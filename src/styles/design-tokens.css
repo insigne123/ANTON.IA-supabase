@@ -1,0 +1,116 @@
+/* Tokens base (HSL, compatibles con shadcn/tailwind) */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 222.2 47.4% 11.2%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 47.4% 11.2%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 47.4% 11.2%;
+
+  --primary: 217.2 91.2% 59.8%;
+  --primary-foreground: 210 40% 98%;
+
+  --secondary: 210 40% 96.1%;
+  --secondary-foreground: 222.2 47.4% 11.2%;
+
+  --muted: 210 40% 96.1%;
+  --muted-foreground: 215 16.3% 46.9%;
+
+  --accent: 210 40% 96.1%;
+  --accent-foreground: 222.2 47.4% 11.2%;
+
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 217.2 91.2% 59.8%;
+
+  /* Charts (opcional) */
+  --chart-1: 217 90% 60%;
+  --chart-2: 142 71% 45%;
+  --chart-3: 27 96% 61%;
+  --chart-4: 0 84% 60%;
+  --chart-5: 251 95% 66%;
+
+  /* Sidebar (LIGHT) */
+  --sidebar-background: 220 20% 98%;
+  --sidebar-foreground: 222.2 47.4% 11.2%;
+  --sidebar-primary: var(--primary);
+  /* Antes: var(--primary-foreground) (casi blanco) ⇒ malo en claro */
+  --sidebar-primary-foreground: 222.2 47.4% 11.2%;
+  /* Acento un poco más notorio para el activo/hover */
+  --sidebar-accent: 210 28% 92%;
+  --sidebar-accent-foreground: 222.2 47.4% 11.2%;
+  --sidebar-border: 214.3 31.8% 91.4%;
+  --sidebar-ring: var(--ring);
+
+  --radius: 0.875rem;
+}
+
+html.dark {
+  --background: 222.2 84% 4.9%;
+  --foreground: 213 31% 91%;
+
+  --card: 222.2 84% 5.5%;
+  --card-foreground: 213 31% 91%;
+
+  --popover: 222.2 84% 5.5%;
+  --popover-foreground: 213 31% 91%;
+
+  --primary: 217.2 91.2% 59.8%;
+  --primary-foreground: 222.2 84% 4.9%;
+
+  --secondary: 217.2 32.6% 17.5%;
+  --secondary-foreground: 210 40% 98%;
+
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;
+
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 210 40% 98%;
+
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 85.7% 97.3%;
+
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --ring: 224.3 76.3% 48%;
+
+  --chart-1: 217 90% 60%;
+  --chart-2: 142 71% 45%;
+  --chart-3: 27 96% 61%;
+  --chart-4: 0 84% 60%;
+  --chart-5: 251 95% 66%;
+
+  /* Sidebar (DARK) */
+  --sidebar-background: 222.2 84% 5.5%;
+  --sidebar-foreground: 213 31% 91%;
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: 217.2 32.6% 17.5%;
+  --sidebar-accent-foreground: 210 40% 98%;
+  --sidebar-border: 217.2 32.6% 17.5%;
+  --sidebar-ring: var(--ring);
+}
+
+/* Focus ring global (a11y) */
+:where(button, a, input, textarea, [role="button"], [tabindex]) {
+  outline: none;
+}
+:where(button, a, input, textarea, [role="button"], [tabindex]):focus-visible {
+  box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring));
+  border-radius: 12px;
+  transition: box-shadow .15s ease;
+}
+
+/* Evita que el HTML incrustado en la preview rompa el ancho del panel */
+.signature-preview-area img {
+  max-width: 100% !important;
+  height: auto !important;
+}
+.signature-preview-area table {
+  max-width: 100% !important;
+}

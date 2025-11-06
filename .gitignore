@@ -1,0 +1,14 @@
+.env*
+service-account.json
+*.secret.json
+
+# Firebase/Build
+.firebase/
+functions/.webpack/
+.next/
+# Entornos
+.env*
+# Artefactos
+*.log
+.DS_Store
+node_modules

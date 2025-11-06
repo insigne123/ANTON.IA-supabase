@@ -1,0 +1,355 @@
+// Apify → ítem crudo que retorna el actor
+export interface ApifyLead {
+  id?: string;
+  // Persona
+  first_name?: string;
+  last_name?: string;
+  full_name?: string; // a veces es 'name'
+  name?: string;
+  title?: string;
+  email?: string | null;
+  email_status?: string | null;
+  linkedin_url?: string | null;
+  photo_url?: string | null;
+  // Ubicación persona (a veces vacío)
+  state?: string | null;
+  city?: string | null;
+  country?: string | null;
+  // Organización (flat)
+  organization_id?: string;
+  organization_name?: string;
+  organization_website_url?: string | null;
+  organization_linkedin_url?: string | null;
+  organization_location_city?: string | null;
+  organization_location_state?: string | null;
+  organization_location_country?: string | null;
+  organization_industry?: string | null;
+  organization_logo_url?: string | null;
+  // Organización (nested)
+  organization?: {
+    id?: string;
+    name?: string;
+    website_url?: string | null;
+    linkedin_url?: string | null;
+    city?: string | null;
+    state?: string | null;
+    country?: string | null;
+    industry?: string | null;
+    logo_url?: string | null;
+  };
+}
+
+// Lo que tu UI consume
+export interface Lead {
+  id: string;
+  name: string;
+  title: string;
+  company: string;
+  email?: string | null;
+  avatar: string;
+  status: 'saved' | 'investigated' | 'contacted' | string;
+  emailEnrichment?: {
+    enriched: boolean;
+    enrichedAt?: string;
+    source?: 'original' | 'anymail_finder';
+    confidence?: number;
+    creditsUsed?: number;
+  };
+  industry?: string | null;
+  companyWebsite?: string | null;
+  companyLinkedin?: string | null;
+  linkedinUrl?: string | null;
+  location?: string;
+  country?: string | null;
+  city?: string | null;
+}
+
+// ⬇️ incluye 'read' y metadatos de respuesta
+export type ContactStatus = 'sent' | 'replied';
+
+export interface ContactedLead {
+  id: string;
+  leadId?: string;
+  name: string;
+  email: string;
+  company?: string;
+
+  subject: string;
+  sentAt: string;
+  status: ContactStatus;
+
+  provider: 'gmail' | 'outlook';
+  messageId?: string;
+  conversationId?: string; // Outlook
+  threadId?: string;       // Gmail
+  internetMessageId?: string;
+  
+  // NUEVO: tracking robusto (no cambia 'status')
+  openedAt?: string;                   // cuándo se confirmó apertura por MDN
+  deliveredAt?: string;                // cuándo se confirmó entrega por DSN
+  readReceiptMessageId?: string;       // id del correo de MDN
+  deliveryReceiptMessageId?: string;   // id del correo de DSN
+
+  lastUpdateAt?: string;
+
+  // respuesta
+  replyMessageId?: string;
+  replySubject?: string;
+  replyPreview?: string;
+  repliedAt?: string;
+  followUpCount?: number;
+  lastFollowUpAt?: string;
+  lastStepIdx?: number; // índice de paso enviado (0-based)
+  replySnippet?: string;
+}
+
+export interface ContactedOpportunity extends Omit<ContactedLead, 'leadId'> {
+  opportunityId?: string;
+}
+
+export interface LeadsApiResponse {
+  totalRecords: number;
+  results: ApifyLead[];
+}
+
+// Nuevas interfaces para enriquecimiento de emails
+export interface AnyEmailFinderRequest {
+  domain?: string;
+  company_name?: string;
+  first_name?: string;
+  last_name?: string;
+  full_name?: string;
+}
+
+export interface AnyEmailFinderResponse {
+  success: boolean;
+  email?: string;
+  confidence?: number;
+  status?: 'valid' | 'risky' | 'unknown';
+  credits_used?: number;
+  error?: string;
+}
+
+// --- OPORTUNIDADES ---
+export type JobOpportunity = {
+  id: string;
+  title: string;
+  companyName: string;
+  companyLinkedinUrl?: string;
+  companyDomain?: string;
+  location?: string;
+  publishedAt?: string;
+  postedTime?: string;
+  jobUrl: string;
+  applyUrl?: string;
+  descriptionSnippet?: string;
+  workType?: 'on_site' | 'hybrid' | 'remote';
+  contractType?: 'full' | 'part' | 'contract' | 'temp' | 'intern' | 'volunteer';
+  experienceLevel?: '1' | '2' | '3' | '4' | '5';
+  source?: 'linkedin';
+};
+
+export type CompanyTarget = {
+  companyName: string;
+  companyDomain?: string;
+  companyLinkedinUrl?: string;
+  sourceJobIds: string[];
+};
+
+export type LeadFromApollo = {
+  id?: string;
+  fullName: string;
+  title: string;
+  email?: string;
+  lockedEmail?: boolean;
+  guessedEmail?: boolean;
+  linkedinUrl?: string;
+  location?: string;
+  companyName?: string;
+  companyDomain?: string;
+};
+
+export type EnrichedLead = {
+  id: string;
+  sourceOpportunityId?: string;
+  fullName: string;
+  title?: string;
+  email?: string;
+  emailStatus?: 'verified' | 'guessed' | 'locked' | 'unknown';
+  linkedinUrl?: string;
+  companyName?: string;
+  companyDomain?: string;
+  descriptionSnippet?: string;
+  createdAt: string;
+  country?: string;
+  city?: string;
+  industry?: string;
+};
+
+export type EnrichedOppLead = {
+  id: string;
+  sourceOpportunityId?: string;
+  fullName: string;
+  title?: string;
+  email?: string;
+  emailStatus?: 'verified' | 'guessed' | 'locked' | 'unknown';
+  linkedinUrl?: string;
+  companyName?: string;
+  companyDomain?: string;
+  descriptionSnippet?: string;
+  createdAt: string;
+};
+
+export type N8nCompanyResearchInput = {
+  companyName: string;
+  industry?: string;
+  country?: string;
+  location?: string;
+  domain?: string;
+};
+
+export type CrossReport = {
+  company: {
+    name: string;
+    domain?: string;
+    linkedin?: string;
+    industry?: string;
+    country?: string;
+    website?: string;
+  };
+  overview: string;
+  pains: string[];
+  opportunities: string[];
+  risks: string[];
+  valueProps: string[];
+  useCases: string[];
+  talkTracks: string[];
+  subjectLines: string[];
+  emailDraft: { subject: string; body: string };
+  sources?: Array<{ title?: string; url: string }>;
+};
+
+export type LeadResearchReport = {
+  id: string;
+  company: {
+    name: string;
+    domain?: string;
+    linkedin?: string;
+    industry?: string;
+    country?: string;
+    website?: string;
+    size?: string | number;
+  };
+  websiteSummary?: { overview?: string; services?: string[]; sources: Array<{ url: string; title?: string }> };
+  signals?: Array<{ type: 'news'|'hiring'|'tech'|'site'; title: string; url?: string; when?: string }>;
+  createdAt: string;
+  cross?: CrossReport;
+  raw?: any;
+  enhanced?: EnhancedReport;
+  meta?: { leadRef?: string | null };
+};
+
+export type EnhancedReport = {
+  overview: string;
+  pains: string[];
+  opportunities: string[];
+  risks: string[];
+  valueProps: string[];
+  useCases: string[];
+  suggestedContacts?: string[];
+  talkTracks: string[];
+  subjectLines: string[];
+  emailDraft: { subject: string; body: string };
+};
+
+export type EmailScope = 'leads' | 'opportunities';
+export type AiIntensity = 'none' | 'light' | 'medium' | 'rewrite';
+export type EmailTone = 'professional' | 'warm' | 'direct' | 'challenger' | 'brief';
+export type EmailLength = 'short' | 'medium' | 'long';
+
+export type EmailTemplate = {
+  id: string;
+  name: string;
+  scope: EmailScope;
+  authoring: 'user' | 'system';
+  aiIntensity: AiIntensity;
+  tone: EmailTone;
+  length: EmailLength;
+  subject: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  description?: string;
+};
+
+export type RenderInput = {
+  template: EmailTemplate;
+  mode: EmailScope;
+  data: {
+    companyProfile: any;
+    report?: any;
+    lead?: any;
+    job?: any;
+  };
+};
+
+export type RenderResult = { subject: string; body: string; warnings?: string[] };
+export type RenderRequest = {
+  templateId: string;
+  aiIntensity?: AiIntensity;
+  tone?: EmailTone;
+  length?: EmailLength;
+  mode: EmailScope;
+  data: RenderInput['data'];
+};
+
+// === Conversational Email Designer ===
+export type ChatRole = 'user' | 'assistant' | 'system';
+export type ChatMessage = { id?: string; role: ChatRole; content: string; createdAt?: string };
+
+export type StyleProfile = {
+  scope: 'leads' | 'opportunities';
+  name: string;
+  tone?: 'professional'|'warm'|'direct'|'challenger'|'brief';
+  length?: 'short'|'medium'|'long';
+  structure?: Array<'hook'|'context'|'value'|'proof'|'cta'>;
+  do?: string[];
+  dont?: string[];
+  personalization?: { useLeadName?: boolean; useCompanyName?: boolean; useReportSignals?: boolean; };
+  cta?: { label?: string; duration?: string };
+  language?: 'es'|'en';
+  constraints?: { noFabrication?: boolean; noSensitiveClaims?: boolean };
+  tokens?: string[];
+  updatedAt?: string;
+
+  /** NUEVO: plantillas que definen el formato real del correo */
+  subjectTemplate?: string;
+  bodyTemplate?: string;
+};
+
+
+// --- CAMPAIGNS ---
+export type CampaignStatus = 'active' | 'paused';
+
+export type CampaignStepAttachment = {
+  name: string;
+  contentBytes: string;
+  contentType?: string;
+};
+
+export type CampaignStep = {
+  offsetDays: number;
+  subjectTemplate: string;
+  bodyTemplate: string;
+  attachments?: CampaignStepAttachment[];
+};
+
+export type Campaign = {
+  id: string;
+  name: string;
+  status: CampaignStatus;
+  steps: CampaignStep[];
+  excludeLeadIds?: string[];
+  createdAt: string;
+  updatedAt: string;
+};

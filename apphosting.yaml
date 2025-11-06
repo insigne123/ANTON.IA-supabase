@@ -1,0 +1,38 @@
+# apphosting.yaml
+
+build:
+  steps:
+    - name: fetch                
+      uri: ${SOURCE_TARBALL_URL}
+
+    - name: setup
+      entrypoint: bash
+      args: ["-lc", "npm ci"]
+
+    - name: build
+      entrypoint: bash
+      args: ["-lc", "npm run build"]
+
+    - name: bundle
+      entrypoint: bash
+      args: ["-lc", "cp -R . ${BUILD_DIR}"]
+
+runConfig:
+  minInstances: 0
+  maxInstances: 20
+  concurrency: 100
+  cpu: 1
+  memoryMiB: 768
+
+env:
+  - variable: APIFY_TOKEN
+    secret: APIFY_TOKEN
+    availability: [RUNTIME]
+
+  - variable: APIFY_APOLLO_ACTOR_ID
+    value: code_crafter/apollo-io-scraper
+    availability: [RUNTIME]
+
+  - variable: NEXT_PUBLIC_GOOGLE_CLIENT_ID
+    value: 1083965020353-50m4ibu3c1f56qc00c5j128bfv0mlk91.apps.googleusercontent.com
+    availability: [BUILD, RUNTIME]
