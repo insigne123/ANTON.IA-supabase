@@ -1,4 +1,5 @@
 .env*
+!.env.example
 service-account.json
 *.secret.json
 
@@ -6,8 +7,6 @@ service-account.json
 .firebase/
 functions/.webpack/
 .next/
-# Entornos
-.env*
 # Artefactos
 *.log
 .DS_Store

@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --loader ./scripts/ts-test-loader.mjs --test"
   },
   "dependencies": {
     "@azure/msal-browser": "^3.17.0",
