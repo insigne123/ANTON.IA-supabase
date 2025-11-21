@@ -15,9 +15,9 @@ export async function searchLeads(
     signal,
   });
   let json: any = null;
-  try { json = await res.json(); } catch {}
+  try { json = await res.json(); } catch { }
   if (!res.ok) {
-    throw new Error(json?.error || `HTTP_${res.status}`);
+    throw new Error(json?.message || json?.error || `HTTP_${res.status}`);
   }
   // Debe ser { count, leads }
   if (!json || !Array.isArray(json.leads)) {
