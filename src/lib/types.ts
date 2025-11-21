@@ -51,7 +51,7 @@ export interface Lead {
   emailEnrichment?: {
     enriched: boolean;
     enrichedAt?: string;
-    source?: 'original' | 'anymail_finder';
+    source?: 'original' | 'anymail_finder' | 'n8n';
     confidence?: number;
     creditsUsed?: number;
   };
@@ -83,7 +83,7 @@ export interface ContactedLead {
   conversationId?: string; // Outlook
   threadId?: string;       // Gmail
   internetMessageId?: string;
-  
+
   // NUEVO: tracking robusto (no cambia 'status')
   openedAt?: string;                   // cuándo se confirmó apertura por MDN
   deliveredAt?: string;                // cuándo se confirmó entrega por DSN
@@ -241,7 +241,7 @@ export type LeadResearchReport = {
     size?: string | number;
   };
   websiteSummary?: { overview?: string; services?: string[]; sources: Array<{ url: string; title?: string }> };
-  signals?: Array<{ type: 'news'|'hiring'|'tech'|'site'; title: string; url?: string; when?: string }>;
+  signals?: Array<{ type: 'news' | 'hiring' | 'tech' | 'site'; title: string; url?: string; when?: string }>;
   createdAt: string;
   cross?: CrossReport;
   raw?: any;
@@ -310,14 +310,14 @@ export type ChatMessage = { id?: string; role: ChatRole; content: string; create
 export type StyleProfile = {
   scope: 'leads' | 'opportunities';
   name: string;
-  tone?: 'professional'|'warm'|'direct'|'challenger'|'brief';
-  length?: 'short'|'medium'|'long';
-  structure?: Array<'hook'|'context'|'value'|'proof'|'cta'>;
+  tone?: 'professional' | 'warm' | 'direct' | 'challenger' | 'brief';
+  length?: 'short' | 'medium' | 'long';
+  structure?: Array<'hook' | 'context' | 'value' | 'proof' | 'cta'>;
   do?: string[];
   dont?: string[];
   personalization?: { useLeadName?: boolean; useCompanyName?: boolean; useReportSignals?: boolean; };
   cta?: { label?: string; duration?: string };
-  language?: 'es'|'en';
+  language?: 'es' | 'en';
   constraints?: { noFabrication?: boolean; noSensitiveClaims?: boolean };
   tokens?: string[];
   updatedAt?: string;

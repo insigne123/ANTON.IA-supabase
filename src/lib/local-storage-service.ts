@@ -11,6 +11,9 @@ function safeParse(raw: string | null): Lead[] {
 
 const norm = (s?: string | null) => (s || '').trim().toLowerCase();
 
+/**
+ * @deprecated Use supabaseService instead.
+ */
 export const localStorageService = {
   getLeads(): Lead[] {
     if (typeof window === 'undefined') return [];

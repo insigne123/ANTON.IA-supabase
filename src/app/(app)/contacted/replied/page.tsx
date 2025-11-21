@@ -56,10 +56,10 @@ export default function ContactedRepliedPage() {
     }
   }
 
-  function removeAll(it: ContactedLead) {
+  async function removeAll(it: ContactedLead) {
     const ok = confirm('Eliminar este hilo respondido y todo su rastro local?');
     if (!ok) return;
-    const res = deleteContactedCascade({
+    const res = await deleteContactedCascade({
       leadId: it.leadId,
       email: it.email,
       messageId: it.messageId,

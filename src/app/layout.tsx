@@ -4,6 +4,7 @@ import '@/styles/design-tokens.css';
 import { Toaster } from '@/components/ui/toaster';
 import { cn } from '@/lib/utils';
 import { ThemeProvider } from '@/components/providers/theme-provider';
+import { AuthProvider } from '@/context/AuthContext';
 
 export const metadata: Metadata = {
   title: 'ANTON.IA - Lead Automation',
@@ -36,8 +37,10 @@ export default function RootLayout({
       </head>
       <body className={cn('font-body antialiased min-h-screen bg-background text-foreground')}>
         <ThemeProvider attribute="class" defaultTheme="system">
-          {children}
-          <Toaster />
+          <AuthProvider>
+            {children}
+            <Toaster />
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -67,7 +67,7 @@ export default function ContactedPage() {
       return;
     }
     try {
-      const { read: hits } = await graphFindReadReceipts({internetMessageId: it.internetMessageId});
+      const hits = await graphFindReadReceipts(it.internetMessageId);
       if (hits.length > 0) {
         const rr = hits[0];
         if (it.conversationId) {
@@ -109,13 +109,17 @@ export default function ContactedPage() {
 
       if (hits && hits.length > 0) {
         const best = hits[0];
-        const repliedAtDate = best.internalDate ? new Date(Number(best.internalDate)) : new Date();
+        const repliedAtDate = (best as any).internalDate
+          ? new Date(Number((best as any).internalDate))
+          : (best as any).receivedDateTime
+            ? new Date((best as any).receivedDateTime)
+            : new Date();
 
         contactedLeadsStorage.upsertByMessageId(it.messageId!, {
           status: 'replied',
           replyMessageId: best.id,
           replySubject: best.subject,
-          replyPreview: best.snippet || '',
+          replyPreview: (best as any).snippet || (best as any).bodyPreview || '',
           repliedAt: repliedAtDate.toISOString(),
         });
         toast({ title: 'Respondido', description: 'El contacto respondió este hilo.' });
@@ -153,9 +157,9 @@ export default function ContactedPage() {
   function confirmDelete(it: ContactedLead) {
     setToDelete(it);
   }
-  function performDelete() {
+  async function performDelete() {
     if (!toDelete) return;
-    const res = deleteContactedCascade({
+    const res = await deleteContactedCascade({
       leadId: toDelete.leadId,
       email: toDelete.email,
       messageId: toDelete.messageId,
@@ -185,7 +189,7 @@ export default function ContactedPage() {
         let hits;
         if (it.provider === 'gmail' && it.threadId) {
           hits = await gmailClient.findRepliesByThread(it.threadId);
-        } else if (it.provider === 'outlook' && it.conversationId){
+        } else if (it.provider === 'outlook' && it.conversationId) {
           hits = await graphFindReplies({
             conversationId: it.conversationId,
             fromEmail: it.email,
@@ -196,13 +200,17 @@ export default function ContactedPage() {
 
         if (hits && hits.length > 0) {
           const best = hits[0];
-          const repliedAtDate = best.internalDate ? new Date(Number(best.internalDate)) : new Date();
+          const repliedAtDate = (best as any).internalDate
+            ? new Date(Number((best as any).internalDate))
+            : (best as any).receivedDateTime
+              ? new Date((best as any).receivedDateTime)
+              : new Date();
 
           contactedLeadsStorage.upsertByMessageId(it.messageId!, {
             status: 'replied',
             replyMessageId: best.id,
             replySubject: best.subject,
-            replyPreview: best.snippet || '',
+            replyPreview: (best as any).snippet || (best as any).bodyPreview || '',
             repliedAt: repliedAtDate.toISOString(),
           } as any);
           found++;
@@ -231,7 +239,7 @@ export default function ContactedPage() {
     let found = 0;
     for (const it of list) {
       try {
-        const { read: hits } = await graphFindReadReceipts({internetMessageId: it.internetMessageId!});
+        const hits = await graphFindReadReceipts(it.internetMessageId!);
         if (hits.length > 0 && it.conversationId) {
           const rr = hits[0];
           contactedLeadsStorage.markReceiptsByConversationId(it.conversationId, {

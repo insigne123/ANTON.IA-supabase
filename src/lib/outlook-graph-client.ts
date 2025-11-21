@@ -11,6 +11,8 @@ export type MiniMessage = {
   toRecipients?: Array<{ emailAddress: { address: string } }>;
   receivedDateTime?: string;
   sentDateTime?: string;
+  bodyPreview?: string;
+  body?: { content?: string; contentType?: string };
 };
 
 function esc(s: string) { return s.replace(/'/g, "''"); }
@@ -33,7 +35,7 @@ async function graphFetch(path: string) {
 export async function graphGetMessage(id: string): Promise<MiniMessage | null> {
   try {
     const select =
-      '$select=id,subject,webLink,conversationId,internetMessageId,from,toRecipients,receivedDateTime,sentDateTime';
+      '$select=id,subject,webLink,conversationId,internetMessageId,from,toRecipients,receivedDateTime,sentDateTime,bodyPreview,body';
     const res = await graphFetch(`/me/messages/${encodeURIComponent(id)}?${select}`);
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(await res.text());
@@ -55,7 +57,7 @@ export async function graphFindReplies(args: {
   try {
     const me = (microsoftAuthService.getUserIdentity().email || '').toLowerCase();
     const select =
-      '$select=id,subject,webLink,conversationId,internetMessageId,from,receivedDateTime';
+      '$select=id,subject,webLink,conversationId,internetMessageId,from,receivedDateTime,bodyPreview';
     const nTop = `$top=${top}`;
     const filter = `$filter=conversationId eq '${esc(conversationId)}'`;
 

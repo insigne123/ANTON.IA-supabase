@@ -18,7 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Search, Save, X, Frown, ChevronDown } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
-import { localStorageService } from '@/lib/local-storage-service';
+import { supabaseService } from '@/lib/supabase-service';
 import { addEnrichedLeads } from '@/lib/saved-enriched-leads-storage';
 import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
 import * as Quota from '@/lib/quota-client';
@@ -54,8 +54,8 @@ function MultiCheckDropdown({
   const selectedCount = value.length;
   const buttonText =
     selectedCount === 0 ? placeholder :
-    selectedCount === 1 ? options.find(o => o.value === value[0])?.label ?? '1 seleccionado'
-    : `${selectedCount} seleccionados`;
+      selectedCount === 1 ? options.find(o => o.value === value[0])?.label ?? '1 seleccionado'
+        : `${selectedCount} seleccionados`;
 
   return (
     <div className="grid gap-2">
@@ -92,8 +92,8 @@ function normalizeLeadForUI(raw: Lead): UILaed {
     raw.organization?.name?.trim() || '—';
 
   const title = raw.title?.trim() || '—';
-  const industry = raw.organization?.industry?.trim() || '—';
-  
+  const industry = (raw.organization as any)?.industry?.trim() || '—';
+
   const location = '—'; // n8n response no lo trae, pero UI lo espera
 
   const avatar =
@@ -157,6 +157,7 @@ export default function SearchPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [leads, setLeads] = useState<UILaed[]>([]);
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
   const { toast } = useToast();
   const [pageIndex, setPageIndex] = useState(0);
@@ -168,6 +169,13 @@ export default function SearchPage() {
 
   useEffect(() => { setPageIndex(0); }, [leads]);
 
+  // Cargar leads guardados para verificar estado
+  useEffect(() => {
+    supabaseService.getLeads().then(all => {
+      setSavedIds(new Set(all.map(l => l.id)));
+    });
+  }, []);
+
   const [filters, setFilters] = useState({
     industry: '',
     location: '',
@@ -177,33 +185,37 @@ export default function SearchPage() {
   });
 
   const handleFilterChange = (field: keyof typeof filters, value: any) => {
-    setFilters(prev => ({...prev, [field]: value}));
+    setFilters(prev => ({ ...prev, [field]: value }));
   };
-  
-  const handleSaveSelectedLeads = () => {
+
+  const handleSaveSelectedLeads = async () => {
     const selected = leads.filter(lead => selectedLeads.has(lead.id));
     const selectedNotContacted = selected.filter(l => !contactedLeadsStorage.isContacted(l.email || undefined, l.id));
     if (selectedNotContacted.length === 0) {
       toast({ title: 'Nada que guardar', description: 'Todos los seleccionados ya fueron contactados o no hay selección.' });
       return;
     }
-  
+
     const withEmail = selectedNotContacted.filter(l => !!l.email);
     if (withEmail.length) {
       const enriched = withEmail.map(mapLeadToEnriched);
       addEnrichedLeads(enriched);
     }
-  
+
     const withoutEmail = selectedNotContacted.filter(l => !l.email);
-    const resSv = localStorageService.addLeadsDedup(withoutEmail);
-  
+    const resSv = await supabaseService.addLeadsDedup(withoutEmail);
+
+    // Actualizar estado local de guardados
+    const all = await supabaseService.getLeads();
+    setSavedIds(new Set(all.map(l => l.id)));
+
     toast({
       title: 'Guardado',
       description:
         `A Enriquecidos: ${withEmail.length} · ` +
         `A Guardados: ${resSv.addedCount} (dup: ${resSv.duplicateCount})`,
     });
-  
+
     setSelectedLeads(new Set());
   };
 
@@ -212,7 +224,7 @@ export default function SearchPage() {
     submittingRef.current = true;
 
     const canUseClientQuota = typeof (Quota as any).canUseClientQuota === 'function' ? (Quota as any).canUseClientQuota : (_k: any) => true;
-    const incClientQuota = typeof (Quota as any).incClientQuota === 'function' ? (Quota as any).incClientQuota : (_k: any) => {};
+    const incClientQuota = typeof (Quota as any).incClientQuota === 'function' ? (Quota as any).incClientQuota : (_k: any) => { };
     const getClientLimit = typeof (Quota as any).getClientLimit === 'function' ? (Quota as any).getClientLimit : (_k: any) => 50;
 
     if (!canUseClientQuota('leadSearch')) {
@@ -232,7 +244,7 @@ export default function SearchPage() {
       const industryKeywords = [filters.industry.trim()].filter(Boolean);
       const locations = filters.location.split(',').map(s => s.trim()).filter(Boolean);
       const sizeRanges = filters.sizeRange.split(',').map(s => s.trim()).filter(Boolean);
-      
+
       if (!industryKeywords.length) {
         throw new Error('El campo "Industria" es obligatorio.');
       }
@@ -243,7 +255,7 @@ export default function SearchPage() {
         throw new Error('Debes seleccionar al menos un tamaño de empresa.');
       }
       incClientQuota('leadSearch');
-      
+
       const payload: LeadsSearchParams = [{
         industry_keywords: industryKeywords,
         company_location: locations,
@@ -270,7 +282,7 @@ export default function SearchPage() {
       submittingRef.current = false;
     }
   };
-  
+
   const handleAbort = () => {
     abortRef.current?.abort();
     setIsLoading(false);
@@ -286,15 +298,15 @@ export default function SearchPage() {
 
   const isPageAllSelected = useMemo(() => {
     if (pagedLeads.length === 0) return false;
-    const selectable = pagedLeads.filter(lead => !localStorageService.isLeadSaved(lead) && !contactedLeadsStorage.isContacted(lead.email || undefined, lead.id));
+    const selectable = pagedLeads.filter(lead => !savedIds.has(lead.id) && !contactedLeadsStorage.isContacted(lead.email || undefined, lead.id));
     if (selectable.length === 0) return false;
     return selectable.every(lead => selectedLeads.has(lead.id));
-  }, [pagedLeads, selectedLeads]);
+  }, [pagedLeads, selectedLeads, savedIds]);
 
   const handleSelectAll = (checked: boolean) => {
     const newSelectedLeads = new Set(selectedLeads);
     pagedLeads.forEach(lead => {
-      const already = localStorageService.isLeadSaved(lead);
+      const already = savedIds.has(lead.id);
       const contacted = contactedLeadsStorage.isContacted(lead.email || undefined, lead.id);
       if (!already && !contacted) {
         if (checked) newSelectedLeads.add(lead.id);
@@ -310,7 +322,7 @@ export default function SearchPage() {
     else newSelectedLeads.delete(leadId);
     setSelectedLeads(newSelectedLeads);
   };
-  
+
   return (
     <div className="container mx-auto py-2">
       <PageHeader
@@ -331,16 +343,16 @@ export default function SearchPage() {
             </div>
             <div>
               <Label htmlFor="location">Ubicación (País) *</Label>
-              <Input id="location" placeholder="Ej: Chile, United States (separado por comas)" value={filters.location} onChange={(e) => handleFilterChange('location', e.target.value)} required/>
+              <Input id="location" placeholder="Ej: Chile, United States (separado por comas)" value={filters.location} onChange={(e) => handleFilterChange('location', e.target.value)} required />
               <small className="text-muted-foreground">Al menos uno. Puedes listar varios.</small>
             </div>
             <div>
               <Label htmlFor="sizeRange">Tamaño de empresa *</Label>
-               <Select value={filters.sizeRange} onValueChange={(v) => handleFilterChange('sizeRange', v)}>
+              <Select value={filters.sizeRange} onValueChange={(v) => handleFilterChange('sizeRange', v)}>
                 <SelectTrigger id="sizeRange"><SelectValue placeholder="Seleccionar tamaño" /></SelectTrigger>
                 <SelectContent>{companySizes.map(s => <SelectItem key={s} value={s}>{s.replace('+', ' o más')}</SelectItem>)}</SelectContent>
               </Select>
-               <small className="text-muted-foreground">Al menos uno.</small>
+              <small className="text-muted-foreground">Al menos uno.</small>
             </div>
             <div>
               <Label htmlFor="title">Cargo/Posición</Label>
@@ -366,7 +378,7 @@ export default function SearchPage() {
           </div>
         </CardContent>
       </Card>
-      
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
@@ -375,11 +387,11 @@ export default function SearchPage() {
               {leads.length > 0 ? `Mostrando ${pagedLeads.length} de ${leads.length} leads.` : 'No se han encontrado leads.'}
             </CardDescription>
           </div>
-          <Button 
-            disabled={selectedLeads.size === 0} 
+          <Button
+            disabled={selectedLeads.size === 0}
             onClick={handleSaveSelectedLeads}
           >
-            <Save className="mr-2"/>Guardar {selectedLeads.size > 0 ? `(${selectedLeads.size})` : ''}
+            <Save className="mr-2" />Guardar {selectedLeads.size > 0 ? `(${selectedLeads.size})` : ''}
           </Button>
         </CardHeader>
         <CardContent>
@@ -409,19 +421,19 @@ export default function SearchPage() {
                   ))
                 ) : pagedLeads.length > 0 ? (
                   pagedLeads.map(lead => {
-                    const already = localStorageService.isLeadSaved(lead);
+                    const already = savedIds.has(lead.id);
                     const contacted = contactedLeadsStorage.isContacted(lead.email || undefined, lead.id);
                     const disabled = already || contacted;
                     return (
                       <TableRow key={lead.id} data-state={selectedLeads.has(lead.id) ? "selected" : ""}>
                         <TableCell>
-                            <Checkbox
-                              disabled={disabled}
-                              checked={selectedLeads.has(lead.id)}
-                              onCheckedChange={(checked) => handleSelectLead(lead.id, Boolean(checked))}
-                            />
-                            {already && <span className="text-xs text-muted-foreground ml-2">Guardado</span>}
-                            {contacted && <span className="text-xs text-primary ml-2">Contactado</span>}
+                          <Checkbox
+                            disabled={disabled}
+                            checked={selectedLeads.has(lead.id)}
+                            onCheckedChange={(checked) => handleSelectLead(lead.id, Boolean(checked))}
+                          />
+                          {already && <span className="text-xs text-muted-foreground ml-2">Guardado</span>}
+                          {contacted && <span className="text-xs text-primary ml-2">Contactado</span>}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-3">
@@ -455,23 +467,23 @@ export default function SearchPage() {
           </div>
           {totalPages > 1 && (
             <div className="flex items-center justify-between py-2">
-                <div className="text-sm text-muted-foreground">
-                    Mostrando{' '}
-                    {leads.length === 0 ? '0' : `${pageIndex * pageSize + 1}–${Math.min(leads.length, (pageIndex + 1) * pageSize)}`} de {leads.length}
-                </div>
-                <div className="flex items-center gap-2">
-                    <Select
-                      value={String(pageSize)}
-                      onValueChange={(v) => { const n = Number(v); if (!Number.isNaN(n)) { setPageSize(n); setPageIndex(0); } }}
-                    >
-                      <SelectTrigger className="w-[150px]"><SelectValue placeholder="Tamaño de página" /></SelectTrigger>
-                      <SelectContent>
-                        {PAGE_SIZE_OPTIONS.map((opt) => (<SelectItem key={opt} value={String(opt)}>{opt} / página</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                    <Button variant="outline" onClick={() => setPageIndex((p) => Math.max(0, p - 1))} disabled={pageIndex === 0}>Anterior</Button>
-                    <Button variant="outline" onClick={() => setPageIndex((p) => (p + 1 < totalPages ? p + 1 : p))} disabled={pageIndex + 1 >= totalPages}>Siguiente</Button>
-                </div>
+              <div className="text-sm text-muted-foreground">
+                Mostrando{' '}
+                {leads.length === 0 ? '0' : `${pageIndex * pageSize + 1}–${Math.min(leads.length, (pageIndex + 1) * pageSize)}`} de {leads.length}
+              </div>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => { const n = Number(v); if (!Number.isNaN(n)) { setPageSize(n); setPageIndex(0); } }}
+                >
+                  <SelectTrigger className="w-[150px]"><SelectValue placeholder="Tamaño de página" /></SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((opt) => (<SelectItem key={opt} value={String(opt)}>{opt} / página</SelectItem>))}
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" onClick={() => setPageIndex((p) => Math.max(0, p - 1))} disabled={pageIndex === 0}>Anterior</Button>
+                <Button variant="outline" onClick={() => setPageIndex((p) => (p + 1 < totalPages ? p + 1 : p))} disabled={pageIndex + 1 >= totalPages}>Siguiente</Button>
+              </div>
             </div>
           )}
         </CardContent>

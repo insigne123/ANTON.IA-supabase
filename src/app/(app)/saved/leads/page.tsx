@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { localStorageService } from '@/lib/local-storage-service';
+import { supabaseService } from '@/lib/supabase-service';
 import type { Lead, EnrichedLead } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -19,7 +19,7 @@ import * as Quota from '@/lib/quota-client';
 import { getClientId } from '@/lib/client-id';
 import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
 
-const displayDomain = (url: string) => { try { const u = new URL(url.startsWith('http') ? url : `https://${url}`); return u.hostname.replace(/^www\./,''); } catch { return url.replace(/^https?:\/\//,'').replace(/^www\./,''); } };
+const displayDomain = (url: string) => { try { const u = new URL(url.startsWith('http') ? url : `https://${url}`); return u.hostname.replace(/^www\./, ''); } catch { return url.replace(/^https?:\/\//, '').replace(/^www\./, ''); } };
 const asHttp = (url: string) => url.startsWith('http') ? url : `https://${url}`;
 
 export default function SavedLeadsPage() {
@@ -30,8 +30,8 @@ export default function SavedLeadsPage() {
   const [enriching, setEnriching] = useState(false);
 
   useEffect(() => {
-    // Carga inicial desde localStorage
-    setSavedLeads(localStorageService.getLeads());
+    // Carga inicial desde Supabase
+    supabaseService.getLeads().then(setSavedLeads);
   }, []);
 
   // Efecto de migración: se ejecuta cuando savedLeads cambia
@@ -59,9 +59,11 @@ export default function SavedLeadsPage() {
     const res = enrichedLeadsStorage.addDedup(moved);
 
     // 2) Dejar en guardados sólo los SIN email
-    const remaining = savedLeads.filter(l => !l.email);
-    localStorageService.setLeads(remaining);
-    setSavedLeads(remaining);
+    // En Supabase, eliminamos los que tienen email
+    supabaseService.removeWhere(l => !!l.email).then(() => {
+      const remaining = savedLeads.filter(l => !l.email);
+      setSavedLeads(remaining);
+    });
 
     const addedCount = (res as any)?.addedCount ?? 0;
     if (addedCount > 0) {
@@ -72,25 +74,24 @@ export default function SavedLeadsPage() {
     }
   }, [savedLeads, toast]);
 
-  function handleDeleteLead(id: string) {
+  async function handleDeleteLead(id: string) {
     const ok = confirm('¿Eliminar este lead de Guardados?');
     if (!ok) return;
-    // En tu proyecto existe deleteLead; si no, usa removeWhere
-    const deleted = (localStorageService as any).deleteLead
-      ? (localStorageService as any).deleteLead(id)
-      : localStorageService.removeWhere((l: Lead) => l.id === id) > 0;
 
-    if (deleted) {
+    const deletedCount = await supabaseService.removeWhere((l: Lead) => l.id === id);
+
+    if (deletedCount > 0) {
       setSavedLeads(prev => prev.filter(l => l.id !== id));
       toast({ title: 'Eliminado', description: 'Se quitó el lead de Guardados.' });
     } else {
-      toast({ variant:'destructive', title:'No se pudo eliminar' });
+      toast({ variant: 'destructive', title: 'No se pudo eliminar' });
     }
   }
 
-  const handleExportCsv = () => {
-    const saved = localStorageService.getLeads();
-  
+  const handleExportCsv = async () => {
+    // Usar estado local o volver a pedir
+    const saved = savedLeads;
+
     // Encabezados como texto (no objetos)
     const headers: string[] = [
       'ID',
@@ -105,7 +106,7 @@ export default function SavedLeadsPage() {
       'Industria',
       'Estado',
     ];
-  
+
     // Filas como (string | number)[] (no objetos)
     const rows: (string | number)[][] = saved.map((l) => ([
       l.id || '',
@@ -120,11 +121,11 @@ export default function SavedLeadsPage() {
       l.industry || '',
       l.status || '',
     ]));
-  
+
     const csv = toCsv(rows, headers);
     downloadCsv(`leads_${new Date().toISOString().slice(0, 10)}.csv`, csv);
   };
-  
+
 
   const pageLeads = savedLeads;
   const allPageLeadsChecked = useMemo(
@@ -164,12 +165,12 @@ export default function SavedLeadsPage() {
     try {
       const clientId = getClientId();
       const payloadLeads = chosen.map(l => ({
-          fullName: l.name,
-          linkedinUrl: l.linkedinUrl || undefined,
-          companyName: l.company || undefined,
-          companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
-          clientRef: l.id, // <— correlación estable
-        }));
+        fullName: l.name,
+        linkedinUrl: l.linkedinUrl || undefined,
+        companyName: l.company || undefined,
+        companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
+        clientRef: l.id, // <— correlación estable
+      }));
 
       const r = await fetch('/api/opportunities/enrich-apollo', {
         method: 'POST',
@@ -189,7 +190,7 @@ export default function SavedLeadsPage() {
       // Actualiza quota-ticket si viene
       const ticket = (j as any)?.ticket || r.headers.get('x-quota-ticket');
       if (ticket) setQuotaTicket(ticket);
-      
+
       // === ACTUALIZAR CUOTA LOCAL EN PROPORCIÓN A LO REALMENTE ENRIQUECIDO ===
       // Preferimos un conteo explícito del backend si viene incluido.
       // Convención sugerida: j.usage.consumed (server-side). Fallback: j.enriched.length.
@@ -205,7 +206,7 @@ export default function SavedLeadsPage() {
       }
 
       // ← NO confiar en el orden: mapear por clientRef
-      const byRef = new Map(payloadLeads.map(pl => [pl.clientRef, pl]));
+      const byRef = new Map(chosen.map(l => [l.id, l]));
       const enrichedNow: EnrichedLead[] = (j.enriched || []).map((e: any) => {
         const sourceLead = byRef.get(e?.clientRef);
         // dominio desde website o email si el actor no lo trae
@@ -214,9 +215,9 @@ export default function SavedLeadsPage() {
           : undefined;
         const domainFromWebsite = sourceLead?.companyWebsite
           ? (sourceLead.companyWebsite.startsWith('http')
-              ? new URL(sourceLead.companyWebsite).hostname
-              : sourceLead.companyWebsite)
-              .replace(/^https?:\/\//,'').replace(/^www\./,'')
+            ? new URL(sourceLead.companyWebsite).hostname
+            : sourceLead.companyWebsite)
+            .replace(/^https?:\/\//, '').replace(/^www\./, '')
           : undefined;
 
         return {
@@ -248,7 +249,7 @@ export default function SavedLeadsPage() {
       }
 
       const removedCount = toRemoveIds.size > 0
-        ? localStorageService.removeWhere(l => toRemoveIds.has(l.id))
+        ? await supabaseService.removeWhere(l => toRemoveIds.has(l.id))
         : 0;
 
       // 3) Actualizar estado en memoria

@@ -15,7 +15,7 @@ import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
 import * as Quota from '@/lib/quota-client';
 import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { parseJsonResponse } from '@/lib/http/safe-json';
-import { localStorageService } from '@/lib/local-storage-service';
+
 import { enrichedLeadsStorage } from '@/lib/enriched-leads-storage';
 import { getClientId } from '@/lib/client-id';
 import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
@@ -23,7 +23,7 @@ import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
 type SearchForm = {
   jobTitle: string;
   location: string;
-  dateRange?: 'r86400'|'r604800'|'r2592000';
+  dateRange?: 'r86400' | 'r604800' | 'r2592000';
   rows?: number;
 };
 
@@ -40,7 +40,7 @@ export default function OpportunitiesPage() {
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [selLeadIdx, setSelLeadIdx] = useState<Record<number, boolean>>({});
   const [enriching, setEnriching] = useState(false);
-  
+
   const [selectedOppIds, setSelectedOppIds] = useState<Record<string, boolean>>({});
   const allSelected = useMemo(
     () => opps.length > 0 && opps.every(o => selectedOppIds[o.id]),
@@ -83,7 +83,7 @@ export default function OpportunitiesPage() {
       tgt.sourceJobIds.push(j.id);
       map.set(key, tgt);
     }
-    return Array.from(map.values()).sort((a,b) => b.sourceJobIds.length - a.sourceJobIds.length);
+    return Array.from(map.values()).sort((a, b) => b.sourceJobIds.length - a.sourceJobIds.length);
   }, [opps]);
 
   async function handleSearch() {
@@ -110,7 +110,7 @@ export default function OpportunitiesPage() {
           toast({ variant: 'destructive', title: 'Token inválido de Apify', description: 'El token de Apify es inválido/expirado. Regenera el token y reinicia el servidor.' });
         } else {
           const snippet = data?.error?.message || data?.message || parsed.text || 'Revisa los logs del servidor.';
-          toast({ variant: 'destructive', title: 'Error al buscar vacantes', description: String(snippet).slice(0,200) });
+          toast({ variant: 'destructive', title: 'Error al buscar vacantes', description: String(snippet).slice(0, 200) });
         }
         return;
       }
@@ -135,7 +135,7 @@ export default function OpportunitiesPage() {
         console.log('[UI] status poll →', stParsed.status, sd?.status || sd?.error?.type);
         if (!stParsed.ok) {
           const snippet = sd?.error?.message || sd?.message || stParsed.text || 'Fallo de estado.';
-          toast({ variant: 'destructive', title: 'Error consultando estado', description: String(snippet).slice(0,200) });
+          toast({ variant: 'destructive', title: 'Error consultando estado', description: String(snippet).slice(0, 200) });
           return;
         }
         if (sd.status === 'SUCCEEDED') {
@@ -174,7 +174,7 @@ export default function OpportunitiesPage() {
     const incClientQuota =
       typeof (Quota as any).incClientQuota === 'function'
         ? (Quota as any).incClientQuota
-        : (_k: any) => {};
+        : (_k: any) => { };
     const getClientLimit =
       typeof (Quota as any).getClientLimit === 'function'
         ? (Quota as any).getClientLimit
@@ -211,13 +211,13 @@ export default function OpportunitiesPage() {
         const snippet = data?.error || data?.message || parsed.text || 'Error buscando leads';
         throw new Error(String(snippet).slice(0, 200));
       }
-      try { incClientQuota('leadSearch'); } catch {}
+      try { incClientQuota('leadSearch'); } catch { }
       setLeads(data.leads || []);
     } catch (e: any) {
       toast({
-          variant: "destructive",
-          title: "Error al buscar leads",
-          description: e.message || "Ocurrió un error inesperado",
+        variant: "destructive",
+        title: "Error al buscar leads",
+        description: e.message || "Ocurrió un error inesperado",
       });
     } finally {
       setLoadingLeads(false);
@@ -225,10 +225,10 @@ export default function OpportunitiesPage() {
   };
 
   // --- Helpers locales ---
-  const displayDomain = (url: string) => { try { const u = new URL(url.startsWith('http') ? url : `https://${url}`); return u.hostname.replace(/^www\./,''); } catch { return (url||'').replace(/^https?:\/\//,'').replace(/^www\./,''); } };
+  const displayDomain = (url: string) => { try { const u = new URL(url.startsWith('http') ? url : `https://${url}`); return u.hostname.replace(/^www\./, ''); } catch { return (url || '').replace(/^https?:\/\//, '').replace(/^www\./, ''); } };
 
   async function enrichSelectedLeads() {
-    const indices = Object.entries(selLeadIdx).filter(([,v]) => v).map(([k]) => Number(k));
+    const indices = Object.entries(selLeadIdx).filter(([, v]) => v).map(([k]) => Number(k));
     const chosen = indices.map(i => leads[i]).filter(Boolean);
     if (chosen.length === 0) {
       toast({ title: 'Nada seleccionado', description: 'Elige al menos un lead.' });
@@ -247,13 +247,13 @@ export default function OpportunitiesPage() {
     try {
       const clientId = getClientId?.() || (microsoftAuthService as any)?.getUserIdentity?.()?.email || 'anonymous';
       const payloadLeads = chosen.map((l, i) => ({
-          fullName: l.fullName,
-          linkedinUrl: l.linkedinUrl || undefined,
-          companyName: l.companyName || undefined,
-          companyDomain: l.companyDomain ? displayDomain(l.companyDomain) : undefined,
-          title: l.title || undefined,
-          sourceOpportunityId: (l as any).sourceJobId || undefined,
-          clientRef: (l as any)?.id || `${l.fullName}-${i}`, // usa id si existe
+        fullName: l.fullName,
+        linkedinUrl: l.linkedinUrl || undefined,
+        companyName: l.companyName || undefined,
+        companyDomain: l.companyDomain ? displayDomain(l.companyDomain) : undefined,
+        title: l.title || undefined,
+        sourceOpportunityId: (l as any).sourceJobId || undefined,
+        clientRef: (l as any)?.id || `${l.fullName}-${i}`, // usa id si existe
       }));
 
       const res = await fetch('/api/opportunities/enrich-apollo', {
@@ -297,7 +297,7 @@ export default function OpportunitiesPage() {
       const addRes = enrichedLeadsStorage.addDedup(formatted);
 
       // quitar de la lista temporal los que tengan email
-      const enrichedRefs = new Set(formatted.filter(x => !!x.email).map((_, i) => enriched[i]?.clientRef).filter(Boolean));
+      const enrichedRefs = new Set(formatted.filter((x: any) => !!x.email).map((_x: any, i: number) => enriched[i]?.clientRef).filter(Boolean));
       const remaining = leads.filter((l: any) => !enrichedRefs.has((l as any)?.id));
       setLeads(remaining);
       setSelLeadIdx({});
@@ -320,7 +320,7 @@ export default function OpportunitiesPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Oportunidades (LinkedIn → Apollo)" description="Encuentra empresas que están contratando y luego contacta a los decisores." />
-      
+
       <Card>
         <CardHeader>
           <CardTitle>1. Buscar Vacantes en LinkedIn</CardTitle>
@@ -343,7 +343,7 @@ export default function OpportunitiesPage() {
           </div>
         </CardContent>
       </Card>
-      
+
       {opps.length > 0 && (
         <Card>
           <CardHeader>
@@ -446,7 +446,7 @@ export default function OpportunitiesPage() {
                 );
               })}
             </div>
-            
+
             <Dialog open={openLeadModal} onOpenChange={setOpenLeadModal}>
               <DialogTrigger asChild>
                 <Button disabled={Object.keys(selectedCompanies).length === 0} size="lg" className="w-full mt-4">
@@ -465,7 +465,7 @@ export default function OpportunitiesPage() {
                 <Button onClick={doSearchLeads} disabled={loadingLeads || !leadTitles.trim()} className="w-full">
                   {loadingLeads ? 'Buscando leads…' : 'Buscar Leads'}
                 </Button>
-                
+
                 {leads.length > 0 && (
                   <div className="mt-4 max-h-[50vh] overflow-auto border rounded-lg">
                     <div className="p-3">
