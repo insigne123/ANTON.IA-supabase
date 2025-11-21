@@ -40,3 +40,4 @@ APIFY_TOKEN=tu_token_de_apify
 ```
 
 **Importante**: El endpoint unificado `/api/leads/search` ahora redirige (307) a `/api/leads/apify` si `USE_APIFY` está activo. El flujo de Apify sigue siendo asíncrono y depende de polling.
+# Leadflowai-21-11
