@@ -29,8 +29,7 @@ function mapLeadToRow(lead: Lead, userId: string) {
     // Validate UUID. If invalid, let DB generate one.
     const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lead.id || '');
 
-    return {
-        id: isValidUUID ? lead.id : undefined,
+    const row: any = {
         user_id: userId,
         name: lead.name,
         title: lead.title,
@@ -47,6 +46,12 @@ function mapLeadToRow(lead: Lead, userId: string) {
         country: lead.country,
         city: lead.city,
     };
+
+    if (isValidUUID) {
+        row.id = lead.id;
+    }
+
+    return row;
 }
 
 export const supabaseService = {
@@ -65,30 +70,13 @@ export const supabaseService = {
     },
 
     // WARNING: This replaces all leads for the user. Use with caution or prefer add/remove.
-    // To replicate localStorage "setLeads" which overwrites everything, we would need to delete all and insert all.
-    // But that's inefficient and dangerous.
-    // For now, we will implement it as a "sync" or just log a warning that it's not fully supported in the same way.
-    // However, the user asked to replicate the signature.
-    // If the app uses setLeads to update a single item by passing the whole list, we should optimize.
-    // But looking at usage, it's mostly used for "addLeadsDedup" and "removeWhere".
-    // We will implement "setLeads" to just do nothing or throw, because we shouldn't overwrite the whole DB from client state easily.
-    // BUT, to be safe and compliant:
     async setLeads(items: Lead[]) {
         console.warn('supabaseService.setLeads is not fully implemented to overwrite all data. Use add/remove methods.');
-        // If we really needed to:
-        // 1. Delete all for user
-        // 2. Insert all
-        // This is too risky for a cloud DB without transactions or more context.
     },
 
     async addLeadsDedup(items: Lead[]): Promise<{ addedCount: number; duplicateCount: number }> {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return { addedCount: 0, duplicateCount: 0 };
-
-        // 1. Fetch existing to dedup (or rely on DB constraints if we had unique keys on email/linkedin)
-        // The localStorage implementation dedups by ID or name|company|title.
-        // We can do a client-side check or just try to insert and ignore conflicts if we had a unique constraint.
-        // Since we don't have a unique constraint in SQL (yet) other than ID, we should check.
 
         const existing = await this.getLeads();
         // Use content-based key for deduplication because incoming IDs might be non-UUIDs (from n8n)
@@ -121,8 +109,6 @@ export const supabaseService = {
     },
 
     async isLeadSaved(lead: Lead): Promise<boolean> {
-        // Inefficient to fetch all, but matches signature.
-        // Better: check by ID or key if possible.
         const all = await this.getLeads();
         const key = (v: Lead) => `${v.name || ''}|${v.company || ''}|${v.title || ''}`.toLowerCase();
         const toFind = key(lead);
