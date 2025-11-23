@@ -3,7 +3,7 @@ import { z } from 'genkit';
 
 export const enhanceCompanyReportFlow = ai.defineFlow(
   {
-    name: 'enhanceCompanyReportFlow',
+    name: 'enhance CompanyReportFlow',
     inputSchema: z.object({
       companyProfile: z.any(),
       lead: z.any(),
@@ -21,3 +21,6 @@ export const enhanceCompanyReportFlow = ai.defineFlow(
     return report;
   }
 );
+
+// Export for API route compatibility
+export const enhanceCompanyReport = enhanceCompanyReportFlow;

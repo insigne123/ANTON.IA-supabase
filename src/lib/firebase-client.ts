@@ -6,7 +6,7 @@ import { getAuth, signInAnonymously, type Auth, onAuthStateChanged } from 'fireb
 
 let app: FirebaseApp | undefined;
 let storage: FirebaseStorage | undefined;
-let auth: Auth | undefined;
+let _authInstance: Auth | undefined;
 
 function assertEnv(name: string, val: string | undefined) {
   if (!val) throw new Error(`[firebase] Falta variable: ${name}`);
@@ -41,8 +41,8 @@ export function getFirebaseStorage(): FirebaseStorage {
 }
 
 export function getFirebaseAuth(): Auth {
-  if (!auth) auth = getAuth(getFirebaseApp());
-  return auth!;
+  if (!_authInstance) _authInstance = getAuth(getFirebaseApp());
+  return _authInstance!;
 }
 
 export async function ensureSignedInAnonymously(): Promise<string> {
@@ -56,3 +56,6 @@ export async function ensureSignedInAnonymously(): Promise<string> {
     });
   });
 }
+
+// Export for compatibility with existing code
+export const auth = getFirebaseAuth();
