@@ -1,99 +1,86 @@
 'use client';
-
 import { useEffect, useState } from 'react';
-import { googleAuthService } from '@/lib/google-auth-service';
+import { Button } from '@/components/ui/button';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { CheckCircle2, XCircle } from 'lucide-react';
 
 export default function GmailConnectPage() {
-  const [connected, setConnected] = useState<boolean>(false);
-  const [email, setEmail] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const supabase = createClientComponentClient();
 
   useEffect(() => {
-    const s = googleAuthService.getSession();
-    setConnected(!!s?.accessToken);
-    setEmail(s?.email ?? null);
+    checkConnection();
   }, []);
 
-  const handleConnect = async () => {
-    setLoading(true);
-    setError(null);
+  async function checkConnection() {
     try {
-      const profile = await googleAuthService.login({ withReadScope: false });
-      setConnected(true);
-      setEmail(profile.email ?? null);
-    } catch (e: any) {
-      console.error('[gmail/connect] error', e);
-      const dbg = googleAuthService.debugAuthConfig();
-      setError(
-        (e?.message || 'Fallo al conectar con Google') +
-          ` · origin=${dbg.origin} · clientIdPresent=${dbg.clientIdPresent}`
-      );
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data } = await supabase
+        .from('provider_tokens')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('provider', 'google')
+        .maybeSingle();
+
+      setConnected(!!data);
+    } catch (error) {
+      console.error('Error checking connection:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const handleDisconnect = async () => {
-    googleAuthService.logout();
-    setConnected(false);
-    setEmail(null);
-  };
+  const handleConnect = () => {
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    const redirectUri = `${process.env.NEXT_PUBLIC_BASE_URL}/api/auth/callback/google`;
+    const scope = 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly openid email profile';
 
-  const handleUpgradeRead = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      await googleAuthService.upgradeToReadScope();
-      alert('Permiso de lectura habilitado (gmail.readonly).');
-    } catch (e: any) {
-      console.error('[gmail/upgrade] error', e);
-      setError(e?.message ?? 'No se pudo solicitar gmail.readonly');
-    } finally {
-      setLoading(false);
-    }
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&access_type=offline&prompt=consent`;
   };
 
   return (
-    <main className="p-6 max-w-2xl">
-      <h1 className="text-2xl font-semibold mb-4">Conectar con Gmail</h1>
-      <div className="rounded-xl border p-4 space-y-3">
-        <p className="text-sm text-muted-foreground">
-          Estado: {connected ? 'Conectado' : 'Desconectado'}
-          {email ? ` — ${email}` : ''}
-        </p>
-        {error && <p className="text-red-600 text-sm">{error}</p>}
-        <div className="flex gap-2">
-          {!connected ? (
-            <button
-              onClick={handleConnect}
-              disabled={loading}
-              className="px-3 py-2 rounded-lg border hover:bg-accent"
-              aria-busy={loading}
-            >
-              {loading ? 'Conectando…' : 'Conectar con Google'}
-            </button>
-          ) : (
-            <>
-              <button
-                onClick={handleDisconnect}
-                className="px-3 py-2 rounded-lg border hover:bg-accent"
-              >
-                Desconectar
-              </button>
-              <button
-                onClick={handleUpgradeRead}
-                className="px-3 py-2 rounded-lg border hover:bg-accent"
-              >
-                Activar seguimiento (leer respuestas)
-              </button>
-            </>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          La app no guarda tu contraseña. Usa OAuth 2.0 y tokens efímeros.
-        </p>
-      </div>
-    </main>
+    <div className="container mx-auto max-w-3xl space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Conexión con Gmail</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-4">
+            {loading ? (
+              <div className="text-sm text-muted-foreground">Verificando conexión...</div>
+            ) : connected ? (
+              <div className="flex items-center text-green-600 font-medium">
+                <CheckCircle2 className="mr-2 h-5 w-5" />
+                Conectado y listo para automatización
+              </div>
+            ) : (
+              <div className="flex items-center text-muted-foreground">
+                <XCircle className="mr-2 h-5 w-5" />
+                No conectado
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button onClick={handleConnect}>
+              {connected ? 'Reconectar / Actualizar permisos' : 'Conectar con Google'}
+            </Button>
+          </div>
+
+          <div className="rounded-md border p-3 text-sm leading-relaxed bg-muted/50">
+            <p className="font-medium">¿Qué permite esta conexión?</p>
+            <ul className="list-disc pl-5 mt-2 space-y-1">
+              <li>Envío de correos manuales desde la plataforma.</li>
+              <li><strong>Envío automático</strong> de campañas en segundo plano (24/7).</li>
+              <li>Almacenamiento seguro de credenciales (Refresh Token).</li>
+            </ul>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
