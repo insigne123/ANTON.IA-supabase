@@ -48,7 +48,7 @@ export async function exportToPdf(
       const pageHeight = pageSize.height ? pageSize.height : (pageSize as any).getHeight();
       doc.setFontSize(8);
       doc.text(
-        `Página ${doc.internal.getNumberOfPages()}`,
+        `Página ${doc.getNumberOfPages()}`,
         pageSize.width - margin - 60,
         pageHeight - 12
       );
@@ -69,7 +69,7 @@ export function exportToCsv(
   const escape = (val: string | number) => {
     const s = String(val ?? '');
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
+  };
   const lines = [
     headers.map(escape).join(','),
     ...rows.map((r) => r.map(escape).join(',')),

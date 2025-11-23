@@ -18,11 +18,11 @@ export function defaultColumns(): ColumnDef[] {
     { key: 'owner', label: 'Owner', visible: true, width: 140, editable: true },
     { key: 'notes', label: 'Notas', visible: true, width: 320, editable: true },
     { key: 'kind', label: 'Tipo', visible: false, width: 110 },
-    { key: 'source', label: 'Fuente', visible: false, width: 110 },
+    // { key: 'source', label: 'Fuente', visible: false, width: 110 },
     { key: 'createdAt', label: 'Creado', visible: false, width: 160 },
-    { key: 'sentAt', label: 'Enviado', visible: false, width: 160 },
-    { key: 'repliedAt', label: 'Respondido', visible: false, width: 160 },
-    { key: 'lastUpdateAt', label: 'Última act.', visible: false, width: 160 },
+    // { key: 'sentAt', label: 'Enviado', visible: false, width: 160 },
+    // { key: 'repliedAt', label: 'Respondido', visible: false, width: 160 },
+    { key: 'updatedAt', label: 'Última act.', visible: false, width: 160 },
     { key: 'linkedinUrl', label: 'LinkedIn', visible: false, width: 160 },
   ];
   return cols;
@@ -91,7 +91,7 @@ export function bulkSetCustom(rows: UnifiedRow[]) {
     if (r.stage) customData.stage = r.stage;
     if (r.owner) customData.owner = r.owner;
     if (r.notes) customData.notes = r.notes;
-    if(Object.keys(customData).length > 0) all[r.gid] = { ...(all[r.gid] || {}), ...customData};
+    if (Object.keys(customData).length > 0) all[r.gid] = { ...(all[r.gid] || {}), ...customData };
   }
   localStorage.setItem(CUSTOM_DATA_KEY, JSON.stringify(all));
 }

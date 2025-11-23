@@ -1,5 +1,5 @@
 
-import { supabase } from '@/lib/supabase-client';
+import { supabase } from '@/lib/supabase';
 import type { UnifiedRow, ColumnDef } from '@/lib/unified-sheet-types';
 import { defaultColumns } from '@/lib/unified-sheet-storage'; // Reusing defaultColumns for now
 
