@@ -3,8 +3,7 @@
 import { Suspense } from 'react';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { getEnrichedOppLeads, removeEnrichedOppLeadById } from '@/lib/saved-enriched-opps-storage';
-import { getEnrichedLeads } from '@/lib/saved-enriched-leads-storage';
+import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
@@ -14,7 +13,7 @@ import { sendEmail } from '@/lib/outlook-email-service';
 import { getCompanyProfile } from '@/lib/data';
 import type { EnrichedLead, EnrichedOppLead, StyleProfile } from '@/lib/types';
 import { useRouter } from 'next/navigation';
-import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { v4 as uuid } from 'uuid';
 import { extractPrimaryEmail } from '@/lib/email-utils';
 import { renderTemplate } from '@/lib/template';
@@ -35,14 +34,14 @@ function htmlToPlainParas(htmlOrText: string): string {
   if (!htmlOrText) return '';
   let s = String(htmlOrText);
   s = s.replace(/\r\n/g, '\n')
-       .replace(/<br\s*\/?>/gi, '\n')
-       .replace(/<\/(p|div|h[1-6])>/gi, '\n\n')
-       .replace(/<\/li>/gi, '\n')
-       .replace(/<li[^>]*>/gi, '• ')
-       .replace(/<\/?[^>]+>/g, '')
-       .replace(/[ \t]+/g, ' ')
-       .replace(/\n{3,}/g, '\n\n')
-       .trim();
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|h[1-6])>/gi, '\n\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<\/?[^>]+>/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
   return s;
 }
 
@@ -52,12 +51,12 @@ function ComposeInner() {
   const sp = useSearchParams();
   const id = sp.get('id') || '';
   const [lead, setLead] = useState<AnyLead | null>(null);
-  
+
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
-  const [draftSource, setDraftSource] = useState<'investigation'|'style'>('investigation');
+  const [draftSource, setDraftSource] = useState<'investigation' | 'style'>('investigation');
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
   const [selectedStyleName, setSelectedStyleName] = useState<string>('');
 
@@ -75,40 +74,45 @@ function ComposeInner() {
 
   useEffect(() => {
     if (!id) return;
-    // 0) buffer temporal desde la página de enriquecidos
-    const buffered = readComposeBuffer(id);
-    if (buffered) { setLead(buffered); return; }
-    // 1) opps
-    const oppLead = getEnrichedOppLeads().find(x => x.id === id);
-    if (oppLead) { setLead(oppLead); return; }
-    // 2) directos
-    const directLead = getEnrichedLeads().find(x => x.id === id);
-    if (directLead) { setLead(directLead); return; }
-    // 3) contactados (por si se registró antes de abrir compose)
-    const contacted = contactedLeadsStorage.findByLeadId(id);
-    if (contacted) {
-      setLead({
-        id,
-        fullName: contacted.name,
-        email: contacted.email,
-        companyName: contacted.company,
-        title: contacted.title || '',
-        companyDomain: (contacted as any).companyDomain || '',
-      } as any);
-      return;
+
+    async function loadLead() {
+      // 0) buffer temporal desde la página de enriquecidos
+      const buffered = readComposeBuffer(id);
+      if (buffered) { setLead(buffered); return; }
+
+      // 1) & 2) Enriched Leads (merged)
+      const enriched = await enrichedLeadsStorage.findEnrichedLeadById(id);
+      if (enriched) { setLead(enriched); return; }
+
+      // 3) contactados (por si se registró antes de abrir compose)
+      const contacted = await contactedLeadsStorage.findByLeadId(id);
+      if (contacted) {
+        setLead({
+          id,
+          fullName: contacted.name,
+          email: contacted.email,
+          companyName: contacted.company,
+          title: (contacted as any).title || '',
+          companyDomain: (contacted as any).companyDomain || '',
+        } as any);
+        return;
+      }
+
+      // 4) fallback a reporte (si existe)
+      // Note: findReportForLead is still sync/local for now.
+      const rep = findReportForLead({ leadId: id, companyDomain: null, companyName: null });
+      if (rep?.cross) {
+        setLead({
+          id,
+          fullName: (rep as any)?.lead?.fullName || '',
+          email: (rep as any)?.lead?.email || '',
+          companyName: rep.cross.company?.name || '',
+          companyDomain: rep.cross.company?.domain || '',
+          title: (rep as any)?.lead?.title || '',
+        } as any);
+      }
     }
-    // 4) fallback a reporte (si existe)
-    const rep = findReportForLead({ leadId: id, companyDomain: null, companyName: null });
-    if (rep?.cross) {
-      setLead({
-        id,
-        fullName: (rep as any)?.lead?.fullName || '',
-        email: (rep as any)?.lead?.email || '',
-        companyName: rep.cross.company?.name || '',
-        companyDomain: rep.cross.company?.domain || '',
-        title: (rep as any)?.lead?.title || '',
-      } as any);
-    }
+    loadLead();
   }, [id]);
   useEffect(() => {
     const list = styleProfilesStorage.list();
@@ -128,7 +132,7 @@ function ComposeInner() {
 
     // Si hay parámetros en URL y NO estamos forzando regeneración, respétalos.
     const generatedSubject = !opts?.forceRegenerate ? (sp.get('subject') || '') : '';
-    const generatedBody    = !opts?.forceRegenerate ? (sp.get('body') || '')    : '';
+    const generatedBody = !opts?.forceRegenerate ? (sp.get('body') || '') : '';
 
     let initialSubject: string;
     let initialBody: string;
@@ -177,7 +181,7 @@ function ComposeInner() {
 
     // 1) Plantillas {{lead.*}} / {{company.*}} / {{sender.*}}
     let subj = renderTemplate(initialSubject || '', { lead: leadData, company, sender });
-    let bod  = renderTemplate(initialBody || '',    { lead: leadData, company, sender });
+    let bod = renderTemplate(initialBody || '', { lead: leadData, company, sender });
     // 2) Firma y placeholders humanos
     bod = applySignaturePlaceholders(bod, sender);
     bod = htmlToPlainParas(bod);
@@ -224,15 +228,13 @@ function ComposeInner() {
 
       // Incrementa espejo local de cuota
       Quota.incClientQuota('contact');
-      
-      contactedLeadsStorage.add({
+
+      await contactedLeadsStorage.add({
         id: uuid(),
         leadId: (lead as any).id,
         name: (lead as any).fullName,
         email,
         company: (lead as any).companyName,
-        title: (lead as any).title,
-        companyDomain: (lead as any).companyDomain,
         subject,
         sentAt: new Date().toISOString(),
         status: 'sent',
@@ -243,7 +245,7 @@ function ComposeInner() {
         lastUpdateAt: new Date().toISOString(),
       });
       // ✅ quitar de Oportunidades Enriquecidas (storage correcto)
-      removeEnrichedOppLeadById((lead as any).id);
+      await enrichedLeadsStorage.removeById((lead as any).id);
 
       toast({ title: 'Enviado con Outlook', description: `Correo enviado a ${(lead as any).fullName}.` });
       router.back();
@@ -257,41 +259,25 @@ function ComposeInner() {
   const doSendGmail = async () => {
     const { email } = extractPrimaryEmail(lead);
     if (!email) {
-        toast({ variant: 'destructive', title: 'Sin email', description: 'Este lead no tiene email revelado.' });
-        return;
+      toast({ variant: 'destructive', title: 'Sin email', description: 'Este lead no tiene email revelado.' });
+      return;
     }
     setIsLoading(true);
     try {
-        const result = await sendGmailEmail({
-            to: email,
-            subject: subject,
-            html: body.replace(/\n/g, '<br>'),
-        });
+      const result = await sendGmailEmail({
+        to: email,
+        subject: subject,
+        html: body.replace(/\n/g, '<br>'),
+      });
 
-        Quota.incClientQuota('contact');
-        
-        contactedLeadsStorage.add({
-            id: uuid(),
-            leadId: (lead as any).id,
-            name: (lead as any).fullName,
-            email,
-            company: (lead as any).companyName,
-            title: (lead as any).title,
-            companyDomain: (lead as any).companyDomain,
-            subject,
-            sentAt: new Date().toISOString(),
-            status: 'sent',
-            provider: 'gmail',
-            messageId: result.id, 
-            threadId: result.threadId,
-            lastUpdateAt: new Date().toISOString(),
-        });
-        // ✅ quitar de Oportunidades Enriquecidas (storage correcto)
-        removeEnrichedOppLeadById((lead as any).id);
-        toast({ title: 'Enviado con Gmail', description: `Correo enviado a ${(lead as any).fullName}.` });
-        router.back();
+      Quota.incClientQuota('contact');
+
+      // ✅ quitar de Oportunidades Enriquecidas (storage correcto)
+      await enrichedLeadsStorage.removeById((lead as any).id);
+      toast({ title: 'Enviado con Gmail', description: `Correo enviado a ${(lead as any).fullName}.` });
+      router.back();
     } catch (e: any) {
-        toast({ variant: 'destructive', title: 'Error al enviar con Gmail', description: e.message || 'Gmail falló' });
+      toast({ variant: 'destructive', title: 'Error al enviar con Gmail', description: e.message || 'Gmail falló' });
     } finally {
       setIsLoading(false);
     }
@@ -306,10 +292,10 @@ function ComposeInner() {
       <Card>
         <CardHeader>
           <CardTitle>Contactar a {(lead as any).fullName}</CardTitle>
-           <CardDescription>
-              {(lead as any).title} en {(lead as any).companyName}
-              {displayEmail ? <span className="text-sm text-muted-foreground"> · {displayEmail}</span> : null}
-            </CardDescription>
+          <CardDescription>
+            {(lead as any).title} en {(lead as any).companyName}
+            {displayEmail ? <span className="text-sm text-muted-foreground"> · {displayEmail}</span> : null}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {/* Fuente del borrador y selector de estilo */}
@@ -318,11 +304,11 @@ function ComposeInner() {
               <div className="text-xs text-muted-foreground mb-1">Fuente del borrador</div>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="draft-source" value="investigation" checked={draftSource==='investigation'} onChange={()=>setDraftSource('investigation')} />
+                  <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => setDraftSource('investigation')} />
                   Investigación (n8n)
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="draft-source" value="style" checked={draftSource==='style'} onChange={()=>{
+                  <input type="radio" name="draft-source" value="style" checked={draftSource === 'style'} onChange={() => {
                     setDraftSource('style');
                     if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
                   }} />
@@ -336,7 +322,7 @@ function ComposeInner() {
                 className="h-9 w-full rounded-md border bg-background px-2 text-sm disabled:opacity-50"
                 disabled={draftSource !== 'style' || styleProfiles.length === 0}
                 value={selectedStyleName}
-                onChange={(e)=> setSelectedStyleName(e.target.value)}
+                onChange={(e) => setSelectedStyleName(e.target.value)}
               >
                 {styleProfiles.length === 0 ? <option value="">(No hay estilos guardados)</option> :
                   styleProfiles.map(p => <option key={p.name} value={p.name}>{p.name}</option>)
@@ -350,16 +336,16 @@ function ComposeInner() {
             </div>
           </div>
           <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Asunto" />
-          <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={14} className="font-mono text-sm"/>
+          <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={14} className="font-mono text-sm" />
           <div className="flex gap-2">
             <Button onClick={doSendOutlook} disabled={isLoading}>
-                {isLoading ? 'Enviando...' : 'Enviar con Outlook'}
+              {isLoading ? 'Enviando...' : 'Enviar con Outlook'}
             </Button>
             <Button onClick={doSendGmail} disabled={isLoading}>
-                {isLoading ? 'Enviando...' : 'Enviar con Gmail'}
+              {isLoading ? 'Enviando...' : 'Enviar con Gmail'}
             </Button>
             <Button variant="outline" onClick={() => router.back()}>
-                Volver
+              Volver
             </Button>
           </div>
         </CardContent>

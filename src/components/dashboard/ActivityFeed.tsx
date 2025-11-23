@@ -5,8 +5,8 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
-import { savedOpportunitiesStorage } from '@/lib/saved-opportunities-storage';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
+import { savedOpportunitiesStorage } from '@/lib/services/opportunities-service';
 import { getSavedLeads } from '@/lib/saved-leads-storage';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -22,46 +22,49 @@ export default function ActivityFeed() {
   const [activities, setActivities] = useState<ActivityItem[]>([]);
 
   useEffect(() => {
-    // Simulación de carga de datos desde diferentes storages.
-    const contacted = contactedLeadsStorage.get();
-    const opps = savedOpportunitiesStorage.get();
-    const savedLeads = getSavedLeads();
+    async function load() {
+      // Simulación de carga de datos desde diferentes storages.
+      const contacted = await contactedLeadsStorage.get();
+      const opps = await savedOpportunitiesStorage.get();
+      const savedLeads = getSavedLeads();
 
-    const feed: ActivityItem[] = [];
+      const feed: ActivityItem[] = [];
 
-    contacted.forEach(c => {
-      feed.push({
-        type: 'contact',
-        title: `Correo enviado a ${c.name}`,
-        description: `Empresa: ${c.company || 'N/A'}`,
-        date: new Date(c.sentAt),
-      });
-      if (c.status === 'replied' && c.repliedAt) {
+      contacted.forEach(c => {
         feed.push({
-          type: 'reply',
-          title: `Respuesta recibida de ${c.name}`,
-          description: `Asunto original: ${c.subject}`,
-          date: new Date(c.repliedAt),
+          type: 'contact',
+          title: `Correo enviado a ${c.name}`,
+          description: `Empresa: ${c.company || 'N/A'}`,
+          date: new Date(c.sentAt),
         });
-      }
-    });
+        if (c.status === 'replied' && c.repliedAt) {
+          feed.push({
+            type: 'reply',
+            title: `Respuesta recibida de ${c.name}`,
+            description: `Asunto original: ${c.subject}`,
+            date: new Date(c.repliedAt),
+          });
+        }
+      });
 
-    opps.forEach(o => {
+      opps.forEach(o => {
         const publishedDate = o.publishedAt ? new Date(o.publishedAt) : new Date(); // Fallback date
         feed.push({
-            type: 'new_opp',
-            title: `Nueva oportunidad guardada: ${o.title}`,
-            description: `Empresa: ${o.companyName}`,
-            date: publishedDate,
+          type: 'new_opp',
+          title: `Nueva oportunidad guardada: ${o.title}`,
+          description: `Empresa: ${o.companyName}`,
+          date: publishedDate,
         });
-    });
+      });
 
-    // Ordenar por fecha descendente y tomar las últimas 15
-    const sortedFeed = feed
-      .sort((a, b) => b.date.getTime() - a.date.getTime())
-      .slice(0, 15);
+      // Ordenar por fecha descendente y tomar las últimas 15
+      const sortedFeed = feed
+        .sort((a, b) => b.date.getTime() - a.date.getTime())
+        .slice(0, 15);
 
-    setActivities(sortedFeed);
+      setActivities(sortedFeed);
+    }
+    load();
   }, []);
 
   return (

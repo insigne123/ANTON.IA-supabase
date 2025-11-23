@@ -5,10 +5,10 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Users, Send, MailCheck, Briefcase } from 'lucide-react';
-import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { campaignsStorage } from '@/lib/campaigns-storage';
-import { getEnrichedLeads } from '@/lib/saved-enriched-leads-storage';
-import { savedOpportunitiesStorage } from '@/lib/saved-opportunities-storage';
+import { getEnrichedLeads } from '@/lib/services/enriched-leads-service';
+import { savedOpportunitiesStorage } from '@/lib/services/opportunities-service';
 
 type Summary = {
   contacted: number;
@@ -28,19 +28,21 @@ export default function SummaryCards() {
   });
 
   useEffect(() => {
-    // Esta lógica se ejecuta en el cliente, donde localStorage está disponible.
-    const contacted = contactedLeadsStorage.get();
-    const campaigns = campaignsStorage.get();
-    const enriched = getEnrichedLeads();
-    const opps = savedOpportunitiesStorage.get();
+    async function load() {
+      const contacted = await contactedLeadsStorage.get();
+      const campaigns = campaignsStorage.get();
+      const enriched = await getEnrichedLeads();
+      const opps = await savedOpportunitiesStorage.get();
 
-    setSummary({
-      contacted: contacted.length,
-      replied: contacted.filter(c => c.status === 'replied').length,
-      activeCampaigns: campaigns.filter(c => !c.isPaused).length,
-      enrichedLeads: enriched.length,
-      savedOpps: opps.length,
-    });
+      setSummary({
+        contacted: contacted.length,
+        replied: contacted.filter(c => c.status === 'replied').length,
+        activeCampaigns: campaigns.filter(c => !c.isPaused).length,
+        enrichedLeads: enriched.length,
+        savedOpps: opps.length,
+      });
+    }
+    load();
   }, []);
 
   const cardItems = [

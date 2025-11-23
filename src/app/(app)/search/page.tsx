@@ -19,8 +19,8 @@ import { Search, Save, X, Frown, ChevronDown } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
 import { supabaseService } from '@/lib/supabase-service';
-import { addEnrichedLeads } from '@/lib/saved-enriched-leads-storage';
-import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
+import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import * as Quota from '@/lib/quota-client';
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from '@/lib/search-config';
 import { searchLeads, type LeadsSearchParams } from '@/lib/leads-client';
@@ -158,6 +158,7 @@ export default function SearchPage() {
   const [leads, setLeads] = useState<UILaed[]>([]);
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set());
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [contactedIds, setContactedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
   const { toast } = useToast();
   const [pageIndex, setPageIndex] = useState(0);
@@ -169,10 +170,19 @@ export default function SearchPage() {
 
   useEffect(() => { setPageIndex(0); }, [leads]);
 
-  // Cargar leads guardados para verificar estado
+  // Cargar leads guardados y contactados para verificar estado
   useEffect(() => {
-    supabaseService.getLeads().then(all => {
-      setSavedIds(new Set(all.map(l => l.id)));
+    Promise.all([
+      supabaseService.getLeads(),
+      contactedLeadsStorage.get()
+    ]).then(([saved, contacted]) => {
+      setSavedIds(new Set(saved.map(l => l.id)));
+      const cSet = new Set<string>();
+      contacted.forEach(c => {
+        if (c.leadId) cSet.add(c.leadId);
+        if (c.email) cSet.add(c.email);
+      });
+      setContactedIds(cSet);
     });
   }, []);
 
@@ -190,16 +200,23 @@ export default function SearchPage() {
 
   const handleSaveSelectedLeads = async () => {
     const selected = leads.filter(lead => selectedLeads.has(lead.id));
-    const selectedNotContacted = selected.filter(l => !contactedLeadsStorage.isContacted(l.email || undefined, l.id));
+    // Filter out already contacted
+    const selectedNotContacted = selected.filter(l => {
+      const isContacted = (l.id && contactedIds.has(l.id)) || (l.email && contactedIds.has(l.email));
+      return !isContacted;
+    });
+
     if (selectedNotContacted.length === 0) {
       toast({ title: 'Nada que guardar', description: 'Todos los seleccionados ya fueron contactados o no hay selección.' });
       return;
     }
 
     const withEmail = selectedNotContacted.filter(l => !!l.email);
+    let enrichedAdded = 0;
     if (withEmail.length) {
       const enriched = withEmail.map(mapLeadToEnriched);
-      addEnrichedLeads(enriched);
+      const res = await enrichedLeadsStorage.addDedup(enriched);
+      enrichedAdded = res.addedCount;
     }
 
     const withoutEmail = selectedNotContacted.filter(l => !l.email);
@@ -212,7 +229,7 @@ export default function SearchPage() {
     toast({
       title: 'Guardado',
       description:
-        `A Enriquecidos: ${withEmail.length} · ` +
+        `A Enriquecidos: ${enrichedAdded} · ` +
         `A Guardados: ${resSv.addedCount} (dup: ${resSv.duplicateCount})`,
     });
 
@@ -298,16 +315,19 @@ export default function SearchPage() {
 
   const isPageAllSelected = useMemo(() => {
     if (pagedLeads.length === 0) return false;
-    const selectable = pagedLeads.filter(lead => !savedIds.has(lead.id) && !contactedLeadsStorage.isContacted(lead.email || undefined, lead.id));
+    const selectable = pagedLeads.filter(lead => {
+      const isContacted = (lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email));
+      return !savedIds.has(lead.id) && !isContacted;
+    });
     if (selectable.length === 0) return false;
     return selectable.every(lead => selectedLeads.has(lead.id));
-  }, [pagedLeads, selectedLeads, savedIds]);
+  }, [pagedLeads, selectedLeads, savedIds, contactedIds]);
 
   const handleSelectAll = (checked: boolean) => {
     const newSelectedLeads = new Set(selectedLeads);
     pagedLeads.forEach(lead => {
       const already = savedIds.has(lead.id);
-      const contacted = contactedLeadsStorage.isContacted(lead.email || undefined, lead.id);
+      const contacted = (lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email));
       if (!already && !contacted) {
         if (checked) newSelectedLeads.add(lead.id);
         else newSelectedLeads.delete(lead.id);
@@ -422,7 +442,7 @@ export default function SearchPage() {
                 ) : pagedLeads.length > 0 ? (
                   pagedLeads.map(lead => {
                     const already = savedIds.has(lead.id);
-                    const contacted = contactedLeadsStorage.isContacted(lead.email || undefined, lead.id);
+                    const contacted = (lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email));
                     const disabled = already || contacted;
                     return (
                       <TableRow key={lead.id} data-state={selectedLeads.has(lead.id) ? "selected" : ""}>

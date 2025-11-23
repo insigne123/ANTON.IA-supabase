@@ -10,13 +10,13 @@ import { JobOpportunity, CompanyTarget, LeadFromApollo } from '@/lib/types';
 import { PageHeader } from '@/components/page-header';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { savedOpportunitiesStorage } from '@/lib/saved-opportunities-storage';
-import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
+import { savedOpportunitiesStorage } from '@/lib/services/opportunities-service';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import * as Quota from '@/lib/quota-client';
 import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { parseJsonResponse } from '@/lib/http/safe-json';
 
-import { enrichedLeadsStorage } from '@/lib/enriched-leads-storage';
+import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import { getClientId } from '@/lib/client-id';
 import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
 
@@ -42,6 +42,18 @@ export default function OpportunitiesPage() {
   const [enriching, setEnriching] = useState(false);
 
   const [selectedOppIds, setSelectedOppIds] = useState<Record<string, boolean>>({});
+  const [contactedIds, setContactedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    contactedLeadsStorage.get().then(all => {
+      const s = new Set<string>();
+      all.forEach(c => {
+        if (c.leadId) s.add(c.leadId);
+        if (c.email) s.add(c.email);
+      });
+      setContactedIds(s);
+    });
+  }, []);
   const allSelected = useMemo(
     () => opps.length > 0 && opps.every(o => selectedOppIds[o.id]),
     [opps, selectedOppIds]
@@ -57,16 +69,16 @@ export default function OpportunitiesPage() {
     setSelectedOppIds(next);
   };
 
-  const saveSelected = () => {
+  const saveSelected = async () => {
     const chosen = opps.filter(o => selectedOppIds[o.id]);
     if (chosen.length === 0) return;
-    const { addedCount, duplicateCount } = savedOpportunitiesStorage.addDedup(chosen);
+    const { addedCount, duplicateCount } = await savedOpportunitiesStorage.addDedup(chosen);
     toast({ title: 'Vacantes guardadas', description: `Agregadas: ${addedCount} · Duplicados: ${duplicateCount}` });
   };
 
-  const saveAll = () => {
+  const saveAll = async () => {
     if (opps.length === 0) return;
-    const { addedCount, duplicateCount } = savedOpportunitiesStorage.addDedup(opps);
+    const { addedCount, duplicateCount } = await savedOpportunitiesStorage.addDedup(opps);
     toast({ title: 'Vacantes guardadas', description: `Agregadas: ${addedCount} · Duplicados: ${duplicateCount}` });
   };
 
@@ -487,7 +499,7 @@ export default function OpportunitiesPage() {
                       </TableHeader>
                       <TableBody>
                         {leads.map((l, i) => {
-                          const contacted = contactedLeadsStorage.isContacted(l.email || undefined, (l as any).id);
+                          const contacted = (l as any).id && contactedIds.has((l as any).id) || (l.email && contactedIds.has(l.email));
                           return (
                             <TableRow key={i}>
                               <TableCell>

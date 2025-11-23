@@ -36,9 +36,8 @@ function combinedHTML(
     (websiteText && websiteText !== 'https://') || phoneText
       ? `<tr>
   <td style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:18px;color:#475467;">
-    ${websiteText && websiteText !== 'https://' ? `<a href="${websiteText}" style="color:#1570EF;text-decoration:none;">${websiteText}</a>` : ''}${
-          websiteText && phoneText ? ' · ' : ''
-        }${phoneText || ''}
+    ${websiteText && websiteText !== 'https://' ? `<a href="${websiteText}" style="color:#1570EF;text-decoration:none;">${websiteText}</a>` : ''}${websiteText && phoneText ? ' · ' : ''
+      }${phoneText || ''}
   </td>
 </tr>`
       : '';
@@ -92,17 +91,20 @@ export default function SignatureManager({ channel }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   // Cargar firma previa (si existe)
+  // Cargar firma previa (si existe)
   useEffect(() => {
-    const cfg = emailSignatureStorage.get(channel);
-    if (cfg) {
-      setEnabled(!!cfg.enabled);
-      setSeparatorPlaintext(cfg.separatorPlaintext !== false);
-      const match = cfg.html?.match(/<img[^>]+src="([^"]+)"/i);
-      if (match?.[1]) setLogoUrl(match[1]);
-      const w = cfg.html?.match(/<img[^>]+width="(\d+)"/i)?.[1];
-      if (w) setImgWidth(Number(w));
-      setSavedAt(cfg.updatedAt || null);
-    }
+    (async () => {
+      const cfg = await emailSignatureStorage.get(channel);
+      if (cfg) {
+        setEnabled(!!cfg.enabled);
+        setSeparatorPlaintext(cfg.separatorPlaintext !== false);
+        const match = cfg.html?.match(/<img[^>]+src="([^"]+)"/i);
+        if (match?.[1]) setLogoUrl(match[1]);
+        const w = cfg.html?.match(/<img[^>]+width="(\d+)"/i)?.[1];
+        if (w) setImgWidth(Number(w));
+        setSavedAt(cfg.updatedAt || null);
+      }
+    })();
   }, [channel]);
 
   // Construir vista previa (prioriza la URL local si existe para feedback inmediato)
@@ -119,7 +121,7 @@ export default function SignatureManager({ channel }: Props) {
       FORBID_ATTR: ['onerror', 'onload'],
     }) as string;
   }, [localPreviewUrl, logoUrl, /* 👇 deps que afectan al HTML pero no al ancho de preview */
-      alt, addText, name, title, website, phone]);
+    alt, addText, name, title, website, phone]);
 
   // Sube archivo y autoguarda al terminar
   async function handleUpload(file: File) {
@@ -167,13 +169,13 @@ export default function SignatureManager({ channel }: Props) {
         html,
         text: addText
           ? [name || '', title || '', website && website !== 'https://' ? website : '', phone || '']
-              .filter(Boolean)
-              .join('\n')
+            .filter(Boolean)
+            .join('\n')
           : '',
         separatorPlaintext,
         updatedAt: new Date().toISOString(),
       };
-      emailSignatureStorage.save(cfg);
+      emailSignatureStorage.save(cfg).then(() => setSavedAt(cfg.updatedAt));
       setSavedAt(cfg.updatedAt);
 
       // Al tener URL definitiva, usamos esa también en la preview
@@ -188,7 +190,7 @@ export default function SignatureManager({ channel }: Props) {
   }
 
   // Guardado manual (por si editan ancho o añaden datos luego)
-  function handleSave() {
+  async function handleSave() {
     setError(null);
     const src = logoUrl; // no permitimos guardar si solo hay objectURL local
     if (!src || !/^https:\/\//i.test(src)) {
@@ -205,13 +207,13 @@ export default function SignatureManager({ channel }: Props) {
       html,
       text: addText
         ? [name || '', title || '', website && website !== 'https://' ? website : '', phone || '']
-            .filter(Boolean)
-            .join('\n')
+          .filter(Boolean)
+          .join('\n')
         : '',
       separatorPlaintext,
       updatedAt: new Date().toISOString(),
     };
-    emailSignatureStorage.save(cfg);
+    emailSignatureStorage.save(cfg).then(() => setSavedAt(cfg.updatedAt));
     setSavedAt(cfg.updatedAt);
   }
 

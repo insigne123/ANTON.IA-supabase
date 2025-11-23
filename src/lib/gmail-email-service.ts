@@ -32,11 +32,11 @@ export async function sendGmailEmail(input: GmailSendInput): Promise<{ id: strin
   const accessToken = await googleAuthService.getSendToken();
   const from = await googleAuthService.getUserEmail();
   if (!from) {
-      throw new Error('No se pudo obtener el email del usuario desde la sesión de Google. Por favor, vuelve a conectar tu cuenta.');
+    throw new Error('No se pudo obtener el email del usuario desde la sesión de Google. Por favor, vuelve a conectar tu cuenta.');
   }
 
   // Aplica firma si está habilitada para Gmail
-  const sig = emailSignatureStorage.get('gmail');
+  const sig = await emailSignatureStorage.get('gmail');
   const finalHtml = applySignatureHTML(input.html || '', sig?.html);
 
   // Genera versión de texto plano a partir del HTML final (con firma)

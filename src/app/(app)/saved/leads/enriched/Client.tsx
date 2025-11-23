@@ -13,8 +13,8 @@ import type { EnrichedLead, LeadResearchReport, StyleProfile } from '@/lib/types
 import { upsertLeadReports, findReportForLead, leadResearchStorage, getLeadReports, findReportByRef } from '@/lib/lead-research-storage';
 import { BackBar } from '@/components/back-bar';
 import { v4 as uuid } from 'uuid';
-import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
-import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet } from '@/lib/saved-enriched-leads-storage';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
+import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet } from '@/lib/services/enriched-leads-service';
 import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser } from 'lucide-react';
 import { supabaseService } from '@/lib/supabase-service';
 import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
@@ -93,7 +93,7 @@ export default function EnrichedLeadsClient() {
 
   useEffect(() => {
     async function loadData() {
-      const e = enrichedLeadsStorageGet();
+      const e = await enrichedLeadsStorageGet();
       const saved = await supabaseService.getLeads();
 
       const patched = e.map((x) => {
@@ -126,6 +126,8 @@ export default function EnrichedLeadsClient() {
   }, []);
 
   // 🔄 Refrescar si otro tab/página (compose) modifica el localStorage
+  // DEPRECATED: Cloud sync handles this differently (realtime), removing local storage listener.
+  /*
   useEffect(() => {
     function onStorage(ev: StorageEvent) {
       if (ev.key === 'leadflow-enriched-leads') {
@@ -135,6 +137,7 @@ export default function EnrichedLeadsClient() {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
+  */
 
   // Referencia compuesta estable (id || email || linkedin || nombre|empresa)
   function leadRefOf(e: EnrichedLead) {
@@ -632,7 +635,7 @@ export default function EnrichedLeadsClient() {
           });
         }
         Quota.incClientQuota('contact');
-        contactedLeadsStorage.add({
+        await contactedLeadsStorage.add({
           id: uuid(),
           leadId: lead.id,
           name: lead.fullName,
@@ -651,7 +654,7 @@ export default function EnrichedLeadsClient() {
         });
 
         // ✅ mover fuera de Enriquecidos si el envío fue OK
-        removeEnrichedLeadById(lead.id);
+        await removeEnrichedLeadById(lead.id);
         removedIds.add(lead.id);
       } catch (e: any) {
         console.error(`send mail error (${bulkProvider})`, lead.email, e?.message);
@@ -713,10 +716,10 @@ export default function EnrichedLeadsClient() {
     setOpenReport(true);
   }
 
-  function handleDeleteEnriched(id: string) {
+  async function handleDeleteEnriched(id: string) {
     const ok = confirm('¿Eliminar este lead de Enriquecidos?');
     if (!ok) return;
-    const next = removeEnrichedLeadById(id);
+    const next = await removeEnrichedLeadById(id);
     setEnriched(next);
     // limpia selecciones
     setSel(prev => { const p = { ...prev }; delete p[id]; return p; });

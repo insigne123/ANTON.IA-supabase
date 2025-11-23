@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { useToast } from '@/hooks/use-toast';
 import { graphGetMessage } from '@/lib/outlook-graph-client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -23,11 +23,11 @@ export default function ContactedRepliedPage() {
   const [html, setHtml] = useState('');
   const [webLink, setWebLink] = useState<string | undefined>(undefined);
 
-  const refresh = () => setItems(contactedLeadsStorage.get());
+  const refresh = async () => setItems(await contactedLeadsStorage.get());
   useEffect(() => { refresh(); }, []);
 
   const rows = useMemo(() => {
-    return contactedLeadsStorage.get()
+    return items
       .filter(x => x.status === 'replied')
       .sort((a, b) => {
         const da = new Date(a.repliedAt || a.lastUpdateAt || a.sentAt).getTime();

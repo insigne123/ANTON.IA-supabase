@@ -1,8 +1,8 @@
 
 // src/lib/campaign-eligibility.ts
 // Ajusta nombres/types si difieren en tu repo (TODO tipar con tus tipos reales).
-import { contactedLeadsStorage } from './contacted-leads-storage';
-import type { Campaign, CampaignStep } from '@/lib/campaigns-storage';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
+import type { Campaign, CampaignStep } from '@/lib/services/campaigns-service';
 import type { ContactedLead } from '@/lib/types';
 
 export type EligiblePreviewRow = {
@@ -36,15 +36,15 @@ function getNextStepIdx(campaign: Campaign, leadId: string): number | null {
   return next;
 }
 
-export function computeEligibilityForCampaign(
+export async function computeEligibilityForCampaign(
   campaign: Campaign,
   opts: Options = {}
-): EligiblePreviewRow[] {
+): Promise<EligiblePreviewRow[]> {
   const now = opts.now ?? new Date();
   const verifyReplies = opts.verifyReplies ?? false;
 
   // SOLO usamos fuente local. No hacemos side effects ni llamadas externas.
-  const contacted = contactedLeadsStorage.get() ?? [];
+  const contacted = await contactedLeadsStorage.get() ?? [];
   const excluded = new Set(campaign.excludedLeadIds ?? []);
 
   const rows: EligiblePreviewRow[] = [];

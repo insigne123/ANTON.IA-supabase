@@ -9,8 +9,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { campaignsStorage, type Campaign, type CampaignStep, type CampaignStepAttachment } from '@/lib/campaigns-storage';
-import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
+import { campaignsStorage, type Campaign, type CampaignStep, type CampaignStepAttachment } from '@/lib/services/campaigns-service';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { Trash2, Plus, Pause, Play, Eye, X } from 'lucide-react';
 import { computeEligibilityForCampaign, type EligiblePreviewRow } from '@/lib/campaign-eligibility';
 import { microsoftAuthService } from '@/lib/microsoft-auth-service';
@@ -60,11 +60,15 @@ export default function CampaignsPage() {
     excludedLeadIds: [],
   });
 
-  useEffect(() => {
-    setItems(campaignsStorage.get());
-  }, []);
+  const [contacted, setContacted] = useState<ContactedLead[]>([]);
 
-  const contacted = useMemo(() => contactedLeadsStorage.get(), []);
+  useEffect(() => {
+    async function load() {
+      setItems(await campaignsStorage.get());
+      setContacted(await contactedLeadsStorage.get());
+    }
+    load();
+  }, []);
 
   function startCreate() {
     setDraft({
@@ -133,13 +137,13 @@ export default function CampaignsPage() {
         });
       }
       if (draft.id) {
-        campaignsStorage.update(draft.id, { name: draft.name, steps, excludedLeadIds: draft.excludedLeadIds });
+        await campaignsStorage.update(draft.id, { name: draft.name, steps, excludedLeadIds: draft.excludedLeadIds });
         toast({ title: 'Campaña actualizada', description: 'Se guardaron los cambios.' });
       } else {
-        campaignsStorage.add({ name: draft.name, steps, excludedLeadIds: draft.excludedLeadIds });
+        await campaignsStorage.add({ name: draft.name, steps, excludedLeadIds: draft.excludedLeadIds });
         toast({ title: 'Campaña creada', description: 'Ya puedes previsualizar elegibles.' });
       }
-      setItems(campaignsStorage.get());
+      setItems(await campaignsStorage.get());
       setMode({ kind: 'list' });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error al guardar', description: e?.message || 'Revisa los campos.' });
@@ -148,10 +152,10 @@ export default function CampaignsPage() {
     }
   }
 
-  function togglePause(c: Campaign) {
-    const next = campaignsStorage.togglePause(c.id, !c.isPaused)!;
-    setItems(campaignsStorage.get());
-    toast({ title: next.isPaused ? 'Campaña pausada' : 'Campaña reanudada' });
+  async function togglePause(c: Campaign) {
+    const next = await campaignsStorage.togglePause(c.id, !c.isPaused);
+    setItems(await campaignsStorage.get());
+    toast({ title: next?.isPaused ? 'Campaña pausada' : 'Campaña reanudada' });
   }
 
   function askDelete(id: string) {
@@ -162,11 +166,11 @@ export default function CampaignsPage() {
     setDeletingId(null);
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (!deletingId) return;
-    const removed = campaignsStorage.remove(deletingId);
+    const removed = await campaignsStorage.remove(deletingId);
     setDeletingId(null);
-    setItems(campaignsStorage.get());
+    setItems(await campaignsStorage.get());
     if (removed > 0) toast({ title: 'Campaña eliminada' });
     else toast({ variant: 'destructive', title: 'No se pudo eliminar' });
   }
@@ -188,11 +192,11 @@ export default function CampaignsPage() {
     }
   }
 
-  const doPreview = useCallback((campaign: Campaign) => {
+  const doPreview = useCallback(async (campaign: Campaign) => {
     setPreviewLoading(true);
     try {
       // PREVIEW 100% LOCAL: NO OAuth/Graph/Gmail aquí.
-      const rows = computeEligibilityForCampaign(campaign, {
+      const rows = await computeEligibilityForCampaign(campaign, {
         verifyReplies: false,
         now: new Date(),
       });
@@ -210,7 +214,7 @@ export default function CampaignsPage() {
 
 
   // --- Helpers de render de plantilla (con fallback) ---
-  function renderTemplate(tpl: string, lead: ContactedLead, sender: { name?: string|null } = {}) {
+  function renderTemplate(tpl: string, lead: ContactedLead, sender: { name?: string | null } = {}) {
     const base = String(tpl ?? '');
     const out = base
       .replace(/{{\s*lead\.name\s*}}/gi, lead?.name ?? '')
@@ -263,7 +267,7 @@ export default function CampaignsPage() {
 
   // Busca en storage por múltiples claves (leadId | id | email). Devuelve null si no existe.
   function findContactedByLead(leadId: string, email?: string | null): ContactedLead | null {
-    const all = contactedLeadsStorage.get() || [];
+    const all = contacted || [];
     const wantId = String(leadId || '').trim().toLowerCase();
     const wantEmail = String(email || '').trim().toLowerCase();
     // 1) por leadId
@@ -293,13 +297,13 @@ export default function CampaignsPage() {
         contactedFromStore ??
         (row.leadEmail
           ? {
-              // Fallback mínimo para poder enviar aunque no exista en storage
-              leadId: row.leadId,
-              name: row.leadName ?? '',
-              email: row.leadEmail,
-              company: '',
-              status: 'pending',
-            }
+            // Fallback mínimo para poder enviar aunque no exista en storage
+            leadId: row.leadId,
+            name: row.leadName ?? '',
+            email: row.leadEmail,
+            company: '',
+            status: 'pending',
+          }
           : null);
       if (!contacted) throw new Error('No se pudo resolver el contacto: falta email.');
 
@@ -331,7 +335,7 @@ export default function CampaignsPage() {
 
         const convId = res?.conversationId || contacted.conversationId || null;
         if (convId && (contactedLeadsStorage as any).bumpFollowupByConversationId) {
-          (contactedLeadsStorage as any).bumpFollowupByConversationId(convId, row.nextStepIdx);
+          await (contactedLeadsStorage as any).bumpFollowupByConversationId(convId, row.nextStepIdx);
         }
       } else {
         const { sendGmailEmail } = await import('@/lib/gmail-email-service');
@@ -344,13 +348,13 @@ export default function CampaignsPage() {
 
         const threadId = (res as any)?.threadId || contacted.threadId || null;
         if (threadId && (contactedLeadsStorage as any).bumpFollowupByThreadId) {
-          (contactedLeadsStorage as any).bumpFollowupByThreadId(threadId, row.nextStepIdx);
+          await (contactedLeadsStorage as any).bumpFollowupByThreadId(threadId, row.nextStepIdx);
         }
       }
 
       const rec = campaign.sentRecords || {};
       rec[String(row.leadId)] = { lastStepIdx: row.nextStepIdx, lastSentAt: new Date().toISOString() };
-      campaignsStorage.update(campaign.id, { sentRecords: rec });
+      await campaignsStorage.update(campaign.id, { sentRecords: rec });
 
       toast({ title: 'Seguimiento enviado', description: `Se envió el paso #${row.nextStepIdx + 1} a ${contacted.name}.` });
       return true;

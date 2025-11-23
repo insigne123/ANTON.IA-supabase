@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { graphFindReadReceipts, graphFindReplies, graphGetMessage } from '@/lib/outlook-graph-client';
@@ -35,12 +35,12 @@ export default function ContactedPage() {
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
 
-  const refresh = () => setItems(contactedLeadsStorage.get());
+  const refresh = async () => setItems(await contactedLeadsStorage.get());
   useEffect(() => { refresh(); }, []);
 
   const rows = useMemo(() => {
     // Mostrar los NO respondidos; orden por lastUpdateAt desc (fallback sentAt)
-    return contactedLeadsStorage.get()
+    return items
       .filter(x => x.status !== 'replied')
       .sort((a, b) => {
         const da = new Date(a.lastUpdateAt || a.sentAt).getTime();
@@ -71,7 +71,7 @@ export default function ContactedPage() {
       if (hits.length > 0) {
         const rr = hits[0];
         if (it.conversationId) {
-          contactedLeadsStorage.markReceiptsByConversationId(it.conversationId, {
+          await contactedLeadsStorage.markReceiptsByConversationId(it.conversationId, {
             openedAt: rr.receivedDateTime,
             readReceiptMessageId: rr.id,
           });
@@ -115,7 +115,7 @@ export default function ContactedPage() {
             ? new Date((best as any).receivedDateTime)
             : new Date();
 
-        contactedLeadsStorage.upsertByMessageId(it.messageId!, {
+        await contactedLeadsStorage.upsertByMessageId(it.messageId!, {
           status: 'replied',
           replyMessageId: best.id,
           replySubject: best.subject,
@@ -175,7 +175,8 @@ export default function ContactedPage() {
 
   // ⬇️ Lote: verificar respuestas para todos los contactados (no 'replied')
   async function verifyAllReplies() {
-    const list = contactedLeadsStorage.get().filter(x => x.status !== 'replied' && (x.conversationId || x.threadId));
+    const all = await contactedLeadsStorage.get();
+    const list = all.filter(x => x.status !== 'replied' && (x.conversationId || x.threadId));
     if (list.length === 0) {
       toast({ title: 'Nada que verificar', description: 'No hay hilos pendientes de respuesta.' });
       return;
@@ -206,7 +207,7 @@ export default function ContactedPage() {
               ? new Date((best as any).receivedDateTime)
               : new Date();
 
-          contactedLeadsStorage.upsertByMessageId(it.messageId!, {
+          await contactedLeadsStorage.upsertByMessageId(it.messageId!, {
             status: 'replied',
             replyMessageId: best.id,
             replySubject: best.subject,
@@ -229,7 +230,8 @@ export default function ContactedPage() {
 
   // Lote: verificar aperturas (no respondidos)
   async function verifyAllReads() {
-    const list = contactedLeadsStorage.get().filter(x => x.status !== 'replied' && x.internetMessageId);
+    const all = await contactedLeadsStorage.get();
+    const list = all.filter(x => x.status !== 'replied' && x.internetMessageId);
     if (list.length === 0) {
       toast({ title: 'Nada que verificar', description: 'No hay mensajes con Internet-Message-Id.' });
       return;
@@ -242,7 +244,7 @@ export default function ContactedPage() {
         const hits = await graphFindReadReceipts(it.internetMessageId!);
         if (hits.length > 0 && it.conversationId) {
           const rr = hits[0];
-          contactedLeadsStorage.markReceiptsByConversationId(it.conversationId, {
+          await contactedLeadsStorage.markReceiptsByConversationId(it.conversationId, {
             openedAt: rr.receivedDateTime,
             readReceiptMessageId: rr.id,
           });

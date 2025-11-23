@@ -113,7 +113,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   const bccRecipients = (input.bcc || []).map((a) => ({ emailAddress: { address: a } }));
 
   // Aplica firma si está habilitada
-  const sig = emailSignatureStorage.get('outlook');
+  const sig = await emailSignatureStorage.get('outlook');
   const finalHtml = applySignatureHTML(input.htmlBody, sig?.html);
 
   const draftBody = {
@@ -200,13 +200,13 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       ...(bccRecipients.length ? { bccRecipients } : {}),
       ...(Array.isArray(input.attachments) && input.attachments.length
         ? {
-            attachments: input.attachments.map(a => ({
-              '@odata.type': '#microsoft.graph.fileAttachment',
-              name: a.name,
-              contentBytes: a.contentBytes,
-              contentType: a.contentType || undefined,
-            }))
-          }
+          attachments: input.attachments.map(a => ({
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: a.name,
+            contentBytes: a.contentBytes,
+            contentType: a.contentType || undefined,
+          }))
+        }
         : {}
       ),
     },

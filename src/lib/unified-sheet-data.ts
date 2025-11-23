@@ -1,10 +1,10 @@
 // Refuerzo de buildUnifiedRows: robusto ante estructuras variables y sin throws globales
 
-import { getEnrichedLeads } from '@/lib/saved-enriched-leads-storage';
-import { getSavedLeads } from '@/lib/saved-leads-storage';
-import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
-import { savedOpportunitiesStorage } from '@/lib/saved-opportunities-storage';
-import { getCustom } from '@/lib/unified-sheet-storage';
+import { getEnrichedLeads } from '@/lib/services/enriched-leads-service';
+import { supabaseService } from '@/lib/supabase-service';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
+import { savedOpportunitiesStorage } from '@/lib/services/opportunities-service';
+import { unifiedSheetService, type CustomData } from '@/lib/services/unified-sheet-service';
 import type { UnifiedRow } from './unified-sheet-types';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
@@ -86,11 +86,11 @@ function extractEmailFromSavedLead(l: any): string | null {
 
 // --- Mapeos seguros --- //
 
-function mapSavedLead(l: any): UnifiedRow | null {
+function mapSavedLead(l: any, customMap: Record<string, CustomData>): UnifiedRow | null {
   try {
     const idBase = l?.id ?? (l as any)?._id ?? (l as any)?.gid ?? safeUUID();
     const gid = `lead_saved|${String(idBase)}`;
-    const custom = getCustom(gid);
+    const custom = customMap[gid];
     const email = extractEmailFromSavedLead(l);
 
     return {
@@ -116,11 +116,11 @@ function mapSavedLead(l: any): UnifiedRow | null {
   }
 }
 
-function mapEnrichedLead(e: any): UnifiedRow | null {
+function mapEnrichedLead(e: any, customMap: Record<string, CustomData>): UnifiedRow | null {
   try {
     const idBase = e?.id ?? (e as any)?._id ?? (e as any)?.gid ?? safeUUID();
     const gid = `lead_enriched|${String(idBase)}`;
-    const custom = getCustom(gid);
+    const custom = customMap[gid];
     const email = extractEmailFromEnriched(e);
 
     if (!email) {
@@ -155,11 +155,11 @@ function mapEnrichedLead(e: any): UnifiedRow | null {
   }
 }
 
-function mapOpportunity(o: any): UnifiedRow | null {
+function mapOpportunity(o: any, customMap: Record<string, CustomData>): UnifiedRow | null {
   try {
     const idBase = o?.id ?? (o as any)?._id ?? safeUUID();
     const gid = `opportunity|${String(idBase)}`;
-    const custom = getCustom(gid);
+    const custom = customMap[gid];
 
     return {
       gid,
@@ -184,11 +184,11 @@ function mapOpportunity(o: any): UnifiedRow | null {
   }
 }
 
-function mapContacted(c: any): UnifiedRow | null {
+function mapContacted(c: any, customMap: Record<string, CustomData>): UnifiedRow | null {
   try {
     const idBase = c?.id ?? (c as any)?._id ?? safeUUID();
     const gid = `contacted|${String(idBase)}`;
-    const custom = getCustom(gid);
+    const custom = customMap[gid];
     const email = normalizeStr(c?.to ?? c?.email ?? c?.recipient) || null;
 
     return {
@@ -220,9 +220,9 @@ export async function buildUnifiedRows(): Promise<UnifiedRow[]> {
   const rows: UnifiedRow[] = [];
 
   try {
-    const [savedRaw, enrichedRaw, oppsRaw, contactedRaw] = await Promise.all([
+    const [savedRaw, enrichedRaw, oppsRaw, contactedRaw, customDataMap] = await Promise.all([
       (async () => {
-        try { return getSavedLeads(); }
+        try { return supabaseService.getLeads(); }
         catch (e) { console.error('[sheet] getSavedLeads error', e); return []; }
       })(),
       (async () => {
@@ -237,22 +237,26 @@ export async function buildUnifiedRows(): Promise<UnifiedRow[]> {
         try { return contactedLeadsStorage.get(); }
         catch (e) { console.error('[sheet] getContactedLeads error', e); return []; }
       })(),
+      (async () => {
+        try { return unifiedSheetService.getAllCustom(); }
+        catch (e) { console.error('[sheet] getAllCustom error', e); return {}; }
+      })(),
     ]);
 
     for (const l of safeArray(savedRaw)) {
-      const row = mapSavedLead(l);
+      const row = mapSavedLead(l, customDataMap);
       if (row) rows.push(row);
     }
     for (const e of safeArray(enrichedRaw)) {
-      const row = mapEnrichedLead(e);
+      const row = mapEnrichedLead(e, customDataMap);
       if (row) rows.push(row);
     }
     for (const o of safeArray(oppsRaw)) {
-      const row = mapOpportunity(o);
+      const row = mapOpportunity(o, customDataMap);
       if (row) rows.push(row);
     }
     for (const c of safeArray(contactedRaw)) {
-      const row = mapContacted(c);
+      const row = mapContacted(c, customDataMap);
       if (row) rows.push(row);
     }
   } catch (err) {

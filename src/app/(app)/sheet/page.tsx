@@ -13,7 +13,8 @@ import { ChevronDown, ChevronUp, Columns3, Download, RotateCw, Settings2, Extern
 
 import { buildUnifiedRows } from '@/lib/unified-sheet-data';
 import type { ColumnDef, ColumnKey, UnifiedRow, UnifiedStatus } from '@/lib/unified-sheet-types';
-import { defaultColumns, loadColumns, saveColumns, setCustom } from '@/lib/unified-sheet-storage';
+import { defaultColumns } from '@/lib/unified-sheet-storage';
+import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
 import { useToast } from '@/hooks/use-toast';
 import { toCsv, downloadCsv } from '@/lib/csv';
 import Link from 'next/link';
@@ -43,50 +44,51 @@ export default function UnifiedSheetPage() {
   const [cols, setCols] = useState<ColumnDef[]>(defaultColumns());
   const [rows, setRows] = useState<UnifiedRow[]>([]);
   const [q, setQ] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all'|'saved'|'enriched'|'sent'|'read'|'replied'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'saved' | 'enriched' | 'sent' | 'read' | 'replied'>('all');
   const [openCols, setOpenCols] = useState(false);
   const [sortKey, setSortKey] = useState<ColumnKey>('lastUpdateAt');
-  const [sortDir, setSortDir] = useState<'asc'|'desc'>('desc');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [loading, setLoading] = useState(true);
 
   async function refresh() {
     setLoading(true);
     try {
-        const unifiedRows = await buildUnifiedRows();
-        setRows(unifiedRows);
+      const unifiedRows = await buildUnifiedRows();
+      setRows(unifiedRows);
     } catch (error) {
-        toast({variant: 'destructive', title: 'Error al cargar datos', description: 'No se pudieron unificar las fuentes.'})
+      toast({ variant: 'destructive', title: 'Error al cargar datos', description: 'No se pudieron unificar las fuentes.' })
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   }
-  
+
   useEffect(() => {
-    setCols(loadColumns());
+    setCols(unifiedSheetService.loadColumns());
     refresh();
   }, []);
 
   function toggleColVisibility(key: ColumnKey, v: boolean) {
     const next = cols.map(c => c.key === key ? { ...c, visible: v } : c);
     setCols(next);
-    saveColumns(next);
+    unifiedSheetService.saveColumns(next);
   }
 
-  function moveCol(key: ColumnKey, dir: -1|1) {
+  function moveCol(key: ColumnKey, dir: -1 | 1) {
     const idx = cols.findIndex(c => c.key === key);
     if (idx < 0) return;
     const next = [...cols];
     const newIdx = Math.max(0, Math.min(cols.length - 1, idx + dir));
     const [it] = next.splice(idx, 1);
     next.splice(newIdx, 0, it);
+    next.splice(newIdx, 0, it);
     setCols(next);
-    saveColumns(next);
+    unifiedSheetService.saveColumns(next);
   }
 
   function resetSchema() {
     const d = defaultColumns();
     setCols(d);
-    saveColumns(d);
+    unifiedSheetService.saveColumns(d);
   }
 
   const visibleCols = cols.filter(c => c.visible);
@@ -134,10 +136,12 @@ export default function UnifiedSheetPage() {
     const patch: any = {};
     patch[key] = value;
 
-    setCustom(r.gid, patch);
+    // Optimistic update
     setRows(prev => prev.map(x => x.gid === r.gid ? { ...x, ...patch } : x));
+    // Async save
+    unifiedSheetService.setCustom(r.gid, patch);
   }
-  
+
   // ---- helpers para exportación ----
   function buildHeaderAndData() {
     const headers = visibleCols.map(c => c.label);
@@ -159,20 +163,20 @@ export default function UnifiedSheetPage() {
   function exportCsv() {
     const { headers, data } = buildHeaderAndData();
     const csvData = toCsv(data.map(row => row.map(cell => String(cell))), headers);
-    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     downloadCsv(`leadflow-sheet-${stamp}.csv`, csvData);
     toast({ title: 'Exportado', description: `${filtered.length} filas a CSV.` });
   }
 
   async function exportXlsx() {
     const { headers, data } = buildHeaderAndData();
-    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     await exportToXlsx(headers, data, `leadflow-sheet-${stamp}.xlsx`);
   }
 
   async function exportPdf() {
     const { headers, data } = buildHeaderAndData();
-    const stamp = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     await exportToPdf(headers, data, `leadflow-sheet-${stamp}.pdf`);
   }
 
@@ -190,7 +194,7 @@ export default function UnifiedSheetPage() {
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Input placeholder="Filtrar (nombre, email, empresa, dominio…)" value={q} onChange={e => setQ(e.target.value)} className="w-[360px]" />
-        <select className="h-10 border rounded-md px-3 py-2 text-sm bg-background" value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value as any)}>
+        <select className="h-10 border rounded-md px-3 py-2 text-sm bg-background" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)}>
           <option value="all">Todos los estados</option>
           <option value="saved">Guardado</option>
           <option value="enriched">Enriquecido</option>
@@ -239,12 +243,12 @@ export default function UnifiedSheetPage() {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                    [...Array(10)].map((_, i) => (
-                        <TableRow key={i}>
-                            {visibleCols.map(c => <TableCell key={c.key}><div className="h-4 bg-muted rounded w-full animate-pulse" /></TableCell>)}
-                            <TableCell><div className="h-8 bg-muted rounded w-24 ml-auto animate-pulse" /></TableCell>
-                        </TableRow>
-                    ))
+                  [...Array(10)].map((_, i) => (
+                    <TableRow key={i}>
+                      {visibleCols.map(c => <TableCell key={c.key}><div className="h-4 bg-muted rounded w-full animate-pulse" /></TableCell>)}
+                      <TableCell><div className="h-8 bg-muted rounded w-24 ml-auto animate-pulse" /></TableCell>
+                    </TableRow>
+                  ))
                 ) : filtered.map(r => (
                   <TableRow key={r.gid} className="align-top">
                     {visibleCols.map(c => {
@@ -259,7 +263,7 @@ export default function UnifiedSheetPage() {
                           <TableCell key={c.key} style={{ minWidth: c.width ? `${c.width}px` : undefined, textAlign: c.align || 'left' }}>
                             <Input
                               defaultValue={val || ''}
-                              onBlur={(e)=> onEdit(r, c.key as any, e.target.value)}
+                              onBlur={(e) => onEdit(r, c.key as any, e.target.value)}
                               placeholder={c.label}
                               className="h-8"
                             />
@@ -268,7 +272,7 @@ export default function UnifiedSheetPage() {
                       }
                       return (
                         <TableCell key={c.key} style={{ minWidth: c.width ? `${c.width}px` : undefined, textAlign: c.align || 'left' }}>
-                           {c.key === 'email'
+                          {c.key === 'email'
                             ? (r.email ?? '—')
                             : ((r as any)[c.key] ?? '—')}
                         </TableCell>
@@ -310,20 +314,20 @@ export default function UnifiedSheetPage() {
             {cols.map(c => (
               <div key={c.key} className="flex items-center justify-between border rounded p-2">
                 <div className="flex items-center gap-2">
-                  <Checkbox checked={c.visible} onCheckedChange={(v)=>toggleColVisibility(c.key, Boolean(v))} />
+                  <Checkbox checked={c.visible} onCheckedChange={(v) => toggleColVisibility(c.key, Boolean(v))} />
                   <span className="text-sm">{c.label}</span>
                   {c.editable && <Badge variant="outline">editable</Badge>}
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button size="icon" variant="ghost" onClick={()=>moveCol(c.key, -1)} title="Subir"><ChevronUp className="h-4 w-4"/></Button>
-                  <Button size="icon" variant="ghost" onClick={()=>moveCol(c.key, +1)} title="Bajar"><ChevronDown className="h-4 w-4"/></Button>
+                  <Button size="icon" variant="ghost" onClick={() => moveCol(c.key, -1)} title="Subir"><ChevronUp className="h-4 w-4" /></Button>
+                  <Button size="icon" variant="ghost" onClick={() => moveCol(c.key, +1)} title="Bajar"><ChevronDown className="h-4 w-4" /></Button>
                 </div>
               </div>
             ))}
           </div>
           <div className="mt-3 flex justify-between">
             <Button variant="outline" onClick={resetSchema}><Settings2 className="h-4 w-4 mr-2" />Restablecer</Button>
-            <Button onClick={()=>setOpenCols(false)}>Cerrar</Button>
+            <Button onClick={() => setOpenCols(false)}>Cerrar</Button>
           </div>
         </DialogContent>
       </Dialog>

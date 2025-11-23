@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import type { EnrichedOppLead, LeadResearchReport, StyleProfile } from '@/lib/types';
-import { getEnrichedOppLeads, removeEnrichedOppLeadById } from '@/lib/saved-enriched-opps-storage';
+import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import { upsertLeadReports, getLeadReports, findReportForLead, findReportByRef } from '@/lib/lead-research-storage';
 import { BackBar } from '@/components/back-bar';
 import { extractPrimaryEmail } from '@/lib/email-utils';
@@ -23,7 +23,7 @@ import { getCompanyProfile } from '@/lib/data';
 import { emailDraftsStorage } from '@/lib/email-drafts-storage';
 import { sendEmail } from '@/lib/outlook-email-service';
 import { sendGmailEmail } from '@/lib/gmail-email-service';
-import { contactedLeadsStorage } from '@/lib/contacted-leads-storage';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { v4 as uuid } from 'uuid';
 import { styleProfilesStorage } from '@/lib/style-profiles-storage';
 import { generateMailFromStyle } from '@/lib/ai/style-mail';
@@ -70,16 +70,16 @@ export default function EnrichedOpportunitiesPage() {
   const [reportToView, setReportToView] = useState<LeadResearchReport | null>(null);
 
   useEffect(() => {
-    function loadFilteredEnriched() {
-      const all = getEnrichedOppLeads() || [];
-      const contacted = contactedLeadsStorage.get();
+    async function loadFilteredEnriched() {
+      const all = await enrichedLeadsStorage.get();
+      const contacted = await contactedLeadsStorage.get();
       const contactedIds = new Set<string>(
         contacted.map(c => (c.leadId || '').toString()).filter(Boolean)
       );
       const filtered = all.filter(e => !contactedIds.has(e.id));
-      return filtered;
+      setEnriched(filtered as EnrichedOppLead[]);
     }
-    setEnriched(loadFilteredEnriched());
+    loadFilteredEnriched();
     setReports(getLeadReports());
     setStyleProfiles(styleProfilesStorage.list());
   }, []);
@@ -106,12 +106,12 @@ export default function EnrichedOpportunitiesPage() {
     const email = extractPrimaryEmail(e).email;
     return !!email && !isResearched(leadRefOf(e)) && !hasReportStrict(e);
   };
-  
+
   const contactEligible = useMemo(
     () => enriched.filter(e => !!extractPrimaryEmail(e).email).length,
     [enriched]
   );
-  
+
   const allResearchChecked = useMemo(
     () => enriched.length > 0 && enriched.filter(canResearch).every(e => sel[e.id]),
     [enriched, sel]
@@ -149,7 +149,7 @@ export default function EnrichedOpportunitiesPage() {
   async function runOneInvestigationForOpp(lead: EnrichedOppLead) {
     const ref = leadRefOf(lead);
     const { email } = extractPrimaryEmail(lead);
-  
+
     // Construimos el mismo shape que en Leads
     const item = {
       leadRef: ref,
@@ -170,12 +170,12 @@ export default function EnrichedOpportunitiesPage() {
       },
       meta: { leadRef: ref },
     };
-  
+
     const payload = {
       companies: [item],
       userCompanyProfile: getCompanyProfile() || {},
     };
-  
+
     const res = await fetch('/api/research/n8n', {
       method: 'POST',
       headers: {
@@ -185,14 +185,14 @@ export default function EnrichedOpportunitiesPage() {
       },
       body: JSON.stringify(payload),
     });
-  
+
     if (!res.ok) {
       const errorText = await res.text().catch(() => 'Error fetching from n8n');
       throw new Error(`n8n failed: ${errorText}`);
     }
-  
+
     const j = await res.json();
-  
+
     let reports: any[] = Array.isArray(j?.reports) ? j.reports : [];
 
     // Fallback: parsear message.content sin usar la secuencia literal de backticks
@@ -228,7 +228,7 @@ export default function EnrichedOpportunitiesPage() {
       const refs = normalized.map((r: any) => r?.meta?.leadRef).filter(Boolean);
       if (refs.length) markResearched(refs); else markResearched([ref]);
     }
-  
+
     // si el backend retornó 'skipped', también marcamos investigado
     if (Array.isArray(j?.skipped) && j.skipped.length) {
       markResearched(j.skipped);
@@ -306,13 +306,13 @@ export default function EnrichedOpportunitiesPage() {
           const seed = rep?.cross?.emailDraft
             ? { subject: rep.cross.emailDraft.subject, body: rep.cross.emailDraft.body }
             : (() => {
-                const v2 = generateCompanyOutreachV2({
-                  leadFirstName: (l.fullName || '').split(' ')[0] || '',
-                  companyName: l.companyName,
-                  myCompanyProfile: company,
-                });
-                return { subject: v2.subjectBase, body: v2.body };
-              })();
+              const v2 = generateCompanyOutreachV2({
+                leadFirstName: (l.fullName || '').split(' ')[0] || '',
+                companyName: l.companyName,
+                myCompanyProfile: company,
+              });
+              return { subject: v2.subjectBase, body: v2.body };
+            })();
 
           const ctx = buildPersonEmailContext({
             lead: { name: l.fullName, email, title: l.title, company: l.companyName },
@@ -357,7 +357,7 @@ export default function EnrichedOpportunitiesPage() {
           res = await sendGmailEmail({ to: email, subject, html: body.replace(/\n/g, '<br/>') });
         }
         Quota.incClientQuota('contact');
-        contactedLeadsStorage.add({
+        await contactedLeadsStorage.add({
           id: uuid(),
           leadId: lead.id,
           name: lead.fullName,
@@ -376,7 +376,7 @@ export default function EnrichedOpportunitiesPage() {
           lastUpdateAt: new Date().toISOString(),
         });
 
-        removeEnrichedOppLeadById(lead.id);
+        await enrichedLeadsStorage.removeById(lead.id);
         removedIds.add(lead.id);
       } catch (e: any) {
         console.error(`send mail error (${bulkProvider})`, email, e?.message);
@@ -404,7 +404,7 @@ export default function EnrichedOpportunitiesPage() {
     if (body) url.searchParams.set('body', body);
     router.push(url.toString());
   };
-  
+
   function putComposeBuffer(lead: EnrichedOppLead, subject?: string, body?: string) {
     try {
       const key = `compose-lead:${lead.id}`;
@@ -417,7 +417,7 @@ export default function EnrichedOpportunitiesPage() {
         companyDomain: lead.companyDomain,
         subject, body,
       }));
-    } catch (e:any) { console.warn('[compose-buffer] set failed', e?.message); }
+    } catch (e: any) { console.warn('[compose-buffer] set failed', e?.message); }
   }
 
   async function generateEmailFromReport(lead: EnrichedOppLead) {
@@ -449,7 +449,7 @@ export default function EnrichedOpportunitiesPage() {
     let body = renderTemplate(report.cross.emailDraft.body || '', ctx);
     body = applySignaturePlaceholders(body, sender);
     subj = ensureSubjectPrefix(subj, ctx.lead.firstName);
-    
+
     putComposeBuffer(lead, subj, body);
     goContact(lead.id, subj, body);
   }
@@ -462,7 +462,7 @@ export default function EnrichedOpportunitiesPage() {
       companyName: lead.companyName || null,
     });
     // Log discreto para diagnosticar matching
-    try { console.log('[report:open] ref', { ref, found: !!rep }); } catch {}
+    try { console.log('[report:open] ref', { ref, found: !!rep }); } catch { }
     if (!rep?.cross) {
       toast({ title: 'Sin reporte', description: 'Investiga con n8n antes de ver el reporte cruzado.' });
       return;
@@ -489,7 +489,7 @@ export default function EnrichedOpportunitiesPage() {
         <div className="mb-3 text-sm text-muted-foreground border rounded p-3">
           Progreso de investigación: {researchProgress.done}/{researchProgress.total}
         </div>
-       )}
+      )}
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
@@ -696,11 +696,11 @@ export default function EnrichedOpportunitiesPage() {
               <div className="text-xs text-muted-foreground mb-1">Fuente del borrador</div>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="draft-source" value="investigation" checked={draftSource==='investigation'} onChange={()=>setDraftSource('investigation')} />
+                  <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => setDraftSource('investigation')} />
                   Investigación (n8n)
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="draft-source" value="style" checked={draftSource==='style'} onChange={()=>{
+                  <input type="radio" name="draft-source" value="style" checked={draftSource === 'style'} onChange={() => {
                     setDraftSource('style');
                     if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
                   }} />
@@ -714,7 +714,7 @@ export default function EnrichedOpportunitiesPage() {
                 className="h-9 w-full rounded-md border bg-background px-2 text-sm disabled:opacity-50"
                 disabled={draftSource !== 'style' || styleProfiles.length === 0}
                 value={selectedStyleName}
-                onChange={(e)=> setSelectedStyleName(e.target.value)}
+                onChange={(e) => setSelectedStyleName(e.target.value)}
               >
                 {styleProfiles.length === 0 ? <option value="">(No hay estilos guardados)</option> :
                   styleProfiles.map(p => <option key={p.name} value={p.name}>{p.name}</option>)
@@ -725,11 +725,11 @@ export default function EnrichedOpportunitiesPage() {
               <div className="text-xs text-muted-foreground mb-1">Proveedor de envío</div>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="bulk-provider" value="outlook" checked={bulkProvider==='outlook'} onChange={()=>setBulkProvider('outlook')} />
+                  <input type="radio" name="bulk-provider" value="outlook" checked={bulkProvider === 'outlook'} onChange={() => setBulkProvider('outlook')} />
                   Outlook
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="bulk-provider" value="gmail" checked={bulkProvider==='gmail'} onChange={()=>setBulkProvider('gmail')} />
+                  <input type="radio" name="bulk-provider" value="gmail" checked={bulkProvider === 'gmail'} onChange={() => setBulkProvider('gmail')} />
                   Gmail
                 </label>
               </div>
@@ -737,7 +737,7 @@ export default function EnrichedOpportunitiesPage() {
           </div>
 
           <div className="max-h-[60vh] overflow-y-auto space-y-4 p-1">
-            {composeList.map(({lead, subject, body}, i) => (
+            {composeList.map(({ lead, subject, body }, i) => (
               <div key={lead.id} className="border rounded-lg p-3">
                 <div className="font-semibold text-sm">{lead.fullName} &lt;{extractPrimaryEmail(lead).email}&gt;</div>
                 <div className="text-xs text-muted-foreground">{lead.title} @ {lead.companyName}</div>
