@@ -36,13 +36,15 @@ function mapRowToCampaign(row: any): Campaign {
     return {
         id: row.id,
         name: row.name || 'Campaña',
-        isPaused: row.is_paused || false,
+        // Map status column to isPaused boolean
+        isPaused: row.status === 'PAUSED',
         createdAt: row.created_at,
-        updatedAt: row.updated_at,
+        // updatedAt is not a column, so we try to get it from JSON or fallback to createdAt
+        updatedAt: isLegacy ? row.created_at : (rawSteps?.updatedAt || row.created_at),
+
         // If legacy, rawSteps is the array. If new, rawSteps.steps is the array.
         steps: isLegacy ? rawSteps : (rawSteps?.steps || []),
-        // If legacy, these are empty (or from columns if they existed, but they don't).
-        // If new, they are in the JSON object.
+        // If legacy, these are empty. If new, they are in the JSON object.
         excludedLeadIds: isLegacy ? [] : (rawSteps?.excludedLeadIds || []),
         sentRecords: isLegacy ? {} : (rawSteps?.sentRecords || {}),
     };
@@ -52,40 +54,32 @@ function mapCampaignToRow(c: Partial<Campaign>) {
     const row: any = {};
     if (c.id) row.id = c.id;
     if (c.name !== undefined) row.name = c.name;
-    if (c.isPaused !== undefined) row.is_paused = c.isPaused;
+
+    // Map isPaused to status column
+    if (c.isPaused !== undefined) {
+        row.status = c.isPaused ? 'PAUSED' : 'ACTIVE';
+    }
+
     if (c.createdAt) row.created_at = c.createdAt;
-    if (c.updatedAt) row.updated_at = c.updatedAt;
 
-    // We store everything in the 'steps' JSONB column
-    // We need to preserve existing data if we are doing a partial update, 
-    // but mapCampaignToRow is usually called with a constructed object.
-    // For updates, we might need to be careful, but let's assume the service passes the full object or we handle it.
-    // Actually, the update method in this service does: const updateData = { ...patch, updatedAt: now }; const row = mapCampaignToRow(updateData);
-    // This means 'steps' might be missing in 'patch'.
-    // If steps is missing in patch, we shouldn't overwrite the DB column with empty.
-    // But mapCampaignToRow returns a partial row.
+    // We store everything else in the 'steps' JSONB column
+    // We need to preserve existing data if we are doing a partial update.
+    // The update method handles fetching existing data, so 'c' should have the merged state.
 
-    // However, if we want to update 'excludedLeadIds', we MUST write to 'steps' column.
-    // So we need to make sure we have the other data or we might overwrite it.
-    // The current service implementation for 'update' does NOT fetch before update (except implicitly via patch).
-    // This is risky if we map multiple fields to one JSON column.
-    // But for now, let's implement the mapping. The service 'update' method might need a tweak to fetch-merge-save if we are mapping multiple logical fields to one physical column.
-
-    if (c.steps || c.excludedLeadIds || c.sentRecords) {
-        // We construct the JSON object. 
-        // CAUTION: If we only have one of them, we might overwrite others if we don't have the previous state.
-        // The 'update' method needs to be smarter.
-        // For 'add', we have everything.
+    if (c.steps || c.excludedLeadIds || c.sentRecords || c.updatedAt) {
         row.steps = {
             steps: c.steps || [],
             excludedLeadIds: c.excludedLeadIds || [],
-            sentRecords: c.sentRecords || {}
+            sentRecords: c.sentRecords || {},
+            updatedAt: c.updatedAt // Store updatedAt in JSON since column doesn't exist
         };
     }
 
     // Do NOT map to non-existent columns
-    // if (c.excludedLeadIds) row.excluded_lead_ids = c.excludedLeadIds;
-    // if (c.sentRecords) row.sent_records = c.sentRecords;
+    // row.updated_at = c.updatedAt; // Column does not exist
+    // row.is_paused = c.isPaused;   // Column does not exist
+    // row.excluded_lead_ids = ...   // Column does not exist
+    // row.sent_records = ...        // Column does not exist
 
     return row;
 }
