@@ -2,11 +2,13 @@
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
 import { getAuth, signInAnonymously, type Auth, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, type Firestore } from 'firebase/firestore';
 // (Opcional si usas App Check) import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
 
 let app: FirebaseApp | undefined;
 let storage: FirebaseStorage | undefined;
 let _authInstance: Auth | undefined;
+let _dbInstance: Firestore | undefined;
 
 function assertEnv(name: string, val: string | undefined) {
   if (!val) throw new Error(`[firebase] Falta variable: ${name}`);
@@ -57,5 +59,11 @@ export async function ensureSignedInAnonymously(): Promise<string> {
   });
 }
 
+export function getFirebaseDb(): Firestore {
+  if (!_dbInstance) _dbInstance = getFirestore(getFirebaseApp());
+  return _dbInstance!;
+}
+
 // Export for compatibility with existing code
 export const auth = getFirebaseAuth();
+export const db = getFirebaseDb();

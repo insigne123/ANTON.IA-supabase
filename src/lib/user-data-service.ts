@@ -9,8 +9,8 @@ import {
   setDoc,
   deleteDoc,
 } from 'firebase/firestore';
-import type { Lead, ContactedLead } from './types';
-import type { JobOpportunity } from './opportunities';
+import type { Lead, ContactedLead, JobOpportunity } from './types';
+// import type { JobOpportunity } from './opportunities';
 import type { Campaign } from './campaigns-storage';
 
 class UserDataService {

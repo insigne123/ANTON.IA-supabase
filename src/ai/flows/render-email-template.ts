@@ -1,13 +1,13 @@
 'use server';
 
-import {ai} from '@/ai/genkit';
-import {z} from 'genkit';
+import { ai } from '@/ai/genkit';
+import { z } from 'genkit';
 import {
   EmailLength,
   EmailScope,
   EmailTone,
   AiIntensity,
-} from '@/lib/email-studio/types';
+} from '@/lib/types';
 
 type Input = {
   mode: EmailScope;
@@ -26,7 +26,7 @@ type Input = {
 };
 
 const renderEmailTemplateFlow = ai.defineFlow(
-  {name: 'renderEmailTemplate', inputSchema: z.any(), outputSchema: z.any()},
+  { name: 'renderEmailTemplate', inputSchema: z.any(), outputSchema: z.any() },
   async (input: Input) => {
     const {
       mode,
@@ -51,15 +51,15 @@ const renderEmailTemplateFlow = ai.defineFlow(
       aiIntensity === 'light'
         ? 'Reescribe suavemente para claridad y tono, preservando hechos.'
         : aiIntensity === 'medium'
-        ? 'Mejora estructura, tono y concisión, preservando hechos.'
-        : 'Redacta desde cero usando solo los datos entregados, sin añadir hechos no presentes.';
+          ? 'Mejora estructura, tono y concisión, preservando hechos.'
+          : 'Redacta desde cero usando solo los datos entregados, sin añadir hechos no presentes.';
 
     const lengthHint =
       length === 'short'
         ? 'concreta y breve'
         : length === 'long'
-        ? 'un poco más detallada (sin exceder 180 palabras)'
-        : 'de longitud media';
+          ? 'un poco más detallada (sin exceder 180 palabras)'
+          : 'de longitud media';
 
     const prompt = `
 Eres un redactor de outbound B2B con guardrails estrictos.
@@ -84,13 +84,13 @@ Objetivo:
 Devuelve SOLO JSON válido: { "subject": "...", "body": "..." }
 `;
 
-    const {output} = await ai.generate({
+    const { output } = await ai.generate({
       prompt,
       model: 'googleai/gemini-1.5-pro',
-      config: {temperature: 0.4},
+      config: { temperature: 0.4 },
       output: {
         format: 'json',
-        schema: z.object({subject: z.string(), body: z.string()}),
+        schema: z.object({ subject: z.string(), body: z.string() }),
       },
     });
 

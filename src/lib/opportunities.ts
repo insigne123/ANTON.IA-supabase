@@ -17,7 +17,8 @@ export function normalizeLinkedinJob(item: any): JobOpportunity {
 }
 
 // Export for API route compatibility - stub implementation
-export function buildApolloPeopleUrl(params: any): string {
+// Export for API route compatibility - stub implementation
+export function buildApolloPeopleUrl(company: any, titles: string[], locations?: string[]): string {
   // TODO: Implement proper Apollo people URL building
   return '';
 }
