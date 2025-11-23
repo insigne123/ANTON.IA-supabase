@@ -105,6 +105,12 @@ export const campaignsStorage = {
 
     async add(input: Omit<Campaign, 'id' | 'createdAt' | 'updatedAt' | 'isPaused' | 'sentRecords'> & { id?: string }): Promise<Campaign | null> {
         try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                console.error('User not authenticated');
+                return null;
+            }
+
             const id = input.id || crypto.randomUUID();
             const now = new Date().toISOString();
             const newCampaign: Campaign = {
@@ -119,6 +125,9 @@ export const campaignsStorage = {
             };
 
             const row = mapCampaignToRow(newCampaign);
+            // Add user_id to satisfying RLS
+            row.user_id = user.id;
+
             const { error } = await supabase
                 .from('campaigns')
                 .insert([row]);
