@@ -135,7 +135,6 @@ export default function OpportunitiesPage() {
 
       // --- Polling a /api/opportunities/status ---
       const started = Date.now();
-      const started = Date.now();
       // Increase timeout to 5 minutes (300s) as requested by user, or use env var
       const envMaxMinutes = Number(process.env.NEXT_PUBLIC_SEARCH_MAX_POLL_MINUTES || 5);
       const MAX_MS = envMaxMinutes * 60 * 1000;
