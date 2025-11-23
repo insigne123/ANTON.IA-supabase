@@ -529,12 +529,10 @@ export default function CampaignsPage() {
               <CardDescription>Define pasos, adjuntos, exclusiones y guarda.</CardDescription>
             </div>
             <div className="space-x-2">
-              {!draft.id && (
-                <Button variant="secondary" onClick={() => setAiOpen(true)}>
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Generar con IA
-                </Button>
-              )}
+              <Button variant="secondary" onClick={() => setAiOpen(true)}>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Generar con IA
+              </Button>
               <Button variant="outline" onClick={() => setMode({ kind: 'list' })}>Cancelar</Button>
               <Button onClick={saveCampaign} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
             </div>
