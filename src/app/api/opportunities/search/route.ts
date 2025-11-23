@@ -60,7 +60,14 @@ export async function POST(req: Request) {
     }
     console.error('[opportunities/search] error:', err);
     return j(
-      { error: { type: 'internal-error', message: 'Error iniciando la búsqueda.', detail: err?.message } },
+      {
+        error: {
+          type: 'internal-error',
+          message: 'Error iniciando la búsqueda.',
+          detail: err instanceof Error ? err.message : String(err),
+          stack: process.env.NODE_ENV === 'development' ? err?.stack : undefined
+        }
+      },
       500,
     );
   } finally {
