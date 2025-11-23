@@ -11,12 +11,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { campaignsStorage, type Campaign, type CampaignStep, type CampaignStepAttachment } from '@/lib/services/campaigns-service';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
-import { Trash2, Plus, Pause, Play, Eye, X } from 'lucide-react';
+import { Trash2, Plus, Pause, Play, Eye, X, Sparkles } from 'lucide-react';
 import { computeEligibilityForCampaign, type EligiblePreviewRow } from '@/lib/campaign-eligibility';
 import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { googleAuthService } from '@/lib/google-auth-service';
 import type { ContactedLead } from '@/lib/types';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 
 type Mode = { kind: 'list' } | { kind: 'edit'; id?: string };
 
@@ -45,6 +46,12 @@ export default function CampaignsPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [sendingId, setSendingId] = useState<string | null>(null);
+
+  // AI Generation State
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiGoal, setAiGoal] = useState('');
+  const [aiAudience, setAiAudience] = useState('');
 
   // Selección en la tabla de previsualización
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -408,56 +415,110 @@ export default function CampaignsPage() {
   };
 
 
+  async function generateCampaign() {
+    if (!aiGoal.trim()) return;
+    setAiLoading(true);
+    try {
+      const res = await fetch('/api/ai/generate-campaign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          goal: aiGoal,
+          targetAudience: aiAudience,
+          companyName: 'Mi Empresa', // TODO: Get from profile
+          language: 'es',
+        }),
+      });
+      if (!res.ok) throw new Error('Error generando campaña');
+      const data = await res.json();
+
+      // Map response to draft steps
+      const newSteps: DraftStep[] = data.steps.map((s: any) => ({
+        id: crypto.randomUUID(),
+        name: s.name,
+        offsetDays: s.offsetDays,
+        subject: s.subject,
+        bodyHtml: s.bodyHtml,
+        attachments: [],
+      }));
+
+      setDraft(d => ({ ...d, steps: newSteps }));
+      setAiOpen(false);
+      toast({ title: 'Campaña generada', description: 'Revisa y edita los pasos antes de guardar.' });
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Error', description: e.message });
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   return (
     <div className="container mx-auto space-y-6">
       <PageHeader title="Campañas" description="Crea campañas con pasos, excluye leads y previsualiza elegibles." />
 
       {mode.kind === 'list' && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Mis campañas</CardTitle>
-              <CardDescription>Administra, pausa/reanuda, previsualiza y elimina.</CardDescription>
-            </div>
-            <Button onClick={startCreate}><Plus className="mr-2 h-4 w-4" />Nueva campaña</Button>
-          </CardHeader>
-          <CardContent>
-            <div className="border rounded-md overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>Pasos</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {items.length === 0 ? (
-                    <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No hay campañas.</TableCell></TableRow>
-                  ) : items.map((c) => (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-medium">{c.name}</TableCell>
-                      <TableCell>{c.steps.length}</TableCell>
-                      <TableCell>{c.isPaused ? 'Pausada' : 'Activa'}</TableCell>
-                      <TableCell className="text-right space-x-2">
-                        <Button size="sm" variant="outline" onClick={() => doPreview(c)} disabled={previewLoading}><Eye className="mr-1 h-4 w-4" />{previewLoading ? 'Cargando...' : 'Previsualizar'}</Button>
-                        <Button size="sm" variant="secondary" onClick={() => startEdit(c)}>Editar</Button>
-                        <Button size="sm" variant="outline" onClick={() => togglePause(c)}>
-                          {c.isPaused ? <Play className="mr-1 h-4 w-4" /> : <Pause className="mr-1 h-4 w-4" />}
-                          {c.isPaused ? 'Reanudar' : 'Pausar'}
-                        </Button>
-                        <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => askDelete(c.id)}>
-                          <Trash2 className="mr-1 h-4 w-4" />Eliminar
-                        </Button>
-                      </TableCell>
+        <>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Mis campañas</CardTitle>
+                <CardDescription>Administra, pausa/reanuda, previsualiza y elimina.</CardDescription>
+              </div>
+              <Button onClick={startCreate}><Plus className="mr-2 h-4 w-4" />Nueva campaña</Button>
+            </CardHeader>
+            <CardContent>
+              <div className="border rounded-md overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead>Pasos</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {items.length === 0 ? (
+                      <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No hay campañas.</TableCell></TableRow>
+                    ) : items.map((c) => (
+                      <TableRow key={c.id}>
+                        <TableCell className="font-medium">{c.name}</TableCell>
+                        <TableCell>{c.steps.length}</TableCell>
+                        <TableCell>{c.isPaused ? 'Pausada' : 'Activa'}</TableCell>
+                        <TableCell className="text-right space-x-2">
+                          <Button size="sm" variant="outline" onClick={() => doPreview(c)} disabled={previewLoading}><Eye className="mr-1 h-4 w-4" />{previewLoading ? 'Cargando...' : 'Previsualizar'}</Button>
+                          <Button size="sm" variant="secondary" onClick={() => startEdit(c)}>Editar</Button>
+                          <Button size="sm" variant="outline" onClick={() => togglePause(c)}>
+                            {c.isPaused ? <Play className="mr-1 h-4 w-4" /> : <Pause className="mr-1 h-4 w-4" />}
+                            {c.isPaused ? 'Reanudar' : 'Pausar'}
+                          </Button>
+                          <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => askDelete(c.id)}>
+                            <Trash2 className="mr-1 h-4 w-4" />Eliminar
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle>Automatización</CardTitle>
+              <CardDescription>Conecta tus cuentas para permitir el envío automático en segundo plano (requiere configuración de secretos).</CardDescription>
+            </CardHeader>
+            <CardContent className="flex gap-4 flex-wrap">
+              <Button variant="outline" onClick={() => window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID}&redirect_uri=${process.env.NEXT_PUBLIC_BASE_URL}/api/auth/callback/google&response_type=code&scope=https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly openid email profile&access_type=offline&prompt=consent`}>
+                Conectar Google (Gmail)
+              </Button>
+              <Button variant="outline" onClick={() => window.location.href = `https://login.microsoftonline.com/${process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID}/oauth2/v2.0/authorize?client_id=${process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID}&response_type=code&redirect_uri=${process.env.NEXT_PUBLIC_AZURE_AD_REDIRECT_URI}&response_mode=query&scope=offline_access User.Read Mail.Send`}>
+                Conectar Microsoft (Outlook)
+              </Button>
+            </CardContent>
+          </Card>
+        </>
       )}
 
       {mode.kind === 'edit' && (
@@ -468,6 +529,10 @@ export default function CampaignsPage() {
               <CardDescription>Define pasos, adjuntos, exclusiones y guarda.</CardDescription>
             </div>
             <div className="space-x-2">
+              <Button variant="secondary" onClick={() => setAiOpen(true)}>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Generar con IA
+              </Button>
               <Button variant="outline" onClick={() => setMode({ kind: 'list' })}>Cancelar</Button>
               <Button onClick={saveCampaign} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
             </div>
@@ -682,6 +747,55 @@ export default function CampaignsPage() {
         </DialogContent>
       </Dialog>
 
+
+      {/* === Modal de IA === */}
+      <Dialog open={aiOpen} onOpenChange={setAiOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Generar campaña con IA</DialogTitle>
+            <DialogDescription>
+              Describe el objetivo de tu campaña y la IA generará los pasos, asuntos y correos por ti.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="ai-goal">Objetivo de la campaña</Label>
+              <Textarea
+                id="ai-goal"
+                placeholder="Ej: Recuperar clientes que pidieron presupuesto pero no compraron..."
+                value={aiGoal}
+                onChange={(e) => setAiGoal(e.target.value)}
+                rows={3}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="ai-audience">Público objetivo (Opcional)</Label>
+              <Input
+                id="ai-audience"
+                placeholder="Ej: Gerentes de marketing en empresas de software"
+                value={aiAudience}
+                onChange={(e) => setAiAudience(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAiOpen(false)}>Cancelar</Button>
+            <Button onClick={generateCampaign} disabled={aiLoading || !aiGoal.trim()}>
+              {aiLoading ? (
+                <>
+                  <Sparkles className="mr-2 h-4 w-4 animate-spin" />
+                  Generando...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Generar
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Diálogo de confirmación de borrado (simple) */}
       {deletingId && (
