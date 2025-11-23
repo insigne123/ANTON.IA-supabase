@@ -135,8 +135,11 @@ export default function OpportunitiesPage() {
 
       // --- Polling a /api/opportunities/status ---
       const started = Date.now();
-      const MAX_MS = 90_000; // 90s en UI
-      let delay = 1500;
+      const started = Date.now();
+      // Increase timeout to 5 minutes (300s) as requested by user, or use env var
+      const envMaxMinutes = Number(process.env.NEXT_PUBLIC_SEARCH_MAX_POLL_MINUTES || 5);
+      const MAX_MS = envMaxMinutes * 60 * 1000;
+      let delay = 2000; // Start with 2s delay
       const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
       while (Date.now() - started < MAX_MS) {
         const st = await fetch(`/api/opportunities/status?runId=${encodeURIComponent(runId)}&limit=${form.rows ?? 100}`, {
