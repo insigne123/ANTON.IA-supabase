@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -13,92 +12,135 @@ import { Save, Sparkles } from 'lucide-react';
 import { generateCompanyProfile, GenerateCompanyProfileOutput } from '@/ai/flows/generate-company-profile';
 import { useToast } from '@/hooks/use-toast';
 
-const PROFILE_STORAGE_KEY = 'leadflow-company-profile';
+import { profileService } from '@/lib/services/profile-service';
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState({
-      name: '',
-      role: '',
-      companyName: '',
-      sector: '',
-      website: '',
-      description: '',
-      services: '',
-      valueProposition: '',
+    name: '',
+    role: '',
+    companyName: '',
+    sector: '',
+    website: '',
+    description: '',
+    services: '',
+    valueProposition: '',
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
-    const savedProfile = localStorage.getItem(PROFILE_STORAGE_KEY);
-    if (savedProfile) {
-      setProfile(JSON.parse(savedProfile));
-    } else {
-      // Set initial state from data file if nothing is saved
-      setProfile(prev => ({
-        ...prev,
-        companyName: initialProfile.name,
-        sector: initialProfile.sector,
-        website: initialProfile.website,
-        description: initialProfile.description,
-        services: initialProfile.services,
-        valueProposition: initialProfile.valueProposition,
-      }));
+    async function loadProfile() {
+      try {
+        const data = await profileService.getProfile();
+        if (data) {
+          const extended = data.signatures?.['profile_extended'] || {};
+          setProfile({
+            name: data.full_name || '',
+            role: extended.role || '',
+            companyName: data.company_name || '',
+            sector: extended.sector || '',
+            website: data.company_domain || '',
+            description: extended.description || '',
+            services: extended.services || '',
+            valueProposition: extended.valueProposition || '',
+          });
+        } else {
+          // Set initial state from data file if nothing is saved
+          setProfile(prev => ({
+            ...prev,
+            companyName: initialProfile.name,
+            sector: initialProfile.sector,
+            website: initialProfile.website,
+            description: initialProfile.description,
+            services: initialProfile.services,
+            valueProposition: initialProfile.valueProposition,
+          }));
+        }
+      } catch (e) {
+        console.error('Error loading profile:', e);
+      }
     }
+    loadProfile();
   }, []);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setIsSaving(true);
-    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
-    setTimeout(() => {
-      setIsSaving(false);
-      toast({
-          title: "Perfil Guardado",
-          description: "La información de tu empresa ha sido actualizada.",
+    try {
+      const currentProfile = await profileService.getProfile();
+      const currentSignatures = currentProfile?.signatures || {};
+
+      await profileService.updateProfile({
+        full_name: profile.name,
+        company_name: profile.companyName,
+        company_domain: profile.website,
+        signatures: {
+          ...currentSignatures,
+          profile_extended: {
+            role: profile.role,
+            sector: profile.sector,
+            description: profile.description,
+            services: profile.services,
+            valueProposition: profile.valueProposition
+          }
+        }
       });
-    }, 1000);
+
+      toast({
+        title: "Perfil Guardado",
+        description: "La información de tu empresa ha sido actualizada en la nube.",
+      });
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "No se pudo guardar el perfil.",
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
-  
+
   const handleAutofill = async () => {
     if (!profile.companyName) {
-        toast({
-            variant: "destructive",
-            title: "Error",
-            description: "Por favor, introduce el nombre de la empresa para autocompletar.",
-        });
-        return;
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Por favor, introduce el nombre de la empresa para autocompletar.",
+      });
+      return;
     }
     setIsGenerating(true);
     try {
-        const result: GenerateCompanyProfileOutput = await generateCompanyProfile({ companyName: profile.companyName });
-        setProfile(prev => ({
-            ...prev,
-            sector: result.sector,
-            website: result.website,
-            description: result.description,
-            services: result.services,
-            valueProposition: result.valueProposition,
-        }));
-         toast({
-            title: "¡Información Autocompletada!",
-            description: "Hemos rellenado el perfil de tu empresa con IA.",
-        });
+      const result: GenerateCompanyProfileOutput = await generateCompanyProfile({ companyName: profile.companyName });
+      setProfile(prev => ({
+        ...prev,
+        sector: result.sector,
+        website: result.website,
+        description: result.description,
+        services: result.services,
+        valueProposition: result.valueProposition,
+      }));
+      toast({
+        title: "¡Información Autocompletada!",
+        description: "Hemos rellenado el perfil de tu empresa con IA.",
+      });
     } catch (error) {
-        console.error("Error generating company profile:", error);
-        toast({
-            variant: "destructive",
-            title: "Error de Autocompletado",
-            description: "No se pudo generar la información. Por favor, inténtalo de nuevo.",
-        });
+      console.error("Error generating company profile:", error);
+      toast({
+        variant: "destructive",
+        title: "Error de Autocompletado",
+        description: "No se pudo generar la información. Por favor, inténtalo de nuevo.",
+      });
     } finally {
-        setIsGenerating(false);
+      setIsGenerating(false);
     }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { id, value } = e.target;
-    setProfile(prev => ({...prev, [id]: value}));
+    setProfile(prev => ({ ...prev, [id]: value }));
   }
 
   return (
@@ -120,7 +162,7 @@ export default function ProfilePage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="role">Cargo</Label>
-              <Input id="role" value={profile.role} onChange={handleInputChange} placeholder="Ej: Director de Ventas"/>
+              <Input id="role" value={profile.role} onChange={handleInputChange} placeholder="Ej: Director de Ventas" />
             </div>
           </div>
           <div className="relative">
@@ -132,14 +174,14 @@ export default function ProfilePage() {
             </Button>
           </div>
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-             <div className="space-y-2">
-                <Label htmlFor="sector">Sector/Industria</Label>
-                <Input id="sector" value={profile.sector} onChange={handleInputChange} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="website">Sitio web</Label>
-                <Input id="website" value={profile.website} onChange={handleInputChange} />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="sector">Sector/Industria</Label>
+              <Input id="sector" value={profile.sector} onChange={handleInputChange} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="website">Sitio web</Label>
+              <Input id="website" value={profile.website} onChange={handleInputChange} />
+            </div>
           </div>
           <div className="space-y-2">
             <Label htmlFor="description">Descripción de empresa</Label>
@@ -155,7 +197,7 @@ export default function ProfilePage() {
           </div>
         </CardContent>
       </Card>
-      
+
       <div className="mt-8 flex justify-end">
         <Button onClick={handleSave} disabled={isSaving}>
           <Save className="mr-2" />

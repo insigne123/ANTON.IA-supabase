@@ -179,14 +179,14 @@ export default function CampaignsPage() {
     setDraft((d) => {
       const set = new Set(d.excludedLeadIds);
       if (checked) set.add(leadId); else set.delete(leadId);
-      return { ...d, excludedLeadIds: Array.from(set) };
+      return { ...d, excludedLeadIds: [...set] };
     });
   }
 
   function excludeAll(checked: boolean) {
     if (checked) {
       const allIds = contacted.map((c: any) => String(c.leadId)).filter(Boolean);
-      setDraft((d) => ({ ...d, excludedLeadIds: Array.from(new Set(allIds)) }));
+      setDraft((d) => ({ ...d, excludedLeadIds: [...new Set(allIds)] }));
     } else {
       setDraft((d) => ({ ...d, excludedLeadIds: [] }));
     }

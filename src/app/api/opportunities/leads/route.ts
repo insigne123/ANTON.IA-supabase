@@ -60,15 +60,18 @@ export async function POST(req: NextRequest) {
     });
     console.info('[quota] contact OK', { userId, dayKey, count, limit });
     if (!allowed) {
-        return NextResponse.json(
-          { error: `Daily quota exceeded for contact. Used ${count}/${limit}.` },
-          { status: 429 }
-        );
+      return NextResponse.json(
+        { error: `Daily quota exceeded for contact. Used ${count}/${limit}.` },
+        { status: 429 }
+      );
     }
 
     const { companies, personTitles, personLocations, countPerCompany = 100, getEmails = true, excludeGuessedEmails = false } = await req.json() as Body;
     const token = process.env.APIFY_TOKEN;
-    if (!token) return NextResponse.json({ error: 'APIFY_TOKEN missing' }, { status: 500 });
+    if (!token) {
+      console.error('APIFY_TOKEN is missing');
+      return NextResponse.json({ error: 'Service configuration error: APIFY_TOKEN missing' }, { status: 503 });
+    }
 
     const all: LeadFromApollo[] = [];
 

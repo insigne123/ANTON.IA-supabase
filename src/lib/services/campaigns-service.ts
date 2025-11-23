@@ -1,4 +1,4 @@
-import { supabaseService } from '@/lib/supabase-service';
+import { supabase } from '@/lib/supabase';
 import { contactedLeadsStorage } from './contacted-leads-service';
 
 export type CampaignStepAttachment = {
@@ -57,7 +57,7 @@ function mapCampaignToRow(c: Partial<Campaign>) {
 export const campaignsStorage = {
     async get(): Promise<Campaign[]> {
         try {
-            const { data, error } = await supabaseService
+            const { data, error } = await supabase
                 .from('campaigns')
                 .select('*')
                 .order('created_at', { ascending: false });
@@ -89,7 +89,7 @@ export const campaignsStorage = {
             };
 
             const row = mapCampaignToRow(newCampaign);
-            const { error } = await supabaseService
+            const { error } = await supabase
                 .from('campaigns')
                 .insert([row]);
 
@@ -110,7 +110,7 @@ export const campaignsStorage = {
             const updateData = { ...patch, updatedAt: now };
             const row = mapCampaignToRow(updateData);
 
-            const { data, error } = await supabaseService
+            const { data, error } = await supabase
                 .from('campaigns')
                 .update(row)
                 .eq('id', id)
@@ -130,7 +130,7 @@ export const campaignsStorage = {
 
     async getById(id: string): Promise<Campaign | null> {
         try {
-            const { data, error } = await supabaseService
+            const { data, error } = await supabase
                 .from('campaigns')
                 .select('*')
                 .eq('id', id)
@@ -149,7 +149,7 @@ export const campaignsStorage = {
 
     async remove(id: string): Promise<number> {
         try {
-            const { error, count } = await supabaseService
+            const { error, count } = await supabase
                 .from('campaigns')
                 .delete()
                 .eq('id', id); // .delete({ count: 'exact' }) is not directly available in all clients but delete returns count often.
@@ -171,6 +171,6 @@ export const campaignsStorage = {
     },
 
     async setExclusions(id: string, excludedLeadIds: string[]): Promise<Campaign | null> {
-        return this.update(id, { excludedLeadIds: Array.from(new Set(excludedLeadIds)) });
+        return this.update(id, { excludedLeadIds: [...new Set(excludedLeadIds)] });
     }
 };
