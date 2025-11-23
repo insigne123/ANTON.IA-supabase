@@ -29,15 +29,22 @@ export type Campaign = {
 };
 
 function mapRowToCampaign(row: any): Campaign {
+    // Handle both legacy (array) and new (object) formats for steps
+    const rawSteps = row.steps;
+    const isLegacy = Array.isArray(rawSteps);
+
     return {
         id: row.id,
         name: row.name || 'Campaña',
         isPaused: row.is_paused || false,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
-        steps: Array.isArray(row.steps) ? row.steps : [],
-        excludedLeadIds: Array.isArray(row.excluded_lead_ids) ? row.excluded_lead_ids : [],
-        sentRecords: row.sent_records && typeof row.sent_records === 'object' ? row.sent_records : {},
+        // If legacy, rawSteps is the array. If new, rawSteps.steps is the array.
+        steps: isLegacy ? rawSteps : (rawSteps?.steps || []),
+        // If legacy, these are empty (or from columns if they existed, but they don't).
+        // If new, they are in the JSON object.
+        excludedLeadIds: isLegacy ? [] : (rawSteps?.excludedLeadIds || []),
+        sentRecords: isLegacy ? {} : (rawSteps?.sentRecords || {}),
     };
 }
 
@@ -48,9 +55,38 @@ function mapCampaignToRow(c: Partial<Campaign>) {
     if (c.isPaused !== undefined) row.is_paused = c.isPaused;
     if (c.createdAt) row.created_at = c.createdAt;
     if (c.updatedAt) row.updated_at = c.updatedAt;
-    if (c.steps) row.steps = c.steps;
-    if (c.excludedLeadIds) row.excluded_lead_ids = c.excludedLeadIds;
-    if (c.sentRecords) row.sent_records = c.sentRecords;
+
+    // We store everything in the 'steps' JSONB column
+    // We need to preserve existing data if we are doing a partial update, 
+    // but mapCampaignToRow is usually called with a constructed object.
+    // For updates, we might need to be careful, but let's assume the service passes the full object or we handle it.
+    // Actually, the update method in this service does: const updateData = { ...patch, updatedAt: now }; const row = mapCampaignToRow(updateData);
+    // This means 'steps' might be missing in 'patch'.
+    // If steps is missing in patch, we shouldn't overwrite the DB column with empty.
+    // But mapCampaignToRow returns a partial row.
+
+    // However, if we want to update 'excludedLeadIds', we MUST write to 'steps' column.
+    // So we need to make sure we have the other data or we might overwrite it.
+    // The current service implementation for 'update' does NOT fetch before update (except implicitly via patch).
+    // This is risky if we map multiple fields to one JSON column.
+    // But for now, let's implement the mapping. The service 'update' method might need a tweak to fetch-merge-save if we are mapping multiple logical fields to one physical column.
+
+    if (c.steps || c.excludedLeadIds || c.sentRecords) {
+        // We construct the JSON object. 
+        // CAUTION: If we only have one of them, we might overwrite others if we don't have the previous state.
+        // The 'update' method needs to be smarter.
+        // For 'add', we have everything.
+        row.steps = {
+            steps: c.steps || [],
+            excludedLeadIds: c.excludedLeadIds || [],
+            sentRecords: c.sentRecords || {}
+        };
+    }
+
+    // Do NOT map to non-existent columns
+    // if (c.excludedLeadIds) row.excluded_lead_ids = c.excludedLeadIds;
+    // if (c.sentRecords) row.sent_records = c.sentRecords;
+
     return row;
 }
 
@@ -106,9 +142,19 @@ export const campaignsStorage = {
 
     async update(id: string, patch: Partial<Omit<Campaign, 'id' | 'createdAt'>>): Promise<Campaign | null> {
         try {
+            // Since we store multiple fields in the 'steps' JSON column, we must fetch first to merge
+            // otherwise we might lose data (e.g. updating exclusions would wipe steps).
+            const existing = await this.getById(id);
+            if (!existing) return null;
+
             const now = new Date().toISOString();
-            const updateData = { ...patch, updatedAt: now };
-            const row = mapCampaignToRow(updateData);
+            const merged: Campaign = {
+                ...existing,
+                ...patch,
+                updatedAt: now
+            };
+
+            const row = mapCampaignToRow(merged);
 
             const { data, error } = await supabase
                 .from('campaigns')
