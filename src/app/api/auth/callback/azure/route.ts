@@ -36,7 +36,8 @@ export async function GET(req: NextRequest) {
             await tokenService.saveToken(supabase, 'outlook', tokens.refresh_token);
         }
 
-        return NextResponse.redirect(new URL('/campaigns?connected=outlook', req.url));
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+        return NextResponse.redirect(`${baseUrl}/campaigns?connected=outlook`);
     } catch (error) {
         console.error('Error exchanging Azure code:', error);
         return NextResponse.redirect(new URL('/campaigns?error=exchange_failed', req.url));

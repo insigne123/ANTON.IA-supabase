@@ -34,7 +34,8 @@ export async function GET(req: NextRequest) {
             await tokenService.saveToken(supabase, 'google', tokens.refresh_token);
         }
 
-        return NextResponse.redirect(new URL('/campaigns?connected=google', req.url));
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+        return NextResponse.redirect(`${baseUrl}/campaigns?connected=google`);
     } catch (error) {
         console.error('Error exchanging Google code:', error);
         return NextResponse.redirect(new URL('/campaigns?error=exchange_failed', req.url));
