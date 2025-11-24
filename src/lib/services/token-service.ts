@@ -16,7 +16,11 @@ export const tokenService = {
                 updated_at: new Date().toISOString()
             });
 
-        if (error) console.error('Error saving token:', error);
+        if (error) {
+            console.error('Error saving token:', error);
+            return error;
+        }
+        return null;
     },
 
     async getToken(supabase: SupabaseClient, userId: string, provider: 'google' | 'outlook') {

@@ -33,7 +33,10 @@ export async function GET(req: NextRequest) {
         if (!tokens.refresh_token) {
             console.warn('No refresh token returned from Azure');
         } else {
-            await tokenService.saveToken(supabase, 'outlook', tokens.refresh_token);
+            const saveErr = await tokenService.saveToken(supabase, 'outlook', tokens.refresh_token);
+            if (saveErr) {
+                return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=db_save_failed`);
+            }
         }
 
         const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
