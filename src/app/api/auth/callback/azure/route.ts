@@ -30,13 +30,19 @@ export async function GET(req: NextRequest) {
 
         const tokens = await tokenRes.json();
 
+        if (!tokenRes.ok) {
+            console.error('Azure token exchange failed:', tokens);
+            return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=token_exchange_failed&details=${tokens.error || 'unknown'}`);
+        }
+
         if (!tokens.refresh_token) {
             console.warn('No refresh token returned from Azure');
-        } else {
-            const saveErr = await tokenService.saveToken(supabase, 'outlook', tokens.refresh_token);
-            if (saveErr) {
-                return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=db_save_failed`);
-            }
+            return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=no_refresh_token`);
+        }
+
+        const saveErr = await tokenService.saveToken(supabase, 'outlook', tokens.refresh_token);
+        if (saveErr) {
+            return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=db_save_failed`);
         }
 
         const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';

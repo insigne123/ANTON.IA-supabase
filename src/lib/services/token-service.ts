@@ -4,7 +4,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 export const tokenService = {
     async saveToken(supabase: SupabaseClient, provider: 'google' | 'outlook', refreshToken: string, expiresAt?: Date) {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!user) return { message: 'No user found in session' };
 
         const { error } = await supabase
             .from('provider_tokens')

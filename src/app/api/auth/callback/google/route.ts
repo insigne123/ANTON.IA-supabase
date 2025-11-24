@@ -28,10 +28,19 @@ export async function GET(req: NextRequest) {
 
         const tokens = await tokenRes.json();
 
+        if (!tokenRes.ok) {
+            console.error('Google token exchange failed:', tokens);
+            return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/gmail?error=token_exchange_failed&details=${tokens.error || 'unknown'}`);
+        }
+
         if (!tokens.refresh_token) {
             console.warn('No refresh token returned from Google');
-        } else {
-            await tokenService.saveToken(supabase, 'google', tokens.refresh_token);
+            return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/gmail?error=no_refresh_token`);
+        }
+
+        const saveErr = await tokenService.saveToken(supabase, 'google', tokens.refresh_token);
+        if (saveErr) {
+            return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/gmail?error=db_save_failed`);
         }
 
         const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
