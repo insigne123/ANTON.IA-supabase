@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
         }
 
         const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-        return NextResponse.redirect(`${baseUrl}/campaigns?connected=google`);
+        return NextResponse.redirect(`${baseUrl}/gmail?connected=true`);
     } catch (error) {
         console.error('Error exchanging Google code:', error);
         return NextResponse.redirect(new URL('/campaigns?error=exchange_failed', req.url));
