@@ -133,8 +133,11 @@ export const enrichedLeadsStorage = {
     get: getEnrichedLeads,
     set: setEnrichedLeads,
     addDedup: async (newOnes: EnrichedLead[]) => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return { addedCount: 0, duplicateCount: 0, added: [], duplicates: [] };
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        if (!user) {
+            console.error('[enriched-leads] addDedup: No user found', userError);
+            return { addedCount: 0, duplicateCount: 0, added: [], duplicates: [] };
+        }
 
         const existing = await getEnrichedLeads();
         const keyOf = (l: EnrichedLead) => (l.id?.trim() || (l.email?.trim() || '') || `${l.fullName || ''}|${l.companyDomain || l.companyName || ''}|${l.title || ''}`).toLowerCase();

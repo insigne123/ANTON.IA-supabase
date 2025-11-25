@@ -257,9 +257,8 @@ export default function SavedLeadsPage() {
       setSelLead({});
 
       // 4) Feedback
-      const movedCount =
-        (addRes as any)?.addedCount ??
-        enrichedNow.filter(x => !!x.email).length;
+      console.log('[enrich] addRes:', addRes);
+      const movedCount = (addRes as any)?.addedCount ?? 0;
 
       toast({
         title: 'Enriquecimiento listo',
