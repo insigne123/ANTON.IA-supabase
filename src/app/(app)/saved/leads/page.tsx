@@ -1,6 +1,6 @@
 
 'use client';
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -13,7 +13,7 @@ import { useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Download, Trash2 } from 'lucide-react';
 import { toCsv, downloadCsv } from '@/lib/csv';
-import { enrichedLeadsStorage } from '@/lib/enriched-leads-storage';
+import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
 import * as Quota from '@/lib/quota-client';
 import { getClientId } from '@/lib/client-id';
@@ -56,22 +56,26 @@ export default function SavedLeadsPage() {
       industry: l.industry || undefined,
       createdAt: new Date().toISOString(),
     }));
-    const res = enrichedLeadsStorage.addDedup(moved);
 
-    // 2) Dejar en guardados sólo los SIN email
-    // En Supabase, eliminamos los que tienen email
-    supabaseService.removeWhere(l => !!l.email).then(() => {
-      const remaining = savedLeads.filter(l => !l.email);
-      setSavedLeads(remaining);
-    });
-
-    const addedCount = (res as any)?.addedCount ?? 0;
-    if (addedCount > 0) {
-      toast({
-        title: 'Leads movidos a Enriquecidos',
-        description: `Se movieron ${addedCount} lead(s) con email a la sección Enriquecidos.`,
+    // Usamos una función asíncrona autoejecutable para poder usar await si fuera necesario,
+    // aunque en useEffect no se recomienda await directo.
+    // En este caso, enrichedLeadsStorage.addDedup es async.
+    enrichedLeadsStorage.addDedup(moved).then((res) => {
+      // 2) Dejar en guardados sólo los SIN email
+      // En Supabase, eliminamos los que tienen email
+      supabaseService.removeWhere(l => !!l.email).then(() => {
+        const remaining = savedLeads.filter(l => !l.email);
+        setSavedLeads(remaining);
       });
-    }
+
+      const addedCount = (res as any)?.addedCount ?? 0;
+      if (addedCount > 0) {
+        toast({
+          title: 'Leads movidos a Enriquecidos',
+          description: `Se movieron ${addedCount} lead(s) con email a la sección Enriquecidos.`,
+        });
+      }
+    });
   }, [savedLeads, toast]);
 
   async function handleDeleteLead(id: string) {
@@ -262,7 +266,7 @@ export default function SavedLeadsPage() {
 
       toast({
         title: 'Enriquecimiento listo',
-        description: `Movidos a Enriquecidos: ${movedCount} · Quitados de Guardados: ${removedCount} · Cuota +${enrichedCount}`,
+        description: `Movidos a Enriquecidos: ${movedCount} · Quitados de Guardados: ${removedCount} · Cuota +${enrichedCount} · DB: ${process.env.NEXT_PUBLIC_SUPABASE_URL?.slice(0, 20)}...`,
       });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error', description: e.message || 'Ocurrió un error' });
