@@ -50,6 +50,9 @@ function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string) {
 }
 
 export async function getEnrichedLeads(): Promise<EnrichedLead[]> {
+    const { data: { user } } = await supabase.auth.getUser();
+    console.log('[enriched-leads] get: user', user?.id);
+
     const { data, error } = await supabase
         .from(TABLE)
         .select('*')
@@ -59,6 +62,7 @@ export async function getEnrichedLeads(): Promise<EnrichedLead[]> {
         console.error('Error fetching enriched leads:', error);
         return [];
     }
+    console.log('[enriched-leads] get: found', data?.length, 'rows');
 
     return (data || []).map(mapRowToEnrichedLead);
 }
