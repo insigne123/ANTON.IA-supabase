@@ -237,7 +237,7 @@ export default function SavedLeadsPage() {
       });
 
       // 1) Añadir a Enriquecidos (dedupe)
-      const addRes = enrichedLeadsStorage.addDedup(enrichedNow);
+      const addRes = await enrichedLeadsStorage.addDedup(enrichedNow);
 
       // 2) Remover de Guardados los que se enriquecieron con email
       //    (usamos el mapping por índice chosen[i] -> enrichedNow[i])
