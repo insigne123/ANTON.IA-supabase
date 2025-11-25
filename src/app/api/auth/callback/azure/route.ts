@@ -7,6 +7,13 @@ export async function GET(req: NextRequest) {
     const searchParams = req.nextUrl.searchParams;
     const code = searchParams.get('code');
 
+    const error = searchParams.get('error');
+    const errorDescription = searchParams.get('error_description');
+
+    if (error) {
+        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=${error}&details=${errorDescription}`);
+    }
+
     if (!code) {
         return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=no_code`);
     }
@@ -22,7 +29,7 @@ export async function GET(req: NextRequest) {
                 code,
                 client_id: process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID!,
                 client_secret: process.env.AZURE_AD_CLIENT_SECRET!,
-                redirect_uri: process.env.NEXT_PUBLIC_AZURE_AD_REDIRECT_URI!,
+                redirect_uri: `${process.env.NEXT_PUBLIC_BASE_URL}/api/auth/callback/azure`,
                 grant_type: 'authorization_code',
                 scope: 'offline_access User.Read Mail.Send',
             }),
