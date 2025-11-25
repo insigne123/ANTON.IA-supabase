@@ -363,8 +363,6 @@ export default function EnrichedOpportunitiesPage() {
           name: lead.fullName,
           email,
           company: lead.companyName,
-          title: lead.title,
-          companyDomain: lead.companyDomain,
           subject,
           sentAt: new Date().toISOString(),
           status: 'sent',

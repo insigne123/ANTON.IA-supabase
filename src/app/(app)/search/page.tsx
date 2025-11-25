@@ -442,7 +442,7 @@ export default function SearchPage() {
                 ) : pagedLeads.length > 0 ? (
                   pagedLeads.map(lead => {
                     const already = savedIds.has(lead.id);
-                    const contacted = (lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email));
+                    const contacted = !!((lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email)));
                     const disabled = already || contacted;
                     return (
                       <TableRow key={lead.id} data-state={selectedLeads.has(lead.id) ? "selected" : ""}>

@@ -46,7 +46,7 @@ export default function UnifiedSheetPage() {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'saved' | 'enriched' | 'sent' | 'read' | 'replied'>('all');
   const [openCols, setOpenCols] = useState(false);
-  const [sortKey, setSortKey] = useState<ColumnKey>('lastUpdateAt');
+  const [sortKey, setSortKey] = useState<ColumnKey>('updatedAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [loading, setLoading] = useState(true);
 

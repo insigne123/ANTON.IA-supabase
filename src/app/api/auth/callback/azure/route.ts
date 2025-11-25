@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
     const code = searchParams.get('code');
 
     if (!code) {
-        return NextResponse.redirect(new URL('/campaigns?error=no_code', req.url));
+        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=no_code`);
     }
 
     try {
@@ -49,6 +49,6 @@ export async function GET(req: NextRequest) {
         return NextResponse.redirect(`${baseUrl}/outlook?connected=true`);
     } catch (error) {
         console.error('Error exchanging Azure code:', error);
-        return NextResponse.redirect(new URL('/campaigns?error=exchange_failed', req.url));
+        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=exchange_failed`);
     }
 }
