@@ -142,6 +142,7 @@ export const enrichedLeadsStorage = {
             console.error('[enriched-leads] addDedup: No user found', userError);
             return { addedCount: 0, duplicateCount: 0, added: [], duplicates: [] };
         }
+        console.log('[enriched-leads] addDedup: user', user.id);
 
         const existing = await getEnrichedLeads();
         const keyOf = (l: EnrichedLead) => (l.id?.trim() || (l.email?.trim() || '') || `${l.fullName || ''}|${l.companyDomain || l.companyName || ''}|${l.title || ''}`).toLowerCase();
@@ -168,9 +169,20 @@ export const enrichedLeadsStorage = {
         }
 
         if (toInsert.length > 0) {
-            const { error } = await supabase.from(TABLE).insert(toInsert);
+            const { data: inserted, error } = await supabase.from(TABLE).insert(toInsert).select();
             if (error) {
                 console.error('Error adding enriched leads:', error);
+                return { addedCount: 0, duplicateCount: dups.length, added: [], duplicates: dups };
+            }
+            console.log('[enriched-leads] addDedup: actual inserted', inserted?.length, inserted);
+
+            // Update 'added' with actual returned data to be sure
+            if (inserted && inserted.length > 0) {
+                added.length = 0; // Clear optimistic
+                inserted.forEach(r => added.push(mapRowToEnrichedLead(r)));
+            } else {
+                // If success but no data returned, something is wrong (RLS blocking view?)
+                console.warn('[enriched-leads] addDedup: success but no data returned. RLS blocking select?');
                 return { addedCount: 0, duplicateCount: dups.length, added: [], duplicates: dups };
             }
         }
