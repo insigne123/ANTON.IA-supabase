@@ -137,6 +137,7 @@ export const enrichedLeadsStorage = {
     get: getEnrichedLeads,
     set: setEnrichedLeads,
     addDedup: async (newOnes: EnrichedLead[]) => {
+        console.log('[enriched-leads] DB URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
         const { data: { user }, error: userError } = await supabase.auth.getUser();
         if (!user) {
             console.error('[enriched-leads] addDedup: No user found', userError);
