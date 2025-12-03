@@ -1,12 +1,14 @@
 import { supabase } from '../supabase';
 import type { EnrichedLead } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { organizationService } from './organization-service';
 
 const TABLE = 'enriched_leads';
 
 function mapRowToEnrichedLead(row: any): EnrichedLead {
     return {
         id: row.id,
+        organizationId: row.organization_id,
         sourceOpportunityId: row.data?.sourceOpportunityId,
         fullName: row.full_name,
         email: row.email,
@@ -23,7 +25,7 @@ function mapRowToEnrichedLead(row: any): EnrichedLead {
     };
 }
 
-function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string) {
+function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string, organizationId: string | null) {
     // Validate UUID or generate one if missing/invalid
     const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lead.id || '');
     const id = isValidUUID ? lead.id : uuidv4();
@@ -31,6 +33,7 @@ function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string) {
     return {
         id,
         user_id: userId,
+        organization_id: organizationId,
         full_name: lead.fullName,
         email: lead.email,
         company_name: lead.companyName,
@@ -53,10 +56,18 @@ export async function getEnrichedLeads(): Promise<EnrichedLead[]> {
     const { data: { user } } = await supabase.auth.getUser();
     console.log('[enriched-leads] get: user', user?.id);
 
-    const { data, error } = await supabase
+    const orgId = await organizationService.getCurrentOrganizationId();
+
+    let query = supabase
         .from(TABLE)
         .select('*')
         .order('created_at', { ascending: false });
+
+    if (orgId) {
+        query = query.eq('organization_id', orgId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
         console.error('Error fetching enriched leads:', error);
@@ -75,6 +86,8 @@ export async function addEnrichedLeads(items: EnrichedLead[]) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
+    const orgId = await organizationService.getCurrentOrganizationId();
+
     const existing = await getEnrichedLeads();
     const key = (v: EnrichedLead) => (v.id || v.email || `${v.fullName}|${v.companyName}|${v.title}`).toLowerCase();
     const seen = new Set(existing.map(key));
@@ -84,7 +97,7 @@ export async function addEnrichedLeads(items: EnrichedLead[]) {
     for (const item of items) {
         const k = key(item);
         if (!seen.has(k)) {
-            toInsert.push(mapEnrichedLeadToRow(item, user.id));
+            toInsert.push(mapEnrichedLeadToRow(item, user.id, orgId));
             seen.add(k);
         }
     }
@@ -145,6 +158,8 @@ export const enrichedLeadsStorage = {
         }
         console.log('[enriched-leads] addDedup: user', user.id);
 
+        const orgId = await organizationService.getCurrentOrganizationId();
+
         const existing = await getEnrichedLeads();
         const keyOf = (l: EnrichedLead) => (l.id?.trim() || (l.email?.trim() || '') || `${l.fullName || ''}|${l.companyDomain || l.companyName || ''}|${l.title || ''}`).toLowerCase();
         const seen = new Set(existing.map(keyOf));
@@ -161,7 +176,7 @@ export const enrichedLeadsStorage = {
             }
 
             // Prepare for insert
-            const row = mapEnrichedLeadToRow(raw, user.id);
+            const row = mapEnrichedLeadToRow(raw, user.id, orgId);
             toInsert.push(row);
 
             // Add to local tracking

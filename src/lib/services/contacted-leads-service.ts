@@ -1,12 +1,14 @@
 import { supabase } from '../supabase';
 import type { ContactedLead } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { organizationService } from './organization-service';
 
 const TABLE = 'contacted_leads';
 
 function mapRowToContactedLead(row: any): ContactedLead {
     return {
         id: row.id,
+        organizationId: row.organization_id,
         leadId: row.lead_id,
         name: row.name,
         email: row.email,
@@ -32,11 +34,12 @@ function mapRowToContactedLead(row: any): ContactedLead {
     };
 }
 
-function mapContactedLeadToRow(item: ContactedLead, userId: string) {
+function mapContactedLeadToRow(item: ContactedLead, userId: string, organizationId: string | null) {
     const id = item.id || uuidv4();
     return {
         id,
         user_id: userId,
+        organization_id: organizationId,
         lead_id: item.leadId,
         name: item.name,
         email: item.email,
@@ -63,10 +66,18 @@ function mapContactedLeadToRow(item: ContactedLead, userId: string) {
 }
 
 export async function getContactedLeads(): Promise<ContactedLead[]> {
-    const { data, error } = await supabase
+    const orgId = await organizationService.getCurrentOrganizationId();
+
+    let query = supabase
         .from(TABLE)
         .select('*')
         .order('sent_at', { ascending: false });
+
+    if (orgId) {
+        query = query.eq('organization_id', orgId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
         console.error('Error fetching contacted leads:', error);
@@ -91,6 +102,8 @@ export const contactedLeadsStorage = {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
+        const orgId = await organizationService.getCurrentOrganizationId();
+
         // Check for duplicates based on messageId or email+subject+sentAt
         // This is harder to do efficiently in one query without a unique constraint, 
         // but we can check if messageId exists if present.
@@ -99,7 +112,7 @@ export const contactedLeadsStorage = {
             if (count && count > 0) return;
         }
 
-        const row = mapContactedLeadToRow({ ...item, followUpCount: 0, lastStepIdx: -1 }, user.id);
+        const row = mapContactedLeadToRow({ ...item, followUpCount: 0, lastStepIdx: -1 }, user.id, orgId);
         const { error } = await supabase.from(TABLE).insert(row);
         if (error) console.error('Error adding contacted lead:', error);
     },
@@ -262,7 +275,13 @@ export const contactedLeadsStorage = {
     isContacted: async (email?: string, leadId?: string): Promise<boolean> => {
         if (!email && !leadId) return false;
 
+        const orgId = await organizationService.getCurrentOrganizationId();
+
         let query = supabase.from(TABLE).select('id', { count: 'exact', head: true });
+
+        if (orgId) {
+            query = query.eq('organization_id', orgId);
+        }
 
         if (email && leadId) {
             query = query.or(`email.ilike.${email},lead_id.eq.${leadId}`);

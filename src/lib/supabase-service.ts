@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import type { Lead } from './types';
+import { organizationService } from './services/organization-service';
 
 const TABLE = 'leads';
 
@@ -7,6 +8,7 @@ const TABLE = 'leads';
 function mapRowToLead(row: any): Lead {
     return {
         id: row.id,
+        organizationId: row.organization_id,
         name: row.name,
         title: row.title,
         company: row.company,
@@ -25,12 +27,13 @@ function mapRowToLead(row: any): Lead {
 }
 
 // Helper to map Lead type to DB row
-function mapLeadToRow(lead: Lead, userId: string) {
+function mapLeadToRow(lead: Lead, userId: string, organizationId: string | null) {
     // Validate UUID. If invalid, let DB generate one.
     const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lead.id || '');
 
     const row: any = {
         user_id: userId,
+        organization_id: organizationId,
         name: lead.name,
         title: lead.title,
         company: lead.company,
@@ -56,10 +59,18 @@ function mapLeadToRow(lead: Lead, userId: string) {
 
 export const supabaseService = {
     async getLeads(): Promise<Lead[]> {
-        const { data, error } = await supabase
+        const orgId = await organizationService.getCurrentOrganizationId();
+
+        let query = supabase
             .from(TABLE)
             .select('*')
             .order('created_at', { ascending: false });
+
+        if (orgId) {
+            query = query.eq('organization_id', orgId);
+        }
+
+        const { data, error } = await query;
 
         if (error) {
             console.error('Error fetching leads:', error);
@@ -78,6 +89,8 @@ export const supabaseService = {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return { addedCount: 0, duplicateCount: 0 };
 
+        const orgId = await organizationService.getCurrentOrganizationId();
+
         const existing = await this.getLeads();
         // Use content-based key for deduplication because incoming IDs might be non-UUIDs (from n8n)
         // while existing IDs are UUIDs. Comparing them would always fail.
@@ -90,7 +103,7 @@ export const supabaseService = {
         for (const it of items) {
             const k = key(it);
             if (!seen.has(k)) {
-                toInsert.push(mapLeadToRow(it, user.id));
+                toInsert.push(mapLeadToRow(it, user.id, orgId));
                 seen.add(k);
             } else {
                 duplicateCount++;

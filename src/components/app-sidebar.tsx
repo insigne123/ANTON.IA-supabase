@@ -14,7 +14,7 @@ import {
   SidebarTrigger
 } from '@/components/ui/sidebar';
 import {
-  User, Search, Send, Share2, Briefcase, Settings, Table as TableIcon, Users, MailCheck, Mail, LayoutDashboard,
+  User, Search, Send, Share2, Briefcase, Settings, Table as TableIcon, Users, MailCheck, Mail, LayoutDashboard, Building2,
 } from 'lucide-react';
 import Logo from './logo';
 
@@ -31,6 +31,7 @@ const navItems = [
   { href: '/outlook', icon: Share2, label: 'Conexión con Outlook' },
   { href: '/gmail', icon: Mail, label: 'Conectar Gmail' },
   { href: '/settings/email-studio', icon: Settings, label: 'Ajustes · Email Studio' },
+  { href: '/settings/organization', icon: Building2, label: 'Ajustes · Organización' },
 ];
 
 export function AppSidebar() {

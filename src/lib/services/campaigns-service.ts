@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { contactedLeadsStorage } from './contacted-leads-service';
+import { organizationService } from './organization-service';
 
 export type CampaignStepAttachment = {
     name: string;
@@ -18,6 +19,7 @@ export type CampaignStep = {
 
 export type Campaign = {
     id: string;
+    organizationId?: string;
     name: string;
     isPaused: boolean;
     createdAt: string;
@@ -35,6 +37,7 @@ function mapRowToCampaign(row: any): Campaign {
 
     return {
         id: row.id,
+        organizationId: row.organization_id,
         name: row.name || 'Campaña',
         // Map status column to isPaused boolean
         isPaused: row.status === 'PAUSED',
@@ -50,10 +53,12 @@ function mapRowToCampaign(row: any): Campaign {
     };
 }
 
-function mapCampaignToRow(c: Partial<Campaign>) {
+function mapCampaignToRow(c: Partial<Campaign>, userId?: string, organizationId?: string | null) {
     const row: any = {};
     if (c.id) row.id = c.id;
     if (c.name !== undefined) row.name = c.name;
+    if (userId) row.user_id = userId;
+    if (organizationId) row.organization_id = organizationId;
 
     // Map isPaused to status column
     if (c.isPaused !== undefined) {
@@ -75,22 +80,24 @@ function mapCampaignToRow(c: Partial<Campaign>) {
         };
     }
 
-    // Do NOT map to non-existent columns
-    // row.updated_at = c.updatedAt; // Column does not exist
-    // row.is_paused = c.isPaused;   // Column does not exist
-    // row.excluded_lead_ids = ...   // Column does not exist
-    // row.sent_records = ...        // Column does not exist
-
     return row;
 }
 
 export const campaignsStorage = {
     async get(): Promise<Campaign[]> {
         try {
-            const { data, error } = await supabase
+            const orgId = await organizationService.getCurrentOrganizationId();
+
+            let query = supabase
                 .from('campaigns')
                 .select('*')
                 .order('created_at', { ascending: false });
+
+            if (orgId) {
+                query = query.eq('organization_id', orgId);
+            }
+
+            const { data, error } = await query;
 
             if (error) {
                 console.error('Error fetching campaigns:', error);
@@ -111,10 +118,13 @@ export const campaignsStorage = {
                 return null;
             }
 
+            const orgId = await organizationService.getCurrentOrganizationId();
+
             const id = input.id || crypto.randomUUID();
             const now = new Date().toISOString();
             const newCampaign: Campaign = {
                 id,
+                organizationId: orgId || undefined,
                 name: input.name,
                 steps: input.steps,
                 excludedLeadIds: input.excludedLeadIds || [],
@@ -124,9 +134,7 @@ export const campaignsStorage = {
                 sentRecords: {},
             };
 
-            const row = mapCampaignToRow(newCampaign);
-            // Add user_id to satisfying RLS
-            row.user_id = user.id;
+            const row = mapCampaignToRow(newCampaign, user.id, orgId);
 
             const { error } = await supabase
                 .from('campaigns')
@@ -157,6 +165,7 @@ export const campaignsStorage = {
                 updatedAt: now
             };
 
+            // We don't update user_id or organization_id on update usually
             const row = mapCampaignToRow(merged);
 
             const { data, error } = await supabase
