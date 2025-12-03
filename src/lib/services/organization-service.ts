@@ -29,33 +29,16 @@ export const organizationService = {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return null;
 
-        // 1. Create Organization
-        const { data: org, error: orgError } = await supabase
-            .from('organizations')
-            .insert([{ name }])
-            .select()
-            .single();
+        // Use RPC to create org and add member atomically
+        const { data, error } = await supabase
+            .rpc('create_new_organization', { org_name: name });
 
-        if (orgError || !org) {
-            console.error('Error creating organization:', orgError);
+        if (error) {
+            console.error('Error creating organization:', error);
             return null;
         }
 
-        // 2. Add Member (Owner)
-        const { error: memberError } = await supabase
-            .from('organization_members')
-            .insert([{
-                organization_id: org.id,
-                user_id: user.id,
-                role: 'owner'
-            }]);
-
-        if (memberError) {
-            console.error('Error adding owner to organization:', memberError);
-            return null;
-        }
-
-        return org.id;
+        return data; // Returns the new org ID
     },
 
     async getOrganizationDetails(): Promise<{ organization: any, members: any[] } | null> {
