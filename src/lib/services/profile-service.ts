@@ -5,16 +5,24 @@ export type Profile = {
     email: string | null;
     full_name: string | null;
     avatar_url: string | null;
+    company_name?: string | null;
+    company_domain?: string | null;
+    signatures?: any; // JSONB
     created_at: string;
     updated_at: string;
 };
 
 export const profileService = {
-    async getProfile(userId: string): Promise<Profile | null> {
+    async getProfile(userId?: string): Promise<Profile | null> {
+        const { data: { user } } = await supabase.auth.getUser();
+        const targetId = userId || user?.id;
+
+        if (!targetId) return null;
+
         const { data, error } = await supabase
             .from('profiles')
             .select('*')
-            .eq('id', userId)
+            .eq('id', targetId)
             .single();
 
         if (error) {
@@ -26,12 +34,16 @@ export const profileService = {
     },
 
     async getCurrentProfile(): Promise<Profile | null> {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return null;
-        return this.getProfile(user.id);
+        return this.getProfile();
     },
 
-    async updateProfile(userId: string, updates: Partial<Profile>): Promise<Profile | null> {
+    async updateProfile(updates: Partial<Profile>): Promise<Profile | null> {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return null;
+        return this.updateProfileById(user.id, updates);
+    },
+
+    async updateProfileById(userId: string, updates: Partial<Profile>): Promise<Profile | null> {
         const { data, error } = await supabase
             .from('profiles')
             .update(updates)
