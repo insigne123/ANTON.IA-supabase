@@ -11,7 +11,7 @@ import { getEnrichedLeads } from '@/lib/saved-enriched-leads-storage';
 import { findReportForLead } from '@/lib/lead-research-storage';
 import { campaignsStorage } from '@/lib/campaigns-storage';
 import { computeEligibilityForCampaign } from '@/lib/campaign-eligibility';
-import type { EnrichedLead } from '@/lib/types';
+import type { EnrichedLead } from '../../lib/types';
 
 type ReadyToContactLead = {
   id: string;
@@ -32,17 +32,21 @@ export default function NextStepsWidget() {
       .filter(lead => !!findReportForLead({ leadId: lead.id, companyDomain: lead.companyDomain, companyName: lead.companyName }))
       .slice(0, 5) // Limitar a 5 para el widget
       .map(lead => ({ id: lead.id, name: lead.fullName, company: lead.companyName || 'N/A' }));
-    
+
     setReadyLeads(ready);
 
     const campaigns = campaignsStorage.get();
-    let totalEligible = 0;
-    campaigns.forEach(c => {
+    const promises = campaigns.map(c => {
       if (!c.isPaused) {
-        totalEligible += computeEligibilityForCampaign(c).length;
+        return computeEligibilityForCampaign(c).then(rows => rows.length);
       }
+      return Promise.resolve(0);
     });
-    setEligibleCampaignLeads(totalEligible);
+
+    Promise.all(promises).then(counts => {
+      const total = counts.reduce((a, b) => a + b, 0);
+      setEligibleCampaignLeads(total);
+    });
 
   }, []);
 
@@ -74,7 +78,7 @@ export default function NextStepsWidget() {
 
         {readyLeads.length > 0 && (
           <div className="space-y-2">
-             <p className="font-semibold text-sm">Leads Listos para Primer Contacto</p>
+            <p className="font-semibold text-sm">Leads Listos para Primer Contacto</p>
             {readyLeads.map(lead => (
               <div key={lead.id} className="flex items-center justify-between text-sm">
                 <p>
@@ -86,15 +90,15 @@ export default function NextStepsWidget() {
                 </Button>
               </div>
             ))}
-             <Link href="/saved/leads/enriched" className="text-xs text-primary hover:underline flex items-center mt-2">
+            <Link href="/saved/leads/enriched" className="text-xs text-primary hover:underline flex items-center mt-2">
               Ver todos los leads enriquecidos <ArrowRight className="ml-1 h-3 w-3" />
             </Link>
           </div>
         )}
 
         {readyLeads.length === 0 && eligibleCampaignLeads === 0 && (
-           <div className="flex flex-col items-center justify-center text-center p-6 bg-muted/30 rounded-lg">
-             <CheckCircle2 className="h-8 w-8 text-green-500 mb-2"/>
+          <div className="flex flex-col items-center justify-center text-center p-6 bg-muted/30 rounded-lg">
+            <CheckCircle2 className="h-8 w-8 text-green-500 mb-2" />
             <p className="font-medium">¡Todo al día!</p>
             <p className="text-sm text-muted-foreground">No hay acciones sugeridas por ahora.</p>
           </div>

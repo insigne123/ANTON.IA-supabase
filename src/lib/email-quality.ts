@@ -5,13 +5,13 @@ export function qualityChecks(subject: string, body: string, style: StyleProfile
   const words = body.trim().split(/\s+/).filter(Boolean).length;
   const want =
     style.length === 'short' ? [40, 100] :
-    style.length === 'medium' ? [90, 180] : [160, 300];
+      style.length === 'medium' ? [90, 180] : [160, 300];
 
   const inRange = words >= want[0] && words <= want[1];
   const cta = hasCta(subject + ' ' + body);
   const personalization =
-    (style.personalization.useLeadName && /\{\{lead\./.test(subject+body)) ||
-    (style.personalization.useCompanyName && /\{\{company\./.test(subject+body));
+    (style.personalization?.useLeadName && /\{\{lead\./.test(subject + body)) ||
+    (style.personalization?.useCompanyName && /\{\{company\./.test(subject + body));
 
   const warnings: string[] = [];
   if (!inRange) warnings.push(`Longitud sugerida: ${want[0]}–${want[1]} palabras (tienes ${words}).`);

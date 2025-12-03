@@ -25,11 +25,11 @@ export const leads: Lead[] = [
 ];
 
 export const contactedLeads: ContactedLead[] = [
-  { id: '1', name: 'Isabella Martinez', company: 'Catalyst Co.', contactDate: '2023-10-26', emailStatus: 'sent', avatar: 'https://placehold.co/40x40.png?b=1', emailContent: 'Subject: Collaboration Opportunity\n\nHi Isabella, ...' },
-  { id: '2', name: 'Jack Lewis', company: 'Fusion Dynamics', contactDate: '2023-10-25', emailStatus: 'read', avatar: 'https://placehold.co/40x40.png?b=2', emailContent: 'Subject: Quick Question\n\nHi Jack, ...' },
-  { id: '3', name: 'Karen Hall', company: 'Vortex Inc.', contactDate: '2023-10-24', emailStatus: 'replied', avatar: 'https://placehold.co/40x40.png?b=3', emailContent: 'Subject: Following up\n\nHi Karen, ...' },
-  { id: '4', name: 'Leo Young', company: 'Evolve Systems', contactDate: '2023-10-23', emailStatus: 'sent', avatar: 'https://placehold.co/40x40.png?b=4', emailContent: 'Subject: Intro to Innovatech\n\nHi Leo, ...' },
-  { id: '5', name: 'Mia Scott', company: 'Horizon Tech', contactDate: '2023-10-22', emailStatus: 'read', avatar: 'https://placehold.co/40x40.png?b=5', emailContent: 'Subject: Your tech stack\n\nHi Mia, ...' },
+  { id: '1', name: 'Isabella Martinez', email: 'isabella@catalyst.co', company: 'Catalyst Co.', sentAt: '2023-10-26T10:00:00Z', status: 'sent', subject: 'Collaboration Opportunity', provider: 'gmail' },
+  { id: '2', name: 'Jack Lewis', email: 'jack@fusion.dyn', company: 'Fusion Dynamics', sentAt: '2023-10-25T14:30:00Z', status: 'sent', subject: 'Quick Question', provider: 'outlook' },
+  { id: '3', name: 'Karen Hall', email: 'karen@vortex.inc', company: 'Vortex Inc.', sentAt: '2023-10-24T09:15:00Z', status: 'replied', subject: 'Following up', provider: 'gmail', repliedAt: '2023-10-25T09:00:00Z' },
+  { id: '4', name: 'Leo Young', email: 'leo@evolve.sys', company: 'Evolve Systems', sentAt: '2023-10-23T16:45:00Z', status: 'sent', subject: 'Intro to Innovatech', provider: 'outlook' },
+  { id: '5', name: 'Mia Scott', email: 'mia@horizon.tech', company: 'Horizon Tech', sentAt: '2023-10-22T11:20:00Z', status: 'sent', subject: 'Your tech stack', provider: 'gmail' },
 ];
 
 export const industries = ["Human Resources", "Technology", "Healthcare", "Finance", "Manufacturing", "Retail", "Education", "Accounting", "Architecture & Planning", "Apparel & Fashion", "Automotive", "Building Materials", "Biotechnology", "Environment Services", "Electrical/Electronic Manufacturing", "Computer Software", "Entertainment", "Education Management", "Construction", "Financial Services", "Government Administration", "Hospitality", "Health, Wellness & Fitness", "Higher Education", "Information Services"];
@@ -64,13 +64,13 @@ export const industryMapping: { [key: string]: string } = {
 };
 
 export function getCompanyProfile() {
-    if (typeof window !== 'undefined') {
-        const savedProfile = localStorage.getItem('leadflow-company-profile');
-        if (savedProfile) {
-            return JSON.parse(savedProfile);
-        }
+  if (typeof window !== 'undefined') {
+    const savedProfile = localStorage.getItem('leadflow-company-profile');
+    if (savedProfile) {
+      return JSON.parse(savedProfile);
     }
-    return companyProfile;
+  }
+  return companyProfile;
 }
 
 

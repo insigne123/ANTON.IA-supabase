@@ -42,6 +42,7 @@ export interface ApifyLead {
 // Lo que tu UI consume
 export interface Lead {
   id: string;
+  organizationId?: string;
   name: string;
   title: string;
   company: string;
@@ -64,11 +65,14 @@ export interface Lead {
   city?: string | null;
 }
 
+export type SavedLead = Lead;
+
 // ⬇️ incluye 'read' y metadatos de respuesta
 export type ContactStatus = 'sent' | 'replied';
 
 export interface ContactedLead {
   id: string;
+  organizationId?: string;
   leadId?: string;
   name: string;
   email: string;
@@ -171,6 +175,7 @@ export type LeadFromApollo = {
 
 export type EnrichedLead = {
   id: string;
+  organizationId?: string;
   sourceOpportunityId?: string;
   fullName: string;
   title?: string;
@@ -346,6 +351,7 @@ export type CampaignStep = {
 
 export type Campaign = {
   id: string;
+  organizationId?: string;
   name: string;
   status: CampaignStatus;
   steps: CampaignStep[];
@@ -353,3 +359,20 @@ export type Campaign = {
   createdAt: string;
   updatedAt: string;
 };
+
+// --- ORGANIZATIONS ---
+export type OrganizationRole = 'owner' | 'admin' | 'member';
+
+export interface Organization {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface OrganizationMember {
+  organizationId: string;
+  userId: string;
+  role: OrganizationRole;
+  createdAt: string;
+}
+

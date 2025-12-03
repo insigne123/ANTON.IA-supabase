@@ -31,7 +31,7 @@ export function renderTemplateString(tpl: string, ctx: any): { text: string; war
   return { text, warnings };
 }
 
-export function buildTemplateContext(input: import('./types').RenderInput['data']) {
+export function buildTemplateContext(input: import('@/lib/types').RenderInput['data']) {
   // contexto plano y seguro
   return {
     lead: input.lead ?? {},

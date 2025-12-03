@@ -18,7 +18,7 @@ import { generateMailFromStyle } from '@/lib/ai/style-mail';
 import { getEnrichedLeads } from '@/lib/saved-enriched-leads-storage';
 import { findReportForLead } from '@/lib/lead-research-storage';
 
-type Mode = 'leads'|'opportunities';
+type Mode = 'leads' | 'opportunities';
 
 export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
   const { toast } = useToast();
@@ -30,7 +30,7 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
 
   // ======= Chat =======
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role:'assistant', content:'¡Hola! Dime el tono, longitud y estructura que quieres. Puedes usar tokens como {{lead.firstName}}.', id:'w1' }
+    { role: 'assistant' as const, content: '¡Hola! Dime el tono, longitud y estructura que quieres. Puedes usar tokens como {{lead.firstName}}.', id: 'w1' }
   ]);
   const [input, setInput] = useState('');
 
@@ -111,13 +111,13 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
 
   // ======= Chat turn (si tu endpoint no cambia nada, al menos guardamos las plantillas) =======
   async function runChatTurn(userText: string) {
-    const next = [...messages, { role:'user', content:userText, id:crypto.randomUUID() }];
+    const next = [...messages, { role: 'user' as const, content: userText, id: crypto.randomUUID() }];
     setMessages(next);
 
     try {
       const res = await fetch('/api/email/style/chat', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: next,
           styleProfile: style,
@@ -138,8 +138,8 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
       };
       setStyle(updated);
       recomputePreview(updated);
-      setMessages(prev => [...prev, { role:'assistant', content:'Listo. Ajusté el estilo y la plantilla.', id:crypto.randomUUID() }]);
-    } catch (e:any) {
+      setMessages(prev => [...prev, { role: 'assistant' as const, content: 'Listo. Ajusté el estilo y la plantilla.', id: crypto.randomUUID() }]);
+    } catch (e: any) {
       // fallback mínimo: si el usuario escribe "hazlo breve", toquetea length, etc.
       const txt = userText.toLowerCase();
       const updated = { ...style };
@@ -150,13 +150,13 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
       }
       setStyle(updated);
       recomputePreview(updated);
-      setMessages(prev => [...prev, { role:'assistant', content:'He aplicado ajustes básicos al estilo.', id:crypto.randomUUID() }]);
-      toast({ variant:'destructive', title:'Aviso', description:'El endpoint de chat no respondió. Apliqué ajustes locales.' });
+      setMessages(prev => [...prev, { role: 'assistant' as const, content: 'He aplicado ajustes básicos al estilo.', id: crypto.randomUUID() }]);
+      toast({ variant: 'destructive', title: 'Aviso', description: 'El endpoint de chat no respondió. Apliqué ajustes locales.' });
     }
   }
 
   const chatRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { chatRef.current?.scrollTo({top: 1e9}); }, [messages]);
+  useEffect(() => { chatRef.current?.scrollTo({ top: 1e9 }); }, [messages]);
 
   function send() {
     const text = input.trim();
@@ -172,7 +172,7 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
     setStyle(saved);
     setStyles(styleProfilesStorage.list());
     setSelectedStyleName(saved.name);
-    toast({ title:'Estilo guardado', description:`${saved.name}` });
+    toast({ title: 'Estilo guardado', description: `${saved.name}` });
   }
   function loadProfile(name: string) {
     const s = styleProfilesStorage.getByName(name);
@@ -215,7 +215,7 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
           {t.label}
         </Badge>
       ))}
-      <Badge variant="outline" className="cursor-pointer" onClick={() => setStyle(s => ({ ...s, cta: { ...(s.cta||{}), duration: '15', label: '¿Agendamos 15 min?' } }))}>CTA 15 min</Badge>
+      <Badge variant="outline" className="cursor-pointer" onClick={() => setStyle(s => ({ ...s, cta: { ...(s.cta || {}), duration: '15', label: '¿Agendamos 15 min?' } }))}>CTA 15 min</Badge>
     </div>
   ), []);
 
@@ -234,10 +234,10 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
             <ScrollArea ref={chatRef} className="flex-1 border rounded p-3 bg-muted/30">
               <div className="space-y-3">
                 {messages.map(m => (
-                  <div key={m.id} className={`flex gap-2 items-start ${m.role==='user'?'justify-end':''}`}>
-                    {m.role==='assistant' ? <Bot className="h-4 w-4 mt-1 opacity-70" /> : <User className="h-4 w-4 mt-1 opacity-70" />}
+                  <div key={m.id} className={`flex gap-2 items-start ${m.role === 'user' ? 'justify-end' : ''}`}>
+                    {m.role === 'assistant' ? <Bot className="h-4 w-4 mt-1 opacity-70" /> : <User className="h-4 w-4 mt-1 opacity-70" />}
                     <div className={`max-w-[85%] rounded-md px-3 py-2 text-sm leading-relaxed
-                      ${m.role==='user'?'bg-primary text-primary-foreground':'bg-background border'}`}>
+                      ${m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-background border'}`}>
                       {m.content}
                     </div>
                   </div>
@@ -245,9 +245,9 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
               </div>
             </ScrollArea>
             <div className="flex gap-2">
-              <Input placeholder="Ej: hazlo más directo y breve, con CTA de 15 min" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==='Enter' && send()} />
+              <Input placeholder="Ej: hazlo más directo y breve, con CTA de 15 min" value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} />
               <Button onClick={send}><Send className="h-4 w-4 mr-1" />Enviar</Button>
-              <Button variant="secondary" onClick={()=>runChatTurn('Genera 2 variantes') }><Wand2 className="h-4 w-4 mr-1" />Variantes</Button>
+              <Button variant="secondary" onClick={() => runChatTurn('Genera 2 variantes')}><Wand2 className="h-4 w-4 mr-1" />Variantes</Button>
             </div>
           </CardContent>
         </Card>
@@ -261,19 +261,19 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
           <CardContent className="space-y-2">
             {styles.map(s => (
               <div key={s.name} className="flex items-center justify-between border rounded px-2 py-1">
-                <button className="text-left text-sm" onClick={()=>loadProfile(s.name)}>
+                <button className="text-left text-sm" onClick={() => loadProfile(s.name)}>
                   <div className="font-medium">{s.name}</div>
                   <div className="text-xs text-muted-foreground">{s.tone} · {s.length}</div>
                 </button>
                 <div className="flex items-center gap-1">
-                  <Button size="icon" variant="ghost" title="Duplicar" onClick={()=>duplicateProfile(s.name)}><Copy className="h-4 w-4" /></Button>
-                  <Button size="icon" variant="ghost" title="Eliminar" onClick={()=>deleteProfile(s.name)}><Trash2 className="h-4 w-4" /></Button>
+                  <Button size="icon" variant="ghost" title="Duplicar" onClick={() => duplicateProfile(s.name)}><Copy className="h-4 w-4" /></Button>
+                  <Button size="icon" variant="ghost" title="Eliminar" onClick={() => deleteProfile(s.name)}><Trash2 className="h-4 w-4" /></Button>
                 </div>
               </div>
             ))}
             <div className="pt-2 flex gap-2">
               <Button onClick={saveProfile}><Save className="h-4 w-4 mr-1" />Guardar estilo</Button>
-              <Button variant="outline" onClick={()=>{ setStyle({...defaultStyle, scope: mode}); setSelectedStyleName(''); recomputePreview({...defaultStyle, scope: mode}); }}>
+              <Button variant="outline" onClick={() => { setStyle({ ...defaultStyle, scope: mode }); setSelectedStyleName(''); recomputePreview({ ...defaultStyle, scope: mode }); }}>
                 <RefreshCw className="h-4 w-4 mr-1" />Nuevo desde base
               </Button>
             </div>
@@ -296,7 +296,7 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
                 <select
                   className="ml-2 h-8 rounded border bg-background px-2 text-sm"
                   value={sampleLeadId}
-                  onChange={e=>setSampleLeadId(e.target.value)}
+                  onChange={e => setSampleLeadId(e.target.value)}
                 >
                   {sampleLeads.map(l => <option key={l.id} value={l.id}>{l.fullName} · {l.companyName}</option>)}
                 </select>
@@ -308,8 +308,8 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
               <div className="text-xs text-muted-foreground mb-1">Asunto (plantilla)</div>
               <Input
                 value={style.subjectTemplate || ''}
-                onChange={e=> setStyle(s => ({ ...s, subjectTemplate: e.target.value }))}
-                onBlur={()=> recomputePreview({ ...style })}
+                onChange={e => setStyle(s => ({ ...s, subjectTemplate: e.target.value }))}
+                onBlur={() => recomputePreview({ ...style })}
                 placeholder="Ej: {{lead.firstName}}, idea rápida para {{company.name}}"
               />
             </div>
@@ -317,8 +317,8 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
               <div className="text-xs text-muted-foreground mb-1">Cuerpo (plantilla)</div>
               <Textarea
                 value={style.bodyTemplate || ''}
-                onChange={e=> setStyle(s => ({ ...s, bodyTemplate: e.target.value }))}
-                onBlur={()=> recomputePreview({ ...style })}
+                onChange={e => setStyle(s => ({ ...s, bodyTemplate: e.target.value }))}
+                onBlur={() => recomputePreview({ ...style })}
                 rows={12}
                 className="font-mono text-sm"
                 placeholder={`Saludo\n\nHook\n\nContexto\n\nValor + CTA\n\nFirma`}
@@ -339,7 +339,7 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
                 <TabsTrigger value="b">Variante B</TabsTrigger>
                 <TabsTrigger value="c">Variante C</TabsTrigger>
               </TabsList>
-              {['a','b','c'].map(k => (
+              {['a', 'b', 'c'].map(k => (
                 <TabsContent key={k} value={k} className="mt-3">
                   <div className="space-y-3">
                     <div>
@@ -357,9 +357,9 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
                     {warnings?.length ? (
                       <div className="rounded border p-2 text-xs">
                         <div className="font-medium mb-1">Checklist</div>
-                        <ul className="list-disc pl-5 space-y-1">{warnings.map((w,i)=><li key={i}>{w}</li>)}</ul>
+                        <ul className="list-disc pl-5 space-y-1">{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
                       </div>
-                    ): null}
+                    ) : null}
                   </div>
                 </TabsContent>
               ))}

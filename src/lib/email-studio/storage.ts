@@ -1,4 +1,4 @@
-import { EmailTemplate } from './types';
+import { EmailTemplate } from '@/lib/types';
 
 const KEY = 'leadflow-email-templates';
 

@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { savedOpportunitiesStorage } from '@/lib/services/opportunities-service';
-import { getSavedLeads } from '@/lib/saved-leads-storage';
+import { supabaseService } from '@/lib/supabase-service';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -26,7 +26,7 @@ export default function ActivityFeed() {
       // Simulación de carga de datos desde diferentes storages.
       const contacted = await contactedLeadsStorage.get();
       const opps = await savedOpportunitiesStorage.get();
-      const savedLeads = getSavedLeads();
+      const savedLeads = await supabaseService.getLeads();
 
       const feed: ActivityItem[] = [];
 

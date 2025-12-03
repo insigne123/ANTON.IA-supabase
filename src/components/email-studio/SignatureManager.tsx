@@ -7,8 +7,7 @@ import {
   EmailChannel,
   SignatureConfig,
 } from '@/lib/email-signature-storage';
-import { getFirebaseStorage, ensureSignedInAnonymously } from '@/lib/firebase-client';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { supabase } from '@/lib/supabase';
 
 type Props = { channel: EmailChannel };
 
@@ -68,7 +67,7 @@ export default function SignatureManager({ channel }: Props) {
   const [separatorPlaintext, setSeparatorPlaintext] = useState(true);
 
   // Imagen
-  const [logoUrl, setLogoUrl] = useState('');             // URL pública (getDownloadURL)
+  const [logoUrl, setLogoUrl] = useState('');             // URL pública
   const [localPreviewUrl, setLocalPreviewUrl] = useState(''); // URL.createObjectURL(file)
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
@@ -90,7 +89,6 @@ export default function SignatureManager({ channel }: Props) {
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Cargar firma previa (si existe)
   // Cargar firma previa (si existe)
   useEffect(() => {
     (async () => {
@@ -143,25 +141,33 @@ export default function SignatureManager({ channel }: Props) {
     try {
       setUploading(true);
       setUploadMsg('Subiendo…');
-      const storage = getFirebaseStorage();
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuario no autenticado');
+
       const ext = file.type === 'image/png' ? 'png' : 'jpg';
-      // 🔐 Subir a la carpeta del usuario autenticado (Anonymous OK)
-      const uid = await ensureSignedInAnonymously();
-      const key = `signatures/${uid}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const r = ref(storage, key);
-      await uploadBytes(r, file, {
-        contentType: file.type,
-        cacheControl: 'public, max-age=31536000, immutable',
-      });
-      setUploadMsg('Obteniendo URL pública…');
-      const url = await getDownloadURL(r);
-      setLogoUrl(url);
+      const key = `signatures/${user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
+      const { data, error: uploadError } = await supabase.storage
+        .from('public') // Asumiendo bucket 'public'
+        .upload(key, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('public')
+        .getPublicUrl(key);
+
+      setLogoUrl(publicUrl);
       setUploadMsg('Listo');
 
       // Autoguardar firma (solo-imagen por defecto)
       const html = addText
-        ? combinedHTML(url, imgWidth, alt || 'Firma', name || '', title || '', website || '', phone || '')
-        : onlyImageHTML(url, imgWidth, alt || 'Firma');
+        ? combinedHTML(publicUrl, imgWidth, alt || 'Firma', name || '', title || '', website || '', phone || '')
+        : onlyImageHTML(publicUrl, imgWidth, alt || 'Firma');
 
       const cfg: SignatureConfig = {
         channel,
@@ -183,7 +189,7 @@ export default function SignatureManager({ channel }: Props) {
       setTimeout(() => setUploadMsg(''), 1200);
     } catch (e: any) {
       console.error('[signature/upload]', e);
-      setError(e?.message || 'Error subiendo la imagen. Verifica configuración de Firebase Storage.');
+      setError(e?.message || 'Error subiendo la imagen. Verifica configuración de Supabase Storage.');
     } finally {
       setUploading(false);
     }

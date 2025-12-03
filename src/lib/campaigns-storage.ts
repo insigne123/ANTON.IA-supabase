@@ -43,9 +43,9 @@ function sanitize(items: any[]): Campaign[] {
       id: String(s.id),
       name: String(s.name || 'Paso'),
       offsetDays: Number.isFinite(+s.offsetDays) ? Number(s.offsetDays) : 0,
-      subject: String(s.subject || s.subjectTemplate ||''),
+      subject: String(s.subject || s.subjectTemplate || ''),
       bodyHtml: String(s.bodyHtml || s.bodyTemplate || ''),
-      attachments: Array.isArray(s.attachments) ? s.attachments.map((a) => ({
+      attachments: Array.isArray(s.attachments) ? s.attachments.map((a: any) => ({
         name: String(a.name || 'file'),
         contentBytes: String(a.contentBytes || ''),
         contentType: a.contentType ? String(a.contentType) : undefined,

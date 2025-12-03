@@ -8,14 +8,14 @@ export async function POST(req: NextRequest) {
 
     // Llama al flow de Genkit para producir JSON bien estructurado (EnhancedReport)
     const out = await enhanceCompanyReport({
-      rawReport,
-      normalizedReport,
+      report: normalizedReport || rawReport,
       companyProfile,
       lead,
+      myCompany: { name: 'ANTON.IA', description: 'AI Agent' }, // Dummy data to satisfy schema
     });
 
     return NextResponse.json(out);
-  } catch (e:any) {
+  } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'AI error' }, { status: 500 });
   }
 }

@@ -11,6 +11,11 @@ function ruleBasedUpdateStyle(messages: ChatMessage[], prev: StyleProfile): Styl
   const last = (messages || []).slice().reverse().find(m => m.role === 'user')?.content.toLowerCase() || '';
   const style = { ...prev };
 
+  // Ensure defaults
+  style.structure = style.structure || ['hook', 'context', 'value', 'cta'];
+  style.personalization = style.personalization || { useLeadName: true, useCompanyName: true };
+  style.cta = style.cta || { label: '¿15 min?', duration: '15' };
+
   // tono
   if (/cálid|calid|amable|cercan/.test(last)) style.tone = 'warm';
   if (/direct|al grano|conciso/.test(last)) style.tone = 'direct';
@@ -40,7 +45,7 @@ function ruleBasedUpdateStyle(messages: ChatMessage[], prev: StyleProfile): Styl
 }
 
 // Render: llama a tu endpoint existente de render (servidor a servidor)
-async function renderEmail(style: StyleProfile, mode: 'leads'|'opportunities', sampleData: any) {
+async function renderEmail(style: StyleProfile, mode: 'leads' | 'opportunities', sampleData: any) {
   const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/email/render`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -51,12 +56,12 @@ async function renderEmail(style: StyleProfile, mode: 'leads'|'opportunities', s
 
   if (!res || !res.ok) {
     // fallback muy simple si /api/email/render no existe
-    const subj = `[${style.tone}] {{company.name}} · ${style.cta.label || 'Conversación breve'}`;
+    const subj = `[${style.tone}] {{company.name}} · ${style.cta?.label || 'Conversación breve'}`;
     const body =
-`Hola {{lead.firstName}},
+      `Hola {{lead.firstName}},
 
 Soy de Innovatech. Vi {{company.name}} y creo que podemos aportar valor con X.
-¿${style.cta.duration || '15'} min esta semana?
+¿${style.cta?.duration || '15'} min esta semana?
 
 Saludos,
 —`;
@@ -99,7 +104,7 @@ export async function POST(req: Request) {
       preview,
       warnings: qc.warnings,
     });
-  } catch (e:any) {
+  } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 });
   }
 }

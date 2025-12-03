@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTemplateById } from '@/lib/email-studio/storage';
 import { buildTemplateContext, renderTemplateString } from '@/lib/email-studio/template-engine';
-import type { RenderRequest, RenderResult } from '@/lib/email-studio/types';
+import type { RenderRequest, RenderResult } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     result.warnings = [...(result.warnings || []), ...warns];
 
     return NextResponse.json(result);
-  } catch (e:any) {
+  } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Render error' }, { status: 500 });
   }
 }
