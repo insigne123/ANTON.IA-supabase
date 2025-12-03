@@ -1,5 +1,17 @@
+'use client';
+
+import { useEffect, useState, useCallback } from 'react';
+import { organizationService } from '@/lib/services/organization-service';
+import { useRealtime } from '@/hooks/use-realtime';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Loader2, Plus, Copy, Mail, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Copy, Mail, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 export default function OrganizationSettingsPage() {
