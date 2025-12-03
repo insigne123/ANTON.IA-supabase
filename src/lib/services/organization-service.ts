@@ -58,7 +58,14 @@ export const organizationService = {
 
         const { data: members, error: membersError } = await supabase
             .from('organization_members')
-            .select('*')
+            .select(`
+                *,
+                profiles:user_id (
+                    full_name,
+                    email,
+                    avatar_url
+                )
+            `)
             .eq('organization_id', orgId);
 
         if (membersError) {
@@ -67,5 +74,71 @@ export const organizationService = {
         }
 
         return { organization: org, members: members || [] };
+    },
+
+    async createInvite(email: string, role: 'admin' | 'member' = 'member'): Promise<{ token: string } | null> {
+        const orgId = await this.getCurrentOrganizationId();
+        if (!orgId) return null;
+
+        const token = crypto.randomUUID();
+
+        const { error } = await supabase
+            .from('organization_invites')
+            .insert([{
+                organization_id: orgId,
+                email,
+                role,
+                token
+            }]);
+
+        if (error) {
+            console.error('Error creating invite:', error);
+            return null;
+        }
+
+        return { token };
+    },
+
+    async getInvites(): Promise<any[]> {
+        const orgId = await this.getCurrentOrganizationId();
+        if (!orgId) return [];
+
+        const { data, error } = await supabase
+            .from('organization_invites')
+            .select('*')
+            .eq('organization_id', orgId);
+
+        if (error) {
+            console.error('Error fetching invites:', error);
+            return [];
+        }
+
+        return data || [];
+    },
+
+    async revokeInvite(inviteId: string): Promise<boolean> {
+        const { error } = await supabase
+            .from('organization_invites')
+            .delete()
+            .eq('id', inviteId);
+
+        if (error) {
+            console.error('Error revoking invite:', error);
+            return false;
+        }
+
+        return true;
+    },
+
+    async acceptInvite(token: string): Promise<boolean> {
+        const { data, error } = await supabase
+            .rpc('accept_invite', { invite_token: token });
+
+        if (error) {
+            console.error('Error accepting invite:', error);
+            throw error;
+        }
+
+        return !!data;
     }
 };
