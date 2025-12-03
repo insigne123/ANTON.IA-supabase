@@ -67,7 +67,8 @@ export const supabaseService = {
             .order('created_at', { ascending: false });
 
         if (orgId) {
-            query = query.eq('organization_id', orgId);
+            // Allow seeing leads for the current org OR legacy leads (null org_id)
+            query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
         }
 
         const { data, error } = await query;
