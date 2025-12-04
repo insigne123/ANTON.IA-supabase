@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { contactedLeadsStorage } from './contacted-leads-service';
 import { organizationService } from './organization-service';
+import { activityLogService } from './activity-log-service';
 
 export type CampaignStepAttachment = {
     name: string;
@@ -145,6 +146,9 @@ export const campaignsStorage = {
                 console.error('Error adding campaign:', error);
                 return null;
             }
+
+            await activityLogService.logActivity('create_campaign', 'campaign', newCampaign.id, { name: newCampaign.name });
+
             return newCampaign;
         } catch (err) {
             console.error('Unexpected error adding campaign:', err);

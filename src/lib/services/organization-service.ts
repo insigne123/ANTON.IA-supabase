@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { activityLogService } from './activity-log-service';
 
 export const organizationService = {
     async getCurrentOrganizationId(): Promise<string | null> {
@@ -96,6 +97,8 @@ export const organizationService = {
             return null;
         }
 
+        await activityLogService.logActivity('invite_member', 'member', undefined, { email, role });
+
         return { token };
     },
 
@@ -170,6 +173,23 @@ export const organizationService = {
             console.error('Error deleting organization:', error);
             return false;
         }
+        return true;
+    },
+
+    async updateMemberRole(orgId: string, userId: string, newRole: 'admin' | 'member' | 'owner'): Promise<boolean> {
+        // Only owners/admins can update roles (RLS enforced)
+        const { error } = await supabase
+            .from('organization_members')
+            .update({ role: newRole })
+            .eq('organization_id', orgId)
+            .eq('user_id', userId);
+
+        if (error) {
+            console.error('Error updating member role:', error);
+            return false;
+        }
+
+        await activityLogService.logActivity('update_member', 'member', userId, { newRole });
         return true;
     }
 };

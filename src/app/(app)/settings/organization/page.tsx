@@ -13,6 +13,8 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Plus, Copy, Mail, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ActivityHistory } from '@/components/activity-history';
 
 export default function OrganizationSettingsPage() {
     const [loading, setLoading] = useState(true);
@@ -152,6 +154,17 @@ export default function OrganizationSettingsPage() {
 
     const { organization, members } = orgData;
 
+    const handleRoleChange = async (userId: string, newRole: 'admin' | 'member' | 'owner') => {
+        if (!orgData) return;
+        const success = await organizationService.updateMemberRole(orgData.organization.id, userId, newRole);
+        if (success) {
+            toast({ title: "Role Updated", description: "Member role has been updated." });
+            loadData();
+        } else {
+            toast({ variant: "destructive", title: "Error", description: "Failed to update role." });
+        }
+    };
+
     return (
         <div className="space-y-6 p-6">
             <div>
@@ -264,7 +277,21 @@ export default function OrganizationSettingsPage() {
                                         {new Date(member.created_at).toLocaleDateString()}
                                     </TableCell>
                                     <TableCell className="text-right">
-                                        {/* Actions placeholder */}
+                                        {currentUserRole === 'owner' && member.role !== 'owner' && (
+                                            <Select
+                                                defaultValue={member.role}
+                                                onValueChange={(val) => handleRoleChange(member.user_id, val as any)}
+                                            >
+                                                <SelectTrigger className="w-[100px] h-8">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="member">Member</SelectItem>
+                                                    <SelectItem value="admin">Admin</SelectItem>
+                                                    <SelectItem value="owner">Owner</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        )}
                                     </TableCell>
                                 </TableRow>
                             ))}
@@ -323,6 +350,8 @@ export default function OrganizationSettingsPage() {
                     </CardContent>
                 </Card>
             )}
+
+            <ActivityHistory />
 
             <Card className="border-destructive/50">
                 <CardHeader>

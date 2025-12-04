@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import type { Lead } from './types';
 import { organizationService } from './services/organization-service';
+import { activityLogService } from './services/activity-log-service';
 
 const TABLE = 'leads';
 
@@ -117,6 +118,12 @@ export const supabaseService = {
                 console.error('Error adding leads:', error);
                 return { addedCount: 0, duplicateCount }; // Or throw
             }
+
+            // Log activity for each new lead
+            // We do this asynchronously to not block the UI
+            toInsert.forEach(lead => {
+                activityLogService.logActivity('create_lead', 'lead', lead.id, { name: lead.name, company: lead.company });
+            });
         }
 
         return { addedCount: toInsert.length, duplicateCount };
