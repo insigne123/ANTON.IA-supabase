@@ -51,11 +51,11 @@ export const activityLogService = {
         }
     },
 
-    async getActivities(limit: number = 20) {
+    async getActivities(limit: number = 20, filters?: { userId?: string; action?: ActivityAction }) {
         const orgId = await organizationService.getCurrentOrganizationId();
         if (!orgId) return [];
 
-        const { data, error } = await supabase
+        let query = supabase
             .from('activity_logs')
             .select(`
                 *,
@@ -68,6 +68,16 @@ export const activityLogService = {
             .eq('organization_id', orgId)
             .order('created_at', { ascending: false })
             .limit(limit);
+
+        if (filters?.userId && filters.userId !== 'all') {
+            query = query.eq('user_id', filters.userId);
+        }
+
+        if (filters?.action && filters.action !== 'all' as any) {
+            query = query.eq('action', filters.action);
+        }
+
+        const { data, error } = await query;
 
         if (error) {
             console.error('Error fetching activities:', error);

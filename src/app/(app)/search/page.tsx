@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
@@ -13,9 +12,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from '@/components/ui/pagination';
 import { companySizes } from '@/lib/data';
-import type { Lead as UILaed } from '@/lib/types';
+import type { Lead as UILaed, SavedSearch } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Search, Save, X, Frown, ChevronDown, Loader2 } from 'lucide-react';
+import { Search, Save, X, Frown, ChevronDown, Loader2, Bookmark, BookmarkPlus, Trash2 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
 import { supabaseService } from '@/lib/supabase-service';
@@ -32,6 +31,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { APOLLO_SENIORITIES } from '@/lib/apollo-taxonomies';
+import { savedSearchesService } from '@/lib/services/saved-searches-service';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 
 function MultiCheckDropdown({
   label,
@@ -168,6 +170,13 @@ export default function SearchPage() {
   const abortRef = useRef<AbortController | null>(null);
   const submittingRef = useRef(false);
 
+  // Saved Searches State
+  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
+  const [saveSearchOpen, setSaveSearchOpen] = useState(false);
+  const [newSearchName, setNewSearchName] = useState('');
+  const [isShared, setIsShared] = useState(false);
+  const [savingSearch, setSavingSearch] = useState(false);
+
   useEffect(() => { setPageIndex(0); }, [leads]);
 
   // Cargar leads guardados y contactados para verificar estado
@@ -184,7 +193,15 @@ export default function SearchPage() {
       });
       setContactedIds(cSet);
     });
+
+    // Load saved searches
+    loadSavedSearches();
   }, []);
+
+  const loadSavedSearches = async () => {
+    const data = await savedSearchesService.getSavedSearches();
+    setSavedSearches(data);
+  };
 
   const [filters, setFilters] = useState({
     industry: '',
@@ -353,12 +370,83 @@ export default function SearchPage() {
     setSelectedLeads(newSelectedLeads);
   };
 
+  // Saved Searches Handlers
+  const handleSaveSearch = async () => {
+    if (!newSearchName.trim()) return;
+    setSavingSearch(true);
+    try {
+      await savedSearchesService.saveSearch(newSearchName, filters, isShared);
+      toast({ title: 'Búsqueda guardada', description: 'Los filtros se han guardado correctamente.' });
+      setSaveSearchOpen(false);
+      setNewSearchName('');
+      setIsShared(false);
+      loadSavedSearches();
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Error', description: 'No se pudo guardar la búsqueda.' });
+    } finally {
+      setSavingSearch(false);
+    }
+  };
+
+  const handleLoadSearch = (search: SavedSearch) => {
+    setFilters(search.criteria);
+    toast({ title: 'Filtros cargados', description: `Se han aplicado los filtros de "${search.name}".` });
+  };
+
+  const handleDeleteSearch = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (!confirm('¿Eliminar esta búsqueda guardada?')) return;
+    try {
+      await savedSearchesService.deleteSearch(id);
+      loadSavedSearches();
+      toast({ title: 'Búsqueda eliminada' });
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Error', description: 'No se pudo eliminar la búsqueda.' });
+    }
+  };
+
   return (
     <div className="container mx-auto py-2">
       <PageHeader
         title="Búsqueda de Leads"
         description="Encuentra nuevos prospectos utilizando filtros avanzados para refinar tu búsqueda."
-      />
+      >
+        <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Bookmark className="mr-2 h-4 w-4" />
+                Cargar Búsqueda
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64 max-h-80 overflow-auto">
+              {savedSearches.length === 0 ? (
+                <div className="p-2 text-sm text-muted-foreground text-center">No hay búsquedas guardadas.</div>
+              ) : (
+                savedSearches.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between p-2 hover:bg-muted rounded-sm cursor-pointer group" onClick={() => handleLoadSearch(s)}>
+                    <div className="flex flex-col overflow-hidden">
+                      <span className="text-sm font-medium truncate">{s.name}</span>
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        {s.isShared ? 'Compartida' : 'Privada'} • {s.user?.fullName}
+                      </span>
+                    </div>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100" onClick={(e) => handleDeleteSearch(e, s.id)}>
+                      <Trash2 className="h-3 w-3 text-destructive" />
+                    </Button>
+                  </div>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Button variant="secondary" onClick={() => setSaveSearchOpen(true)}>
+            <BookmarkPlus className="mr-2 h-4 w-4" />
+            Guardar Filtros
+          </Button>
+        </div>
+      </PageHeader>
+
       <Card className="mb-8">
         <CardHeader>
           <CardTitle>Filtros de Búsqueda</CardTitle>
@@ -519,6 +607,31 @@ export default function SearchPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={saveSearchOpen} onOpenChange={setSaveSearchOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Guardar Búsqueda</DialogTitle>
+            <DialogDescription>Guarda los filtros actuales para usarlos después o compartirlos con tu equipo.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="search-name">Nombre de la búsqueda</Label>
+              <Input id="search-name" value={newSearchName} onChange={(e) => setNewSearchName(e.target.value)} placeholder="Ej: Gerentes de Marketing en Chile" />
+            </div>
+            <div className="flex items-center space-x-2">
+              <Switch id="shared" checked={isShared} onCheckedChange={setIsShared} />
+              <Label htmlFor="shared">Compartir con mi organización</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSaveSearchOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSaveSearch} disabled={savingSearch || !newSearchName.trim()}>
+              {savingSearch ? 'Guardando...' : 'Guardar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

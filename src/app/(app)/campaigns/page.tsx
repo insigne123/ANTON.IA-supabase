@@ -18,6 +18,7 @@ import { googleAuthService } from '@/lib/google-auth-service';
 import type { ContactedLead } from '@/lib/types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { CommentsSection } from '@/components/comments-section';
 
 type Mode = { kind: 'list' } | { kind: 'edit'; id?: string };
 
@@ -507,112 +508,131 @@ export default function CampaignsPage() {
       )}
 
       {mode.kind === 'edit' && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>{draft.id ? 'Editar campaña' : 'Nueva campaña'}</CardTitle>
-              <CardDescription>Define pasos, adjuntos, exclusiones y guarda.</CardDescription>
-            </div>
-            <div className="space-x-2">
-              <Button variant="secondary" onClick={() => setAiOpen(true)}>
-                <Sparkles className="mr-2 h-4 w-4" />
-                Generar con IA
-              </Button>
-              <Button variant="outline" onClick={() => setMode({ kind: 'list' })}>Cancelar</Button>
-              <Button onClick={saveCampaign} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">Nombre</label>
-              <Input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
-            </div>
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>{draft.id ? 'Editar campaña' : 'Nueva campaña'}</CardTitle>
+                  <CardDescription>Define pasos, adjuntos, exclusiones y guarda.</CardDescription>
+                </div>
+                <div className="space-x-2">
+                  <Button variant="secondary" onClick={() => setAiOpen(true)}>
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Generar con IA
+                  </Button>
+                  <Button variant="outline" onClick={() => setMode({ kind: 'list' })}>Cancelar</Button>
+                  <Button onClick={saveCampaign} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid gap-2">
+                  <label className="text-sm font-medium">Nombre</label>
+                  <Input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
+                </div>
 
-            <div className="space-y-3">
-              <div className="text-sm font-medium">Pasos</div>
-              {draft.steps.map((s, idx) => (
-                <div key={s.id} className="border rounded-md p-3 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="font-medium">Paso {idx + 1}</div>
-                    <Button size="sm" variant="ghost" onClick={() => removeStep(s.id)} aria-label="Eliminar paso">
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="grid md:grid-cols-3 gap-3">
-                    <div className="grid gap-2">
-                      <label className="text-sm">Nombre</label>
-                      <Input value={s.name} onChange={(e) =>
-                        setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, name: e.target.value } : x) }))
-                      } />
+                <div className="space-y-3">
+                  <div className="text-sm font-medium">Pasos</div>
+                  {draft.steps.map((s, idx) => (
+                    <div key={s.id} className="border rounded-md p-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="font-medium">Paso {idx + 1}</div>
+                        <Button size="sm" variant="ghost" onClick={() => removeStep(s.id)} aria-label="Eliminar paso">
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="grid md:grid-cols-3 gap-3">
+                        <div className="grid gap-2">
+                          <label className="text-sm">Nombre</label>
+                          <Input value={s.name} onChange={(e) =>
+                            setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, name: e.target.value } : x) }))
+                          } />
+                        </div>
+                        <div className="grid gap-2">
+                          <label className="text-sm">Offset (días)</label>
+                          <Input type="number" min={0} value={s.offsetDays}
+                            onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, offsetDays: Number(e.target.value || 0) } : x) }))} />
+                        </div>
+                        <div className="grid gap-2">
+                          <label className="text-sm">Asunto</label>
+                          <Input value={s.subject}
+                            onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, subject: e.target.value } : x) }))} />
+                        </div>
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-sm">Cuerpo (HTML permitido, variables: {'{{lead.name}} {{company}} {{sender.name}}'})</label>
+                        <Textarea rows={8} className="font-mono text-sm" value={s.bodyHtml}
+                          onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, bodyHtml: e.target.value } : x) }))} />
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-sm">Adjuntos (imágenes/archivos)</label>
+                        <Input type="file" multiple onChange={(e) => onStepFile(e, s.id)} />
+                        {s.attachments?.length ? <div className="text-xs text-muted-foreground">Adjuntos guardados: {s.attachments.length}</div> : null}
+                      </div>
                     </div>
-                    <div className="grid gap-2">
-                      <label className="text-sm">Offset (días)</label>
-                      <Input type="number" min={0} value={s.offsetDays}
-                        onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, offsetDays: Number(e.target.value || 0) } : x) }))} />
-                    </div>
-                    <div className="grid gap-2">
-                      <label className="text-sm">Asunto</label>
-                      <Input value={s.subject}
-                        onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, subject: e.target.value } : x) }))} />
-                    </div>
+                  ))}
+                  <Button variant="secondary" onClick={addStep}><Plus className="mr-2 h-4 w-4" />Añadir paso</Button>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="text-sm font-medium">Exclusiones (leads contactados que NO participarán)</div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Checkbox id="exclude-all" checked={draft.excludedLeadIds.length > 0 && draft.excludedLeadIds.length >= contacted.length}
+                      onCheckedChange={(v) => excludeAll(Boolean(v))} />
+                    <label htmlFor="exclude-all" className="text-sm cursor-pointer">Excluir todos</label>
                   </div>
-                  <div className="grid gap-2">
-                    <label className="text-sm">Cuerpo (HTML permitido, variables: {'{{lead.name}} {{company}} {{sender.name}}'})</label>
-                    <Textarea rows={8} className="font-mono text-sm" value={s.bodyHtml}
-                      onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, bodyHtml: e.target.value } : x) }))} />
-                  </div>
-                  <div className="grid gap-2">
-                    <label className="text-sm">Adjuntos (imágenes/archivos)</label>
-                    <Input type="file" multiple onChange={(e) => onStepFile(e, s.id)} />
-                    {s.attachments?.length ? <div className="text-xs text-muted-foreground">Adjuntos guardados: {s.attachments.length}</div> : null}
+                  <div className="border rounded-md max-h-[40vh] overflow-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-10"></TableHead>
+                          <TableHead>Lead</TableHead>
+                          <TableHead>Empresa</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Estado</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {contacted.length === 0 ? (
+                          <TableRow><TableCell colSpan={5} className="text-center py-6 text-muted-foreground">No hay leads contactados aún.</TableCell></TableRow>
+                        ) : contacted.map((cl: any) => {
+                          const id = String(cl.leadId || '');
+                          const checked = draft.excludedLeadIds.includes(id);
+                          return (
+                            <TableRow key={id}>
+                              <TableCell>
+                                <Checkbox checked={checked} onCheckedChange={(v) => onExcludeToggle(id, Boolean(v))} />
+                              </TableCell>
+                              <TableCell>{cl.name}</TableCell>
+                              <TableCell>{cl.company || '—'}</TableCell>
+                              <TableCell>{cl.email}</TableCell>
+                              <TableCell>{cl.status}</TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
                   </div>
                 </div>
-              ))}
-              <Button variant="secondary" onClick={addStep}><Plus className="mr-2 h-4 w-4" />Añadir paso</Button>
-            </div>
+              </CardContent>
+            </Card>
+          </div>
 
-            <div className="space-y-3">
-              <div className="text-sm font-medium">Exclusiones (leads contactados que NO participarán)</div>
-              <div className="flex items-center gap-2 mb-2">
-                <Checkbox id="exclude-all" checked={draft.excludedLeadIds.length > 0 && draft.excludedLeadIds.length >= contacted.length}
-                  onCheckedChange={(v) => excludeAll(Boolean(v))} />
-                <label htmlFor="exclude-all" className="text-sm cursor-pointer">Excluir todos</label>
+          {/* Comments Section */}
+          <div className="lg:col-span-1">
+            {draft.id ? (
+              <div className="sticky top-6 h-[calc(100vh-100px)]">
+                <CommentsSection entityType="campaign" entityId={draft.id} />
               </div>
-              <div className="border rounded-md max-h-[40vh] overflow-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-10"></TableHead>
-                      <TableHead>Lead</TableHead>
-                      <TableHead>Empresa</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Estado</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {contacted.length === 0 ? (
-                      <TableRow><TableCell colSpan={5} className="text-center py-6 text-muted-foreground">No hay leads contactados aún.</TableCell></TableRow>
-                    ) : contacted.map((cl: any) => {
-                      const id = String(cl.leadId || '');
-                      const checked = draft.excludedLeadIds.includes(id);
-                      return (
-                        <TableRow key={id}>
-                          <TableCell>
-                            <Checkbox checked={checked} onCheckedChange={(v) => onExcludeToggle(id, Boolean(v))} />
-                          </TableCell>
-                          <TableCell>{cl.name}</TableCell>
-                          <TableCell>{cl.company || '—'}</TableCell>
-                          <TableCell>{cl.email}</TableCell>
-                          <TableCell>{cl.status}</TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            ) : (
+              <Card className="h-full flex items-center justify-center p-6 text-center text-muted-foreground bg-muted/30 border-dashed">
+                <div>
+                  <p>Guarda la campaña para habilitar los comentarios.</p>
+                </div>
+              </Card>
+            )}
+          </div>
+        </div>
       )}
 
       {/* === Modal de Previsualización === */}

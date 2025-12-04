@@ -1,4 +1,3 @@
-
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
@@ -11,13 +10,18 @@ import { supabaseService } from '@/lib/supabase-service';
 import type { Lead, EnrichedLead } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Download, Trash2 } from 'lucide-react';
+import { Download, Trash2, MessageSquare } from 'lucide-react';
 import { toCsv, downloadCsv } from '@/lib/csv';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
 import * as Quota from '@/lib/quota-client';
 import { getClientId } from '@/lib/client-id';
 import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { useAuth } from '@/context/AuthContext';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { CommentsSection } from '@/components/comments-section';
 
 const displayDomain = (url: string) => { try { const u = new URL(url.startsWith('http') ? url : `https://${url}`); return u.hostname.replace(/^www\./, ''); } catch { return url.replace(/^https?:\/\//, '').replace(/^www\./, ''); } };
 const asHttp = (url: string) => url.startsWith('http') ? url : `https://${url}`;
@@ -25,9 +29,12 @@ const asHttp = (url: string) => url.startsWith('http') ? url : `https://${url}`;
 export default function SavedLeadsPage() {
   const { toast } = useToast();
   const router = useRouter();
+  const { user } = useAuth();
   const [savedLeads, setSavedLeads] = useState<Lead[]>([]);
   const [selLead, setSelLead] = useState<Record<string, boolean>>({});
   const [enriching, setEnriching] = useState(false);
+  const [showOnlyMyLeads, setShowOnlyMyLeads] = useState(false);
+  const [selectedLeadForComments, setSelectedLeadForComments] = useState<Lead | null>(null);
 
   useEffect(() => {
     // Carga inicial desde Supabase
@@ -130,8 +137,13 @@ export default function SavedLeadsPage() {
     downloadCsv(`leads_${new Date().toISOString().slice(0, 10)}.csv`, csv);
   };
 
+  const filteredLeads = useMemo(() => {
+    if (!showOnlyMyLeads || !user) return savedLeads;
+    return savedLeads.filter(l => l.userId === user.id);
+  }, [savedLeads, showOnlyMyLeads, user]);
 
-  const pageLeads = savedLeads;
+  const pageLeads = filteredLeads;
+
   const allPageLeadsChecked = useMemo(
     () =>
       pageLeads.length > 0 &&
@@ -292,7 +304,11 @@ export default function SavedLeadsPage() {
             <CardTitle>Leads guardados</CardTitle>
             <CardDescription>Selecciona los que no tienen email para enriquecerlos.</CardDescription>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            <div className="flex items-center space-x-2 mr-4">
+              <Switch id="my-leads" checked={showOnlyMyLeads} onCheckedChange={setShowOnlyMyLeads} />
+              <Label htmlFor="my-leads">Solo mis leads</Label>
+            </div>
             <Button variant="outline" onClick={handleExportCsv}>
               <Download className="mr-2 h-4 w-4" />
               Exportar CSV
@@ -373,7 +389,10 @@ export default function SavedLeadsPage() {
                     <TableCell>{l.industry || '—'}</TableCell>
                     <TableCell>{l.country || '—'}</TableCell>
                     <TableCell>{l.city || '—'}</TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right flex justify-end gap-1">
+                      <Button size="icon" variant="ghost" onClick={() => setSelectedLeadForComments(l)} title="Comentarios">
+                        <MessageSquare className="h-4 w-4" />
+                      </Button>
                       <Button size="icon" variant="ghost" onClick={() => handleDeleteLead(l.id)} title="Eliminar">
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -385,6 +404,19 @@ export default function SavedLeadsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Sheet open={!!selectedLeadForComments} onOpenChange={(open) => !open && setSelectedLeadForComments(null)}>
+        <SheetContent className="w-[400px] sm:w-[540px] flex flex-col">
+          <SheetHeader>
+            <SheetTitle>Comentarios: {selectedLeadForComments?.name}</SheetTitle>
+          </SheetHeader>
+          <div className="flex-1 mt-4 overflow-hidden">
+            {selectedLeadForComments && (
+              <CommentsSection entityType="lead" entityId={selectedLeadForComments.id} />
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

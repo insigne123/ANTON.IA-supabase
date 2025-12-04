@@ -9,6 +9,7 @@ const TABLE = 'leads';
 function mapRowToLead(row: any): Lead {
     return {
         id: row.id,
+        userId: row.user_id,
         organizationId: row.organization_id,
         name: row.name,
         title: row.title,

@@ -42,6 +42,7 @@ export interface ApifyLead {
 // Lo que tu UI consume
 export interface Lead {
   id: string;
+  userId?: string;
   organizationId?: string;
   name: string;
   title: string;
@@ -374,5 +375,36 @@ export interface OrganizationMember {
   userId: string;
   role: OrganizationRole;
   createdAt: string;
+}
+
+// --- COMMENTS ---
+export interface Comment {
+  id: string;
+  organizationId: string;
+  userId: string;
+  entityType: string;
+  entityId: string;
+  content: string;
+  createdAt: string;
+  user?: {
+    fullName: string;
+    avatarUrl?: string;
+    email?: string;
+  };
+}
+
+// --- SAVED SEARCHES ---
+export interface SavedSearch {
+  id: string;
+  organizationId: string;
+  userId: string;
+  name: string;
+  criteria: any; // JSONB
+  isShared: boolean;
+  createdAt: string;
+  user?: {
+    fullName: string;
+    avatarUrl?: string;
+  };
 }
 
