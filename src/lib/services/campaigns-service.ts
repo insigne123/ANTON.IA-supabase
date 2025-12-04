@@ -94,7 +94,8 @@ export const campaignsStorage = {
                 .order('created_at', { ascending: false });
 
             if (orgId) {
-                query = query.eq('organization_id', orgId);
+                // Allow seeing campaigns for the current org OR personal campaigns (null org_id)
+                query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
             }
 
             const { data, error } = await query;

@@ -74,7 +74,8 @@ export async function getContactedLeads(): Promise<ContactedLead[]> {
         .order('sent_at', { ascending: false });
 
     if (orgId) {
-        query = query.eq('organization_id', orgId);
+        // Allow seeing contacted leads for the current org OR personal (null org_id)
+        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
     }
 
     const { data, error } = await query;
@@ -280,7 +281,8 @@ export const contactedLeadsStorage = {
         let query = supabase.from(TABLE).select('id', { count: 'exact', head: true });
 
         if (orgId) {
-            query = query.eq('organization_id', orgId);
+            // Check in org OR personal
+            query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
         }
 
         if (email && leadId) {
