@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { PresenceAvatars } from '@/components/presence-avatars';
 
 type PageHeaderProps = {
   title: string;
@@ -9,10 +10,6 @@ type PageHeaderProps = {
 export function PageHeader({ title, description, children }: PageHeaderProps) {
   return (
     <div className="mb-8 flex flex-col items-start justify-between gap-4 border-b pb-6 md:flex-row md:items-end">
-      import {PresenceAvatars} from '@/components/presence-avatars';
-
-      // ...
-
       <div className="space-y-2">
         <div className="relative flex items-center gap-4">
           <div>
