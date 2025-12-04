@@ -15,7 +15,7 @@ import { Pagination, PaginationContent, PaginationItem, PaginationLink, Paginati
 import { companySizes } from '@/lib/data';
 import type { Lead as UILaed } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Search, Save, X, Frown, ChevronDown } from 'lucide-react';
+import { Search, Save, X, Frown, ChevronDown, Loader2 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
 import { supabaseService } from '@/lib/supabase-service';
@@ -198,6 +198,8 @@ export default function SearchPage() {
     setFilters(prev => ({ ...prev, [field]: value }));
   };
 
+  const [isSaving, setIsSaving] = useState(false);
+
   const handleSaveSelectedLeads = async () => {
     const selected = leads.filter(lead => selectedLeads.has(lead.id));
     // Filter out already contacted
@@ -211,29 +213,37 @@ export default function SearchPage() {
       return;
     }
 
-    const withEmail = selectedNotContacted.filter(l => !!l.email);
-    let enrichedAdded = 0;
-    if (withEmail.length) {
-      const enriched = withEmail.map(mapLeadToEnriched);
-      const res = await enrichedLeadsStorage.addDedup(enriched);
-      enrichedAdded = res.addedCount;
+    setIsSaving(true);
+    try {
+      const withEmail = selectedNotContacted.filter(l => !!l.email);
+      let enrichedAdded = 0;
+      if (withEmail.length) {
+        const enriched = withEmail.map(mapLeadToEnriched);
+        const res = await enrichedLeadsStorage.addDedup(enriched);
+        enrichedAdded = res.addedCount;
+      }
+
+      const withoutEmail = selectedNotContacted.filter(l => !l.email);
+      const resSv = await supabaseService.addLeadsDedup(withoutEmail);
+
+      // Actualizar estado local de guardados
+      const all = await supabaseService.getLeads();
+      setSavedIds(new Set(all.map(l => l.id)));
+
+      toast({
+        title: 'Guardado',
+        description:
+          `A Enriquecidos: ${enrichedAdded} · ` +
+          `A Guardados: ${resSv.addedCount} (dup: ${resSv.duplicateCount})`,
+      });
+
+      setSelectedLeads(new Set());
+    } catch (error) {
+      console.error('Error saving leads:', error);
+      toast({ variant: "destructive", title: "Error", description: "No se pudieron guardar los leads." });
+    } finally {
+      setIsSaving(false);
     }
-
-    const withoutEmail = selectedNotContacted.filter(l => !l.email);
-    const resSv = await supabaseService.addLeadsDedup(withoutEmail);
-
-    // Actualizar estado local de guardados
-    const all = await supabaseService.getLeads();
-    setSavedIds(new Set(all.map(l => l.id)));
-
-    toast({
-      title: 'Guardado',
-      description:
-        `A Enriquecidos: ${enrichedAdded} · ` +
-        `A Guardados: ${resSv.addedCount} (dup: ${resSv.duplicateCount})`,
-    });
-
-    setSelectedLeads(new Set());
   };
 
   const handleSearch = async () => {
@@ -408,10 +418,11 @@ export default function SearchPage() {
             </CardDescription>
           </div>
           <Button
-            disabled={selectedLeads.size === 0}
+            disabled={selectedLeads.size === 0 || isSaving}
             onClick={handleSaveSelectedLeads}
           >
-            <Save className="mr-2" />Guardar {selectedLeads.size > 0 ? `(${selectedLeads.size})` : ''}
+            {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2" />}
+            {isSaving ? 'Guardando...' : `Guardar ${selectedLeads.size > 0 ? `(${selectedLeads.size})` : ''}`}
           </Button>
         </CardHeader>
         <CardContent>

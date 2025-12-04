@@ -13,7 +13,8 @@ export type ActivityAction =
     | 'remove_member'
     | 'join_organization'
     | 'leave_organization'
-    | 'create_organization';
+    | 'create_organization'
+    | 'update_organization';
 
 export type EntityType = 'lead' | 'campaign' | 'member' | 'organization';
 

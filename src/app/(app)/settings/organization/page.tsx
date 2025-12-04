@@ -185,7 +185,32 @@ export default function OrganizationSettingsPage() {
                 <CardContent className="space-y-4">
                     <div className="grid w-full max-w-sm items-center gap-1.5">
                         <Label htmlFor="orgName">Organization Name</Label>
-                        <Input type="text" id="orgName" value={organization.name} readOnly />
+                        <div className="flex gap-2">
+                            <Input
+                                type="text"
+                                id="orgName"
+                                value={organization.name}
+                                onChange={(e) => setOrgData({
+                                    ...orgData,
+                                    organization: { ...organization, name: e.target.value }
+                                })}
+                            />
+                            <Button
+                                size="sm"
+                                onClick={async () => {
+                                    setLoading(true);
+                                    const success = await organizationService.updateOrganization(organization.id, { name: organization.name });
+                                    if (success) {
+                                        toast({ title: "Updated", description: "Organization name updated." });
+                                    } else {
+                                        toast({ variant: "destructive", title: "Error", description: "Failed to update name." });
+                                    }
+                                    setLoading(false);
+                                }}
+                            >
+                                Save
+                            </Button>
+                        </div>
                     </div>
                     <div className="text-sm text-muted-foreground">
                         Created on {new Date(organization.created_at).toLocaleDateString()}

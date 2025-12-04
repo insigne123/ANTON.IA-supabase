@@ -42,6 +42,21 @@ export const organizationService = {
         return data; // Returns the new org ID
     },
 
+    async updateOrganization(orgId: string, updates: { name: string }): Promise<boolean> {
+        const { error } = await supabase
+            .from('organizations')
+            .update(updates)
+            .eq('id', orgId);
+
+        if (error) {
+            console.error('Error updating organization:', error);
+            return false;
+        }
+
+        await activityLogService.logActivity('update_organization', 'organization', orgId, updates);
+        return true;
+    },
+
     async getOrganizationDetails(): Promise<{ organization: any, members: any[] } | null> {
         const orgId = await this.getCurrentOrganizationId();
         if (!orgId) return null;
