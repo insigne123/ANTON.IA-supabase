@@ -22,37 +22,39 @@ export function PresenceAvatars() {
     });
 
     return (
-        <div className="flex items-center -space-x-2 overflow-hidden pl-2">
-            <TooltipProvider delayDuration={300}>
-                {sortedUsers.map((u) => {
-                    const isHere = u.currentPath === pathname;
-                    return (
-                        <Tooltip key={u.userId}>
-                            <TooltipTrigger asChild>
-                                <div className={cn(
-                                    "relative inline-block border-2 border-background rounded-full transition-transform hover:z-10 hover:scale-110",
-                                    isHere ? "ring-2 ring-green-500 ring-offset-2 ring-offset-background" : "opacity-70 grayscale"
-                                )}>
-                                    <Avatar className="h-8 w-8">
-                                        <AvatarImage src={u.avatarUrl} />
-                                        <AvatarFallback className="text-[10px] bg-primary/10 text-primary">
-                                            {u.fullName?.[0]?.toUpperCase() || u.email[0].toUpperCase()}
-                                        </AvatarFallback>
-                                    </Avatar>
-                                </div>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                <p className="font-medium">{u.fullName || u.email}</p>
-                                <p className="text-xs text-muted-foreground">
-                                    {isHere ? 'Viendo esta página' : `En ${u.currentPath}`}
-                                </p>
-                            </TooltipContent>
-                        </Tooltip>
-                    );
-                })}
-            </TooltipProvider>
+        <div className="flex items-center gap-3 pl-2">
+            <div className="flex -space-x-2 overflow-hidden">
+                <TooltipProvider delayDuration={300}>
+                    {sortedUsers.map((u) => {
+                        const isHere = u.currentPath === pathname;
+                        return (
+                            <Tooltip key={u.userId}>
+                                <TooltipTrigger asChild>
+                                    <div className={cn(
+                                        "relative inline-block border-2 border-background rounded-full transition-transform hover:z-10 hover:scale-110",
+                                        isHere ? "ring-2 ring-green-500 ring-offset-2 ring-offset-background" : "opacity-70 grayscale"
+                                    )}>
+                                        <Avatar className="h-8 w-8">
+                                            <AvatarImage src={u.avatarUrl} />
+                                            <AvatarFallback className="text-[10px] bg-primary/10 text-primary">
+                                                {u.fullName?.[0]?.toUpperCase() || u.email[0].toUpperCase()}
+                                            </AvatarFallback>
+                                        </Avatar>
+                                    </div>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    <p className="font-medium">{u.fullName || u.email}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                        {isHere ? 'Viendo esta página' : `En ${u.currentPath}`}
+                                    </p>
+                                </TooltipContent>
+                            </Tooltip>
+                        );
+                    })}
+                </TooltipProvider>
+            </div>
             {sortedUsers.length > 0 && (
-                <span className="ml-4 text-xs text-muted-foreground">
+                <span className="text-[10px] font-medium text-muted-foreground bg-muted/50 px-2 py-1 rounded-full whitespace-nowrap">
                     {sortedUsers.length} online
                 </span>
             )}

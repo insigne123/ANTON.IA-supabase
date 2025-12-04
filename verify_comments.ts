@@ -1,31 +1,27 @@
-import { commentsService } from './src/lib/services/comments-service';
 import { supabase } from './src/lib/supabase';
 
 async function verifyComments() {
-    console.log('Verifying Comments Service...');
+    console.log('Verifying Comments Table...');
 
-    // 1. Check if table exists (implicit check by trying to select)
-    const { error: tableError } = await supabase.from('comments').select('count').limit(1);
-    if (tableError) {
-        console.error('Error accessing comments table:', tableError);
+    // 1. Check if table exists (by trying to select count)
+    const { count, error: countError } = await supabase.from('comments').select('*', { count: 'exact', head: true });
+
+    if (countError) {
+        console.error('Error accessing comments table:', countError);
+        if (countError.code === 'PGRST205') {
+            console.error('This confirms the schema cache issue. Please run the migration "20251204013000_fix_schema_cache.sql".');
+        }
         return;
     }
-    console.log('Comments table exists.');
+    console.log('Comments table accessible. Count:', count);
 
-    // 2. Add a comment
-    // Need a valid entity ID. Let's use a dummy UUID.
-    const dummyId = '00000000-0000-0000-0000-000000000000';
-    const entityType = 'test_entity';
+    // 2. Try to insert a comment (requires being logged in, which this script might not be fully, 
+    // but we can check if we get a permission error vs a "table not found" error)
 
-    // We need to be logged in for RLS. 
-    // This script runs in node, so it might not have auth context unless we sign in.
-    // But we can't easily sign in as a user here without credentials.
-    // So this verification might fail on RLS if run from outside the app context.
+    // We can't easily simulate a full user login here without credentials, 
+    // but we can check if the table metadata is available.
 
-    // However, if we run this in the browser console or if the user runs it, it might work.
-    // But for now, let's just rely on the table check.
-
-    console.log('Verification script created. To fully verify, run this in the app context or check the UI.');
+    console.log('Verification script finished. If you see "Comments table accessible", the schema cache issue is likely resolved.');
 }
 
 verifyComments();
