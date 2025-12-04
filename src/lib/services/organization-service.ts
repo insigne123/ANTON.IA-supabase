@@ -140,5 +140,36 @@ export const organizationService = {
         }
 
         return !!data;
+    },
+
+    async leaveOrganization(orgId: string): Promise<boolean> {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return false;
+
+        const { error } = await supabase
+            .from('organization_members')
+            .delete()
+            .eq('organization_id', orgId)
+            .eq('user_id', user.id);
+
+        if (error) {
+            console.error('Error leaving organization:', error);
+            return false;
+        }
+        return true;
+    },
+
+    async deleteOrganization(orgId: string): Promise<boolean> {
+        // Only owners can delete (RLS enforced)
+        const { error } = await supabase
+            .from('organizations')
+            .delete()
+            .eq('id', orgId);
+
+        if (error) {
+            console.error('Error deleting organization:', error);
+            return false;
+        }
+        return true;
     }
 };

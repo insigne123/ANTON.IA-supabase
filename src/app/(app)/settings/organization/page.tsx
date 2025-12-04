@@ -20,16 +20,23 @@ export default function OrganizationSettingsPage() {
     const [invites, setInvites] = useState<any[]>([]);
     const [inviteEmail, setInviteEmail] = useState('');
     const [isInviteOpen, setIsInviteOpen] = useState(false);
+    const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
     const { toast } = useToast();
 
     const loadData = useCallback(async () => {
         try {
-            const [details, invitesData] = await Promise.all([
+            const [details, invitesData, { data: { user } }] = await Promise.all([
                 organizationService.getOrganizationDetails(),
-                organizationService.getInvites()
+                organizationService.getInvites(),
+                import('@/lib/supabase').then(m => m.supabase.auth.getUser())
             ]);
             setOrgData(details);
             setInvites(invitesData);
+
+            if (details && user) {
+                const me = details.members.find((m: any) => m.user_id === user.id);
+                setCurrentUserRole(me?.role || null);
+            }
         } catch (error) {
             console.error('Failed to load organization data', error);
         } finally {
@@ -43,6 +50,36 @@ export default function OrganizationSettingsPage() {
 
     useRealtime('organization_members', '*', loadData);
     useRealtime('organization_invites', '*', loadData);
+
+    const handleLeaveOrg = async () => {
+        if (!orgData || !confirm("Are you sure you want to leave this organization?")) return;
+
+        setLoading(true);
+        const success = await organizationService.leaveOrganization(orgData.organization.id);
+        if (success) {
+            toast({ title: "Left Organization", description: "You have successfully left the organization." });
+            setOrgData(null); // Reset to show "Create Org" state
+            loadData();
+        } else {
+            toast({ variant: "destructive", title: "Error", description: "Failed to leave organization." });
+            setLoading(false);
+        }
+    };
+
+    const handleDeleteOrg = async () => {
+        if (!orgData || !confirm("WARNING: This will permanently delete the organization. Your personal data will be preserved, but shared data might be affected. Are you sure?")) return;
+
+        setLoading(true);
+        const success = await organizationService.deleteOrganization(orgData.organization.id);
+        if (success) {
+            toast({ title: "Organization Deleted", description: "The organization has been deleted." });
+            setOrgData(null);
+            loadData();
+        } else {
+            toast({ variant: "destructive", title: "Error", description: "Failed to delete organization." });
+            setLoading(false);
+        }
+    };
 
     const handleInvite = async () => {
         if (!inviteEmail) return;
@@ -286,6 +323,33 @@ export default function OrganizationSettingsPage() {
                     </CardContent>
                 </Card>
             )}
+
+            <Card className="border-destructive/50">
+                <CardHeader>
+                    <CardTitle className="text-destructive">Danger Zone</CardTitle>
+                    <CardDescription>
+                        Irreversible actions for your organization.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="flex items-center justify-between">
+                        <div className="text-sm text-muted-foreground">
+                            {currentUserRole === 'owner'
+                                ? "Permanently delete this organization and all its data association."
+                                : "Leave this organization. You will lose access to shared resources."}
+                        </div>
+                        {currentUserRole === 'owner' ? (
+                            <Button variant="destructive" onClick={handleDeleteOrg}>
+                                Delete Organization
+                            </Button>
+                        ) : (
+                            <Button variant="destructive" onClick={handleLeaveOrg}>
+                                Leave Organization
+                            </Button>
+                        )}
+                    </div>
+                </CardContent>
+            </Card>
         </div>
     );
 }
