@@ -122,36 +122,29 @@ export async function POST(req: NextRequest) {
   const currentParams = parsed.data[0]; // Take the first item
 
   // 3. Construct new payload
-  const newPayload = {
-    user_id: user.id,
-    industry_keywords: currentParams.industry_keywords,
-    company_location: currentParams.company_location,
-    titles: currentParams.titles ? [currentParams.titles] : [], // API expects array? Original type says titles is string. User prompt example: "titles": ["cargo1", "cargo2"]
-    // Wait, LeadsSearchParams[0].titles is string inside the schema? 
-    // Checking lib/schemas/leads.ts would be good but let's assume currentParams.titles is string or array.
-    // If it's a comma separated string, we might want to split it.
-    // However, user example shows array. Existing schema might differ.
-    // Let's check schema if possible or handle both.
-    // For now, assume we convert whatever title we have to array if needed.
+  console.log("Current Params from request:", currentParams);
+  console.log("Authenticated User ID:", user.id);
 
-    // Actually, let's reuse other params if valuable
-    employee_range: currentParams.employee_ranges, // Remap from employee_ranges to employee_range
-    max_results: currentParams.max_results || 100,
+  const newPayload = {
+    // Spread existing params to ensure we don't miss anything supported by the schema or passed in
+    ...currentParams,
+
+    // Explicit overrides/transformations
+    user_id: user.id || undefined, // undefined will be omitted by JSON.stringify if not careful, but spread keeps keys. user.id string is expected.
+
+    // API requires 'titles' as array, schema allows string default
+    titles: Array.isArray(currentParams.titles)
+      ? currentParams.titles
+      : (typeof currentParams.titles === 'string' && currentParams.titles.length > 0 ? [currentParams.titles] : []),
+
+    // Remap employee_ranges to employee_range if that's what the new API prefers, 
+    // but keep employee_ranges too just in case via spread.
+    employee_range: currentParams.employee_ranges,
   };
 
-  // Adjust titles logic: existing simple implementation passes string. New API wants array.
-  // If currentParams.titles is a string "CEO, Manager", we should split it?
-  // User prompt: `titles: ["cargo1", "cargo2"]`.
-  // LeadsSearchParams `titles` is string (based on `search/page.tsx` usage: `filters.title.trim()`).
-  if (typeof currentParams.titles === 'string' && currentParams.titles.length > 0) {
-    // Split by comma if multiple? Or just treat as search query? 
-    // Safe bet: [currentParams.titles]
-    (newPayload as any).titles = [currentParams.titles];
-  } else if (Array.isArray(currentParams.titles)) {
-    (newPayload as any).titles = currentParams.titles;
-  } else {
-    (newPayload as any).titles = [];
-  }
+  if (!newPayload.titles) newPayload.titles = [];
+
+  console.log("Outgoing Payload to Service:", JSON.stringify(newPayload, null, 2));
 
   return callLeadSearchService(newPayload);
 }
