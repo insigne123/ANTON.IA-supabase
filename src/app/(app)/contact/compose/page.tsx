@@ -192,6 +192,7 @@ function ComposeInner() {
 
   const [usePixel, setUsePixel] = useState(true);
   const [useReadReceipt, setUseReadReceipt] = useState(false);
+  const [useLinkTracking, setUseLinkTracking] = useState(false);
 
   useEffect(() => {
     if (!lead) return;
@@ -200,6 +201,16 @@ function ComposeInner() {
     setBody(tuned.body);
 
   }, [lead, sp, draftSource, selectedStyleName, styleProfiles.length]);
+
+  // Helper to inject link tracking
+  function rewriteLinksForTracking(html: string, trackingId: string): string {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    // Replace href="http..." with href="origin/api/tracking/click?id=...&url=encoded"
+    return html.replace(/href=["'](http[^"']+)["']/gi, (match, url, quote) => {
+      const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
+      return `href=${quote}${trackingUrl}${quote}`;
+    });
+  }
 
   const regenerate = async () => {
     if (!lead) return;
@@ -226,7 +237,12 @@ function ComposeInner() {
       const trackingId = uuid();
       let finalHtmlBody = body.replace(/\n/g, '<br>');
 
-      // 2. Inject Pixel if enabled
+      // 2. Rewrite Links if enabled
+      if (useLinkTracking) {
+        finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
+      }
+
+      // 3. Inject Pixel if enabled
       if (usePixel) {
         // Use window.location.origin to get the current domain
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -284,7 +300,12 @@ function ComposeInner() {
       const trackingId = uuid();
       let finalHtmlBody = body.replace(/\n/g, '<br>');
 
-      // 2. Inject Pixel if enabled
+      // 2. Rewrite Links if enabled
+      if (useLinkTracking) {
+        finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
+      }
+
+      // 3. Inject Pixel if enabled
       if (usePixel) {
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
         const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
@@ -389,6 +410,16 @@ function ComposeInner() {
                 />
                 Activar Tracking Pixel
                 <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded ml-1">Recomendado</span>
+              </label>
+
+              <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Reescribe enlaces para saber si el usuario hizo clic">
+                <input
+                  type="checkbox"
+                  checked={useLinkTracking}
+                  onChange={(e) => setUseLinkTracking(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                Track Link Clicks
               </label>
 
               <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Solicita confirmación de lectura estándar (puede ser bloqueado por el usuario)">

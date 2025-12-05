@@ -91,6 +91,8 @@ export interface ContactedLead {
 
   // NUEVO: tracking robusto (no cambia 'status')
   openedAt?: string;                   // cuándo se confirmó apertura por MDN
+  clickedAt?: string;                  // cuándo se hizo click en un enlace
+  clickCount?: number;                 // cuántas veces se hizo click
   deliveredAt?: string;                // cuándo se confirmó entrega por DSN
   readReceiptMessageId?: string;       // id del correo de MDN
   deliveryReceiptMessageId?: string;   // id del correo de DSN

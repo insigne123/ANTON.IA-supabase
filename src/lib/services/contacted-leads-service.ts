@@ -24,6 +24,8 @@ function mapRowToContactedLead(row: any): ContactedLead {
         repliedAt: row.replied_at,
         replyPreview: row.reply_preview,
         openedAt: row.opened_at,
+        clickedAt: row.clicked_at,
+        clickCount: row.click_count,
         deliveredAt: row.delivered_at,
         readReceiptMessageId: row.read_receipt_message_id,
         deliveryReceiptMessageId: row.delivery_receipt_message_id,
@@ -55,6 +57,8 @@ function mapContactedLeadToRow(item: ContactedLead, userId: string, organization
         replied_at: item.repliedAt,
         reply_preview: item.replyPreview,
         opened_at: item.openedAt,
+        clicked_at: item.clickedAt,
+        click_count: item.clickCount,
         delivered_at: item.deliveredAt,
         read_receipt_message_id: item.readReceiptMessageId,
         delivery_receipt_message_id: item.deliveryReceiptMessageId,
@@ -325,5 +329,26 @@ export const contactedLeadsStorage = {
             .eq('id', id);
 
         if (error) console.error('Error marking lead as opened:', error);
+    },
+
+    markClickedById: async (id: string) => {
+        // Fetch current count to increment safely (or use a DB function/rpc if concurrency is high, but simple read-modify-write is okay here)
+        const { data } = await supabase.from(TABLE).select('click_count, clicked_at').eq('id', id).single();
+        const currentCount = (data?.click_count || 0) + 1;
+
+        // If it's the first click, set clicked_at. If already clicked, keep original or update? 
+        // Usually we want "first clicked" or "last clicked". Let's update "clicked_at" to NOW (last click).
+        const updates: any = {
+            click_count: currentCount,
+            clicked_at: new Date().toISOString(),
+            last_update_at: new Date().toISOString(),
+        };
+
+        const { error } = await supabase
+            .from(TABLE)
+            .update(updates)
+            .eq('id', id);
+
+        if (error) console.error('Error marking lead as clicked:', error);
     },
 };

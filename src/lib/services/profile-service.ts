@@ -57,5 +57,16 @@ export const profileService = {
         }
 
         return data;
+    },
+
+    async getSignatures(): Promise<any> {
+        const profile = await this.getCurrentProfile();
+        return profile?.signatures || {};
+    },
+
+    async setSignatures(signatures: any): Promise<void> {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        await this.updateProfileById(user.id, { signatures });
     }
 };

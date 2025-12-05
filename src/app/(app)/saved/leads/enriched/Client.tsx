@@ -37,6 +37,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { getFirstNameSafe } from '@/lib/template';
 import { generateMailFromStyle } from '@/lib/ai/style-mail';
 import { styleProfilesStorage } from '@/lib/style-profiles-storage';
+import { profileService } from '@/lib/services/profile-service';
 
 
 const extractDomainFromEmail = (email?: string | null) =>
@@ -349,9 +350,22 @@ export default function EnrichedLeadsClient() {
     if (!item.meta.leadRef) item.meta.leadRef = leadRef;
     if (!item.leadRef) item.leadRef = leadRef;
 
+    // Obtener perfil real de la empresa desde Supabase
+    const realProfile = await profileService.getCurrentProfile();
+    // Mapear campos de profiles -> n8n structure
+    const extended = realProfile?.signatures?.['profile_extended'] || {};
+    const effectiveCompanyProfile = {
+      name: realProfile?.company_name || realProfile?.full_name || 'Mi Empresa',
+      sector: extended.sector || '',
+      description: extended.description || '',
+      services: extended.services || '',
+      valueProposition: extended.valueProposition || '',
+      website: realProfile?.company_domain || '',
+    };
+
     const payload = {
       companies: [item],
-      userCompanyProfile: base?.userCompanyProfile || getCompanyProfile() || {},
+      userCompanyProfile: effectiveCompanyProfile,
     };
 
     // Enviamos el shape ANIDADO que n8n espera + trazabilidad
