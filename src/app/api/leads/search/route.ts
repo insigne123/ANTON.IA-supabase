@@ -128,20 +128,21 @@ export async function POST(req: NextRequest) {
   console.log("Authenticated User ID:", user.id);
 
   const newPayload = {
-    // Spread existing params to ensure we don't miss anything supported by the schema or passed in
-    ...currentParams,
+    // Strict payload based on specific service requirements
+    user_id: user.id || undefined,
 
-    // Explicit overrides/transformations
-    user_id: user.id || undefined, // undefined will be omitted by JSON.stringify if not careful, but spread keeps keys. user.id string is expected.
+    industry_keywords: currentParams.industry_keywords,
+    company_location: currentParams.company_location,
 
-    // API requires 'titles' as array, schema allows string default
+    // API requires 'titles' as array. Schema default is empty string, we convert to empty array or single-item array.
     titles: Array.isArray(currentParams.titles)
       ? currentParams.titles
       : (typeof currentParams.titles === 'string' && currentParams.titles.length > 0 ? [currentParams.titles] : []),
 
-    // Remap employee_ranges to employee_range if that's what the new API prefers, 
-    // but keep employee_ranges too just in case via spread.
+    // Service uses "employee_range" (singular) but accepts the array values from "employee_ranges"
     employee_range: currentParams.employee_ranges,
+
+    max_results: currentParams.max_results || 100,
   };
 
   if (!newPayload.titles) newPayload.titles = [];
