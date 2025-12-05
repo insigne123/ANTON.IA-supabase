@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
     // Service uses "employee_range" (singular) but accepts the array values from "employee_ranges"
     employee_range: currentParams.employee_ranges,
 
-    max_results: currentParams.max_results || 100,
+    max_results: 100,
   };
 
   if (!newPayload.titles) newPayload.titles = [];
