@@ -16,8 +16,11 @@ export function normalizeFromN8N(json: unknown) {
   const dataToNormalize = Array.isArray(parsed) ? parsed[0] : parsed;
 
   // Asegura shape interno estricto (string | undefined, no null)
+  // Mapeamos count preferentemente de leads_count, luego de count (legacy), y fallback a length
+  const finalCount = (dataToNormalize as any).leads_count ?? dataToNormalize.count ?? dataToNormalize.leads.length;
+
   const normalized = LeadsResponseSchema.parse({
-    count: dataToNormalize.count ?? dataToNormalize.leads.length,
+    count: finalCount,
     leads: dataToNormalize.leads.map((l) => ({
       id: l.id,
       first_name: l.first_name ?? "",
