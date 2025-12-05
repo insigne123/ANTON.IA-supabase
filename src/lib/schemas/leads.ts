@@ -76,7 +76,7 @@ const N8NWebhookLeadSchema = z.object({
 });
 
 const N8NWebhookObjectSchema = z.object({
-  count: z.number().nonnegative(),
+  count: z.number().nonnegative().optional(), // Relaxed validation
   leads: z.array(N8NWebhookLeadSchema),
 });
 

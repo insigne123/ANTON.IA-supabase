@@ -11,28 +11,28 @@ export function normalizeFromN8N(json: unknown) {
 
   // Validar con el schema flexible que acepta nulls
   const parsed = N8NWebhookResponseSchema.parse(payload);
-  
+
   // Si el schema union validó un array, tomamos el primer elemento.
   const dataToNormalize = Array.isArray(parsed) ? parsed[0] : parsed;
 
   // Asegura shape interno estricto (string | undefined, no null)
   const normalized = LeadsResponseSchema.parse({
-    count: dataToNormalize.count,
+    count: dataToNormalize.count ?? dataToNormalize.leads.length,
     leads: dataToNormalize.leads.map((l) => ({
       id: l.id,
       first_name: l.first_name ?? "",
-      last_name:  l.last_name  ?? "",
-      email:      l.email      ?? "", 
-      title:      l.title      ?? "",
+      last_name: l.last_name ?? "",
+      email: l.email ?? "",
+      title: l.title ?? "",
       organization: l.organization
         ? {
-            id:    l.organization.id ?? undefined,
-            name:  l.organization.name ?? undefined,
-            domain:l.organization.domain ?? undefined,
-          }
+          id: l.organization.id ?? undefined,
+          name: l.organization.name ?? undefined,
+          domain: l.organization.domain ?? undefined,
+        }
         : undefined,
       linkedin_url: l.linkedin_url ?? "",
-      photo_url:    l.photo_url    ?? "",
+      photo_url: l.photo_url ?? "",
       email_status: l.email_status ?? "",
     })),
   });
