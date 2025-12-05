@@ -55,6 +55,8 @@ async function callLeadSearchService(payload: any) {
       }
 
       const raw = await res.text();
+      console.log("Raw Response from Service:", raw);
+
       if (!raw || !raw.trim()) {
         throw new Error("SERVICE_EMPTY_BODY");
       }
