@@ -311,4 +311,19 @@ export const contactedLeadsStorage = {
         }
         return toRemove.length;
     },
+
+    markOpenedById: async (id: string) => {
+        // Only update if not already opened (optional optimization, but good for first-open accuracy)
+        // Or just update always to "last opened". Let's update typically.
+        const { error } = await supabase
+            .from(TABLE)
+            .update({
+                status: 'opened',
+                opened_at: new Date().toISOString(),
+                last_update_at: new Date().toISOString(),
+            })
+            .eq('id', id);
+
+        if (error) console.error('Error marking lead as opened:', error);
+    },
 };

@@ -190,6 +190,9 @@ function ComposeInner() {
     return { subject: subj, body: bod };
   }
 
+  const [usePixel, setUsePixel] = useState(true);
+  const [useReadReceipt, setUseReadReceipt] = useState(false);
+
   useEffect(() => {
     if (!lead) return;
     const tuned = buildDraftForLead(lead);
@@ -219,18 +222,31 @@ function ComposeInner() {
     }
     setIsLoading(true);
     try {
-      const htmlBody = body.replace(/\n/g, '<br>');
+      // 1. Generate ID upfront to create pixel URL
+      const trackingId = uuid();
+      let finalHtmlBody = body.replace(/\n/g, '<br>');
+
+      // 2. Inject Pixel if enabled
+      if (usePixel) {
+        // Use window.location.origin to get the current domain
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+        const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="display:none;width:1px;height:1px;" />`;
+        finalHtmlBody += `\n<br>${trackingPixel}`;
+      }
+
       const res = await sendEmail({
         to: email,
         subject,
-        htmlBody,
+        htmlBody: finalHtmlBody,
+        requestReceipts: useReadReceipt, // Pass new option
       });
 
       // Incrementa espejo local de cuota
       Quota.incClientQuota('contact');
 
       await contactedLeadsStorage.add({
-        id: uuid(),
+        id: trackingId, // Use the pre-generated ID
         leadId: (lead as any).id,
         name: (lead as any).fullName,
         email,
@@ -264,13 +280,38 @@ function ComposeInner() {
     }
     setIsLoading(true);
     try {
+      // 1. Generate ID upfront to create pixel URL
+      const trackingId = uuid();
+      let finalHtmlBody = body.replace(/\n/g, '<br>');
+
+      // 2. Inject Pixel if enabled
+      if (usePixel) {
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+        const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="display:none;width:1px;height:1px;" />`;
+        finalHtmlBody += `\n<br>${trackingPixel}`;
+      }
+
       const result = await sendGmailEmail({
         to: email,
         subject: subject,
-        html: body.replace(/\n/g, '<br>'),
+        html: finalHtmlBody,
       });
 
       Quota.incClientQuota('contact');
+
+      await contactedLeadsStorage.add({
+        id: trackingId, // Use pre-generated ID
+        leadId: (lead as any).id,
+        name: (lead as any).fullName,
+        email,
+        company: (lead as any).companyName,
+        subject,
+        sentAt: new Date().toISOString(),
+        status: 'sent',
+        provider: 'gmail',
+        lastUpdateAt: new Date().toISOString(),
+      });
 
       // ✅ quitar de Oportunidades Enriquecidas (storage correcto)
       await enrichedLeadsStorage.removeById((lead as any).id);
@@ -335,6 +376,33 @@ function ComposeInner() {
               </Button>
             </div>
           </div>
+
+          {/* Tracking Options - NEW SECTION */}
+          <div className="border border-border/50 rounded-md p-3 bg-muted/20">
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Inyecta una imagen invisible para detectar apertura en tiempo real">
+                <input
+                  type="checkbox"
+                  checked={usePixel}
+                  onChange={(e) => setUsePixel(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                Activar Tracking Pixel
+                <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded ml-1">Recomendado</span>
+              </label>
+
+              <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Solicita confirmación de lectura estándar (puede ser bloqueado por el usuario)">
+                <input
+                  type="checkbox"
+                  checked={useReadReceipt}
+                  onChange={(e) => setUseReadReceipt(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                Solicitar Confirmación de Lectura
+              </label>
+            </div>
+          </div>
+
           <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Asunto" />
           <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={14} className="font-mono text-sm" />
           <div className="flex gap-2">
