@@ -17,6 +17,7 @@ import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet } from '@/lib/services/enriched-leads-service';
 import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser } from 'lucide-react';
 import { supabaseService } from '@/lib/supabase-service';
+import { supabase } from '@/lib/supabase';
 import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
 import { sendEmail } from '@/lib/outlook-email-service';
 import { sendGmailEmail } from '@/lib/gmail-email-service';
@@ -123,6 +124,24 @@ export default function EnrichedLeadsClient() {
       setStyleProfiles(styleProfilesStorage.list());
     }
     loadData();
+
+    // Realtime Subscription
+    const channel = supabase
+      .channel('enriched-leads-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'enriched_leads' },
+        () => {
+          // Simplest strategy: reload full list on any change to ensure consistency
+          // This handles INSERT (new), DELETE (removed), UPDATE (edited)
+          loadData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // 🔄 Refrescar si otro tab/página (compose) modifica el localStorage
@@ -287,14 +306,15 @@ export default function EnrichedLeadsClient() {
   const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
   /** Obtiene/crea sesión MSAL y devuelve email/uid para cabecera X-User-Id. */
+  /** Obtiene ID de usuario autenticado de Supabase para headers. */
   async function getUserIdOrFail(): Promise<string> {
-    // Garantiza identidad (hará popup de login si no hay sesión)
-    const ident = await microsoftAuthService.ensureUserIdentity();
-    const email = ident?.email || '';
-    const uid = ident?.id || '';
-    const userId = (email || uid || '').trim();
-    if (!userId) throw new Error('no_identity');
-    return userId;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.id) {
+      // Si no hay usuario, redirigir (aunque el middleware ya debería proteger)
+      toast({ variant: 'destructive', title: 'Error de sesión', description: 'No se detectó usuario. Recarga la página.' });
+      throw new Error('no_identity');
+    }
+    return user.id;
   }
 
   async function runOneInvestigation(e: EnrichedLead, userId: string) {
