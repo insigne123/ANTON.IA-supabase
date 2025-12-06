@@ -145,6 +145,38 @@ export default function EnrichedLeadsClient() {
     };
   }, []);
 
+  // Listen for Auth Changes to reload data if session restores late
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' || (event === 'INITIAL_SESSION' && session)) {
+        // Force reload when we are sure we have a user
+        enrichedLeadsStorageGet().then((e) => {
+          supabaseService.getLeads().then((saved) => {
+            const patched = e.map((x) => {
+              if (x.companyName && x.companyDomain) return x;
+              const match =
+                saved.find(s => x.linkedinUrl && s.linkedinUrl === x.linkedinUrl) ||
+                saved.find(s => `${s.name}|${s.company}`.toLowerCase() === `${x.fullName}|${x.companyName || ''}`.toLowerCase());
+              const fromEmail = extractDomainFromEmail(x.email);
+              const fromWebsite =
+                match?.companyWebsite
+                  ? (match.companyWebsite.startsWith('http') ? new URL(match.companyWebsite).hostname : match.companyWebsite)
+                    .replace(/^https?:\/\//, '').replace(/^www\./, '')
+                  : undefined;
+              return {
+                ...x,
+                companyName: x.companyName ?? match?.company ?? x.companyName ?? undefined,
+                companyDomain: x.companyDomain ?? fromWebsite ?? fromEmail ?? x.companyDomain ?? undefined,
+              };
+            });
+            setEnriched(patched);
+          });
+        });
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
   // 🔄 Refrescar si otro tab/página (compose) modifica el localStorage
   // DEPRECATED: Cloud sync handles this differently (realtime), removing local storage listener.
   /*
