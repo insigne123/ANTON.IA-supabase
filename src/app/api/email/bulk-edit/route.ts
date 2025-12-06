@@ -96,7 +96,7 @@ ${JSON.stringify(examples, null, 2)}
 
     const responseDrafts = drafts.map(original => {
       const id = original.lead.id || original.lead.email;
-      const edit = editMap.get(id);
+      const edit = id ? editMap.get(id) : undefined;
       if (edit) {
         return {
           subject: edit.subject,
