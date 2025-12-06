@@ -64,6 +64,21 @@ export default function EnrichedOpportunitiesPage() {
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
   const [selectedStyleName, setSelectedStyleName] = useState<string>('');
 
+  // Tracking options
+  const [usePixel, setUsePixel] = useState(true);
+  const [useLinkTracking, setUseLinkTracking] = useState(false);
+  const [useReadReceipt, setUseReadReceipt] = useState(false);
+
+  // Helper to inject link tracking
+  function rewriteLinksForTracking(html: string, trackingId: string): string {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    // Replace href="http..." with href="origin/api/tracking/click?id=...&url=encoded"
+    return html.replace(/href=["'](http[^"']+)["']/gi, (match, url, quote) => {
+      const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
+      return `href=${quote}${trackingUrl}${quote}`;
+    });
+  }
+
   // === Reporte modal ===
   const [openReport, setOpenReport] = useState(false);
   const [reportLead, setReportLead] = useState<EnrichedOppLead | null>(null);
@@ -351,14 +366,39 @@ export default function EnrichedOpportunitiesPage() {
       const email = extractPrimaryEmail(lead).email!;
       try {
         let res: any = null;
+        const trackingId = uuid(); // ID unificado para el envío y el registro local
+        let finalHtmlBody = body.replace(/\n/g, '<br/>');
+
+        // 1. Rewrite Links if enabled
+        if (useLinkTracking) {
+          finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
+        }
+
+        // 2. Inject Pixel if enabled
+        if (usePixel) {
+          const origin = typeof window !== 'undefined' ? window.location.origin : '';
+          const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+          const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="display:none;width:1px;height:1px;" />`;
+          finalHtmlBody += `\n<br>${trackingPixel}`;
+        }
+
         if (bulkProvider === 'outlook') {
-          res = await sendEmail({ to: email, subject, htmlBody: body.replace(/\n/g, '<br/>') });
+          res = await sendEmail({
+            to: email,
+            subject,
+            htmlBody: finalHtmlBody,
+            requestReceipts: useReadReceipt
+          });
         } else {
-          res = await sendGmailEmail({ to: email, subject, html: body.replace(/\n/g, '<br/>') });
+          res = await sendGmailEmail({
+            to: email,
+            subject,
+            html: finalHtmlBody
+          });
         }
         Quota.incClientQuota('contact');
         await contactedLeadsStorage.add({
-          id: uuid(),
+          id: trackingId, // Usamos el ID generado para tracking
           leadId: lead.id,
           name: lead.fullName,
           email,
@@ -731,6 +771,27 @@ export default function EnrichedOpportunitiesPage() {
                   Gmail
                 </label>
               </div>
+            </div>
+          </div>
+
+          <div className="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-3 items-center bg-muted/30 p-2 rounded">
+            <div className="col-span-1">
+              <label className="flex items-center gap-2 text-sm cursor-pointer font-medium">
+                <Checkbox checked={usePixel} onCheckedChange={(v) => setUsePixel(Boolean(v))} />
+                Tracking Pixel (Lectura)
+              </label>
+            </div>
+            <div className="col-span-1">
+              <label className="flex items-center gap-2 text-sm cursor-pointer font-medium">
+                <Checkbox checked={useLinkTracking} onCheckedChange={(v) => setUseLinkTracking(Boolean(v))} />
+                Link Tracking (Clics)
+              </label>
+            </div>
+            <div className="col-span-1">
+              <label className="flex items-center gap-2 text-sm cursor-pointer font-medium">
+                <Checkbox checked={useReadReceipt} onCheckedChange={(v) => setUseReadReceipt(Boolean(v))} disabled={bulkProvider === 'gmail'} />
+                Read Requests (Outlook)
+              </label>
             </div>
           </div>
 

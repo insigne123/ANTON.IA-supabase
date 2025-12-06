@@ -16,6 +16,7 @@ import { useRouter } from 'next/navigation';
 import { toCsv, downloadCsv } from '@/lib/csv';
 import { Download } from 'lucide-react';
 import { getClientId } from '@/lib/client-id';
+import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
 
 export default function SavedOpportunitiesPage() {
     const { toast } = useToast();
@@ -222,6 +223,10 @@ export default function SavedOpportunitiesPage() {
     return (
         <div className="space-y-6">
             <PageHeader title="Guardados · Oportunidades" description="Empresas que están contratando. Busca contactos para cada una y enriquécelos." />
+
+            <div className="mb-4">
+                <DailyQuotaProgress kinds={['enrich']} compact />
+            </div>
 
             <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
