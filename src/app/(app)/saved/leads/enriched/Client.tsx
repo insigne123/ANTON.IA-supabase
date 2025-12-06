@@ -66,6 +66,9 @@ export default function EnrichedLeadsClient() {
   const [draftSource, setDraftSource] = useState<'investigation' | 'style'>('investigation');
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
   const [selectedStyleName, setSelectedStyleName] = useState<string>('');
+  const [usePixel, setUsePixel] = useState(true);
+  const [useLinkTracking, setUseLinkTracking] = useState(false);
+  const [useReadReceipt, setUseReadReceipt] = useState(false);
   // Editor IA inline (dentro del modal actual, sin abrir otro <Dialog/>)
   const [showBulkEditor, setShowBulkEditor] = useState(false);
   const [editInstruction, setEditInstruction] = useState('');
@@ -208,6 +211,16 @@ export default function EnrichedLeadsClient() {
   /** Reporte estrictamente por referencia de lead (NO por dominio/nombre). */
   function hasReportStrict(e: EnrichedLead) {
     return !!findReportByRef(leadRefOf(e))?.cross;
+  }
+
+  // Helper to inject link tracking (duplicated from compose, should be util but ok for now)
+  function rewriteLinksForTracking(html: string, trackingId: string): string {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    // Replace href="http..." with href="origin/api/tracking/click?id=...&url=encoded"
+    return html.replace(/href=["'](http[^"']+)["']/gi, (match, url, quote) => {
+      const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
+      return `href=${quote}${trackingUrl}${quote}`;
+    });
   }
 
   const canContact = (lead: EnrichedLead) => hasReport(lead) && !!lead.email;
@@ -686,23 +699,40 @@ export default function EnrichedLeadsClient() {
       const { lead, subject, body } = items[i];
       try {
         let res: any = null;
+        const trackingId = uuid(); // Pre-generate ID for tracking
+        let finalHtmlBody = body.replace(/\n/g, '<br/>');
+
+        // 2. Rewrite Links if enabled
+        if (useLinkTracking) {
+          finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
+        }
+
+        // 3. Inject Pixel if enabled
+        if (usePixel) {
+          const origin = typeof window !== 'undefined' ? window.location.origin : '';
+          const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+          const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="display:none;width:1px;height:1px;" />`;
+          finalHtmlBody += `\n<br>${trackingPixel}`;
+        }
+
         if (bulkProvider === 'outlook') {
           res = await sendEmail({
             to: lead.email!,
             subject,
-            htmlBody: body.replace(/\n/g, '<br/>'),
+            htmlBody: finalHtmlBody,
+            requestReceipts: useReadReceipt,
           });
         } else {
           // Gmail
           res = await sendGmailEmail({
             to: lead.email!,
             subject,
-            html: body.replace(/\n/g, '<br/>'),
+            html: finalHtmlBody,
           });
         }
         Quota.incClientQuota('contact');
         await contactedLeadsStorage.add({
-          id: uuid(),
+          id: trackingId, // Use the same ID
           leadId: lead.id,
           name: lead.fullName,
           email: lead.email!,
@@ -1306,6 +1336,58 @@ export default function EnrichedLeadsClient() {
               </div>
             </div>
           )}
+
+
+          {/* Tracking Options (NEW) */}
+          <div className="mb-4 border border-border/50 rounded-md p-3 bg-muted/20">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Inyecta una imagen invisible para detectar apertura en tiempo real">
+                  <input
+                    type="checkbox"
+                    checked={usePixel}
+                    onChange={(e) => setUsePixel(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  Activar Tracking Pixel
+                  <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded ml-1">Recomendado</span>
+                </label>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Inserta un píxel invisible para detectar aperturas.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Reescribe enlaces para saber si el usuario hizo clic">
+                  <input
+                    type="checkbox"
+                    checked={useLinkTracking}
+                    onChange={(e) => setUseLinkTracking(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  Track Link Clicks
+                </label>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Hace rastreables los links de tus correos.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Solicita confirmación de lectura estándar">
+                  <input
+                    type="checkbox"
+                    checked={useReadReceipt}
+                    onChange={(e) => setUseReadReceipt(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  Solicitar Confirmación
+                </label>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Pide confirmación explícita al destinatario.
+                </p>
+              </div>
+            </div>
+          </div>
 
           <div className="max-h-[60vh] overflow-y-auto space-y-4 p-1">
             {composeList.map(({ lead, subject, body }, i) => (
