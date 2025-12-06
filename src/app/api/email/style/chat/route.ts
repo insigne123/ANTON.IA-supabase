@@ -2,47 +2,7 @@ import { NextResponse } from 'next/server';
 import { qualityChecks } from '@/lib/email-quality';
 import type { ChatMessage, StyleProfile } from '@/lib/types';
 import { defaultStyle } from '@/lib/style-profiles-storage';
-
-/**
- * Minimal: aplica reglas simples a partir del último mensaje.
- * Reemplaza esta función por tu LLM (Gemini/OpenAI) cuando quieras.
- */
-function ruleBasedUpdateStyle(messages: ChatMessage[], prev: StyleProfile): StyleProfile {
-  const last = (messages || []).slice().reverse().find(m => m.role === 'user')?.content.toLowerCase() || '';
-  const style = { ...prev };
-
-  // Ensure defaults
-  style.structure = style.structure || ['hook', 'context', 'value', 'cta'];
-  style.personalization = style.personalization || { useLeadName: true, useCompanyName: true };
-  style.cta = style.cta || { label: '¿15 min?', duration: '15' };
-
-  // tono
-  if (/cálid|calid|amable|cercan/.test(last)) style.tone = 'warm';
-  if (/direct|al grano|conciso/.test(last)) style.tone = 'direct';
-  if (/challenger|retador|provoc/.test(last)) style.tone = 'challenger';
-  if (/profes/.test(last)) style.tone = 'professional';
-  if (/breve|corto|muy corto/.test(last)) style.length = 'short';
-  if (/largo|detallado/.test(last)) style.length = 'long';
-
-  // estructura
-  if (/quitar.*prueba|sin prueba social/.test(last)) style.structure = style.structure.filter(x => x !== 'proof');
-  if (/agrega.*prueba|incluye prueba social/.test(last) && !style.structure.includes('proof')) style.structure.splice(3, 0, 'proof');
-
-  // CTA
-  if (/10 ?min/.test(last)) style.cta = { label: '¿10 min?', duration: '10' };
-  if (/15 ?min/.test(last)) style.cta = { label: '¿15 min?', duration: '15' };
-  if (/20 ?min/.test(last)) style.cta = { label: '¿20 min?', duration: '20' };
-  if (/sin cta/.test(last)) style.cta = { label: '', duration: undefined };
-
-  // personalización
-  if (/usa.*nombre/.test(last)) style.personalization.useLeadName = true;
-  if (/no.*nombre/.test(last)) style.personalization.useLeadName = false;
-  if (/usa.*empresa/.test(last)) style.personalization.useCompanyName = true;
-  if (/no.*empresa/.test(last)) style.personalization.useCompanyName = false;
-
-  style.updatedAt = new Date().toISOString();
-  return style;
-}
+import { updateStyleProfile } from '@/ai/flows/update-style-profile';
 
 // Render: llama a tu endpoint existente de render (servidor a servidor)
 async function renderEmail(style: StyleProfile, mode: 'leads' | 'opportunities', sampleData: any) {
@@ -89,8 +49,26 @@ export async function POST(req: Request) {
     const { messages, styleProfile, mode = 'leads', sampleData } = await req.json();
 
     const base: StyleProfile = styleProfile || { ...defaultStyle, scope: mode };
-    // (1) Actualizar estilo
-    const updated = ruleBasedUpdateStyle(messages as ChatMessage[], base);
+    const lastMessage = (messages as ChatMessage[]).slice().reverse().find(m => m.role === 'user')?.content || '';
+
+    // (1) Actualizar estilo con IA Real (Genkit + Gemini)
+    let updated = { ...base };
+    let explanation = '';
+
+    if (lastMessage) {
+      const aiResult = await updateStyleProfile({
+        currentStyle: base,
+        userInstruction: lastMessage,
+        sampleLead: sampleData
+      });
+      // Mezclamos el resultado de la IA con el estilo base
+      updated = {
+        ...base,
+        ...aiResult.updatedStyle,
+        updatedAt: new Date().toISOString()
+      };
+      explanation = aiResult.explanation;
+    }
 
     // (2) Render seguro
     const sample = loadSampleFromClient(sampleData);
@@ -101,10 +79,13 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       styleProfile: updated,
+      // Si la IA dio una explicación, la devolvemos como mensaje del asistente
+      explanation,
       preview,
       warnings: qc.warnings,
     });
   } catch (e: any) {
+    console.error('Error in chat style API:', e);
     return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 });
   }
 }
