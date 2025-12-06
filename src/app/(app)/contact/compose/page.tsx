@@ -400,37 +400,52 @@ function ComposeInner() {
 
           {/* Tracking Options - NEW SECTION */}
           <div className="border border-border/50 rounded-md p-3 bg-muted/20">
-            <div className="flex flex-wrap gap-4">
-              <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Inyecta una imagen invisible para detectar apertura en tiempo real">
-                <input
-                  type="checkbox"
-                  checked={usePixel}
-                  onChange={(e) => setUsePixel(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                />
-                Activar Tracking Pixel
-                <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded ml-1">Recomendado</span>
-              </label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Inyecta una imagen invisible para detectar apertura en tiempo real">
+                  <input
+                    type="checkbox"
+                    checked={usePixel}
+                    onChange={(e) => setUsePixel(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  Activar Tracking Pixel
+                  <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded ml-1">Recomendado</span>
+                </label>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Inserta un píxel invisible. Sabrás exactamente cuándo abren tu correo sin que el destinatario lo note.
+                </p>
+              </div>
 
-              <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Reescribe enlaces para saber si el usuario hizo clic">
-                <input
-                  type="checkbox"
-                  checked={useLinkTracking}
-                  onChange={(e) => setUseLinkTracking(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                />
-                Track Link Clicks
-              </label>
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Reescribe enlaces para saber si el usuario hizo clic">
+                  <input
+                    type="checkbox"
+                    checked={useLinkTracking}
+                    onChange={(e) => setUseLinkTracking(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  Track Link Clicks
+                </label>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Convierte automáticamente cualquier link en el cuerpo (ej. tu web) en un enlace rastreable.
+                </p>
+              </div>
 
-              <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Solicita confirmación de lectura estándar (puede ser bloqueado por el usuario)">
-                <input
-                  type="checkbox"
-                  checked={useReadReceipt}
-                  onChange={(e) => setUseReadReceipt(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                />
-                Solicitar Confirmación de Lectura
-              </label>
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Solicita confirmación de lectura estándar (puede ser bloqueado por el usuario)">
+                  <input
+                    type="checkbox"
+                    checked={useReadReceipt}
+                    onChange={(e) => setUseReadReceipt(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  Solicitar Confirmación
+                </label>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Pide una confirmación formal. El destinatario verá una ventana emergente y podría rechazarla.
+                </p>
+              </div>
             </div>
           </div>
 
