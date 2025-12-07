@@ -18,6 +18,10 @@ const nextConfig = {
         port: '',
         pathname: '/**',
       },
+      { protocol: 'https', hostname: 'logo.clearbit.com' },
+      { protocol: 'https', hostname: 'media.licdn.com' },
+      { protocol: 'https', hostname: '*.googleusercontent.com' },
+      { protocol: 'https', hostname: 'ui-avatars.com' },
     ],
   },
 

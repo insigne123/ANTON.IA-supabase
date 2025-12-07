@@ -1,6 +1,7 @@
 
 'use client';
 import { useEffect, useMemo, useState } from 'react';
+import NextImage from 'next/image';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -300,7 +301,20 @@ export default function SavedOpportunitiesPage() {
                             {orgCandidates.map((c, i) => (
                                 <div key={i} className={`flex items-center justify-between border rounded p-3 ${chosenOrg?.id === c.id ? 'bg-muted/50' : ''}`}>
                                     <div className="flex items-center gap-3">
-                                        {c.logo ? <img src={c.logo} alt="" className="w-8 h-8 rounded" data-ai-hint="logo" /> : <div className="w-8 h-8 rounded bg-muted" />}
+                                        {c.logo ? (
+                                            <div className="relative w-8 h-8 rounded overflow-hidden">
+                                                <NextImage
+                                                    src={c.logo}
+                                                    alt={c.name}
+                                                    className="object-cover"
+                                                    fill
+                                                    sizes="32px"
+                                                    data-ai-hint="logo"
+                                                />
+                                            </div>
+                                        ) : (
+                                            <div className="w-8 h-8 rounded bg-muted" />
+                                        )}
                                         <div>
                                             <div className="font-medium">{c.name}</div>
                                             <div className="text-xs text-muted-foreground">
@@ -318,7 +332,7 @@ export default function SavedOpportunitiesPage() {
                                 <div className="text-sm text-muted-foreground">Sin resultados. Ajusta el nombre y vuelve a intentar.</div>
                             )}
                         </div>
-                    </div>
+                    </div >
 
                     <div className="grid md:grid-cols-2 gap-3 mt-4">
                         <Input value={leadTitles} onChange={e => setLeadTitles(e.target.value)} placeholder="Cargos (coma separada, opcional)" />
@@ -339,47 +353,49 @@ export default function SavedOpportunitiesPage() {
                         </Button>
                     </DialogFooter>
 
-                    {foundLeads.length > 0 && (
-                        <div className="mt-4 max-h-[40vh] overflow-auto border rounded">
-                            <Table>
-                                <TableHeader className="sticky top-0 bg-background">
-                                    <TableRow>
-                                        <TableHead className="w-10">
-                                            <Checkbox checked={allLeadsSelected} onCheckedChange={(v) => toggleSelectAllLeads(Boolean(v))} />
-                                        </TableHead>
-                                        <TableHead>Nombre</TableHead>
-                                        <TableHead>Título</TableHead>
-                                        <TableHead>Empresa</TableHead>
-                                        <TableHead>Email</TableHead>
-                                        <TableHead>LinkedIn</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {foundLeads.map((l, i) => (
-                                        <TableRow key={i}>
-                                            <TableCell>
-                                                <Checkbox
-                                                    checked={!!selectedLeadIds[(l.id || l.linkedinUrl || l.fullName)]}
-                                                    onCheckedChange={(v) => toggleLead((l.id || l.linkedinUrl || l.fullName), Boolean(v))}
-                                                />
-                                            </TableCell>
-                                            <TableCell>{l.fullName}</TableCell>
-                                            <TableCell>{l.title}</TableCell>
-                                            <TableCell>{l.companyName}</TableCell>
-                                            <TableCell>
-                                                {l.email
-                                                    ? l.email
-                                                    : (l.lockedEmail ? '(locked)' : (l.guessedEmail ? '(guess)' : '-'))}
-                                            </TableCell>
-                                            <TableCell>{l.linkedinUrl ? <a className="underline" href={l.linkedinUrl} target="_blank" rel="noreferrer">Perfil</a> : '-'}</TableCell>
+                    {
+                        foundLeads.length > 0 && (
+                            <div className="mt-4 max-h-[40vh] overflow-auto border rounded">
+                                <Table>
+                                    <TableHeader className="sticky top-0 bg-background">
+                                        <TableRow>
+                                            <TableHead className="w-10">
+                                                <Checkbox checked={allLeadsSelected} onCheckedChange={(v) => toggleSelectAllLeads(Boolean(v))} />
+                                            </TableHead>
+                                            <TableHead>Nombre</TableHead>
+                                            <TableHead>Título</TableHead>
+                                            <TableHead>Empresa</TableHead>
+                                            <TableHead>Email</TableHead>
+                                            <TableHead>LinkedIn</TableHead>
                                         </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
-        </div>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {foundLeads.map((l, i) => (
+                                            <TableRow key={i}>
+                                                <TableCell>
+                                                    <Checkbox
+                                                        checked={!!selectedLeadIds[(l.id || l.linkedinUrl || l.fullName)]}
+                                                        onCheckedChange={(v) => toggleLead((l.id || l.linkedinUrl || l.fullName), Boolean(v))}
+                                                    />
+                                                </TableCell>
+                                                <TableCell>{l.fullName}</TableCell>
+                                                <TableCell>{l.title}</TableCell>
+                                                <TableCell>{l.companyName}</TableCell>
+                                                <TableCell>
+                                                    {l.email
+                                                        ? l.email
+                                                        : (l.lockedEmail ? '(locked)' : (l.guessedEmail ? '(guess)' : '-'))}
+                                                </TableCell>
+                                                <TableCell>{l.linkedinUrl ? <a className="underline" href={l.linkedinUrl} target="_blank" rel="noreferrer">Perfil</a> : '-'}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        )
+                    }
+                </DialogContent >
+            </Dialog >
+        </div >
     );
 }
