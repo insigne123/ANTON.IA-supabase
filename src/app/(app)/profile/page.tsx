@@ -37,7 +37,7 @@ export default function ProfilePage() {
           const extended = data.signatures?.['profile_extended'] || {};
           setProfile({
             name: data.full_name || '',
-            role: extended.role || '',
+            role: data.job_title || extended.role || '',
             companyName: data.company_name || '',
             sector: extended.sector || '',
             website: data.company_domain || '',
@@ -74,6 +74,7 @@ export default function ProfilePage() {
         full_name: profile.name,
         company_name: profile.companyName,
         company_domain: profile.website,
+        job_title: profile.role,
         signatures: {
           ...currentSignatures,
           profile_extended: {
