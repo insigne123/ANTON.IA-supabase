@@ -43,8 +43,12 @@ function fileToBase64(file: File): Promise<CampaignStepAttachment> {
   });
 }
 
+import { useAuth } from '@/context/AuthContext';
+
 export default function CampaignsPage() {
   const { toast } = useToast();
+  const { user, loading: authLoading } = useAuth();
+
   const [mode, setMode] = useState<Mode>({ kind: 'list' });
   const [items, setItems] = useState<Campaign[]>([]);
   const [saving, setSaving] = useState(false);
@@ -71,7 +75,6 @@ export default function CampaignsPage() {
   const allSelected = previewRows.length > 0 && selectedCount === previewRows.length;
   const someSelected = selectedCount > 0 && !allSelected;
 
-
   // Editor state
   const [draft, setDraft] = useState<{
     id?: string;
@@ -90,11 +93,14 @@ export default function CampaignsPage() {
 
   useEffect(() => {
     async function load() {
+      if (authLoading) return;
+      if (!user) return; // or handle unauthenticated state
+
       setItems(await campaignsStorage.get());
       setContacted(await contactedLeadsStorage.get());
     }
     load();
-  }, []);
+  }, [authLoading, user]);
 
   function startCreate() {
     setDraft({
