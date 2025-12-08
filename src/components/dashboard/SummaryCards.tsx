@@ -30,14 +30,14 @@ export default function SummaryCards() {
   useEffect(() => {
     async function load() {
       const contacted = await contactedLeadsStorage.get();
-      const campaigns = campaignsStorage.get();
+      const campaigns = await campaignsStorage.get();
       const enriched = await getEnrichedLeads();
       const opps = await savedOpportunitiesStorage.get();
 
       setSummary({
         contacted: contacted.length,
         replied: contacted.filter(c => c.status === 'replied').length,
-        activeCampaigns: campaigns.filter(c => !c.isPaused).length,
+        activeCampaigns: campaigns.filter(c => c.status === 'active').length,
         enrichedLeads: enriched.length,
         savedOpps: opps.length,
       });

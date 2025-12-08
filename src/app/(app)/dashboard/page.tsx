@@ -7,6 +7,7 @@ import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
 import ActivityFeed from '@/components/dashboard/ActivityFeed';
 import NextStepsWidget from '@/components/dashboard/NextStepsWidget';
 import PerformanceChart from '@/components/dashboard/PerformanceChart';
+import FunnelChart from '@/components/dashboard/FunnelChart';
 import SummaryCards from '@/components/dashboard/SummaryCards';
 
 export default function DashboardPage() {
@@ -27,10 +28,16 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Sección Media: Próximos Pasos y Gráfico de Rendimiento */}
+      {/* Sección Media: Próximos Pasos y Gráficos */}
       <div className="grid gap-6 lg:grid-cols-2">
         <NextStepsWidget />
         <PerformanceChart />
+      </div>
+
+      {/* Sección Analítica Profunda */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <FunnelChart />
+        {/* Espacio para futuras analíticas o mover ActivityFeed aquí */}
       </div>
 
       {/* Sección Inferior: Actividad Reciente */}
