@@ -68,7 +68,14 @@ export async function POST(req: NextRequest) {
             </div>
         `;
 
-        const finalBody = htmlBody + footerHtml;
+        let finalBody = htmlBody;
+        if (finalBody.includes('</body>')) {
+            finalBody = finalBody.replace('</body>', `${footerHtml}</body>`);
+        } else {
+            finalBody += footerHtml;
+        }
+
+        console.log('[Email] Generated Unsubscribe Link:', unsubscribeUrl);
 
         // --- End Unsubscribe Logic --- //
 
