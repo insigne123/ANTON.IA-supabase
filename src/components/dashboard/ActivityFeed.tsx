@@ -23,46 +23,60 @@ export default function ActivityFeed() {
 
   useEffect(() => {
     async function load() {
-      // Simulación de carga de datos desde diferentes storages.
-      const contacted = await contactedLeadsStorage.get();
-      const opps = await savedOpportunitiesStorage.get();
-      const savedLeads = await supabaseService.getLeads();
+      try {
+        // Simulación de carga de datos desde diferentes storages.
+        const contactedPromise = contactedLeadsStorage.get();
+        const oppsPromise = savedOpportunitiesStorage.get();
+        const savedLeadsPromise = supabaseService.getLeads();
 
-      const feed: ActivityItem[] = [];
+        const [contacted, opps, savedLeads] = await Promise.all([
+          contactedPromise.catch(() => []),
+          oppsPromise.catch(() => []),
+          savedLeadsPromise.catch(() => [])
+        ]);
 
-      contacted.forEach(c => {
-        feed.push({
-          type: 'contact',
-          title: `Correo enviado a ${c.name}`,
-          description: `Empresa: ${c.company || 'N/A'}`,
-          date: new Date(c.sentAt),
+        const feed: ActivityItem[] = [];
+
+        (contacted || []).forEach(c => {
+          if (!c) return;
+          if (c.sentAt) {
+            feed.push({
+              type: 'contact',
+              title: `Correo enviado a ${c.name}`,
+              description: `Empresa: ${c.company || 'N/A'}`,
+              date: new Date(c.sentAt),
+            });
+          }
+          if (c.status === 'replied' && c.repliedAt) {
+            feed.push({
+              type: 'reply',
+              title: `Respuesta recibida de ${c.name}`,
+              description: `Asunto original: ${c.subject}`,
+              date: new Date(c.repliedAt),
+            });
+          }
         });
-        if (c.status === 'replied' && c.repliedAt) {
+
+        (opps || []).forEach(o => {
+          if (!o) return;
+          const publishedDate = o.publishedAt ? new Date(o.publishedAt) : new Date(); // Fallback date
           feed.push({
-            type: 'reply',
-            title: `Respuesta recibida de ${c.name}`,
-            description: `Asunto original: ${c.subject}`,
-            date: new Date(c.repliedAt),
+            type: 'new_opp',
+            title: `Nueva oportunidad guardada: ${o.title}`,
+            description: `Empresa: ${o.companyName}`,
+            date: publishedDate,
           });
-        }
-      });
-
-      opps.forEach(o => {
-        const publishedDate = o.publishedAt ? new Date(o.publishedAt) : new Date(); // Fallback date
-        feed.push({
-          type: 'new_opp',
-          title: `Nueva oportunidad guardada: ${o.title}`,
-          description: `Empresa: ${o.companyName}`,
-          date: publishedDate,
         });
-      });
 
-      // Ordenar por fecha descendente y tomar las últimas 15
-      const sortedFeed = feed
-        .sort((a, b) => b.date.getTime() - a.date.getTime())
-        .slice(0, 15);
+        // Ordenar por fecha descendente y tomar las últimas 15
+        const sortedFeed = feed
+          .sort((a, b) => b.date.getTime() - a.date.getTime())
+          .slice(0, 15);
 
-      setActivities(sortedFeed);
+        setActivities(sortedFeed);
+      } catch (error) {
+        console.error("Error loading activity feed:", error);
+      }
     }
     load();
   }, []);

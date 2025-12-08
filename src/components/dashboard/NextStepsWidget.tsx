@@ -26,28 +26,39 @@ export default function NextStepsWidget() {
 
   useEffect(() => {
     setMounted(true);
-    // Calcular al montar y potencialmente en un intervalo si los datos cambian a menudo.
-    const enriched = getEnrichedLeads();
-    const ready = enriched
-      .filter(lead => !!findReportForLead({ leadId: lead.id, companyDomain: lead.companyDomain, companyName: lead.companyName }))
-      .slice(0, 5) // Limitar a 5 para el widget
-      .map(lead => ({ id: lead.id, name: lead.fullName, company: lead.companyName || 'N/A' }));
+    async function load() {
+      try {
+        const enrichedPromise = getEnrichedLeads();
+        const campaignsPromise = campaignsStorage.get();
 
-    setReadyLeads(ready);
+        const [enriched, campaigns] = await Promise.all([
+          Promise.resolve(enrichedPromise).catch(() => []),
+          campaignsPromise.catch(() => [])
+        ]);
 
-    const campaigns = campaignsStorage.get();
-    const promises = campaigns.map(c => {
-      if (!c.isPaused) {
-        return computeEligibilityForCampaign(c).then(rows => rows.length);
+        const ready = (enriched || [])
+          .filter(lead => !!findReportForLead({ leadId: lead.id, companyDomain: lead.companyDomain, companyName: lead.companyName }))
+          .slice(0, 5) // Limitar a 5 para el widget
+          .map(lead => ({ id: lead.id, name: lead.fullName, company: lead.companyName || 'N/A' }));
+
+        setReadyLeads(ready);
+
+        const promises = (campaigns || []).map(c => {
+          if (!c.isPaused) {
+            return computeEligibilityForCampaign(c).then(rows => rows.length).catch(() => 0);
+          }
+          return Promise.resolve(0);
+        });
+
+        Promise.all(promises).then(counts => {
+          const total = counts.reduce((a, b) => a + b, 0);
+          setEligibleCampaignLeads(total);
+        });
+      } catch (e) {
+        console.error("Error loading next steps widget", e);
       }
-      return Promise.resolve(0);
-    });
-
-    Promise.all(promises).then(counts => {
-      const total = counts.reduce((a, b) => a + b, 0);
-      setEligibleCampaignLeads(total);
-    });
-
+    }
+    load();
   }, []);
 
   if (!mounted) return null; // Evita renderizado SSR que no puede acceder a localStorage

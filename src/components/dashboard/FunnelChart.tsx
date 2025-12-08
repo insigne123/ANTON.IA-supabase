@@ -10,21 +10,26 @@ export default function FunnelChart() {
 
     useEffect(() => {
         async function load() {
-            const contacts = await contactedLeadsStorage.get();
+            try {
+                const contacts = await contactedLeadsStorage.get().catch(() => []) || [];
 
-            // Calcular métricas
-            const sent = contacts.length;
-            const opened = contacts.filter(c => !!c.openedAt || c.clickCount > 0 || c.status === 'replied').length;
-            // Si respondió o clicó, implícitamente abrió (a veces el pixel de apertura falla pero el click es certero)
-            const clicked = contacts.filter(c => !!c.clickedAt || (c.clickCount && c.clickCount > 0)).length;
-            const replied = contacts.filter(c => c.status === 'replied' || !!c.repliedAt).length;
+                // Calcular métricas
+                const sent = contacts.length;
+                const opened = contacts.filter(c => !!c.openedAt || c.clickCount > 0 || c.status === 'replied').length;
+                // Si respondió o clicó, implícitamente abrió
+                const clicked = contacts.filter(c => !!c.clickedAt || (c.clickCount && c.clickCount > 0)).length;
+                const replied = contacts.filter(c => c.status === 'replied' || !!c.repliedAt).length;
 
-            setData([
-                { name: 'Enviados', value: sent, fill: '#3b82f6' },  // Blue
-                { name: 'Abiertos', value: opened, fill: '#8b5cf6' }, // Violet
-                { name: 'Clics', value: clicked, fill: '#14b8a6' },    // Teal
-                { name: 'Respuestas', value: replied, fill: '#22c55e' } // Green
-            ]);
+                setData([
+                    { name: 'Enviados', value: sent, fill: '#3b82f6' },
+                    { name: 'Abiertos', value: opened, fill: '#8b5cf6' },
+                    { name: 'Clics', value: clicked, fill: '#14b8a6' },
+                    { name: 'Respuestas', value: replied, fill: '#22c55e' }
+                ]);
+            } catch (error) {
+                console.error("Error loading funnel chart", error);
+                setData([]);
+            }
         }
         load();
     }, []);

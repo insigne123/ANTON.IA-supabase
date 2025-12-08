@@ -18,7 +18,8 @@ export default function AppLayout({
         </header>
 
         {/* Topbar desktop (visible en md+) */}
-        <div className="sticky top-0 z-10 hidden h-14 items-center justify-end border-b bg-background/80 px-6 backdrop-blur-sm md:flex">
+        <div className="sticky top-0 z-10 hidden h-14 items-center justify-between border-b bg-background/80 px-6 backdrop-blur-sm md:flex">
+          <SidebarTrigger />
           <ThemeToggle />
         </div>
 
