@@ -63,14 +63,16 @@ export async function POST(req: NextRequest) {
         const unsubscribeUrl = generateUnsubscribeLink(to, user.id, orgId);
         const footerHtml = `
             <br/><br/>
-            <div style="font-size: 12px; color: #888; border-top: 1px solid #eee; padding-top: 10px; margin-top: 20px;">
-                <p>Si no deseas recibir más correos de nosotros, puedes <a href="${unsubscribeUrl}" target="_blank" style="color: #666; text-decoration: underline;">darte de baja aquí</a>.</p>
+            <div style="font-family: sans-serif; font-size: 12px; color: #888; border-top: 1px solid #eee; padding-top: 10px; margin-top: 20px; display: block;">
+                <p style="margin: 0;">Si no deseas recibir más correos de nosotros, puedes <a href="${unsubscribeUrl}" target="_blank" style="color: #666; text-decoration: underline;">darte de baja aquí</a>.</p>
             </div>
         `;
 
         let finalBody = htmlBody;
-        if (finalBody.includes('</body>')) {
-            finalBody = finalBody.replace('</body>', `${footerHtml}</body>`);
+        // Case insensitive check for closing body tag
+        const bodyTagRegex = /<\/body>/i;
+        if (bodyTagRegex.test(finalBody)) {
+            finalBody = finalBody.replace(bodyTagRegex, `${footerHtml}</body>`);
         } else {
             finalBody += footerHtml;
         }
