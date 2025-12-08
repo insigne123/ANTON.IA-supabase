@@ -12,6 +12,7 @@ export const organizationService = {
                 .from('organization_members')
                 .select('organization_id')
                 .eq('user_id', user.id)
+                .order('created_at', { ascending: true })
                 .limit(1)
                 .single();
 

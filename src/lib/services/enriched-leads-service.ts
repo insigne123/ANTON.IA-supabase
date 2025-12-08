@@ -57,6 +57,7 @@ export async function getEnrichedLeads(): Promise<EnrichedLead[]> {
     console.log('[enriched-leads] get: user', user?.id);
 
     const orgId = await organizationService.getCurrentOrganizationId();
+    console.log('[enriched-leads] get: orgId', orgId);
 
     let query = supabase
         .from(TABLE)
