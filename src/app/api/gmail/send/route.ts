@@ -1,5 +1,8 @@
 // Envío Gmail: arma RFC822 correcto y usa base64url en `raw`
 import { NextResponse } from 'next/server';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
+import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 
 type SendReq = {
   to: string;
@@ -99,20 +102,77 @@ function buildRfc822Raw({ from, to, subject, html, text, cc = [], bcc = [], repl
   return rfc822;
 }
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as SendReq;
-    
+
     if (!body.from || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.from)) {
       return NextResponse.json({ error: 'Remitente inválido o ausente' }, { status: 400 });
     }
-    
+
     const accessToken = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
     if (!accessToken) return NextResponse.json({ error: 'Missing access token' }, { status: 401 });
 
-    const safeHtml = (body.html && body.html.trim().length) ? body.html : '<div></div>';
+    // --- Authenticate Local User (for Unsubscribe Link & Blacklist) ---
+    const supabase = createRouteHandlerClient({ cookies });
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized (No Session)' }, { status: 401 });
+    }
+
+    // Try to find Org ID (optional)
+    let orgId: string | null = null;
+    const { data: member } = await supabase
+      .from('organization_members')
+      .select('organization_id')
+      .eq('user_id', user.id)
+      .limit(1)
+      .maybeSingle();
+    if (member) orgId = member.organization_id;
+
+    // --- Blacklist Check ---
+    let blacklistQuery = supabase
+      .from('unsubscribed_emails')
+      .select('id')
+      .eq('email', body.to);
+
+    if (orgId) {
+      blacklistQuery = blacklistQuery.or(`user_id.eq.${user.id},organization_id.eq.${orgId}`);
+    } else {
+      blacklistQuery = blacklistQuery.eq('user_id', user.id);
+    }
+    const { data: blocked } = await blacklistQuery.maybeSingle();
+
+    if (blocked) {
+      console.warn(`[gmail/send] Blocked email to ${body.to} (User: ${user.id})`);
+      return NextResponse.json({ error: 'El destinatario se ha dado de baja de tus envíos.' }, { status: 403 });
+    }
+
+    // --- Inject Unsubscribe Link ---
+    const unsubscribeUrl = generateUnsubscribeLink(body.to, user.id, orgId);
+    console.log('[Gmail] Generated Unsubscribe Link:', unsubscribeUrl);
+
+    const footerHtml = `
+        <br/><br/>
+        <div style="font-family: sans-serif; font-size: 12px; color: #888; border-top: 1px solid #eee; padding-top: 10px; margin-top: 20px; display: block;">
+            <p style="margin: 0;">Si no deseas recibir más correos de nosotros, puedes <a href="${unsubscribeUrl}" target="_blank" style="color: #666; text-decoration: underline;">darte de baja aquí</a>.</p>
+        </div>
+    `;
+
+    let safeHtml = (body.html && body.html.trim().length) ? body.html : '<div></div>';
+    const bodyTagRegex = /<\/body>/i;
+    if (bodyTagRegex.test(safeHtml)) {
+      safeHtml = safeHtml.replace(bodyTagRegex, `${footerHtml}</body>`);
+    } else {
+      safeHtml += footerHtml;
+    }
+
+    // --- Build & Send ---
     const rawRfc822 = buildRfc822Raw({ ...body, html: safeHtml });
-    const raw = encodeBase64Url(rawRfc822); 
+    const raw = encodeBase64Url(rawRfc822);
 
     const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
       method: 'POST',
@@ -126,11 +186,11 @@ export async function POST(req: Request) {
     if (!res.ok) {
       const t = await res.text();
       console.error('[gmail/send] upsteam', res.status, t);
+      // Clean error message for user
       return NextResponse.json({ error: t || 'gmail upstream error' }, { status: 500 });
     }
 
     const data = await res.json();
-    // Gmail devuelve { id, threadId, labelIds? }
     return NextResponse.json({ ok: true, id: data.id, threadId: data.threadId });
   } catch (e: any) {
     console.error('[gmail/send] error', e);
