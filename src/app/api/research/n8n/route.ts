@@ -5,7 +5,11 @@
 //   - (alternativa aceptada) N8N_WEBHOOK_URL
 //   - (opcional) N8N_API_KEY para Authorization: Bearer <key>
 
+//   - (opcional) N8N_API_KEY para Authorization: Bearer <key>
+
 import { extractJsonFromMaybeFenced } from '@/lib/extract-json';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
 
 export const dynamic = 'force-dynamic'; // evita caché
 export const revalidate = 0;
@@ -64,8 +68,14 @@ export async function POST(req: Request): Promise<Response> {
     return json(500, { error: 'Server not configured: N8N_RESEARCH_WEBHOOK_URL' });
   }
 
-  // Hacemos opcional el header; si no viene, usar fallback estable
-  const userId = req.headers.get('x-user-id') || 'anon';
+  // --- Authenticate User via Session (Cookies) ---
+  const supabase = createRouteHandlerClient({ cookies });
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id || 'anon';
+
+  // Fallback to header only if session is missing (e.g. server-to-server calls?? unlikely in this app context)
+  // const userIdHeader = req.headers.get('x-user-id');
+  // const finalUserId = userId !== 'anon' ? userId : (userIdHeader || 'anon');
 
   let body: any;
   try {
@@ -132,39 +142,21 @@ export async function POST(req: Request): Promise<Response> {
   const apiKey = process.env.N8N_API_KEY;
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-  // --- FETCH USER PROFILE (Job Title) ---
+  // --- FETCH USER PROFILE (Name & Job Title) ---
   let userJobTitle: string | null = null;
+  let userFullName: string | null = null;
+
   if (userId && userId !== 'anon') {
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name, job_title')
+        .eq('id', userId)
+        .single();
 
-      if (supabaseUrl && supabaseKey) {
-        // We use direct fetch or a minimal client to avoid heavy deps if possible, 
-        // but 'createClient' is standard. We'll assume the environment has it.
-        // For this file specifically, we might need to import createClient.
-        // Ideally we import it at the top, but to avoid conflicts in this replace block, 
-        // I will rely on an existing import or add it. 
-        // Wait, this file didn't have @supabase/supabase-js imported.
-        // It's safer to use a raw fetch to Supabase REST API to avoid adding a new import in a ReplaceChunk.
-        // OR I can use the multi-replace to add the import.
-
-        // Let's use raw fetch which is zero-dep.
-        const res = await fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${userId}&select=job_title`, {
-          headers: {
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`,
-            'Content-Type': 'application/json'
-          },
-          cache: 'no-store'
-        });
-
-        if (res.ok) {
-          const profiles = await res.json();
-          if (Array.isArray(profiles) && profiles.length > 0) {
-            userJobTitle = profiles[0].job_title;
-          }
-        }
+      if (profile) {
+        userJobTitle = profile.job_title || null;
+        userFullName = profile.full_name || null;
       }
     } catch (err) {
       console.warn('[research:n8n] Failed to fetch user profile:', err);
@@ -174,6 +166,7 @@ export async function POST(req: Request): Promise<Response> {
   // Identificación del usuario en el payload para n8n
   const userContext = {
     id: userId,
+    name: userFullName,
     jobTitle: userJobTitle
   };
 
@@ -245,6 +238,6 @@ export async function POST(req: Request): Promise<Response> {
     console.warn('[research:n8n] fallback parse failed:', (e as any)?.message);
   }
 
-  console.info('[research:n8n] OK → n8n aceptó', { userId, jobTitle: userJobTitle, reports: out.reports?.length ?? 0, skipped: out.skipped?.length ?? 0 });
+  console.info('[research:n8n] OK → n8n aceptó', { userId, name: userFullName, jobTitle: userJobTitle, reports: out.reports?.length ?? 0, skipped: out.skipped?.length ?? 0 });
   return json(200, out);
 }
