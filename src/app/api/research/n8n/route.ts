@@ -40,7 +40,7 @@ function withTimeout<T>(p: Promise<T>, ms = 20000): Promise<T> {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('timeout')), ms);
     p.then((v) => { clearTimeout(t); resolve(v); })
-     .catch((e) => { clearTimeout(t); reject(e); });
+      .catch((e) => { clearTimeout(t); reject(e); });
   });
 }
 
@@ -132,10 +132,57 @@ export async function POST(req: Request): Promise<Response> {
   const apiKey = process.env.N8N_API_KEY;
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
+  // --- FETCH USER PROFILE (Job Title) ---
+  let userJobTitle: string | null = null;
+  if (userId && userId !== 'anon') {
+    try {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+      if (supabaseUrl && supabaseKey) {
+        // We use direct fetch or a minimal client to avoid heavy deps if possible, 
+        // but 'createClient' is standard. We'll assume the environment has it.
+        // For this file specifically, we might need to import createClient.
+        // Ideally we import it at the top, but to avoid conflicts in this replace block, 
+        // I will rely on an existing import or add it. 
+        // Wait, this file didn't have @supabase/supabase-js imported.
+        // It's safer to use a raw fetch to Supabase REST API to avoid adding a new import in a ReplaceChunk.
+        // OR I can use the multi-replace to add the import.
+
+        // Let's use raw fetch which is zero-dep.
+        const res = await fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${userId}&select=job_title`, {
+          headers: {
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json'
+          },
+          cache: 'no-store'
+        });
+
+        if (res.ok) {
+          const profiles = await res.json();
+          if (Array.isArray(profiles) && profiles.length > 0) {
+            userJobTitle = profiles[0].job_title;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[research:n8n] Failed to fetch user profile:', err);
+    }
+  }
+
+  // Identificación del usuario en el payload para n8n
+  const userContext = {
+    id: userId,
+    jobTitle: userJobTitle
+  };
+
   let n8nRes: Response;
   try {
     // Reenviamos el body original pero garantizando campos canónicos en raíz
-    const forward = { ...body, ...canon };
+    // Add userContext
+    const forward = { ...body, ...canon, userContext };
+
     n8nRes = await withTimeout(fetch(webhook, {
       method: 'POST',
       headers,
@@ -166,10 +213,10 @@ export async function POST(req: Request): Promise<Response> {
     typeof result === 'string'
       ? { reports: [], skipped: [], text: result }
       : {
-          reports: Array.isArray(result.reports) ? result.reports : [],
-          skipped: Array.isArray(result.skipped) ? result.skipped : [],
-          ...result,
-        };
+        reports: Array.isArray(result.reports) ? result.reports : [],
+        skipped: Array.isArray(result.skipped) ? result.skipped : [],
+        ...result,
+      };
 
   // --- Fallback: n8n devolvió un mensaje con JSON en message.content ---
   try {
@@ -198,6 +245,6 @@ export async function POST(req: Request): Promise<Response> {
     console.warn('[research:n8n] fallback parse failed:', (e as any)?.message);
   }
 
-  console.info('[research:n8n] OK → n8n aceptó', { userId, reports: out.reports?.length ?? 0, skipped: out.skipped?.length ?? 0 });
+  console.info('[research:n8n] OK → n8n aceptó', { userId, jobTitle: userJobTitle, reports: out.reports?.length ?? 0, skipped: out.skipped?.length ?? 0 });
   return json(200, out);
 }

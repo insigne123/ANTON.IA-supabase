@@ -25,5 +25,6 @@ export function generateUnsubscribeLink(email: string, userId: string, orgId?: s
     if (orgId) params.set('o', orgId);
     params.set('sig', sig);
 
-    return `${baseUrl}/api/tracking/unsubscribe?${params.toString()}`;
+    // Point to the frontend page, not the API directly
+    return `${baseUrl}/unsubscribe?${params.toString()}`;
 }
