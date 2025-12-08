@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import type { EnrichedOppLead, LeadResearchReport, StyleProfile } from '@/lib/types';
-import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
+import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
 import { upsertLeadReports, getLeadReports, findReportForLead, findReportByRef } from '@/lib/lead-research-storage';
 import { BackBar } from '@/components/back-bar';
 import { extractPrimaryEmail } from '@/lib/email-utils';
@@ -86,7 +86,7 @@ export default function EnrichedOpportunitiesPage() {
 
   useEffect(() => {
     async function loadFilteredEnriched() {
-      const all = await enrichedLeadsStorage.get();
+      const all = await enrichedOpportunitiesStorage.get();
       const contacted = await contactedLeadsStorage.get();
       const contactedIds = new Set<string>(
         contacted.map(c => (c.leadId || '').toString()).filter(Boolean)
@@ -414,7 +414,7 @@ export default function EnrichedOpportunitiesPage() {
           lastUpdateAt: new Date().toISOString(),
         });
 
-        await enrichedLeadsStorage.removeById(lead.id);
+        await enrichedOpportunitiesStorage.removeById(lead.id); // Updated storage
         removedIds.add(lead.id);
       } catch (e: any) {
         console.error(`send mail error (${bulkProvider})`, email, e?.message);

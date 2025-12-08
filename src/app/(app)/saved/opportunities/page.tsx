@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import type { JobOpportunity, LeadFromApollo, EnrichedOppLead } from '@/lib/types';
 import { savedOpportunitiesStorage } from '@/lib/services/opportunities-service';
-import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
+import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -211,7 +211,7 @@ export default function SavedOpportunitiesPage() {
                 ...e,
                 descriptionSnippet: currentOpp?.descriptionSnippet,
             }));
-            await enrichedLeadsStorage.addDedup(enrichedNow);
+            await enrichedOpportunitiesStorage.addDedup(enrichedNow);
 
             toast({ title: 'Listo', description: `Enriquecidos ${enrichedNow.length} lead(s).` });
             setOrgPickerOpen(false);

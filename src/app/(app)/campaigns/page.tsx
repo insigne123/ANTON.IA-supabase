@@ -1,4 +1,3 @@
-
 'use client';
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
@@ -7,11 +6,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { campaignsStorage, type Campaign, type CampaignStep, type CampaignStepAttachment } from '@/lib/services/campaigns-service';
+import { campaignsStorage, type CampaignStep, type CampaignStepAttachment } from '@/lib/services/campaigns-service';
+// UI-compatible Campaign type from service
+import type { Campaign } from '@/lib/services/campaigns-service';
+
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
-import { Trash2, Plus, Pause, Play, Eye, X, Sparkles } from 'lucide-react';
+import { Trash2, Plus, Pause, Play, Eye, X, Sparkles, MessageSquare } from 'lucide-react';
 import { computeEligibilityForCampaign, type EligiblePreviewRow } from '@/lib/campaign-eligibility';
 import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { googleAuthService } from '@/lib/google-auth-service';
@@ -19,6 +22,10 @@ import type { ContactedLead } from '@/lib/types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { CommentsSection } from '@/components/comments-section';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { CampaignAnalytics } from '@/components/campaigns/CampaignAnalytics';
+import { CampaignFlow } from '@/components/campaigns/CampaignFlow';
+import { cn } from '@/lib/utils';
 
 type Mode = { kind: 'list' } | { kind: 'edit'; id?: string };
 
@@ -54,6 +61,10 @@ export default function CampaignsPage() {
   const [aiGoal, setAiGoal] = useState('');
   const [aiAudience, setAiAudience] = useState('');
 
+  // View Mode
+  const [viewMode, setViewMode] = useState<'list' | 'flow'>('list');
+  const [activeStepId, setActiveStepId] = useState<string | null>(null);
+
   // Selección en la tabla de previsualización
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectedCount = selectedIds.size;
@@ -62,10 +73,17 @@ export default function CampaignsPage() {
 
 
   // Editor state
-  const [draft, setDraft] = useState<{ id?: string; name: string; steps: DraftStep[]; excludedLeadIds: string[] }>({
+  const [draft, setDraft] = useState<{
+    id?: string;
+    name: string;
+    steps: DraftStep[];
+    excludedLeadIds: string[];
+    settings: NonNullable<Campaign['settings']>;
+  }>({
     name: 'Nueva campaña',
     steps: [{ id: crypto.randomUUID(), name: 'Follow-up 1', offsetDays: 3, subject: '', bodyHtml: '', attachments: [] }],
     excludedLeadIds: [],
+    settings: { smartScheduling: { enabled: false, timezone: 'UTC', startHour: 9, endHour: 17 } }
   });
 
   const [contacted, setContacted] = useState<ContactedLead[]>([]);
@@ -83,6 +101,7 @@ export default function CampaignsPage() {
       name: 'Nueva campaña',
       steps: [{ id: crypto.randomUUID(), name: 'Follow-up 1', offsetDays: 3, subject: '', bodyHtml: '', attachments: [] }],
       excludedLeadIds: [],
+      settings: { smartScheduling: { enabled: false, timezone: 'UTC', startHour: 9, endHour: 17 } }
     });
     setMode({ kind: 'edit' });
   }
@@ -93,6 +112,7 @@ export default function CampaignsPage() {
       name: c.name,
       steps: c.steps.map((s) => ({ ...s })),
       excludedLeadIds: [...c.excludedLeadIds],
+      settings: c.settings || { smartScheduling: { enabled: false, timezone: 'UTC', startHour: 9, endHour: 17 } }
     });
     setMode({ kind: 'edit', id: c.id });
   }
@@ -145,10 +165,20 @@ export default function CampaignsPage() {
         });
       }
       if (draft.id) {
-        await campaignsStorage.update(draft.id, { name: draft.name, steps, excludedLeadIds: draft.excludedLeadIds });
+        await campaignsStorage.update(draft.id, {
+          name: draft.name,
+          steps,
+          excludedLeadIds: draft.excludedLeadIds,
+          settings: draft.settings
+        });
         toast({ title: 'Campaña actualizada', description: 'Se guardaron los cambios.' });
       } else {
-        await campaignsStorage.add({ name: draft.name, steps, excludedLeadIds: draft.excludedLeadIds });
+        await campaignsStorage.add({
+          name: draft.name,
+          steps,
+          excludedLeadIds: draft.excludedLeadIds,
+          settings: draft.settings
+        });
         toast({ title: 'Campaña creada', description: 'Ya puedes previsualizar elegibles.' });
       }
       setItems(await campaignsStorage.get());
@@ -508,80 +538,284 @@ export default function CampaignsPage() {
       )}
 
       {mode.kind === 'edit' && (
-        <div className="grid gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>{draft.id ? 'Editar campaña' : 'Nueva campaña'}</CardTitle>
-                  <CardDescription>Define pasos, adjuntos, exclusiones y guarda.</CardDescription>
-                </div>
-                <div className="space-x-2">
-                  <Button variant="secondary" onClick={() => setAiOpen(true)}>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Generar con IA
-                  </Button>
-                  <Button variant="outline" onClick={() => setMode({ kind: 'list' })}>Cancelar</Button>
-                  <Button onClick={saveCampaign} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-2">
-                  <label className="text-sm font-medium">Nombre</label>
-                  <Input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
-                </div>
+        <Tabs defaultValue="editor" className="space-y-6">
+          <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight">{draft.id ? 'Gestionar Campaña' : 'Nueva Campaña'}</h2>
+              <p className="text-muted-foreground">Configura los pasos, revisa métricas y ajusta exclusiones.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <TabsList>
+                <TabsTrigger value="editor">Editor</TabsTrigger>
+                <TabsTrigger value="analytics" disabled={!draft.id}>Analíticas</TabsTrigger>
+                <TabsTrigger value="settings">Configuración</TabsTrigger>
+              </TabsList>
+              <div className="h-6 w-px bg-border mx-2" />
+              <Button variant="outline" onClick={() => setMode({ kind: 'list' })}>Volver</Button>
+              <Button onClick={saveCampaign} disabled={saving}>{saving ? 'Guardando...' : 'Guardar Cambios'}</Button>
+            </div>
+          </div>
 
-                <div className="space-y-3">
-                  <div className="text-sm font-medium">Pasos</div>
-                  {draft.steps.map((s, idx) => (
-                    <div key={s.id} className="border rounded-md p-3 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="font-medium">Paso {idx + 1}</div>
-                        <Button size="sm" variant="ghost" onClick={() => removeStep(s.id)} aria-label="Eliminar paso">
-                          <X className="h-4 w-4" />
+          <TabsContent value="editor" className="space-y-6">
+            <div className="grid gap-6 lg:grid-cols-3">
+              <div className="lg:col-span-2 space-y-6">
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between">
+                    <CardTitle>Pasos de la secuencia</CardTitle>
+                    <div className="flex items-center gap-2">
+                      <div className="flex bg-muted p-1 rounded-md">
+                        <Button size="sm" variant={viewMode === 'list' ? 'secondary' : 'ghost'} className="h-7 px-2" onClick={() => setViewMode('list')}>Lista</Button>
+                        <Button size="sm" variant={viewMode === 'flow' ? 'secondary' : 'ghost'} className="h-7 px-2" onClick={() => setViewMode('flow')}>Flujo</Button>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => setAiOpen(true)}>
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        IA
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Nombre de la campaña</label>
+                      <Input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
+                    </div>
+
+                    {viewMode === 'list' ? (
+                      <div className="space-y-4">
+                        {draft.steps.map((s, idx) => (
+                          <div key={s.id} id={`step-${s.id}`} className={cn("relative border rounded-lg p-4 bg-card hover:border-primary/50 transition-colors", activeStepId === s.id && "border-primary ring-1 ring-primary bg-primary/5")}>
+                            <div className="absolute right-4 top-4">
+                              <Button size="sm" variant="ghost" onClick={() => removeStep(s.id)} className="h-8 w-8 p-0 text-muted-foreground hover:text-red-500">
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+
+                            <div className="mb-4 flex items-center gap-2">
+                              <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold">
+                                {idx + 1}
+                              </div>
+                              <span className="text-sm font-medium">Paso {idx + 1}</span>
+                              {idx > 0 && (
+                                <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                                  Espera {s.offsetDays} días
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="grid gap-4">
+                              <div className="flex items-center justify-between">
+                                <div className="grid md:grid-cols-2 gap-4 flex-1">
+                                  <div className="grid gap-1.5">
+                                    <label className="text-xs font-medium text-muted-foreground">Nombre del paso</label>
+                                    <Input className="h-8" value={s.name} onChange={(e) =>
+                                      setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, name: e.target.value } : x) }))
+                                    } />
+                                  </div>
+                                  <div className="grid gap-1.5">
+                                    <label className="text-xs font-medium text-muted-foreground">Días de espera (Offset)</label>
+                                    <Input className="h-8" type="number" min={0} value={s.offsetDays}
+                                      onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, offsetDays: Number(e.target.value || 0) } : x) }))} />
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2 border-l pl-4 ml-4">
+                                  <Label htmlFor={`ab-toggle-${s.id}`} className="text-xs">Prueba A/B</Label>
+                                  <Switch id={`ab-toggle-${s.id}`} checked={!!s.variantB} onCheckedChange={(checked) => {
+                                    setDraft(d => ({
+                                      ...d,
+                                      steps: d.steps.map(x => x.id === s.id ? {
+                                        ...x,
+                                        variantB: checked ? { subject: '', bodyHtml: '' } : undefined
+                                      } : x)
+                                    }));
+                                  }} />
+                                </div>
+                              </div>
+
+                              {s.variantB ? (
+                                <Tabs defaultValue="A" className="w-full">
+                                  <TabsList className="grid w-full grid-cols-2 h-8">
+                                    <TabsTrigger value="A" className="text-xs">Variante A (Original)</TabsTrigger>
+                                    <TabsTrigger value="B" className="text-xs">Variante B (Alternativa)</TabsTrigger>
+                                  </TabsList>
+                                  <TabsContent value="A" className="space-y-4 pt-4 border rounded-md p-4 mt-2">
+                                    <div className="grid gap-1.5">
+                                      <label className="text-xs font-medium text-muted-foreground">Asunto A</label>
+                                      <Input className="h-9" value={s.subject} placeholder="Hola {{lead.name}}..."
+                                        onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, subject: e.target.value } : x) }))} />
+                                    </div>
+                                    <div className="grid gap-1.5">
+                                      <label className="text-xs font-medium text-muted-foreground">Cuerpo A</label>
+                                      <Textarea rows={6} className="font-mono text-sm resize-none" value={s.bodyHtml} placeholder="Permite HTML básico y variables..."
+                                        onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, bodyHtml: e.target.value } : x) }))} />
+                                      <div className="text-[10px] text-muted-foreground flex gap-2">
+                                        <span>Variables:</span>
+                                        <code className="bg-muted px-1 rounded">{`{{lead.name}}`}</code>
+                                        <code className="bg-muted px-1 rounded">{`{{company}}`}</code>
+                                        <code className="bg-muted px-1 rounded">{`{{sender.name}}`}</code>
+                                      </div>
+                                    </div>
+                                  </TabsContent>
+                                  <TabsContent value="B" className="space-y-4 pt-4 border rounded-md p-4 mt-2 border-orange-200 bg-orange-50/30">
+                                    <div className="grid gap-1.5">
+                                      <label className="text-xs font-medium text-muted-foreground text-orange-800">Asunto B</label>
+                                      <Input className="h-9 border-orange-200" value={s.variantB?.subject || ''} placeholder="Variante B..."
+                                        onChange={(e) => setDraft((d) => ({
+                                          ...d,
+                                          steps: d.steps.map((x) => x.id === s.id ? { ...x, variantB: { ...x.variantB!, subject: e.target.value, bodyHtml: x.variantB!.bodyHtml } } : x)
+                                        }))} />
+                                    </div>
+                                    <div className="grid gap-1.5">
+                                      <label className="text-xs font-medium text-muted-foreground text-orange-800">Cuerpo B</label>
+                                      <Textarea rows={6} className="font-mono text-sm resize-none border-orange-200" value={s.variantB?.bodyHtml || ''} placeholder="Versión alternativa..."
+                                        onChange={(e) => setDraft((d) => ({
+                                          ...d,
+                                          steps: d.steps.map((x) => x.id === s.id ? { ...x, variantB: { ...x.variantB!, subject: x.variantB!.subject, bodyHtml: e.target.value } } : x)
+                                        }))} />
+                                    </div>
+                                  </TabsContent>
+                                </Tabs>
+                              ) : (
+                                <>
+                                  <div className="grid gap-1.5">
+                                    <label className="text-xs font-medium text-muted-foreground">Asunto</label>
+                                    <Input className="h-9" value={s.subject} placeholder="Hola {{lead.name}}..."
+                                      onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, subject: e.target.value } : x) }))} />
+                                  </div>
+                                  <div className="grid gap-1.5">
+                                    <label className="text-xs font-medium text-muted-foreground">Cuerpo del correo</label>
+                                    <Textarea rows={6} className="font-mono text-sm resize-none" value={s.bodyHtml} placeholder="Permite HTML básico y variables..."
+                                      onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, bodyHtml: e.target.value } : x) }))} />
+                                    <div className="text-[10px] text-muted-foreground flex gap-2">
+                                      <span>Variables:</span>
+                                      <code className="bg-muted px-1 rounded">{`{{lead.name}}`}</code>
+                                      <code className="bg-muted px-1 rounded">{`{{company}}`}</code>
+                                      <code className="bg-muted px-1 rounded">{`{{sender.name}}`}</code>
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+
+                              <div className="grid gap-1.5">
+                                <label className="text-xs font-medium text-muted-foreground">Adjuntar archivos</label>
+                                <Input className="text-xs" type="file" multiple onChange={(e) => onStepFile(e, s.id)} />
+                                {s.attachments?.length ? <div className="text-xs text-green-600 flex items-center gap-1"><Sparkles className="w-3 h-3" /> {s.attachments.length} archivos adjuntos listos</div> : null}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+
+                        <Button variant="outline" className="w-full border-dashed py-6" onClick={addStep}>
+                          <Plus className="mr-2 h-4 w-4" />
+                          Añadir siguiente paso
                         </Button>
                       </div>
-                      <div className="grid md:grid-cols-3 gap-3">
-                        <div className="grid gap-2">
-                          <label className="text-sm">Nombre</label>
-                          <Input value={s.name} onChange={(e) =>
-                            setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, name: e.target.value } : x) }))
-                          } />
+                    ) : (
+                      // FLOW VIEW
+                      <div className="flex flex-col gap-6">
+                        <CampaignFlow
+                          steps={draft.steps}
+                          activeStepId={activeStepId}
+                          onSelectStep={(id) => {
+                            setActiveStepId(id);
+                            setViewMode('list');
+                            setTimeout(() => {
+                              document.getElementById(`step-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 100);
+                          }}
+                        />
+                        <div className="text-center text-xs text-muted-foreground">
+                          Haz clic en un paso para editar su contenido.
                         </div>
-                        <div className="grid gap-2">
-                          <label className="text-sm">Offset (días)</label>
-                          <Input type="number" min={0} value={s.offsetDays}
-                            onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, offsetDays: Number(e.target.value || 0) } : x) }))} />
-                        </div>
-                        <div className="grid gap-2">
-                          <label className="text-sm">Asunto</label>
-                          <Input value={s.subject}
-                            onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, subject: e.target.value } : x) }))} />
-                        </div>
+                        <Button variant="outline" className="w-full border-dashed py-6" onClick={addStep}>
+                          <Plus className="mr-2 h-4 w-4" />
+                          Añadir siguiente paso
+                        </Button>
                       </div>
-                      <div className="grid gap-2">
-                        <label className="text-sm">Cuerpo (HTML permitido, variables: {'{{lead.name}} {{company}} {{sender.name}}'})</label>
-                        <Textarea rows={8} className="font-mono text-sm" value={s.bodyHtml}
-                          onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, bodyHtml: e.target.value } : x) }))} />
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="lg:col-span-1">
+                {draft.id ? (
+                  <div className="sticky top-6 h-[calc(100vh-100px)]">
+                    <CommentsSection entityType="campaign" entityId={draft.id} />
+                  </div>
+                ) : (
+                  <Card className="h-full flex items-center justify-center p-6 text-center text-muted-foreground bg-muted/30 border-dashed">
+                    <div>
+                      <p>Guarda la campaña para habilitar los comentarios.</p>
+                    </div>
+                  </Card>
+                )}
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="analytics">
+            {draft.id ? (
+              (() => {
+                const original = items.find(i => i.id === draft.id);
+                if (!original) return <div className="p-8 text-center">Campaña no encontrada.</div>;
+                return <CampaignAnalytics campaign={original} contactedLeads={contacted} />;
+              })()
+            ) : (
+              <div className="p-12 text-center text-muted-foreground">Guarda la campaña para ver analíticas.</div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="settings">
+            <Card>
+              <CardHeader>
+                <CardTitle>Exclusiones y Configuración Avanzada</CardTitle>
+                <CardDescription>Gestiona quiénes no deben recibir correos de esta campaña.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+
+                <div>
+                  <h3 className="text-sm font-medium mb-3">Envío Inteligente</h3>
+                  <div className="flex items-center gap-2 mb-4">
+                    <Switch id="smart-sched"
+                      checked={!!draft.settings?.smartScheduling?.enabled}
+                      onCheckedChange={(v) =>
+                        setDraft(d => ({ ...d, settings: { ...d.settings, smartScheduling: { ...d.settings.smartScheduling!, enabled: v } } }))
+                      } />
+                    <Label htmlFor="smart-sched">Optimizar horario de envío (envía solo en horario laboral)</Label>
+                  </div>
+
+                  {draft.settings?.smartScheduling?.enabled && (
+                    <div className="grid gap-4 md:grid-cols-3 border p-4 rounded-md">
+                      <div className="grid gap-1.5">
+                        <Label>Zona Horaria</Label>
+                        <Input value={draft.settings.smartScheduling.timezone} onChange={(e) =>
+                          setDraft(d => ({ ...d, settings: { ...d.settings, smartScheduling: { ...d.settings.smartScheduling!, timezone: e.target.value } } }))
+                        } />
                       </div>
-                      <div className="grid gap-2">
-                        <label className="text-sm">Adjuntos (imágenes/archivos)</label>
-                        <Input type="file" multiple onChange={(e) => onStepFile(e, s.id)} />
-                        {s.attachments?.length ? <div className="text-xs text-muted-foreground">Adjuntos guardados: {s.attachments.length}</div> : null}
+                      <div className="grid gap-1.5">
+                        <Label>Hora Inicio (0-23)</Label>
+                        <Input type="number" min={0} max={23} value={draft.settings.smartScheduling.startHour} onChange={(e) =>
+                          setDraft(d => ({ ...d, settings: { ...d.settings, smartScheduling: { ...d.settings.smartScheduling!, startHour: Number(e.target.value) } } }))
+                        } />
+                      </div>
+                      <div className="grid gap-1.5">
+                        <Label>Hora Fin (0-23)</Label>
+                        <Input type="number" min={0} max={23} value={draft.settings.smartScheduling.endHour} onChange={(e) =>
+                          setDraft(d => ({ ...d, settings: { ...d.settings, smartScheduling: { ...d.settings.smartScheduling!, endHour: Number(e.target.value) } } }))
+                        } />
                       </div>
                     </div>
-                  ))}
-                  <Button variant="secondary" onClick={addStep}><Plus className="mr-2 h-4 w-4" />Añadir paso</Button>
+                  )}
                 </div>
 
+                <div className="h-px bg-border my-6" />
+
                 <div className="space-y-3">
-                  <div className="text-sm font-medium">Exclusiones (leads contactados que NO participarán)</div>
+                  <div className="text-sm font-medium">Leads contactados que NO participarán</div>
                   <div className="flex items-center gap-2 mb-2">
                     <Checkbox id="exclude-all" checked={draft.excludedLeadIds.length > 0 && draft.excludedLeadIds.length >= contacted.length}
                       onCheckedChange={(v) => excludeAll(Boolean(v))} />
-                    <label htmlFor="exclude-all" className="text-sm cursor-pointer">Excluir todos</label>
+                    <label htmlFor="exclude-all" className="text-sm cursor-pointer">Excluir todos los contactados previamente</label>
                   </div>
-                  <div className="border rounded-md max-h-[40vh] overflow-auto">
+                  <div className="border rounded-md max-h-[500px] overflow-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -616,31 +850,14 @@ export default function CampaignsPage() {
                 </div>
               </CardContent>
             </Card>
-          </div>
-
-          {/* Comments Section */}
-          <div className="lg:col-span-1">
-            {draft.id ? (
-              <div className="sticky top-6 h-[calc(100vh-100px)]">
-                <CommentsSection entityType="campaign" entityId={draft.id} />
-              </div>
-            ) : (
-              <Card className="h-full flex items-center justify-center p-6 text-center text-muted-foreground bg-muted/30 border-dashed">
-                <div>
-                  <p>Guarda la campaña para habilitar los comentarios.</p>
-                </div>
-              </Card>
-            )}
-          </div>
-        </div>
+          </TabsContent>
+        </Tabs>
       )}
 
       {/* === Modal de Previsualización === */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        {/* max-w adaptativa y sin overflow del contenedor; el scroll va en el body */}
         <DialogContent className="max-w-[min(96vw,1100px)] p-0">
           <div className="flex max-h-[80vh] flex-col">
-            {/* Header sticky */}
             <div className="sticky top-0 z-10 border-b bg-background/90 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
               <DialogHeader className="mb-2">
                 <DialogTitle>Leads elegibles</DialogTitle>
@@ -679,7 +896,6 @@ export default function CampaignsPage() {
               )}
             </div>
 
-            {/* Body scrollable */}
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
               {previewLoading ? (
                 <div className="py-10 text-center text-sm text-muted-foreground">Calculando elegibles…</div>
@@ -752,7 +968,6 @@ export default function CampaignsPage() {
         </DialogContent>
       </Dialog>
 
-
       {/* === Modal de IA === */}
       <Dialog open={aiOpen} onOpenChange={setAiOpen}>
         <DialogContent>
@@ -802,7 +1017,7 @@ export default function CampaignsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Diálogo de confirmación de borrado (simple) */}
+      {/* Diálogo de confirmación de borrado */}
       {deletingId && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
           <div className="bg-background border rounded-lg p-5 w-full max-w-md">

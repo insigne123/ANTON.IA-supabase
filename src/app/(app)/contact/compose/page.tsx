@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
+import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
@@ -81,8 +82,23 @@ function ComposeInner() {
       if (buffered) { setLead(buffered); return; }
 
       // 1) & 2) Enriched Leads (merged)
-      const enriched = await enrichedLeadsStorage.findEnrichedLeadById(id);
-      if (enriched) { setLead(enriched); return; }
+      let found: AnyLead | undefined = await enrichedLeadsStorage.findEnrichedLeadById(id);
+      let source = 'leads';
+
+      if (!found) {
+        // Try searching in opportunities
+        const opp = await enrichedOpportunitiesStorage.findEnrichedLeadById(id);
+        if (opp) {
+          found = opp;
+          source = 'opportunities';
+        }
+      }
+
+      if (found) {
+        (found as any)._sourceTable = source;
+        setLead(found);
+        return;
+      }
 
       // 3) contactados (por si se registró antes de abrir compose)
       const contacted = await contactedLeadsStorage.findByLeadId(id);
@@ -277,7 +293,12 @@ function ComposeInner() {
         lastUpdateAt: new Date().toISOString(),
       });
       // ✅ quitar de Oportunidades Enriquecidas (storage correcto)
-      await enrichedLeadsStorage.removeById((lead as any).id);
+      // Remove from source
+      if ((lead as any)._sourceTable === 'opportunities') {
+        await enrichedOpportunitiesStorage.removeById((lead as any).id);
+      } else {
+        await enrichedLeadsStorage.removeById((lead as any).id);
+      }
 
       toast({ title: 'Enviado con Outlook', description: `Correo enviado a ${(lead as any).fullName}.` });
       router.back();
@@ -335,7 +356,11 @@ function ComposeInner() {
       });
 
       // ✅ quitar de Oportunidades Enriquecidas (storage correcto)
-      await enrichedLeadsStorage.removeById((lead as any).id);
+      if ((lead as any)._sourceTable === 'opportunities') {
+        await enrichedOpportunitiesStorage.removeById((lead as any).id);
+      } else {
+        await enrichedLeadsStorage.removeById((lead as any).id);
+      }
       toast({ title: 'Enviado con Gmail', description: `Correo enviado a ${(lead as any).fullName}.` });
       router.back();
     } catch (e: any) {

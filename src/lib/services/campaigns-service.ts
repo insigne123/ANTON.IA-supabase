@@ -21,6 +21,14 @@ export type CampaignStep = {
     subject: string; // UI uses 'subject'
     bodyHtml: string; // UI uses 'bodyHtml'
     attachments?: CampaignStepAttachment[];
+
+    // A/B Testing
+    variantB?: {
+        subject: string;
+        bodyHtml: string;
+        attachments?: CampaignStepAttachment[];
+        weight?: number; // 0.5 default (50/50)
+    };
 };
 
 // UI-compatible Campaign
@@ -28,12 +36,23 @@ export type Campaign = {
     id: string;
     organizationId?: string;
     name: string;
-    isPaused: boolean; // UI uses boolean isPaused
-    createdAt: string;
-    updatedAt: string;
+    isPaused: boolean;
     steps: CampaignStep[];
     excludedLeadIds: string[];
-    sentRecords: Record<string, { lastStepIdx: number; lastSentAt: string }>;
+    createdAt: string;
+    updatedAt: string;
+    // Progreso por lead (independiente por campaña)
+    sentRecords?: Record<string, { lastStepIdx: number; lastSentAt: string }>;
+
+    // Campaign-wide settings
+    settings?: {
+        smartScheduling?: {
+            enabled: boolean;
+            timezone: string;
+            startHour: number; // 0-23
+            endHour: number;   // 0-23
+        };
+    };
 };
 
 function mapRowToCampaign(row: any, steps: any[] = []): Campaign {
@@ -41,19 +60,21 @@ function mapRowToCampaign(row: any, steps: any[] = []): Campaign {
         id: row.id,
         organizationId: row.organization_id,
         name: row.name || 'Campaña',
-        isPaused: row.status === 'paused', // Map DB status -> UI boolean
+        isPaused: row.status === 'paused',
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         steps: steps.map(s => ({
             id: s.id,
-            name: `Paso ${s.order_index + 1}`, // Generate a name if missing
+            name: `Paso ${s.order_index + 1}`,
             offsetDays: s.offset_days,
-            subject: s.subject_template, // Map DB -> UI
-            bodyHtml: s.body_template,   // Map DB -> UI
-            attachments: s.attachments as CampaignStepAttachment[]
+            subject: s.subject_template,
+            bodyHtml: s.body_template,
+            attachments: s.attachments as CampaignStepAttachment[],
+            variantB: s.variant_b || undefined
         })),
         excludedLeadIds: row.excluded_lead_ids || [],
-        sentRecords: {} // Not persisted in relational schema yet, return empty
+        sentRecords: {}, // Not persisted in relational schema yet
+        settings: row.settings || undefined
     };
 }
 
@@ -119,7 +140,8 @@ export const campaignsStorage = {
                     organization_id: orgId,
                     name: input.name,
                     status: input.isPaused ? 'paused' : 'active',
-                    excluded_lead_ids: input.excludedLeadIds || []
+                    excluded_lead_ids: input.excludedLeadIds || [],
+                    settings: input.settings || {}
                 })
                 .select()
                 .single();
@@ -131,27 +153,28 @@ export const campaignsStorage = {
 
             // 2. Insert Steps
             if (input.steps && input.steps.length > 0) {
-                const stepsToInsert = input.steps.map((s, idx) => ({
+                const stepsPayload = input.steps.map((s, idx) => ({
                     campaign_id: campData.id,
                     order_index: idx,
                     offset_days: s.offsetDays,
-                    subject_template: s.subject || '', // Map UI -> DB
-                    body_template: s.bodyHtml || '',   // Map UI -> DB
-                    attachments: s.attachments || []
+                    subject_template: s.subject,
+                    body_template: s.bodyHtml,
+                    attachments: s.attachments || [],
+                    variant_b: s.variantB || null
                 }));
 
                 const { error: stepsError } = await supabase
                     .from(TABLE_STEPS)
-                    .insert(stepsToInsert);
+                    .insert(stepsPayload);
 
-                if (stepsError) console.error('Error adding steps:', stepsError);
+                if (stepsError) {
+                    console.error('Error adding steps:', stepsError);
+                }
             }
 
-            await activityLogService.logActivity('create_campaign', 'campaign', campData.id, { name: campData.name });
-
-            return this.getById(campData.id);
+            return mapRowToCampaign(campData, input.steps?.map((s, i) => ({ ...s, id: 'temp-id', order_index: i })) || []);
         } catch (err) {
-            console.error('Unexpected error adding campaign:', err);
+            console.error('Error in add campaign:', err);
             return null;
         }
     },
@@ -162,6 +185,7 @@ export const campaignsStorage = {
             if (patch.name !== undefined) updateData.name = patch.name;
             if (patch.isPaused !== undefined) updateData.status = patch.isPaused ? 'paused' : 'active';
             if (patch.excludedLeadIds !== undefined) updateData.excluded_lead_ids = patch.excludedLeadIds;
+            if (patch.settings !== undefined) updateData.settings = patch.settings;
 
             const { error } = await supabase
                 .from(TABLE_CAMPAIGNS)
@@ -172,17 +196,20 @@ export const campaignsStorage = {
 
             // If steps are provided, replace them
             if (patch.steps) {
+                // Delete old steps
                 await supabase.from(TABLE_STEPS).delete().eq('campaign_id', id);
 
-                const stepsToInsert = patch.steps.map((s, idx) => ({
+                // Insert new steps
+                const stepsPayload = patch.steps.map((s, idx) => ({
                     campaign_id: id,
                     order_index: idx,
                     offset_days: s.offsetDays,
                     subject_template: s.subject,
                     body_template: s.bodyHtml,
-                    attachments: s.attachments || []
+                    attachments: s.attachments || [],
+                    variant_b: s.variantB || null
                 }));
-                await supabase.from(TABLE_STEPS).insert(stepsToInsert);
+                await supabase.from(TABLE_STEPS).insert(stepsPayload);
             }
 
             return this.getById(id);

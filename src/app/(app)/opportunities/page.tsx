@@ -16,7 +16,7 @@ import * as Quota from '@/lib/quota-client';
 import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { parseJsonResponse } from '@/lib/http/safe-json';
 
-import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
+import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
 import { getClientId } from '@/lib/client-id';
 import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
 
@@ -308,7 +308,7 @@ export default function OpportunitiesPage() {
         companyDomain: e.companyDomain ?? byRef.get(e?.clientRef)?.companyDomain,
         createdAt: e.createdAt,
       }));
-      const addRes = enrichedLeadsStorage.addDedup(formatted);
+      const addRes = enrichedOpportunitiesStorage.addDedup(formatted);
 
       // quitar de la lista temporal los que tengan email
       const enrichedRefs = new Set(formatted.filter((x: any) => !!x.email).map((_x: any, i: number) => enriched[i]?.clientRef).filter(Boolean));

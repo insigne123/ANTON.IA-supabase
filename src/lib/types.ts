@@ -361,6 +361,8 @@ export type Campaign = {
   excludeLeadIds?: string[];
   createdAt: string;
   updatedAt: string;
+  // Progreso por lead (independiente por campaña)
+  sentRecords?: Record<string, { lastStepIdx: number; lastSentAt: string }>;
 };
 
 // --- ORGANIZATIONS ---
