@@ -29,18 +29,29 @@ export default function SummaryCards() {
 
   useEffect(() => {
     async function load() {
-      const contacted = await contactedLeadsStorage.get();
-      const campaigns = await campaignsStorage.get();
-      const enriched = await getEnrichedLeads();
-      const opps = await savedOpportunitiesStorage.get();
+      try {
+        const contactsPromise = contactedLeadsStorage.get();
+        const campaignsPromise = campaignsStorage.get();
+        const enrichedPromise = getEnrichedLeads();
+        const oppsPromise = savedOpportunitiesStorage.get();
 
-      setSummary({
-        contacted: contacted.length,
-        replied: contacted.filter(c => c.status === 'replied').length,
-        activeCampaigns: campaigns.filter(c => c.status === 'active').length,
-        enrichedLeads: enriched.length,
-        savedOpps: opps.length,
-      });
+        const [contacted, campaigns, enriched, opps] = await Promise.all([
+          contactsPromise.catch(() => []),
+          campaignsPromise.catch(() => []),
+          enrichedPromise.catch(() => []),
+          oppsPromise.catch(() => [])
+        ]);
+
+        setSummary({
+          contacted: contacted?.length || 0,
+          replied: contacted?.filter(c => c.status === 'replied').length || 0,
+          activeCampaigns: campaigns?.filter(c => c.status === 'active').length || 0,
+          enrichedLeads: enriched?.length || 0,
+          savedOpps: opps?.length || 0,
+        });
+      } catch (error) {
+        console.error("Error loading summary cards:", error);
+      }
     }
     load();
   }, []);

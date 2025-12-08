@@ -10,6 +10,8 @@ import { ColumnMapping, CsvLeadInput } from '@/lib/csv-import-utils';
 import { savedOpportunitiesStorage } from '@/lib/saved-opportunities-storage'; // Usaremos esto o leads-service directamente
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 // NOTA: Dependiendo de dónde se guarden los leads, podríamos necesitar una función específica en un servicio.
 // Asumiremos que los guardamos como "Saved Opportunities" o "Enriched Leads"? 
 // El usuario dijo "importar leads a la base". Lo más seguro es guardarlos como leads enriquecidos (aunque vengan de CSV).
@@ -85,10 +87,15 @@ export default function ImportLeadsPage() {
 
     return (
         <div className="max-w-5xl mx-auto space-y-6 pb-20">
-            <PageHeader
-                title="Importar Leads"
-                description="Agrega contactos masivamente desde un archivo CSV."
-            />
+            <div className="flex items-center gap-4">
+                <Button variant="ghost" size="icon" onClick={() => router.back()}>
+                    <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <PageHeader
+                    title="Importar Leads"
+                    description="Agrega contactos masivamente desde un archivo CSV."
+                />
+            </div>
 
             {/* Progress Steps */}
             <div className="flex items-center justify-center gap-4 mb-8 text-sm">

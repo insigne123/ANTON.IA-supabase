@@ -21,38 +21,52 @@ export default function PerformanceChart() {
 
   useEffect(() => {
     async function load() {
-      const contacted = await contactedLeadsStorage.get();
-      const today = new Date();
-      const dataByDay: Record<string, { sent: number; replied: number }> = {};
+      try {
+        const contacted = await contactedLeadsStorage.get() || [];
+        const today = new Date();
+        const dataByDay: Record<string, { sent: number; replied: number }> = {};
 
-      // Inicializar los últimos 7 días
-      for (let i = 6; i >= 0; i--) {
-        const day = subDays(today, i);
-        const key = format(day, 'yyyy-MM-dd');
-        dataByDay[key] = { sent: 0, replied: 0 };
-      }
-
-      // Llenar con datos reales
-      contacted.forEach(c => {
-        const sentKey = format(new Date(c.sentAt), 'yyyy-MM-dd');
-        if (dataByDay[sentKey]) {
-          dataByDay[sentKey].sent += 1;
+        // Inicializar los últimos 7 días
+        for (let i = 6; i >= 0; i--) {
+          const day = subDays(today, i);
+          const key = format(day, 'yyyy-MM-dd');
+          dataByDay[key] = { sent: 0, replied: 0 };
         }
 
-        if (c.status === 'replied' && c.repliedAt) {
-          const repliedKey = format(new Date(c.repliedAt), 'yyyy-MM-dd');
-          if (dataByDay[repliedKey]) {
-            dataByDay[repliedKey].replied += 1;
+        // Llenar con datos reales
+        contacted.forEach(c => {
+          if (!c || !c.sentAt) return; // Safety check
+          try {
+            const sentAtDate = new Date(c.sentAt);
+            if (isNaN(sentAtDate.getTime())) return;
+            const sentKey = format(sentAtDate, 'yyyy-MM-dd');
+            if (dataByDay[sentKey]) {
+              dataByDay[sentKey].sent += 1;
+            }
+          } catch (e) { /* ignore date parse error */ }
+
+          if (c.status === 'replied' && c.repliedAt) {
+            try {
+              const repliedDate = new Date(c.repliedAt);
+              if (isNaN(repliedDate.getTime())) return;
+              const repliedKey = format(repliedDate, 'yyyy-MM-dd');
+              if (dataByDay[repliedKey]) {
+                dataByDay[repliedKey].replied += 1;
+              }
+            } catch (e) { /* ignore */ }
           }
-        }
-      });
+        });
 
-      const finalData = Object.entries(dataByDay).map(([date, values]) => ({
-        date: format(new Date(date), 'EEE', { locale: es }), // ej. "lun"
-        ...values,
-      }));
+        const finalData = Object.entries(dataByDay).map(([date, values]) => ({
+          date: format(new Date(date), 'EEE', { locale: es }), // ej. "lun"
+          ...values,
+        }));
 
-      setChartData(finalData);
+        setChartData(finalData);
+      } catch (error) {
+        console.error("Error loading performance chart:", error);
+        setChartData([]); // Fail safe
+      }
     }
     load();
   }, []);

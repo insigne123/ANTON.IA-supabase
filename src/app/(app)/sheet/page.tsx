@@ -217,6 +217,11 @@ export default function UnifiedSheetPage() {
         <Button onClick={exportPdf} variant="outline">
           <FileText className="mr-2 h-4 w-4" /> PDF
         </Button>
+        <Link href="/leads/import">
+          <Button variant="default" className="bg-green-600 hover:bg-green-700">
+            <Download className="mr-2 h-4 w-4 rotate-180" /> Importar Leads
+          </Button>
+        </Link>
       </div>
 
       <Card>
