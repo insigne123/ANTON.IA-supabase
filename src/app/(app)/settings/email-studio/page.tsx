@@ -4,6 +4,9 @@ import { PageHeader } from '@/components/page-header';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import ConversationalDesigner from '@/components/email-studio/ConversationalDesigner';
 import SignatureManager from '@/components/email-studio/SignatureManager';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { Beaker } from 'lucide-react';
 
 export default function EmailStudioPage() {
   const AdvancedEditor = () => {
@@ -17,7 +20,15 @@ export default function EmailStudioPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Email Studio" description="Personaliza el tono y la estructura de tus correos." />
+      <div className="flex justify-between items-start">
+        <PageHeader title="Email Studio" description="Personaliza el tono y la estructura de tus correos." />
+        <Link href="/settings/email-studio/test">
+          <Button variant="outline" size="sm">
+            <Beaker className="mr-2 h-4 w-4" />
+            <span>Tester de Envíos</span>
+          </Button>
+        </Link>
+      </div>
       <Tabs defaultValue="chat">
         <TabsList>
           <TabsTrigger value="chat">Conversacional</TabsTrigger>
