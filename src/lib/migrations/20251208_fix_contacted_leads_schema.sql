@@ -5,6 +5,8 @@ ADD COLUMN IF NOT EXISTS role text,
 ADD COLUMN IF NOT EXISTS name text,
 ADD COLUMN IF NOT EXISTS email text,
 ADD COLUMN IF NOT EXISTS follow_up_count INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS last_step_idx INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS last_follow_up_at TIMESTAMPTZ,
 ADD COLUMN IF NOT EXISTS campaign_id uuid;
 
 -- Also add organization_id if it's missing, as we seem to be moving to org-based structure

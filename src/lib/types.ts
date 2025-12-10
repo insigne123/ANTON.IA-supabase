@@ -78,6 +78,10 @@ export interface ContactedLead {
   name: string;
   email: string;
   company?: string;
+  role?: string;
+  industry?: string;
+  city?: string;
+  country?: string;
 
   subject: string;
   sentAt: string;

@@ -279,6 +279,9 @@ export default function ContactedPage() {
         <Link href="/contacted/replied">
           <Button variant="outline">Ver respondidos</Button>
         </Link>
+        <Link href="/contacted/analytics">
+          <Button variant="default">Ver Analítica</Button>
+        </Link>
       </div>
 
       <Card>
@@ -320,11 +323,13 @@ export default function ContactedPage() {
                       <TableCell>
                         {status === 'replied'
                           ? <Badge variant="default">Respondido</Badge>
-                          : it.openedAt
-                            ? <Badge variant="default">Abierto</Badge>
-                            : it.deliveredAt
-                              ? <Badge variant="outline">Entregado</Badge>
-                              : <Badge variant="secondary">No abierto</Badge>}
+                          : (it.clickCount && it.clickCount > 0)
+                            ? <Badge className="bg-blue-600 hover:bg-blue-700">Clickeado ({it.clickCount})</Badge>
+                            : it.openedAt
+                              ? <Badge variant="default">Abierto</Badge>
+                              : it.deliveredAt
+                                ? <Badge variant="outline">Entregado</Badge>
+                                : <Badge variant="secondary">No abierto</Badge>}
                       </TableCell>
                       <TableCell className="text-right space-x-2">
                         <Button size="sm" variant="outline" onClick={() => handleViewEmail(it)}>
