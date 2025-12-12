@@ -27,6 +27,17 @@ function mapRowToContactedLead(row: any): ContactedLead {
         threadId: row.thread_id,
         repliedAt: row.replied_at,
         lastReplyText: row.last_reply_text,
+        openedAt: row.opened_at,
+        clickedAt: row.clicked_at,
+        clickCount: row.click_count,
+        deliveredAt: row.delivered_at,
+        readReceiptMessageId: row.read_receipt_message_id,
+        deliveryReceiptMessageId: row.delivery_receipt_message_id,
+        lastUpdateAt: row.last_update_at,
+        replyPreview: row.reply_preview,
+        followUpCount: row.follow_up_count,
+        lastFollowUpAt: row.last_follow_up_at,
+        lastStepIdx: row.last_step_idx,
     };
 }
 
