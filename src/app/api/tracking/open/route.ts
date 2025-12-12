@@ -14,31 +14,25 @@ export async function GET(req: NextRequest) {
             process.env.SUPABASE_SERVICE_ROLE_KEY!
         );
 
-        // Await the update to ensure it completes before the response is sent (Serverless execution model)
+        // DEBUG MODE: Return JSON to see what is failing
         try {
-            await supabaseAdmin
+            const result = await supabaseAdmin
                 .from('contacted_leads')
                 .update({
                     status: 'opened',
                     opened_at: new Date().toISOString(),
                     last_update_at: new Date().toISOString(),
                 })
-                .eq('id', id);
-        } catch (err) {
-            console.error("Tracking Open error:", err);
+                .eq('id', id)
+                .select(); // Select to check if row was found
+
+            if (result.error) throw result.error;
+            if (result.data.length === 0) throw new Error("Row not found (ID mismatch)");
+
+            return NextResponse.json({ success: true, updated: result.data });
+
+        } catch (err: any) {
+            return NextResponse.json({ success: false, error: err.message || err }, { status: 500 });
         }
     }
-
-    // Transparent 1x1 PNG pixel
-    const pixel = Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-        "base64"
-    );
-
-    return new NextResponse(pixel, {
-        headers: {
-            "Content-Type": "image/png",
-            "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
-        },
-    });
 }
