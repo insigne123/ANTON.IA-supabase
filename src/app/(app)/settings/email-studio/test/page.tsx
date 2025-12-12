@@ -102,7 +102,7 @@ export default function EmailTestPage() {
             if (usePixel) {
                 const origin = typeof window !== 'undefined' ? window.location.origin : '';
                 const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-                const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="display:none;width:1px;height:1px;" />`;
+                const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
                 // Try to inject before </body>, otherwise append
                 if (/<\/body>/i.test(finalHtmlBody)) {
                     finalHtmlBody = finalHtmlBody.replace(/<\/body>/i, `${trackingPixel}</body>`);
