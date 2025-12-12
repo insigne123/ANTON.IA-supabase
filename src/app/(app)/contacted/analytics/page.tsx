@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
+import { BackBar } from '@/components/back-bar';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -123,153 +124,147 @@ export default function ContactedAnalyticsPage() {
 
     if (loading) return <div className="flex h-96 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
 
-    import { BackBar } from '@/components/back-bar';
+    return (
+        <div className="space-y-6 pb-20">
 
-    // ... existing imports ...
+            <BackBar href="/contacted" label="Volver a Leads Contactados" />
+            <PageHeader
+                title="Analítica de Contactos"
+                description="Métricas de rendimiento e insights de tus campañas de outreach."
+            />
+            {/* ... */}
 
-    export default function ContactedAnalyticsPage() {
-        // ... stats ...
-
-        return (
-            <div className="space-y-6 pb-20">
-                <BackBar href="/contacted" label="Volver a Leads Contactados" />
-                <PageHeader
-                    title="Analítica de Contactos"
-                    description="Métricas de rendimiento e insights de tus campañas de outreach."
-                />
-                {/* ... */}
-
-                <div className="flex justify-end">
-                    <Select value={period} onValueChange={setPeriod}>
-                        <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Periodo" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">Todo el histórico</SelectItem>
-                            <SelectItem value="7d">Últimos 7 días</SelectItem>
-                            <SelectItem value="30d">Últimos 30 días</SelectItem>
-                            <SelectItem value="month">Este mes</SelectItem>
-                            <SelectItem value="year">Este año</SelectItem>
-                        </SelectContent>
-                    </Select>
-                </div>
-
-                {/* KPI Cards */}
-                <div className="grid gap-4 md:grid-cols-4">
-                    <KPI title="Total Enviados" value={stats.total} icon={Mail} sub="Correos enviados" />
-                    <KPI title="Tasa de Apertura" value={`${stats.openRate.toFixed(1)}%`} icon={Users} sub={`${stats.opened} aperturas`} />
-                    <KPI title="Tasa de Respuesta" value={`${stats.replyRate.toFixed(1)}%`} icon={MessageSquare} sub={`${stats.replied} respuestas`} />
-                    <KPI title="Tasa de Clicks" value={`${stats.clickRate.toFixed(1)}%`} icon={MousePointerClick} sub={`${stats.clicked} usuarios clickearon`} />
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-                    <Card className="col-span-4">
-                        <CardHeader>
-                            <CardTitle>Por Áreas Empresariales</CardTitle>
-                            <CardDescription>Departamentos donde estamos impactando más.</CardDescription>
-                        </CardHeader>
-                        <CardContent className="pl-2">
-                            <ResponsiveContainer width="100%" height={350}>
-                                <BarChart data={byStructure.areas} layout="vertical" margin={{ left: 20, right: 20, top: 20, bottom: 20 }}>
-                                    <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
-                                    <XAxis type="number" hide />
-                                    <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 12 }} />
-                                    <Tooltip
-                                        contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: 'var(--radius)' }}
-                                        itemStyle={{ color: 'hsl(var(--foreground))' }}
-                                        cursor={{ fill: 'hsl(var(--muted)/0.2)' }}
-                                    />
-                                    <Bar dataKey="value" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} barSize={20} />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </CardContent>
-                    </Card>
-
-                    <Card className="col-span-3">
-                        <CardHeader>
-                            <CardTitle>Canal de Contacto</CardTitle>
-                            <CardDescription>Email vs LinkedIn</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <ResponsiveContainer width="100%" height={350}>
-                                <PieChart>
-                                    <Pie
-                                        data={byStructure.providers}
-                                        cx="50%"
-                                        cy="50%"
-                                        innerRadius={60}
-                                        outerRadius={80}
-                                        paddingAngle={5}
-                                        dataKey="value"
-                                    >
-                                        {byStructure.providers.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={index === 0 ? '#0077b5' : '#ea4335'} />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip />
-                                    <Legend />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </CardContent>
-                    </Card>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2 mt-4">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Nivel de Seniority</CardTitle>
-                            <CardDescription>¿A quién le estamos hablando?</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <ResponsiveContainer width="100%" height={300}>
-                                <BarChart data={byStructure.levels} layout="vertical" margin={{ left: 20, right: 20 }}>
-                                    <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
-                                    <XAxis type="number" hide />
-                                    <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 12 }} />
-                                    <Tooltip />
-                                    <Bar dataKey="value" fill="#8884d8" radius={[0, 4, 4, 0]} barSize={20} />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </CardContent>
-                    </Card>
-
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Sectores / Industrias</CardTitle>
-                            <CardDescription>Top 10 industrias contactadas.</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <ResponsiveContainer width="100%" height={300}>
-                                <BarChart data={byStructure.industries} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                    <XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
-                                    <YAxis />
-                                    <Tooltip
-                                        contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: 'var(--radius)' }}
-                                        itemStyle={{ color: 'hsl(var(--foreground))' }}
-                                    />
-                                    <Bar dataKey="value" fill="#82ca9d" radius={[4, 4, 0, 0]} />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </CardContent>
-                    </Card>
-
-                </div>
+            <div className="flex justify-end">
+                <Select value={period} onValueChange={setPeriod}>
+                    <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Periodo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">Todo el histórico</SelectItem>
+                        <SelectItem value="7d">Últimos 7 días</SelectItem>
+                        <SelectItem value="30d">Últimos 30 días</SelectItem>
+                        <SelectItem value="month">Este mes</SelectItem>
+                        <SelectItem value="year">Este año</SelectItem>
+                    </SelectContent>
+                </Select>
             </div>
-        );
-    }
 
-    function KPI({ title, value, icon: Icon, sub }: any) {
-        return (
-            <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">{title}</CardTitle>
-                    <Icon className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                    <div className="text-2xl font-bold">{value}</div>
-                    <p className="text-xs text-muted-foreground">{sub}</p>
-                </CardContent>
-            </Card>
-        );
-    }
+            {/* KPI Cards */}
+            <div className="grid gap-4 md:grid-cols-4">
+                <KPI title="Total Enviados" value={stats.total} icon={Mail} sub="Correos enviados" />
+                <KPI title="Tasa de Apertura" value={`${stats.openRate.toFixed(1)}%`} icon={Users} sub={`${stats.opened} aperturas`} />
+                <KPI title="Tasa de Respuesta" value={`${stats.replyRate.toFixed(1)}%`} icon={MessageSquare} sub={`${stats.replied} respuestas`} />
+                <KPI title="Tasa de Clicks" value={`${stats.clickRate.toFixed(1)}%`} icon={MousePointerClick} sub={`${stats.clicked} usuarios clickearon`} />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+                <Card className="col-span-4">
+                    <CardHeader>
+                        <CardTitle>Por Áreas Empresariales</CardTitle>
+                        <CardDescription>Departamentos donde estamos impactando más.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="pl-2">
+                        <ResponsiveContainer width="100%" height={350}>
+                            <BarChart data={byStructure.areas} layout="vertical" margin={{ left: 20, right: 20, top: 20, bottom: 20 }}>
+                                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
+                                <XAxis type="number" hide />
+                                <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 12 }} />
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: 'var(--radius)' }}
+                                    itemStyle={{ color: 'hsl(var(--foreground))' }}
+                                    cursor={{ fill: 'hsl(var(--muted)/0.2)' }}
+                                />
+                                <Bar dataKey="value" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} barSize={20} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </CardContent>
+                </Card>
+
+                <Card className="col-span-3">
+                    <CardHeader>
+                        <CardTitle>Canal de Contacto</CardTitle>
+                        <CardDescription>Email vs LinkedIn</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <ResponsiveContainer width="100%" height={350}>
+                            <PieChart>
+                                <Pie
+                                    data={byStructure.providers}
+                                    cx="50%"
+                                    cy="50%"
+                                    innerRadius={60}
+                                    outerRadius={80}
+                                    paddingAngle={5}
+                                    dataKey="value"
+                                >
+                                    {byStructure.providers.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={index === 0 ? '#0077b5' : '#ea4335'} />
+                                    ))}
+                                </Pie>
+                                <Tooltip />
+                                <Legend />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    </CardContent>
+                </Card>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 mt-4">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Nivel de Seniority</CardTitle>
+                        <CardDescription>¿A quién le estamos hablando?</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <ResponsiveContainer width="100%" height={300}>
+                            <BarChart data={byStructure.levels} layout="vertical" margin={{ left: 20, right: 20 }}>
+                                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
+                                <XAxis type="number" hide />
+                                <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 12 }} />
+                                <Tooltip />
+                                <Bar dataKey="value" fill="#8884d8" radius={[0, 4, 4, 0]} barSize={20} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Sectores / Industrias</CardTitle>
+                        <CardDescription>Top 10 industrias contactadas.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <ResponsiveContainer width="100%" height={300}>
+                            <BarChart data={byStructure.industries} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
+                                <YAxis />
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: 'var(--radius)' }}
+                                    itemStyle={{ color: 'hsl(var(--foreground))' }}
+                                />
+                                <Bar dataKey="value" fill="#82ca9d" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </CardContent>
+                </Card>
+
+            </div>
+        </div>
+    );
+}
+
+function KPI({ title, value, icon: Icon, sub }: any) {
+    return (
+        <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">{title}</CardTitle>
+                <Icon className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+                <div className="text-2xl font-bold">{value}</div>
+                <p className="text-xs text-muted-foreground">{sub}</p>
+            </CardContent>
+        </Card>
+    );
+}
