@@ -25,7 +25,7 @@ export default function EmailTestPage() {
     const [from, setFrom] = useState('');
     const [to, setTo] = useState('');
     const [subject, setSubject] = useState('Prueba de Tracking - Email Studio');
-    const [body, setBody] = useState('<p>Hola,</p><p>Este es un correo de prueba.</p><p>Haz clic en este enlace para probar el tracking: <a href="https://example.com">Ejemplo.com</a></p>');
+    const [body, setBody] = useState('Hola,\n\nEste es un correo de prueba.\nHaz clic en este enlace para probar el tracking: https://example.com');
 
     const [useGmail, setUseGmail] = useState(true);
     // Tracking Options
@@ -79,7 +79,18 @@ export default function EmailTestPage() {
         try {
             const endpoint = useGmail ? '/api/gmail/send' : '/api/providers/send';
             const trackingId = uuid();
-            let finalHtmlBody = body;
+
+
+            // Auto-convert text to HTML
+            let finalHtmlBody = body
+                // Escape HTML basic chars to avoid XSS if we were strict, but here we want to allow some? 
+                // Let's assume user input is text. Escape chars first.
+                .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;").replace(/'/g, "&#039;")
+                // Convert newlines
+                .replace(/\n/g, '<br/>')
+                // Convert URLs to detected links
+                .replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
 
             // 1. Rewrite Links if enabled
             if (useLinkTracking) {
@@ -192,15 +203,13 @@ export default function EmailTestPage() {
                             <Input value={subject} onChange={e => setSubject(e.target.value)} />
                         </div>
                         <div className="space-y-2">
-                            <Label>Cuerpo (HTML)</Label>
+                            <Label>Cuerpo (Texto)</Label>
                             <Textarea
                                 value={body}
                                 onChange={e => setBody(e.target.value)}
-                                className="font-mono text-xs h-32"
+                                className="h-32"
+                                placeholder="Escribe tu mensaje aquí..."
                             />
-                            <p className="text-[10px] text-muted-foreground">
-                                Tip: Usa <code>&lt;a href="..."&gt;Link&lt;/a&gt;</code> para probar clicks.
-                            </p>
                         </div>
 
                         {/* Tracking Options */}
