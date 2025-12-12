@@ -18,6 +18,7 @@ import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, en
 import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin, Phone } from 'lucide-react';
 import { extensionService } from '@/lib/services/extension-service';
 import { supabaseService } from '@/lib/supabase-service';
+import { getCompanyProfile } from '@/lib/data';
 import { supabase } from '@/lib/supabase';
 import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
 import { sendEmail } from '@/lib/outlook-email-service';
@@ -937,7 +938,11 @@ export default function EnrichedLeadsClient() {
         // 3. Inject Pixel if enabled
         if (usePixel) {
           const origin = typeof window !== 'undefined' ? window.location.origin : '';
-          const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+          let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+          const profile = getCompanyProfile();
+          if (profile?.logo && profile.logo.startsWith('http')) {
+            pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
+          }
           // FIX: Removed display:none to prevent blocking by email clients
           const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
           finalHtmlBody += `\n<br>${trackingPixel}`;

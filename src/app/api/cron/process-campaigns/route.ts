@@ -141,12 +141,18 @@ export async function GET(req: NextRequest) {
                             return `href=${quote}${trackingUrl}${quote}`;
                         });
 
-                        // 2. Inject Pixel
-                        const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-                        const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
-                        body += `\n<br>${trackingPixel}`;
+                        // 3. Inject Pixel
+                        if (step.usePixel) {
+                            let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+                            // Fallback to default placeholder logo for automated campaigns since we don't have access to localStorage
+                            // and organization logo is not yet in DB schema.
+                            const defaultLogo = `${origin}/logo-placeholder.svg`;
+                            pixelUrl += `&redirect=${encodeURIComponent(defaultLogo)}`;
 
-                        // Use 'body' (the modified one) instead of raw template
+                            // Remove display:none
+                            const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
+                            body += `\n<br>${trackingPixel}`;
+                        }              // Use 'body' (the modified one) instead of raw template
                         if (provider === 'google') {
                             await sendGmail(accessToken, lead.email, subject, body);
                         } else {

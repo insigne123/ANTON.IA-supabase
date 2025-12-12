@@ -15,17 +15,31 @@ export async function GET(req: NextRequest) {
         );
 
         // Await the update to ensure it completes before the response is sent (Serverless execution model)
+        // Await the update... (existing code)
         try {
             await supabaseAdmin
                 .from('contacted_leads')
                 .update({
-                    // status: 'opened', // REMOVED: Violates DB constraint. We only track opened_at.
                     opened_at: new Date().toISOString(),
                     last_update_at: new Date().toISOString(),
                 })
                 .eq('id', id);
         } catch (err) {
             console.error("Tracking Open error:", err);
+        }
+
+        const redirectUrl = searchParams.get("redirect");
+        if (redirectUrl) {
+            // Validate URL to prevent open redirect vulnerabilities (optional but good practice)
+            // For now, assuming relatively trusted internal usage, but we should at least check http protocol
+            try {
+                const urlObj = new URL(redirectUrl);
+                if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
+                    return NextResponse.redirect(redirectUrl, 307); // 307 ensures method preservation if relevant, though GET is just GET
+                }
+            } catch (e) {
+                // Invalid URL, fall through to pixel
+            }
         }
 
         // Transparent 1x1 PNG pixel

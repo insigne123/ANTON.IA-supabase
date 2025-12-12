@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { buildSenderInfo, applySignaturePlaceholders } from '@/lib/signature-placeholders';
 import { renderTemplate, buildPersonEmailContext } from '@/lib/template';
+import { getCompanyProfile } from '@/lib/data';
 import { ensureSubjectPrefix, generateCompanyOutreachV2 } from '@/lib/outreach-templates';
 import { getCompanyProfile } from '@/lib/data';
 import { emailDraftsStorage } from '@/lib/email-drafts-storage';
@@ -125,11 +126,17 @@ export default function EnrichedOpportunitiesPage() {
 
   // ...
 
-  // in sendBulk loop
+  // in sendBulk
   // 2. Inject Pixel if enabled
   if (usePixel) {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+    let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+
+    const profile = getCompanyProfile();
+    if (profile?.logo && profile.logo.startsWith('http')) {
+      pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
+    }
+
     // FIX: Removed display:none to prevent blocking by email clients
     const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
     finalHtmlBody += `\n<br>${trackingPixel}`;

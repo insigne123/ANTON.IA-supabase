@@ -263,7 +263,14 @@ function ComposeInner() {
       if (usePixel) {
         // Use window.location.origin to get the current domain
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
-        const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+        let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+
+        // OPTIMIZATION: Redirect to logo if available
+        const profile = getCompanyProfile();
+        if (profile?.logo && profile.logo.startsWith('http')) {
+          pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
+        }
+
         // FIX: Removed display:none to prevent blocking by email clients
         const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
         finalHtmlBody += `\n<br>${trackingPixel}`;
@@ -331,7 +338,14 @@ function ComposeInner() {
       // 3. Inject Pixel if enabled
       if (usePixel) {
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
-        const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+        let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+
+        // OPTIMIZATION: Redirect to logo
+        const profile = getCompanyProfile();
+        if (profile?.logo && profile.logo.startsWith('http')) {
+          pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
+        }
+
         // FIX: Removed display:none
         const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
         finalHtmlBody += `\n<br>${trackingPixel}`;

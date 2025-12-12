@@ -16,6 +16,7 @@ import { useAuth } from '@/context/AuthContext';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import type { ContactedLead } from '@/lib/types';
 import { v4 as uuid } from 'uuid';
+import { getCompanyProfile } from '@/lib/data';
 
 export default function EmailTestPage() {
     const { toast } = useToast();
@@ -98,17 +99,20 @@ export default function EmailTestPage() {
                 finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
             }
 
-            // 2. Inject Pixel if enabled
+            // 3. Inject Pixel (Visible but 1x1)
             if (usePixel) {
                 const origin = typeof window !== 'undefined' ? window.location.origin : '';
-                const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-                const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
-                // Try to inject before </body>, otherwise append
-                if (/<\/body>/i.test(finalHtmlBody)) {
-                    finalHtmlBody = finalHtmlBody.replace(/<\/body>/i, `${trackingPixel}</body>`);
-                } else {
-                    finalHtmlBody += `\n${trackingPixel}`;
+                let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+
+                // OPTIMIZATION: Redirect to logo if available
+                const profile = getCompanyProfile();
+                if (profile?.logo && profile.logo.startsWith('http')) {
+                    pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
                 }
+
+                // FIX: Removed display:none to prevent blocking by email clients
+                const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
+                finalHtmlBody += `\n<br>${trackingPixel}`;
             }
 
             const payload: any = {
