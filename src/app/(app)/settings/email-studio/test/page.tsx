@@ -61,7 +61,8 @@ export default function EmailTestPage() {
     // Helper to inject link tracking
     function rewriteLinksForTracking(html: string, trackingId: string): string {
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
-        return html.replace(/href=["'](http[^"']+)["']/gi, (match, url, quote) => {
+        // Capture quote in group 1, URL in group 2
+        return html.replace(/href=(["'])(http[^"']+)\1/gi, (match, quote, url) => {
             // Avoid rewriting tracking links themselves if already present
             if (url.includes('/api/tracking/click')) return match;
             const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
