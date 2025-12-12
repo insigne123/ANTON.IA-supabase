@@ -42,7 +42,7 @@ env:
     availability: [RUNTIME]
 
   - variable: NEXT_PUBLIC_SUPABASE_URL
-    value: https://yfdel,flsheurzaicwayi.supabase.co
+    value: https://yfdelflsheurzaicwayi.supabase.co
     availability: [BUILD, RUNTIME]
 
   - variable: NEXT_PUBLIC_SUPABASE_ANON_KEY
