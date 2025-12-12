@@ -22,6 +22,8 @@ function mapRowToEnrichedLead(row: any): EnrichedLead {
         country: row.data?.country,
         city: row.data?.city,
         industry: row.data?.industry,
+        phoneNumbers: row.phone_numbers,
+        primaryPhone: row.primary_phone,
     };
 }
 
@@ -40,6 +42,8 @@ function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string, organizationId
         title: lead.title,
         linkedin_url: lead.linkedinUrl,
         created_at: lead.createdAt || new Date().toISOString(),
+        phone_numbers: lead.phoneNumbers,
+        primary_phone: lead.primaryPhone,
         data: {
             sourceOpportunityId: lead.sourceOpportunityId,
             emailStatus: lead.emailStatus,
@@ -221,6 +225,37 @@ export const enrichedLeadsStorage = {
         // We'd need to fetch count to be accurate, but for now:
         const remaining = (await getEnrichedLeads()).length;
         return { removed: true, remaining };
+    },
+    update: async (leads: EnrichedLead[]) => {
+        // Prepare updates. Since we might have partial data, we should be careful.
+        // For enrichment, we want to update phone/email if provided.
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const orgId = await organizationService.getCurrentOrganizationId();
+
+        for (const l of leads) {
+            const row = mapEnrichedLeadToRow(l, user.id, orgId);
+            // Use upsert or update. Since ID exists, update is safer if we want to preserve other fields?
+            // Actually, mapEnrichedLeadToRow overwrites everything with what's in 'l'. 
+            // If 'l' comes from API and is "partial" (e.g. missing some local data), we might lose data.
+            // BUT, the client flow is: load existing -> send to API -> get merged result -> save.
+            // Client.tsx: `handleConfirmEnrich` sends a minimal payload, but receives `newEnriched`.
+            // If `newEnriched` is fully hydrated (merged with previous state), we can overwrite.
+            // The API `enrich-apollo` returns a NEW object with `id: uuid()`. Wait.
+            // If API returns NEW ID, `addDedup` treats it as new? 
+            // In `Client.tsx`, we pass `clientRef: l.id`. The API returns `clientRef` in the object.
+            // We should use that to match and update the EXISTING ID.
+
+            // Let's implement a smart upsert that uses `clientRef` as ID if present.
+            const finalId = (l as any).clientRef || l.id;
+            const updateData: any = { ...row, id: finalId };
+
+            // Remove fields that shouldn't be nulled if undefined in 'l' (if we were doing partial).
+            // But for now, let's assume `addDedup` is for NEW, and `update` is for existing.
+            // We'll use `upsert` on the specific ID.
+            const { error } = await supabase.from(TABLE).upsert(updateData);
+            if (error) console.error('Error updating lead:', finalId, error);
+        }
     },
     removeWhere: removeWhere,
     findEnrichedLeadById: findEnrichedLeadById,

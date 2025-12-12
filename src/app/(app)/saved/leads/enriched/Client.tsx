@@ -14,8 +14,8 @@ import { upsertLeadReports, findReportForLead, leadResearchStorage, getLeadRepor
 import { BackBar } from '@/components/back-bar';
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
-import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet } from '@/lib/services/enriched-leads-service';
-import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin } from 'lucide-react';
+import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
+import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin, Phone } from 'lucide-react';
 import { extensionService } from '@/lib/services/extension-service';
 import { supabaseService } from '@/lib/supabase-service';
 import { supabase } from '@/lib/supabase';
@@ -53,6 +53,8 @@ import { Label } from '@/components/ui/label';
 const extractDomainFromEmail = (email?: string | null) =>
   email && email.includes('@') ? email.split('@')[1].toLowerCase() : undefined;
 
+import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
+
 export default function EnrichedLeadsClient() {
   const router = useRouter();
   const { toast } = useToast();
@@ -83,6 +85,96 @@ export default function EnrichedLeadsClient() {
   const [showBulkEditor, setShowBulkEditor] = useState(false);
   const [editInstruction, setEditInstruction] = useState('');
   const [applyingEdit, setApplyingEdit] = useState(false);
+
+  // --- Enrichment Options ---
+  const [openEnrichOptions, setOpenEnrichOptions] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  const [leadsToEnrich, setLeadsToEnrich] = useState<EnrichedLead[]>([]);
+
+  async function handleConfirmEnrich(opts: { revealEmail: boolean; revealPhone: boolean }) {
+    if (!leadsToEnrich.length) return;
+    setEnriching(true);
+    try {
+      const userId = await getUserIdOrFail();
+
+      // Map to minimal payload
+      const payloadLeads = leadsToEnrich.map(l => ({
+        fullName: l.fullName,
+        linkedinUrl: l.linkedinUrl,
+        companyName: l.companyName,
+        companyDomain: l.companyDomain,
+        title: l.title,
+        sourceOpportunityId: l.sourceOpportunityId,
+        clientRef: l.id
+      }));
+
+      const res = await fetch('/api/opportunities/enrich-apollo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
+        body: JSON.stringify({
+          leads: payloadLeads,
+          revealEmail: opts.revealEmail,
+          revealPhone: opts.revealPhone
+        }),
+      });
+
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+
+      const data = await res.json();
+      const { enriched: newEnriched } = data;
+
+      if (Array.isArray(newEnriched) && newEnriched.length) {
+        const toUpdate: EnrichedLead[] = [];
+        const toAdd: EnrichedLead[] = [];
+
+        newEnriched.forEach((incoming: EnrichedLead & { clientRef?: string }) => {
+          // Match with existing
+          const existing = enriched.find(e => e.id === incoming.clientRef);
+          if (existing) {
+            // Merge important fields, keep ID
+            toUpdate.push({
+              ...existing, // Keep original creation date, etc
+              email: incoming.email || existing.email,
+              emailStatus: incoming.emailStatus || existing.emailStatus,
+              phoneNumbers: incoming.phoneNumbers,
+              primaryPhone: incoming.primaryPhone,
+              // If unlocked new info
+              linkedinUrl: incoming.linkedinUrl || existing.linkedinUrl,
+              companyName: incoming.companyName || existing.companyName,
+              title: incoming.title || existing.title,
+              // Ensure we use the proper ID for the update
+              id: existing.id
+            });
+          } else {
+            toAdd.push(incoming);
+          }
+        });
+
+        if (toUpdate.length > 0) {
+          await enrichedLeadsStorage.update(toUpdate);
+        }
+        if (toAdd.length > 0) {
+          await enrichedLeadsStorage.addDedup(toAdd);
+        }
+
+        // Reload list
+        const fresh = await enrichedLeadsStorageGet();
+        setEnriched(fresh);
+        toast({ title: 'Enriquecimiento completado', description: `Se actualizaron ${toUpdate.length} y agregaron ${toAdd.length} leads.` });
+      }
+
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Error', description: e.message });
+    } finally {
+      setEnriching(false);
+      setLeadsToEnrich([]);
+    }
+  }
+
+  function initiateEnrichment(leads: EnrichedLead[]) {
+    setLeadsToEnrich(leads);
+    setOpenEnrichOptions(true);
+  }
 
   // --- LinkedIn Modal ---
   const [openLinkedin, setOpenLinkedin] = useState(false);

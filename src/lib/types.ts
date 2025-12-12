@@ -204,6 +204,15 @@ export type EnrichedLead = {
   country?: string;
   city?: string;
   industry?: string;
+  // Phone Enrichment
+  phoneNumbers?: Array<{
+    raw_number: string;
+    sanitized_number: string;
+    type: string;
+    position: string;
+    status: string;
+  }> | null;
+  primaryPhone?: string | null;
 };
 
 export type EnrichedOppLead = {
