@@ -15,9 +15,9 @@ export default function FunnelChart() {
 
                 // Calcular métricas
                 const sent = contacts.length;
-                const opened = contacts.filter(c => !!c.openedAt || c.clickCount > 0 || c.status === 'replied').length;
+                const opened = contacts.filter(c => !!c.openedAt || (c.clickCount || 0) > 0 || c.status === 'replied').length;
                 // Si respondió o clicó, implícitamente abrió
-                const clicked = contacts.filter(c => !!c.clickedAt || (c.clickCount && c.clickCount > 0)).length;
+                const clicked = contacts.filter(c => !!c.clickedAt || (c.clickCount || 0) > 0).length;
                 const replied = contacts.filter(c => c.status === 'replied' || !!c.repliedAt).length;
 
                 setData([

@@ -29,11 +29,13 @@ function stripHtmlToText(html: string): string {
 
 
 export async function sendGmailEmail(input: GmailSendInput): Promise<{ id: string; threadId: string; }> {
-  const accessToken = await googleAuthService.getSendToken();
-  const from = await googleAuthService.getUserEmail();
-  if (!from) {
-    throw new Error('No se pudo obtener el email del usuario desde la sesión de Google. Por favor, vuelve a conectar tu cuenta.');
-  }
+  // Try to get client session silently. If not available, we fall back to server-side token.
+  const session = googleAuthService.getSession();
+  const accessToken = (session?.accessToken && session.scope.includes('https://www.googleapis.com/auth/gmail.send'))
+    ? session.accessToken
+    : '';
+
+  const from = await googleAuthService.getUserEmail() || undefined;
 
   // Aplica firma si está habilitada para Gmail
   const sig = await emailSignatureStorage.get('gmail');
@@ -46,7 +48,7 @@ export async function sendGmailEmail(input: GmailSendInput): Promise<{ id: strin
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: accessToken ? `Bearer ${accessToken}` : '', // Send empty if no token
       // Si tienes un userId para cuota/telemetría, puedes pasarlo sin romper nada:
       'x-user-id': from ? `gmail:${from}` : '',
     },

@@ -108,12 +108,12 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json()) as SendReq;
 
-    if (!body.from || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.from)) {
-      return NextResponse.json({ error: 'Remitente inválido o ausente' }, { status: 400 });
+    // Validate 'from' ONLY if provided. If not provided, we will try to fetch it from Google using the token.
+    if (body.from && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.from)) {
+      return NextResponse.json({ error: 'Remitente inválido' }, { status: 400 });
     }
 
-    const accessToken = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
-    if (!accessToken) return NextResponse.json({ error: 'Missing access token' }, { status: 401 });
+    let accessToken = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
 
     // --- Authenticate Local User (for Unsubscribe Link & Blacklist) ---
     const supabase = createRouteHandlerClient({ cookies });
@@ -122,6 +122,42 @@ export async function POST(req: Request) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized (No Session)' }, { status: 401 });
     }
+
+    // Fallback: If no client access token, try to get from server-side stored refresh token
+    if (!accessToken) {
+      console.log('[gmail/send] No client token, attempting server-side refresh for user', user.id);
+      const { tokenService } = await import('@/lib/services/token-service');
+      const tokenRecord = await tokenService.getToken(supabase, user.id, 'google');
+
+      if (tokenRecord?.refresh_token) {
+        try {
+          const params = new URLSearchParams({
+            client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
+            client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+            refresh_token: tokenRecord.refresh_token,
+            grant_type: 'refresh_token',
+          });
+
+          const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params
+          });
+
+          const refreshData = await refreshRes.json();
+          if (refreshRes.ok && refreshData.access_token) {
+            accessToken = refreshData.access_token;
+            console.log('[gmail/send] Successfully refreshed server-side token');
+          } else {
+            console.error('[gmail/send] Refresh failed', refreshData);
+          }
+        } catch (err) {
+          console.error('[gmail/send] Refresh exception', err);
+        }
+      }
+    }
+
+    if (!accessToken) return NextResponse.json({ error: 'Missing access token (Client or Server)' }, { status: 401 });
 
     // Try to find Org ID (optional)
     let orgId: string | null = null;
@@ -168,6 +204,26 @@ export async function POST(req: Request) {
       safeHtml = safeHtml.replace(bodyTagRegex, `${footerHtml}</body>`);
     } else {
       safeHtml += footerHtml;
+    }
+
+    // --- If 'from' is missing, fetch it from Google ---
+    if (!body.from) {
+      try {
+        const profileRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+          headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        if (profileRes.ok) {
+          const profile = await profileRes.json();
+          body.from = profile.emailAddress;
+          console.log('[gmail/send] Resolved sender email:', body.from);
+        } else {
+          console.warn('[gmail/send] Failed to fetch profile for sender email', await profileRes.text());
+          return NextResponse.json({ error: 'No se pudo determinar el remitente (el token puede ser inválido o faltan scopes).' }, { status: 400 });
+        }
+      } catch (err) {
+        console.error('[gmail/send] Profile fetch error', err);
+        return NextResponse.json({ error: 'Error interno obteniendo perfil de remitente' }, { status: 500 });
+      }
     }
 
     // --- Build & Send ---

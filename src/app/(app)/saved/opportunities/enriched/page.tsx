@@ -100,7 +100,7 @@ export default function EnrichedOpportunitiesPage() {
     // Remove from 'reports' local storage
     const removed = await removeReportFor(ref);
     // Also remove from 'isResearched' set
-    await removeResearched(ref);
+    await removeResearched([ref]);
 
     setReportToView(null);
     setOpenReport(false);

@@ -44,8 +44,16 @@ export default function NextStepsWidget() {
         setReadyLeads(ready);
 
         const promises = (campaigns || []).map(c => {
-          if (!c.isPaused) {
-            return computeEligibilityForCampaign(c).then(rows => rows.length).catch(() => 0);
+          // Fix: check status instead of isPaused (type mismatch)
+          const isPaused = c.status === 'paused';
+          if (!isPaused) {
+            // Map to Service Campaign type expected by computeEligibility
+            const serviceCampaign: any = {
+              ...c,
+              isPaused: false,
+              excludedLeadIds: c.excludeLeadIds || []
+            };
+            return computeEligibilityForCampaign(serviceCampaign).then(rows => rows.length).catch(() => 0);
           }
           return Promise.resolve(0);
         });
