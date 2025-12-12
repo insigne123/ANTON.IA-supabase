@@ -244,9 +244,24 @@ export default function EmailTestPage() {
                         {debugResult && (
                             <div className={`mt-4 p-3 rounded-md text-sm border ${debugResult.success ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
                                 {debugResult.success ? (
-                                    <div className="flex items-center gap-2">
-                                        <CheckCircle2 className="h-4 w-4" />
-                                        <span>Enviado. Tracking ID: <span className="font-mono text-xs">{debugResult.trackingId?.slice(0, 8)}...</span></span>
+                                    <div className="flex flex-col gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <CheckCircle2 className="h-4 w-4" />
+                                            <span>Enviado. Tracking ID: <span className="font-mono text-xs">{debugResult.trackingId?.slice(0, 8)}...</span></span>
+                                        </div>
+                                        <div className="text-xs mt-1 border-t border-green-200 pt-1">
+                                            <p className="font-semibold mb-1">Diagnóstico:</p>
+                                            <a
+                                                href={`/api/tracking/open?id=${debugResult.trackingId}`}
+                                                target="_blank"
+                                                className="underline text-blue-600 hover:text-blue-800 block"
+                                            >
+                                                1. Click para Simular Apertura (Browser Directo)
+                                            </a>
+                                            <span className="text-muted-foreground block mt-1">
+                                                Si este funciona pero Gmail no, es culpa de Gmail/Cache.
+                                            </span>
+                                        </div>
                                     </div>
                                 ) : (
                                     <div className="flex items-center gap-2">
