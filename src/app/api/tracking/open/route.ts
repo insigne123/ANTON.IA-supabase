@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { contactedLeadsStorage } from "@/lib/services/contacted-leads-service";
+import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = 'force-dynamic';
 
@@ -8,8 +8,27 @@ export async function GET(req: NextRequest) {
     const id = searchParams.get("id");
 
     if (id) {
-        // Fire and forget update (awaiting it is fine too, but we prioritize returning the image)
-        await contactedLeadsStorage.markOpenedById(id);
+        // Use Service Role to bypass RLS for tracking updates
+        const supabaseAdmin = createClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+        );
+
+        // Fire and forget update
+        (async () => {
+            try {
+                await supabaseAdmin
+                    .from('contacted_leads')
+                    .update({
+                        status: 'opened',
+                        opened_at: new Date().toISOString(),
+                        last_update_at: new Date().toISOString(),
+                    })
+                    .eq('id', id);
+            } catch (err) {
+                console.error("Tracking Open error:", err);
+            }
+        })();
     }
 
     // Transparent 1x1 PNG pixel

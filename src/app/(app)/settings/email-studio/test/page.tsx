@@ -112,7 +112,7 @@ export default function EmailTestPage() {
             }
 
             const payload: any = {
-                to: useGmail ? to : [to],
+                to: to,
                 from,
                 subject,
                 html: finalHtmlBody,
