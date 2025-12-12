@@ -126,10 +126,27 @@ export async function GET(req: NextRequest) {
 
                     // Send Email
                     try {
+                        // REWRITE LINKS & INJECT PIXEL
+                        const trackingId = lead.id;
+                        const origin = req.nextUrl.origin;
+
                         // Render template (simple replacement)
                         let subject = step.subject.replace('{{lead.name}}', lead.name || '').replace('{{company}}', lead.company || '');
                         let body = step.bodyHtml.replace('{{lead.name}}', lead.name || '').replace('{{company}}', lead.company || '');
 
+                        // 1. Rewrite Links
+                        body = body.replace(/href=(["'])(http[^"']+)\1/gi, (match, quote, url) => {
+                            if (url.includes('/api/tracking/click')) return match;
+                            const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
+                            return `href=${quote}${trackingUrl}${quote}`;
+                        });
+
+                        // 2. Inject Pixel
+                        const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+                        const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
+                        body += `\n<br>${trackingPixel}`;
+
+                        // Use 'body' (the modified one) instead of raw template
                         if (provider === 'google') {
                             await sendGmail(accessToken, lead.email, subject, body);
                         } else {

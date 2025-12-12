@@ -221,8 +221,9 @@ function ComposeInner() {
   // Helper to inject link tracking
   function rewriteLinksForTracking(html: string, trackingId: string): string {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    // Replace href="http..." with href="origin/api/tracking/click?id=...&url=encoded"
-    return html.replace(/href=["'](http[^"']+)["']/gi, (match, url, quote) => {
+    // Unify regex with the robust one from EmailTestPage
+    return html.replace(/href=(["'])(http[^"']+)\1/gi, (match, quote, url) => {
+      if (url.includes('/api/tracking/click')) return match;
       const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
       return `href=${quote}${trackingUrl}${quote}`;
     });
@@ -263,7 +264,8 @@ function ComposeInner() {
         // Use window.location.origin to get the current domain
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
         const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-        const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="display:none;width:1px;height:1px;" />`;
+        // FIX: Removed display:none to prevent blocking by email clients
+        const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
         finalHtmlBody += `\n<br>${trackingPixel}`;
       }
 
@@ -330,7 +332,8 @@ function ComposeInner() {
       if (usePixel) {
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
         const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-        const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="display:none;width:1px;height:1px;" />`;
+        // FIX: Removed display:none
+        const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
         finalHtmlBody += `\n<br>${trackingPixel}`;
       }
 
