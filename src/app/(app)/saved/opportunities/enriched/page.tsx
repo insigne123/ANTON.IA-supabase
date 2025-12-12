@@ -32,6 +32,9 @@ import { isResearched, markResearched } from '@/lib/researched-leads-storage';
 import { v4 as uuidv4 } from 'uuid';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
 import { extractJsonFromMaybeFenced } from '@/lib/extract-json';
+import { Linkedin } from 'lucide-react';
+import { extensionService } from '@/lib/services/extension-service';
+import { generateLinkedinDraft } from '@/lib/ai/linkedin-templates';
 
 function getClientUserId(): string {
   // ID estable por navegador para trazabilidad en n8n; no PII
@@ -63,6 +66,12 @@ export default function EnrichedOpportunitiesPage() {
   const [draftSource, setDraftSource] = useState<'investigation' | 'style'>('investigation');
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
   const [selectedStyleName, setSelectedStyleName] = useState<string>('');
+
+  // --- LinkedIn Modal ---
+  const [openLinkedin, setOpenLinkedin] = useState(false);
+  const [linkedinLead, setLinkedinLead] = useState<EnrichedOppLead | null>(null);
+  const [linkedinMessage, setLinkedinMessage] = useState('');
+  const [sendingLinkedin, setSendingLinkedin] = useState(false);
 
   // Tracking options
   const [usePixel, setUsePixel] = useState(true);
@@ -508,6 +517,78 @@ export default function EnrichedOpportunitiesPage() {
     setReportLead(lead);
     setReportToView(rep);
     setOpenReport(true);
+    setOpenReport(true);
+  }
+
+  function openLinkedinCompose(lead: EnrichedOppLead) {
+    if (!lead.linkedinUrl) return;
+    setLinkedinLead(lead);
+
+    // Contextual AI Generation
+    // Note: Opp Lead properties mapping might need adjustment if EnrichedOppLead differs from EnrichedLead significantly
+    // But both have fullName, companyName, linkedinUrl so it works.
+    const ref = leadRefOf(lead);
+    const rep = findReportForLead({ leadId: ref, companyDomain: lead.companyDomain || null, companyName: lead.companyName || null });
+
+    // Cast to EnrichedLead-like because helper expects it, mostly compatible
+    const draft = generateLinkedinDraft(lead as any, rep);
+
+    setLinkedinMessage(draft);
+    setOpenLinkedin(true);
+  }
+
+  async function handleSendLinkedin() {
+    if (!linkedinLead || !linkedinMessage) return;
+    setSendingLinkedin(true);
+
+    try {
+      if (!extensionService.isInstalled) {
+        toast({
+          variant: 'destructive',
+          title: 'Extensión no detectada',
+          description: 'Instala la extensión de Chrome de Anton.IA para enviar DMs.'
+        });
+        setSendingLinkedin(false);
+        return;
+      }
+
+      const res = await extensionService.sendLinkedinDM(linkedinLead.linkedinUrl!, linkedinMessage);
+
+      if (res.success) {
+        await contactedLeadsStorage.add({
+          id: uuid(),
+          leadId: linkedinLead.id,
+          name: linkedinLead.fullName,
+          email: extractPrimaryEmail(linkedinLead).email || '',
+          company: linkedinLead.companyName,
+          role: linkedinLead.title,
+          industry: (linkedinLead as any).industry,
+          city: (linkedinLead as any).city,
+          country: (linkedinLead as any).country,
+
+          subject: 'LinkedIn DM',
+          status: 'sent',
+          provider: 'linkedin',
+          linkedinThreadUrl: linkedinLead.linkedinUrl,
+          linkedinMessageStatus: 'sent',
+          sentAt: new Date().toISOString(),
+          lastUpdateAt: new Date().toISOString()
+        });
+
+        toast({ title: 'Mensaje Enviado', description: 'La extensión procesó el envío correctamente.' });
+        setOpenLinkedin(false);
+
+        // Optional: Remove from enriched?
+        // await enrichedOpportunitiesStorage.removeById(linkedinLead.id);
+      } else {
+        toast({ variant: 'destructive', title: 'Error en Envío', description: res.error });
+      }
+
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Excepción', description: e.message });
+    } finally {
+      setSendingLinkedin(false);
+    }
   }
 
   return (
@@ -634,6 +715,15 @@ export default function EnrichedOpportunitiesPage() {
                         disabled={!extractPrimaryEmail(e).email}
                       >
                         Contactar
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => openLinkedinCompose(e)}
+                        disabled={!e.linkedinUrl}
+                        title="Contactar por LinkedIn"
+                      >
+                        <Linkedin className="h-4 w-4" />
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -834,6 +924,38 @@ export default function EnrichedOpportunitiesPage() {
               <Button variant="outline" onClick={() => setOpenCompose(false)} disabled={sendingBulk}>Cerrar</Button>
               <Button onClick={sendBulk} disabled={sendingBulk || !composeList?.length}>
                 {sendingBulk ? 'Enviando…' : `Enviar todos (${bulkProvider})`}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* LinkedIn Compose Modal */}
+      <Dialog open={openLinkedin} onOpenChange={setOpenLinkedin}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Contactar por LinkedIn</DialogTitle>
+            <CardDescription>
+              Se abrirá una pestaña de LinkedIn y la extensión escribirá por ti.
+            </CardDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm">
+              <strong>Para:</strong> {linkedinLead?.fullName}
+            </div>
+            <Textarea
+              value={linkedinMessage}
+              onChange={(e) => setLinkedinMessage(e.target.value)}
+              rows={6}
+              placeholder="Escribe tu mensaje aquí..."
+            />
+            <div className="text-xs text-muted-foreground">
+              * Antón.IA simulará escritura humana. No cierres la nueva pestaña inmediatamente.
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setOpenLinkedin(false)}>Cancelar</Button>
+              <Button onClick={handleSendLinkedin} disabled={sendingLinkedin}>
+                {sendingLinkedin ? 'Enviando...' : 'Enviar con Extensión'}
               </Button>
             </div>
           </div>

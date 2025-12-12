@@ -15,7 +15,8 @@ import { BackBar } from '@/components/back-bar';
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet } from '@/lib/services/enriched-leads-service';
-import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser } from 'lucide-react';
+import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin } from 'lucide-react';
+import { extensionService } from '@/lib/services/extension-service';
 import { supabaseService } from '@/lib/supabase-service';
 import { supabase } from '@/lib/supabase';
 import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
@@ -38,6 +39,7 @@ import { getFirstNameSafe } from '@/lib/template';
 import { generateMailFromStyle } from '@/lib/ai/style-mail';
 import { styleProfilesStorage } from '@/lib/style-profiles-storage';
 import { profileService } from '@/lib/services/profile-service';
+import { generateLinkedinDraft } from '@/lib/ai/linkedin-templates';
 
 
 const extractDomainFromEmail = (email?: string | null) =>
@@ -73,6 +75,12 @@ export default function EnrichedLeadsClient() {
   const [showBulkEditor, setShowBulkEditor] = useState(false);
   const [editInstruction, setEditInstruction] = useState('');
   const [applyingEdit, setApplyingEdit] = useState(false);
+
+  // --- LinkedIn Modal ---
+  const [openLinkedin, setOpenLinkedin] = useState(false);
+  const [linkedinLead, setLinkedinLead] = useState<EnrichedLead | null>(null);
+  const [linkedinMessage, setLinkedinMessage] = useState('');
+  const [sendingLinkedin, setSendingLinkedin] = useState(false);
 
   // ===== Filtros (incluye/excluye) =====
   const [showFilters, setShowFilters] = useState(false);
@@ -625,6 +633,77 @@ export default function EnrichedLeadsClient() {
     });
   }
 
+  function openLinkedinCompose(lead: EnrichedLead) {
+    if (!lead.linkedinUrl) return;
+    setLinkedinLead(lead);
+
+    // Contextual AI Generation
+    const rep = findReportForLead({ leadId: leadRefOf(lead), companyDomain: lead.companyDomain || null, companyName: lead.companyName || null });
+    const draft = generateLinkedinDraft(lead, rep);
+
+    setLinkedinMessage(draft);
+    setOpenLinkedin(true);
+  }
+
+  async function handleSendLinkedin() {
+    if (!linkedinLead || !linkedinMessage) return;
+    setSendingLinkedin(true);
+
+    try {
+      // 1. Check Extension
+      if (!extensionService.isInstalled) {
+        toast({
+          variant: 'destructive',
+          title: 'Extensión no detectada',
+          description: 'Instala la extensión de Chrome de Anton.IA para enviar DMs.'
+        });
+        setSendingLinkedin(false);
+        return;
+      }
+
+      // 2. Send Command
+      const res = await extensionService.sendLinkedinDM(linkedinLead.linkedinUrl!, linkedinMessage);
+
+      if (res.success) {
+        // 3. Save Log
+        await contactedLeadsStorage.add({
+          id: uuid(),
+          leadId: linkedinLead.id,
+          name: linkedinLead.fullName,
+          email: linkedinLead.email || '',
+          company: linkedinLead.companyName,
+          role: linkedinLead.title,
+          industry: linkedinLead.industry,
+          city: linkedinLead.city,
+          country: linkedinLead.country,
+
+          subject: 'LinkedIn DM',
+          status: 'sent',
+          provider: 'linkedin', // New provider
+          linkedinThreadUrl: linkedinLead.linkedinUrl, // Best proxy for now
+          linkedinMessageStatus: 'sent',
+          sentAt: new Date().toISOString(),
+
+          // Tech fields
+          lastUpdateAt: new Date().toISOString()
+        });
+
+        toast({ title: 'Mensaje Enviado', description: 'La extensión procesó el envío correctamente.' });
+        setOpenLinkedin(false);
+
+        // Optional: Remove from enriched?
+        // await removeEnrichedLeadById(linkedinLead.id);
+      } else {
+        toast({ variant: 'destructive', title: 'Error en Envío', description: res.error });
+      }
+
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Excepción', description: e.message });
+    } finally {
+      setSendingLinkedin(false);
+    }
+  }
+
   function openBulkCompose() {
     const company = getCompanyProfile() || {};
     const sender = buildSenderInfo();
@@ -1074,6 +1153,15 @@ export default function EnrichedLeadsClient() {
                     <TableCell className="text-right space-x-2">
                       <Button size="sm" variant="outline" onClick={() => openReportFor(e)}>Ver reporte</Button>
                       <Button size="sm" onClick={() => generateEmailFromReportFor(e)} disabled={!canContact(e)}>Contactar</Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => openLinkedinCompose(e)}
+                        disabled={!e.linkedinUrl}
+                        title="Contactar por LinkedIn"
+                      >
+                        <Linkedin className="h-4 w-4" />
+                      </Button>
                       <Button size="icon" variant="ghost" onClick={() => handleDeleteEnriched(e.id)} title="Eliminar">
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -1513,6 +1601,38 @@ export default function EnrichedLeadsClient() {
               <Button variant="outline" onClick={() => setOpenCompose(false)} disabled={sendingBulk}>Cerrar</Button>
               <Button onClick={sendBulk} disabled={sendingBulk || !composeList?.length}>
                 {sendingBulk ? 'Enviando…' : `Enviar todos (${bulkProvider})`}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* LinkedIn Compose Modal */}
+      <Dialog open={openLinkedin} onOpenChange={setOpenLinkedin}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Contactar por LinkedIn</DialogTitle>
+            <CardDescription>
+              Se abrirá una pestaña de LinkedIn y la extensión escribirá por ti.
+            </CardDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm">
+              <strong>Para:</strong> {linkedinLead?.fullName}
+            </div>
+            <Textarea
+              value={linkedinMessage}
+              onChange={(e) => setLinkedinMessage(e.target.value)}
+              rows={6}
+              placeholder="Escribe tu mensaje aquí..."
+            />
+            <div className="text-xs text-muted-foreground">
+              * Antón.IA simulará escritura humana. No cierres la nueva pestaña inmediatamente.
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setOpenLinkedin(false)}>Cancelar</Button>
+              <Button onClick={handleSendLinkedin} disabled={sendingLinkedin}>
+                {sendingLinkedin ? 'Enviando...' : 'Enviar con Extensión'}
               </Button>
             </div>
           </div>

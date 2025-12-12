@@ -1,0 +1,58 @@
+{
+    "manifest_version": 3,
+    "name": "Anton.IA Automation",
+    "version": "1.0",
+    "description": "Automatización segura de LinkedIn para Anton.IA",
+    "permissions": [
+        "activeTab",
+        "scripting",
+        "storage",
+        "tabs"
+    ],
+    "host_permissions": [
+        "https://www.linkedin.com/*",
+        "http://localhost:3000/*",
+        "https://*.vercel.app/*",
+        "https://*.hosted.app/*"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://www.linkedin.com/*"
+            ],
+            "js": [
+                "content.js"
+            ]
+        },
+        {
+            "matches": [
+                "http://localhost:3000/*",
+                "https://*.vercel.app/*",
+                "https://*.hosted.app/*"
+            ],
+            "js": [
+                "web_injector.js"
+            ]
+        }
+    ],
+    "action": {
+        "default_popup": "popup.html",
+        "default_title": "Anton.IA Status",
+        "default_icon": "icon.png"
+    },
+    "icons": {
+        "16": "icon.png",
+        "48": "icon.png",
+        "128": "icon.png"
+    },
+    "externally_connectable": {
+        "matches": [
+            "http://localhost:3000/*",
+            "https://*.vercel.app/*",
+            "https://*.hosted.app/*"
+        ]
+    }
+}

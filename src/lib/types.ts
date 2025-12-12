@@ -87,7 +87,7 @@ export interface ContactedLead {
   sentAt: string;
   status: ContactStatus;
 
-  provider: 'gmail' | 'outlook';
+  provider: 'gmail' | 'outlook' | 'linkedin';
   messageId?: string;
   conversationId?: string; // Outlook
   threadId?: string;       // Gmail
@@ -112,6 +112,10 @@ export interface ContactedLead {
   lastFollowUpAt?: string;
   lastStepIdx?: number; // índice de paso enviado (0-based)
   replySnippet?: string;
+
+  // LinkedIn specifics
+  linkedinThreadUrl?: string;
+  linkedinMessageStatus?: 'sent' | 'queued' | 'failed' | 'replied';
 }
 
 export interface ContactedOpportunity extends Omit<ContactedLead, 'leadId'> {

@@ -37,6 +37,8 @@ function mapRowToContactedLead(row: any): ContactedLead {
         lastFollowUpAt: row.last_follow_up_at,
         lastStepIdx: row.last_step_idx,
         lastUpdateAt: row.last_update_at,
+        linkedinThreadUrl: row.linkedin_thread_url,
+        linkedinMessageStatus: row.linkedin_message_status,
     };
 }
 
@@ -74,6 +76,8 @@ function mapContactedLeadToRow(item: ContactedLead, userId: string, organization
         last_follow_up_at: item.lastFollowUpAt,
         last_step_idx: item.lastStepIdx,
         last_update_at: item.lastUpdateAt || new Date().toISOString(),
+        linkedin_thread_url: item.linkedinThreadUrl,
+        linkedin_message_status: item.linkedinMessageStatus,
     };
 }
 
