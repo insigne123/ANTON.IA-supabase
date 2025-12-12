@@ -8,6 +8,107 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 });
 
+// --- LISTENER LOGIC (Phase 3) ---
+// Monitor chat for new incoming messages
+
+let lastProcessedMessage = null;
+
+// Run observer when on messaging page
+if (location.href.includes('messaging')) {
+    startReplyObserver();
+}
+
+// Also watch for URL changes (SPA)
+let lastUrl = location.href;
+new MutationObserver(() => {
+    const url = location.href;
+    if (url !== lastUrl) {
+        lastUrl = url;
+        if (url.includes('messaging/thread')) {
+            console.log('Anton.IA: Thread detected, starting observer...');
+            startReplyObserver();
+        }
+    }
+}).observe(document, { subtree: true, childList: true });
+
+function startReplyObserver() {
+    // We observe the message list container
+    // Class names change, so we look for generic "list" roles or specific partial classes
+    const chatContainer = document.querySelector('.msg-s-message-list-container');
+
+    if (!chatContainer) {
+        // Retry/Wait
+        setTimeout(startReplyObserver, 2000);
+        return;
+    }
+
+    console.log('Anton.IA: Observer attached to chat container');
+
+    const callback = (mutationsList) => {
+        // Check for new nodes
+        for (const mutation of mutationsList) {
+            if (mutation.type === 'childList') {
+                checkLastMessage();
+            }
+        }
+    };
+
+    const observer = new MutationObserver(callback);
+    observer.observe(chatContainer, { childList: true, subtree: true });
+
+    // Check initial state too
+    checkLastMessage();
+}
+
+function checkLastMessage() {
+    // Find all message bubbles
+    // Selector strategy: 'msg-s-event-listitem' is the wrapper.
+    const items = document.querySelectorAll('.msg-s-event-listitem');
+    if (items.length === 0) return;
+
+    const lastItem = items[items.length - 1];
+
+    // Check if it's NOT from me
+    // Usually 'msg-s-message-group--is-mine' or similar exists on the GROUP.
+    // The list items are inside groups.
+    // We need to check if the message is INCOMING.
+    // Heuristic: Check for Profile Link/Image of the OTHER person.
+
+    // LinkedIn DOM structure varies.
+    // Robust check: Does it have 'msg-s-event-listitem--other'? (Sometimes used)
+
+    const isMine = lastItem.innerHTML.includes('msg-s-message-group--is-mine') ||
+        lastItem.closest('.msg-s-message-group--is-mine');
+
+    if (!isMine) {
+        // It's from them!
+        const textElement = lastItem.querySelector('.msg-s-event-listitem__body');
+        const text = textElement ? textElement.innerText : '';
+
+        if (text && text !== lastProcessedMessage) {
+            console.log('Anton.IA: Reply Detected!', text.substring(0, 20) + '...');
+            lastProcessedMessage = text;
+
+            // Send to Background
+            chrome.runtime.sendMessage({
+                action: 'REPLY_DETECTED',
+                replyText: text,
+                linkedinThreadUrl: location.href,
+                profileUrl: extractProfileFromThread()
+            });
+        }
+    }
+}
+
+function extractProfileFromThread() {
+    // Try to find the profile link in the header
+    const headerLink = document.querySelector('.msg-thread-section__sender a.msg-thread-section__sender-link');
+    return headerLink ? headerLink.href : null;
+}
+
+
+// --- EXISTING SEND LOGIC ---
+
 async function runDMFlow(profileUrl, message, sendResponse) {
     try {
         // 1. Check if we are on the right profile
@@ -19,9 +120,6 @@ async function runDMFlow(profileUrl, message, sendResponse) {
             // But actually, if we reload, this promise dies.
             // Mitigation: background.js should navigate -> wait complete -> send 'EXECUTE_DM_DESCRIBE'.
             // For now, let's assume we are ALREADY on the page or background moved us.
-
-            // If we are NOT on the page, we tell background "Please move me".
-            // But let's keep it simple: Background does the nav.
             // If URL mismatches significantly, fail.
         }
 

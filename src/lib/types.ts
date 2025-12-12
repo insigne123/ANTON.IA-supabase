@@ -69,7 +69,7 @@ export interface Lead {
 export type SavedLead = Lead;
 
 // ⬇️ incluye 'read' y metadatos de respuesta
-export type ContactStatus = 'sent' | 'replied';
+export type ContactStatus = 'sent' | 'replied' | 'scheduled' | 'queued' | 'failed';
 
 export interface ContactedLead {
   id: string;
@@ -113,9 +113,13 @@ export interface ContactedLead {
   lastStepIdx?: number; // índice de paso enviado (0-based)
   replySnippet?: string;
 
+  // Smart Planner
+  scheduledAt?: string; // ISO Date
+
   // LinkedIn specifics
   linkedinThreadUrl?: string;
   linkedinMessageStatus?: 'sent' | 'queued' | 'failed' | 'replied';
+  lastReplyText?: string;
 }
 
 export interface ContactedOpportunity extends Omit<ContactedLead, 'leadId'> {

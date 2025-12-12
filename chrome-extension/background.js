@@ -1,7 +1,13 @@
-// Background Service Worker
-// Manages the queue and communication between Web App and LinkedIn Tabs
+const API_BASE = 'http://localhost:3000'; // Make sure this matches user env or use production URL
 
-let linkedinTabId = null;
+// Setup polling
+chrome.alarms.create('check_schedule', { periodInMinutes: 1 });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'check_schedule') {
+        checkAndExecuteSchedule();
+    }
+});
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log('[Anton.IA Background] Received:', request);
@@ -15,22 +21,78 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         handleSendDM(request, sendResponse);
         return true; // async response
     }
+
+    if (request.action === 'REPLY_DETECTED') {
+        handleReplyDetected(request);
+        sendResponse({ received: true });
+        return true;
+    }
 });
+
+async function handleReplyDetected(payload) {
+    try {
+        console.log('[Anton.IA] Sending reply to API:', payload);
+        const res = await fetch(`${API_BASE}/api/scheduler/reply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const json = await res.json();
+        console.log('[Anton.IA] API Response:', json);
+    } catch (e) {
+        console.error('[Anton.IA] Failed to send reply to API:', e);
+    }
+}
+
+async function checkAndExecuteSchedule() {
+    try {
+        const res = await fetch(`${API_BASE}/api/scheduler/poll`);
+        const data = await res.json();
+
+        if (data.tasks && data.tasks.length > 0) {
+            console.log(`[Anton.IA] Found ${data.tasks.length} scheduled tasks.`);
+            processBatch(data.tasks);
+        }
+    } catch (e) {
+        console.error('[Anton.IA] Polling error:', e);
+    }
+}
+
+async function processBatch(tasks) {
+    for (const task of tasks) {
+        // Execute one by one
+        console.log('[Anton.IA] Processing:', task.id, task.name);
+        // ... (Using same logic as previously discussed)
+
+        const messageToContext = task.subject || "Hola, me gustaría conectar.";
+
+        const result = await new Promise(resolve => {
+            handleSendDM({
+                profileUrl: task.linkedin_thread_url, // We stored this in planner-service
+                message: messageToContext
+            }, resolve);
+        });
+
+        // Report status
+        const status = result.success ? 'sent' : 'failed'; // or retry logic
+        await fetch(`${API_BASE}/api/scheduler/complete`, {
+            method: 'POST',
+            body: JSON.stringify({ id: task.id, status, error: result.error })
+        });
+
+        // Wait random time between actions
+        await new Promise(r => setTimeout(r, 10000 + Math.random() * 5000));
+    }
+}
 
 async function handleSendDM(payload, sendResponse) {
     try {
         // 1. Find or active LinkedIn Tab
-        // We check if we already have a focused LinkedIn tab or try to find one
         let tabs = await chrome.tabs.query({ url: "https://www.linkedin.com/*" });
         let activeTab = tabs.length > 0 ? tabs[0] : null;
 
         if (!activeTab) {
-            // Create new tab but don't focus it to keep user workflow smooth (unless manual action requires it)
-            // For a manual "Send DM" click, we probably WANT to switch to it or open it.
-            // Let's create it in background first.
             activeTab = await chrome.tabs.create({ url: 'https://www.linkedin.com', active: false });
-
-            // Wait for it to load... (simplified for now)
             await new Promise(r => setTimeout(r, 5000));
         }
 

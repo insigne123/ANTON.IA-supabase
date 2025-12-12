@@ -87,6 +87,7 @@ export default function ContactedAnalyticsPage() {
         const areas: Record<string, number> = {};
         const levels: Record<string, number> = {};
         const industries: Record<string, number> = {};
+        const providers: Record<string, number> = {};
 
         filteredData.forEach(item => {
             // Area
@@ -97,10 +98,13 @@ export default function ContactedAnalyticsPage() {
             const lvl = classifyLevel(item.role);
             levels[lvl] = (levels[lvl] || 0) + 1;
 
-            // Industry (if present)
+            // Industry
             const ind = item.industry || 'Desconocido';
-            // Simplificar algunas industrias muy largas si es necesario
             industries[ind] = (industries[ind] || 0) + 1;
+
+            // Provider
+            const prov = item.provider === 'linkedin' ? 'LinkedIn' : 'Email';
+            providers[prov] = (providers[prov] || 0) + 1;
         });
 
         const formatForChart = (rec: Record<string, number>) =>
@@ -113,6 +117,7 @@ export default function ContactedAnalyticsPage() {
             areas: formatForChart(areas),
             levels: formatForChart(levels),
             industries: formatForChart(industries),
+            providers: formatForChart(providers),
         };
     }, [filteredData]);
 
@@ -173,14 +178,14 @@ export default function ContactedAnalyticsPage() {
 
                 <Card className="col-span-3">
                     <CardHeader>
-                        <CardTitle>Nivel de Seniority</CardTitle>
-                        <CardDescription>¿A quién le estamos hablando?</CardDescription>
+                        <CardTitle>Canal de Contacto</CardTitle>
+                        <CardDescription>Email vs LinkedIn</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <ResponsiveContainer width="100%" height={350}>
                             <PieChart>
                                 <Pie
-                                    data={byStructure.levels}
+                                    data={byStructure.providers}
                                     cx="50%"
                                     cy="50%"
                                     innerRadius={60}
@@ -188,8 +193,8 @@ export default function ContactedAnalyticsPage() {
                                     paddingAngle={5}
                                     dataKey="value"
                                 >
-                                    {byStructure.levels.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                    {byStructure.providers.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={index === 0 ? '#0077b5' : '#ea4335'} />
                                     ))}
                                 </Pie>
                                 <Tooltip />
@@ -200,27 +205,47 @@ export default function ContactedAnalyticsPage() {
                 </Card>
             </div>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle>Sectores / Industrias</CardTitle>
-                    <CardDescription>Top 10 industrias contactadas.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={byStructure.industries} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                            <XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
-                            <YAxis />
-                            <Tooltip
-                                contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: 'var(--radius)' }}
-                                itemStyle={{ color: 'hsl(var(--foreground))' }}
-                            />
-                            <Bar dataKey="value" fill="#82ca9d" radius={[4, 4, 0, 0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </CardContent>
-            </Card>
+            <div className="grid gap-4 md:grid-cols-2 mt-4">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Nivel de Seniority</CardTitle>
+                        <CardDescription>¿A quién le estamos hablando?</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <ResponsiveContainer width="100%" height={300}>
+                            <BarChart data={byStructure.levels} layout="vertical" margin={{ left: 20, right: 20 }}>
+                                <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
+                                <XAxis type="number" hide />
+                                <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 12 }} />
+                                <Tooltip />
+                                <Bar dataKey="value" fill="#8884d8" radius={[0, 4, 4, 0]} barSize={20} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </CardContent>
+                </Card>
 
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Sectores / Industrias</CardTitle>
+                        <CardDescription>Top 10 industrias contactadas.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <ResponsiveContainer width="100%" height={300}>
+                            <BarChart data={byStructure.industries} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
+                                <YAxis />
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: 'var(--radius)' }}
+                                    itemStyle={{ color: 'hsl(var(--foreground))' }}
+                                />
+                                <Bar dataKey="value" fill="#82ca9d" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </CardContent>
+                </Card>
+
+            </div>
         </div>
     );
 }

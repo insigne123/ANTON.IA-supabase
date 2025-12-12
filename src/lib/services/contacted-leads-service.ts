@@ -26,19 +26,7 @@ function mapRowToContactedLead(row: any): ContactedLead {
         internetMessageId: row.internet_message_id,
         threadId: row.thread_id,
         repliedAt: row.replied_at,
-        replyPreview: row.reply_preview,
-        openedAt: row.opened_at,
-        clickedAt: row.clicked_at,
-        clickCount: row.click_count,
-        deliveredAt: row.delivered_at,
-        readReceiptMessageId: row.read_receipt_message_id,
-        deliveryReceiptMessageId: row.delivery_receipt_message_id,
-        followUpCount: row.follow_up_count,
-        lastFollowUpAt: row.last_follow_up_at,
-        lastStepIdx: row.last_step_idx,
-        lastUpdateAt: row.last_update_at,
-        linkedinThreadUrl: row.linkedin_thread_url,
-        linkedinMessageStatus: row.linkedin_message_status,
+        lastReplyText: row.last_reply_text,
     };
 }
 
@@ -64,20 +52,7 @@ function mapContactedLeadToRow(item: ContactedLead, userId: string, organization
         conversation_id: item.conversationId,
         internet_message_id: item.internetMessageId,
         thread_id: item.threadId,
-        replied_at: item.repliedAt,
-        reply_preview: item.replyPreview,
-        opened_at: item.openedAt,
-        clicked_at: item.clickedAt,
-        click_count: item.clickCount,
-        delivered_at: item.deliveredAt,
-        read_receipt_message_id: item.readReceiptMessageId,
-        delivery_receipt_message_id: item.deliveryReceiptMessageId,
-        follow_up_count: item.followUpCount,
-        last_follow_up_at: item.lastFollowUpAt,
-        last_step_idx: item.lastStepIdx,
-        last_update_at: item.lastUpdateAt || new Date().toISOString(),
-        linkedin_thread_url: item.linkedinThreadUrl,
-        linkedin_message_status: item.linkedinMessageStatus,
+        last_reply_text: item.lastReplyText,
     };
 }
 

@@ -34,6 +34,7 @@ export default function ContactedPage() {
   const [toDelete, setToDelete] = useState<ContactedLead | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
+  const [suggestion, setSuggestion] = useState<string>('');
 
   const refresh = async () => setItems(await contactedLeadsStorage.get());
   useEffect(() => { refresh(); }, []);
@@ -133,6 +134,17 @@ export default function ContactedPage() {
   }
 
   async function handleViewReply(it: ContactedLead) {
+    // 1. Check for LinkedIn Reply
+    if (it.provider === 'linkedin' && it.status === 'replied') {
+      const replyText = it.lastReplyText || it.replyPreview || '(Sin contenido de respuesta capturado)';
+      setViewSubject('Respuesta de LinkedIn');
+      setViewBodyHtml(`<p>${replyText}</p>`);
+      setViewWebLink(it.linkedinThreadUrl || '#');
+      setViewOpen(true);
+      return;
+    }
+
+    // 2. Existing checks for Email
     const replyId = (it as any).replyMessageId as string | undefined;
     if (!replyId) {
       toast({ variant: 'destructive', title: 'Sin respuesta', description: 'Primero verifica si hay respuesta.' });
@@ -388,10 +400,21 @@ export default function ContactedPage() {
           ) : (
             <>
               <div className="prose prose-sm max-w-none mb-4" dangerouslySetInnerHTML={{ __html: viewBodyHtml }} />
-              {viewWebLink && (
-                <a href={viewWebLink} target="_blank" rel="noopener noreferrer" className="underline text-sm">
-                  Abrir en Outlook
-                </a>
+              <div className="flex gap-2 mt-4">
+                {viewWebLink && (
+                  <a href={viewWebLink} target="_blank" rel="noopener noreferrer" className="underline text-sm btn btn-outline">
+                    Abrir original
+                  </a>
+                )}
+                <Button onClick={() => setSuggestion("¡Gracias por tu respuesta! Me gustaría agendar una llamada cortal...")} variant="secondary">
+                  💡 Generar Respuesta con IA (Simulado)
+                </Button>
+              </div>
+              {suggestion && (
+                <div className="mt-4 p-4 bg-muted rounded-md relative">
+                  <p className="text-sm italic">{suggestion}</p>
+                  <Button size="sm" variant="ghost" className="absolute top-2 right-2" onClick={() => navigator.clipboard.writeText(suggestion)}>Copiar</Button>
+                </div>
               )}
             </>
           )}
