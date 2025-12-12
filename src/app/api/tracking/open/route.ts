@@ -14,21 +14,19 @@ export async function GET(req: NextRequest) {
             process.env.SUPABASE_SERVICE_ROLE_KEY!
         );
 
-        // Fire and forget update
-        (async () => {
-            try {
-                await supabaseAdmin
-                    .from('contacted_leads')
-                    .update({
-                        status: 'opened',
-                        opened_at: new Date().toISOString(),
-                        last_update_at: new Date().toISOString(),
-                    })
-                    .eq('id', id);
-            } catch (err) {
-                console.error("Tracking Open error:", err);
-            }
-        })();
+        // Await the update to ensure it completes before the response is sent (Serverless execution model)
+        try {
+            await supabaseAdmin
+                .from('contacted_leads')
+                .update({
+                    status: 'opened',
+                    opened_at: new Date().toISOString(),
+                    last_update_at: new Date().toISOString(),
+                })
+                .eq('id', id);
+        } catch (err) {
+            console.error("Tracking Open error:", err);
+        }
     }
 
     // Transparent 1x1 PNG pixel
