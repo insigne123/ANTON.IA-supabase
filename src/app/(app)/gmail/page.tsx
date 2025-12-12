@@ -40,7 +40,7 @@ export default function GmailConnectPage() {
     const scope = 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly openid email profile';
 
     // DEBUG: Mostrar qué URI se está enviando
-    alert(`Redirigiendo a Google con URI: ${redirectUri}\nAsegúrate que ESTA url exacta esté en la consola de Google.`);
+    // alert(`Redirigiendo a Google con URI: ${redirectUri}\nAsegúrate que ESTA url exacta esté en la consola de Google.`);
 
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&access_type=offline&prompt=consent`;
   };

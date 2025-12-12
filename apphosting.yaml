@@ -36,3 +36,7 @@ env:
   - variable: NEXT_PUBLIC_GOOGLE_CLIENT_ID
     value: 1083965020353-50m4ibu3c1f56qc00c5j128bfv0mlk91.apps.googleusercontent.com
     availability: [BUILD, RUNTIME]
+
+  - variable: GOOGLE_CLIENT_SECRET
+    secret: GOOGLE_CLIENT_SECRET
+    availability: [RUNTIME]
