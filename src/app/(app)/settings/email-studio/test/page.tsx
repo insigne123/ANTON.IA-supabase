@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import type { ContactedLead } from '@/lib/types';
+import { v4 as uuid } from 'uuid';
 
 export default function EmailTestPage() {
     const { toast } = useToast();
@@ -27,6 +28,11 @@ export default function EmailTestPage() {
     const [body, setBody] = useState('<p>Hola,</p><p>Este es un correo de prueba.</p><p>Haz clic en este enlace para probar el tracking: <a href="https://example.com">Ejemplo.com</a></p>');
 
     const [useGmail, setUseGmail] = useState(true);
+    // Tracking Options
+    const [usePixel, setUsePixel] = useState(true);
+    const [useLinkTracking, setUseLinkTracking] = useState(true);
+    const [useReadReceipt, setUseReadReceipt] = useState(false);
+
     const [logs, setLogs] = useState<ContactedLead[]>([]);
     const [refreshing, setRefreshing] = useState(false);
     const [debugResult, setDebugResult] = useState<any>(null);
@@ -37,15 +43,14 @@ export default function EmailTestPage() {
 
     useEffect(() => {
         refreshLogs();
-    }, [to]); // Auto-refresh when target email changes
+    }, [to]);
 
     async function refreshLogs() {
         setRefreshing(true);
         try {
             const all = await contactedLeadsStorage.get();
-            // Filter by the email we are testing with or a generic fallback for unrelated tests
             const relevant = all.filter(x => to ? (x.email === to) : true).sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
-            setLogs(relevant.slice(0, 50)); // Limit to 50
+            setLogs(relevant.slice(0, 50));
         } catch (e) {
             console.error(e);
         } finally {
@@ -53,22 +58,16 @@ export default function EmailTestPage() {
         }
     }
 
-    // Simulación de lo que pasará con los links
-    const previewInjection = () => {
-        let html = body;
-        const pixel = `<img src="https://.../api/tracking/pixel.png?id=TEST_ID" alt="" width="1" height="1" style="display:none;" />`;
-        if (/<\/body>/i.test(html)) {
-            html = html.replace(/<\/body>/i, `${pixel}</body>`);
-        } else {
-            html += pixel;
-        }
-
-        html = html.replace(/<a\s+(?:[^>]*?\s+)?href="([^"]*)"([^>]*)>/gim, (match, url, extras) => {
-            return `<a href="https://.../api/tracking/click?url=${encodeURIComponent(url)}&id=TEST_ID" ${extras}>`;
+    // Helper to inject link tracking
+    function rewriteLinksForTracking(html: string, trackingId: string): string {
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        return html.replace(/href=["'](http[^"']+)["']/gi, (match, url, quote) => {
+            // Avoid rewriting tracking links themselves if already present
+            if (url.includes('/api/tracking/click')) return match;
+            const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
+            return `href=${quote}${trackingUrl}${quote}`;
         });
-
-        return html;
-    };
+    }
 
     async function handleSend() {
         if (!to) return toast({ variant: 'destructive', title: 'Falta destinatario' });
@@ -79,16 +78,36 @@ export default function EmailTestPage() {
 
         try {
             const endpoint = useGmail ? '/api/gmail/send' : '/api/providers/send';
+            const trackingId = uuid();
+            let finalHtmlBody = body;
+
+            // 1. Rewrite Links if enabled
+            if (useLinkTracking) {
+                finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
+            }
+
+            // 2. Inject Pixel if enabled
+            if (usePixel) {
+                const origin = typeof window !== 'undefined' ? window.location.origin : '';
+                const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+                const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="display:none;width:1px;height:1px;" />`;
+                // Try to inject before </body>, otherwise append
+                if (/<\/body>/i.test(finalHtmlBody)) {
+                    finalHtmlBody = finalHtmlBody.replace(/<\/body>/i, `${trackingPixel}</body>`);
+                } else {
+                    finalHtmlBody += `\n${trackingPixel}`;
+                }
+            }
 
             const payload: any = {
-                to: useGmail ? to : [to], // Normalize for different endpoints if needed
-                from, // IMPORTANT: Added 'from' to fix the error
+                to: useGmail ? to : [to],
+                from,
                 subject,
-                html: body,
-                // For providers endpoint
+                html: finalHtmlBody,
                 provider: useGmail ? 'google' : 'outlook',
-                htmlBody: body,
-                organizationId: undefined
+                htmlBody: finalHtmlBody,
+                organizationId: undefined,
+                requestReceipts: useReadReceipt
             };
 
             const res = await fetch(endpoint, {
@@ -103,18 +122,10 @@ export default function EmailTestPage() {
 
             toast({ title: 'Correo enviado', description: 'Revisa tu bandeja.' });
 
-            setDebugResult({
-                success: true,
-                provider: useGmail ? 'Gmail API' : 'Outlook/Provider',
-                sentTo: to,
-                simulation: previewInjection(),
-            });
-
-            // Manually add to storage for tracking because the API endpoints don't do it automatically
-            // (The main app does it in Client.tsx)
+            // Persist for tracking
             await contactedLeadsStorage.add({
-                id: undefined,
-                leadId: 'test-' + Date.now(), // Fake ID
+                id: trackingId, // IMPORTANT: Use trackingId
+                leadId: 'test-' + Date.now(),
                 name: 'Usuario Test',
                 email: to,
                 company: 'Test Corp',
@@ -122,14 +133,23 @@ export default function EmailTestPage() {
                 sentAt: new Date().toISOString(),
                 status: 'sent',
                 provider: useGmail ? 'gmail' : 'outlook',
-                messageId: data.id,
+                messageId: data.id || data.messageId, // Handle different responses
                 threadId: data.threadId,
                 clickCount: 0,
+                readReceiptMessageId: useReadReceipt ? (data.id || data.messageId) : undefined, // Potential match
                 role: 'Tester',
                 industry: 'Test',
                 city: 'Test City',
                 country: 'Test Country'
             } as any);
+
+            setDebugResult({
+                success: true,
+                provider: useGmail ? 'Gmail API' : 'Outlook/Provider',
+                sentTo: to,
+                trackingId,
+                features: { pixel: usePixel, links: useLinkTracking, receipts: useReadReceipt }
+            });
 
             refreshLogs();
 
@@ -183,6 +203,23 @@ export default function EmailTestPage() {
                             </p>
                         </div>
 
+                        {/* Tracking Options */}
+                        <div className="flex flex-col gap-2 p-3 bg-muted/20 border rounded-md">
+                            <div className="text-xs font-semibold text-muted-foreground mb-1">Opciones de Rastreo</div>
+                            <div className="flex items-center space-x-2">
+                                <Switch checked={usePixel} onCheckedChange={setUsePixel} id="use-pixel" />
+                                <Label htmlFor="use-pixel" className="text-sm font-normal cursor-pointer">Pixel de Apertura</Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <Switch checked={useLinkTracking} onCheckedChange={setUseLinkTracking} id="use-links" />
+                                <Label htmlFor="use-links" className="text-sm font-normal cursor-pointer">Rastreo de Clicks</Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <Switch checked={useReadReceipt} onCheckedChange={setUseReadReceipt} id="use-receipts" />
+                                <Label htmlFor="use-receipts" className="text-sm font-normal cursor-pointer">Confirmación de Lectura</Label>
+                            </div>
+                        </div>
+
                         <div className="flex items-center space-x-2 pt-2">
                             <Switch checked={useGmail} onCheckedChange={setUseGmail} id="use-gmail" />
                             <Label htmlFor="use-gmail">Enviar vía Gmail API</Label>
@@ -199,7 +236,7 @@ export default function EmailTestPage() {
                                 {debugResult.success ? (
                                     <div className="flex items-center gap-2">
                                         <CheckCircle2 className="h-4 w-4" />
-                                        <span>Enviado correctamente. Revisa la tabla de la derecha.</span>
+                                        <span>Enviado. Tracking ID: <span className="font-mono text-xs">{debugResult.trackingId?.slice(0, 8)}...</span></span>
                                     </div>
                                 ) : (
                                     <div className="flex items-center gap-2">

@@ -61,3 +61,5 @@ export function unmarkResearched(refs: string[] = []) {
 export function clearAllResearched() {
   setAll([]);
 }
+
+export const removeResearched = unmarkResearched;
