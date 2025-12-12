@@ -40,3 +40,15 @@ env:
   - variable: GOOGLE_CLIENT_SECRET
     secret: GOOGLE_CLIENT_SECRET
     availability: [RUNTIME]
+
+  - variable: NEXT_PUBLIC_SUPABASE_URL
+    value: https://yfdel,flsheurzaicwayi.supabase.co
+    availability: [BUILD, RUNTIME]
+
+  - variable: NEXT_PUBLIC_SUPABASE_ANON_KEY
+    secret: NEXT_PUBLIC_SUPABASE_ANON_KEY
+    availability: [BUILD, RUNTIME]
+
+  - variable: SUPABASE_SERVICE_ROLE_KEY
+    secret: SUPABASE_SERVICE_ROLE_KEY
+    availability: [RUNTIME]
