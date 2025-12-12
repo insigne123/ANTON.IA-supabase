@@ -28,14 +28,14 @@ export function findReportForLead(opts: {
   const leadRefLower = leadRefRaw.toLowerCase();
   const byRef = leadRefRaw
     ? arr.find(r => {
-        const k = (r.meta?.leadRef || '').trim();
-        return k === leadRefRaw || k.toLowerCase() === leadRefLower;
-      })
+      const k = (r.meta?.leadRef || '').trim();
+      return k === leadRefRaw || k.toLowerCase() === leadRefLower;
+    })
     : null;
   if (byRef) return byRef;
   const byDomain = opts.companyDomain ? arr.find(r => r.company.domain === opts.companyDomain) : null;
   if (byDomain) return byDomain;
-  const byName = opts.companyName ? arr.find(r => (r.company.name||'').toLowerCase() === opts.companyName!.toLowerCase()) : null;
+  const byName = opts.companyName ? arr.find(r => (r.company.name || '').toLowerCase() === opts.companyName!.toLowerCase()) : null;
   return byName || null;
 }
 
@@ -49,7 +49,7 @@ export function upsertLeadReports(newOnes: LeadResearchReport[]) {
       // Fallback minimalista: usa dominio o nombre+fecha como referencia
       r.meta.leadRef = r.meta.leadRef
         || (r.company?.domain ? `d:${r.company.domain}` : '')
-        || `n:${(r.company?.name||'').toLowerCase()}:${r.createdAt}`;
+        || `n:${(r.company?.name || '').toLowerCase()}:${r.createdAt}`;
     }
     return r;
   });
@@ -59,8 +59,8 @@ export function upsertLeadReports(newOnes: LeadResearchReport[]) {
   const dedup = all.filter(r => {
     const k = r.meta?.leadRef
       || (r.company.domain ? `d:${r.company.domain}` : '')
-      || `n:${(r.company.name||'').toLowerCase()}:${r.createdAt}`;
-    if(k && seen.has(k)) return false;
+      || `n:${(r.company.name || '').toLowerCase()}:${r.createdAt}`;
+    if (k && seen.has(k)) return false;
     if (k) seen.add(k);
     return true;
   });
@@ -107,4 +107,11 @@ export function findReportByRef(leadRef: string | undefined | null): LeadResearc
   if (!ref) return null;
   const arr = getAll();
   return arr.find(r => (r.meta?.leadRef || '') === ref) || null;
+}
+/** Elimina reportes para una ref. */
+export function removeReportFor(leadRef: string | undefined | null) {
+  if (typeof window === 'undefined') return 0;
+  const ref = (leadRef || '').trim();
+  if (!ref) return 0;
+  return leadResearchStorage.removeWhere(r => (r.meta?.leadRef || '') === ref);
 }

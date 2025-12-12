@@ -88,7 +88,11 @@ export default function EnrichedOpportunitiesPage() {
   const [linkedinMessage, setLinkedinMessage] = useState('');
   const [sendingLinkedin, setSendingLinkedin] = useState(false);
 
-  // Tracking options (pixel/link/receipt) - declared below in original, consolidating here or keeping original order...
+  // Tracking options
+  const [usePixel, setUsePixel] = useState(true);
+  const [useLinkTracking, setUseLinkTracking] = useState(true);
+  const [useReadReceipt, setUseReadReceipt] = useState(false);
+
   // I will just add logic for clearInvestigationFor:
 
   async function clearInvestigationFor(lead: EnrichedOppLead) {
