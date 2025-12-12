@@ -15,27 +15,25 @@ export async function GET(req: NextRequest) {
             process.env.SUPABASE_SERVICE_ROLE_KEY!
         );
 
-        // Record click asynchronously (fire & forget for speed)
-        (async () => {
-            try {
-                // Increment click_count atomic update would be better via RPC, but read-write is acceptable for low volume
-                // actually atomic increment: click_count = click_count + 1
-                // But simple approach first:
-                const { data } = await supabaseAdmin.from('contacted_leads').select('click_count').eq('id', id).single();
-                const current = (data?.click_count || 0) + 1;
+        // Await the update to ensure it completes before the response is sent
+        try {
+            // Increment click_count atomic update would be better via RPC, but read-write is acceptable for low volume
+            // actually atomic increment: click_count = click_count + 1
+            // But simple approach first:
+            const { data } = await supabaseAdmin.from('contacted_leads').select('click_count').eq('id', id).single();
+            const current = (data?.click_count || 0) + 1;
 
-                await supabaseAdmin
-                    .from('contacted_leads')
-                    .update({
-                        click_count: current,
-                        clicked_at: new Date().toISOString(),
-                        last_update_at: new Date().toISOString()
-                    })
-                    .eq('id', id);
-            } catch (err) {
-                console.error("Tracking error:", err);
-            }
-        })();
+            await supabaseAdmin
+                .from('contacted_leads')
+                .update({
+                    click_count: current,
+                    clicked_at: new Date().toISOString(),
+                    last_update_at: new Date().toISOString()
+                })
+                .eq('id', id);
+        } catch (err) {
+            console.error("Tracking error:", err);
+        }
     }
 
     // Redirect to the original URL (or fallback to homepage if missing)
