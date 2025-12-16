@@ -214,10 +214,19 @@ export default function SavedLeadsPage() {
         body: JSON.stringify({ leads: payloadLeads, revealEmail, revealPhone }),
       });
       const j = await r.clone().json().catch(async () => ({ nonJson: true, text: await r.text() }));
+      console.log('[enrich] Response:', j);
+
       if (!r.ok) {
         const snippet = (j as any)?.error || (j as any)?.message || (j as any)?.text || 'Error interno';
         throw new Error(`HTTP ${r.status}: ${String(snippet).slice(0, 200)}`);
       }
+
+      // Check for server-side quota limit note
+      if (j.note && typeof j.note === 'string' && j.note.includes('Quota')) {
+        toast({ variant: 'destructive', title: 'Límite diario alcanzado', description: j.note });
+        // We can still process what resulted (if any), but warn the user.
+      }
+
       // Actualiza quota-ticket si viene
       const ticket = (j as any)?.ticket || r.headers.get('x-quota-ticket');
       if (ticket) setQuotaTicket(ticket);
