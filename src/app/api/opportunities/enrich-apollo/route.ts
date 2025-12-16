@@ -136,8 +136,15 @@ export async function POST(req: NextRequest) {
       if (l.companyDomain) payload.organization_domain = cleanDomain(l.companyDomain);
       if (l.companyName) payload.organization_name = l.companyName;
 
-      const res = await withRetry(() =>
-        fetchWithLog('APOLLO people/match', `${BASE}/people/match`, {
+      // Algunos planes de Apollo obligan a pasar webhook_url si pides teléfono
+      if (revealPhone) {
+        // Usamos una URL ficticia o la real si existiera, para pasar la validación
+        // Si Apollo manda los datos por webhook, no los veremos aquí síncronamente (salvo que sea 'instant').
+        payload.webhook_url = `https://${req.headers.get('host') || 'anton-ia-supabase.vercel.app'}/api/webhooks/apollo-dummy`;
+      }
+
+      let res = await withRetry(() =>
+        fetchWithLog('APOLLO people/match (Phone+Email)', `${BASE}/people/match`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -149,25 +156,70 @@ export async function POST(req: NextRequest) {
         }),
       );
 
-      if (!res.ok) {
+      let j: any = {};
+      let p: any = null;
+
+      if (res.ok) {
+        j = await res.json().catch(() => ({}));
+        p = j?.person ?? j;
+      } else {
+        // Si falló (ej. 400 por falta de webhook o error de créditos de teléfono),
+        // intentamos el fallback inmediatamente.
+        const errText = await safeText(res);
+        console.warn('[enrich-apollo] Phone+Email failed:', res.status, errText);
+
+        // Fallback directo: solo Email
+        if (revealPhone && revealEmail) {
+          console.log('[enrich-apollo] Fallback: Retrying with Email Only immediately.');
+          const fallbackPayload = { ...payload, reveal_phone_number: false };
+          delete fallbackPayload.webhook_url;
+
+          const res2 = await withRetry(() =>
+            fetchWithLog('APOLLO people/match (Email Only)', `${BASE}/people/match`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Api-Key': apiKey,
+                accept: 'application/json',
+                'Cache-Control': 'no-cache',
+              },
+              body: JSON.stringify(fallbackPayload),
+            }),
+          );
+          if (res2.ok) {
+            j = await res2.json().catch(() => ({}));
+            p = j?.person ?? j;
+            // Marcamos que usamos fallback para debugging
+            j._fallbackUsed = true;
+          } else {
+            // Si también falla, guardamos el error original
+            j = { error: errText };
+          }
+        } else {
+          // Si no había fallback posible, dejamos el error
+          j = { error: errText };
+        }
+      }
+
+      // Si después de todo no tenemos persona válida, guardamos el error/nota
+      if (!p || (!p.email && !p.id)) { // chequeo laxo
         enrichedOut.push({
           id: uuid(),
           sourceOpportunityId: l.sourceOpportunityId,
           fullName: l.fullName,
           companyName: l.companyName,
           title: l.title,
-          // DB defaults to NULL for phones/emails not requested
-          note: await safeText(res),
+          note: j.error || (j.message ? String(j.message) : undefined) || 'No match found',
           createdAt: new Date().toISOString(),
           clientRef: l.clientRef ?? undefined,
+          _rawDebug: j
         });
         await sleep(250);
         continue;
       }
 
-      const j = await res.json();
-      // console.log('[enrich-apollo] Match result:', { id: l.clientRef, foundEmail: !!(j?.person?.email), foundPhone: !!(j?.person?.phone_numbers?.length) });
-      const p = j?.person ?? j;
+      // Si llegamos aquí, tenemos éxito (ya sea del primero o del fallback)
+      // Pasamos p a la lógica de mapeo...
       const rawEmail: string | undefined = p?.email || p?.personal_email || p?.primary_email;
       const locked = !!rawEmail && /email_not_unlocked@domain\.com/i.test(rawEmail);
 
