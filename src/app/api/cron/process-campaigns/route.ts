@@ -135,7 +135,7 @@ export async function GET(req: NextRequest) {
                         let body = step.bodyHtml.replace('{{lead.name}}', lead.name || '').replace('{{company}}', lead.company || '');
 
                         // 1. Rewrite Links
-                        body = body.replace(/href=(["'])(http[^"']+)\1/gi, (match, quote, url) => {
+                        body = body.replace(/href=(["'])(http[^"']+)\1/gi, (match: string, quote: string, url: string) => {
                             if (url.includes('/api/tracking/click')) return match;
                             const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
                             return `href=${quote}${trackingUrl}${quote}`;

@@ -24,7 +24,6 @@ import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
 import { sendEmail } from '@/lib/outlook-email-service';
 import { sendGmailEmail } from '@/lib/gmail-email-service';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { getCompanyProfile } from '@/lib/data';
 import { isResearched, markResearched, unmarkResearched } from '@/lib/researched-leads-storage';
 import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
@@ -336,7 +335,7 @@ export default function EnrichedLeadsClient() {
   function rewriteLinksForTracking(html: string, trackingId: string): string {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     // Unify regex with the robust one from EmailTestPage
-    return html.replace(/href=(["'])(http[^"']+)\1/gi, (match, quote, url) => {
+    return html.replace(/href=(["'])(http[^"']+)\1/gi, (match: string, quote: string, url: string) => {
       if (url.includes('/api/tracking/click')) return match;
       const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
       return `href=${quote}${trackingUrl}${quote}`;

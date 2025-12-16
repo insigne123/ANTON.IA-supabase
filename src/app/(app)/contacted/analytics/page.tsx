@@ -127,7 +127,7 @@ export default function ContactedAnalyticsPage() {
     return (
         <div className="space-y-6 pb-20">
 
-            <BackBar href="/contacted" label="Volver a Leads Contactados" />
+            <BackBar fallbackHref="/contacted" label="Volver a Leads Contactados" />
             <PageHeader
                 title="Analítica de Contactos"
                 description="Métricas de rendimiento e insights de tus campañas de outreach."

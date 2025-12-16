@@ -222,7 +222,7 @@ function ComposeInner() {
   function rewriteLinksForTracking(html: string, trackingId: string): string {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     // Unify regex with the robust one from EmailTestPage
-    return html.replace(/href=(["'])(http[^"']+)\1/gi, (match, quote, url) => {
+    return html.replace(/href=(["'])(http[^"']+)\1/gi, (match: string, quote: string, url: string) => {
       if (url.includes('/api/tracking/click')) return match;
       const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
       return `href=${quote}${trackingUrl}${quote}`;
