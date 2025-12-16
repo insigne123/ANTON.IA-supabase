@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { leads, revealEmail = true, revealPhone = false } = (await req.json()) as EnrichInput;
+    console.log('[enrich-apollo] Incoming payload:', { count: leads?.length, revealEmail, revealPhone, firstLead: leads?.[0] });
     if (!Array.isArray(leads) || leads.length === 0) {
       return NextResponse.json({ error: 'leads requerido' }, { status: 400 });
     }
@@ -165,6 +166,7 @@ export async function POST(req: NextRequest) {
       }
 
       const j = await res.json();
+      // console.log('[enrich-apollo] Match result:', { id: l.clientRef, foundEmail: !!(j?.person?.email), foundPhone: !!(j?.person?.phone_numbers?.length) });
       const p = j?.person ?? j;
       const rawEmail: string | undefined = p?.email || p?.personal_email || p?.primary_email;
       const locked = !!rawEmail && /email_not_unlocked@domain\.com/i.test(rawEmail);

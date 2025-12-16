@@ -258,11 +258,44 @@ export default function SavedLeadsPage() {
           phoneNumbers: e.phoneNumbers,
           primaryPhone: e.primaryPhone,
           createdAt: e.createdAt,
-        };
-      });
+          // Aseguramos que phoneNumbers y primaryPhone se pasen
+          return {
+            id: e.id,
+            fullName: e.fullName,
+            title: e.title,
+            email: e.email,
+            emailStatus: e.emailStatus || 'unknown',
+            linkedinUrl: e.linkedinUrl,
+            companyName: e.companyName ?? sourceLead?.company,
+            companyDomain: e.companyDomain ?? domainFromWebsite ?? domainFromEmail,
+            country: sourceLead?.country,
+            city: sourceLead?.city,
+            industry: sourceLead?.industry,
+            phoneNumbers: e.phoneNumbers,
+            primaryPhone: e.primaryPhone,
+            createdAt: e.createdAt,
+          };
+        });
 
-      // 1) Añadir a Enriquecidos
-      const addRes = await enrichedLeadsStorage.addDedup(enrichedNow);
+      console.log('[enrich] Enriched Now (raw):', enrichedNow);
+
+      // 1) Filtrar y Añadir a Enriquecidos
+      // Solo guardamos si encontramos ALGO (email o teléfono de cualquier tipo)
+      const usefulEnriched = enrichedNow.filter(e =>
+        e.email ||
+        e.primaryPhone ||
+        (e.phoneNumbers && Array.isArray(e.phoneNumbers) && e.phoneNumbers.length > 0)
+      );
+
+      let addRes: any = { addedCount: 0 };
+      if (usefulEnriched.length > 0) {
+        addRes = await enrichedLeadsStorage.addDedup(usefulEnriched);
+      } else {
+        // Feedback si no se encontró nada útil
+        if (chosen.length === 1) {
+          toast({ variant: 'default', title: 'Sin datos nuevos', description: 'Apollo no encontró email ni teléfono para este lead.' });
+        }
+      }
 
       // 2) Remover de Guardados si obtuvimos ID de contacto (email o telefono)
       const toRemoveIds = new Set<string>();
