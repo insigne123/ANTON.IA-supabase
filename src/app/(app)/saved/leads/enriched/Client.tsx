@@ -584,6 +584,10 @@ export default function EnrichedLeadsClient() {
       }));
 
       toast({ title: '¡Teléfono encontrado!', description: `Se enriqueció el lead con ${data.phoneNumbers?.length || 1} número(s).` });
+    } else {
+      console.log('[runOneInvestigation] No phone data in N8N response. Keys:', Object.keys(data || {}));
+      // Opcional: avisar que no llegó teléfono, para depuración
+      // toast({ variant: 'outline', title: 'Sin teléfono', description: 'La investigación no retornó datos de contacto telefónico.' });
     }
 
     if (Array.isArray(data?.reports) && data.reports.length) {
@@ -1195,6 +1199,14 @@ export default function EnrichedLeadsClient() {
             >
               <Eraser className="mr-2 h-4 w-4" />
               Borrar investigaciones
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => initiateEnrichment(enriched.filter(e => selectedToContact.has(e.id)))}
+              disabled={selectedToContact.size === 0}
+            >
+              <RotateCw className="mr-2 h-4 w-4" />
+              Enriquecer Datos
             </Button>
             <Button onClick={openBulkCompose} disabled={selectedToContact.size === 0}>
               Contactar seleccionados ({selectedToContact.size})
@@ -1969,6 +1981,14 @@ export default function EnrichedLeadsClient() {
         lead={leadToCall}
         report={reportToView} // Nos aseguramos de pasarle el reporte que corresponde al leadToCall
         onLogCall={handleLogCall}
+      />
+
+      <EnrichmentOptionsDialog
+        open={openEnrichOptions}
+        onOpenChange={setOpenEnrichOptions}
+        onConfirm={handleConfirmEnrich}
+        loading={enriching}
+        leadCount={leadsToEnrich.length}
       />
     </div>
   );

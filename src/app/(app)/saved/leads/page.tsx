@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/AuthContext';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { CommentsSection } from '@/components/comments-section';
+import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
 
 const displayDomain = (url: string) => { try { const u = new URL(url.startsWith('http') ? url : `https://${url}`); return u.hostname.replace(/^www\./, ''); } catch { return url.replace(/^https?:\/\//, '').replace(/^www\./, ''); } };
 const asHttp = (url: string) => url.startsWith('http') ? url : `https://${url}`;
@@ -35,6 +36,10 @@ export default function SavedLeadsPage() {
   const [enriching, setEnriching] = useState(false);
   const [showOnlyMyLeads, setShowOnlyMyLeads] = useState(false);
   const [selectedLeadForComments, setSelectedLeadForComments] = useState<Lead | null>(null);
+
+  // Dialog state
+  const [enrichOptionsOpen, setEnrichOptionsOpen] = useState(false);
+  const [leadsToEnrich, setLeadsToEnrich] = useState<Lead[]>([]);
 
   useEffect(() => {
     // Carga inicial desde Supabase
@@ -158,21 +163,32 @@ export default function SavedLeadsPage() {
     setSelLead(next);
   };
 
-  async function enrichSelected() {
+  function initiateEnrichSelected() {
     const chosen = savedLeads.filter(l => selLead[l.id] && !l.email);
     if (chosen.length === 0) {
       toast({ title: 'Nada que enriquecer', description: 'Todos los seleccionados ya tienen email.' });
       return;
     }
-    // Validación preventiva: necesitamos cupos para TODOS los seleccionados
-    if (!Quota.canUseClientQuota('enrich', chosen.length)) {
+    setLeadsToEnrich(chosen);
+    setEnrichOptionsOpen(true);
+  }
+
+  async function handleConfirmEnrich(opts: { revealEmail: boolean; revealPhone: boolean }) {
+    const { revealEmail, revealPhone } = opts;
+    const chosen = leadsToEnrich;
+
+    // Validación preventiva de cuota (approx)
+    const costPerLead = (revealEmail ? 1 : 0) + (revealPhone ? 1 : 0);
+    const totalCost = costPerLead * chosen.length;
+
+    if (!Quota.canUseClientQuota('enrich', totalCost)) {
       const { enrich: used = 0 } = Quota.getClientQuota() as any;
       const limit = Quota.getClientLimit('enrich');
       const remaining = Math.max(0, limit - (used || 0));
       toast({
         variant: 'destructive',
         title: 'Cupo insuficiente',
-        description: `Seleccionaste ${chosen.length} lead(s) pero solo quedan ${remaining} cupo(s) hoy.`,
+        description: `Requieres ${totalCost} cupos pero solo quedan ${remaining}.`,
       });
       return;
     }
@@ -185,18 +201,17 @@ export default function SavedLeadsPage() {
         linkedinUrl: l.linkedinUrl || undefined,
         companyName: l.company || undefined,
         companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
-        clientRef: l.id, // <— correlación estable
+        clientRef: l.id,
       }));
 
       const r = await fetch('/api/opportunities/enrich-apollo', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // Identidad ligera para control de cuota en el backend:
           'x-user-id': clientId,
           'x-quota-ticket': getQuotaTicket() || '',
         },
-        body: JSON.stringify({ leads: payloadLeads }),
+        body: JSON.stringify({ leads: payloadLeads, revealEmail, revealPhone }),
       });
       const j = await r.clone().json().catch(async () => ({ nonJson: true, text: await r.text() }));
       if (!r.ok) {
@@ -207,25 +222,16 @@ export default function SavedLeadsPage() {
       const ticket = (j as any)?.ticket || r.headers.get('x-quota-ticket');
       if (ticket) setQuotaTicket(ticket);
 
-      // === ACTUALIZAR CUOTA LOCAL EN PROPORCIÓN A LO REALMENTE ENRIQUECIDO ===
-      // Preferimos un conteo explícito del backend si viene incluido.
-      // Convención sugerida: j.usage.consumed (server-side). Fallback: j.enriched.length.
+      // Actualizar Cuota
       const enrichedCountFromServer = Number(j?.usage?.consumed ?? 0);
-      const enrichedCount =
-        Number.isFinite(enrichedCountFromServer) && enrichedCountFromServer > 0
-          ? enrichedCountFromServer
-          : Array.isArray(j?.enriched)
-            ? j.enriched.length
-            : 0;
-      if (enrichedCount > 0) {
-        Quota.incClientQuota('enrich', enrichedCount);
+      if (enrichedCountFromServer > 0) {
+        Quota.incClientQuota('enrich', enrichedCountFromServer);
       }
 
-      // ← NO confiar en el orden: mapear por clientRef
+      // Procesar respuesta
       const byRef = new Map(chosen.map(l => [l.id, l]));
       const enrichedNow: EnrichedLead[] = (j.enriched || []).map((e: any) => {
         const sourceLead = byRef.get(e?.clientRef);
-        // dominio desde website o email si el actor no lo trae
         const domainFromEmail = sourceLead?.email?.includes('@')
           ? sourceLead.email!.split('@')[1].toLowerCase()
           : undefined;
@@ -236,6 +242,7 @@ export default function SavedLeadsPage() {
             .replace(/^https?:\/\//, '').replace(/^www\./, '')
           : undefined;
 
+        // Aseguramos que phoneNumbers y primaryPhone se pasen
         return {
           id: e.id,
           fullName: e.fullName,
@@ -248,42 +255,43 @@ export default function SavedLeadsPage() {
           country: sourceLead?.country,
           city: sourceLead?.city,
           industry: sourceLead?.industry,
+          phoneNumbers: e.phoneNumbers,
+          primaryPhone: e.primaryPhone,
           createdAt: e.createdAt,
         };
       });
 
-      // 1) Añadir a Enriquecidos (dedupe)
+      // 1) Añadir a Enriquecidos
       const addRes = await enrichedLeadsStorage.addDedup(enrichedNow);
 
-      // 2) Remover de Guardados los que se enriquecieron con email
-      //    (usamos el mapping por índice chosen[i] -> enrichedNow[i])
+      // 2) Remover de Guardados si obtuvimos ID de contacto (email o telefono)
       const toRemoveIds = new Set<string>();
       for (let i = 0; i < enrichedNow.length; i++) {
         const enriched = enrichedNow[i];
         const src = chosen[i];
-        if (enriched?.email && src?.id) toRemoveIds.add(src.id);
+        if ((enriched?.email || enriched?.primaryPhone) && src?.id) {
+          toRemoveIds.add(src.id);
+        }
       }
 
       const removedCount = toRemoveIds.size > 0
         ? await supabaseService.removeWhere(l => toRemoveIds.has(l.id))
         : 0;
 
-      // 3) Actualizar estado en memoria
+      // 3) Refrescar UI
       setSavedLeads(prev => prev.filter(l => !toRemoveIds.has(l.id)));
       setSelLead({});
 
-      // 4) Feedback
-      console.log('[enrich] addRes:', addRes);
-      const movedCount = (addRes as any)?.addedCount ?? 0;
-
       toast({
         title: 'Enriquecimiento listo',
-        description: `Movidos a Enriquecidos: ${movedCount} · Quitados de Guardados: ${removedCount} · Cuota +${enrichedCount} · DB: ${process.env.NEXT_PUBLIC_SUPABASE_URL?.slice(0, 20)}...`,
+        description: `Movidos: ${removedCount}. Cuota consumida: ${enrichedCountFromServer}`,
       });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error', description: e.message || 'Ocurrió un error' });
     } finally {
       setEnriching(false);
+      setEnrichOptionsOpen(false);
+      setLeadsToEnrich([]);
     }
   }
 
@@ -319,10 +327,11 @@ export default function SavedLeadsPage() {
             >
               Ver enriquecidos
             </Button>
+
             <Button
               variant="secondary"
               disabled={enriching || Object.values(selLead).every(v => !v)}
-              onClick={enrichSelected}
+              onClick={initiateEnrichSelected}
             >
               {enriching ? 'Enriqueciendo…' : 'Enriquecer seleccionados'}
             </Button>
@@ -417,6 +426,13 @@ export default function SavedLeadsPage() {
           </div>
         </SheetContent>
       </Sheet>
+      <EnrichmentOptionsDialog
+        open={enrichOptionsOpen}
+        onOpenChange={setEnrichOptionsOpen}
+        onConfirm={handleConfirmEnrich}
+        loading={enriching}
+        leadCount={leadsToEnrich.length}
+      />
     </div>
   );
 }
