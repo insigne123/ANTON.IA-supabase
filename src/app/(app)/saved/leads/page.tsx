@@ -266,25 +266,8 @@ export default function SavedLeadsPage() {
           industry: sourceLead?.industry,
           phoneNumbers: e.phoneNumbers,
           primaryPhone: e.primaryPhone,
-          createdAt: e.createdAt,
-          // Aseguramos que phoneNumbers y primaryPhone se pasen
-          return {
-            id: e.id,
-            fullName: e.fullName,
-            title: e.title,
-            email: e.email,
-            emailStatus: e.emailStatus || 'unknown',
-            linkedinUrl: e.linkedinUrl,
-            companyName: e.companyName ?? sourceLead?.company,
-            companyDomain: e.companyDomain ?? domainFromWebsite ?? domainFromEmail,
-            country: sourceLead?.country,
-            city: sourceLead?.city,
-            industry: sourceLead?.industry,
-            phoneNumbers: e.phoneNumbers,
-            primaryPhone: e.primaryPhone,
-            createdAt: e.createdAt,
-          };
-        });
+        };
+      });
 
       console.log('[enrich] Enriched Now (raw):', enrichedNow);
 
