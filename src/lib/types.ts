@@ -87,7 +87,7 @@ export interface ContactedLead {
   sentAt: string;
   status: ContactStatus;
 
-  provider: 'gmail' | 'outlook' | 'linkedin';
+  provider: 'gmail' | 'outlook' | 'linkedin' | 'phone';
   messageId?: string;
   conversationId?: string; // Outlook
   threadId?: string;       // Gmail

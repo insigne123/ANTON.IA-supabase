@@ -14,9 +14,10 @@ import { upsertLeadReports, findReportForLead, leadResearchStorage, getLeadRepor
 import { BackBar } from '@/components/back-bar';
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
-import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
+import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage, updateEnrichedLead } from '@/lib/services/enriched-leads-service';
 import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin, Phone } from 'lucide-react';
 import { extensionService } from '@/lib/services/extension-service';
+import { PhoneCallModal } from '@/components/phone-call-modal';
 import { supabaseService } from '@/lib/supabase-service';
 import { getCompanyProfile } from '@/lib/data';
 import { supabase } from '@/lib/supabase';
@@ -62,6 +63,10 @@ export default function EnrichedLeadsClient() {
   const [sel, setSel] = useState<Record<string, boolean>>({});           // selección para INVESTIGAR
   const [reports, setReports] = useState<LeadResearchReport[]>([]);
   const [openReport, setOpenReport] = useState(false);
+  // Estados para Modal de llamada
+  const [callModalOpen, setCallModalOpen] = useState(false);
+  const [leadToCall, setLeadToCall] = useState<EnrichedLead | null>(null);
+
   const [reportToView, setReportToView] = useState<LeadResearchReport | null>(null);
   const [reportLead, setReportLead] = useState<EnrichedLead | null>(null);
 
@@ -558,6 +563,29 @@ export default function EnrichedLeadsClient() {
     Quota.incClientQuota('research');
 
     // Normalización de reports (cross/meta.leadRef), igual que en Oportunidades
+    // Check for phone enrichment data from N8N
+    if (data?.phoneNumbers || data?.primaryPhone) {
+      // Update Supabase
+      await updateEnrichedLead(e.id, {
+        phoneNumbers: data.phoneNumbers,
+        primaryPhone: data.primaryPhone || (data.phoneNumbers?.[0]?.sanitized_number)
+      });
+
+      // Update local state
+      setEnriched(prev => prev.map(item => {
+        if (item.id === e.id) {
+          return {
+            ...item,
+            phoneNumbers: data.phoneNumbers,
+            primaryPhone: data.primaryPhone || (data.phoneNumbers?.[0]?.sanitized_number)
+          };
+        }
+        return item;
+      }));
+
+      toast({ title: '¡Teléfono encontrado!', description: `Se enriqueció el lead con ${data.phoneNumbers?.length || 1} número(s).` });
+    }
+
     if (Array.isArray(data?.reports) && data.reports.length) {
       const normalized = data.reports.map((r: any) => {
         const out: any = { ...r };
@@ -1048,6 +1076,42 @@ export default function EnrichedLeadsClient() {
     setOpenReport(true);
   }
 
+  async function handleLogCall(result: 'connected' | 'voicemail' | 'wrong_number' | 'no_answer', notes: string) {
+    if (!leadToCall) return;
+
+    try {
+      // 1. Guardar en Contactados
+      await contactedLeadsStorage.add({
+        id: uuid(),
+        leadId: leadToCall.id,
+        name: leadToCall.fullName,
+        email: leadToCall.email || '',
+        company: leadToCall.companyName,
+        role: leadToCall.title,
+        industry: leadToCall.industry || undefined,
+        city: leadToCall.city || leadToCall.country || undefined, // Mapping helper could be better but direct here
+        country: leadToCall.country || undefined,
+        subject: `Llamada: ${result}`,
+        sentAt: new Date().toISOString(),
+        status: 'sent', // Asumido como contactado
+        provider: 'phone',
+        lastUpdateAt: new Date().toISOString(),
+        // Usamos campos genéricos para guardar notas de la llamada si es necesario, 
+        // o idealmente el backend soportaría notes. Por ahora lo dejamos en subject o simulado.
+        // Como 'subject' es visible, "Llamada: connected" es útil.
+      });
+
+      // 2. Remover de Enriquecidos
+      await removeEnrichedLeadById(leadToCall.id);
+      setEnriched(prev => prev.filter(e => e.id !== leadToCall.id));
+
+      toast({ title: 'Llamada registrada', description: `Lead movido a Contactados (${result}).` });
+    } catch (e) {
+      console.error(e);
+      toast({ variant: 'destructive', title: 'Error', description: 'No se pudo guardar la llamada.' });
+    }
+  }
+
   async function handleDeleteEnriched(id: string) {
     const ok = confirm('¿Eliminar este lead de Enriquecidos?');
     if (!ok) return;
@@ -1064,12 +1128,13 @@ export default function EnrichedLeadsClient() {
   const contactCount = selectedToContact.size;
 
   // ---------- Export helpers ----------
-  const exportHeaders = ['Nombre', 'Cargo', 'Empresa', 'Email', 'LinkedIn', 'Dominio'];
+  const exportHeaders = ['Nombre', 'Cargo', 'Empresa', 'Email', 'Teléfono', 'LinkedIn', 'Dominio'];
   const toRow = (e: EnrichedLead): (string | number)[] => ([
     e.fullName || '',
     e.title || '',
     e.companyName || '',
     e.email || (e.emailStatus === 'locked' ? '(locked)' : ''),
+    e.primaryPhone || (e.phoneNumbers && e.phoneNumbers[0] ? e.phoneNumbers[0].sanitized_number : '') || '',
     e.linkedinUrl || '',
     e.companyDomain || '',
   ]);
@@ -1266,6 +1331,7 @@ export default function EnrichedLeadsClient() {
                   <TableHead>Cargo</TableHead>
                   <TableHead>Empresa</TableHead>
                   <TableHead>Email</TableHead>
+                  <TableHead>Teléfono</TableHead> {/* Added Phone column header */}
                   <TableHead>LinkedIn</TableHead>
                   <TableHead>Dominio</TableHead>
                   <TableHead className="w-64 text-right">Acciones</TableHead>
@@ -1308,6 +1374,30 @@ export default function EnrichedLeadsClient() {
                     <TableCell>{e.title || '—'}</TableCell>
                     <TableCell>{e.companyName || '—'}</TableCell>
                     <TableCell>{e.email || (e.emailStatus === 'locked' ? '(locked)' : '—')}</TableCell>
+                    <TableCell>
+                      {e.primaryPhone ? (
+                        <div
+                          className="flex flex-col gap-1 cursor-pointer hover:bg-muted/50 p-1 rounded transition-colors group"
+                          onClick={() => {
+                            const rep = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
+                            setLeadToCall(e);
+                            setReportToView(rep || null); // Reusamos estado o pasamos directo
+                            setCallModalOpen(true);
+                          }}
+                          title="Clic para abrir Terminal de Llamada"
+                        >
+                          <div className="flex items-center gap-1 text-sm font-medium text-blue-600 group-hover:text-blue-800">
+                            <Phone className="h-3 w-3" />
+                            <span>{e.primaryPhone}</span>
+                          </div>
+                          {e.phoneNumbers && e.phoneNumbers.length > 1 && (
+                            <span className="text-[10px] text-muted-foreground">+{e.phoneNumbers.length - 1} más</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground text-xs italic">—</span>
+                      )}
+                    </TableCell>
                     <TableCell>{e.linkedinUrl ? <a className="underline" target="_blank" href={e.linkedinUrl}>Perfil</a> : '—'}</TableCell>
                     <TableCell>{e.companyDomain || '—'}</TableCell>
                     <TableCell className="text-right space-x-2">
@@ -1873,6 +1963,13 @@ export default function EnrichedLeadsClient() {
         </DialogContent>
       </Dialog>
 
+      <PhoneCallModal
+        open={callModalOpen}
+        onOpenChange={setCallModalOpen}
+        lead={leadToCall}
+        report={reportToView} // Nos aseguramos de pasarle el reporte que corresponde al leadToCall
+        onLogCall={handleLogCall}
+      />
     </div>
   );
 }

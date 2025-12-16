@@ -260,3 +260,24 @@ export const enrichedLeadsStorage = {
     removeWhere: removeWhere,
     findEnrichedLeadById: findEnrichedLeadById,
 };
+
+export async function updateEnrichedLead(id: string, updates: Partial<EnrichedLead>) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('No session');
+
+    const mappedUpdates: any = {};
+    if (updates.phoneNumbers !== undefined) mappedUpdates.phone_numbers = updates.phoneNumbers;
+    if (updates.primaryPhone !== undefined) mappedUpdates.primary_phone = updates.primaryPhone;
+
+    if (Object.keys(mappedUpdates).length === 0) return;
+
+    const { error } = await supabase
+        .from(TABLE)
+        .update(mappedUpdates)
+        .eq('id', id);
+
+    if (error) {
+        console.error('Error updating enriched lead:', error);
+        throw error;
+    }
+}
