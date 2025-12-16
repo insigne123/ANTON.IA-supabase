@@ -203,14 +203,19 @@ export async function POST(req: NextRequest) {
         primaryPhone,
         createdAt: new Date().toISOString(),
         clientRef: l.clientRef ?? undefined,
+        _rawDebug: j // Inject raw response for debug (will be stripped in production usually, but helpful here)
       });
 
       await sleep(200);
     }
 
-    const responsePayload: { enriched: any[]; note?: string; usage: { consumed: number }; ticket?: string } = {
+    const responsePayload: { enriched: any[]; note?: string; usage: { consumed: number }; ticket?: string; debug?: any } = {
       enriched: enrichedOut,
       usage: { consumed },
+      debug: {
+        rawFirstResponse: enrichedOut.length > 0 ? (enrichedOut[0] as any)._rawDebug : undefined,
+        firstLeadName: leads[0]?.fullName
+      }
     };
     if (stoppedByQuota) {
       responsePayload.note = `Quota limit reached. ${out.length} of ${leads.length} leads were processed.`;
