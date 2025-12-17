@@ -266,9 +266,30 @@ export default function EnrichedLeadsClient() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'enriched_leads' },
-        () => {
-          // Simplest strategy: reload full list on any change to ensure consistency
-          // This handles INSERT (new), DELETE (removed), UPDATE (edited)
+        (payload) => {
+          // Detect if phone numbers were just added
+          if (payload.eventType === 'UPDATE') {
+            const newData = payload.new as EnrichedLead;
+            const oldData = payload.old as Partial<EnrichedLead>;
+
+            // Check if phone numbers appeared now where they weren't before (or just became available)
+            // Note: payload.old might only contain ID in some configs, but usually contains changed cols or full row if replica identity is set.
+            // We'll rely on checking if 'new' has phones. We might alert even if it had phones before if we can't diff easily, 
+            // but ideally we check if we didn't have them in our LOCAL state 'enriched'.
+            const localLead = enriched.find(e => e.id === newData.id);
+            const hadPhones = localLead && Array.isArray(localLead.phoneNumbers) && localLead.phoneNumbers.length > 0;
+            const nowHasPhones = Array.isArray(newData.phoneNumbers) && newData.phoneNumbers.length > 0;
+
+            if (!hadPhones && nowHasPhones) {
+              toast({
+                title: '¡Teléfono encontrado!',
+                description: `Se detectaron números para ${newData.fullName || 'un lead'}.`,
+                duration: 5000,
+              });
+            }
+          }
+
+          // Reload data to reflect changes
           loadData();
         }
       )
