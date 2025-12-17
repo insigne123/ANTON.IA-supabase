@@ -175,6 +175,7 @@ export async function POST(req: NextRequest) {
 
       if (res.ok) {
         j = await res.json().catch(() => ({}));
+        console.log('[enrich-apollo] Success Response Body:', JSON.stringify(j, null, 2));
         p = j?.person ?? j;
       } else {
         // Si falló (ej. 400 por falta de webhook o error de créditos de teléfono),
