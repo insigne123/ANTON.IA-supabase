@@ -216,6 +216,13 @@ export default function SavedLeadsPage() {
       const j = await r.clone().json().catch(async () => ({ nonJson: true, text: await r.text() }));
       console.log('[enrich] Response:', j);
 
+      // Print server-side logs for debugging
+      if (j?.debug?.serverLogs && Array.isArray(j.debug.serverLogs)) {
+        console.groupCollapsed('[Server Logs] Apollo Enrichment');
+        j.debug.serverLogs.forEach((l: string) => console.log(l));
+        console.groupEnd();
+      }
+
       if (!r.ok) {
         const snippet = (j as any)?.error || (j as any)?.message || (j as any)?.text || 'Error interno';
         throw new Error(`HTTP ${r.status}: ${String(snippet).slice(0, 200)}`);
