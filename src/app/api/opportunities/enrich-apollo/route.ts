@@ -145,8 +145,16 @@ export async function POST(req: NextRequest) {
         // Si Apollo manda los datos por webhook, no los veremos aquí síncronamente (salvo que sea 'instant').
         const host = req.headers.get('host') || 'anton-ia-supabase.vercel.app';
         // Ensure https
-        const protocol = host.includes('localhost') ? 'http' : 'https';
-        payload.webhook_url = `${protocol}://${host}/api/webhooks/apollo?enriched_lead_id=${enrichedId}`;
+        let protocol = host.includes('localhost') ? 'http' : 'https';
+        let webhookHost = host;
+
+        // If running locally, we must use a specialized production URL because Apollo likely rejects "localhost"
+        if (host.includes('localhost')) {
+          protocol = 'https';
+          webhookHost = 'studio--leadflowai-3yjcy.us-central1.hosted.app';
+        }
+
+        payload.webhook_url = `${protocol}://${webhookHost}/api/webhooks/apollo?enriched_lead_id=${enrichedId}`;
       }
 
       let res = await withRetry(() =>
