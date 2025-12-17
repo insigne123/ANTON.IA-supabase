@@ -56,6 +56,11 @@ export async function POST(req: NextRequest) {
     }
 
     const { leads, revealEmail = true, revealPhone = false } = (await req.json()) as EnrichInput;
+    // We can't use 'log' helper here yet as it's not initialized. We'll rely on serverLogs being initialized later or just keep console.log for this initial one if it's before loop. 
+    // Actually, 'log' is defined inside the function but initialized later. I should move 'log' definition up if I want to use it everywhere, logic is currently inside the loop or just before it. 
+    // The previous edit put 'log' definition BEFORE the loop (line 107). So I can use it inside the loop.
+    // But line 59 is at the top of the function. I should just leave this one as console.log or move log definition up.
+    // For now, I'll focus on the loop logs which are the critical ones for per-lead debugging.
     console.log('[enrich-apollo] Incoming payload:', { count: leads?.length, revealEmail, revealPhone, firstLead: leads?.[0] });
     if (!Array.isArray(leads) || leads.length === 0) {
       return NextResponse.json({ error: 'leads requerido' }, { status: 400 });
@@ -101,6 +106,15 @@ export async function POST(req: NextRequest) {
     let stoppedByQuota = false;
     let consumed = 0;
     const enrichedOut: any[] = [];
+
+    // Capture debug logs to send to client
+    const serverLogs: string[] = [];
+    const log = (...args: any[]) => {
+      const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+      console.log('[enrich-apollo]', msg);
+      serverLogs.push(msg);
+    };
+
     for (const l of leads) {
       // Chequeo y consumo de cuota (preferir server store; si falla, el epheméro)
       if (quotaStatus.count >= quotaStatus.limit) {
@@ -157,6 +171,8 @@ export async function POST(req: NextRequest) {
         payload.webhook_url = `${protocol}://${webhookHost}/api/webhooks/apollo?enriched_lead_id=${enrichedId}`;
       }
 
+      log('Sending payload to Apollo:', payload);
+
       let res = await withRetry(() =>
         fetchWithLog('APOLLO people/match (Phone+Email)', `${BASE}/people/match`, {
           method: 'POST',
@@ -170,12 +186,14 @@ export async function POST(req: NextRequest) {
         }),
       );
 
+      log('Response status:', res.status);
+
       let j: any = {};
       let p: any = null;
 
       if (res.ok) {
         j = await res.json().catch(() => ({}));
-        console.log('[enrich-apollo] Success Response Body:', JSON.stringify(j, null, 2));
+        log('Success Response Body:', j);
         p = j?.person ?? j;
       } else {
         // Si falló (ej. 400 por falta de webhook o error de créditos de teléfono),
@@ -281,7 +299,8 @@ export async function POST(req: NextRequest) {
       usage: { consumed },
       debug: {
         rawFirstResponse: enrichedOut.length > 0 ? (enrichedOut[0] as any)._rawDebug : undefined,
-        firstLeadName: leads[0]?.fullName
+        firstLeadName: leads[0]?.fullName,
+        serverLogs // Return logs to client
       }
     };
     if (stoppedByQuota) {

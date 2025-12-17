@@ -126,6 +126,14 @@ export default function EnrichedLeadsClient() {
       if (!res.ok) throw new Error(`Error ${res.status}`);
 
       const data = await res.json();
+
+      // Print server-side logs for debugging
+      if (data?.debug?.serverLogs && Array.isArray(data.debug.serverLogs)) {
+        console.groupCollapsed('[Server Logs] Apollo Enrichment');
+        data.debug.serverLogs.forEach((l: string) => console.log(l));
+        console.groupEnd();
+      }
+
       const { enriched: newEnriched } = data;
 
       if (Array.isArray(newEnriched) && newEnriched.length) {
