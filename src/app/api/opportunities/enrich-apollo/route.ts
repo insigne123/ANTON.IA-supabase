@@ -125,6 +125,9 @@ export async function POST(req: NextRequest) {
       }
 
 
+      // Pre-generate ID to link webhook updates to the row we will insert
+      const enrichedId = uuid();
+
       // ---- Enriquecimiento con Apollo ----
       const payload: any = {
         reveal_personal_emails: revealEmail,
@@ -140,7 +143,10 @@ export async function POST(req: NextRequest) {
       if (revealPhone) {
         // Usamos una URL ficticia o la real si existiera, para pasar la validación
         // Si Apollo manda los datos por webhook, no los veremos aquí síncronamente (salvo que sea 'instant').
-        payload.webhook_url = `https://${req.headers.get('host') || 'anton-ia-supabase.vercel.app'}/api/webhooks/apollo-dummy`;
+        const host = req.headers.get('host') || 'anton-ia-supabase.vercel.app';
+        // Ensure https
+        const protocol = host.includes('localhost') ? 'http' : 'https';
+        payload.webhook_url = `${protocol}://${host}/api/webhooks/apollo?enriched_lead_id=${enrichedId}`;
       }
 
       let res = await withRetry(() =>
@@ -204,7 +210,7 @@ export async function POST(req: NextRequest) {
       // Si después de todo no tenemos persona válida, guardamos el error/nota
       if (!p || (!p.email && !p.id)) { // chequeo laxo
         enrichedOut.push({
-          id: uuid(),
+          id: enrichedId, // Use pre-generated ID
           sourceOpportunityId: l.sourceOpportunityId,
           fullName: l.fullName,
           companyName: l.companyName,
@@ -241,7 +247,7 @@ export async function POST(req: NextRequest) {
       }
 
       enrichedOut.push({
-        id: uuid(),
+        id: enrichedId, // Use pre-generated ID
         sourceOpportunityId: l.sourceOpportunityId,
         fullName: p?.name ?? l.fullName,
         title: p?.title ?? l.title,
