@@ -148,8 +148,7 @@ export async function POST(req: NextRequest) {
       // Pre-generate ID to link webhook updates to the row we will insert
       const enrichedId = uuid();
 
-      // [LONG POLLING STEP 1] Insert 'Placeholder' row so Webhook has something to update
-      // We map the input 'l' to a DB row structure.
+      // [N8N STRATEGY STEP 1] Insert 'Placeholder' row with PENDING status
       const initialRow = {
         id: enrichedId,
         user_id: userId,
@@ -157,10 +156,7 @@ export async function POST(req: NextRequest) {
         // But 'enriched-leads-service' uses it. If we leave it null, user can only see it in Personal view.
         // For simplicity/robustness, we might skip organization_id or fetch it? 
         // Fetching orgId adds latency. Let's try to pass it if possible or assume NULL (Personal) is safe fallback.
-        // Actually, Client sends 'clientRef' which is the 'lead.id'. 
-        // Let's assume Personal context for now or if the user is in an Org, this needs Org ID.
-        // Given 'saved leads' are often personal, NULL might be okay?
-        // Wait, Client.tsx uses `enrichedLeadsStorage.addDedup` which fetches `getCurrentOrganizationId`.
+        // Actually, Client.tsx uses `enrichedLeadsStorage.addDedup` which fetches `getCurrentOrganizationId`.
         // If API inserts with NULL, and user is in Org, the user won't see the enriched lead if RLS filters by Org.
         // However, the `row` will exist.
         // Workaround: We proceed without OrgID. If it's an issue, we can fetch user profile to get Org.
@@ -173,6 +169,7 @@ export async function POST(req: NextRequest) {
         created_at: new Date().toISOString(),
         phone_numbers: [],
         primary_phone: null,
+        enrichment_status: revealPhone ? 'pending_phone' : 'completed', // <--- NEW STATUS
         data: {
           sourceOpportunityId: l.sourceOpportunityId,
           companyDomain: l.companyDomain,
@@ -200,19 +197,21 @@ export async function POST(req: NextRequest) {
 
       // Algunos planes de Apollo obligan a pasar webhook_url si pides teléfono
       if (revealPhone) {
-        const host = req.headers.get('host') || 'anton-ia-supabase.vercel.app';
-        let protocol = host.includes('localhost') ? 'http' : 'https';
-        let webhookHost = host;
+        // [N8N STRATEGY STEP 2] Use N8N Webhook URL
+        const n8nUrl = process.env.N8N_APOLLO_WEBHOOK_URL;
 
-        if (host.includes('localhost')) {
-          protocol = 'https';
-          webhookHost = 'studio--leadflowai-3yjcy.us-central1.hosted.app';
+        if (n8nUrl && n8nUrl.startsWith('http')) {
+          // Append the ID so N8N knows which lead to update
+          const sep = n8nUrl.includes('?') ? '&' : '?';
+          payload.webhook_url = `${n8nUrl}${sep}enriched_lead_id=${enrichedId}`;
+        } else {
+          console.warn('[enrich-apollo] N8N_APOLLO_WEBHOOK_URL not set or invalid! Phone enrichment might fail silently.');
+          // Fallback to internal? Or allow fail? 
+          // We'll let it proceed but log heavy warning.
         }
-
-        payload.webhook_url = `${protocol}://${webhookHost}/api/webhooks/apollo?enriched_lead_id=${enrichedId}`;
       }
 
-      log('Sending payload to Apollo:', payload);
+      log('Sending payload to Apollo (N8N):', payload);
 
       let res = await withRetry(() =>
         fetchWithLog('APOLLO people/match (Phone+Email)', `${BASE}/people/match`, {
@@ -269,7 +268,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // [LONG POLLING STEP 2] Update the DB with the metadata we just got (Email, Verified Name, etc.)
+      // [N8N STRATEGY STEP 3] Update DB with whatever we got (Email), leave Phone pending
       const rawEmail: string | undefined = p?.email || p?.personal_email || p?.primary_email;
       const locked = !!rawEmail && /email_not_unlocked@domain\.com/i.test(rawEmail);
       const emailToSave = revealEmail ? (locked ? undefined : rawEmail) : undefined;
@@ -292,8 +291,24 @@ export async function POST(req: NextRequest) {
             industry: p.industry,
           }
         };
+        // Important: If we got the phone number IMMEDIATELY (rare, but possible), we should mark completed?
+        // Apollo usually returns empty list if revealing via webhook.
+        // If p.phone_numbers is present AND we asked for it, maybe N8N won't be called?
+        // Actually Apollo docs say "If this parameter is set to true... Apollo send a JSON response... to the webhook URL".
+        // It implies ALWAYS sending webhook.
+        // But if it's instant, we might receive it here too.
+        // Let's assume it's pending unless we see numbers.
+        if (revealPhone && p.phone_numbers && p.phone_numbers.length > 0) {
+          updateData.phone_numbers = p.phone_numbers;
+          updateData.primary_phone = p.phone_numbers[0]?.sanitized_number; // simplified
+          updateData.enrichment_status = 'completed';
+        }
+
         await supabaseAdmin.from('enriched_leads').update(updateData).eq('id', enrichedId);
       }
+
+      // [N8N STRATEGY STEP 4] Remove Long Polling. Return immediately.
+      // logic continues to output constructor...
 
       // Parse Phone Numbers (Synchronous check)
       let phoneNumbers: any[] | undefined = undefined;
@@ -302,52 +317,9 @@ export async function POST(req: NextRequest) {
       if (revealPhone) {
         const numbers = Array.isArray(p?.phone_numbers) ? p.phone_numbers : [];
         phoneNumbers = numbers;
-
-        // [LONG POLLING STEP 3] If no phone numbers, POLL the database!
-        if (numbers.length === 0) {
-          log('No phone numbers in sync response. Starting Long Polling (max 180s)...');
-          const POLL_START = Date.now();
-          const TIMEOUT = 180 * 1000; // 3 minutes
-
-          while (Date.now() - POLL_START < TIMEOUT) {
-            const elapsed = Math.round((Date.now() - POLL_START) / 1000);
-            // Check DB
-            const { data: dbLead } = await supabaseAdmin
-              .from('enriched_leads')
-              .select('phone_numbers, primary_phone')
-              .eq('id', enrichedId)
-              .single();
-
-            if (dbLead && Array.isArray(dbLead.phone_numbers) && dbLead.phone_numbers.length > 0) {
-              log(`Phone numbers found via polling after ${elapsed}s!`);
-              phoneNumbers = dbLead.phone_numbers;
-              primaryPhone = dbLead.primary_phone;
-              // Update 'p' object so the output constructor uses it?
-              // We will just set the variables 'phoneNumbers' and 'primaryPhone' which are used below.
-              break;
-            }
-
-            // Wait 5s
-            await sleep(5000);
-          }
-
-          if ((!phoneNumbers || phoneNumbers.length === 0)) {
-            log('Long Polling timed out. No phone numbers found.');
-          }
-        } else {
-          // We have numbers synchronously
-          const found = numbers.find((n: any) => n.type === 'mobile')
-            || numbers.find((n: any) => n.type === 'direct_dial')
-            || numbers[0];
+        if (numbers.length > 0) {
+          const found = numbers.find((n: any) => n.type === 'mobile') || numbers[0];
           primaryPhone = found?.sanitized_number;
-
-          // If we have them sync, we should update DB too?
-          // The updateData above didn't include phone numbers.
-          // We should save them now to be consistent.
-          await supabaseAdmin.from('enriched_leads').update({
-            phone_numbers: phoneNumbers,
-            primary_phone: primaryPhone
-          }).eq('id', enrichedId);
         }
       }
 
@@ -389,6 +361,8 @@ export async function POST(req: NextRequest) {
         // Phone Data
         phoneNumbers,
         primaryPhone,
+        // Status for UI
+        enrichmentStatus: (revealPhone && (!phoneNumbers || phoneNumbers.length === 0)) ? 'pending_phone' : 'completed',
         createdAt: new Date().toISOString(),
         clientRef: l.clientRef ?? undefined,
         _rawDebug: j

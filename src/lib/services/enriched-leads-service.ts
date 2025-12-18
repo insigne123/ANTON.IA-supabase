@@ -24,6 +24,7 @@ function mapRowToEnrichedLead(row: any): EnrichedLead {
         industry: row.data?.industry,
         phoneNumbers: row.phone_numbers,
         primaryPhone: row.primary_phone,
+        enrichmentStatus: row.enrichment_status,
     };
 }
 
@@ -44,6 +45,7 @@ function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string, organizationId
         created_at: lead.createdAt || new Date().toISOString(),
         phone_numbers: lead.phoneNumbers,
         primary_phone: lead.primaryPhone,
+        enrichment_status: lead.enrichmentStatus ?? 'completed',
         data: {
             sourceOpportunityId: lead.sourceOpportunityId,
             emailStatus: lead.emailStatus,

@@ -267,29 +267,20 @@ export default function EnrichedLeadsClient() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'enriched_leads' },
         (payload) => {
-          // Detect if phone numbers were just added
           if (payload.eventType === 'UPDATE') {
-            const newData = payload.new as EnrichedLead;
-            const oldData = payload.old as Partial<EnrichedLead>;
+            const newData = payload.new as any; // typed as any to access custom cols if needed
+            const oldData = payload.old as any;
 
-            // Check if phone numbers appeared now where they weren't before (or just became available)
-            // Note: payload.old might only contain ID in some configs, but usually contains changed cols or full row if replica identity is set.
-            // We'll rely on checking if 'new' has phones. We might alert even if it had phones before if we can't diff easily, 
-            // but ideally we check if we didn't have them in our LOCAL state 'enriched'.
-            const localLead = enriched.find(e => e.id === newData.id);
-            const hadPhones = localLead && Array.isArray(localLead.phoneNumbers) && localLead.phoneNumbers.length > 0;
-            const nowHasPhones = Array.isArray(newData.phoneNumbers) && newData.phoneNumbers.length > 0;
-
-            if (!hadPhones && nowHasPhones) {
+            // Detect Status Change: Pending -> Completed
+            if (newData.enrichment_status === 'completed' && oldData.enrichment_status === 'pending_phone') {
               toast({
                 title: '¡Teléfono encontrado!',
-                description: `Se detectaron números para ${newData.fullName || 'un lead'}.`,
+                description: `N8N completó la búsqueda para ${newData.full_name || 'un lead'}.`,
                 duration: 5000,
               });
             }
           }
-
-          // Reload data to reflect changes
+          // Reload data
           loadData();
         }
       )
@@ -1434,6 +1425,25 @@ export default function EnrichedLeadsClient() {
                           {e.phoneNumbers && e.phoneNumbers.length > 1 && (
                             <span className="text-[10px] text-muted-foreground">+{e.phoneNumbers.length - 1} más</span>
                           )}
+                        </div>
+                      ) : (e.enrichmentStatus === 'pending_phone') ? (
+                        <div className="w-full max-w-[100px] space-y-1" title="Esperando webhook de Apollo (aprox 90s)...">
+                          <div className="flex justify-between text-[9px] text-muted-foreground uppercase">
+                            <span>Buscando...</span>
+                            <span>90s</span>
+                          </div>
+                          <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-blue-500 rounded-full animate-progress-90"
+                              style={{ animation: 'progress 90s linear forwards' }}
+                            ></div>
+                          </div>
+                          <style jsx>{`
+                             @keyframes progress {
+                               from { width: 0%; }
+                               to { width: 100%; }
+                             }
+                           `}</style>
                         </div>
                       ) : (
                         <span className="text-muted-foreground text-xs italic">—</span>

@@ -213,6 +213,7 @@ export type EnrichedLead = {
     status: string;
   }> | null;
   primaryPhone?: string | null;
+  enrichmentStatus?: 'completed' | 'pending_phone' | 'failed' | string;
 };
 
 export type EnrichedOppLead = {
