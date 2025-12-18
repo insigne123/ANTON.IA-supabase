@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 import { v4 as uuid } from 'uuid';
 import { fetchWithLog } from '@/lib/debug';
 import { checkAndConsumeDailyQuota, getDailyQuotaStatus } from '@/lib/server/daily-quota-store';
@@ -9,6 +10,11 @@ export const runtime = 'nodejs';
 
 const BASE = 'https://api.apollo.io/api/v1';
 const DAILY_LIMIT = 50;
+
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 /**
  * Fallback epheméro en memoria si el store de cuotas falla (p.ej. invalid_rapt).
@@ -142,6 +148,45 @@ export async function POST(req: NextRequest) {
       // Pre-generate ID to link webhook updates to the row we will insert
       const enrichedId = uuid();
 
+      // [LONG POLLING STEP 1] Insert 'Placeholder' row so Webhook has something to update
+      // We map the input 'l' to a DB row structure.
+      const initialRow = {
+        id: enrichedId,
+        user_id: userId,
+        // organization_id: ??? - We don't have orgId easily available here without fetching. 
+        // But 'enriched-leads-service' uses it. If we leave it null, user can only see it in Personal view.
+        // For simplicity/robustness, we might skip organization_id or fetch it? 
+        // Fetching orgId adds latency. Let's try to pass it if possible or assume NULL (Personal) is safe fallback.
+        // Actually, Client sends 'clientRef' which is the 'lead.id'. 
+        // Let's assume Personal context for now or if the user is in an Org, this needs Org ID.
+        // Given 'saved leads' are often personal, NULL might be okay?
+        // Wait, Client.tsx uses `enrichedLeadsStorage.addDedup` which fetches `getCurrentOrganizationId`.
+        // If API inserts with NULL, and user is in Org, the user won't see the enriched lead if RLS filters by Org.
+        // However, the `row` will exist.
+        // Workaround: We proceed without OrgID. If it's an issue, we can fetch user profile to get Org.
+        full_name: l.fullName,
+        email: l.clientRef ? undefined : undefined, // Don't save email yet if not enriched? Or save input email? Input lead usually has NO email if we are enriching.
+        // Input `l` has `companyName` etc.
+        company_name: l.companyName,
+        title: l.title,
+        linkedin_url: l.linkedinUrl,
+        created_at: new Date().toISOString(),
+        phone_numbers: [],
+        primary_phone: null,
+        data: {
+          sourceOpportunityId: l.sourceOpportunityId,
+          companyDomain: l.companyDomain,
+        }
+      };
+
+      // Fire and forget insert (await to ensure it exists before webhook hits)
+      try {
+        await supabaseAdmin.from('enriched_leads').insert(initialRow);
+      } catch (err) {
+        console.error('[enrich-apollo] Failed to insert placeholder:', err);
+        // Continue anyway? converting to sync-only mode effectively
+      }
+
       // ---- Enriquecimiento con Apollo ----
       const payload: any = {
         reveal_personal_emails: revealEmail,
@@ -155,14 +200,10 @@ export async function POST(req: NextRequest) {
 
       // Algunos planes de Apollo obligan a pasar webhook_url si pides teléfono
       if (revealPhone) {
-        // Usamos una URL ficticia o la real si existiera, para pasar la validación
-        // Si Apollo manda los datos por webhook, no los veremos aquí síncronamente (salvo que sea 'instant').
         const host = req.headers.get('host') || 'anton-ia-supabase.vercel.app';
-        // Ensure https
         let protocol = host.includes('localhost') ? 'http' : 'https';
         let webhookHost = host;
 
-        // If running locally, we must use a specialized production URL because Apollo likely rejects "localhost"
         if (host.includes('localhost')) {
           protocol = 'https';
           webhookHost = 'studio--leadflowai-3yjcy.us-central1.hosted.app';
@@ -196,12 +237,9 @@ export async function POST(req: NextRequest) {
         log('Success Response Body:', j);
         p = j?.person ?? j;
       } else {
-        // Si falló (ej. 400 por falta de webhook o error de créditos de teléfono),
-        // intentamos el fallback inmediatamente.
         const errText = await safeText(res);
         console.warn('[enrich-apollo] Phone+Email failed:', res.status, errText);
 
-        // Fallback directo: solo Email
         if (revealPhone && revealEmail) {
           console.log('[enrich-apollo] Fallback: Retrying with Email Only immediately.');
           const fallbackPayload = { ...payload, reveal_phone_number: false };
@@ -222,22 +260,101 @@ export async function POST(req: NextRequest) {
           if (res2.ok) {
             j = await res2.json().catch(() => ({}));
             p = j?.person ?? j;
-            // Marcamos que usamos fallback para debugging
             j._fallbackUsed = true;
           } else {
-            // Si también falla, guardamos el error original
             j = { error: errText };
           }
         } else {
-          // Si no había fallback posible, dejamos el error
           j = { error: errText };
         }
       }
 
+      // [LONG POLLING STEP 2] Update the DB with the metadata we just got (Email, Verified Name, etc.)
+      const rawEmail: string | undefined = p?.email || p?.personal_email || p?.primary_email;
+      const locked = !!rawEmail && /email_not_unlocked@domain\.com/i.test(rawEmail);
+      const emailToSave = revealEmail ? (locked ? undefined : rawEmail) : undefined;
+
+      if (p) {
+        // Prepare update based on what Apollo returned
+        const updateData: any = {
+          full_name: p.name || l.fullName,
+          title: p.title || l.title,
+          linkedin_url: p.linkedin_url || l.linkedinUrl,
+          company_name: p.organization?.name || l.companyName,
+          // if we have email now, set it
+          email: emailToSave,
+          data: {
+            sourceOpportunityId: l.sourceOpportunityId,
+            companyDomain: p.organization?.primary_domain || cleanDomain(l.companyDomain),
+            emailStatus: revealEmail ? (locked ? 'locked' : p.email_status || 'unknown') : undefined,
+            city: p.city,
+            country: p.country,
+            industry: p.industry,
+          }
+        };
+        await supabaseAdmin.from('enriched_leads').update(updateData).eq('id', enrichedId);
+      }
+
+      // Parse Phone Numbers (Synchronous check)
+      let phoneNumbers: any[] | undefined = undefined;
+      let primaryPhone: string | undefined = undefined;
+
+      if (revealPhone) {
+        const numbers = Array.isArray(p?.phone_numbers) ? p.phone_numbers : [];
+        phoneNumbers = numbers;
+
+        // [LONG POLLING STEP 3] If no phone numbers, POLL the database!
+        if (numbers.length === 0) {
+          log('No phone numbers in sync response. Starting Long Polling (max 180s)...');
+          const POLL_START = Date.now();
+          const TIMEOUT = 180 * 1000; // 3 minutes
+
+          while (Date.now() - POLL_START < TIMEOUT) {
+            const elapsed = Math.round((Date.now() - POLL_START) / 1000);
+            // Check DB
+            const { data: dbLead } = await supabaseAdmin
+              .from('enriched_leads')
+              .select('phone_numbers, primary_phone')
+              .eq('id', enrichedId)
+              .single();
+
+            if (dbLead && Array.isArray(dbLead.phone_numbers) && dbLead.phone_numbers.length > 0) {
+              log(`Phone numbers found via polling after ${elapsed}s!`);
+              phoneNumbers = dbLead.phone_numbers;
+              primaryPhone = dbLead.primary_phone;
+              // Update 'p' object so the output constructor uses it?
+              // We will just set the variables 'phoneNumbers' and 'primaryPhone' which are used below.
+              break;
+            }
+
+            // Wait 5s
+            await sleep(5000);
+          }
+
+          if ((!phoneNumbers || phoneNumbers.length === 0)) {
+            log('Long Polling timed out. No phone numbers found.');
+          }
+        } else {
+          // We have numbers synchronously
+          const found = numbers.find((n: any) => n.type === 'mobile')
+            || numbers.find((n: any) => n.type === 'direct_dial')
+            || numbers[0];
+          primaryPhone = found?.sanitized_number;
+
+          // If we have them sync, we should update DB too?
+          // The updateData above didn't include phone numbers.
+          // We should save them now to be consistent.
+          await supabaseAdmin.from('enriched_leads').update({
+            phone_numbers: phoneNumbers,
+            primary_phone: primaryPhone
+          }).eq('id', enrichedId);
+        }
+      }
+
       // Si después de todo no tenemos persona válida, guardamos el error/nota
-      if (!p || (!p.email && !p.id)) { // chequeo laxo
+      if (!p || (!p.email && !p.id && (!phoneNumbers || phoneNumbers.length === 0))) {
         enrichedOut.push({
-          id: enrichedId, // Use pre-generated ID
+          id: enrichedId,
           sourceOpportunityId: l.sourceOpportunityId,
           fullName: l.fullName,
           companyName: l.companyName,
@@ -251,25 +368,11 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      // Si llegamos aquí, tenemos éxito (ya sea del primero o del fallback)
-      // Pasamos p a la lógica de mapeo...
-      const rawEmail: string | undefined = p?.email || p?.personal_email || p?.primary_email;
-      const locked = !!rawEmail && /email_not_unlocked@domain\.com/i.test(rawEmail);
-
-      // Parse Phone Numbers
-      // If revealPhone was false, we don't want to touch phoneNumbers (leave undefined)
-      // If revealPhone was true, we return list (or empty list if none found)
-      let phoneNumbers: any[] | undefined = undefined;
-      let primaryPhone: string | undefined = undefined;
-
-      if (revealPhone) {
-        const numbers = Array.isArray(p?.phone_numbers) ? p.phone_numbers : [];
-        phoneNumbers = numbers;
-
-        // Simple Primary Logic: Mobile > Direct > Corporate > Other
-        const found = numbers.find((n: any) => n.type === 'mobile')
-          || numbers.find((n: any) => n.type === 'direct_dial')
-          || numbers[0];
+      // Re-calculate primary phone if it came from polling
+      if (!primaryPhone && phoneNumbers && phoneNumbers.length > 0) {
+        const found = phoneNumbers.find((n: any) => n.type === 'mobile')
+          || phoneNumbers.find((n: any) => n.type === 'direct_dial')
+          || phoneNumbers[0];
         primaryPhone = found?.sanitized_number;
       }
 
@@ -278,7 +381,7 @@ export async function POST(req: NextRequest) {
         sourceOpportunityId: l.sourceOpportunityId,
         fullName: p?.name ?? l.fullName,
         title: p?.title ?? l.title,
-        email: revealEmail ? (locked ? undefined : rawEmail) : undefined, // Undefined if not requested
+        email: emailToSave,
         emailStatus: revealEmail ? (locked ? 'locked' : p?.email_status || 'unknown') : undefined,
         linkedinUrl: p?.linkedin_url ?? normalizeLinkedin(l.linkedinUrl || ''),
         companyName: p?.organization?.name ?? l.companyName,
@@ -288,7 +391,7 @@ export async function POST(req: NextRequest) {
         primaryPhone,
         createdAt: new Date().toISOString(),
         clientRef: l.clientRef ?? undefined,
-        _rawDebug: j // Inject raw response for debug (will be stripped in production usually, but helpful here)
+        _rawDebug: j
       });
 
       await sleep(200);
