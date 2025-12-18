@@ -207,6 +207,15 @@ export default function LoginPage() {
                         </TabsContent>
                     </Tabs>
 
+                    <div className="mt-4 text-center text-xs text-muted-foreground">
+                        <p>
+                            Al continuar, aceptas nuestra{' '}
+                            <a href="/privacy/extension" className="underline hover:text-primary" target="_blank" rel="noopener noreferrer">
+                                Política de Privacidad
+                            </a>.
+                        </p>
+                    </div>
+
                     <div className="relative my-6">
                         <div className="absolute inset-0 flex items-center">
                             <span className="w-full border-t" />

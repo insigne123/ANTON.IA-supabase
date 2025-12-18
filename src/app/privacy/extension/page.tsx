@@ -56,16 +56,29 @@ export default function ExtensionPrivacyPolicy() {
 
                     <section>
                         <h3 className="text-xl font-semibold">3. Permisos Requeridos</h3>
-                        <p>La extensión solicita los siguientes permisos mínimos necesarios:</p>
+                        <p>La extensión solicita los siguientes permisos mínimos necesarios para su operación:</p>
                         <ul className="list-disc pl-5">
-                            <li><code>activeTab</code> / <code>tabs</code>: Para detectar si está en una página de perfil de LinkedIn™ válida.</li>
-                            <li><code>scripting</code>: Para ejecutar la acción de automatización (escribir mensaje, leer texto) en la página actual.</li>
-                            <li><code>storage</code>: Para guardar preferencias de configuración local (ej. estado de la conexión).</li>
+                            <li><code>activeTab</code> / <code>tabs</code>: Para detectar si el usuario se encuentra en una página de LinkedIn™ válida y leer la URL actual.</li>
+                            <li><code>scripting</code>: Para inyectar scripts de automatización que permiten leer datos públicos del perfil o realizar acciones solicitadas por el usuario (ej. enviar mensaje).</li>
+                            <li><code>storage</code>: Para almacenar preferencias locales y el estado de la sesión (token de autenticación temporal).</li>
+                            <li><code>host_permissions</code>: Acceso limitado a <code>www.linkedin.com</code> para la automatización y a los dominios de la aplicación Anton.IA para la comunicación segura.</li>
                         </ul>
                     </section>
 
                     <section>
-                        <h3 className="text-xl font-semibold">4. Seguridad</h3>
+                        <h3 className="text-xl font-semibold">4. Uso de Datos (Google User Data Policy)</h3>
+                        <p>
+                            De acuerdo con la política de "Limited Use" de Google Chrome Web Store:
+                        </p>
+                        <ul className="list-disc pl-5">
+                            <li>La extensión <strong>no transfiere</strong> datos del usuario a terceros, excepto para el propósito directo de la funcionalidad (guardar en su propia base de datos de Anton.IA).</li>
+                            <li>La extensión <strong>no utiliza ni transfiere</strong> datos para fines de solvencia crediticia, préstamos, publicidad o minería de datos.</li>
+                            <li>La extensión <strong>no vende</strong> datos de usuario.</li>
+                        </ul>
+                    </section>
+
+                    <section>
+                        <h3 className="text-xl font-semibold">5. Seguridad</h3>
                         <p>
                             Toda la comunicación entre la extensión y la aplicación Anton.IA ocurre de manera local (vía <code>window.postMessage</code>)
                             o a través de canales seguros verificados. No rastreamos su historial de navegación fuera de los dominios estrictamente necesarios para la funcionalidad.
@@ -73,7 +86,7 @@ export default function ExtensionPrivacyPolicy() {
                     </section>
 
                     <section>
-                        <h3 className="text-xl font-semibold">5. Contacto</h3>
+                        <h3 className="text-xl font-semibold">6. Contacto</h3>
                         <p>
                             Para cualquier duda sobre esta política o el funcionamiento de la extensión, puede contactar al desarrollador o administrador
                             de su instancia de Anton.IA.
