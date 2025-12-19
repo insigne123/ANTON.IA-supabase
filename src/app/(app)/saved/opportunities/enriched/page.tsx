@@ -107,14 +107,20 @@ export default function EnrichedOpportunitiesPage() {
         revealPhone: true
       };
 
-      await fetch('/api/opportunities/enrich-apollo', {
+      const res = await fetch('/api/opportunities/enrich-apollo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': clientId },
         body: JSON.stringify(payload),
       });
 
+      const data = await res.json();
+      if (data?.debug?.serverLogs && Array.isArray(data.debug.serverLogs)) {
+        console.groupCollapsed('[Server Logs] Apollo Enrichment (Retry)');
+        data.debug.serverLogs.forEach((l: string) => console.log(l));
+        console.groupEnd();
+      }
+
       // No need to handle response data heavily, the webhook will update the row.
-      // Or if the API finds it instantly, it updates the DB.
       toast({ title: 'Solicitud enviada', description: 'Espera unos segundos.' });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error al reintentar', description: e.message });
@@ -194,6 +200,14 @@ export default function EnrichedOpportunitiesPage() {
 
       if (!res.ok) throw new Error(`Error ${res.status}`);
       const data = await res.json();
+
+      // [DEBUG] Print Server Logs
+      if (data?.debug?.serverLogs && Array.isArray(data.debug.serverLogs)) {
+        console.groupCollapsed('[Server Logs] Apollo Enrichment');
+        data.debug.serverLogs.forEach((l: string) => console.log(l));
+        console.groupEnd();
+      }
+
       const { enriched: newEnriched } = data; // Assuming same response structure
 
       if (Array.isArray(newEnriched) && newEnriched.length) {
