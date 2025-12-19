@@ -22,10 +22,20 @@ function mapRowToEnrichedLead(row: any): EnrichedLead {
         country: row.data?.country,
         city: row.data?.city,
         industry: row.data?.industry,
-        phoneNumbers: row.phone_numbers,
+        phoneNumbers: typeof row.phone_numbers === 'string'
+            ? tryParse(row.phone_numbers)
+            : (Array.isArray(row.phone_numbers) ? row.phone_numbers : []),
         primaryPhone: row.primary_phone,
         enrichmentStatus: row.enrichment_status,
     };
+}
+
+function tryParse(json: string) {
+    try {
+        return JSON.parse(json);
+    } catch {
+        return [];
+    }
 }
 
 function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string, organizationId: string | null) {

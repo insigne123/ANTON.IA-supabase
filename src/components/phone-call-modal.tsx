@@ -103,7 +103,7 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
 
                         {report && (
                             <>
-                                {report.cross?.pains?.length > 0 && (
+                                {(report.cross?.pains?.length ?? 0) > 0 && (
                                     <div className="p-3 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 rounded-md">
                                         <h4 className="text-xs font-bold uppercase text-red-600 dark:text-red-400 mb-2">Pains Detectados</h4>
                                         <ul className="list-disc pl-4 text-xs space-y-1">
