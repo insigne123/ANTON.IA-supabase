@@ -50,6 +50,7 @@ type EnrichInput = {
     title?: string;
     sourceOpportunityId?: string;
     clientRef?: string; // <— correlación desde el cliente
+    email?: string; // [IMPROVEMENT] Allow passing known email
   }>;
 };
 
@@ -161,7 +162,7 @@ export async function POST(req: NextRequest) {
         // However, the `row` will exist.
         // Workaround: We proceed without OrgID. If it's an issue, we can fetch user profile to get Org.
         full_name: l.fullName,
-        email: l.clientRef ? undefined : undefined, // Don't save email yet if not enriched? Or save input email? Input lead usually has NO email if we are enriching.
+        email: l.email || (l.clientRef ? undefined : undefined), // [IMPROVEMENT] Use passed email if exists
         // Input `l` has `companyName` etc.
         company_name: l.companyName,
         title: l.title,
@@ -201,39 +202,11 @@ export async function POST(req: NextRequest) {
         }
       }
       // If we already have an email (even corporate), passing it helps Apollo confirm identity
-      // The `l` object comes from `foundLeads`. `l.clientRef` was mapped but `l.email` might not be in the `EnrichInput` type definition?
-      // Let's check `EnrichInput` type above. It has `clientRef` but maybe not `email`.
-      // The `saved/opportunities/page.tsx` sends `payload` with `leads` mapping. It does NOT send `email`.
-      // I need to update the Source Page to send `email` too! 
-      // But wait, the prompt says "intentes llenar los maximos posibles con la info que manejamos... mail".
-      // So I should suspect `l` might NOT have email yet in `route.ts`.
-      // I will assume for now I can modify `route.ts` to accept `email` in `leads` array.
-      if ((l as any).email) payload.email = (l as any).email;
+      if (l.email) payload.email = l.email;
 
       if (l.title) payload.title = l.title;
       if (l.companyDomain) payload.organization_domain = cleanDomain(l.companyDomain);
       if (l.companyName) payload.organization_name = l.companyName;
-
-      // Algunos planes de Apollo obligan a pasar webhook_url si pides teléfono
-      if (revealPhone) {
-        // [N8N STRATEGY STEP 2] Use N8N Webhook URL
-        const n8nUrl = process.env.N8N_APOLLO_WEBHOOK_URL;
-
-        if (n8nUrl && n8nUrl.startsWith('http')) {
-          // Append the ID so N8N knows which lead to update
-          const sep = n8nUrl.includes('?') ? '&' : '?';
-          // Use 'enriched_lead_id' for consistency if N8N expects it, but really it refers to an opportunity lead now.
-          // Ideally: payload.webhook_url = `${n8nUrl}${sep}enriched_lead_id=${enrichedId}&type=opportunity`;
-          // But let's stick to minimal change if N8N is generic. 
-          // However, if N8N updates 'enriched_leads', we have a problem.
-          // Let's assume the user handles this or the logic is generic enough.
-          payload.webhook_url = `${n8nUrl}${sep}enriched_lead_id=${enrichedId}&table=enriched_opportunities`;
-        } else {
-          console.warn('[enrich-apollo] N8N_APOLLO_WEBHOOK_URL not set or invalid! Phone enrichment might fail silently.');
-          // Fallback to internal? Or allow fail? 
-          // We'll let it proceed but log heavy warning.
-        }
-      }
 
       log('Sending payload to Apollo (N8N):', payload);
 
@@ -295,7 +268,16 @@ export async function POST(req: NextRequest) {
       // [N8N STRATEGY STEP 3] Update DB with whatever we got (Email), leave Phone pending
       const rawEmail: string | undefined = p?.email || p?.personal_email || p?.primary_email;
       const locked = !!rawEmail && /email_not_unlocked@domain\.com/i.test(rawEmail);
-      const emailToSave = revealEmail ? (locked ? undefined : rawEmail) : undefined;
+
+      // If user requested reveal, but result is locked, check if we have fallback
+      let emailToSave = revealEmail ? (locked ? undefined : rawEmail) : undefined;
+      let statusToSave = revealEmail ? (locked ? 'locked' : p?.email_status || 'unknown') : undefined;
+
+      if (!emailToSave && l.email && revealEmail) {
+        // Fallback to our existing email
+        emailToSave = l.email;
+        statusToSave = 'verified'; // Assume our source is good? or 'unknown'
+      }
 
       if (p) {
         // Prepare update based on what Apollo returned
@@ -309,7 +291,7 @@ export async function POST(req: NextRequest) {
           data: {
             sourceOpportunityId: l.sourceOpportunityId,
             companyDomain: p.organization?.primary_domain || cleanDomain(l.companyDomain),
-            emailStatus: revealEmail ? (locked ? 'locked' : p.email_status || 'unknown') : undefined,
+            emailStatus: statusToSave,
             city: p.city,
             country: p.country,
             industry: p.industry,

@@ -104,8 +104,22 @@ export async function findEnrichedLeadById(id: string): Promise<EnrichedLead | u
     return mapRowToEnrichedLead(data);
 }
 
+export async function deleteEnrichedLead(id: string): Promise<boolean> {
+    const { error } = await supabase
+        .from(TABLE)
+        .delete()
+        .eq('id', id);
+
+    if (error) {
+        console.error('Error deleting enriched lead:', error);
+        return false;
+    }
+    return true;
+}
+
 export const enrichedOpportunitiesStorage = {
     get: getEnrichedOpportunities,
+    delete: deleteEnrichedLead,
     addDedup: async (newOnes: EnrichedLead[]) => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return { addedCount: 0, duplicateCount: 0, added: [], duplicates: [] };

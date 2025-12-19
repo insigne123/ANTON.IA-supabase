@@ -805,6 +805,20 @@ export default function EnrichedOpportunitiesPage() {
                       >
                         <Linkedin className="h-4 w-4" />
                       </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-red-500"
+                        title="Eliminar de la lista"
+                        onClick={async () => {
+                          if (!confirm('¿Eliminar este contacto?')) return;
+                          await enrichedOpportunitiesStorage.delete(e.id);
+                          setEnriched(prev => prev.filter(x => x.id !== e.id));
+                          toast({ title: 'Contacto eliminado' });
+                        }}
+                      >
+                        <Eraser className="h-4 w-4" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
