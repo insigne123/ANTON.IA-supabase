@@ -21,6 +21,7 @@ import { renderTemplate, buildPersonEmailContext } from '@/lib/template';
 import { ensureSubjectPrefix, generateCompanyOutreachV2 } from '@/lib/outreach-templates';
 import { getCompanyProfile } from '@/lib/data';
 import { emailDraftsStorage } from '@/lib/email-drafts-storage';
+import { supabase } from '@/lib/supabase';
 import { sendEmail } from '@/lib/outlook-email-service';
 import { sendGmailEmail } from '@/lib/gmail-email-service';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
@@ -72,16 +73,42 @@ export default function EnrichedOpportunitiesPage() {
   const [leadsToEnrich, setLeadsToEnrich] = useState<EnrichedOppLead[]>([]);
 
   // Load Data Effect
+  const loadData = async () => {
+    const data = await enrichedOpportunitiesStorage.get();
+    setEnriched(data);
+    setReports(getLeadReports());
+    setStyleProfiles(styleProfilesStorage.list());
+  };
+
   useEffect(() => {
-    async function load() {
-      const data = await enrichedOpportunitiesStorage.get();
-      // Simple dedupe or processing if needed, for now raw set
-      // Apply local report check
-      setEnriched(data);
-      setReports(getLeadReports());
-      setStyleProfiles(styleProfilesStorage.list());
-    }
-    load();
+    loadData();
+
+    // Realtime Subscription
+    const channel = supabase
+      .channel('enriched-opportunities-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'enriched_opportunities' },
+        (payload) => {
+          loadData(); // Reload on any change
+
+          if (payload.eventType === 'UPDATE') {
+            const newData = payload.new as any;
+            const oldData = payload.old as any;
+            if (newData.enrichment_status === 'completed' && oldData.enrichment_status === 'pending_phone') {
+              toast({
+                title: '¡Teléfono encontrado!',
+                description: `Se completó el enriquecimiento para ${newData.full_name || 'un contacto'}.`,
+              });
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   function initiateEnrichment(leads: EnrichedOppLead[]) {

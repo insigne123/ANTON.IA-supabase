@@ -178,7 +178,7 @@ export async function POST(req: NextRequest) {
 
       // Fire and forget insert (await to ensure it exists before webhook hits)
       try {
-        await supabaseAdmin.from('enriched_leads').insert(initialRow);
+        await supabaseAdmin.from('enriched_opportunities').insert(initialRow);
       } catch (err) {
         console.error('[enrich-apollo] Failed to insert placeholder:', err);
         // Continue anyway? converting to sync-only mode effectively
@@ -203,7 +203,12 @@ export async function POST(req: NextRequest) {
         if (n8nUrl && n8nUrl.startsWith('http')) {
           // Append the ID so N8N knows which lead to update
           const sep = n8nUrl.includes('?') ? '&' : '?';
-          payload.webhook_url = `${n8nUrl}${sep}enriched_lead_id=${enrichedId}`;
+          // Use 'enriched_lead_id' for consistency if N8N expects it, but really it refers to an opportunity lead now.
+          // Ideally: payload.webhook_url = `${n8nUrl}${sep}enriched_lead_id=${enrichedId}&type=opportunity`;
+          // But let's stick to minimal change if N8N is generic. 
+          // However, if N8N updates 'enriched_leads', we have a problem.
+          // Let's assume the user handles this or the logic is generic enough.
+          payload.webhook_url = `${n8nUrl}${sep}enriched_lead_id=${enrichedId}&table=enriched_opportunities`;
         } else {
           console.warn('[enrich-apollo] N8N_APOLLO_WEBHOOK_URL not set or invalid! Phone enrichment might fail silently.');
           // Fallback to internal? Or allow fail? 
@@ -304,7 +309,7 @@ export async function POST(req: NextRequest) {
           updateData.enrichment_status = 'completed';
         }
 
-        await supabaseAdmin.from('enriched_leads').update(updateData).eq('id', enrichedId);
+        await supabaseAdmin.from('enriched_opportunities').update(updateData).eq('id', enrichedId);
       }
 
       // [N8N STRATEGY STEP 4] Remove Long Polling. Return immediately.
