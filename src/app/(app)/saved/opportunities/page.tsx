@@ -186,6 +186,7 @@ export default function SavedOpportunitiesPage() {
                     companyDomain: l.companyDomain || domain,
                     sourceOpportunityId: currentOpp?.id,
                     linkedinUrl: l.linkedinUrl,
+                    email: l.email, // [IMPROVED MATCHING] Send email if we have it
                 })),
                 revealEmail: opts.revealEmail,
                 revealPhone: opts.revealPhone

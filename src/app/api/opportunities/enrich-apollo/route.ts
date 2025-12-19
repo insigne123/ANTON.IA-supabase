@@ -190,7 +190,26 @@ export async function POST(req: NextRequest) {
         reveal_phone_number: revealPhone,
       };
       if (l.linkedinUrl) payload.linkedin_url = normalizeLinkedin(l.linkedinUrl);
-      if (l.fullName) payload.name = l.fullName;
+
+      // [IMPROVED MATCHING] Split name and include email if available
+      if (l.fullName) {
+        payload.name = l.fullName;
+        const parts = l.fullName.trim().split(/\s+/);
+        if (parts.length > 1) {
+          payload.first_name = parts[0];
+          payload.last_name = parts.slice(1).join(' ');
+        }
+      }
+      // If we already have an email (even corporate), passing it helps Apollo confirm identity
+      // The `l` object comes from `foundLeads`. `l.clientRef` was mapped but `l.email` might not be in the `EnrichInput` type definition?
+      // Let's check `EnrichInput` type above. It has `clientRef` but maybe not `email`.
+      // The `saved/opportunities/page.tsx` sends `payload` with `leads` mapping. It does NOT send `email`.
+      // I need to update the Source Page to send `email` too! 
+      // But wait, the prompt says "intentes llenar los maximos posibles con la info que manejamos... mail".
+      // So I should suspect `l` might NOT have email yet in `route.ts`.
+      // I will assume for now I can modify `route.ts` to accept `email` in `leads` array.
+      if ((l as any).email) payload.email = (l as any).email;
+
       if (l.title) payload.title = l.title;
       if (l.companyDomain) payload.organization_domain = cleanDomain(l.companyDomain);
       if (l.companyName) payload.organization_name = l.companyName;

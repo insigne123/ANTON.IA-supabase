@@ -80,6 +80,51 @@ export default function EnrichedOpportunitiesPage() {
     setStyleProfiles(styleProfilesStorage.list());
   };
 
+  const handleRetryPhone = async (lead: EnrichedOppLead) => {
+    if (enriching) return;
+    const clientId = getClientUserId();
+    if (!clientId) {
+      toast({ variant: 'destructive', title: 'Error', description: 'No ID cliente' });
+      return;
+    }
+
+    setEnriching(true);
+    toast({ title: 'Reintentando...', description: 'Enviando solicitud para ' + lead.fullName });
+
+    try {
+      const payload = {
+        leads: [{
+          fullName: lead.fullName,
+          title: lead.title,
+          companyName: lead.companyName,
+          companyDomain: lead.companyDomain,
+          sourceOpportunityId: lead.sourceOpportunityId,
+          linkedinUrl: lead.linkedinUrl,
+          email: extractPrimaryEmail(lead).email, // Include email if we have it
+        }],
+        revealEmail: false, // We likely already have email or don't want to pay again?
+        // Actually, if we are retrying phone, we assume we want phone.
+        // But if we want to improve "Match" maybe we should set RevealEmail=false to save credits if we have it?
+        // Let's assume we ONLY want phone now.
+        revealPhone: true
+      };
+
+      await fetch('/api/opportunities/enrich-apollo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': clientId },
+        body: JSON.stringify(payload),
+      });
+
+      // No need to handle response data heavily, the webhook will update the row.
+      // Or if the API finds it instantly, it updates the DB.
+      toast({ title: 'Solicitud enviada', description: 'Espera unos segundos.' });
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Error al reintentar', description: e.message });
+    } finally {
+      setEnriching(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
 
@@ -717,6 +762,18 @@ export default function EnrichedOpportunitiesPage() {
                                 to { width: 100%; }
                                 }
                             `}</style>
+                          {/* [RETRY LOGIC] Show retry button if user wants to force it */}
+                          <div className="pt-1 flex justify-center">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-5 text-[9px] px-1 text-muted-foreground hover:text-primary"
+                              onClick={() => handleRetryPhone(e)}
+                              disabled={enriching}
+                            >
+                              ¿Demora? Reintentar
+                            </Button>
+                          </div>
                         </div>
                       ) : (
                         <span className="text-muted-foreground text-xs italic">—</span>
