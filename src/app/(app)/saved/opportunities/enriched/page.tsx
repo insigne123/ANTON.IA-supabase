@@ -35,6 +35,9 @@ import { extractJsonFromMaybeFenced } from '@/lib/extract-json';
 import { Linkedin, Eraser, Filter } from 'lucide-react';
 import { extensionService } from '@/lib/services/extension-service';
 import { generateLinkedinDraft } from '@/lib/ai/linkedin-templates';
+import { PhoneCallModal } from '@/components/phone-call-modal';
+import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
+import { Phone } from 'lucide-react';
 
 function getClientUserId(): string {
   // ID estable por navegador para trazabilidad en n8n; no PII
@@ -58,6 +61,85 @@ export default function EnrichedOpportunitiesPage() {
   const [reportToView, setReportToView] = useState<LeadResearchReport | null>(null);
   const [openReport, setOpenReport] = useState(false);
   const [reportLead, setReportLead] = useState<EnrichedOppLead | null>(null);
+
+  // Phone Call Modal
+  const [callModalOpen, setCallModalOpen] = useState(false);
+  const [leadToCall, setLeadToCall] = useState<EnrichedOppLead | null>(null);
+
+  // Enrichment Options
+  const [openEnrichOptions, setOpenEnrichOptions] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  const [leadsToEnrich, setLeadsToEnrich] = useState<EnrichedOppLead[]>([]);
+
+  // Load Data Effect
+  useEffect(() => {
+    async function load() {
+      const data = await enrichedOpportunitiesStorage.get();
+      // Simple dedupe or processing if needed, for now raw set
+      // Apply local report check
+      setEnriched(data);
+      setReports(getLeadReports());
+      setStyleProfiles(styleProfilesStorage.list());
+    }
+    load();
+  }, []);
+
+  function initiateEnrichment(leads: EnrichedOppLead[]) {
+    // Adapter if needed, type matches mostly
+    setLeadsToEnrich(leads);
+    setOpenEnrichOptions(true);
+  }
+
+  async function handleConfirmEnrich(opts: { revealEmail: boolean; revealPhone: boolean }) {
+    if (!leadsToEnrich.length) return;
+    setEnriching(true);
+    try {
+      // We reuse the same API endpoint /api/opportunities/enrich-apollo?
+      // Yes, likely supports it or we need to ensure backend handles 'EnrichedOppLead' fields.
+      // Actually, the API expects { leads: [{ linkedinUrl... }] }.
+      // Let's assume parity.
+
+      const payloadLeads = leadsToEnrich.map(l => ({
+        fullName: l.fullName,
+        linkedinUrl: l.linkedinUrl,
+        companyName: l.companyName,
+        companyDomain: l.companyDomain,
+        title: l.title,
+        sourceOpportunityId: l.sourceOpportunityId,
+        clientRef: l.id
+      }));
+
+      const { data: { user } } = await import('@/lib/supabase').then(m => m.supabase.auth.getUser());
+      const userId = user?.id || 'anon';
+
+      const res = await fetch('/api/opportunities/enrich-apollo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
+        body: JSON.stringify({
+          leads: payloadLeads,
+          revealEmail: opts.revealEmail,
+          revealPhone: opts.revealPhone
+        }),
+      });
+
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const data = await res.json();
+      const { enriched: newEnriched } = data; // Assuming same response structure
+
+      if (Array.isArray(newEnriched) && newEnriched.length) {
+        await enrichedOpportunitiesStorage.addDedup(newEnriched);
+        const fresh = await enrichedOpportunitiesStorage.get();
+        setEnriched(fresh);
+        toast({ title: 'Enriquecimiento completado', description: `Se actualizaron ${newEnriched.length} registros.` });
+      }
+
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Error', description: e.message });
+    } finally {
+      setEnriching(false);
+      setLeadsToEnrich([]);
+    }
+  }
 
   // === Filtering State ===
   const [showFilters, setShowFilters] = useState(false);
@@ -531,6 +613,7 @@ export default function EnrichedOpportunitiesPage() {
                   <TableHead>Título</TableHead>
                   <TableHead>Empresa</TableHead>
                   <TableHead>Email</TableHead>
+                  <TableHead>Teléfono</TableHead>
                   <TableHead>LinkedIn</TableHead>
                   <TableHead>Dominio</TableHead>
                   <TableHead className="w-64 text-right">Acciones</TableHead>
@@ -569,7 +652,50 @@ export default function EnrichedOpportunitiesPage() {
                     <TableCell>{e.title || '—'}</TableCell>
                     <TableCell>{e.companyName || '—'}</TableCell>
                     <TableCell>{extractPrimaryEmail(e).email || (e.emailStatus === 'locked' ? '(locked)' : '—')}</TableCell>
-                    <TableCell>{e.linkedinUrl ? <a className="underline" target="_blank" href={e.linkedinUrl}>Perfil</a> : '—'}</TableCell>
+                    <TableCell>
+                      {e.primaryPhone ? (
+                        <div
+                          className="flex flex-col gap-1 cursor-pointer hover:bg-muted/50 p-1 rounded transition-colors group"
+                          onClick={() => {
+                            const rep = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
+                            setLeadToCall(e);
+                            setReportToView(rep || null);
+                            setCallModalOpen(true);
+                          }}
+                          title="Clic para abrir Terminal de Llamada"
+                        >
+                          <div className="flex items-center gap-1 text-sm font-medium text-blue-600 group-hover:text-blue-800">
+                            <Phone className="h-3 w-3" />
+                            <span>{e.primaryPhone}</span>
+                          </div>
+                          {e.phoneNumbers && e.phoneNumbers.length > 1 && (
+                            <span className="text-[10px] text-muted-foreground">+{e.phoneNumbers.length - 1} más</span>
+                          )}
+                        </div>
+                      ) : (e.enrichmentStatus === 'pending_phone') ? (
+                        <div className="w-full max-w-[100px] space-y-1" title="Esperando webhook de Apollo (aprox 90s)...">
+                          <div className="flex justify-between text-[9px] text-muted-foreground uppercase">
+                            <span>Buscando...</span>
+                            <span>90s</span>
+                          </div>
+                          <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-blue-500 rounded-full animate-progress-90"
+                              style={{ animation: 'progress 90s linear forwards' }}
+                            ></div>
+                          </div>
+                          <style jsx>{`
+                                @keyframes progress {
+                                from { width: 0%; }
+                                to { width: 100%; }
+                                }
+                            `}</style>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground text-xs italic">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell>{e.linkedinUrl ? <a className="underline" target="_blank" href={e.linkedinUrl} rel="noreferrer">Perfil</a> : '—'}</TableCell>
                     <TableCell>{e.companyDomain || '—'}</TableCell>
                     <TableCell className="text-right space-x-2">
                       <Button
@@ -831,6 +957,25 @@ export default function EnrichedOpportunitiesPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <PhoneCallModal
+        open={callModalOpen}
+        onOpenChange={setCallModalOpen}
+        lead={leadToCall as any} // Cast compatible
+        report={reportToView}
+        onLogCall={(res, notes) => {
+          console.log('Log call not fully implemented for opps yet', res, notes);
+          setCallModalOpen(false);
+        }}
+      />
+
+      <EnrichmentOptionsDialog
+        open={openEnrichOptions}
+        onOpenChange={setOpenEnrichOptions}
+        onConfirm={handleConfirmEnrich}
+        loading={enriching}
+        leadCount={leadsToEnrich.length}
+      />
     </div>
   );
 }
