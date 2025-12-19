@@ -156,6 +156,7 @@ export default function SavedOpportunitiesPage() {
         } catch (e: any) {
             toast({ variant: 'destructive', title: 'Error', description: e.message || 'Ocurrió un error' });
         } finally {
+            setLoadingLeads(false);
         }
     };
 
