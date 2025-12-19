@@ -8,7 +8,6 @@ import crypto from 'crypto';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const BASE = 'https://api.apollo.io/api/v1';
 const DAILY_LIMIT = 50;
 
 const supabaseAdmin = createClient(
@@ -17,9 +16,7 @@ const supabaseAdmin = createClient(
 );
 
 /**
- * Fallback epheméro en memoria si el store de cuotas falla (p.ej. invalid_rapt).
- * Clave: userId. Valor: { count, yyyymmdd } para reset diario.
- * NOTA: Es por-proceso; en serverless puede no compartirse entre instancias.
+ * Fallback epheméro en memoria si el store de cuotas falla.
  */
 const memQuota: Record<string, { count: number; day: string }> = {};
 function todayKey() {
@@ -32,12 +29,6 @@ function memGet(userId: string) {
   if (!q || q.day !== k) memQuota[userId] = { count: 0, day: k };
   return memQuota[userId];
 }
-function memConsume(userId: string) {
-  const q = memGet(userId);
-  if (q.count >= DAILY_LIMIT) return { allowed: false, count: q.count, limit: DAILY_LIMIT };
-  q.count++;
-  return { allowed: true, count: q.count, limit: DAILY_LIMIT };
-}
 
 type EnrichInput = {
   revealEmail?: boolean;
@@ -49,8 +40,8 @@ type EnrichInput = {
     companyDomain?: string;
     title?: string;
     sourceOpportunityId?: string;
-    clientRef?: string; // <— correlación desde el cliente
-    email?: string; // [IMPROVEMENT] Allow passing known email
+    clientRef?: string;
+    email?: string;
   }>;
 };
 
@@ -63,56 +54,6 @@ export async function POST(req: NextRequest) {
     }
 
     const { leads, revealEmail = true, revealPhone = false } = (await req.json()) as EnrichInput;
-    // We can't use 'log' helper here yet as it's not initialized. We'll rely on serverLogs being initialized later or just keep console.log for this initial one if it's before loop. 
-    // Actually, 'log' is defined inside the function but initialized later. I should move 'log' definition up if I want to use it everywhere, logic is currently inside the loop or just before it. 
-    // The previous edit put 'log' definition BEFORE the loop (line 107). So I can use it inside the loop.
-    // But line 59 is at the top of the function. I should just leave this one as console.log or move log definition up.
-    // For now, I'll focus on the loop logs which are the critical ones for per-lead debugging.
-    console.log('[enrich-apollo] Incoming payload:', { count: leads?.length, revealEmail, revealPhone, firstLead: leads?.[0] });
-    if (!Array.isArray(leads) || leads.length === 0) {
-      return NextResponse.json({ error: 'leads requerido' }, { status: 400 });
-    }
-
-    // Cost estimation: 1 for email, 1 for phone
-    const costPerLead = (revealEmail ? 1 : 0) + (revealPhone ? 1 : 0);
-    // If both false, fail (nothing to enrich)? Or assume basic enrichment (free)?
-    // Apollo usually charges 1 credit per revealed contact info. Match is often free without reveal.
-    // For now, let's assume limit is "requests", not credits, for our internal tracking.
-
-    // ... existing quota logic ...
-
-    const apiKey = process.env.APOLLO_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: 'APOLLO_API_KEY missing' }, { status: 500 });
-    }
-
-    // ---- Lectura de cuota segura (con fallback) ----
-    let quotaStatus = { count: 0, limit: DAILY_LIMIT };
-    let useMemQuota = false;
-    const dayKey = new Date().toISOString().slice(0, 10);
-    const secret = process.env.QUOTA_FALLBACK_SECRET || '';
-    // ticket stateless (firmado) para funcionar en serverless
-    const incomingTicket = req.headers.get('x-quota-ticket')?.trim() || '';
-    try {
-      quotaStatus = await getDailyQuotaStatus({ userId, resource: 'enrich', limit: DAILY_LIMIT });
-    } catch (e: any) {
-      // ... existing error handler ...
-      console.error('[enrich-apollo] getDailyQuotaStatus failed, using in-memory fallback:', e);
-      useMemQuota = true;
-      if (secret) {
-        const parsed = verifyTicket(incomingTicket, secret);
-        const count = (parsed && parsed.userId === userId && parsed.dayKey === dayKey) ? parsed.count : 0;
-        quotaStatus = { count, limit: DAILY_LIMIT };
-      } else {
-        const q = memGet(userId);
-        quotaStatus = { count: q.count, limit: DAILY_LIMIT };
-      }
-    }
-
-    const out: any[] = [];
-    let stoppedByQuota = false;
-    let consumed = 0;
-    const enrichedOut: any[] = [];
 
     // Capture debug logs to send to client
     const serverLogs: string[] = [];
@@ -122,274 +63,174 @@ export async function POST(req: NextRequest) {
       serverLogs.push(msg);
     };
 
+    console.log('[enrich-apollo] Incoming payload:', { count: leads?.length, revealEmail, revealPhone });
+    if (!Array.isArray(leads) || leads.length === 0) {
+      return NextResponse.json({ error: 'leads requerido' }, { status: 400 });
+    }
+
+    // ---- Lectura de cuota segura (con fallback) ----
+    let quotaStatus = { count: 0, limit: DAILY_LIMIT };
+    let useMemQuota = false;
+    const dayKey = new Date().toISOString().slice(0, 10);
+    const secret = process.env.QUOTA_FALLBACK_SECRET || '';
+    const incomingTicket = req.headers.get('x-quota-ticket')?.trim() || '';
+    try {
+      quotaStatus = await getDailyQuotaStatus({ userId, resource: 'enrich', limit: DAILY_LIMIT });
+    } catch (e: any) {
+      console.error('[enrich-apollo] getDailyQuotaStatus failed, using in-memory fallback:', e);
+      useMemQuota = true;
+      if (secret) {
+        const parsed = verifyTicket(incomingTicket, secret);
+        const count = (parsed && parsed.userId === userId && parsed.dayKey === dayKey) ? parsed.count : 0;
+        quotaStatus = { count, limit: DAILY_LIMIT };
+      } else {
+        const q = memGet(userId);
+        quotaStatus = { count: q.count, limit: DAILY_LIMIT }; // Fix: q.count
+      }
+    }
+
+    let stoppedByQuota = false;
+    let consumed = 0;
+    const enrichedOut: any[] = [];
+
     for (const l of leads) {
-      // Chequeo y consumo de cuota (preferir server store; si falla, el epheméro)
+      // Chequeo y consumo de cuota
       if (quotaStatus.count >= quotaStatus.limit) {
         stoppedByQuota = true;
         break;
       }
 
-      // ... consume logic (omitted for brevity, keep existing block) ...
       if (!useMemQuota) {
         try {
-          // We count "requests" here, not heavy credits. 
-          // TODO: Better quota model for multi-credit actions.
           const { allowed } = await checkAndConsumeDailyQuota({ userId, resource: 'enrich', limit: DAILY_LIMIT });
           if (!allowed) { stoppedByQuota = true; break; }
           quotaStatus.count++;
           consumed++;
-        } catch { useMemQuota = true; quotaStatus.count++; consumed++; } // Simplified fallback logic
+        } catch { useMemQuota = true; quotaStatus.count++; consumed++; }
       } else {
         if (quotaStatus.count >= DAILY_LIMIT) { stoppedByQuota = true; break; }
         quotaStatus.count++;
         consumed++;
       }
 
-
-      // Pre-generate ID to link webhook updates to the row we will insert
+      // Pre-generate ID to link webhook updates
       const enrichedId = uuid();
 
-      // [N8N STRATEGY STEP 1] Insert 'Placeholder' row with PENDING status
+      // [STEP 1] Insert 'Placeholder' row with PENDING status
       const initialRow = {
         id: enrichedId,
         user_id: userId,
-        // organization_id: ??? - We don't have orgId easily available here without fetching. 
-        // But 'enriched-leads-service' uses it. If we leave it null, user can only see it in Personal view.
-        // For simplicity/robustness, we might skip organization_id or fetch it? 
-        // Fetching orgId adds latency. Let's try to pass it if possible or assume NULL (Personal) is safe fallback.
-        // Actually, Client.tsx uses `enrichedLeadsStorage.addDedup` which fetches `getCurrentOrganizationId`.
-        // If API inserts with NULL, and user is in Org, the user won't see the enriched lead if RLS filters by Org.
-        // However, the `row` will exist.
-        // Workaround: We proceed without OrgID. If it's an issue, we can fetch user profile to get Org.
         full_name: l.fullName,
-        email: l.email || (l.clientRef ? undefined : undefined), // [IMPROVEMENT] Use passed email if exists
-        // Input `l` has `companyName` etc.
+        email: l.email || undefined,
         company_name: l.companyName,
         title: l.title,
         linkedin_url: l.linkedinUrl,
         created_at: new Date().toISOString(),
         phone_numbers: [],
         primary_phone: null,
-        enrichment_status: revealPhone ? 'pending_phone' : 'completed', // <--- NEW STATUS
+        enrichment_status: revealPhone ? 'pending_phone' : 'completed',
         data: {
           sourceOpportunityId: l.sourceOpportunityId,
           companyDomain: l.companyDomain,
         }
       };
 
-      // Fire and forget insert (await to ensure it exists before webhook hits)
       try {
         await supabaseAdmin.from('enriched_opportunities').insert(initialRow);
       } catch (err) {
         console.error('[enrich-apollo] Failed to insert placeholder:', err);
-        // Continue anyway? converting to sync-only mode effectively
       }
 
-      // ---- Enriquecimiento con Apollo ----
-      const payload: any = {
-        reveal_personal_emails: revealEmail,
-        reveal_phone_number: revealPhone,
+      // [STEP 2] EXTERNALIZATION: Forward to Enrichment Service
+      const servicePayload: any = {
+        record_id: enrichedId,
+        table_name: 'enriched_opportunities',
+        lead: {
+          first_name: '', // Will be filled below
+          last_name: '',
+          full_name: l.fullName,
+          email: l.email || undefined,
+          company_name: l.companyName,
+          company_domain: l.companyDomain,
+          linkedin_url: l.linkedinUrl,
+          title: l.title,
+          source_id: l.sourceOpportunityId
+        },
+        userId: userId,
+        config: {
+          reveal_phone: revealPhone,
+          reveal_email: revealEmail
+        }
       };
-      if (l.linkedinUrl) payload.linkedin_url = normalizeLinkedin(l.linkedinUrl);
 
-      // [IMPROVED MATCHING] Split name and include email if available
       if (l.fullName) {
-        payload.name = l.fullName;
         const parts = l.fullName.trim().split(/\s+/);
         if (parts.length > 1) {
-          payload.first_name = parts[0];
-          payload.last_name = parts.slice(1).join(' ');
+          servicePayload.lead.first_name = parts[0];
+          servicePayload.lead.last_name = parts.slice(1).join(' ');
+        } else {
+          servicePayload.lead.first_name = parts[0];
         }
       }
-      // If we already have an email (even corporate), passing it helps Apollo confirm identity
-      if (l.email) payload.email = l.email;
 
-      if (l.title) payload.title = l.title;
-      if (l.companyDomain) payload.organization_domain = cleanDomain(l.companyDomain);
-      if (l.companyName) payload.organization_name = l.companyName;
+      const externalUrl = process.env.ENRICHMENT_SERVICE_URL;
 
-      log('Sending payload to Apollo (N8N):', payload);
-
-      let res = await withRetry(() =>
-        fetchWithLog('APOLLO people/match (Phone+Email)', `${BASE}/people/match`, {
+      if (externalUrl) {
+        log(`Forwarding enrichment to: ${externalUrl}`);
+        // Fire and forget, usually. But await to catch immediate networking errors?
+        fetch(externalUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Api-Key': apiKey,
-            accept: 'application/json',
-            'Cache-Control': 'no-cache',
+            'x-api-secret': process.env.ENRICHMENT_SERVICE_SECRET || ''
           },
-          body: JSON.stringify(payload),
-        }),
-      );
-
-      log('Response status:', res.status);
-
-      let j: any = {};
-      let p: any = null;
-
-      if (res.ok) {
-        j = await res.json().catch(() => ({}));
-        log('Success Response Body:', j);
-        p = j?.person ?? j;
-      } else {
-        const errText = await safeText(res);
-        console.warn('[enrich-apollo] Phone+Email failed:', res.status, errText);
-
-        if (revealPhone && revealEmail) {
-          console.log('[enrich-apollo] Fallback: Retrying with Email Only immediately.');
-          const fallbackPayload = { ...payload, reveal_phone_number: false };
-          delete fallbackPayload.webhook_url;
-
-          const res2 = await withRetry(() =>
-            fetchWithLog('APOLLO people/match (Email Only)', `${BASE}/people/match`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Api-Key': apiKey,
-                accept: 'application/json',
-                'Cache-Control': 'no-cache',
-              },
-              body: JSON.stringify(fallbackPayload),
-            }),
-          );
-          if (res2.ok) {
-            j = await res2.json().catch(() => ({}));
-            p = j?.person ?? j;
-            j._fallbackUsed = true;
-          } else {
-            j = { error: errText };
-          }
-        } else {
-          j = { error: errText };
-        }
-      }
-
-      // [N8N STRATEGY STEP 3] Update DB with whatever we got (Email), leave Phone pending
-      const rawEmail: string | undefined = p?.email || p?.personal_email || p?.primary_email;
-      const locked = !!rawEmail && /email_not_unlocked@domain\.com/i.test(rawEmail);
-
-      // If user requested reveal, but result is locked, check if we have fallback
-      let emailToSave = revealEmail ? (locked ? undefined : rawEmail) : undefined;
-      let statusToSave = revealEmail ? (locked ? 'locked' : p?.email_status || 'unknown') : undefined;
-
-      if (!emailToSave && l.email && revealEmail) {
-        // Fallback to our existing email
-        emailToSave = l.email;
-        statusToSave = 'verified'; // Assume our source is good? or 'unknown'
-      }
-
-      if (p) {
-        // Prepare update based on what Apollo returned
-        const updateData: any = {
-          full_name: p.name || l.fullName,
-          title: p.title || l.title,
-          linkedin_url: p.linkedin_url || l.linkedinUrl,
-          company_name: p.organization?.name || l.companyName,
-          // if we have email now, set it
-          email: emailToSave,
-          data: {
-            sourceOpportunityId: l.sourceOpportunityId,
-            companyDomain: p.organization?.primary_domain || cleanDomain(l.companyDomain),
-            emailStatus: statusToSave,
-            city: p.city,
-            country: p.country,
-            industry: p.industry,
-          }
-        };
-        // Important: If we got the phone number IMMEDIATELY (rare, but possible), we should mark completed?
-        // Apollo usually returns empty list if revealing via webhook.
-        // If p.phone_numbers is present AND we asked for it, maybe N8N won't be called?
-        // Actually Apollo docs say "If this parameter is set to true... Apollo send a JSON response... to the webhook URL".
-        // It implies ALWAYS sending webhook.
-        // But if it's instant, we might receive it here too.
-        // Let's assume it's pending unless we see numbers.
-        if (revealPhone && p.phone_numbers && p.phone_numbers.length > 0) {
-          updateData.phone_numbers = p.phone_numbers;
-          updateData.primary_phone = p.phone_numbers[0]?.sanitized_number; // simplified
-          updateData.enrichment_status = 'completed';
-        }
-
-        await supabaseAdmin.from('enriched_opportunities').update(updateData).eq('id', enrichedId);
-      }
-
-      // [N8N STRATEGY STEP 4] Remove Long Polling. Return immediately.
-      // logic continues to output constructor...
-
-      // Parse Phone Numbers (Synchronous check)
-      let phoneNumbers: any[] | undefined = undefined;
-      let primaryPhone: string | undefined = undefined;
-
-      if (revealPhone) {
-        const numbers = Array.isArray(p?.phone_numbers) ? p.phone_numbers : [];
-        phoneNumbers = numbers;
-        if (numbers.length > 0) {
-          const found = numbers.find((n: any) => n.type === 'mobile') || numbers[0];
-          primaryPhone = found?.sanitized_number;
-        }
-      }
-
-      // Si después de todo no tenemos persona válida, guardamos el error/nota
-      if (!p || (!p.email && !p.id && (!phoneNumbers || phoneNumbers.length === 0))) {
-        enrichedOut.push({
-          id: enrichedId,
-          sourceOpportunityId: l.sourceOpportunityId,
-          fullName: l.fullName,
-          companyName: l.companyName,
-          title: l.title,
-          note: j.error || (j.message ? String(j.message) : undefined) || 'No match found',
-          createdAt: new Date().toISOString(),
-          clientRef: l.clientRef ?? undefined,
-          _rawDebug: j
+          body: JSON.stringify(servicePayload)
+        }).then(r => {
+          if (!r.ok) console.error('[enrich-forwarder] Service returned error:', r.status);
+          else log('[enrich-forwarder] Successfully queued.');
+        }).catch(e => {
+          console.error('[enrich-forwarder] Connection failed:', e);
         });
-        await sleep(250);
-        continue;
+
+      } else {
+        console.warn('[enrich-forwarder] No ENRICHMENT_SERVICE_URL set. Dumping payload to console (Mock Mode).');
+        console.log('--- PAYLOAD FOR EXTERNAL APP ---');
+        console.log(JSON.stringify(servicePayload, null, 2));
+        console.log('-------------------------------');
       }
 
-      // Re-calculate primary phone if it came from polling
-      if (!primaryPhone && phoneNumbers && phoneNumbers.length > 0) {
-        const found = phoneNumbers.find((n: any) => n.type === 'mobile')
-          || phoneNumbers.find((n: any) => n.type === 'direct_dial')
-          || phoneNumbers[0];
-        primaryPhone = found?.sanitized_number;
-      }
-
+      // Add to output list so UI knows it started
       enrichedOut.push({
-        id: enrichedId, // Use pre-generated ID
+        id: enrichedId,
         sourceOpportunityId: l.sourceOpportunityId,
-        fullName: p?.name ?? l.fullName,
-        title: p?.title ?? l.title,
-        email: emailToSave,
-        emailStatus: revealEmail ? (locked ? 'locked' : p?.email_status || 'unknown') : undefined,
-        linkedinUrl: p?.linkedin_url ?? normalizeLinkedin(l.linkedinUrl || ''),
-        companyName: p?.organization?.name ?? l.companyName,
-        companyDomain: p?.organization?.primary_domain ?? cleanDomain(l.companyDomain),
-        // Phone Data
-        phoneNumbers,
-        primaryPhone,
-        // Status for UI
-        enrichmentStatus: (revealPhone && (!phoneNumbers || phoneNumbers.length === 0)) ? 'pending_phone' : 'completed',
+        fullName: l.fullName,
+        companyName: l.companyName,
+        title: l.title,
+        email: l.email,
+        emailStatus: 'unknown',
+        linkedinUrl: normalizeLinkedin(l.linkedinUrl || ''),
+        companyDomain: l.companyDomain,
+        phoneNumbers: [],
+        primaryPhone: null,
+        enrichmentStatus: 'pending_phone',
         createdAt: new Date().toISOString(),
-        clientRef: l.clientRef ?? undefined,
-        _rawDebug: j
+        clientRef: undefined
       });
 
-      await sleep(200);
-    }
+      await sleep(50);
+    } // end for loop
 
     const responsePayload: { enriched: any[]; note?: string; usage: { consumed: number }; ticket?: string; debug?: any } = {
       enriched: enrichedOut,
       usage: { consumed },
       debug: {
-        rawFirstResponse: enrichedOut.length > 0 ? (enrichedOut[0] as any)._rawDebug : undefined,
-        firstLeadName: leads[0]?.fullName,
-        serverLogs // Return logs to client
+        serverLogs
       }
     };
     if (stoppedByQuota) {
-      responsePayload.note = `Quota limit reached. ${out.length} of ${leads.length} leads were processed.`;
+      responsePayload.note = `Quota limit reached. ${consumed} processed.`;
     }
-    // Si estamos en fallback y hay secreto, devolvemos el ticket firmado con el nuevo conteo
+
     if (useMemQuota && secret) {
       const token = signTicket({ userId, dayKey, count: quotaStatus.count }, secret);
       responsePayload.ticket = token;
@@ -398,49 +239,14 @@ export async function POST(req: NextRequest) {
       return res;
     }
     return NextResponse.json(responsePayload, { status: 200 });
+
   } catch (e: any) {
-    const msg = (e?.message || '').toString();
-    if (msg.includes('invalid_rapt') || msg.includes('invalid_grant')) {
-      // Normalizamos el error para la UI
-      return NextResponse.json(
-        {
-          error: 'invalid_rapt',
-          error_description:
-            'Google exige reautenticación para el store de cuotas. Usa Service Account (ADC) o ajusta la política de reauth.',
-        },
-        { status: 401 },
-      );
-    }
-    if (e?.code === 'DAILY_QUOTA_EXCEEDED') {
-      return NextResponse.json({ error: e.message }, { status: 429 });
-    }
     console.error('[enrich-apollo] fatal', e);
-    return NextResponse.json({ error: msg || 'Unexpected error' }, { status: 500 });
+    return NextResponse.json({ error: e.message || 'Unexpected error' }, { status: 500 });
   }
 }
 
 /* ------------ helpers ------------- */
-
-async function withRetry<T extends Response>(fn: () => Promise<T>, attempts = 3): Promise<T> {
-  let last: T | null = null;
-  for (let i = 1; i <= attempts; i++) {
-    try {
-      const res = await fn();
-      last = res;
-      if (res.ok) return res;
-      if ([429, 500, 502, 503, 504].includes(res.status)) {
-        await sleep(600 * i);
-        continue;
-      }
-      return res;
-    } catch (err) {
-      if (i === attempts) throw err;
-      await sleep(600 * i);
-    }
-  }
-  if (last) return last;
-  throw new Error('fetch failed without response');
-}
 
 function normalizeLinkedin(url: string) {
   if (!url) return url;
@@ -456,30 +262,11 @@ function normalizeLinkedin(url: string) {
   }
 }
 
-function cleanDomain(x?: string) {
-  if (!x) return x || undefined;
-  try {
-    const u = new URL(x.startsWith('http') ? x : `https://${x}`);
-    const host = u.hostname.toLowerCase();
-    return host.startsWith('www.') ? host.slice(4) : host;
-  } catch {
-    const host = String(x).toLowerCase().replace(/^https?:\/\//, '');
-    return host.startsWith('www.') ? host.slice(4) : host;
-  }
-}
-
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
-async function safeText(res: Response) {
-  try {
-    return await res.text();
-  } catch {
-    return '';
-  }
-}
 
-/* ----- quota ticket helpers (stateless) ----- */
+/* ----- quota ticket helpers ----- */
 function signTicket(payload: { userId: string; dayKey: string; count: number }, secret: string): string {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const sig = crypto.createHmac('sha256', secret).update(body).digest('base64url');
