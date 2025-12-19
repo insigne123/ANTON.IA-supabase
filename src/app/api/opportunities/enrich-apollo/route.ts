@@ -224,7 +224,10 @@ export async function POST(req: NextRequest) {
 
       // [STEP 3] PHASE 2: PHONE ENRICHMENT (External)
       if (revealPhone) {
-        log('Starting External Phone Enrichment');
+        // Validation log
+        const externalUrl = process.env.ENRICHMENT_SERVICE_URL;
+        console.log(`[enrich-hybrid] Phase 2 Phone. URL present? ${!!externalUrl}. Value: ${externalUrl || '(empty)'}`);
+
         const servicePayload: any = {
           record_id: enrichedId,
           table_name: 'enriched_opportunities',
@@ -232,22 +235,21 @@ export async function POST(req: NextRequest) {
             first_name: '',
             last_name: '',
             full_name: l.fullName,
-            email: emailResult?.email || l.email || undefined, // Use found email if Phase 1 succeeded!
+            email: emailResult?.email || l.email || undefined,
             company_name: l.companyName,
             company_domain: l.companyDomain,
             linkedin_url: l.linkedinUrl,
             title: l.title,
             source_id: l.sourceOpportunityId,
-            apollo_id: foundApolloId // <--- PASSING DISCOVERED ID!
+            apollo_id: foundApolloId
           },
           userId: userId,
           config: {
             reveal_phone: true,
-            reveal_email: false // Already done internally
+            reveal_email: false
           }
         };
 
-        // Name split helper
         if (l.fullName) {
           const parts = l.fullName.trim().split(/\s+/);
           if (parts.length > 1) {
@@ -256,17 +258,27 @@ export async function POST(req: NextRequest) {
           } else { servicePayload.lead.first_name = parts[0]; }
         }
 
-        const externalUrl = process.env.ENRICHMENT_SERVICE_URL;
         if (externalUrl) {
-          log('Forwarding to:', externalUrl);
-          // Async, no await
-          fetch(externalUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-api-secret': process.env.ENRICHMENT_SERVICE_SECRET || '' },
-            body: JSON.stringify(servicePayload)
-          }).catch(e => console.error('Ext Service Error', e));
+          log('Forwarding to External Service:', externalUrl);
+          // We will AWAIT this fetch to ensure we catch network errors in the logs immediately, 
+          // even if it slows down the response slightly (it's a trade-off for debugging).
+          try {
+            const extRes = await fetch(externalUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-secret': process.env.ENRICHMENT_SERVICE_SECRET || '' },
+              body: JSON.stringify(servicePayload)
+            });
+            log('External Service Response Status:', extRes.status);
+            if (!extRes.ok) {
+              const txt = await extRes.text();
+              console.error('[enrich-hybrid] External Service Error Body:', txt);
+            }
+          } catch (e) {
+            console.error('[enrich-hybrid] External Service Connection Failed:', e);
+          }
         } else {
-          console.log('--- PAYLOAD FOR EXTERNAL APP (MOCK) ---');
+          console.warn('[enrich-hybrid] NO ENRICHMENT_SERVICE_URL DEFINED. Skipping external call.');
+          console.log('--- MOCK EXTERNAL PAYLOAD ---');
           console.log(JSON.stringify(servicePayload, null, 2));
         }
       }
