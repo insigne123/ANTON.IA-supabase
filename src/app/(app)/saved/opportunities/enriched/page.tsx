@@ -100,12 +100,10 @@ export default function EnrichedOpportunitiesPage() {
           companyDomain: lead.companyDomain,
           sourceOpportunityId: lead.sourceOpportunityId,
           linkedinUrl: lead.linkedinUrl,
-          email: extractPrimaryEmail(lead).email, // Include email if we have it
+          email: extractPrimaryEmail(lead).email,
+          existingRecordId: lead.id // <--- IMPORTANT: Prevent duplicates
         }],
-        revealEmail: false, // We likely already have email or don't want to pay again?
-        // Actually, if we are retrying phone, we assume we want phone.
-        // But if we want to improve "Match" maybe we should set RevealEmail=false to save credits if we have it?
-        // Let's assume we ONLY want phone now.
+        revealEmail: false,
         revealPhone: true
       };
 

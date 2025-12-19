@@ -93,7 +93,9 @@ export async function POST(req: NextRequest) {
     let consumed = 0;
     const enrichedOut: any[] = [];
 
-    for (const l of leads) {
+    type LeadInput = EnrichInput['leads'][0] & { existingRecordId?: string };
+
+    for (const l of (leads as LeadInput[])) {
       // Chequeo y consumo de cuota
       if (quotaStatus.count >= quotaStatus.limit) {
         stoppedByQuota = true;
@@ -113,32 +115,43 @@ export async function POST(req: NextRequest) {
         consumed++;
       }
 
-      // Pre-generate ID to link webhook updates
-      const enrichedId = uuid();
+      // ID Management: Reuse existing if provided (Retry Mode), else generate new
+      const isRetry = !!l.existingRecordId;
+      const enrichedId = l.existingRecordId || uuid();
 
-      // [STEP 1] Insert 'Placeholder' row with PENDING status
-      const initialRow = {
-        id: enrichedId,
-        user_id: userId,
-        full_name: l.fullName,
-        email: l.email || undefined,
-        company_name: l.companyName,
-        title: l.title,
-        linkedin_url: l.linkedinUrl,
-        created_at: new Date().toISOString(),
-        phone_numbers: [],
-        primary_phone: null,
-        enrichment_status: revealPhone ? 'pending_phone' : 'completed',
-        data: {
-          sourceOpportunityId: l.sourceOpportunityId,
-          companyDomain: l.companyDomain,
+      // [STEP 1] Insert 'Placeholder' row ONLY if new
+      if (!isRetry) {
+        const initialRow = {
+          id: enrichedId,
+          user_id: userId,
+          full_name: l.fullName,
+          email: l.email || undefined,
+          company_name: l.companyName,
+          title: l.title,
+          linkedin_url: l.linkedinUrl,
+          created_at: new Date().toISOString(),
+          phone_numbers: [],
+          primary_phone: null,
+          enrichment_status: revealPhone ? 'pending_phone' : 'completed',
+          data: {
+            sourceOpportunityId: l.sourceOpportunityId,
+            companyDomain: l.companyDomain,
+          }
+        };
+
+        try {
+          await supabaseAdmin.from('enriched_opportunities').insert(initialRow);
+        } catch (err) {
+          console.error('[enrich-apollo] Failed to insert placeholder:', err);
         }
-      };
-
-      try {
-        await supabaseAdmin.from('enriched_opportunities').insert(initialRow);
-      } catch (err) {
-        console.error('[enrich-apollo] Failed to insert placeholder:', err);
+      } else {
+        // If Retry, maybe update status to pending_phone to show "Thinking" again?
+        // Yes, good UX.
+        try {
+          await supabaseAdmin.from('enriched_opportunities')
+            .update({ enrichment_status: 'pending_phone' })
+            .eq('id', enrichedId);
+        } catch (e) { console.error('Failed to update status on retry', e); }
       }
 
       // [STEP 2] EXTERNALIZATION: Forward to Enrichment Service
