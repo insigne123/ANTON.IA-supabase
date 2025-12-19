@@ -745,36 +745,7 @@ export default function EnrichedOpportunitiesPage() {
                           )}
                         </div>
                       ) : (e.enrichmentStatus === 'pending_phone') ? (
-                        <div className="w-full max-w-[100px] space-y-1" title="Esperando webhook de Apollo (aprox 90s)...">
-                          <div className="flex justify-between text-[9px] text-muted-foreground uppercase">
-                            <span>Buscando...</span>
-                            <span>90s</span>
-                          </div>
-                          <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-blue-500 rounded-full animate-progress-90"
-                              style={{ animation: 'progress 90s linear forwards' }}
-                            ></div>
-                          </div>
-                          <style jsx>{`
-                                @keyframes progress {
-                                from { width: 0%; }
-                                to { width: 100%; }
-                                }
-                            `}</style>
-                          {/* [RETRY LOGIC] Show retry button if user wants to force it */}
-                          <div className="pt-1 flex justify-center">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-5 text-[9px] px-1 text-muted-foreground hover:text-primary"
-                              onClick={() => handleRetryPhone(e)}
-                              disabled={enriching}
-                            >
-                              ¿Demora? Reintentar
-                            </Button>
-                          </div>
-                        </div>
+                        <PendingEnrichmentTimer createdAt={e.createdAt} onRetry={() => handleRetryPhone(e)} enriching={enriching} />
                       ) : (
                         <span className="text-muted-foreground text-xs italic">—</span>
                       )}
@@ -1074,6 +1045,65 @@ export default function EnrichedOpportunitiesPage() {
         loading={enriching}
         leadCount={leadsToEnrich.length}
       />
+    </div>
+  );
+}
+
+function PendingEnrichmentTimer({ createdAt, onRetry, enriching }: { createdAt: string, onRetry: () => void, enriching: boolean }) {
+  const [percent, setPercent] = useState(0);
+  const [label, setLabel] = useState('Buscando...');
+  const [isTimeout, setIsTimeout] = useState(false);
+
+  useEffect(() => {
+    // Calculate initial progress based on createdAt
+    const start = new Date(createdAt).getTime();
+    const duration = 90 * 1000; // 90s
+
+    const tick = () => {
+      const now = Date.now();
+      const elapsed = now - start;
+      const p = Math.min(100, Math.max(0, (elapsed / duration) * 100));
+
+      setPercent(p);
+
+      if (elapsed >= duration) {
+        setIsTimeout(true);
+        setLabel('Demora detectada');
+      } else {
+        setLabel(`${Math.ceil((duration - elapsed) / 1000)}s`);
+      }
+    };
+
+    tick(); // immediate
+    const int = setInterval(tick, 1000);
+    return () => clearInterval(int);
+  }, [createdAt]);
+
+  return (
+    <div className="w-full max-w-[100px] space-y-1">
+      <div className="flex justify-between text-[9px] text-muted-foreground uppercase">
+        <span>{isTimeout ? 'Pendiente' : 'Buscando...'}</span>
+        <span>{label}</span>
+      </div>
+      <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-1000 ${isTimeout ? 'bg-yellow-500' : 'bg-blue-500'}`}
+          style={{ width: `${percent}%` }}
+        ></div>
+      </div>
+
+      {/* Show retry if timeout OR if user wants */}
+      <div className="pt-1 flex justify-center">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-5 text-[9px] px-1 text-muted-foreground hover:text-primary"
+          onClick={onRetry}
+          disabled={enriching}
+        >
+          {isTimeout ? 'Reintentar ahora' : '¿Reintentar?'}
+        </Button>
+      </div>
     </div>
   );
 }
