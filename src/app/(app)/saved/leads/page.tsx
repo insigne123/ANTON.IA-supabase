@@ -211,7 +211,7 @@ export default function SavedLeadsPage() {
           'x-user-id': clientId,
           'x-quota-ticket': getQuotaTicket() || '',
         },
-        body: JSON.stringify({ leads: payloadLeads, revealEmail, revealPhone }),
+        body: JSON.stringify({ leads: payloadLeads, revealEmail, revealPhone, tableName: 'enriched_leads' }),
       });
       const j = await r.clone().json().catch(async () => ({ nonJson: true, text: await r.text() }));
       console.log('[enrich] Response:', j);
