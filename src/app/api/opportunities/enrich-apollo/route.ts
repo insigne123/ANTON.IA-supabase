@@ -265,6 +265,7 @@ export async function POST(req: NextRequest) {
 
         if (externalUrl) {
           log('Forwarding to External Service:', externalUrl);
+          log('Payload to External:', JSON.stringify(servicePayload));
           // We will AWAIT this fetch to ensure we catch network errors in the logs immediately, 
           // even if it slows down the response slightly (it's a trade-off for debugging).
           try {
