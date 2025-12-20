@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as EnrichInput & { tableName?: string };
     const { leads, revealEmail = true, revealPhone = false } = body;
+    const tableName = body.tableName || 'enriched_opportunities';
     if (!Array.isArray(leads) || leads.length === 0) return NextResponse.json({ error: 'leads requerido' }, { status: 400 });
 
     const serverLogs: string[] = [];
@@ -129,12 +130,12 @@ export async function POST(req: NextRequest) {
             companyDomain: cleanDomain(l.companyDomain),
           }
         };
-        try { await supabaseAdmin.from('enriched_opportunities').insert(initialRow); }
+        try { await supabaseAdmin.from(tableName).insert(initialRow); }
         catch (err) { console.error('Failed to insert initial row', err); }
       } else {
         // If retrying phone, mark pending again
         if (revealPhone) {
-          await supabaseAdmin.from('enriched_opportunities').update({ enrichment_status: 'pending_phone' }).eq('id', enrichedId);
+          await supabaseAdmin.from(tableName).update({ enrichment_status: 'pending_phone' }).eq('id', enrichedId);
         }
       }
 
@@ -204,7 +205,7 @@ export async function POST(req: NextRequest) {
               };
 
               // Update DB immediately
-              await supabaseAdmin.from('enriched_opportunities').update(updateData).eq('id', enrichedId);
+              await supabaseAdmin.from(tableName).update(updateData).eq('id', enrichedId);
 
               // Store result for UI response
               emailResult = {
@@ -226,7 +227,7 @@ export async function POST(req: NextRequest) {
       // [STEP 3] PHASE 2: PHONE ENRICHMENT (External)
       if (revealPhone) {
         // Validation log
-        const externalUrl = process.env.ENRICHMENT_SERVICE_URL;
+        const externalUrl = (process.env.ENRICHMENT_SERVICE_URL || '').trim();
         const secret = (process.env.ENRICHMENT_SERVICE_SECRET || '').trim(); // FORCE TRIM
         const maskedSecret = secret ? `${secret.substring(0, 4)}...${secret.substring(secret.length - 4)}` : '(empty)';
 
@@ -235,7 +236,7 @@ export async function POST(req: NextRequest) {
 
         const servicePayload: any = {
           record_id: enrichedId,
-          table_name: body.tableName || 'enriched_opportunities',
+          table_name: tableName,
           lead: {
             first_name: '',
             last_name: '',
