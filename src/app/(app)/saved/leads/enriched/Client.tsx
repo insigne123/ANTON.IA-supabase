@@ -1363,7 +1363,7 @@ export default function EnrichedLeadsClient() {
                   <TableHead>Cargo</TableHead>
                   <TableHead>Empresa</TableHead>
                   <TableHead>Email</TableHead>
-                  <TableHead>Teléfono</TableHead> {/* Added Phone column header */}
+                  <TableHead>Teléfono</TableHead>
                   <TableHead>LinkedIn</TableHead>
                   <TableHead>Dominio</TableHead>
                   <TableHead className="w-64 text-right">Acciones</TableHead>
