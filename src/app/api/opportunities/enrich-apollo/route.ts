@@ -275,10 +275,10 @@ export async function POST(req: NextRequest) {
             log('External Service Response Status:', extRes.status);
             if (!extRes.ok) {
               const txt = await extRes.text();
-              console.error('[enrich-hybrid] External Service Error Body:', txt);
+              log(`[enrich-hybrid] External Service Error Body: ${txt}`);
             }
-          } catch (e) {
-            console.error('[enrich-hybrid] External Service Connection Failed:', e);
+          } catch (e: any) {
+            log(`[enrich-hybrid] External Service Connection Failed: ${e?.message || e}`);
           }
         } else {
           console.warn('[enrich-hybrid] NO ENRICHMENT_SERVICE_URL DEFINED. Skipping external call.');
