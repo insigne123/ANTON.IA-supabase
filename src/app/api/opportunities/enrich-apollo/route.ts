@@ -269,7 +269,7 @@ export async function POST(req: NextRequest) {
           try {
             const extRes = await fetch(externalUrl, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-api-secret': process.env.ENRICHMENT_SERVICE_SECRET || '' },
+              headers: { 'Content-Type': 'application/json', 'x-api-secret-key': secret },
               body: JSON.stringify(servicePayload)
             });
             log('External Service Response Status:', extRes.status);
