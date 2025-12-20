@@ -229,8 +229,8 @@ export async function POST(req: NextRequest) {
         const secret = (process.env.ENRICHMENT_SERVICE_SECRET || '').trim(); // FORCE TRIM
         const maskedSecret = secret ? `${secret.substring(0, 4)}...${secret.substring(secret.length - 4)}` : '(empty)';
 
-        console.log(`[enrich-hybrid] Phase 2 Phone. URL present? ${!!externalUrl}. Value: ${externalUrl || '(empty)'}`);
-        console.log(`[enrich-hybrid] Secret loaded? ${!!secret}. Length: ${secret.length}. Masked: ${maskedSecret}`);
+        log(`[enrich-hybrid] Phase 2 Phone. URL present? ${!!externalUrl}. Value: ${externalUrl || '(empty)'}`);
+        log(`[enrich-hybrid] [${new Date().toISOString()}] Secret loaded? ${!!secret}. Length: ${secret.length}. Masked: ${maskedSecret}`);
 
         const servicePayload: any = {
           record_id: enrichedId,
