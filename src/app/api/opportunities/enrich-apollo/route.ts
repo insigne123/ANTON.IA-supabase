@@ -49,7 +49,8 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: 'missing user id' }, { status: 401 });
 
   try {
-    const { leads, revealEmail = true, revealPhone = false } = (await req.json()) as EnrichInput;
+    const body = await req.json() as EnrichInput & { tableName?: string };
+    const { leads, revealEmail = true, revealPhone = false } = body;
     if (!Array.isArray(leads) || leads.length === 0) return NextResponse.json({ error: 'leads requerido' }, { status: 400 });
 
     const serverLogs: string[] = [];
@@ -234,7 +235,7 @@ export async function POST(req: NextRequest) {
 
         const servicePayload: any = {
           record_id: enrichedId,
-          table_name: 'enriched_opportunities',
+          table_name: body.tableName || 'enriched_opportunities',
           lead: {
             first_name: '',
             last_name: '',

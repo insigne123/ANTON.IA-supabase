@@ -119,7 +119,8 @@ export default function EnrichedLeadsClient() {
         body: JSON.stringify({
           leads: payloadLeads,
           revealEmail: opts.revealEmail,
-          revealPhone: opts.revealPhone
+          revealPhone: opts.revealPhone,
+          tableName: 'enriched_leads'
         }),
       });
 
