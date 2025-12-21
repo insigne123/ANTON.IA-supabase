@@ -195,7 +195,7 @@ export type EnrichedLead = {
   fullName: string;
   title?: string;
   email?: string;
-  emailStatus?: 'verified' | 'guessed' | 'locked' | 'unknown';
+  emailStatus?: 'verified' | 'guessed' | 'locked' | 'unknown' | 'not_found';
   linkedinUrl?: string;
   companyName?: string;
   companyDomain?: string;
@@ -222,7 +222,7 @@ export type EnrichedOppLead = {
   fullName: string;
   title?: string;
   email?: string;
-  emailStatus?: 'verified' | 'guessed' | 'locked' | 'unknown';
+  emailStatus?: 'verified' | 'guessed' | 'locked' | 'unknown' | 'not_found';
   linkedinUrl?: string;
   companyName?: string;
   companyDomain?: string;

@@ -735,9 +735,15 @@ export default function EnrichedOpportunitiesPage() {
                     <TableCell>{e.fullName}</TableCell>
                     <TableCell>{e.title || '—'}</TableCell>
                     <TableCell>{e.companyName || '—'}</TableCell>
-                    <TableCell>{extractPrimaryEmail(e).email || (e.emailStatus === 'locked' ? '(locked)' : '—')}</TableCell>
                     <TableCell>
-                      {e.primaryPhone ? (
+                      {e.email === 'Not Found'
+                        ? <span className="text-muted-foreground text-xs italic">Not Found</span>
+                        : (extractPrimaryEmail(e).email || (e.emailStatus === 'locked' ? '(locked)' : '—'))}
+                    </TableCell>
+                    <TableCell>
+                      {e.primaryPhone === 'Not Found' ? (
+                        <span className="text-muted-foreground text-xs italic">Not Found</span>
+                      ) : e.primaryPhone ? (
                         <div
                           className="flex flex-col gap-1 cursor-pointer hover:bg-muted/50 p-1 rounded transition-colors group"
                           onClick={() => {

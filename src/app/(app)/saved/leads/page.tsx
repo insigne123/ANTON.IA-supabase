@@ -279,29 +279,25 @@ export default function SavedLeadsPage() {
       console.log('[enrich] Enriched Now (raw):', enrichedNow);
 
       // 1) Filtrar y Añadir a Enriquecidos
-      // Solo guardamos si encontramos ALGO (email o teléfono de cualquier tipo)
-      const usefulEnriched = enrichedNow.filter(e =>
-        e.email ||
-        e.primaryPhone ||
-        (e.phoneNumbers && Array.isArray(e.phoneNumbers) && e.phoneNumbers.length > 0)
-      );
+      // NUEVO: Guardamos TODOS, incluso si no tienen datos, para que el usuario vea "Not Found"
+      const leadsToSave = enrichedNow.map(e => ({
+        ...e,
+        email: e.email || 'Not Found',
+        primaryPhone: e.primaryPhone || (e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : 'Not Found'),
+        // Si quieres guardar un estado explícito de "no encontrado"
+        emailStatus: e.email ? (e.emailStatus || 'verified') : 'not_found',
+      }));
 
       let addRes: any = { addedCount: 0 };
-      if (usefulEnriched.length > 0) {
-        addRes = await enrichedLeadsStorage.addDedup(usefulEnriched);
-      } else {
-        // Feedback si no se encontró nada útil
-        if (chosen.length === 1) {
-          toast({ variant: 'default', title: 'Sin datos nuevos', description: 'Apollo no encontró email ni teléfono para este lead.' });
-        }
+      if (leadsToSave.length > 0) {
+        addRes = await enrichedLeadsStorage.addDedup(leadsToSave);
       }
 
-      // 2) Remover de Guardados si obtuvimos ID de contacto (email o telefono)
+      // 2) Remover de Guardados (siempre removemos porque ya se procesó)
       const toRemoveIds = new Set<string>();
       for (let i = 0; i < enrichedNow.length; i++) {
-        const enriched = enrichedNow[i];
         const src = chosen[i];
-        if ((enriched?.email || enriched?.primaryPhone) && src?.id) {
+        if (src?.id) {
           toRemoveIds.add(src.id);
         }
       }
@@ -314,9 +310,11 @@ export default function SavedLeadsPage() {
       setSavedLeads(prev => prev.filter(l => !toRemoveIds.has(l.id)));
       setSelLead({});
 
+      const foundCount = leadsToSave.filter(l => l.email !== 'Not Found' || l.primaryPhone !== 'Not Found').length;
+
       toast({
-        title: 'Enriquecimiento listo',
-        description: `Movidos: ${removedCount}. Cuota consumida: ${enrichedCountFromServer}`,
+        title: 'Enriquecimiento completado',
+        description: `Procesados: ${leadsToSave.length}. Con datos: ${foundCount}. Movidos a Enriquecidos.`,
       });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error', description: e.message || 'Ocurrió un error' });

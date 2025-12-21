@@ -208,10 +208,14 @@ export default function SavedOpportunitiesPage() {
             const enrichedNow: EnrichedOppLead[] = (j.enriched || []).map((e: any) => ({
                 ...e,
                 descriptionSnippet: currentOpp?.descriptionSnippet,
+                email: e.email || 'Not Found',
+                emailStatus: e.email ? (e.emailStatus || 'verified') : 'not_found',
+                primaryPhone: e.primaryPhone || (e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : 'Not Found'),
             }));
             await enrichedOpportunitiesStorage.addDedup(enrichedNow);
 
-            toast({ title: 'Listo', description: `Enriquecidos ${enrichedNow.length} lead(s).` });
+            const foundCount = enrichedNow.filter(l => l.email !== 'Not Found').length;
+            toast({ title: 'Enriquecimiento completado', description: `Procesados: ${enrichedNow.length}. Con email: ${foundCount}.` });
             setOrgPickerOpen(false);
             setOpenEnrichOptions(false);
         } catch (e: any) {
