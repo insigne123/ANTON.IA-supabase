@@ -195,7 +195,7 @@ export default function SavedLeadsPage() {
 
     setEnriching(true);
     try {
-      const clientId = getClientId();
+      const finalUserId = user?.id || getClientId();
       const payloadLeads = chosen.map(l => ({
         fullName: l.name,
         linkedinUrl: l.linkedinUrl || undefined,
@@ -208,7 +208,7 @@ export default function SavedLeadsPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-id': clientId,
+          'x-user-id': finalUserId,
           'x-quota-ticket': getQuotaTicket() || '',
         },
         body: JSON.stringify({ leads: payloadLeads, revealEmail, revealPhone, tableName: 'enriched_leads' }),

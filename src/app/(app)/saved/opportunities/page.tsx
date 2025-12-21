@@ -176,7 +176,10 @@ export default function SavedOpportunitiesPage() {
                 (chosenOrg?.website_url ? new URL(chosenOrg.website_url).hostname : undefined);
 
             const clientId = getClientId?.() ?? '';
-            if (!clientId) throw new Error('Falta ID de cliente (refresca la página)');
+            // Use real user ID if available
+            const finalUserId = user?.id || clientId;
+
+            if (!finalUserId) throw new Error('Falta ID de usuario (refresca la página)');
 
             const payload = {
                 leads: chosen.map(l => ({
@@ -194,7 +197,7 @@ export default function SavedOpportunitiesPage() {
 
             const r = await fetch('/api/opportunities/enrich-apollo', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-user-id': clientId },
+                headers: { 'Content-Type': 'application/json', 'x-user-id': finalUserId },
                 body: JSON.stringify(payload),
             });
             const j = await r.json();

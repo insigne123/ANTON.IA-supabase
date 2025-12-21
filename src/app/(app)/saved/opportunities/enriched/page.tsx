@@ -88,6 +88,9 @@ export default function EnrichedOpportunitiesPage() {
       return;
     }
 
+    const { data: { user } } = await supabase.auth.getUser();
+    const finalUserId = user?.id || clientId;
+
     setEnriching(true);
     toast({ title: 'Reintentando...', description: 'Enviando solicitud para ' + lead.fullName });
 
@@ -109,7 +112,7 @@ export default function EnrichedOpportunitiesPage() {
 
       const res = await fetch('/api/opportunities/enrich-apollo', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': clientId },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': finalUserId },
         body: JSON.stringify(payload),
       });
 
