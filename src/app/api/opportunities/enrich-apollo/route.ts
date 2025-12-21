@@ -130,8 +130,13 @@ export async function POST(req: NextRequest) {
             companyDomain: cleanDomain(l.companyDomain),
           }
         };
-        try { await supabaseAdmin.from(tableName).insert(initialRow); }
-        catch (err) { console.error('Failed to insert initial row', err); }
+        const { error: insertError } = await supabaseAdmin.from(tableName).insert(initialRow);
+        if (insertError) {
+          log('[FATAL] Failed to insert initial row:', insertError.message, JSON.stringify(insertError));
+          // STOP processing this lead. If we can't save it, we can't enrich it.
+          // Continue to next lead or throw? Let's skip this lead to be safe but log heavily.
+          continue;
+        }
       } else {
         // If retrying phone, mark pending again
         if (revealPhone) {
