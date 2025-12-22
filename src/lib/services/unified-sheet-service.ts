@@ -47,11 +47,17 @@ export const unifiedSheetService = {
     async setCustom(gid: string, patch: CustomData): Promise<void> {
         try {
             // Upsert
+            const { data: { user } } = await supabase.auth.getUser();
+            const orgId = await require('./organization-service').organizationService.getCurrentOrganizationId();
+
+            if (!user) return;
+
             const { error } = await supabase
                 .from(TABLE_NAME)
                 .upsert({
                     id: gid,
                     ...patch,
+                    organization_id: orgId, // Ensure data is owned by org
                     updated_at: new Date().toISOString(),
                 });
 
@@ -65,14 +71,18 @@ export const unifiedSheetService = {
 
     async bulkSetCustom(rows: UnifiedRow[]): Promise<void> {
         try {
+            const { data: { user } } = await supabase.auth.getUser();
+            const orgId = await require('./organization-service').organizationService.getCurrentOrganizationId();
+            if (!user) return;
+
             const updates = rows
                 .map(r => {
-                    const patch: any = { id: r.gid, updated_at: new Date().toISOString() };
+                    const patch: any = { id: r.gid, updated_at: new Date().toISOString(), organization_id: orgId };
                     if (r.stage !== undefined) patch.stage = r.stage;
                     if (r.owner !== undefined) patch.owner = r.owner;
                     if (r.notes !== undefined) patch.notes = r.notes;
                     // Only include if there's actual data to save (besides id/updated_at)
-                    if (Object.keys(patch).length > 2) return patch;
+                    if (Object.keys(patch).length > 3) return patch; // >3 because id, updated_at, orgId
                     return null;
                 })
                 .filter(Boolean);

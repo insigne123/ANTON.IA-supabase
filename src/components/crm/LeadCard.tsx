@@ -29,15 +29,22 @@ export function LeadCard({ lead, onClick }: Props) {
         opacity: isDragging ? 0.5 : 1,
     };
 
+    const handleClick = (e: React.MouseEvent) => {
+        // Only trigger onClick if not dragging
+        if (!isDragging && onClick) {
+            onClick();
+        }
+    };
+
     return (
-        <div ref={setNodeRef} style={style} {...attributes} {...listeners} className="mb-2">
+        <div ref={setNodeRef} style={style} {...attributes} className="mb-2">
             <Card
                 className="cursor-pointer hover:shadow-md transition-shadow bg-card"
-                onClick={onClick}
+                onClick={handleClick}
             >
                 <CardContent className="p-3 space-y-2">
                     <div className="flex items-start justify-between">
-                        <div className="space-y-0.5">
+                        <div className="space-y-0.5 flex-1" {...listeners}>
                             <h4 className="text-sm font-semibold line-clamp-1 leading-tight">{lead.name || 'Sin nombre'}</h4>
                             <p className="text-xs text-muted-foreground line-clamp-1">{lead.title || lead.company}</p>
                             {lead.title && lead.company && <p className="text-[10px] text-muted-foreground line-clamp-1">{lead.company}</p>}
