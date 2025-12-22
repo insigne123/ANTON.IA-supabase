@@ -163,7 +163,12 @@ export default function EnrichedOpportunitiesPage() {
 
   // Helpers Referencias
   const leadRefOf = (e: EnrichedOppLead) => e.id || e.email || e.linkedinUrl || `${e.fullName}|${e.companyName || ''}`;
-  const hasReportStrict = (e: EnrichedOppLead) => !!findReportByRef(leadRefOf(e))?.cross;
+
+  const getReportFor = (e: EnrichedOppLead) => {
+    return findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
+  };
+
+  const hasReportStrict = (e: EnrichedOppLead) => !!getReportFor(e)?.cross;
   const isResearchedLead = (e: EnrichedOppLead) => isResearched(leadRefOf(e)) || hasReportStrict(e);
 
   // Bulk Checks
@@ -307,7 +312,7 @@ export default function EnrichedOpportunitiesPage() {
     ids.forEach(id => {
       const l = enriched.find(x => x.id === id);
       if (!l || !canContact(l)) return; // Double check
-      const rep = findReportByRef(leadRefOf(l));
+      const rep = getReportFor(l); // Usage updated to use robust lookup
       toCompose.push({
         lead: l,
         subject: rep?.cross?.emailDraft?.subject || `Contacto: ${l.fullName}`,
@@ -480,7 +485,7 @@ export default function EnrichedOpportunitiesPage() {
                     const emailData = extractPrimaryEmail(e);
                     const hasEmail = !!emailData.email;
                     const researched = isResearchedLead(e);
-                    const report = findReportByRef(leadRefOf(e))?.cross;
+                    const report = getReportFor(e)?.cross;
                     const pendingPhone = e.enrichmentStatus === 'pending_phone';
 
                     return (
@@ -712,23 +717,32 @@ export default function EnrichedOpportunitiesPage() {
           <div className="mb-4 border border-border/50 rounded-md p-3 bg-muted/20">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Inyecta una imagen invisible para detectar apertura en tiempo real">
                   <Checkbox checked={usePixel} onCheckedChange={(c) => setUsePixel(!!c)} />
                   Activar Tracking Pixel
                   <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded ml-1">Recomendado</span>
                 </label>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Inserta un píxel invisible para detectar aperturas.
+                </p>
               </div>
               <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Reescribe enlaces para saber si el usuario hizo clic">
                   <Checkbox checked={useLinkTracking} onCheckedChange={(c) => setUseLinkTracking(!!c)} />
                   Track Link Clicks
                 </label>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Hace rastreables los links de tus correos.
+                </p>
               </div>
               <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Solicita confirmación de lectura estándar">
                   <Checkbox checked={useReadReceipt} onCheckedChange={(c) => setUseReadReceipt(!!c)} />
                   Solicitar Confirmación
                 </label>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Pide confirmación explícita al destinatario.
+                </p>
               </div>
             </div>
           </div>
