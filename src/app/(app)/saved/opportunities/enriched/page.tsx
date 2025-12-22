@@ -10,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import type { EnrichedOppLead, LeadResearchReport } from '@/lib/types';
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
-import { upsertLeadReports, getLeadReports, findReportByRef, removeReportFor } from '@/lib/lead-research-storage';
+import { upsertLeadReports, getLeadReports, findReportByRef, removeReportFor, findReportForLead } from '@/lib/lead-research-storage';
 import { extractPrimaryEmail } from '@/lib/email-utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -19,14 +19,12 @@ import { supabase } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
 import { isResearched, markResearched, removeResearched } from '@/lib/researched-leads-storage';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
-import { Linkedin, Eraser, Filter, Trash2, Download, FileSpreadsheet, RotateCw, Phone, MessageSquare } from 'lucide-react';
+import { Linkedin, Eraser, Filter, Trash2, Download, FileSpreadsheet, RotateCw, Phone } from 'lucide-react';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
 import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
-import { profileService } from '@/lib/services/profile-service';
 import * as Quota from '@/lib/quota-client';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
 
 function getClientUserId(): string {
@@ -67,7 +65,6 @@ export default function EnrichedOpportunitiesPage() {
   // Enrichment Options
   const [openEnrichOptions, setOpenEnrichOptions] = useState(false);
   const [enriching, setEnriching] = useState(false);
-  const [leadsToEnrich, setLeadsToEnrich] = useState<EnrichedOppLead[]>([]);
 
   // Filtros
   const [showFilters, setShowFilters] = useState(false);
@@ -85,6 +82,9 @@ export default function EnrichedOpportunitiesPage() {
   // Paginación
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState<number>(1);
+
+  // Contact Selection (Mock for compatibility with EnrichedLeads logic)
+  const [selectedToContact, setSelectedToContact] = useState<Set<string>>(new Set());
 
   // Load Data
   const loadData = async () => {
@@ -164,6 +164,20 @@ export default function EnrichedOpportunitiesPage() {
     });
   };
 
+  const canContact = (e: EnrichedOppLead) => !!e.email && e.email !== 'Not Found';
+  const toggleAllContact = (checked: boolean) => {
+    const next = new Set(selectedToContact);
+    pageLeads.forEach(e => {
+      if (canContact(e)) {
+        if (checked) next.add(e.id); else next.delete(e.id);
+      }
+    });
+    setSelectedToContact(next);
+  };
+  const contactEligiblePage = pageLeads.filter(canContact).length;
+  const allContactChecked = contactEligiblePage > 0 && pageLeads.filter(canContact).every(e => selectedToContact.has(e.id));
+
+
   // Acciones
   const handleExportCsv = () => exportToCsv(enriched, 'oportunidades_enriquecidas');
   const handleExportXlsx = () => exportToXlsx(enriched, 'oportunidades_enriquecidas');
@@ -208,6 +222,15 @@ export default function EnrichedOpportunitiesPage() {
     toast({ title: 'Investigaciones borradas de seleccionados' });
     setSel({});
   };
+
+  const clearInvestigationFor = (lead: EnrichedOppLead) => {
+    const ref = leadRefOf(lead);
+    removeReportFor(ref);
+    removeResearched(ref);
+    setReports(getLeadReports());
+    toast({ title: 'Investigación eliminada' });
+    if (reportLead?.id === lead.id) setOpenReport(false);
+  }
 
   // N8N Research
   const runOneInvestigation = async (e: EnrichedOppLead, userId: string) => {
@@ -298,40 +321,40 @@ export default function EnrichedOpportunitiesPage() {
         description="Gestiona, investiga y contacta a los leads provenientes de oportunidades."
       >
         <div className="flex gap-2">
-          {/* Mostrar SOLO cuota de investigación para cumplir requerimiento de 'barra única' */}
           <DailyQuotaProgress kinds={['research']} compact className="w-[200px]" />
+          <BackBar />
         </div>
       </PageHeader>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Leads guardados (Enriquecidos)</CardTitle>
-            <CardDescription>Selecciona los que tienen email para investigar.</CardDescription>
+          <div className="space-y-1">
+            <CardTitle>Leads enriquecidos (Oportunidades)</CardTitle>
+            <CardDescription>Gestiona, investiga y contacta tus leads de oportunidades.</CardDescription>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center space-x-2 mr-4">
-              <Switch id="my-leads" checked={showOnlyMyLeads} onCheckedChange={setShowOnlyMyLeads} />
-              <Label htmlFor="my-leads">Solo mis leads</Label>
-            </div>
-
-            <Button variant="outline" size="sm" onClick={handleExportCsv} title="Exportar CSV">
-              <Download className="mr-2 h-4 w-4" /> Exportar CSV
-            </Button>
-
             <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)}>
               <Filter className="w-4 h-4 mr-2" />
-              {showFilters ? 'Ocultar Filtros' : 'Filtrar'}
+              filtros
             </Button>
-
-            <Button
-              onClick={handleRunN8nResearch}
-              disabled={researching || Object.keys(sel).length === 0}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              {researching ? <RotateCw className="w-4 h-4 animate-spin mr-2" /> : <RotateCw className="w-4 h-4 mr-2" />}
-              Investigar ({Object.keys(sel).length})
+            {/* Bulk Actions Only if Selected */}
+            {Object.keys(sel).length > 0 && (
+              <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+                <Button variant="secondary" size="sm" onClick={handleDeleteSelected}>
+                  <Trash2 className="w-4 h-4 mr-1" /> Borrar seleccionados
+                </Button>
+                <Button variant="default" size="sm" onClick={handleRunN8nResearch} disabled={researching}>
+                  {researching ? <RotateCw className="w-4 h-4 animate-spin mr-2" /> : <RotateCw className="w-4 h-4 mr-2" />}
+                  Investigar ({Object.keys(sel).length})
+                </Button>
+              </div>
+            )}
+            <Button variant="outline" size="sm" onClick={handleExportCsv} title="Exportar CSV">
+              <Download className="w-4 h-4" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleExportXlsx} title="Exportar Excel">
+              <FileSpreadsheet className="w-4 h-4" />
             </Button>
           </div>
         </CardHeader>
@@ -365,103 +388,103 @@ export default function EnrichedOpportunitiesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10">
-                    <Checkbox
-                      checked={allResearchChecked}
-                      onCheckedChange={v => toggleAllResearch(Boolean(v))}
-                    />
+                  <TableHead className="w-12 text-center" title="Marcar para INVESTIGAR con n8n">
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="text-[10px] uppercase text-muted-foreground">Inv.</span>
+                      <Checkbox
+                        checked={allResearchChecked}
+                        onCheckedChange={(v) => toggleAllResearch(Boolean(v))}
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="w-12 text-center" title="Marcar para CONTACTAR por email">
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="text-[10px] uppercase text-muted-foreground">Cont.</span>
+                      <Checkbox
+                        checked={contactEligiblePage > 0 ? allContactChecked : false}
+                        disabled={contactEligiblePage === 0}
+                        onCheckedChange={(v) => toggleAllContact(Boolean(v))}
+                      />
+                    </div>
                   </TableHead>
                   <TableHead>Nombre</TableHead>
                   <TableHead>Cargo</TableHead>
                   <TableHead>Empresa</TableHead>
                   <TableHead>Email</TableHead>
-                  <TableHead>Website</TableHead>
+                  <TableHead>Teléfono</TableHead>
                   <TableHead>LinkedIn</TableHead>
-                  <TableHead>Industria</TableHead>
-                  <TableHead>País</TableHead>
-                  <TableHead>Ciudad</TableHead>
-                  <TableHead className="w-20 text-right">Acciones</TableHead>
+                  <TableHead>Dominio</TableHead>
+                  <TableHead className="w-64 text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pageLeads.length === 0 ? (
-                  <TableRow><TableCell colSpan={13} className="h-24 text-center text-muted-foreground">No hay leads.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={10} className="h-24 text-center text-muted-foreground">No hay leads.</TableCell></TableRow>
                 ) : (
-                  pageLeads.map((lead) => {
-                    const emailData = extractPrimaryEmail(lead);
+                  pageLeads.map((e) => {
+                    const emailData = extractPrimaryEmail(e);
                     const hasEmail = !!emailData.email;
-                    const researched = isResearchedLead(lead);
-                    const report = findReportByRef(leadRefOf(lead))?.cross;
-
-                    // Safe properties access (assuming EnrichedOppLead might have extra props at runtime or safely undefined)
-                    const anyLead = lead as any;
-                    const hasAvatar = !!anyLead.avatar || !!anyLead.photo_url;
-                    const avatarSrc = anyLead.avatar || anyLead.photo_url || anyLead.photoUrl;
+                    const researched = isResearchedLead(e);
+                    const report = findReportByRef(leadRefOf(e))?.cross;
+                    const pendingPhone = e.enrichmentStatus === 'pending_phone';
 
                     return (
-                      <TableRow key={lead.id}>
-                        <TableCell>
+                      <TableRow key={e.id}>
+                        <TableCell className="text-center">
                           <Checkbox
-                            checked={!!sel[lead.id]}
-                            onCheckedChange={(c) => setSel(prev => {
-                              const n = { ...prev };
-                              if (c) n[lead.id] = true; else delete n[lead.id];
-                              return n;
-                            })}
+                            checked={!!sel[e.id]}
+                            onCheckedChange={(v) => setSel(prev => ({ ...prev, [e.id]: Boolean(v) }))}
                             disabled={!hasEmail || researched}
                           />
                         </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-10 w-10">
-                              <AvatarImage src={avatarSrc} alt={lead.fullName} />
-                              <AvatarFallback>{(lead.fullName || '?').charAt(0)}</AvatarFallback>
-                            </Avatar>
-                            <div className="flex flex-col">
-                              <span className="font-medium">{lead.fullName}</span>
-                            </div>
-                          </div>
+                        <TableCell className="text-center">
+                          <Checkbox
+                            disabled={!canContact(e)}
+                            checked={selectedToContact.has(e.id)}
+                            onCheckedChange={(v) => {
+                              const next = new Set(selectedToContact);
+                              if (v) next.add(e.id); else next.delete(e.id);
+                              setSelectedToContact(next);
+                            }}
+                          />
                         </TableCell>
-                        <TableCell>{lead.title || '—'}</TableCell>
-                        <TableCell>{lead.companyName || '—'}</TableCell>
+                        <TableCell>{e.fullName}</TableCell>
+                        <TableCell>{e.title || '—'}</TableCell>
+                        <TableCell>{e.companyName || '—'}</TableCell>
                         <TableCell>
                           {hasEmail ? (
                             <span className={emailData.status === 'verified' ? 'text-green-600' : 'text-yellow-600'}>
                               {emailData.email}
                             </span>
-                          ) : <span className="text-muted-foreground">—</span>}
+                          ) : <span className="text-xs italic text-muted-foreground">Not Found</span>}
                         </TableCell>
                         <TableCell>
-                          {lead.companyDomain ? (
-                            <a href={`https://${lead.companyDomain}`} target="_blank" className="underline">
-                              {displayDomain(lead.companyDomain)}
-                            </a>
-                          ) : '—'}
+                          {e.primaryPhone ? (
+                            <div className="flex flex-col gap-1 cursor-pointer hover:bg-muted/50 p-1 rounded transition-colors group" onClick={() => { setLeadToCall(e); setCallModalOpen(true); }}>
+                              <div className="flex items-center gap-1 text-sm font-medium text-blue-600 group-hover:text-blue-800">
+                                <Phone className="h-3 w-3" />
+                                <span>{e.primaryPhone}</span>
+                              </div>
+                            </div>
+                          ) : pendingPhone ? (
+                            <span className="text-xs animate-pulse text-orange-500">Buscando...</span>
+                          ) : (
+                            <span className="text-muted-foreground text-xs italic">—</span>
+                          )}
                         </TableCell>
-                        <TableCell>
-                          {lead.linkedinUrl ? (
-                            <a href={lead.linkedinUrl} target="_blank" className="underline">Perfil</a>
-                          ) : '—'}
-                        </TableCell>
-                        <TableCell>{anyLead.industry || '—'}</TableCell>
-                        <TableCell>{anyLead.country || '—'}</TableCell>
-                        <TableCell>{anyLead.city || '—'}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            {report ? (
-                              <Button size="icon" variant="ghost" onClick={() => { setReportLead(lead); setReportToView({ leadRef: leadRefOf(lead), cross: report } as any); setOpenReport(true); }} title="Ver Reporte">
-                                <MessageSquare className="h-4 w-4 text-green-600" />
-                              </Button>
-                            ) : (
-                              <Button size="icon" variant="ghost" disabled title="Sin reporte">
-                                <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                              </Button>
-                            )}
-
-                            <Button size="icon" variant="ghost" onClick={() => handleDeleteOne(lead.id)} title="Eliminar">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
+                        <TableCell>{e.linkedinUrl ? <a className="underline" target="_blank" href={e.linkedinUrl}>Perfil</a> : '—'}</TableCell>
+                        <TableCell>{e.companyDomain || '—'}</TableCell>
+                        <TableCell className="text-right space-x-2">
+                          <Button size="sm" variant="outline" onClick={() => { setReportLead(e); setReportToView(report ? { leadRef: leadRefOf(e), cross: report } as any : null); setOpenReport(true); }}>
+                            {report ? 'Ver reporte' : 'Sin reporte'}
+                          </Button>
+                          <Button size="sm" disabled={!canContact(e)}>Contactar</Button>
+                          <Button size="icon" variant="ghost" disabled={!e.linkedinUrl} onClick={() => e.linkedinUrl && window.open(e.linkedinUrl, '_blank')}>
+                            <Linkedin className="h-4 w-4" />
+                          </Button>
+                          <Button size="icon" variant="ghost" onClick={() => handleDeleteOne(e.id)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     );
@@ -488,7 +511,14 @@ export default function EnrichedOpportunitiesPage() {
           <DialogHeader>
             <DialogTitle>Reporte: {reportLead?.companyName}</DialogTitle>
           </DialogHeader>
-          {reportToView?.cross && (
+          {reportToView?.cross && reportLead && (
+            <div className="w-full flex justify-end mb-2">
+              <Button variant="destructive" size="sm" onClick={() => clearInvestigationFor(reportLead)}>
+                <Eraser className="h-4 w-4 mr-1" /> Eliminar investigación de este lead
+              </Button>
+            </div>
+          )}
+          {reportToView?.cross ? (
             <div className="space-y-4 text-sm">
               <p>{reportToView.cross.overview}</p>
               {reportToView.cross.pains?.length > 0 && <div><strong>Pains:</strong> <ul className="list-disc pl-5">{reportToView.cross.pains.map(p => <li key={p}>{p}</li>)}</ul></div>}
@@ -499,11 +529,15 @@ export default function EnrichedOpportunitiesPage() {
                 </div>
               )}
             </div>
+          ) : (
+            <div className="p-4 text-center text-muted-foreground">
+              No hay reporte generado para este lead. Selecciónalo en la lista y pulsa "Investigar (n8n)".
+            </div>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* CALL MODAL (Kept for completeness if user uses phones in future) */}
+      {/* CALL MODAL */}
       {leadToCall && <PhoneCallModal open={callModalOpen} onOpenChange={setCallModalOpen} customerName={leadToCall.fullName} customerPhone={leadToCall.primaryPhone || ''} leadIdentifier={leadToCall.id} />}
 
       <EnrichmentOptionsDialog open={openEnrichOptions} onOpenChange={setOpenEnrichOptions} onConfirm={() => { }} loading={false} />
