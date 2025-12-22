@@ -10,9 +10,9 @@ export async function middleware(req: NextRequest) {
         data: { session },
     } = await supabase.auth.getSession();
 
-    // If user is signed in and the current path is /login, redirect the user to /
+    // If user is signed in and the current path is /login, redirect the user to /dashboard
     if (session && req.nextUrl.pathname === '/login') {
-        return NextResponse.redirect(new URL('/', req.url));
+        return NextResponse.redirect(new URL('/dashboard', req.url));
     }
 
     // If user is not signed in and the current path is not /login, redirect the user to /login
