@@ -256,33 +256,98 @@ export default function EnrichedOpportunitiesPage() {
     if (reportLead?.id === lead.id) setOpenReport(false);
   }
 
-  // N8N Research
+  // N8N Research (mirrored from Leads Enriched for consistency)
   const runOneInvestigation = async (e: EnrichedOppLead, userId: string) => {
-    const base = buildN8nPayloadFromLead(e as any) as any;
     const leadRef = leadRefOf(e);
 
-    // Initial context (will be enriched by API route too)
+    // Usa tu builder (ya arma targetCompany/lead/userCompanyProfile)
+    const base = buildN8nPayloadFromLead(e as any) as any;
+
+    // Normaliza y asegura meta.leadRef dentro de companies[0]
+    const item = base?.companies?.[0]
+      ? { ...base.companies[0] }
+      : {
+        leadRef,
+        targetCompany: {
+          name: e.companyName || null,
+          domain: e.companyDomain || null,
+          linkedin: (e as any).companyLinkedinUrl || null,
+          country: (e as any).country || null,
+          industry: (e as any).industry || null,
+          website: e.companyDomain ? `https://${e.companyDomain}` : null,
+        },
+        lead: {
+          id: e.id,
+          fullName: e.fullName,
+          title: e.title,
+          email: e.email,
+          linkedinUrl: e.linkedinUrl,
+        },
+      };
+
+    if (!item.meta) item.meta = {};
+    if (!item.meta.leadRef) item.meta.leadRef = leadRef;
+    if (!item.leadRef) item.leadRef = leadRef;
+
+    // Obtener perfil real de la empresa desde Supabase
     const { profileService } = await import('@/lib/services/profile-service');
-    const profile = await profileService.getCurrentProfile();
+    const realProfile = await profileService.getCurrentProfile();
+    // Mapear campos de profiles -> n8n structure
+    const extended = realProfile?.signatures?.['profile_extended'] || {};
     const effectiveCompanyProfile = {
-      name: profile?.company_name || '',
-      website: profile?.company_domain || ''
+      name: realProfile?.company_name || realProfile?.full_name || 'Mi Empresa',
+      sector: extended.sector || '',
+      description: extended.description || '',
+      services: extended.services || '',
+      valueProposition: extended.valueProposition || '',
+      website: realProfile?.company_domain || '',
     };
 
     const payload = {
-      companies: [{ ...base.companies?.[0], leadRef, meta: { leadRef } }],
+      companies: [item],
       userCompanyProfile: effectiveCompanyProfile,
     };
+
+    // Enviamos el shape ANIDADO que n8n espera + trazabilidad
     const res = await fetch('/api/research/n8n', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-User-Id': userId, 'X-App-Env': 'LeadFlowAI' },
-      body: JSON.stringify(payload)
+      headers: {
+        'Content-Type': 'application/json',
+        'X-User-Id': userId,
+        'X-App-Env': 'LeadFlowAI',
+      },
+      cache: 'no-store',
+      body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error('API Error');
-    const data = await res.json();
-    // Handle { reports: [...] } response structure
-    const report = Array.isArray(data.reports) && data.reports.length > 0 ? data.reports[0] : (data.report || data);
-    return { leadRef, report };
+
+    let data: any = null;
+    let text = '';
+    try { data = await res.json(); } catch { text = await res.text().catch(() => ''); }
+
+    if (!res.ok) {
+      const msg = data?.error
+        || (text?.startsWith('<') ? 'El backend devolvió HTML (error interno). Revisa /api/research/n8n.' : (text || 'n8n error'));
+      throw new Error(msg);
+    }
+
+    // Espejo local de cuota
+    Quota.incClientQuota('research');
+
+    // Normalización de reports (cross/meta.leadRef) - Para Oportunidades guardamos en DB
+    if (Array.isArray(data?.reports) && data.reports.length) {
+      const normalized = data.reports.map((r: any) => {
+        const out: any = { ...r };
+        if (!out.cross) out.cross = out.report || out.data || null;
+        if (!out.meta) out.meta = {};
+        if (!out.meta.leadRef) out.meta.leadRef = leadRef;
+        return out;
+      });
+      // Return first normalized report for cloud persistence
+      return { leadRef, report: normalized[0]?.cross || normalized[0] };
+    }
+
+    // Fallback: si no hay reports array, intenta usar el objeto directamente
+    return { leadRef, report: data };
   };
 
   const handleRunN8nResearch = async () => {
