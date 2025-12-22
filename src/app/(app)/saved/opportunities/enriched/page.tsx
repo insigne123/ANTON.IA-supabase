@@ -8,26 +8,26 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import type { EnrichedOppLead, LeadResearchReport, StyleProfile } from '@/lib/types';
+import type { EnrichedOppLead, LeadResearchReport } from '@/lib/types';
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
-import { upsertLeadReports, getLeadReports, findReportForLead, findReportByRef, removeReportFor } from '@/lib/lead-research-storage';
-import { BackBar } from '@/components/back-bar';
+import { upsertLeadReports, getLeadReports, findReportByRef, removeReportFor } from '@/lib/lead-research-storage';
 import { extractPrimaryEmail } from '@/lib/email-utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
 import { isResearched, markResearched, removeResearched } from '@/lib/researched-leads-storage';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
-import { Linkedin, Eraser, Filter, Trash2, Download, FileSpreadsheet, RotateCw, Phone } from 'lucide-react';
+import { Linkedin, Eraser, Filter, Trash2, Download, FileSpreadsheet, RotateCw, Phone, MessageSquare } from 'lucide-react';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
 import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
 import { profileService } from '@/lib/services/profile-service';
 import * as Quota from '@/lib/quota-client';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Switch } from '@/components/ui/switch';
 
 function getClientUserId(): string {
   try {
@@ -43,6 +43,9 @@ async function getUserIdOrFail(): Promise<string> {
   if (!user?.id) throw new Error('no_identity');
   return user.id;
 }
+
+const displayDomain = (url: string) => { try { const u = new URL(url.startsWith('http') ? url : `https://${url}`); return u.hostname.replace(/^www\./, ''); } catch { return url.replace(/^https?:\/\//, '').replace(/^www\./, ''); } };
+const asHttp = (url: string) => url.startsWith('http') ? url : `https://${url}`;
 
 export default function EnrichedOpportunitiesPage() {
   const router = useRouter();
@@ -74,10 +77,10 @@ export default function EnrichedOpportunitiesPage() {
   const [fExcCompany, setFExcCompany] = useState('');
   const [fExcLead, setFExcLead] = useState('');
   const [fExcTitle, setFExcTitle] = useState('');
-  const [applied, setApplied] = useState({
-    incCompany: '', incLead: '', incTitle: '',
-    excCompany: '', excLead: '', excTitle: '',
-  });
+  const [applied, setApplied] = useState({ incCompany: '', incLead: '', incTitle: '', excCompany: '', excLead: '', excTitle: '' });
+
+  // Show only my leads toggle (mock functionality if userId is present)
+  const [showOnlyMyLeads, setShowOnlyMyLeads] = useState(false);
 
   // Paginación
   const [pageSize, setPageSize] = useState<number>(50);
@@ -174,11 +177,15 @@ export default function EnrichedOpportunitiesPage() {
     toast({ title: 'Leads borrados' });
   };
 
+  const handleDeleteOne = async (id: string) => {
+    if (!confirm('¿Eliminar lead?')) return;
+    await enrichedOpportunitiesStorage.remove([id]);
+    loadData();
+    toast({ title: 'Lead borrado' });
+  };
+
   const clearInvestigations = () => {
     if (!confirm('¿Borrar TODAS las investigaciones y marcas de memoria?')) return;
-    // Esto requeriría iterar todos. En Leads hay una función específica.
-    // Por simplicidad borramos reportes locales.
-    // TODO: Implementar borrado masivo real si se requiere.
     enriched.forEach(e => {
       const ref = leadRefOf(e);
       removeReportFor(ref);
@@ -206,8 +213,7 @@ export default function EnrichedOpportunitiesPage() {
   const runOneInvestigation = async (e: EnrichedOppLead, userId: string) => {
     const base = buildN8nPayloadFromLead(e as any) as any;
     const leadRef = leadRefOf(e);
-    const effectiveCompanyProfile = { name: 'Mi Empresa', website: '' }; // Mock basic profile if needed or fetch
-    // Real implementation mimics Client.tsx
+    const effectiveCompanyProfile = { name: 'Mi Empresa', website: '' };
     const payload = {
       companies: [{ ...base.companies?.[0], leadRef, meta: { leadRef } }],
       userCompanyProfile: effectiveCompanyProfile,
@@ -294,35 +300,29 @@ export default function EnrichedOpportunitiesPage() {
         <div className="flex gap-2">
           {/* Mostrar SOLO cuota de investigación para cumplir requerimiento de 'barra única' */}
           <DailyQuotaProgress kinds={['research']} compact className="w-[200px]" />
-          <BackBar />
         </div>
       </PageHeader>
 
       <Card>
-        <CardHeader className="flex flex-col md:flex-row items-start md:items-center justify-between space-y-2 md:space-y-0 pb-4">
-          <div className="space-y-1">
-            <CardTitle>Lista de oportunidades enriquecidas ({filtered.length} / {enriched.length})</CardTitle>
-            <CardDescription>Solo se investigan los que tienen email revelado.</CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Leads guardados (Enriquecidos)</CardTitle>
+            <CardDescription>Selecciona los que tienen email para investigar.</CardDescription>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center space-x-2 mr-4">
+              <Switch id="my-leads" checked={showOnlyMyLeads} onCheckedChange={setShowOnlyMyLeads} />
+              <Label htmlFor="my-leads">Solo mis leads</Label>
+            </div>
+
+            <Button variant="outline" size="sm" onClick={handleExportCsv} title="Exportar CSV">
+              <Download className="mr-2 h-4 w-4" /> Exportar CSV
+            </Button>
+
             <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)}>
               <Filter className="w-4 h-4 mr-2" />
               {showFilters ? 'Ocultar Filtros' : 'Filtrar'}
-            </Button>
-
-            {Object.keys(sel).length > 0 && (
-              <>
-                <Button variant="secondary" size="sm" onClick={clearInvestigationsSelected}>
-                  <Eraser className="w-4 h-4 mr-2" /> Borrar inv. sel.
-                </Button>
-                <Button variant="destructive" size="sm" onClick={handleDeleteSelected}>
-                  <Trash2 className="w-4 h-4 mr-2" /> Eliminar seleccionados
-                </Button>
-              </>
-            )}
-            <Button variant="secondary" size="sm" onClick={clearInvestigations} disabled={!anyInvestigated}>
-              <Eraser className="w-4 h-4 mr-2" /> Borrar todas inv.
             </Button>
 
             <Button
@@ -331,16 +331,7 @@ export default function EnrichedOpportunitiesPage() {
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               {researching ? <RotateCw className="w-4 h-4 animate-spin mr-2" /> : <RotateCw className="w-4 h-4 mr-2" />}
-              Investigar (n8n) ({Object.keys(sel).length})
-            </Button>
-
-            <div className="h-4 w-px bg-border mx-1" />
-
-            <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={!enriched.length} title="Exportar CSV">
-              <Download className="w-4 h-4 mr-2" /> CSV
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleExportXlsx} disabled={!enriched.length} title="Exportar Excel">
-              <FileSpreadsheet className="w-4 h-4 mr-2" /> XLSX
+              Investigar ({Object.keys(sel).length})
             </Button>
           </div>
         </CardHeader>
@@ -360,18 +351,6 @@ export default function EnrichedOpportunitiesPage() {
                 <Label className="text-xs uppercase text-muted-foreground">Incluir Cargo</Label>
                 <Input value={fIncTitle} onChange={e => { setFIncTitle(e.target.value); setApplied(prev => ({ ...prev, incTitle: e.target.value })) }} />
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs uppercase text-muted-foreground">Excluir Empresa</Label>
-                <Input value={fExcCompany} onChange={e => { setFExcCompany(e.target.value); setApplied(prev => ({ ...prev, excCompany: e.target.value })) }} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs uppercase text-muted-foreground">Excluir Nombre</Label>
-                <Input value={fExcLead} onChange={e => { setFExcLead(e.target.value); setApplied(prev => ({ ...prev, excLead: e.target.value })) }} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs uppercase text-muted-foreground">Excluir Cargo</Label>
-                <Input value={fExcTitle} onChange={e => { setFExcTitle(e.target.value); setApplied(prev => ({ ...prev, excTitle: e.target.value })) }} />
-              </div>
               <div className="col-span-full flex justify-end">
                 <Button variant="ghost" size="sm" onClick={() => {
                   setFIncCompany(''); setFIncLead(''); setFIncTitle('');
@@ -386,36 +365,42 @@ export default function EnrichedOpportunitiesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-12 text-center">
-                    <div className="flex flex-col items-center">
-                      <span className="text-[10px] uppercase text-muted-foreground mb-1">Inv.</span>
-                      <Checkbox checked={allResearchChecked} onCheckedChange={toggleAllResearch} />
-                    </div>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allResearchChecked}
+                      onCheckedChange={v => toggleAllResearch(Boolean(v))}
+                    />
                   </TableHead>
-                  <TableHead className="w-[60px]"></TableHead>
                   <TableHead>Nombre</TableHead>
                   <TableHead>Cargo</TableHead>
                   <TableHead>Empresa</TableHead>
                   <TableHead>Email</TableHead>
-                  <TableHead>Teléfono</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
+                  <TableHead>Website</TableHead>
+                  <TableHead>LinkedIn</TableHead>
+                  <TableHead>Industria</TableHead>
+                  <TableHead>País</TableHead>
+                  <TableHead>Ciudad</TableHead>
+                  <TableHead className="w-20 text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pageLeads.length === 0 ? (
-                  <TableRow><TableCell colSpan={9} className="h-24 text-center text-muted-foreground">No hay leads.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={13} className="h-24 text-center text-muted-foreground">No hay leads.</TableCell></TableRow>
                 ) : (
                   pageLeads.map((lead) => {
                     const emailData = extractPrimaryEmail(lead);
                     const hasEmail = !!emailData.email;
                     const researched = isResearchedLead(lead);
                     const report = findReportByRef(leadRefOf(lead))?.cross;
-                    const pendingPhone = lead.enrichmentStatus === 'pending_phone';
+
+                    // Safe properties access (assuming EnrichedOppLead might have extra props at runtime or safely undefined)
+                    const anyLead = lead as any;
+                    const hasAvatar = !!anyLead.avatar || !!anyLead.photo_url;
+                    const avatarSrc = anyLead.avatar || anyLead.photo_url || anyLead.photoUrl;
 
                     return (
                       <TableRow key={lead.id}>
-                        <TableCell className="text-center">
+                        <TableCell>
                           <Checkbox
                             checked={!!sel[lead.id]}
                             onCheckedChange={(c) => setSel(prev => {
@@ -427,71 +412,54 @@ export default function EnrichedOpportunitiesPage() {
                           />
                         </TableCell>
                         <TableCell>
-                          <Linkedin
-                            className={`w-4 h-4 cursor-pointer mx-auto ${lead.linkedinUrl ? 'text-blue-500 hover:text-blue-700' : 'text-gray-300'}`}
-                            onClick={() => lead.linkedinUrl && window.open(lead.linkedinUrl, '_blank')}
-                          />
-                        </TableCell>
-                        <TableCell className="font-medium">{lead.fullName}</TableCell>
-                        <TableCell className="text-muted-foreground text-xs">{lead.title}</TableCell>
-                        <TableCell>
-                          <div className="flex flex-col">
-                            <span>{lead.companyName || '—'}</span>
-                            <a href={`https://${lead.companyDomain}`} target="_blank" className="text-xs text-blue-500 hover:underline">{lead.companyDomain}</a>
+                          <div className="flex items-center gap-3">
+                            <Avatar className="h-10 w-10">
+                              <AvatarImage src={avatarSrc} alt={lead.fullName} />
+                              <AvatarFallback>{(lead.fullName || '?').charAt(0)}</AvatarFallback>
+                            </Avatar>
+                            <div className="flex flex-col">
+                              <span className="font-medium">{lead.fullName}</span>
+                            </div>
                           </div>
                         </TableCell>
+                        <TableCell>{lead.title || '—'}</TableCell>
+                        <TableCell>{lead.companyName || '—'}</TableCell>
                         <TableCell>
                           {hasEmail ? (
                             <span className={emailData.status === 'verified' ? 'text-green-600' : 'text-yellow-600'}>
                               {emailData.email}
                             </span>
-                          ) : <span className="text-xs italic text-muted-foreground">Not Found</span>}
+                          ) : <span className="text-muted-foreground">—</span>}
                         </TableCell>
                         <TableCell>
-                          {lead.primaryPhone ? (
-                            <div className="flex items-center gap-1 text-blue-600 font-mono text-xs cursor-pointer" onClick={() => { setLeadToCall(lead); setCallModalOpen(true); }}>
-                              <Phone className="w-3 h-3" /> {lead.primaryPhone}
-                            </div>
-                          ) : pendingPhone ? (
-                            <span className="text-xs animate-pulse text-orange-500">Buscando...</span>
-                          ) : (
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs text-muted-foreground">—</span>
-                              <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => handleRetryPhone(lead)} title="Reintentar">
-                                <RotateCw className="w-3 h-3" />
-                              </Button>
-                            </div>
-                          )}
+                          {lead.companyDomain ? (
+                            <a href={`https://${lead.companyDomain}`} target="_blank" className="underline">
+                              {displayDomain(lead.companyDomain)}
+                            </a>
+                          ) : '—'}
                         </TableCell>
                         <TableCell>
-                          {report ? (
-                            <span className="bg-green-100 text-green-800 text-[10px] px-2 py-0.5 rounded-full border border-green-200 cursor-pointer hover:bg-green-200"
-                              onClick={() => { setReportLead(lead); setReportToView({ leadRef: leadRefOf(lead), cross: report } as any); setOpenReport(true); }}
-                            >
-                              REPORT
-                            </span>
-                          ) : <span className="text-xs text-muted-foreground">—</span>}
+                          {lead.linkedinUrl ? (
+                            <a href={lead.linkedinUrl} target="_blank" className="underline">Perfil</a>
+                          ) : '—'}
                         </TableCell>
+                        <TableCell>{anyLead.industry || '—'}</TableCell>
+                        <TableCell>{anyLead.country || '—'}</TableCell>
+                        <TableCell>{anyLead.city || '—'}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
-                            {report && (
-                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
-                                const ref = leadRefOf(lead);
-                                removeReportFor(ref);
-                                removeResearched(ref);
-                                setReports(getLeadReports());
-                                toast({ title: 'Investigación eliminada' });
-                              }} title="Borrar Investigación">
-                                <Eraser className="w-3 h-3 text-orange-500" />
+                            {report ? (
+                              <Button size="icon" variant="ghost" onClick={() => { setReportLead(lead); setReportToView({ leadRef: leadRefOf(lead), cross: report } as any); setOpenReport(true); }} title="Ver Reporte">
+                                <MessageSquare className="h-4 w-4 text-green-600" />
+                              </Button>
+                            ) : (
+                              <Button size="icon" variant="ghost" disabled title="Sin reporte">
+                                <MessageSquare className="h-4 w-4 text-muted-foreground" />
                               </Button>
                             )}
-                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => {
-                              if (confirm('¿Eliminar lead?')) {
-                                enrichedOpportunitiesStorage.remove([lead.id]);
-                                loadData();
-                              }
-                            }} title="Eliminar Lead">
-                              <Trash2 className="w-3 h-3 text-destructive" />
+
+                            <Button size="icon" variant="ghost" onClick={() => handleDeleteOne(lead.id)} title="Eliminar">
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         </TableCell>
@@ -535,7 +503,7 @@ export default function EnrichedOpportunitiesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* CALL MODAL */}
+      {/* CALL MODAL (Kept for completeness if user uses phones in future) */}
       {leadToCall && <PhoneCallModal open={callModalOpen} onOpenChange={setCallModalOpen} customerName={leadToCall.fullName} customerPhone={leadToCall.primaryPhone || ''} leadIdentifier={leadToCall.id} />}
 
       <EnrichmentOptionsDialog open={openEnrichOptions} onOpenChange={setOpenEnrichOptions} onConfirm={() => { }} loading={false} />
