@@ -376,6 +376,7 @@ export default function EnrichedOpportunitiesPage() {
       }
       toast({ title: 'Investigación completa' });
       setSel({});
+      loadData(); // Reload data to show reports
     } catch (e: any) { toast({ variant: 'destructive', title: 'Error', description: e.message }); }
     finally { setResearching(false); }
   };
