@@ -249,6 +249,20 @@ export default function EnrichedOpportunitiesPage() {
     } catch (e) { toast({ variant: 'destructive', title: 'Error al borrar' }); }
   };
 
+  const clearInvestigationsSelected = () => {
+    if (!selectedToContact.size) return;
+    const targets = enriched.filter(e => selectedToContact.has(e.id));
+    if (!confirm(`¿Borrar investigaciones de ${targets.length} lead(s) seleccionados? Podrás investigarlos nuevamente.`)) return;
+
+    const promises = targets.filter(e => !!e.report).map(e => enrichedOpportunitiesStorage.update(e.id, { report: undefined }));
+    Promise.all(promises).then(() => {
+      loadData();
+      toast({ title: 'Investigaciones borradas (seleccionados)' });
+    }).catch(() => {
+      toast({ variant: 'destructive', title: 'Error al borrar' });
+    });
+  };
+
   const clearInvestigationFor = async (lead: EnrichedOppLead) => {
     await enrichedOpportunitiesStorage.update(lead.id, { report: undefined });
     loadData();
@@ -444,55 +458,91 @@ export default function EnrichedOpportunitiesPage() {
   };
 
 
+  // Contadores
+  const researchEligible = useMemo(
+    () => filtered.filter(e => !!e.email && !isResearchedLead(e)).length,
+    [filtered]
+  );
+  const anyInvestigated = useMemo(
+    () => enriched.some(e => !!e.report),
+    [enriched]
+  );
+  const researchCount = Object.values(sel).filter(Boolean).length;
+  const contactCount = selectedToContact.size;
+
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Oportunidades Enriquecidas"
-        description="Gestiona, investiga y contacta a los leads provenientes de oportunidades."
-      >
-        <div className="flex gap-2">
-          {mounted && <DailyQuotaProgress kinds={['research']} compact className="w-[200px]" />}
-          <BackBar fallbackHref="/saved/opportunities" />
-        </div>
-      </PageHeader>
+        title="Oportunidades enriquecidas"
+        description="Selecciona, investiga con n8n y luego contacta."
+      />
+      <BackBar fallbackHref="/saved/opportunities" className="mb-2" />
+
+      <div className="mb-4">
+        <DailyQuotaProgress kinds={['research']} compact />
+      </div>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <div className="space-y-1">
-            <CardTitle>Leads enriquecidos (Oportunidades)</CardTitle>
-            <CardDescription>Gestiona, investiga y contacta tus leads de oportunidades.</CardDescription>
+          <div>
+            <CardTitle>Lista de oportunidades enriquecidas ({filtered.length} / {enriched.length})</CardTitle>
+            <CardDescription>
+              {researchEligible === 0
+                ? 'No hay leads con email para investigar.'
+                : 'Solo se investigan los que tienen email revelado.'}
+            </CardDescription>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)}>
-              <Filter className="w-4 h-4 mr-2" />
-              filtros
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowFilters(v => !v)}
+              title="Mostrar/Ocultar filtros"
+            >
+              Filtrar
             </Button>
-            {Object.keys(sel).length > 0 && (
-              <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-                <Button variant="secondary" size="sm" onClick={handleDeleteSelected}>
-                  <Trash2 className="w-4 h-4 mr-1" /> Borrar seleccionados
-                </Button>
-                <Button variant="default" size="sm" onClick={handleRunN8nResearch} disabled={researching}>
-                  {researching ? <RotateCw className="w-4 h-4 animate-spin mr-2" /> : <RotateCw className="w-4 h-4 mr-2" />}
-                  Investigar ({Object.keys(sel).length})
-                </Button>
-              </div>
-            )}
-            {selectedToContact.size > 0 && (
-              <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 ml-2">
-                <Button variant="default" size="sm" onClick={handleOpenBulkCompose}>
-                  <Send className="w-4 h-4 mr-2" />
-                  Contactar ({selectedToContact.size})
-                </Button>
-              </div>
-            )}
-
-            <Button variant="outline" size="sm" onClick={handleExportCsv} title="Exportar CSV">
-              <Download className="w-4 h-4" />
+            <Button
+              variant="secondary"
+              onClick={clearInvestigationsSelected}
+              disabled={selectedToContact.size === 0}
+              title={selectedToContact.size === 0 ? 'Selecciona leads para contactar' : 'Borrar investigaciones de los seleccionados para contactar'}
+            >
+              <Eraser className="mr-2 h-4 w-4" />
+              Borrar investigaciones de seleccionados
             </Button>
-            <Button variant="outline" size="sm" onClick={handleExportXlsx} title="Exportar Excel">
-              <FileSpreadsheet className="w-4 h-4" />
+            <Button
+              variant="destructive"
+              onClick={clearInvestigations}
+              disabled={!anyInvestigated}
+              title={anyInvestigated ? 'Borrar todos los reportes y marcas de investigación' : 'No hay investigaciones que borrar'}
+            >
+              <Eraser className="mr-2 h-4 w-4" />
+              Borrar investigaciones
+            </Button>
+            <Button onClick={handleOpenBulkCompose} disabled={selectedToContact.size === 0}>
+              Contactar seleccionados ({selectedToContact.size})
+            </Button>
+            <Button
+              onClick={() => handleRunN8nResearch()}
+              disabled={researching || researchCount === 0}
+            >
+              {researching ? 'Investigando...' : `Investigar (n8n) (${researchCount})`}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleExportCsv}
+              disabled={enriched.length === 0}
+              title="Exportar a CSV"
+            >
+              CSV
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleExportXlsx}
+              disabled={enriched.length === 0}
+              title="Exportar a Excel"
+            >
+              XLSX
             </Button>
           </div>
         </CardHeader>
