@@ -145,18 +145,22 @@ export async function POST(req: Request): Promise<Response> {
   // --- FETCH USER PROFILE (Name & Job Title) ---
   let userJobTitle: string | null = null;
   let userFullName: string | null = null;
+  let userCompanyName: string | null = null;
+  let userCompanyDomain: string | null = null;
 
   if (userId && userId !== 'anon') {
     try {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('full_name, job_title')
+        .select('full_name, job_title, company_name, company_domain')
         .eq('id', userId)
         .single();
 
       if (profile) {
         userJobTitle = profile.job_title || null;
         userFullName = profile.full_name || null;
+        userCompanyName = profile.company_name || null;
+        userCompanyDomain = profile.company_domain || null;
       }
     } catch (err) {
       console.warn('[research:n8n] Failed to fetch user profile:', err);
@@ -167,7 +171,11 @@ export async function POST(req: Request): Promise<Response> {
   const userContext = {
     id: userId,
     name: userFullName,
-    jobTitle: userJobTitle
+    jobTitle: userJobTitle,
+    company: {
+      name: userCompanyName,
+      domain: userCompanyDomain
+    }
   };
 
   let n8nRes: Response;

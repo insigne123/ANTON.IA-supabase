@@ -260,7 +260,15 @@ export default function EnrichedOpportunitiesPage() {
   const runOneInvestigation = async (e: EnrichedOppLead, userId: string) => {
     const base = buildN8nPayloadFromLead(e as any) as any;
     const leadRef = leadRefOf(e);
-    const effectiveCompanyProfile = { name: 'Mi Empresa', website: '' };
+
+    // Initial context (will be enriched by API route too)
+    const { profileService } = await import('@/lib/services/profile-service');
+    const profile = await profileService.getCurrentProfile();
+    const effectiveCompanyProfile = {
+      name: profile?.company_name || '',
+      website: profile?.company_domain || ''
+    };
+
     const payload = {
       companies: [{ ...base.companies?.[0], leadRef, meta: { leadRef } }],
       userCompanyProfile: effectiveCompanyProfile,
@@ -272,7 +280,9 @@ export default function EnrichedOpportunitiesPage() {
     });
     if (!res.ok) throw new Error('API Error');
     const data = await res.json();
-    return { leadRef, report: data.report || data };
+    // Handle { reports: [...] } response structure
+    const report = Array.isArray(data.reports) && data.reports.length > 0 ? data.reports[0] : (data.report || data);
+    return { leadRef, report };
   };
 
   const handleRunN8nResearch = async () => {
