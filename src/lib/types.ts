@@ -214,6 +214,7 @@ export type EnrichedLead = {
   }> | null;
   primaryPhone?: string | null;
   enrichmentStatus?: 'completed' | 'pending_phone' | 'failed' | string;
+  report?: CrossReport; // Persistent Report
 };
 
 export type EnrichedOppLead = {
@@ -237,6 +238,7 @@ export type EnrichedOppLead = {
   }> | null;
   primaryPhone?: string | null;
   enrichmentStatus?: 'completed' | 'pending_phone' | 'failed' | string;
+  report?: CrossReport; // Persistent Report
 };
 
 export type N8nCompanyResearchInput = {

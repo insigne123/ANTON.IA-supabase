@@ -31,6 +31,7 @@ function mapRowToEnrichedLead(row: any): EnrichedLead {
             : (Array.isArray(row.phone_numbers) ? row.phone_numbers : []),
         primaryPhone: row.primary_phone,
         enrichmentStatus: row.enrichment_status,
+        report: row.data?.report,
     };
 }
 
@@ -67,6 +68,7 @@ function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string, organizationId
             country: lead.country,
             city: lead.city,
             industry: lead.industry,
+            report: lead.report,
         },
     };
 }
@@ -165,6 +167,32 @@ export const enrichedOpportunitiesStorage = {
         const all = await getEnrichedOpportunities();
         const keyOf = (l: EnrichedLead) => (l.id?.trim() || (l.email?.trim() || '') || `${l.fullName || ''}|${l.companyDomain || l.companyName || ''}|${l.title || ''}`).toLowerCase();
         return all.some(x => keyOf(x) === keyOf(l));
+    },
+    update: async (id: string, updates: Partial<EnrichedLead>) => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return false;
+
+        const current = await findEnrichedLeadById(id);
+        if (!current) return false;
+
+        const merged = { ...current, ...updates };
+        const row = mapEnrichedLeadToRow(merged, user.id, merged.organizationId || null);
+
+        const { error } = await supabase
+            .from(TABLE)
+            .update({
+                full_name: row.full_name,
+                email: row.email,
+                company_name: row.company_name,
+                title: row.title,
+                linkedin_url: row.linkedin_url,
+                phone_numbers: row.phone_numbers,
+                primary_phone: row.primary_phone,
+                enrichment_status: row.enrichment_status,
+                data: row.data
+            })
+            .eq('id', id);
+        return !error;
     },
     findEnrichedLeadById: findEnrichedLeadById
 };

@@ -10,8 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import type { EnrichedOppLead, LeadResearchReport, StyleProfile } from '@/lib/types';
+// FIXED IMPORT
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
-import { upsertLeadReports, getLeadReports, findReportByRef, removeReportFor, findReportForLead } from '@/lib/lead-research-storage';
 import { extractPrimaryEmail } from '@/lib/email-utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -19,15 +19,14 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
-import { isResearched, markResearched, removeResearched } from '@/lib/researched-leads-storage';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
 import { Linkedin, Eraser, Filter, Trash2, Download, FileSpreadsheet, RotateCw, Phone, Send, Edit } from 'lucide-react';
 import { PhoneCallModal } from '@/components/phone-call-modal';
-import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
 import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
-import { styleProfilesStorage } from '@/lib/style-profiles-storage'; // FIXED IMPORT
+import { styleProfilesStorage } from '@/lib/style-profiles-storage';
 import * as Quota from '@/lib/quota-client';
+
 
 function getClientUserId(): string {
   try {
@@ -53,22 +52,20 @@ export default function EnrichedOpportunitiesPage() {
 
   const [enriched, setEnriched] = useState<EnrichedOppLead[]>([]);
   const [sel, setSel] = useState<Record<string, boolean>>({});
-  const [reports, setReports] = useState<LeadResearchReport[]>([]);
   const [researching, setResearching] = useState(false);
   const [researchProgress, setResearchProgress] = useState({ done: 0, total: 0 });
   const [reportToView, setReportToView] = useState<LeadResearchReport | null>(null);
   const [reportLead, setReportLead] = useState<EnrichedOppLead | null>(null);
   const [openReport, setOpenReport] = useState(false);
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   // Phone Call Modal
   const [callModalOpen, setCallModalOpen] = useState(false);
   const [leadToCall, setLeadToCall] = useState<EnrichedOppLead | null>(null);
 
-  // Enrichment Options
-  const [openEnrichOptions, setOpenEnrichOptions] = useState(false);
-  const [enriching, setEnriching] = useState(false);
-
-  // Filtros
+  // Filter State
   const [showFilters, setShowFilters] = useState(false);
   const [fIncCompany, setFIncCompany] = useState('');
   const [fIncLead, setFIncLead] = useState('');
@@ -82,7 +79,7 @@ export default function EnrichedOpportunitiesPage() {
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState<number>(1);
 
-  // Contact Selection (Strict Logic: Must be researched)
+  // Contact Selection
   const [selectedToContact, setSelectedToContact] = useState<Set<string>>(new Set());
 
   // Mass Compose State
@@ -108,7 +105,6 @@ export default function EnrichedOpportunitiesPage() {
   const loadData = async () => {
     const data = await enrichedOpportunitiesStorage.get();
     setEnriched(data);
-    setReports(getLeadReports());
     const styles = styleProfilesStorage.list(); // FIXED: use storage.list()
     setStyleProfiles(styles);
   };
@@ -164,12 +160,8 @@ export default function EnrichedOpportunitiesPage() {
   // Helpers Referencias
   const leadRefOf = (e: EnrichedOppLead) => e.id || e.email || e.linkedinUrl || `${e.fullName}|${e.companyName || ''}`;
 
-  const getReportFor = (e: EnrichedOppLead) => {
-    return findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
-  };
-
-  const hasReportStrict = (e: EnrichedOppLead) => !!getReportFor(e)?.cross;
-  const isResearchedLead = (e: EnrichedOppLead) => isResearched(leadRefOf(e)) || hasReportStrict(e);
+  const hasReportStrict = (e: EnrichedOppLead) => !!e.report;
+  const isResearchedLead = (e: EnrichedOppLead) => !!e.report;
 
   // Bulk Checks
   const researchEligiblePage = pageLeads.filter(e => e.email && !isResearchedLead(e)).length;
@@ -205,8 +197,30 @@ export default function EnrichedOpportunitiesPage() {
   };
 
   // Acciones
-  const handleExportCsv = () => exportToCsv(enriched, 'oportunidades_enriquecidas');
-  const handleExportXlsx = () => exportToXlsx(enriched, 'oportunidades_enriquecidas');
+  const prepareExport = () => {
+    const headers = ['ID', 'Name', 'Title', 'Company', 'Email', 'Phone', 'LinkedIn', 'Domain', 'Researched'];
+    const rows = enriched.map(e => [
+      e.id,
+      e.fullName,
+      e.title || '',
+      e.companyName || '',
+      e.email || '',
+      e.primaryPhone || '',
+      e.linkedinUrl || '',
+      e.companyDomain || '',
+      e.report ? 'Yes' : 'No'
+    ]);
+    return { headers, rows };
+  };
+
+  const handleExportCsv = () => {
+    const { headers, rows } = prepareExport();
+    exportToCsv(headers, rows, 'oportunidades_enriquecidas');
+  };
+  const handleExportXlsx = () => {
+    const { headers, rows } = prepareExport();
+    exportToXlsx(headers, rows, 'oportunidades_enriquecidas');
+  };
 
   const handleDeleteSelected = async () => {
     const ids = Object.keys(sel).filter(k => sel[k]);
@@ -224,22 +238,20 @@ export default function EnrichedOpportunitiesPage() {
     toast({ title: 'Lead borrado' });
   };
 
-  const clearInvestigations = () => {
+  const clearInvestigations = async () => {
     if (!confirm('¿Borrar TODAS las investigaciones y marcas de memoria?')) return;
-    enriched.forEach(e => {
-      const ref = leadRefOf(e);
-      removeReportFor(ref);
-      removeResearched([ref]); // FIXED: passed as array
-    });
-    setReports(getLeadReports());
-    toast({ title: 'Investigaciones borradas' });
+    try {
+      // Must iterate because storage has no bulk update
+      const promises = enriched.filter(e => !!e.report).map(e => enrichedOpportunitiesStorage.update(e.id, { report: undefined }));
+      await Promise.all(promises);
+      loadData();
+      toast({ title: 'Investigaciones borradas (cloud)' });
+    } catch (e) { toast({ variant: 'destructive', title: 'Error al borrar' }); }
   };
 
-  const clearInvestigationFor = (lead: EnrichedOppLead) => {
-    const ref = leadRefOf(lead);
-    removeReportFor(ref);
-    removeResearched([ref]); // FIXED: passed as array
-    setReports(getLeadReports());
+  const clearInvestigationFor = async (lead: EnrichedOppLead) => {
+    await enrichedOpportunitiesStorage.update(lead.id, { report: undefined });
+    loadData();
     toast({ title: 'Investigación eliminada' });
     if (reportLead?.id === lead.id) setOpenReport(false);
   }
@@ -280,24 +292,14 @@ export default function EnrichedOpportunitiesPage() {
         if (t) {
           try {
             const res = await runOneInvestigation(t, userId);
-            upsertLeadReports([{
-              id: uuidv4(),
-              company: {
-                name: t.companyName || '',
-                domain: t.companyDomain,
-              },
-              createdAt: new Date().toISOString(),
-              cross: res.report,
-              meta: { leadRef: res.leadRef }
-            }]);
-            markResearched([res.leadRef]); // FIXED: passed as array
+            // Persistent storage update
+            await enrichedOpportunitiesStorage.update(t.id, { report: res.report });
           } catch (e) { console.error(e); }
         }
         done++;
         setResearchProgress({ done, total: ids.length });
       }
       toast({ title: 'Investigación completa' });
-      setReports(getLeadReports());
       setSel({});
     } catch (e: any) { toast({ variant: 'destructive', title: 'Error', description: e.message }); }
     finally { setResearching(false); }
@@ -312,11 +314,11 @@ export default function EnrichedOpportunitiesPage() {
     ids.forEach(id => {
       const l = enriched.find(x => x.id === id);
       if (!l || !canContact(l)) return; // Double check
-      const rep = getReportFor(l); // Usage updated to use robust lookup
+      // const rep = getReportFor(l); -> l.report
       toCompose.push({
         lead: l,
-        subject: rep?.cross?.emailDraft?.subject || `Contacto: ${l.fullName}`,
-        body: rep?.cross?.emailDraft?.body || `Hola ${l.fullName}, te contacto desde...`
+        subject: l.report?.emailDraft?.subject || `Contacto: ${l.fullName}`,
+        body: l.report?.emailDraft?.body || `Hola ${l.fullName}, te contacto desde...`
       });
     });
 
@@ -373,7 +375,7 @@ export default function EnrichedOpportunitiesPage() {
         description="Gestiona, investiga y contacta a los leads provenientes de oportunidades."
       >
         <div className="flex gap-2">
-          <DailyQuotaProgress kinds={['research']} compact className="w-[200px]" />
+          {mounted && <DailyQuotaProgress kinds={['research']} compact className="w-[200px]" />}
           <BackBar fallbackHref="/saved/opportunities" />
         </div>
       </PageHeader>
@@ -484,8 +486,8 @@ export default function EnrichedOpportunitiesPage() {
                   pageLeads.map((e) => {
                     const emailData = extractPrimaryEmail(e);
                     const hasEmail = !!emailData.email;
-                    const researched = isResearchedLead(e);
-                    const report = getReportFor(e)?.cross;
+                    const researched = !!e.report;
+                    const report = e.report;
                     const pendingPhone = e.enrichmentStatus === 'pending_phone';
 
                     return (
@@ -776,8 +778,6 @@ export default function EnrichedOpportunitiesPage() {
 
       {/* CALL MODAL */}
       {leadToCall && <PhoneCallModal open={callModalOpen} onOpenChange={setCallModalOpen} lead={leadToCall as any} report={reportToView} onLogCall={(r, n) => console.log('Call logged:', r, n)} />}
-
-      <EnrichmentOptionsDialog open={openEnrichOptions} onOpenChange={setOpenEnrichOptions} onConfirm={() => { }} loading={false} leadCount={0} />
 
     </div>
   );
