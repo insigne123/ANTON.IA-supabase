@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
+import { BackBar } from '@/components/back-bar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -25,7 +26,6 @@ import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-opti
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
 import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
 import * as Quota from '@/lib/quota-client';
-import { Switch } from '@/components/ui/switch';
 
 function getClientUserId(): string {
   try {
@@ -75,9 +75,6 @@ export default function EnrichedOpportunitiesPage() {
   const [fExcLead, setFExcLead] = useState('');
   const [fExcTitle, setFExcTitle] = useState('');
   const [applied, setApplied] = useState({ incCompany: '', incLead: '', incTitle: '', excCompany: '', excLead: '', excTitle: '' });
-
-  // Show only my leads toggle (mock functionality if userId is present)
-  const [showOnlyMyLeads, setShowOnlyMyLeads] = useState(false);
 
   // Paginación
   const [pageSize, setPageSize] = useState<number>(50);
@@ -185,7 +182,8 @@ export default function EnrichedOpportunitiesPage() {
   const handleDeleteSelected = async () => {
     const ids = Object.keys(sel).filter(k => sel[k]);
     if (!ids.length || !confirm(`¿Borrar ${ids.length} leads?`)) return;
-    await enrichedOpportunitiesStorage.remove(ids);
+    // FIX: Using removeById iteratively as remove(ids) is not supported
+    await Promise.all(ids.map(id => enrichedOpportunitiesStorage.removeById(id)));
     setSel({});
     loadData();
     toast({ title: 'Leads borrados' });
@@ -193,7 +191,7 @@ export default function EnrichedOpportunitiesPage() {
 
   const handleDeleteOne = async (id: string) => {
     if (!confirm('¿Eliminar lead?')) return;
-    await enrichedOpportunitiesStorage.remove([id]);
+    await enrichedOpportunitiesStorage.removeById(id);
     loadData();
     toast({ title: 'Lead borrado' });
   };
@@ -207,20 +205,6 @@ export default function EnrichedOpportunitiesPage() {
     });
     setReports(getLeadReports());
     toast({ title: 'Investigaciones borradas' });
-  };
-
-  const clearInvestigationsSelected = () => {
-    const ids = Object.keys(sel).filter(k => sel[k]);
-    if (!ids.length) return;
-    const targets = enriched.filter(e => ids.includes(e.id));
-    targets.forEach(e => {
-      const ref = leadRefOf(e);
-      removeReportFor(ref);
-      removeResearched(ref);
-    });
-    setReports(getLeadReports());
-    toast({ title: 'Investigaciones borradas de seleccionados' });
-    setSel({});
   };
 
   const clearInvestigationFor = (lead: EnrichedOppLead) => {
@@ -268,7 +252,17 @@ export default function EnrichedOpportunitiesPage() {
         if (t) {
           try {
             const res = await runOneInvestigation(t, userId);
-            upsertLeadReports([{ leadRef: res.leadRef, companyDomain: t.companyDomain, companyName: t.companyName || '', cross: res.report }]);
+            // FIX: Correct structure for upsertLeadReports
+            upsertLeadReports([{
+              id: uuidv4(),
+              company: {
+                name: t.companyName || '',
+                domain: t.companyDomain,
+              },
+              createdAt: new Date().toISOString(),
+              cross: res.report,
+              meta: { leadRef: res.leadRef }
+            }]);
             markResearched(res.leadRef);
           } catch (e) { console.error(e); }
         }
@@ -282,38 +276,6 @@ export default function EnrichedOpportunitiesPage() {
     finally { setResearching(false); }
   };
 
-  const handleRetryPhone = async (lead: EnrichedOppLead) => {
-    if (enriching) return;
-    const clientId = getClientUserId();
-    const { data: { user } } = await supabase.auth.getUser();
-    const finalUserId = user?.id || clientId;
-    setEnriching(true);
-    try {
-      const payload = {
-        leads: [{
-          fullName: lead.fullName,
-          companyName: lead.companyName,
-          companyDomain: lead.companyDomain,
-          email: extractPrimaryEmail(lead).email,
-          existingRecordId: lead.id
-        }],
-        revealEmail: false,
-        revealPhone: true
-      };
-      await fetch('/api/opportunities/enrich-apollo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': finalUserId },
-        body: JSON.stringify(payload),
-      });
-      toast({ title: 'Solicitud enviada' });
-    } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error', description: e.message });
-    } finally {
-      setEnriching(false);
-    }
-  };
-
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -322,7 +284,7 @@ export default function EnrichedOpportunitiesPage() {
       >
         <div className="flex gap-2">
           <DailyQuotaProgress kinds={['research']} compact className="w-[200px]" />
-          <BackBar />
+          <BackBar fallbackHref="/saved/opportunities" />
         </div>
       </PageHeader>
 
@@ -338,7 +300,6 @@ export default function EnrichedOpportunitiesPage() {
               <Filter className="w-4 h-4 mr-2" />
               filtros
             </Button>
-            {/* Bulk Actions Only if Selected */}
             {Object.keys(sel).length > 0 && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
                 <Button variant="secondary" size="sm" onClick={handleDeleteSelected}>
@@ -538,9 +499,9 @@ export default function EnrichedOpportunitiesPage() {
       </Dialog>
 
       {/* CALL MODAL */}
-      {leadToCall && <PhoneCallModal open={callModalOpen} onOpenChange={setCallModalOpen} customerName={leadToCall.fullName} customerPhone={leadToCall.primaryPhone || ''} leadIdentifier={leadToCall.id} />}
+      {leadToCall && <PhoneCallModal open={callModalOpen} onOpenChange={setCallModalOpen} lead={leadToCall as any} report={reportToView} onLogCall={(r, n) => console.log('Call logged:', r, n)} />}
 
-      <EnrichmentOptionsDialog open={openEnrichOptions} onOpenChange={setOpenEnrichOptions} onConfirm={() => { }} loading={false} />
+      <EnrichmentOptionsDialog open={openEnrichOptions} onOpenChange={setOpenEnrichOptions} onConfirm={() => { }} loading={false} leadCount={0} />
 
     </div>
   );
