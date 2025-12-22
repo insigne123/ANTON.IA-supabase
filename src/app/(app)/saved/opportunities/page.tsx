@@ -19,10 +19,12 @@ import { toCsv, downloadCsv } from '@/lib/csv';
 import { Download } from 'lucide-react';
 import { getClientId } from '@/lib/client-id';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
+import { useAuth } from '@/context/AuthContext';
 
 export default function SavedOpportunitiesPage() {
     const { toast } = useToast();
     const router = useRouter();
+    const { user } = useAuth();
     const [opps, setOpps] = useState<JobOpportunity[]>([]);
 
     const [leadTitles, setLeadTitles] = useState('Head of Talent, HR Manager, Recruiting Lead');
