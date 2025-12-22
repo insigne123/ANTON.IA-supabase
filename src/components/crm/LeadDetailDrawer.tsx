@@ -24,6 +24,48 @@ interface Props {
     onOpenChange: (open: boolean) => void;
 }
 
+function getAISuggestion(lead: UnifiedRow, activities: Activity[]): string {
+    const stage = lead.stage || 'inbox';
+    const hasEmail = activities.some(a => a.type === 'email');
+    const lastEmail = activities.find(a => a.type === 'email' && a.title.includes('enviado'));
+    const hasReply = activities.some(a => a.type === 'email' && a.title.includes('Respuesta'));
+
+    // Calculate days since last contact
+    let daysSinceContact = 0;
+    if (lastEmail) {
+        const lastContactDate = new Date(lastEmail.createdAt);
+        daysSinceContact = Math.floor((Date.now() - lastContactDate.getTime()) / (1000 * 60 * 60 * 24));
+    }
+
+    // Generate suggestion based on stage and activity
+    if (stage === 'inbox' || stage === 'qualified') {
+        if (!hasEmail) {
+            return `Este lead aún no ha sido contactado. Es un buen momento para enviar el primer email de presentación.`;
+        }
+    }
+
+    if (stage === 'contacted') {
+        if (hasReply) {
+            return `¡El lead respondió! Revisa su mensaje y programa una llamada o reunión para avanzar.`;
+        }
+        if (daysSinceContact >= 3) {
+            return `Han pasado ${daysSinceContact} días desde el último contacto sin respuesta. Considera enviar un follow-up o intentar por otro canal.`;
+        }
+        return `Email enviado hace ${daysSinceContact} día(s). Espera 2-3 días antes del follow-up.`;
+    }
+
+    if (stage === 'engaged') {
+        return `El lead está interesado. Agenda una demo o reunión para presentar tu solución en detalle.`;
+    }
+
+    if (stage === 'meeting') {
+        return `Reunión agendada. Prepara la presentación y confirma la asistencia 24h antes.`;
+    }
+
+    return `Revisa el historial de actividad y decide el próximo paso según el contexto del lead.`;
+}
+
+
 export function LeadDetailDrawer({ lead, open, onOpenChange }: Props) {
     const [activities, setActivities] = useState<Activity[]>([]);
     const [loading, setLoading] = useState(false);
@@ -34,7 +76,7 @@ export function LeadDetailDrawer({ lead, open, onOpenChange }: Props) {
             setLoading(true);
             // determine leadId: sourceId is mostly the one used for logic, but unifiedGid is good for notes
             const leadId = lead.sourceId;
-            activityService.getLeadActivities(leadId, lead.gid)
+            activityService.getLeadActivities(leadId, lead.gid, lead.email || undefined)
                 .then(setActivities)
                 .catch(console.error)
                 .finally(() => setLoading(false));
@@ -79,20 +121,24 @@ export function LeadDetailDrawer({ lead, open, onOpenChange }: Props) {
                     </div>
                 </SheetHeader>
 
-                {/* AI Next Best Action Placeholder */}
+                {/* AI Next Best Action - Dynamic */}
                 <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-6">
                     <h4 className="text-sm font-semibold text-blue-900 mb-1 flex items-center gap-2">
                         ✨ Sugerencia de IA
                     </h4>
                     <p className="text-sm text-blue-800">
-                        Este lead envió un correo hace 2 días. Sería buen momento para programar una llamada de seguimiento.
+                        {getAISuggestion(lead, activities)}
                     </p>
                     <div className="mt-2 flex gap-2">
-                        <Button size="sm" variant="default" className="bg-blue-600 hover:bg-blue-700 h-8 text-xs">
-                            Agendar llamada
-                        </Button>
+                        {lead.email && (
+                            <Link href={`/contact/compose?id=${lead.sourceId}&email=${lead.email}`}>
+                                <Button size="sm" variant="default" className="bg-blue-600 hover:bg-blue-700 h-8 text-xs">
+                                    Enviar email
+                                </Button>
+                            </Link>
+                        )}
                         <Button size="sm" variant="ghost" className="text-blue-600 h-8 text-xs hover:text-blue-800 hover:bg-blue-100">
-                            Generar respuesta
+                            Generar borrador IA
                         </Button>
                     </div>
                 </div>
