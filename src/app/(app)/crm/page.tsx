@@ -20,10 +20,12 @@ export default function CRMPage() {
     const [rows, setRows] = useState<UnifiedRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedLead, setSelectedLead] = useState<UnifiedRow | null>(null);
+    const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
     // Todo: Switcher for List View vs Board View (future)
     const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
     const [focusMode, setFocusMode] = useState(false); // New Focus Mode state
+    const [focusedStage, setFocusedStage] = useState<PipelineStage>('contacted'); // Default for Focus Mode
 
     async function loadData() {
         setLoading(true);
@@ -94,8 +96,19 @@ export default function CRMPage() {
                 </div>
             </div>
 
-            <SmartAlerts leads={rows} />
-            <div className="flex-1 overflow-hidden">
+            {/* Smart Alerts */}
+            <div className="mb-6">
+                <SmartAlerts
+                    leads={rows}
+                    onAlertClick={(stage) => {
+                        setFocusedStage(stage as PipelineStage);
+                        setFocusMode(true);
+                    }}
+                />
+            </div>
+
+            {/* Kanban Board */}
+            <div className="flex-1 min-h-0">
                 {loading && rows.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-muted-foreground">Cargando pipeline...</div>
                 ) : (
@@ -103,7 +116,10 @@ export default function CRMPage() {
                         leads={rows}
                         onLeadMove={handleLeadMove}
                         onLeadClick={handleLeadClick}
-                        focusMode={focusMode} // Pass default focus props
+                        focusMode={focusMode}
+                        setFocusMode={setFocusMode}
+                        focusedStage={focusedStage}
+                        setFocusedStage={setFocusedStage}
                     />
                 )}
             </div>

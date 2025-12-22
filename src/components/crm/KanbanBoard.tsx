@@ -27,11 +27,26 @@ interface Props {
     onLeadMove: (leadId: string, newStage: PipelineStage) => void;
     onLeadClick: (lead: UnifiedRow) => void;
     focusMode?: boolean;
+    setFocusMode?: (mode: boolean) => void;
+    focusedStage?: PipelineStage;
+    setFocusedStage?: (stage: PipelineStage) => void;
 }
-
-export function KanbanBoard({ leads, onLeadMove, onLeadClick, focusMode = false }: Props) {
+export function KanbanBoard({
+    leads,
+    onLeadMove,
+    onLeadClick,
+    focusMode = false,
+    setFocusMode,
+    focusedStage: propFocusedStage,
+    setFocusedStage: propSetFocusedStage
+}: Props) {
     const [activeId, setActiveId] = useState<string | null>(null);
-    const [focusedStage, setFocusedStage] = useState<PipelineStage>('contacted'); // Default focus
+    // Local state fallback if not provided (though in this app it will always be provided)
+    const [localFocusedStage, setLocalFocusedStage] = useState<PipelineStage>('contacted');
+
+    // Use prop if available, otherwise local state
+    const focusedStage = propFocusedStage !== undefined ? propFocusedStage : localFocusedStage;
+    const setFocusedStage = propSetFocusedStage || setLocalFocusedStage;
 
     const sensors = useSensors(
         useSensor(PointerSensor),

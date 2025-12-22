@@ -6,7 +6,7 @@ import { defaultColumns } from '@/lib/unified-sheet-storage'; // Reusing default
 // Table: unified_crm_data
 // Columns: id (text, PK), stage (text), owner (text), notes (text), updated_at (timestamptz)
 
-export type CustomData = Partial<Pick<UnifiedRow, 'stage' | 'owner' | 'notes'>>;
+export type CustomData = Partial<Pick<UnifiedRow, 'stage' | 'owner' | 'notes'>> & { updated_at?: string };
 
 const TABLE_NAME = 'unified_crm_data';
 
@@ -107,7 +107,7 @@ export const unifiedSheetService = {
         try {
             const { data, error } = await supabase
                 .from(TABLE_NAME)
-                .select('id, stage, owner, notes');
+                .select('id, stage, owner, notes, updated_at');
 
             if (error) {
                 console.error('[unified-sheet-service] getAllCustom error:', error);
@@ -119,7 +119,8 @@ export const unifiedSheetService = {
                 result[row.id] = {
                     stage: row.stage,
                     owner: row.owner,
-                    notes: row.notes
+                    notes: row.notes,
+                    updated_at: row.updated_at
                 };
             });
             return result;
