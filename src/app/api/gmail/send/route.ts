@@ -247,6 +247,74 @@ export async function POST(req: Request) {
     }
 
     const data = await res.json();
+
+    // --- CRM Automation: Auto-update Stats & Stage ---
+    try {
+      console.log('[gmail/send] CRM automation for', body.to);
+
+      // 1. Find the lead by searching in source tables
+      let leadId: string | null = null;
+      let leadKind: string | null = null;
+
+      // Try enriched_leads first
+      const { data: enrichedLead } = await supabase
+        .from('enriched_leads')
+        .select('id')
+        .eq('email', body.to)
+        .maybeSingle();
+
+      if (enrichedLead) {
+        leadId = enrichedLead.id;
+        leadKind = 'enriched_lead';
+      } else {
+        // Try enriched_opportunities
+        const { data: opportunity } = await supabase
+          .from('enriched_opportunities')
+          .select('id')
+          .ilike('email', body.to)
+          .maybeSingle();
+
+        if (opportunity) {
+          leadId = opportunity.id;
+          leadKind = 'enriched_opportunity';
+        }
+      }
+
+      if (leadId && leadKind) {
+        // 2. Increment contacted count
+        await supabase.rpc('increment_contacted_count', { row_id: leadId });
+
+        // 3. Move to 'contacted' stage if currently in 'inbox' or 'qualified'
+        const gid = leadKind === 'enriched_opportunity' ? `enriched_opportunity|${leadId}` :
+          `enriched_lead|${leadId}`;
+
+        const { data: currentData } = await supabase
+          .from('unified_crm_data')
+          .select('stage')
+          .eq('id', gid)
+          .maybeSingle();
+
+        const currentStage = currentData?.stage || 'inbox';
+
+        if (currentStage === 'inbox' || currentStage === 'qualified') {
+          await supabase
+            .from('unified_crm_data')
+            .upsert({
+              id: gid,
+              stage: 'contacted',
+              organization_id: orgId,
+              updated_at: new Date().toISOString()
+            });
+          console.log(`[gmail/send] Auto-moved lead ${gid} to 'contacted'`);
+        }
+      } else {
+        console.log('[gmail/send] No lead found for email:', body.to);
+      }
+    } catch (err) {
+      console.error('[gmail/send] CRM automation error:', err);
+      // Don't fail the response, this is a side effect
+    }
+
     return NextResponse.json({ ok: true, id: data.id, threadId: data.threadId });
   } catch (e: any) {
     console.error('[gmail/send] error', e);

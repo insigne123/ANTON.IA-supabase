@@ -23,6 +23,7 @@ export default function CRMPage() {
 
     // Todo: Switcher for List View vs Board View (future)
     const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
+    const [focusMode, setFocusMode] = useState(false); // New Focus Mode state
 
     async function loadData() {
         setLoading(true);
@@ -75,6 +76,14 @@ export default function CRMPage() {
                         <Button variant="outline" size="sm" disabled>
                             <List className="h-4 w-4 mr-2" /> Lista
                         </Button>
+                        <Button
+                            variant={focusMode ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setFocusMode(!focusMode)}
+                            className={focusMode ? "bg-purple-600 hover:bg-purple-700" : ""}
+                        >
+                            {focusMode ? '🎯 Modo Normal' : '🎯 Modo Foco'}
+                        </Button>
                         <Button variant="secondary" size="sm">
                             <LayoutGrid className="h-4 w-4 mr-2" /> Tablero
                         </Button>
@@ -94,6 +103,7 @@ export default function CRMPage() {
                         leads={rows}
                         onLeadMove={handleLeadMove}
                         onLeadClick={handleLeadClick}
+                        focusMode={focusMode} // Pass default focus props
                     />
                 )}
             </div>

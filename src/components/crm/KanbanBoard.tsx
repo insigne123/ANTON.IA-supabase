@@ -26,10 +26,12 @@ interface Props {
     leads: UnifiedRow[];
     onLeadMove: (leadId: string, newStage: PipelineStage) => void;
     onLeadClick: (lead: UnifiedRow) => void;
+    focusMode?: boolean;
 }
 
-export function KanbanBoard({ leads, onLeadMove, onLeadClick }: Props) {
+export function KanbanBoard({ leads, onLeadMove, onLeadClick, focusMode = false }: Props) {
     const [activeId, setActiveId] = useState<string | null>(null);
+    const [focusedStage, setFocusedStage] = useState<PipelineStage>('contacted'); // Default focus
 
     const sensors = useSensors(
         useSensor(PointerSensor),
@@ -105,18 +107,39 @@ export function KanbanBoard({ leads, onLeadMove, onLeadClick }: Props) {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
         >
-            <div className="flex bg-background h-full overflow-x-auto gap-4 p-4 items-start">
-                {PIPELINE_STAGES.map(stage => (
-                    <KanbanColumn
-                        key={stage.id}
-                        id={stage.id}
-                        title={stage.label}
-                        colorClass={stage.color}
-                        count={columns.get(stage.id)?.length || 0}
-                        leads={columns.get(stage.id) || []}
-                        onLeadClick={onLeadClick}
-                    />
-                ))}
+            <div className={`flex bg-background h-full overflow-x-auto gap-4 p-4 items-start ${focusMode ? 'justify-center' : ''}`}>
+
+                {/* Stage Selector for Focus Mode */}
+                {focusMode && (
+                    <div className="absolute top-20 left-1/2 -translate-x-1/2 z-10 bg-white/90 backdrop-blur border rounded-full px-2 py-1 shadow-sm flex items-center gap-1">
+                        {PIPELINE_STAGES.map(s => (
+                            <button
+                                key={s.id}
+                                onClick={() => setFocusedStage(s.id)}
+                                className={`text-xs px-2 py-1 rounded-full transition-colors ${focusedStage === s.id ? 'bg-black text-white' : 'hover:bg-gray-100 text-gray-500'}`}
+                            >
+                                {s.label}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                {PIPELINE_STAGES.map(stage => {
+                    if (focusMode && stage.id !== focusedStage) return null;
+
+                    return (
+                        <div key={stage.id} className={focusMode ? "w-[600px] h-full transition-all duration-300" : "h-full"}>
+                            <KanbanColumn
+                                id={stage.id}
+                                title={stage.label}
+                                colorClass={stage.color}
+                                count={columns.get(stage.id)?.length || 0}
+                                leads={columns.get(stage.id) || []}
+                                onLeadClick={onLeadClick}
+                            />
+                        </div>
+                    );
+                })}
             </div>
 
             <DragOverlay dropAnimation={dropAnimation}>
