@@ -14,7 +14,7 @@ import {
   SidebarTrigger
 } from '@/components/ui/sidebar';
 import {
-  User, Search, Send, Share2, Briefcase, Settings, Table as TableIcon, Users, MailCheck, Mail, LayoutDashboard, Building2, LogOut, Ban, Shield
+  User, Search, Send, Share2, Briefcase, Settings, Table as TableIcon, Users, MailCheck, Mail, LayoutDashboard, Building2, LogOut, Ban, Shield, LayoutGrid
 } from 'lucide-react';
 import Logo from './logo';
 import { useAuth } from '@/context/AuthContext';
@@ -25,7 +25,8 @@ const navItems = [
   { href: '/search', icon: Search, label: 'Búsqueda de Leads' },
   { href: '/opportunities', icon: Briefcase, label: 'Oportunidades' },
   { href: '/campaigns', icon: MailCheck, label: 'Campañas' },
-  { href: '/sheet', label: 'Sheet (CRM)', icon: TableIcon },
+  { href: '/sheet', label: 'Sheet (Datos)', icon: TableIcon },
+  { href: '/crm', label: 'Pipeline (CRM)', icon: LayoutGrid },
   { href: '/saved/leads', icon: Users, label: 'Guardados · Leads' },
   { href: '/saved/opportunities', icon: Briefcase, label: 'Guardados · Oportunidades' },
   { href: '/contacted', icon: Send, label: 'Leads Contactados' },

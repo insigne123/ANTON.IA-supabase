@@ -101,6 +101,15 @@ export const contactedLeadsStorage = {
         return data ? mapRowToContactedLead(data) : null;
     },
 
+    findAllByLeadId: async (leadId: string) => {
+        const { data } = await supabase
+            .from(TABLE)
+            .select('*')
+            .eq('lead_id', leadId)
+            .order('sent_at', { ascending: false });
+        return (data || []).map(mapRowToContactedLead);
+    },
+
     add: async (item: ContactedLead) => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;

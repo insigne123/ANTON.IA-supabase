@@ -11,26 +11,26 @@ export interface UnifiedRow {
   /** id global único: <kind>|<id o conversationId> */
   gid: string;
   sourceId: string;       // id original de la entidad
-  
+
   // Campos comunes
   name?: string | null;
   email?: string | null;  // <-- NUEVO: email normalizado para mostrar en Sheet
   company?: string | null;
   title?: string | null;
   linkedinUrl?: string | null;
-  
+
   // Metadatos
   status: UnifiedStatus;
   kind: UnifiedKind;
   createdAt?: string | number | null;
   updatedAt?: string | number | null;
   source?: 'search' | 'opportunity' | 'contacted' | 'manual';
-  
+
   // Flags
   hasEmail?: boolean;     // <-- NUEVO: bandera útil para filtros/orden
-  
+
   // Campos custom persistidos por usuario (Stage, Owner, Notas, etc.)
-  stage?: string | null;
+  stage?: import('./crm-types').PipelineStage | string | null;
   owner?: string | null;
   notes?: string | null;
 }
@@ -47,5 +47,5 @@ export type ColumnDef = {
   visible: boolean;
   width?: number;        // px (simple)
   editable?: boolean;    // solo columnas custom
-  align?: 'left'|'right'|'center';
+  align?: 'left' | 'right' | 'center';
 };
