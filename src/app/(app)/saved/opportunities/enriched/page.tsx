@@ -9,22 +9,24 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import type { EnrichedOppLead, LeadResearchReport } from '@/lib/types';
+import type { EnrichedOppLead, LeadResearchReport, StyleProfile } from '@/lib/types';
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
 import { upsertLeadReports, getLeadReports, findReportByRef, removeReportFor, findReportForLead } from '@/lib/lead-research-storage';
 import { extractPrimaryEmail } from '@/lib/email-utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
 import { isResearched, markResearched, removeResearched } from '@/lib/researched-leads-storage';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
-import { Linkedin, Eraser, Filter, Trash2, Download, FileSpreadsheet, RotateCw, Phone } from 'lucide-react';
+import { Linkedin, Eraser, Filter, Trash2, Download, FileSpreadsheet, RotateCw, Phone, Send, Edit } from 'lucide-react';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
 import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
+import { styleProfilesStorage } from '@/lib/style-profiles-storage'; // FIXED IMPORT
 import * as Quota from '@/lib/quota-client';
 
 function getClientUserId(): string {
@@ -80,14 +82,35 @@ export default function EnrichedOpportunitiesPage() {
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState<number>(1);
 
-  // Contact Selection (Mock for compatibility with EnrichedLeads logic)
+  // Contact Selection (Strict Logic: Must be researched)
   const [selectedToContact, setSelectedToContact] = useState<Set<string>>(new Set());
+
+  // Mass Compose State
+  const [openCompose, setOpenCompose] = useState(false);
+  const [composeList, setComposeList] = useState<Array<{ lead: EnrichedOppLead; subject: string; body: string }>>([]);
+  const [sendingBulk, setSendingBulk] = useState(false);
+  const [bulkProvider, setBulkProvider] = useState<'gmail' | 'outlook'>('outlook');
+  const [draftSource, setDraftSource] = useState<'investigation' | 'style'>('investigation');
+  const [selectedStyleName, setSelectedStyleName] = useState<string>('');
+  const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
+
+  // Bulk Editor
+  const [showBulkEditor, setShowBulkEditor] = useState(false);
+  const [editInstruction, setEditInstruction] = useState('');
+  const [applyingEdit, setApplyingEdit] = useState(false);
+
+  // Tracking
+  const [usePixel, setUsePixel] = useState(true);
+  const [useLinkTracking, setUseLinkTracking] = useState(false);
+  const [useReadReceipt, setUseReadReceipt] = useState(false);
 
   // Load Data
   const loadData = async () => {
     const data = await enrichedOpportunitiesStorage.get();
     setEnriched(data);
     setReports(getLeadReports());
+    const styles = styleProfilesStorage.list(); // FIXED: use storage.list()
+    setStyleProfiles(styles);
   };
 
   useEffect(() => {
@@ -112,20 +135,21 @@ export default function EnrichedOpportunitiesPage() {
     const excLeads = splitTerms(applied.excLead);
     const excTitles = splitTerms(applied.excTitle);
 
-    const containsAny = (value: string | null | undefined, terms: string[]) => {
+    // Renamed helpers to avoid collisions
+    const checkContainsAny = (value: string | null | undefined, terms: string[]) => {
       if (!terms.length) return true;
       const v = norm(value);
       return terms.some(t => v.includes(t));
     };
-    const excludesAll = (value: string | null | undefined, terms: string[]) => {
+    const checkExcludesAll = (value: string | null | undefined, terms: string[]) => {
       if (!terms.length) return true;
       const v = norm(value);
       return terms.every(t => !v.includes(t));
     };
 
     return enriched.filter(e =>
-      containsAny(e.companyName, incCompanies) && containsAny(e.fullName, incLeads) && containsAny(e.title, incTitles) &&
-      excludesAll(e.companyName, excCompanies) && excludesAll(e.fullName, excLeads) && excludesAll(e.title, excTitles)
+      checkContainsAny(e.companyName, incCompanies) && checkContainsAny(e.fullName, incLeads) && checkContainsAny(e.title, incTitles) &&
+      checkExcludesAll(e.companyName, excCompanies) && checkExcludesAll(e.fullName, excLeads) && checkExcludesAll(e.title, excTitles)
     );
   }, [enriched, applied]);
 
@@ -145,7 +169,21 @@ export default function EnrichedOpportunitiesPage() {
   // Bulk Checks
   const researchEligiblePage = pageLeads.filter(e => e.email && !isResearchedLead(e)).length;
   const allResearchChecked = researchEligiblePage > 0 && pageLeads.filter(e => e.email && !isResearchedLead(e)).every(e => sel[e.id]);
-  const anyInvestigated = enriched.some(isResearchedLead);
+
+  // CONTACT LOGIC: Must be researched + have email
+  const canContact = (e: EnrichedOppLead) => isResearchedLead(e) && !!e.email && e.email !== 'Not Found';
+  const toggleAllContact = (checked: boolean) => {
+    const next = new Set(selectedToContact);
+    pageLeads.forEach(e => {
+      if (canContact(e)) {
+        if (checked) next.add(e.id); else next.delete(e.id);
+      }
+    });
+    setSelectedToContact(next);
+  };
+  const contactEligiblePage = pageLeads.filter(canContact).length;
+  const allContactChecked = contactEligiblePage > 0 && pageLeads.filter(canContact).every(e => selectedToContact.has(e.id));
+
 
   const toggleAllResearch = (checked: boolean) => {
     setSel(prev => {
@@ -161,20 +199,6 @@ export default function EnrichedOpportunitiesPage() {
     });
   };
 
-  const canContact = (e: EnrichedOppLead) => !!e.email && e.email !== 'Not Found';
-  const toggleAllContact = (checked: boolean) => {
-    const next = new Set(selectedToContact);
-    pageLeads.forEach(e => {
-      if (canContact(e)) {
-        if (checked) next.add(e.id); else next.delete(e.id);
-      }
-    });
-    setSelectedToContact(next);
-  };
-  const contactEligiblePage = pageLeads.filter(canContact).length;
-  const allContactChecked = contactEligiblePage > 0 && pageLeads.filter(canContact).every(e => selectedToContact.has(e.id));
-
-
   // Acciones
   const handleExportCsv = () => exportToCsv(enriched, 'oportunidades_enriquecidas');
   const handleExportXlsx = () => exportToXlsx(enriched, 'oportunidades_enriquecidas');
@@ -182,7 +206,6 @@ export default function EnrichedOpportunitiesPage() {
   const handleDeleteSelected = async () => {
     const ids = Object.keys(sel).filter(k => sel[k]);
     if (!ids.length || !confirm(`¿Borrar ${ids.length} leads?`)) return;
-    // FIX: Using removeById iteratively as remove(ids) is not supported
     await Promise.all(ids.map(id => enrichedOpportunitiesStorage.removeById(id)));
     setSel({});
     loadData();
@@ -201,7 +224,7 @@ export default function EnrichedOpportunitiesPage() {
     enriched.forEach(e => {
       const ref = leadRefOf(e);
       removeReportFor(ref);
-      removeResearched(ref);
+      removeResearched([ref]); // FIXED: passed as array
     });
     setReports(getLeadReports());
     toast({ title: 'Investigaciones borradas' });
@@ -210,7 +233,7 @@ export default function EnrichedOpportunitiesPage() {
   const clearInvestigationFor = (lead: EnrichedOppLead) => {
     const ref = leadRefOf(lead);
     removeReportFor(ref);
-    removeResearched(ref);
+    removeResearched([ref]); // FIXED: passed as array
     setReports(getLeadReports());
     toast({ title: 'Investigación eliminada' });
     if (reportLead?.id === lead.id) setOpenReport(false);
@@ -252,7 +275,6 @@ export default function EnrichedOpportunitiesPage() {
         if (t) {
           try {
             const res = await runOneInvestigation(t, userId);
-            // FIX: Correct structure for upsertLeadReports
             upsertLeadReports([{
               id: uuidv4(),
               company: {
@@ -263,7 +285,7 @@ export default function EnrichedOpportunitiesPage() {
               cross: res.report,
               meta: { leadRef: res.leadRef }
             }]);
-            markResearched(res.leadRef);
+            markResearched([res.leadRef]); // FIXED: passed as array
           } catch (e) { console.error(e); }
         }
         done++;
@@ -275,6 +297,69 @@ export default function EnrichedOpportunitiesPage() {
     } catch (e: any) { toast({ variant: 'destructive', title: 'Error', description: e.message }); }
     finally { setResearching(false); }
   };
+
+  // --- BULK CONTACT LOGIC ---
+  const handleOpenBulkCompose = () => {
+    const ids = Array.from(selectedToContact);
+    if (ids.length === 0) return;
+    const toCompose: Array<{ lead: EnrichedOppLead; subject: string; body: string }> = [];
+
+    ids.forEach(id => {
+      const l = enriched.find(x => x.id === id);
+      if (!l || !canContact(l)) return; // Double check
+      const rep = findReportByRef(leadRefOf(l));
+      toCompose.push({
+        lead: l,
+        subject: rep?.cross?.emailDraft?.subject || `Contacto: ${l.fullName}`,
+        body: rep?.cross?.emailDraft?.body || `Hola ${l.fullName}, te contacto desde...`
+      });
+    });
+
+    setComposeList(toCompose);
+    setOpenCompose(true);
+  };
+
+  const handleSendBulk = async () => {
+    if (!confirm(`¿Enviar ${composeList.length} correos usando ${bulkProvider}?`)) return;
+    setSendingBulk(true);
+    try {
+      const userId = await getUserIdOrFail();
+      const payload = {
+        userId,
+        provider: bulkProvider,
+        tracking: { pixel: usePixel, links: useLinkTracking, readReceipt: useReadReceipt }, // Using local state options
+        emails: composeList.map(it => ({
+          to: [it.lead.email!], // Already validated has email
+          subject: it.subject,
+          text: it.body,
+          html: `<p>${it.body.replace(/\n/g, '<br/>')}</p>`,
+          leadId: it.lead.id
+        }))
+      };
+
+      const res = await fetch('/api/email/bulk-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Error al enviar');
+      }
+
+      const j = await res.json();
+      toast({ title: 'Envío completado', description: `Enviados: ${j.sentCount || 0}, Fallidos: ${j.failedCount || 0}` });
+      setOpenCompose(false);
+      setComposeList([]);
+      setSelectedToContact(new Set());
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Error envío masivo', description: e.message });
+    } finally {
+      setSendingBulk(false);
+    }
+  };
+
 
   return (
     <div className="space-y-6">
@@ -311,6 +396,15 @@ export default function EnrichedOpportunitiesPage() {
                 </Button>
               </div>
             )}
+            {selectedToContact.size > 0 && (
+              <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 ml-2">
+                <Button variant="default" size="sm" onClick={handleOpenBulkCompose}>
+                  <Send className="w-4 h-4 mr-2" />
+                  Contactar ({selectedToContact.size})
+                </Button>
+              </div>
+            )}
+
             <Button variant="outline" size="sm" onClick={handleExportCsv} title="Exportar CSV">
               <Download className="w-4 h-4" />
             </Button>
@@ -400,13 +494,14 @@ export default function EnrichedOpportunitiesPage() {
                         </TableCell>
                         <TableCell className="text-center">
                           <Checkbox
-                            disabled={!canContact(e)}
+                            disabled={!canContact(e)} // Now uses strict check (researched + email)
                             checked={selectedToContact.has(e.id)}
                             onCheckedChange={(v) => {
                               const next = new Set(selectedToContact);
                               if (v) next.add(e.id); else next.delete(e.id);
                               setSelectedToContact(next);
                             }}
+                            title={!canContact(e) ? 'Debes investigar el lead antes de contactar' : 'Marcar para contactar'}
                           />
                         </TableCell>
                         <TableCell>{e.fullName}</TableCell>
@@ -495,6 +590,173 @@ export default function EnrichedOpportunitiesPage() {
               No hay reporte generado para este lead. Selecciónalo en la lista y pulsa "Investigar (n8n)".
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* MASS CONTACT COMPOSE DIALOG */}
+      <Dialog open={openCompose} onOpenChange={setOpenCompose}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" onEscapeKeyDown={() => setOpenCompose(false)}>
+          <DialogHeader>
+            <DialogTitle>Contactar {composeList.length} leads</DialogTitle>
+          </DialogHeader>
+
+          <div className="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+            <div className="col-span-1">
+              <Label className="text-xs text-muted-foreground mb-1">Fuente del borrador</Label>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => setDraftSource('investigation')} />
+                  Investigación
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="draft-source" value="style" checked={draftSource === 'style'} onChange={() => {
+                    setDraftSource('style');
+                    if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
+                  }} />
+                  Estilo (Email Studio)
+                </label>
+              </div>
+            </div>
+            <div className="col-span-1">
+              <Label className="text-xs text-muted-foreground mb-1">Perfil de estilo</Label>
+              <select
+                className="h-9 w-full rounded-md border bg-background px-2 text-sm disabled:opacity-50"
+                disabled={draftSource !== 'style' || styleProfiles.length === 0}
+                value={selectedStyleName}
+                onChange={(e) => setSelectedStyleName(e.target.value)}
+              >
+                {styleProfiles.length === 0 ? <option value="">(No hay estilos)</option> :
+                  styleProfiles.map(p => <option key={p.name} value={p.name}>{p.name}</option>)
+                }
+              </select>
+            </div>
+            <div className="col-span-1">
+              <Label className="text-xs text-muted-foreground mb-1">Proveedor de envío</Label>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="bulk-provider" value="outlook" checked={bulkProvider === 'outlook'} onChange={() => setBulkProvider('outlook')} />
+                  Outlook
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="bulk-provider" value="gmail" checked={bulkProvider === 'gmail'} onChange={() => setBulkProvider('gmail')} />
+                  Gmail
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* AI EDITOR BAR */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs text-muted-foreground">
+              Revisa y ajusta los borradores. Proveedor: <strong>{bulkProvider}</strong>
+            </div>
+            <Button variant="secondary" onClick={() => setShowBulkEditor(v => !v)} disabled={composeList.length === 0}>
+              {showBulkEditor ? 'Ocultar editor IA' : 'Editar con IA (todos)'}
+            </Button>
+          </div>
+
+          {/* BULK EDITOR */}
+          {showBulkEditor && (
+            <div className="mb-3 border rounded-md p-3 bg-muted/40">
+              <div className="text-sm text-muted-foreground mb-1">
+                Describe cómo quieres modificar los correos (se aplicará a todos).
+              </div>
+              <Textarea
+                value={editInstruction}
+                onChange={(e) => setEditInstruction(e.target.value)}
+                rows={3}
+                placeholder='Ej: "Haz el tono más formal" o "Agrega una posdata sobre..."'
+              />
+              <div className="mt-2 flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => { setEditInstruction(''); setShowBulkEditor(false); }}>Cancelar</Button>
+                <Button
+                  disabled={applyingEdit || !editInstruction.trim()}
+                  onClick={async () => {
+                    if (!editInstruction.trim() || !composeList.length) return;
+                    setApplyingEdit(true);
+                    try {
+                      const payload = {
+                        instruction: editInstruction.trim(),
+                        drafts: composeList.map(it => ({
+                          subject: it.subject, body: it.body,
+                          lead: {
+                            id: it.lead.id, fullName: it.lead.fullName, email: it.lead.email,
+                            title: it.lead.title, companyName: it.lead.companyName
+                          }
+                        }))
+                      };
+                      const r = await fetch('/api/email/bulk-edit', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                      });
+                      const j = await r.json();
+                      if (!r.ok) throw new Error(j.error);
+                      const edited = j.drafts || [];
+                      if (edited.length === composeList.length) {
+                        setComposeList(prev => prev.map((it, i) => ({ ...it, subject: edited[i].subject, body: edited[i].body })));
+                      }
+                      setShowBulkEditor(false);
+                      setEditInstruction('');
+                      toast({ title: 'Edición aplicada' });
+                    } catch (e: any) { toast({ variant: 'destructive', title: 'Error', description: e.message }) }
+                    finally { setApplyingEdit(false); }
+                  }}
+                >
+                  {applyingEdit ? 'Aplicando...' : 'Aplicar'}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Tracking Options */}
+          <div className="mb-4 border border-border/50 rounded-md p-3 bg-muted/20">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                  <Checkbox checked={usePixel} onCheckedChange={(c) => setUsePixel(!!c)} />
+                  Activar Tracking Pixel
+                  <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded ml-1">Recomendado</span>
+                </label>
+              </div>
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                  <Checkbox checked={useLinkTracking} onCheckedChange={(c) => setUseLinkTracking(!!c)} />
+                  Track Link Clicks
+                </label>
+              </div>
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                  <Checkbox checked={useReadReceipt} onCheckedChange={(c) => setUseReadReceipt(!!c)} />
+                  Solicitar Confirmación
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* DRAFTS LIST */}
+          <div className="max-h-[50vh] overflow-y-auto space-y-4 p-1">
+            {composeList.map((item, idx) => (
+              <div key={item.lead.id} className="border rounded-lg p-3">
+                <div className="font-semibold text-sm">{item.lead.fullName} &lt;{item.lead.email}&gt;</div>
+                <div className="mt-2 text-xs font-semibold">Asunto</div>
+                <Input value={item.subject} onChange={e => {
+                  const n = [...composeList]; n[idx].subject = e.target.value; setComposeList(n);
+                }} className="mb-2 h-8" />
+                <div className="text-xs font-semibold">Cuerpo</div>
+                <Textarea value={item.body} onChange={e => {
+                  const n = [...composeList]; n[idx].body = e.target.value; setComposeList(n);
+                }} rows={6} className="text-xs font-mono" />
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setOpenCompose(false)}>Cancelar</Button>
+            <Button onClick={handleSendBulk} disabled={sendingBulk}>
+              {sendingBulk ? <RotateCw className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
+              Enviar Correos
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
