@@ -4,7 +4,7 @@
     "description": "ANTONIA Background Worker Functions",
     "main": "antonia-worker.js",
     "engines": {
-        "node": "18"
+        "node": "20"
     },
     "scripts": {
         "build": "tsc",
