@@ -14,7 +14,33 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Settings, Play, Pause, Bot, ArrowRight, CheckCircle2, Target, Briefcase, Globe, Sparkles, Search, Plus, Trash2, ChevronDown } from 'lucide-react';
+import {
+    Loader2,
+    Settings,
+    Play,
+    Pause,
+    Bot,
+    ArrowRight,
+    CheckCircle2,
+    Target,
+    Briefcase,
+    Globe,
+    Sparkles,
+    Search,
+    Plus,
+    Trash2,
+    ChevronDown,
+    Edit2,
+    FileText
+} from 'lucide-react';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { companySizes } from '@/lib/data';
 import { APOLLO_SENIORITIES } from '@/lib/apollo-taxonomies';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -39,11 +65,18 @@ export default function AntoniaPage() {
         keywords: '',
         companySize: '',
         seniorities: [] as string[],
+        missionName: '',
         enrichmentLevel: 'basic' as 'basic' | 'deep',
         campaignName: '',
         campaignContext: '',
         autoGenerateCampaign: false
     });
+
+    const [logsOpen, setLogsOpen] = useState(false);
+    const [taskLogs, setTaskLogs] = useState<any[]>([]);
+    const [currentMissionTitle, setCurrentMissionTitle] = useState('');
+    const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
+    const [logsLoading, setLogsLoading] = useState(false);
 
     const supabase = createClientComponentClient();
     const { toast } = useToast();
@@ -156,7 +189,7 @@ export default function AntoniaPage() {
         }
 
         try {
-            const title = `Buscar ${wizardData.jobTitle} en ${wizardData.location}`;
+            const title = wizardData.missionName || `Buscar ${wizardData.jobTitle} en ${wizardData.location}`;
             const summary = `Buscar ${wizardData.jobTitle}s en ${wizardData.industry} (${wizardData.location}). Enriquecer con nivel ${wizardData.enrichmentLevel}. Campaña: ${wizardData.campaignName || 'Ninguna'}.`;
 
             console.log('[ANTONIA] Creating mission with title:', title);
@@ -203,6 +236,7 @@ export default function AntoniaPage() {
                 keywords: '',
                 companySize: '',
                 seniorities: [],
+                missionName: '',
                 enrichmentLevel: 'basic',
                 campaignName: '',
                 campaignContext: '',
@@ -217,6 +251,60 @@ export default function AntoniaPage() {
                 title: 'Error al crear misión',
                 description: error.message || 'Ocurrió un error inesperado.'
             });
+        }
+    };
+
+    const handlePauseMission = async (mission: AntoniaMission) => {
+        try {
+            const newStatus = mission.status === 'active' ? 'paused' : 'active';
+            await antoniaService.updateMission(mission.id, { status: newStatus as any });
+
+            setMissions(missions.map(m =>
+                m.id === mission.id ? { ...m, status: newStatus as any } : m
+            ));
+
+            toast({
+                title: newStatus === 'active' ? 'Misión Reanudada' : 'Misión Pausada',
+                description: `La misión ha sido ${newStatus === 'active' ? 'activada' : 'pausada'} correctamente.`
+            });
+        } catch (error) {
+            console.error('[ANTONIA] Error toggling mission status:', error);
+            toast({ variant: 'destructive', title: 'Error', description: 'No se pudo actualizar el estado de la misión.' });
+        }
+    };
+
+    const startEditingMission = (mission: AntoniaMission) => {
+        setEditingMissionId(mission.id);
+        setCurrentMissionTitle(mission.title);
+    };
+
+    const saveMissionTitle = async (missionId: string) => {
+        if (!currentMissionTitle.trim()) return;
+
+        try {
+            await antoniaService.updateMission(missionId, { title: currentMissionTitle });
+            setMissions(missions.map(m =>
+                m.id === missionId ? { ...m, title: currentMissionTitle } : m
+            ));
+            setEditingMissionId(null);
+            toast({ title: 'Nombre actualizado' });
+        } catch (error) {
+            toast({ variant: 'destructive', title: 'Error', description: 'No se pudo renombrar la misión' });
+        }
+    };
+
+    const handleShowLogs = async (missionId: string) => {
+        setLogsOpen(true);
+        setLogsLoading(true);
+        try {
+            if (!orgId) return;
+            const logs = await antoniaService.getLogs(orgId, 100, missionId);
+            setTaskLogs(logs || []);
+        } catch (error) {
+            console.error('[ANTONIA] Error loading logs:', error);
+            toast({ variant: 'destructive', title: 'Error', description: 'No se pudieron cargar los logs.' });
+        } finally {
+            setLogsLoading(false);
         }
     };
 
@@ -418,6 +506,14 @@ export default function AntoniaPage() {
                                     <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
                                         <h3 className="text-lg font-medium mb-4">Acciones a Ejecutar</h3>
                                         <div className="space-y-2">
+                                            <Label>Nombre de la Misión (Opcional)</Label>
+                                            <Input
+                                                placeholder="ej. Búsqueda Gerentes Retail Chile"
+                                                value={wizardData.missionName || ''}
+                                                onChange={(e) => setWizardData({ ...wizardData, missionName: e.target.value })}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
                                             <Label>Nivel de Enriquecimiento</Label>
                                             <Select
                                                 value={wizardData.enrichmentLevel}
@@ -601,22 +697,56 @@ export default function AntoniaPage() {
                                     <CardHeader>
                                         <div className="flex justify-between items-start relative z-10">
                                             <Badge variant={mission.status === 'active' ? 'default' : 'secondary'} className={mission.status === 'active' ? 'bg-green-500' : ''}>
-                                                {mission.status === 'active' ? 'ACTIVA' : mission.status.toUpperCase()}
+                                                {mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : mission.status.toUpperCase()}
                                             </Badge>
-                                            <span className="text-xs text-muted-foreground">
-                                                {new Date(mission.createdAt).toLocaleDateString('es-AR')}
-                                            </span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-muted-foreground">
+                                                    {new Date(mission.createdAt).toLocaleDateString('es-AR')}
+                                                </span>
+                                                {editingMissionId !== mission.id && (
+                                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEditingMission(mission)}>
+                                                        <Edit2 className="w-3 h-3 text-muted-foreground" />
+                                                    </Button>
+                                                )}
+                                            </div>
                                         </div>
-                                        <CardTitle className="mt-2 line-clamp-1 relative z-10">{mission.title}</CardTitle>
+                                        {editingMissionId === mission.id ? (
+                                            <div className="flex items-center gap-2 mt-2 relative z-20">
+                                                <Input
+                                                    value={currentMissionTitle}
+                                                    onChange={(e) => setCurrentMissionTitle(e.target.value)}
+                                                    className="h-8 text-sm"
+                                                    autoFocus
+                                                />
+                                                <Button size="sm" onClick={() => saveMissionTitle(mission.id)} className="h-8">Guardar</Button>
+                                                <Button size="icon" variant="ghost" onClick={() => setEditingMissionId(null)} className="h-8 w-8">
+                                                    <X className="w-4 h-4" />
+                                                </Button>
+                                            </div>
+                                        ) : (
+                                            <CardTitle className="mt-2 line-clamp-1 relative z-10">{mission.title}</CardTitle>
+                                        )}
                                     </CardHeader>
                                     <CardContent className="relative z-10">
                                         <p className="text-sm text-muted-foreground line-clamp-3">
                                             {mission.goalSummary}
                                         </p>
                                         <div className="mt-4 flex gap-2">
-                                            <Button variant="outline" size="sm" className="w-full">Ver Logs</Button>
-                                            <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive">
-                                                <Pause className="w-4 h-4" />
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="w-full"
+                                                onClick={() => handleShowLogs(mission.id)}
+                                            >
+                                                <FileText className="w-3 h-3 mr-2" /> Ver Logs
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="text-muted-foreground hover:text-primary"
+                                                onClick={() => handlePauseMission(mission)}
+                                            >
+                                                {mission.status === 'active' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                                             </Button>
                                         </div>
                                     </CardContent>
@@ -799,6 +929,49 @@ export default function AntoniaPage() {
                     </Card>
                 </TabsContent>
             </Tabs>
+
+            <Dialog open={logsOpen} onOpenChange={setLogsOpen}>
+                <DialogContent className="max-w-3xl h-[80vh] flex flex-col">
+                    <DialogHeader>
+                        <DialogTitle>Logs de la Misión</DialogTitle>
+                        <DialogDescription>Registro detallado de actividades</DialogDescription>
+                    </DialogHeader>
+
+                    <ScrollArea className="flex-1 p-4 border rounded-md bg-slate-950 text-slate-50 font-mono text-sm">
+                        {logsLoading ? (
+                            <div className="flex items-center justify-center h-full">
+                                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                            </div>
+                        ) : taskLogs.length === 0 ? (
+                            <div className="text-center text-muted-foreground py-8">
+                                No hay logs registrados para esta misión.
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                {taskLogs.map((log) => (
+                                    <div key={log.id} className="border-b border-slate-800 pb-2 last:border-0">
+                                        <div className="flex justify-between text-xs text-slate-400 mb-1">
+                                            <span>{new Date(log.created_at).toLocaleString()}</span>
+                                            <span className={`uppercase font-bold ${log.level === 'error' ? 'text-red-400' :
+                                                    log.level === 'warn' ? 'text-yellow-400' :
+                                                        'text-blue-400'
+                                                }`}>
+                                                {log.level}
+                                            </span>
+                                        </div>
+                                        <p className="whitespace-pre-wrap">{log.message}</p>
+                                        {log.details && (
+                                            <pre className="mt-1 text-xs text-slate-500 overflow-x-auto">
+                                                {JSON.stringify(log.details, null, 2)}
+                                            </pre>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </ScrollArea>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

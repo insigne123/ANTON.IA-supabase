@@ -42,7 +42,9 @@ export async function POST(req: NextRequest) {
                     jobTitle: mission.params.jobTitle,
                     location: mission.params.location,
                     industry: mission.params.industry,
-                    keywords: mission.params.keywords,
+                    keywords: mission.params.keywords || '',
+                    companySize: mission.params.companySize || '',
+                    seniorities: mission.params.seniorities || [],
                     enrichmentLevel: mission.params.enrichmentLevel,
                     campaignName: mission.params.campaignName,
                     campaignContext: mission.params.campaignContext || '',
@@ -55,8 +57,16 @@ export async function POST(req: NextRequest) {
             .single();
 
         if (taskError) {
-            console.error('[Trigger] Error creating task:', taskError);
-            return NextResponse.json({ error: 'Failed to create task' }, { status: 500 });
+            console.error('[Trigger] Error creating task:', {
+                code: taskError.code,
+                message: taskError.message,
+                details: taskError.details,
+                hint: taskError.hint
+            });
+            return NextResponse.json({
+                error: 'Failed to create task',
+                details: taskError.message
+            }, { status: 500 });
         }
 
         // Log the trigger

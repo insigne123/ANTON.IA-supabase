@@ -184,15 +184,39 @@ export const antoniaService = {
     },
 
     /**
+     * Update Mission Status or Title
+     */
+    updateMission: async (
+        missionId: string,
+        updates: { status?: AntoniaMissionStatus; title?: string }
+    ) => {
+        const { data, error } = await supabase
+            .from('antonia_missions')
+            .update(updates)
+            .eq('id', missionId)
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data as AntoniaMission;
+    },
+
+    /**
      * Get Recent Logs
      */
-    getLogs: async (organizationId: string, limit = 50) => {
-        const { data, error } = await supabase
+    getLogs: async (organizationId: string, limit = 50, missionId?: string) => {
+        let query = supabase
             .from('antonia_logs')
             .select('*')
             .eq('organization_id', organizationId)
             .order('created_at', { ascending: false })
             .limit(limit);
+
+        if (missionId) {
+            query = query.eq('mission_id', missionId);
+        }
+
+        const { data, error } = await query;
 
         if (error) throw error;
         return data;
