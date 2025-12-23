@@ -1,10 +1,5 @@
 import * as functions from 'firebase-functions/v2';
-import { defineString } from 'firebase-functions/params';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-
-const supabaseUrl = defineString('SUPABASE_URL');
-const supabaseServiceKey = defineString('SUPABASE_SERVICE_ROLE_KEY');
-const appUrl = defineString('APP_URL');
 
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
 
@@ -147,7 +142,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient) {
         revealPhone: revealPhone
     };
 
-    const enrichUrl = `${appUrl.value()}/api/opportunities/enrich-apollo`;
+    const enrichUrl = `${process.env.APP_URL}/api/opportunities/enrich-apollo`;
 
     const response = await fetch(enrichUrl, {
         method: 'POST',
@@ -244,8 +239,14 @@ async function executeReport(task: any, supabase: SupabaseClient) {
 /**
  * Scheduled Function: Runs every minute
  */
-export const antoniaTick = functions.scheduler.onSchedule('every 1 minutes', async () => {
-    const supabase = createClient(supabaseUrl.value(), supabaseServiceKey.value());
+export const antoniaTick = functions.scheduler.onSchedule({
+    schedule: 'every 1 minutes',
+    secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']
+}, async () => {
+    const supabase = createClient(
+        process.env.SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
     console.log('[AntoniaTick] waking up...');
 
     const { data: tasks, error } = await supabase
