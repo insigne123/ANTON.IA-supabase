@@ -319,15 +319,6 @@ export default function AntoniaPage() {
                                             </DropdownMenu>
                                             <p className="text-xs text-muted-foreground">Opcional: C-Level, VP, Director, Manager, etc.</p>
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label>Palabras Clave (Opcional)</Label>
-                                            <Input
-                                                placeholder="ej. 'Serie A', 'Contratando'"
-                                                value={wizardData.keywords}
-                                                onChange={(e) => setWizardData({ ...wizardData, keywords: e.target.value })}
-                                            />
-                                            <p className="text-xs text-muted-foreground">Filtra por señales de compra o eventos recientes.</p>
-                                        </div>
                                     </div>
                                 )}
 
