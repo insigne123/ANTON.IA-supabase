@@ -97,13 +97,23 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
     const { jobTitle, location, industry, keywords } = task.payload;
     console.log('[SEARCH] Searching leads:', { jobTitle, location, industry });
 
-    const searchPayload = {
-        jobTitles: jobTitle ? [jobTitle] : [],
-        locations: location ? [location] : [],
-        industries: industry ? [industry] : [],
-        keywords: keywords || '',
+    const searchPayload: any = {
         limit: 100
     };
+
+    // Only include non-empty fields
+    if (jobTitle && jobTitle.trim()) {
+        searchPayload.jobTitles = [jobTitle];
+    }
+    if (location && location.trim()) {
+        searchPayload.locations = [location];
+    }
+    if (industry && industry.trim()) {
+        searchPayload.industries = [industry];
+    }
+    if (keywords && keywords.trim()) {
+        searchPayload.keywords = keywords;
+    }
 
     const response = await fetch(LEAD_SEARCH_URL, {
         method: 'POST',
