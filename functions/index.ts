@@ -1,15 +1,16 @@
 import * as functions from 'firebase-functions/v2';
-import { createClient } from '@supabase/supabase-js';
+import { defineString } from 'firebase-functions/params';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabaseUrl = defineString('SUPABASE_URL');
+const supabaseServiceKey = defineString('SUPABASE_SERVICE_ROLE_KEY');
+const appUrl = defineString('APP_URL');
 
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
 
 // --- WORKER LOGIC ---
 
-async function processTask(task: any) {
+async function processTask(task: any, supabase: SupabaseClient) {
     console.log(`[Worker] Processing task ${task.id} (${task.type})`);
 
     await supabase.from('antonia_tasks').update({
@@ -22,19 +23,19 @@ async function processTask(task: any) {
 
         switch (task.type) {
             case 'SEARCH':
-                result = await executeSearch(task);
+                result = await executeSearch(task, supabase);
                 break;
 
             case 'ENRICH':
-                result = await executeEnrichment(task);
+                result = await executeEnrichment(task, supabase);
                 break;
 
             case 'CONTACT':
-                result = await executeContact(task);
+                result = await executeContact(task, supabase);
                 break;
 
             case 'REPORT':
-                result = await executeReport(task);
+                result = await executeReport(task, supabase);
                 break;
         }
 
@@ -69,7 +70,7 @@ async function processTask(task: any) {
     }
 }
 
-async function executeSearch(task: any) {
+async function executeSearch(task: any, supabase: SupabaseClient) {
     const { jobTitle, location, industry, keywords } = task.payload;
 
     console.log('[SEARCH] Starting lead search', { jobTitle, location, industry });
@@ -129,7 +130,7 @@ async function executeSearch(task: any) {
     return { leadsFound: leads.length };
 }
 
-async function executeEnrichment(task: any) {
+async function executeEnrichment(task: any, supabase: SupabaseClient) {
     const { leads, enrichmentLevel, userId } = task.payload;
 
     const revealPhone = enrichmentLevel === 'deep';
@@ -146,7 +147,7 @@ async function executeEnrichment(task: any) {
         revealPhone: revealPhone
     };
 
-    const enrichUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/opportunities/enrich-apollo`;
+    const enrichUrl = `${appUrl.value()}/api/opportunities/enrich-apollo`;
 
     const response = await fetch(enrichUrl, {
         method: 'POST',
@@ -182,7 +183,7 @@ async function executeEnrichment(task: any) {
     return { enrichedCount: enriched.length };
 }
 
-async function executeContact(task: any) {
+async function executeContact(task: any, supabase: SupabaseClient) {
     const { enrichedLeads, campaignName } = task.payload;
 
     const { data: campaigns } = await supabase
@@ -214,7 +215,7 @@ async function executeContact(task: any) {
     return { contactedCount: contactedLeads.length };
 }
 
-async function executeReport(task: any) {
+async function executeReport(task: any, supabase: SupabaseClient) {
     const { data: mission } = await supabase
         .from('antonia_missions')
         .select('*')
@@ -244,6 +245,7 @@ async function executeReport(task: any) {
  * Scheduled Function: Runs every minute
  */
 export const antoniaTick = functions.scheduler.onSchedule('every 1 minutes', async () => {
+    const supabase = createClient(supabaseUrl.value(), supabaseServiceKey.value());
     console.log('[AntoniaTick] waking up...');
 
     const { data: tasks, error } = await supabase
@@ -262,5 +264,5 @@ export const antoniaTick = functions.scheduler.onSchedule('every 1 minutes', asy
         return;
     }
 
-    await Promise.all(tasks.map(t => processTask(t)));
+    await Promise.all(tasks.map(t => processTask(t, supabase)));
 });
