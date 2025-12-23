@@ -179,15 +179,40 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
     }
 
     const { leads, userId, enrichmentLevel, campaignName } = task.payload;
+
+    console.log(`[ENRICH] Task payload:`, JSON.stringify({
+        leadsCount: leads?.length || 0,
+        userId,
+        enrichmentLevel,
+        campaignName
+    }));
+
+    if (!leads || leads.length === 0) {
+        console.log('[ENRICH] No leads to enrich in payload');
+        return { enrichedCount: 0, skipped: true, reason: 'no_leads' };
+    }
+
     const leadsToEnrich = leads.slice(0, limit - (usage.leads_enriched || 0));
 
     console.log(`[ENRICH] Enriching ${leadsToEnrich.length} leads`);
 
     const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+    console.log(`[ENRICH] Using appUrl: ${appUrl}`);
+
+    if (!appUrl) {
+        console.error('[ENRICH] APP_URL not configured!');
+        throw new Error('APP_URL environment variable not configured');
+    }
+
     const enrichedLeads = [];
 
     for (const lead of leadsToEnrich) {
         try {
+            console.log(`[ENRICH] Enriching lead:`, {
+                name: lead.full_name || lead.name,
+                company: lead.organization_name || lead.company_name
+            });
+
             const response = await fetch(`${appUrl}/api/opportunities/enrich-apollo`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -203,14 +228,22 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
                 })
             });
 
+            console.log(`[ENRICH] API response status: ${response.status}`);
+
             if (response.ok) {
                 const data = await response.json();
                 enrichedLeads.push(data);
+                console.log(`[ENRICH] Successfully enriched lead`);
+            } else {
+                const errorText = await response.text();
+                console.error(`[ENRICH] API error: ${response.status} - ${errorText}`);
             }
         } catch (e) {
             console.error('[ENRICH] Failed to enrich lead:', e);
         }
     }
+
+    console.log(`[ENRICH] Total enriched: ${enrichedLeads.length}`);
 
     await incrementUsage(supabase, task.organization_id, 'enrich', enrichedLeads.length);
 
@@ -342,6 +375,10 @@ async function executeContact(task: any, supabase: SupabaseClient) {
     const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
     let contactedCount = 0;
 
+    // Extract subject and body from settings
+    const subject = campaign.settings?.subject || 'Oportunidad de colaboración';
+    const body = campaign.settings?.body || 'Hola,\n\nMe gustaría conversar contigo.\n\nSaludos,';
+
     for (const lead of leadsToContact) {
         try {
             const response = await fetch(`${appUrl}/api/contact/send`, {
@@ -349,8 +386,8 @@ async function executeContact(task: any, supabase: SupabaseClient) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     to: lead.email,
-                    subject: campaign.subject,
-                    body: campaign.body,
+                    subject: subject,
+                    body: body,
                     leadId: lead.id,
                     campaignId: campaign.id,
                     userId: userId
