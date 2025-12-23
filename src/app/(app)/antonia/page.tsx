@@ -77,10 +77,23 @@ export default function AntoniaPage() {
     }, [supabase]);
 
     const handleCreateMission = async () => {
-        if (!orgId || !userId) return;
+        console.log('[ANTONIA] Creating mission...', { orgId, userId, wizardData });
+
+        if (!orgId || !userId) {
+            console.error('[ANTONIA] Missing orgId or userId', { orgId, userId });
+            toast({
+                variant: 'destructive',
+                title: 'Error',
+                description: 'No se pudo identificar tu organización o usuario. Intenta recargar la página.'
+            });
+            return;
+        }
+
         try {
             const title = `Buscar ${wizardData.jobTitle} en ${wizardData.location}`;
             const summary = `Buscar ${wizardData.jobTitle}s en ${wizardData.industry} (${wizardData.location}). Enriquecer con nivel ${wizardData.enrichmentLevel}. Campaña: ${wizardData.campaignName || 'Ninguna'}.`;
+
+            console.log('[ANTONIA] Creating mission with title:', title);
 
             const mission = await antoniaService.createMission(
                 orgId,
@@ -89,10 +102,13 @@ export default function AntoniaPage() {
                 summary,
                 wizardData
             );
+
+            console.log('[ANTONIA] Mission created:', mission);
             setMissions([mission, ...missions]);
 
             // Trigger the worker to start processing
             try {
+                console.log('[ANTONIA] Triggering worker for mission:', mission.id);
                 const triggerRes = await fetch('/api/antonia/trigger', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -100,10 +116,16 @@ export default function AntoniaPage() {
                 });
 
                 if (!triggerRes.ok) {
-                    console.error('Failed to trigger mission:', await triggerRes.text());
+                    const errorText = await triggerRes.text();
+                    console.error('[ANTONIA] Failed to trigger mission:', errorText);
+                    toast({
+                        variant: 'destructive',
+                        title: 'Advertencia',
+                        description: 'La misión se creó pero no se pudo iniciar automáticamente.'
+                    });
                 }
             } catch (triggerError) {
-                console.error('Error triggering mission:', triggerError);
+                console.error('[ANTONIA] Error triggering mission:', triggerError);
                 // Don't fail the whole operation if trigger fails
             }
 
@@ -122,9 +144,13 @@ export default function AntoniaPage() {
             });
 
             toast({ title: 'Misión Iniciada', description: 'ANTONIA está trabajando en tu tarea.' });
-        } catch (e) {
-            console.error(e);
-            toast({ title: 'Error', description: 'No se pudo iniciar la misión', variant: 'destructive' });
+        } catch (error: any) {
+            console.error('[ANTONIA] Error creating mission:', error);
+            toast({
+                variant: 'destructive',
+                title: 'Error al crear misión',
+                description: error.message || 'Ocurrió un error inesperado.'
+            });
         }
     };
 
