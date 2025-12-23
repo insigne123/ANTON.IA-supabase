@@ -31,7 +31,8 @@ import {
     Trash2,
     ChevronDown,
     Edit2,
-    FileText
+    FileText,
+    X
 } from 'lucide-react';
 import {
     Dialog,
@@ -40,6 +41,16 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { companySizes } from '@/lib/data';
 import { APOLLO_SENIORITIES } from '@/lib/apollo-taxonomies';
@@ -77,6 +88,7 @@ export default function AntoniaPage() {
     const [currentMissionTitle, setCurrentMissionTitle] = useState('');
     const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
     const [logsLoading, setLogsLoading] = useState(false);
+    const [deletingMissionId, setDeletingMissionId] = useState<string | null>(null);
 
     const supabase = createClientComponentClient();
     const { toast } = useToast();
@@ -293,6 +305,19 @@ export default function AntoniaPage() {
         }
     };
 
+    const confirmDeleteMission = async () => {
+        if (!deletingMissionId) return;
+        try {
+            await antoniaService.deleteMission(deletingMissionId);
+            setMissions(missions.filter(m => m.id !== deletingMissionId));
+            setDeletingMissionId(null);
+            toast({ title: 'Misión Eliminada' });
+        } catch (error) {
+            console.error('Error deleting mission:', error);
+            toast({ variant: 'destructive', title: 'Error', description: 'No se pudo eliminar la misión.' });
+        }
+    };
+
     const handleShowLogs = async (missionId: string) => {
         setLogsOpen(true);
         setLogsLoading(true);
@@ -307,6 +332,10 @@ export default function AntoniaPage() {
             setLogsLoading(false);
         }
     };
+
+
+
+
 
     const handleUpdateConfig = async (key: keyof AntoniaConfig, value: any) => {
         if (!orgId || !config) return;
@@ -748,6 +777,22 @@ export default function AntoniaPage() {
                                             >
                                                 {mission.status === 'active' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                                             </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="text-muted-foreground hover:text-red-500"
+                                                onClick={() => setDeletingMissionId(mission.id)}
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="text-muted-foreground hover:text-red-500"
+                                                onClick={() => setDeletingMissionId(mission.id)}
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </Button>
                                         </div>
                                     </CardContent>
                                     {mission.status === 'active' && (
@@ -953,8 +998,8 @@ export default function AntoniaPage() {
                                         <div className="flex justify-between text-xs text-slate-400 mb-1">
                                             <span>{new Date(log.created_at).toLocaleString()}</span>
                                             <span className={`uppercase font-bold ${log.level === 'error' ? 'text-red-400' :
-                                                    log.level === 'warn' ? 'text-yellow-400' :
-                                                        'text-blue-400'
+                                                log.level === 'warn' ? 'text-yellow-400' :
+                                                    'text-blue-400'
                                                 }`}>
                                                 {log.level}
                                             </span>
@@ -972,6 +1017,23 @@ export default function AntoniaPage() {
                     </ScrollArea>
                 </DialogContent>
             </Dialog>
+
+            <AlertDialog open={!!deletingMissionId} onOpenChange={(open) => !open && setDeletingMissionId(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Esta acción no se puede deshacer. Esto eliminará permanentemente la misión y todos sus datos asociados, incluyendo logs y tareas pendientes.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDeleteMission} className="bg-red-600 hover:bg-red-700">
+                            Eliminar
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

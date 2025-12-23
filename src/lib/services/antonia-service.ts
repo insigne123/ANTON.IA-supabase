@@ -220,5 +220,18 @@ export const antoniaService = {
 
         if (error) throw error;
         return data;
+    },
+
+    /**
+     * Delete a Mission
+     */
+    deleteMission: async (missionId: string) => {
+        const { error } = await supabase
+            .from('antonia_missions')
+            .delete()
+            .eq('id', missionId);
+
+        if (error) throw error;
+        return true;
     }
 };
