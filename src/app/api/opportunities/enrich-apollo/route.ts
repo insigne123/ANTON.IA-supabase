@@ -11,10 +11,13 @@ export const runtime = 'nodejs';
 const BASE = 'https://api.apollo.io/api/v1';
 const DAILY_LIMIT = 50;
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Lazy initialization to avoid build-time evaluation of env vars
+function getSupabaseAdmin() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 const memQuota: Record<string, { count: number; day: string }> = {};
 function todayKey() {
@@ -130,7 +133,7 @@ export async function POST(req: NextRequest) {
             companyDomain: cleanDomain(l.companyDomain),
           }
         };
-        const { error: insertError } = await supabaseAdmin.from(tableName).insert(initialRow);
+        const { error: insertError } = await getSupabaseAdmin().from(tableName).insert(initialRow);
         if (insertError) {
           log('[FATAL] Failed to insert initial row:', insertError.message, JSON.stringify(insertError));
           // STOP processing this lead. If we can't save it, we can't enrich it.
@@ -140,7 +143,7 @@ export async function POST(req: NextRequest) {
       } else {
         // If retrying phone, mark pending again
         if (revealPhone) {
-          await supabaseAdmin.from(tableName).update({ enrichment_status: 'pending_phone' }).eq('id', enrichedId);
+          await getSupabaseAdmin().from(tableName).update({ enrichment_status: 'pending_phone' }).eq('id', enrichedId);
         }
       }
 
@@ -210,7 +213,7 @@ export async function POST(req: NextRequest) {
               };
 
               // Update DB immediately
-              await supabaseAdmin.from(tableName).update(updateData).eq('id', enrichedId);
+              await getSupabaseAdmin().from(tableName).update(updateData).eq('id', enrichedId);
 
               // Store result for UI response
               emailResult = {
@@ -378,3 +381,4 @@ function verifyTicket(token: string, secret: string): any {
     return JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
   } catch { return null; }
 }
+
