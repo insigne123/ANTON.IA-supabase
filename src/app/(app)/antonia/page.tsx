@@ -79,6 +79,22 @@ export default function AntoniaPage() {
             );
             setMissions([mission, ...missions]);
 
+            // Trigger the worker to start processing
+            try {
+                const triggerRes = await fetch('/api/antonia/trigger', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ missionId: mission.id })
+                });
+
+                if (!triggerRes.ok) {
+                    console.error('Failed to trigger mission:', await triggerRes.text());
+                }
+            } catch (triggerError) {
+                console.error('Error triggering mission:', triggerError);
+                // Don't fail the whole operation if trigger fails
+            }
+
             setStep(1);
             setWizardData({ industry: '', location: '', jobTitle: '', keywords: '', campaignName: '', enrichmentLevel: 'standard' });
 
