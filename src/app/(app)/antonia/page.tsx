@@ -80,7 +80,8 @@ export default function AntoniaPage() {
         enrichmentLevel: 'basic' as 'basic' | 'deep',
         campaignName: '',
         campaignContext: '',
-        autoGenerateCampaign: false
+        autoGenerateCampaign: false,
+        missionLimit: 20
     });
 
     const [logsOpen, setLogsOpen] = useState(false);
@@ -201,6 +202,21 @@ export default function AntoniaPage() {
         }
 
         try {
+            // Smart Limit Validation
+            const globalLimit = config?.dailyEnrichLimit || 50;
+            const currentUsage = missions.reduce((acc, m) => acc + (m.params?.missionLimit || 0), 0);
+            const needed = wizardData.missionLimit || 20;
+
+            if (currentUsage + needed > globalLimit) {
+                const available = Math.max(0, globalLimit - currentUsage);
+                toast({
+                    variant: 'destructive',
+                    title: 'Límite Global Excedido',
+                    description: `La organización tiene un límite de ${globalLimit} diarios. Usado: ${currentUsage}. Disponible: ${available}. Ajusta el límite de la misión.`
+                });
+                return;
+            }
+
             const title = wizardData.missionName || `Buscar ${wizardData.jobTitle} en ${wizardData.location}`;
             const summary = `Buscar ${wizardData.jobTitle}s en ${wizardData.industry} (${wizardData.location}). Enriquecer con nivel ${wizardData.enrichmentLevel}. Campaña: ${wizardData.campaignName || 'Ninguna'}.`;
 
@@ -248,6 +264,8 @@ export default function AntoniaPage() {
                 keywords: '',
                 companySize: '',
                 seniorities: [],
+                missionName: '',
+                missionLimit: 20, // Reset default
                 missionName: '',
                 enrichmentLevel: 'basic',
                 campaignName: '',
@@ -338,13 +356,26 @@ export default function AntoniaPage() {
 
 
     const handleUpdateConfig = async (key: keyof AntoniaConfig, value: any) => {
-        if (!orgId || !config) return;
+        if (!orgId) return;
         try {
-            const newConfig = { ...config, [key]: value, organizationId: orgId };
+            // If config is null, use defaults
+            const currentConfig = config || {
+                organizationId: orgId,
+                dailyReportEnabled: true,
+                instantAlertsEnabled: true,
+                dailySearchLimit: 3,
+                dailyEnrichLimit: 50,
+                dailyInvestigateLimit: 20,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+
+            const newConfig = { ...currentConfig, [key]: value, organizationId: orgId };
             setConfig(newConfig);
             await antoniaService.upsertConfig(newConfig);
             toast({ title: 'Configuración Guardada' });
         } catch (e) {
+            console.error('Error saving config:', e);
             toast({ title: 'Error al Guardar', variant: 'destructive' });
         }
     };
@@ -558,6 +589,23 @@ export default function AntoniaPage() {
                                             </Select>
                                             <p className="text-xs text-muted-foreground">El nivel profundo consume más créditos pero obtiene datos completos.</p>
                                         </div>
+
+                                        <div className="space-y-2">
+                                            <Label>Límite Diario de esta Misión (Smart Distribution)</Label>
+                                            <div className="flex items-center gap-4">
+                                                <Input
+                                                    type="number"
+                                                    min="1"
+                                                    max={config?.dailyEnrichLimit || 50}
+                                                    value={wizardData.missionLimit || 20}
+                                                    onChange={(e) => setWizardData({ ...wizardData, missionLimit: parseInt(e.target.value) || 0 })}
+                                                />
+                                                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                                                    Disponible en Org: {Math.max(0, (config?.dailyEnrichLimit || 50) - missions.reduce((acc, m) => acc + (m.params?.missionLimit || 0), 0))}
+                                                </span>
+                                            </div>
+                                        </div>
+
                                         <div className="space-y-4 border p-4 rounded-lg bg-secondary/10">
                                             <div className="flex items-center justify-between">
                                                 <div className="space-y-0.5">
@@ -954,7 +1002,7 @@ export default function AntoniaPage() {
                                             <p className="font-medium">Google / Gmail</p>
                                             <p className="text-sm text-muted-foreground">Requerido para envío automático de emails</p>
                                         </div>
-                                        <Button variant="outline">
+                                        <Button variant="outline" onClick={() => toast({ title: "Próximamente", description: "La integración con Google estará disponible en breve." })}>
                                             <Settings className="w-4 h-4 mr-2" /> Conectar Cuenta
                                         </Button>
                                     </div>
@@ -964,7 +1012,7 @@ export default function AntoniaPage() {
                                             <p className="font-medium">Microsoft Outlook</p>
                                             <p className="text-sm text-muted-foreground">Alternativa para envío automático de emails</p>
                                         </div>
-                                        <Button variant="outline">
+                                        <Button variant="outline" onClick={() => toast({ title: "Próximamente", description: "La integración con Outlook estará disponible en breve." })}>
                                             <Settings className="w-4 h-4 mr-2" /> Conectar Cuenta
                                         </Button>
                                     </div>
