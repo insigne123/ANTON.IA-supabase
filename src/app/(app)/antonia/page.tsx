@@ -50,31 +50,89 @@ export default function AntoniaPage() {
 
     useEffect(() => {
         async function loadData() {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
-            setUserId(user.id);
+            try {
+                console.log('[ANTONIA] Loading user data...');
+                const { data: { user }, error: userError } = await supabase.auth.getUser();
 
-            const { data: member } = await supabase
-                .from('organization_members')
-                .select('organization_id')
-                .eq('user_id', user.id)
-                .single();
+                if (userError) {
+                    console.error('[ANTONIA] Error getting user:', userError);
+                    toast({
+                        variant: 'destructive',
+                        title: 'Error de autenticación',
+                        description: 'No se pudo verificar tu sesión. Intenta iniciar sesión nuevamente.'
+                    });
+                    setLoading(false);
+                    return;
+                }
 
-            if (member) {
+                if (!user) {
+                    console.warn('[ANTONIA] No user found');
+                    setLoading(false);
+                    return;
+                }
+
+                console.log('[ANTONIA] User loaded:', user.id);
+                setUserId(user.id);
+
+                const { data: member, error: memberError } = await supabase
+                    .from('organization_members')
+                    .select('organization_id')
+                    .eq('user_id', user.id)
+                    .single();
+
+                if (memberError) {
+                    console.error('[ANTONIA] Error getting organization membership:', memberError);
+                    toast({
+                        variant: 'destructive',
+                        title: 'Error',
+                        description: 'No se pudo cargar tu organización. Verifica que pertenezcas a una organización.'
+                    });
+                    setLoading(false);
+                    return;
+                }
+
+                if (!member) {
+                    console.warn('[ANTONIA] User is not a member of any organization');
+                    toast({
+                        variant: 'destructive',
+                        title: 'Sin organización',
+                        description: 'No perteneces a ninguna organización. Contacta al administrador.'
+                    });
+                    setLoading(false);
+                    return;
+                }
+
+                console.log('[ANTONIA] Organization loaded:', member.organization_id);
                 setOrgId(member.organization_id);
+
                 const [missionsData, configData, campaignsData] = await Promise.all([
                     antoniaService.getActiveMissions(member.organization_id),
                     antoniaService.getConfig(member.organization_id),
                     antoniaService.getCampaigns(member.organization_id)
                 ]);
+
+                console.log('[ANTONIA] Data loaded successfully', {
+                    missions: missionsData.length,
+                    hasConfig: !!configData,
+                    campaigns: campaignsData.length
+                });
+
                 setMissions(missionsData);
                 setConfig(configData);
                 setExistingCampaigns(campaignsData as Campaign[]);
+            } catch (error) {
+                console.error('[ANTONIA] Unexpected error loading data:', error);
+                toast({
+                    variant: 'destructive',
+                    title: 'Error',
+                    description: 'Ocurrió un error al cargar los datos.'
+                });
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
         }
         loadData();
-    }, [supabase]);
+    }, [supabase, toast]);
 
     const handleCreateMission = async () => {
         console.log('[ANTONIA] Creating mission...', { orgId, userId, wizardData });
