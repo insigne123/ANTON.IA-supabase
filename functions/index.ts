@@ -1,84 +1,12 @@
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Define secrets globally for configuration, but access them only inside functions
-const SUPABASE_URL_SECRET = 'SUPABASE_URL';
-const SUPABASE_KEY_SECRET = 'SUPABASE_SERVICE_ROLE_KEY';
+// Define environment variables so TypeScript doesn't complain, 
+// but we will access process.env directly inside the function.
 
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
 
-// Helper to get Supabase client safely
-function getSupabase() {
-    const url = process.env[SUPABASE_URL_SECRET];
-    const key = process.env[SUPABASE_KEY_SECRET];
-
-    if (!url || !key) {
-        throw new Error('Missing Supabase configuration');
-    }
-    return createClient(url, key);
-}
-
-// --- WORKER LOGIC ---
-
-async function processTask(task: any, supabase: SupabaseClient) {
-    console.log(`[Worker] Processing task ${task.id} (${task.type})`);
-
-    await supabase.from('antonia_tasks').update({
-        status: 'processing',
-        processing_started_at: new Date().toISOString()
-    }).eq('id', task.id);
-
-    try {
-        let result = {};
-
-        switch (task.type) {
-            case 'SEARCH':
-                result = await executeSearch(task, supabase);
-                break;
-
-            case 'ENRICH':
-                result = await executeEnrichment(task, supabase);
-                break;
-
-            case 'CONTACT':
-                result = await executeContact(task, supabase);
-                break;
-
-            case 'REPORT':
-                result = await executeReport(task, supabase);
-                break;
-        }
-
-        await supabase.from('antonia_tasks').update({
-            status: 'completed',
-            result: result,
-            updated_at: new Date().toISOString()
-        }).eq('id', task.id);
-
-        await supabase.from('antonia_logs').insert({
-            mission_id: task.mission_id,
-            organization_id: task.organization_id,
-            level: 'success',
-            message: `Task ${task.type} completed successfully.`,
-            details: result
-        });
-
-    } catch (e: any) {
-        console.error(`[Worker] Task ${task.id} Failed`, e);
-        await supabase.from('antonia_tasks').update({
-            status: 'failed',
-            error_message: e.message,
-            updated_at: new Date().toISOString()
-        }).eq('id', task.id);
-
-        await supabase.from('antonia_logs').insert({
-            mission_id: task.mission_id,
-            organization_id: task.organization_id,
-            level: 'error',
-            message: `Task ${task.type} failed: ${e.message}`
-        });
-    }
-}
+// --- HELPERS ---
 
 async function executeSearch(task: any, supabase: SupabaseClient) {
     const { jobTitle, location, industry, keywords } = task.payload;
@@ -142,6 +70,9 @@ async function executeSearch(task: any, supabase: SupabaseClient) {
 
 async function executeEnrichment(task: any, supabase: SupabaseClient) {
     const { leads, enrichmentLevel, userId } = task.payload;
+    const appUrl = process.env.APP_URL;
+
+    if (!appUrl) throw new Error("APP_URL not set");
 
     const revealPhone = enrichmentLevel === 'deep';
     const enrichPayload = {
@@ -157,10 +88,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient) {
         revealPhone: revealPhone
     };
 
-    // Use default URL if APP_URL is not set (e.g. during dev/deploy if accessed improperly)
-    // But strictly, we should assume the env var is present at runtime.
-    const baseUrl = process.env.APP_URL || 'http://localhost:3000';
-    const enrichUrl = `${baseUrl}/api/opportunities/enrich-apollo`;
+    const enrichUrl = `${appUrl}/api/opportunities/enrich-apollo`;
 
     const response = await fetch(enrichUrl, {
         method: 'POST',
@@ -199,6 +127,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient) {
 async function executeContact(task: any, supabase: SupabaseClient) {
     const { enrichedLeads, campaignName } = task.payload;
 
+    // Check if campaign exists
     const { data: campaigns } = await supabase
         .from('campaigns')
         .select('*')
@@ -254,16 +183,83 @@ async function executeReport(task: any, supabase: SupabaseClient) {
     return { emailSent: true, recipient: config.notification_email };
 }
 
-/**
- * Scheduled Function: Runs every minute
- */
+async function processTask(task: any, supabase: SupabaseClient) {
+    console.log(`[Worker] Processing task ${task.id} (${task.type})`);
+
+    await supabase.from('antonia_tasks').update({
+        status: 'processing',
+        processing_started_at: new Date().toISOString()
+    }).eq('id', task.id);
+
+    try {
+        let result = {};
+
+        switch (task.type) {
+            case 'SEARCH':
+                result = await executeSearch(task, supabase);
+                break;
+
+            case 'ENRICH':
+                result = await executeEnrichment(task, supabase);
+                break;
+
+            case 'CONTACT':
+                result = await executeContact(task, supabase);
+                break;
+
+            case 'REPORT':
+                result = await executeReport(task, supabase);
+                break;
+        }
+
+        await supabase.from('antonia_tasks').update({
+            status: 'completed',
+            result: result,
+            updated_at: new Date().toISOString()
+        }).eq('id', task.id);
+
+        await supabase.from('antonia_logs').insert({
+            mission_id: task.mission_id,
+            organization_id: task.organization_id,
+            level: 'success',
+            message: `Task ${task.type} completed successfully.`,
+            details: result
+        });
+
+    } catch (e: any) {
+        console.error(`[Worker] Task ${task.id} Failed`, e);
+        await supabase.from('antonia_tasks').update({
+            status: 'failed',
+            error_message: e.message,
+            updated_at: new Date().toISOString()
+        }).eq('id', task.id);
+
+        await supabase.from('antonia_logs').insert({
+            mission_id: task.mission_id,
+            organization_id: task.organization_id,
+            level: 'error',
+            message: `Task ${task.type} failed: ${e.message}`
+        });
+    }
+}
+
+// --- ENTRY POINT ---
+
 export const antoniaTick = functions.scheduler.onSchedule({
     schedule: 'every 1 minutes',
-    secrets: [SUPABASE_URL_SECRET, SUPABASE_KEY_SECRET]
-}, async () => {
-    // Only initialize Supabase INSIDE the handler
-    const supabase = getSupabase();
+    secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'APP_URL']
+}, async (event) => {
     console.log('[AntoniaTick] waking up...');
+
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+        console.error('Missing Supabase credentials');
+        return;
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
     const { data: tasks, error } = await supabase
         .from('antonia_tasks')
