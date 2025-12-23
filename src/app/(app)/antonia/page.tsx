@@ -619,14 +619,27 @@ export default function AntoniaPage() {
                             <div className="space-y-4">
                                 <h3 className="text-lg font-medium">Integraciones (Acceso Offline)</h3>
                                 <p className="text-sm text-muted-foreground">Para que ANTONIA pueda enviar emails mientras estás desconectado, necesita acceso a tu cuenta.</p>
-                                <div className="p-4 border rounded-lg bg-secondary/20 flex flex-col md:flex-row justify-between items-center gap-4">
-                                    <div>
-                                        <p className="font-medium">Google / Gmail</p>
-                                        <p className="text-sm text-muted-foreground">Requerido para envío automático de emails</p>
+
+                                <div className="space-y-3">
+                                    <div className="p-4 border rounded-lg bg-secondary/20 flex flex-col md:flex-row justify-between items-center gap-4">
+                                        <div>
+                                            <p className="font-medium">Google / Gmail</p>
+                                            <p className="text-sm text-muted-foreground">Requerido para envío automático de emails</p>
+                                        </div>
+                                        <Button variant="outline">
+                                            <Settings className="w-4 h-4 mr-2" /> Conectar Cuenta
+                                        </Button>
                                     </div>
-                                    <Button variant="outline">
-                                        <Settings className="w-4 h-4 mr-2" /> Conectar Cuenta
-                                    </Button>
+
+                                    <div className="p-4 border rounded-lg bg-secondary/20 flex flex-col md:flex-row justify-between items-center gap-4">
+                                        <div>
+                                            <p className="font-medium">Microsoft Outlook</p>
+                                            <p className="text-sm text-muted-foreground">Alternativa para envío automático de emails</p>
+                                        </div>
+                                        <Button variant="outline">
+                                            <Settings className="w-4 h-4 mr-2" /> Conectar Cuenta
+                                        </Button>
+                                    </div>
                                 </div>
                             </div>
                         </CardContent>

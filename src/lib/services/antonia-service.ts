@@ -22,7 +22,21 @@ export const antoniaService = {
             console.error('Error fetching Antonia Config:', error);
             return null;
         }
-        return data;
+
+        if (!data) return null;
+
+        // Map snake_case to camelCase
+        return {
+            organizationId: data.organization_id,
+            notificationEmail: data.notification_email,
+            dailyReportEnabled: data.daily_report_enabled,
+            instantAlertsEnabled: data.instant_alerts_enabled,
+            dailySearchLimit: data.daily_search_limit,
+            dailyEnrichLimit: data.daily_enrich_limit,
+            dailyInvestigateLimit: data.daily_investigate_limit,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+        };
     },
 
     /**
@@ -48,7 +62,19 @@ export const antoniaService = {
             .single();
 
         if (error) throw error;
-        return data;
+
+        // Map snake_case response to camelCase
+        return {
+            organizationId: data.organization_id,
+            notificationEmail: data.notification_email,
+            dailyReportEnabled: data.daily_report_enabled,
+            instantAlertsEnabled: data.instant_alerts_enabled,
+            dailySearchLimit: data.daily_search_limit,
+            dailyEnrichLimit: data.daily_enrich_limit,
+            dailyInvestigateLimit: data.daily_investigate_limit,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+        };
     },
 
     /**
