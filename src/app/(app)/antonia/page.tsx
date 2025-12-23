@@ -910,17 +910,71 @@ export default function AntoniaPage() {
                                         )}
                                     </CardHeader>
                                     <CardContent className="relative z-10">
-                                        <p className="text-sm text-muted-foreground line-clamp-3">
+                                        <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
                                             {mission.goalSummary}
                                         </p>
+
+                                        {/* Mission Parameters */}
+                                        <div className="mb-4 p-3 bg-secondary/20 rounded-lg border text-xs space-y-1">
+                                            <div className="flex justify-between">
+                                                <span className="text-muted-foreground">Objetivo:</span>
+                                                <span className="font-medium">{mission.params?.jobTitle || 'N/A'}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-muted-foreground">Ubicación:</span>
+                                                <span className="font-medium">{mission.params?.location || 'N/A'}</span>
+                                            </div>
+                                            {mission.params?.industry && (
+                                                <div className="flex justify-between">
+                                                    <span className="text-muted-foreground">Industria:</span>
+                                                    <span className="font-medium">{mission.params.industry}</span>
+                                                </div>
+                                            )}
+                                            <div className="flex justify-between">
+                                                <span className="text-muted-foreground">Enriquecimiento:</span>
+                                                <span className="font-medium capitalize">{mission.params?.enrichmentLevel || 'basic'}</span>
+                                            </div>
+                                            {mission.params?.campaignName && (
+                                                <div className="flex justify-between">
+                                                    <span className="text-muted-foreground">Campaña:</span>
+                                                    <span className="font-medium">{mission.params.campaignName}</span>
+                                                </div>
+                                            )}
+                                        </div>
+
                                         <div className="mt-4 flex gap-2">
                                             <Button
                                                 variant="outline"
                                                 size="sm"
-                                                className="w-full"
+                                                className="flex-1"
                                                 onClick={() => handleShowLogs(mission.id)}
                                             >
                                                 <FileText className="w-3 h-3 mr-2" /> Ver Logs
+                                            </Button>
+                                            <Button
+                                                variant="default"
+                                                size="sm"
+                                                className="flex-1"
+                                                onClick={async () => {
+                                                    try {
+                                                        const res = await fetch('/api/cron/antonia');
+                                                        const data = await res.json();
+                                                        toast({
+                                                            title: 'Worker Ejecutado',
+                                                            description: `Procesadas ${data.processed || 0} tareas`
+                                                        });
+                                                        // Reload logs after execution
+                                                        setTimeout(() => handleShowLogs(mission.id), 2000);
+                                                    } catch (error) {
+                                                        toast({
+                                                            variant: 'destructive',
+                                                            title: 'Error',
+                                                            description: 'No se pudo ejecutar el worker'
+                                                        });
+                                                    }
+                                                }}
+                                            >
+                                                <Play className="w-3 h-3 mr-2" /> Ejecutar Ahora
                                             </Button>
                                             <Button
                                                 variant="ghost"
