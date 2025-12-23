@@ -15,12 +15,18 @@ async function getDailyUsage(supabase: any, organizationId: string) {
         .eq('date', today)
         .single();
 
-    return data || { leads_searched: 0, leads_enriched: 0, leads_investigated: 0 };
+    return data || { leads_searched: 0, leads_enriched: 0, leads_investigated: 0, search_runs: 0 };
 }
 
-async function incrementUsage(supabase: any, organizationId: string, type: 'search' | 'enrich' | 'investigate', count: number) {
+async function incrementUsage(supabase: any, organizationId: string, type: 'search' | 'enrich' | 'investigate' | 'search_run', count: number) {
     const today = new Date().toISOString().split('T')[0];
-    const col = type === 'search' ? 'leads_searched' : type === 'enrich' ? 'leads_enriched' : 'leads_investigated';
+
+    // Determine column to update
+    let col = '';
+    if (type === 'search') col = 'leads_searched'; // Keep tracking volume for stats
+    else if (type === 'search_run') col = 'search_runs'; // Track frequency for limits
+    else if (type === 'enrich') col = 'leads_enriched';
+    else col = 'leads_investigated';
 
     const current = await getDailyUsage(supabase, organizationId);
 

@@ -582,14 +582,14 @@ export default function AntoniaPage() {
                                 <h3 className="text-lg font-medium">Límites y Cuotas Diarias</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div className="space-y-2">
-                                        <Label htmlFor="search-limit">Búsquedas Diarias (Leads)</Label>
+                                        <Label htmlFor="search-limit">Búsquedas Diarias (Ejecuciones)</Label>
                                         <Input
                                             id="search-limit"
                                             type="number"
-                                            value={config?.dailySearchLimit || 100}
+                                            value={config?.dailySearchLimit ?? 3}
                                             onChange={(e) => handleUpdateConfig('dailySearchLimit', parseInt(e.target.value))}
                                         />
-                                        <p className="text-xs text-muted-foreground">Máx. leads nuevos a encontrar</p>
+                                        <p className="text-xs text-muted-foreground">Máx. de veces que ANTONIA busca al día</p>
                                     </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="enrich-limit">Enriquecimientos Diarios</Label>

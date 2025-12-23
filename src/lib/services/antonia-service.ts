@@ -35,7 +35,7 @@ export const antoniaService = {
             notification_email: config.notificationEmail,
             daily_report_enabled: config.dailyReportEnabled,
             instant_alerts_enabled: config.instantAlertsEnabled,
-            daily_search_limit: config.dailySearchLimit ?? 100,
+            daily_search_limit: config.dailySearchLimit ?? 3,
             daily_enrich_limit: config.dailyEnrichLimit ?? 50,
             daily_investigate_limit: config.dailyInvestigateLimit ?? 20,
             updated_at: new Date().toISOString()
