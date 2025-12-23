@@ -224,16 +224,20 @@ async function executeSearch(task: any, supabase: any, config: any) {
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
-    const { jobTitle, location, industry, keywords } = task.payload;
+    const { jobTitle, location, industry, keywords, companySize, userId } = task.payload;
     console.log('[SEARCH] Searching leads:', { jobTitle, location, industry });
 
+    // Payload structure matching exactly what external API expects (based on nextjs route.ts)
     const searchPayload = {
-        jobTitles: jobTitle ? [jobTitle] : [],
-        locations: location ? [location] : [],
-        industries: industry ? [industry] : [],
-        keywords: keywords || '',
-        limit: 100
+        user_id: userId,
+        titles: jobTitle ? [jobTitle] : [],
+        company_location: location ? [location] : [],
+        industry_keywords: industry ? [industry] : [],
+        employee_range: companySize ? [companySize] : [],
+        max_results: 100
     };
+
+    console.log('[SEARCH] Sending payload:', JSON.stringify(searchPayload));
 
     const response = await fetch(LEAD_SEARCH_URL, {
         method: 'POST',
@@ -241,10 +245,14 @@ async function executeSearch(task: any, supabase: any, config: any) {
         body: JSON.stringify(searchPayload)
     });
 
-    if (!response.ok) throw new Error(`Search API failed: ${response.statusText}`);
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SEARCH] API Error Response:', errorText);
+        throw new Error(`Search API failed: ${response.statusText} - ${errorText}`);
+    }
 
     const data = await response.json();
-    const leads = data.results || [];
+    const leads = data.results || data.leads || []; // Handle potentially different response structures
 
     if (leads.length > 0) {
         const leadsToInsert = leads.map((lead: any) => ({
