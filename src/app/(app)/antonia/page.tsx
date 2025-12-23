@@ -938,14 +938,6 @@ export default function AntoniaPage() {
                                             >
                                                 <Trash2 className="w-4 h-4" />
                                             </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="text-muted-foreground hover:text-red-500"
-                                                onClick={() => setDeletingMissionId(mission.id)}
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </Button>
                                         </div>
                                     </CardContent>
                                     {mission.status === 'active' && (
@@ -1163,25 +1155,74 @@ export default function AntoniaPage() {
                                 No hay logs registrados para esta misión.
                             </div>
                         ) : (
-                            <div className="space-y-4">
-                                {taskLogs.map((log) => (
-                                    <div key={log.id} className="border-b border-slate-800 pb-2 last:border-0">
-                                        <div className="flex justify-between text-xs text-slate-400 mb-1">
-                                            <span>{new Date(log.created_at).toLocaleString()}</span>
-                                            <span className={`uppercase font-bold ${log.level === 'error' ? 'text-red-400' :
-                                                log.level === 'warn' ? 'text-yellow-400' :
-                                                    'text-blue-400'
-                                                }`}>
-                                                {log.level}
-                                            </span>
+                            <div className="space-y-3">
+                                {taskLogs.map((log) => {
+                                    const formatDate = (dateStr: string) => {
+                                        try {
+                                            const date = new Date(dateStr);
+                                            if (isNaN(date.getTime())) return 'Fecha no disponible';
+                                            return date.toLocaleString('es-AR', {
+                                                day: '2-digit',
+                                                month: '2-digit',
+                                                year: 'numeric',
+                                                hour: '2-digit',
+                                                minute: '2-digit'
+                                            });
+                                        } catch {
+                                            return 'Fecha no disponible';
+                                        }
+                                    };
+
+                                    const getLevelIcon = (level: string) => {
+                                        if (level === 'error') return '❌';
+                                        if (level === 'warning' || level === 'warn') return '⚠️';
+                                        if (level === 'success') return '✅';
+                                        return 'ℹ️';
+                                    };
+
+                                    const getLevelColor = (level: string) => {
+                                        if (level === 'error') return 'text-red-400';
+                                        if (level === 'warning' || level === 'warn') return 'text-yellow-400';
+                                        if (level === 'success') return 'text-green-400';
+                                        return 'text-blue-400';
+                                    };
+
+                                    const formatMessage = (msg: string) => {
+                                        // Make technical messages more user-friendly
+                                        return msg
+                                            .replace(/Task (\w+) completed\./g, '✓ Tarea $1 completada')
+                                            .replace(/Task (\w+) failed:/g, '✗ Error en tarea $1:')
+                                            .replace(/SEARCH/g, 'Búsqueda')
+                                            .replace(/ENRICH/g, 'Enriquecimiento')
+                                            .replace(/CONTACT/g, 'Contacto')
+                                            .replace(/GENERATE_CAMPAIGN/g, 'Generación de Campaña');
+                                    };
+
+                                    return (
+                                        <div key={log.id} className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
+                                            <div className="flex justify-between items-start mb-2">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-base">{getLevelIcon(log.level)}</span>
+                                                    <span className={`text-xs font-semibold uppercase ${getLevelColor(log.level)}`}>
+                                                        {log.level === 'warn' ? 'Advertencia' :
+                                                            log.level === 'error' ? 'Error' :
+                                                                log.level === 'success' ? 'Éxito' : 'Info'}
+                                                    </span>
+                                                </div>
+                                                <span className="text-xs text-slate-500">{formatDate(log.created_at)}</span>
+                                            </div>
+                                            <p className="text-sm text-slate-200 leading-relaxed">{formatMessage(log.message)}</p>
+                                            {log.details && Object.keys(log.details).length > 0 && (
+                                                <details className="mt-2">
+                                                    <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-300">Ver detalles técnicos</summary>
+                                                    <pre className="mt-2 text-xs text-slate-500 overflow-x-auto bg-slate-950 p-2 rounded">
+                                                        {JSON.stringify(log.details, null, 2)}
+                                                    </pre>
+                                                </details>
+                                            )}
                                         </div>
-                                        <p className="whitespace-pre-wrap">{log.message}</p>
-                                        {log.details && (
-                                            <pre className="mt-1 text-xs text-slate-500 overflow-x-auto">
-                                                {JSON.stringify(log.details, null, 2)}
-                                            </pre>
-                                        )}
-                                    </div>
+                                    );
+                                })}
                                 ))}
                             </div>
                         )}
