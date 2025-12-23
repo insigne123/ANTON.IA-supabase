@@ -96,6 +96,10 @@ export const antoniaService = {
                 status: 'active',
                 goal_summary: goalSummary,
                 params,
+                daily_search_limit: params.dailySearchLimit || 1,
+                daily_enrich_limit: params.dailyEnrichLimit || 10,
+                daily_investigate_limit: params.dailyInvestigateLimit || 5,
+                daily_contact_limit: params.dailyContactLimit || 3
             })
             .select()
             .single();

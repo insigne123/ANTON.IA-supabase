@@ -163,11 +163,215 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
 }
 
 async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig: any) {
-    return { enrichedCount: 0, skipped: true, reason: 'not_implemented' };
+    // Get mission limits
+    const { data: mission } = await supabase
+        .from('antonia_missions')
+        .select('daily_enrich_limit')
+        .eq('id', task.mission_id)
+        .single();
+
+    const usage = await getDailyUsage(supabase, task.organization_id);
+    const limit = mission?.daily_enrich_limit || 10;
+
+    if ((usage.leads_enriched || 0) >= limit) {
+        console.log(`[ENRICH] Daily limit reached (${usage.leads_enriched}/${limit})`);
+        return { skipped: true, reason: 'daily_limit_reached' };
+    }
+
+    const { leads, userId, enrichmentLevel, campaignName } = task.payload;
+    const leadsToEnrich = leads.slice(0, limit - (usage.leads_enriched || 0));
+
+    console.log(`[ENRICH] Enriching ${leadsToEnrich.length} leads`);
+
+    const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+    const enrichedLeads = [];
+
+    for (const lead of leadsToEnrich) {
+        try {
+            const response = await fetch(`${appUrl}/api/opportunities/enrich-apollo`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lead: {
+                        name: lead.full_name || lead.name,
+                        title: lead.title,
+                        company: lead.organization_name || lead.company_name,
+                        linkedin_url: lead.linkedin_url
+                    },
+                    userId: userId,
+                    enrichmentType: enrichmentLevel === 'premium' ? 'both' : 'email'
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                enrichedLeads.push(data);
+            }
+        } catch (e) {
+            console.error('[ENRICH] Failed to enrich lead:', e);
+        }
+    }
+
+    await incrementUsage(supabase, task.organization_id, 'enrich', enrichedLeads.length);
+
+    // Chain to INVESTIGATE if configured and we have enriched leads
+    if (enrichedLeads.length > 0) {
+        await supabase.from('antonia_tasks').insert({
+            mission_id: task.mission_id,
+            organization_id: task.organization_id,
+            type: 'INVESTIGATE',
+            status: 'pending',
+            payload: {
+                userId: userId,
+                leads: enrichedLeads,
+                campaignName: campaignName
+            },
+            created_at: new Date().toISOString()
+        });
+    }
+
+    return { enrichedCount: enrichedLeads.length };
+}
+
+async function executeInvestigate(task: any, supabase: SupabaseClient) {
+    // Get mission limits
+    const { data: mission } = await supabase
+        .from('antonia_missions')
+        .select('daily_investigate_limit')
+        .eq('id', task.mission_id)
+        .single();
+
+    const usage = await getDailyUsage(supabase, task.organization_id);
+    const limit = mission?.daily_investigate_limit || 5;
+
+    if ((usage.leads_investigated || 0) >= limit) {
+        console.log(`[INVESTIGATE] Daily limit reached (${usage.leads_investigated}/${limit})`);
+        return { skipped: true, reason: 'daily_limit_reached' };
+    }
+
+    const { leads, userId, campaignName } = task.payload;
+    const leadsToInvestigate = leads.slice(0, limit - (usage.leads_investigated || 0));
+
+    console.log(`[INVESTIGATE] Investigating ${leadsToInvestigate.length} leads`);
+
+    const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+    const investigatedLeads = [];
+
+    for (const lead of leadsToInvestigate) {
+        try {
+            const response = await fetch(`${appUrl}/api/research/investigate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lead: lead,
+                    userId: userId
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                investigatedLeads.push(data);
+            }
+        } catch (e) {
+            console.error('[INVESTIGATE] Failed to investigate lead:', e);
+        }
+    }
+
+    await incrementUsage(supabase, task.organization_id, 'investigate', investigatedLeads.length);
+
+    // Chain to CONTACT if we have investigated leads
+    if (investigatedLeads.length > 0) {
+        await supabase.from('antonia_tasks').insert({
+            mission_id: task.mission_id,
+            organization_id: task.organization_id,
+            type: 'CONTACT',
+            status: 'pending',
+            payload: {
+                userId: userId,
+                leads: investigatedLeads,
+                campaignName: campaignName
+            },
+            created_at: new Date().toISOString()
+        });
+    }
+
+    return { investigatedCount: investigatedLeads.length };
 }
 
 async function executeContact(task: any, supabase: SupabaseClient) {
-    return { contactedCount: 0, skipped: true, reason: 'not_implemented' };
+    // Get mission limits
+    const { data: mission } = await supabase
+        .from('antonia_missions')
+        .select('daily_contact_limit')
+        .eq('id', task.mission_id)
+        .single();
+
+    const usage = await getDailyUsage(supabase, task.organization_id);
+    const limit = mission?.daily_contact_limit || 3;
+
+    // Count contacts sent today
+    const today = new Date().toISOString().split('T')[0];
+    const { count: contactsToday } = await supabase
+        .from('contacted_leads')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', task.organization_id)
+        .gte('contacted_at', `${today}T00:00:00Z`);
+
+    if ((contactsToday || 0) >= limit) {
+        console.log(`[CONTACT] Daily limit reached (${contactsToday}/${limit})`);
+        return { skipped: true, reason: 'daily_limit_reached' };
+    }
+
+    const { leads, userId, campaignName } = task.payload;
+    const leadsToContact = leads.slice(0, limit - (contactsToday || 0));
+
+    console.log(`[CONTACT] Contacting ${leadsToContact.length} leads`);
+
+    // Get campaign details
+    const { data: campaign } = await supabase
+        .from('campaigns')
+        .select('*')
+        .eq('organization_id', task.organization_id)
+        .eq('name', campaignName)
+        .single();
+
+    if (!campaign) {
+        throw new Error('Campaign not found');
+    }
+
+    const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+    let contactedCount = 0;
+
+    for (const lead of leadsToContact) {
+        try {
+            const response = await fetch(`${appUrl}/api/contact/send`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    to: lead.email,
+                    subject: campaign.subject,
+                    body: campaign.body,
+                    leadId: lead.id,
+                    campaignId: campaign.id,
+                    userId: userId
+                })
+            });
+
+            if (response.ok) {
+                contactedCount++;
+            }
+        } catch (e) {
+            console.error('[CONTACT] Failed to contact lead:', e);
+        }
+    }
+
+    // Mark mission as completed if this was the last task
+    await supabase
+        .from('antonia_missions')
+        .update({ status: 'completed', updated_at: new Date().toISOString() })
+        .eq('id', task.mission_id);
+
+    return { contactedCount };
 }
 
 async function processTask(task: any, supabase: SupabaseClient) {
@@ -196,6 +400,9 @@ async function processTask(task: any, supabase: SupabaseClient) {
                 break;
             case 'ENRICH':
                 result = await executeEnrichment(task, supabase, taskConfig);
+                break;
+            case 'INVESTIGATE':
+                result = await executeInvestigate(task, supabase);
                 break;
             case 'CONTACT':
                 result = await executeContact(task, supabase);

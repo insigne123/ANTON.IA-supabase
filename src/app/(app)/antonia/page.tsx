@@ -83,7 +83,10 @@ export default function AntoniaPage() {
         campaignName: '',
         campaignContext: '',
         autoGenerateCampaign: false,
-        missionLimit: 20
+        dailySearchLimit: 1,
+        dailyEnrichLimit: 10,
+        dailyInvestigateLimit: 5,
+        dailyContactLimit: 3
     });
 
     const [logsOpen, setLogsOpen] = useState(false);
@@ -228,21 +231,6 @@ export default function AntoniaPage() {
         }
 
         try {
-            // Smart Limit Validation
-            const globalLimit = config?.dailyEnrichLimit || 50;
-            const currentUsage = missions.reduce((acc, m) => acc + (m.params?.missionLimit || 0), 0);
-            const needed = wizardData.missionLimit || 20;
-
-            if (currentUsage + needed > globalLimit) {
-                const available = Math.max(0, globalLimit - currentUsage);
-                toast({
-                    variant: 'destructive',
-                    title: 'Límite Global Excedido',
-                    description: `La organización tiene un límite de ${globalLimit} diarios. Usado: ${currentUsage}. Disponible: ${available}. Ajusta el límite de la misión.`
-                });
-                return;
-            }
-
             const title = wizardData.missionName || `Buscar ${wizardData.jobTitle} en ${wizardData.location}`;
             const summary = `Buscar ${wizardData.jobTitle}s en ${wizardData.industry} (${wizardData.location}). Enriquecer con nivel ${wizardData.enrichmentLevel}. Campaña: ${wizardData.campaignName || 'Ninguna'}.`;
 
@@ -288,15 +276,16 @@ export default function AntoniaPage() {
                 location: '',
                 industry: '',
                 keywords: '',
-                companySize: '',
-                seniorities: [],
-                missionName: '',
-                missionLimit: 20, // Reset default
+                companySize: '', \n                seniorities: [],
                 missionName: '',
                 enrichmentLevel: 'basic',
                 campaignName: '',
                 campaignContext: '',
-                autoGenerateCampaign: false
+                autoGenerateCampaign: false,
+                dailySearchLimit: 1,
+                dailyEnrichLimit: 10,
+                dailyInvestigateLimit: 5,
+                dailyContactLimit: 3
             });
 
             toast({ title: 'Misión Iniciada', description: 'ANTONIA está trabajando en tu tarea.' });
@@ -695,19 +684,58 @@ export default function AntoniaPage() {
                                             <p className="text-xs text-muted-foreground">El nivel profundo consume más créditos pero obtiene datos completos.</p>
                                         </div>
 
-                                        <div className="space-y-2">
-                                            <Label>Límite Diario de esta Misión (Smart Distribution)</Label>
-                                            <div className="flex items-center gap-4">
-                                                <Input
-                                                    type="number"
-                                                    min="1"
-                                                    max={config?.dailyEnrichLimit || 50}
-                                                    value={wizardData.missionLimit || 20}
-                                                    onChange={(e) => setWizardData({ ...wizardData, missionLimit: parseInt(e.target.value) || 0 })}
-                                                />
-                                                <span className="text-sm text-muted-foreground whitespace-nowrap">
-                                                    Disponible en Org: {Math.max(0, (config?.dailyEnrichLimit || 50) - missions.reduce((acc, m) => acc + (m.params?.missionLimit || 0), 0))}
-                                                </span>
+                                        <div className="space-y-4 border p-4 rounded-lg bg-secondary/10">
+                                            <Label className="text-base font-semibold">Límites Diarios de esta Misión</Label>
+                                            <p className="text-xs text-muted-foreground">Configura cuántas operaciones ANTONIA realizará por día para esta misión.</p>
+
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-2">
+                                                    <Label className="text-sm">Búsquedas por día</Label>
+                                                    <Input
+                                                        type="number"
+                                                        min="1"
+                                                        max="5"
+                                                        value={wizardData.dailySearchLimit}
+                                                        onChange={(e) => setWizardData({ ...wizardData, dailySearchLimit: parseInt(e.target.value) || 1 })}
+                                                    />
+                                                    <p className="text-xs text-muted-foreground">Máx: 5 búsquedas/día</p>
+                                                </div>
+
+                                                <div className="space-y-2">
+                                                    <Label className="text-sm">Leads a enriquecer</Label>
+                                                    <Input
+                                                        type="number"
+                                                        min="1"
+                                                        max="50"
+                                                        value={wizardData.dailyEnrichLimit}
+                                                        onChange={(e) => setWizardData({ ...wizardData, dailyEnrichLimit: parseInt(e.target.value) || 10 })}
+                                                    />
+                                                    <p className="text-xs text-muted-foreground">Máx: 50 leads/día</p>
+                                                </div>
+
+                                                <div className="space-y-2">
+                                                    <Label className="text-sm">Leads a investigar</Label>
+                                                    <Input
+                                                        type="number"
+                                                        min="1"
+                                                        max="20"
+                                                        value={wizardData.dailyInvestigateLimit}
+                                                        onChange={(e) => setWizardData({ ...wizardData, dailyInvestigateLimit: parseInt(e.target.value) || 5 })}
+                                                    />
+                                                    <p className="text-xs text-muted-foreground">Máx: 20 leads/día</p>
+                                                </div>
+
+                                                <div className="space-y-2">
+                                                    <Label className="text-sm">Leads a contactar</Label>
+                                                    <Input
+                                                        type="number"
+                                                        min="1"
+                                                        max="10"
+                                                        value={wizardData.dailyContactLimit}
+                                                        onChange={(e) => setWizardData({ ...wizardData, dailyContactLimit: parseInt(e.target.value) || 3 })}
+                                                    />
+                                                    <p className="text-xs text-muted-foreground">Máx: 10 contactos/día</p>
+                                                </div>
                                             </div>
                                         </div>
 
