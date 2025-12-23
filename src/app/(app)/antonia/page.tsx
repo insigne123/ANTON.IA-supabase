@@ -276,7 +276,8 @@ export default function AntoniaPage() {
                 location: '',
                 industry: '',
                 keywords: '',
-                companySize: '', \n                seniorities: [],
+                companySize: '',
+                seniorities: [],
                 missionName: '',
                 enrichmentLevel: 'basic',
                 campaignName: '',
@@ -1305,7 +1306,7 @@ export default function AntoniaPage() {
                                         </div>
                                     );
                                 })}
-                                ))}
+                                })
                             </div>
                         )}
                     </ScrollArea>
