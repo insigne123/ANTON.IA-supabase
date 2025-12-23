@@ -586,8 +586,14 @@ export default function AntoniaPage() {
                                         <Input
                                             id="search-limit"
                                             type="number"
-                                            value={config?.dailySearchLimit ?? 3}
-                                            onChange={(e) => handleUpdateConfig('dailySearchLimit', parseInt(e.target.value))}
+                                            min="1"
+                                            defaultValue={config?.dailySearchLimit ?? 3}
+                                            onBlur={(e) => {
+                                                const val = parseInt(e.target.value);
+                                                if (!isNaN(val) && val > 0) {
+                                                    handleUpdateConfig('dailySearchLimit', val);
+                                                }
+                                            }}
                                         />
                                         <p className="text-xs text-muted-foreground">Máx. de veces que ANTONIA busca al día</p>
                                     </div>
@@ -596,8 +602,14 @@ export default function AntoniaPage() {
                                         <Input
                                             id="enrich-limit"
                                             type="number"
-                                            value={config?.dailyEnrichLimit || 50}
-                                            onChange={(e) => handleUpdateConfig('dailyEnrichLimit', parseInt(e.target.value))}
+                                            min="1"
+                                            defaultValue={config?.dailyEnrichLimit ?? 50}
+                                            onBlur={(e) => {
+                                                const val = parseInt(e.target.value);
+                                                if (!isNaN(val) && val > 0) {
+                                                    handleUpdateConfig('dailyEnrichLimit', val);
+                                                }
+                                            }}
                                         />
                                         <p className="text-xs text-muted-foreground">Máx. leads a verificar email</p>
                                     </div>
@@ -606,8 +618,14 @@ export default function AntoniaPage() {
                                         <Input
                                             id="investigate-limit"
                                             type="number"
-                                            value={config?.dailyInvestigateLimit || 20}
-                                            onChange={(e) => handleUpdateConfig('dailyInvestigateLimit', parseInt(e.target.value))}
+                                            min="1"
+                                            defaultValue={config?.dailyInvestigateLimit ?? 20}
+                                            onBlur={(e) => {
+                                                const val = parseInt(e.target.value);
+                                                if (!isNaN(val) && val > 0) {
+                                                    handleUpdateConfig('dailyInvestigateLimit', val);
+                                                }
+                                            }}
                                         />
                                         <p className="text-xs text-muted-foreground">Máx. leads con datos completos (Tel)</p>
                                     </div>
