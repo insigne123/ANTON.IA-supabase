@@ -14,13 +14,14 @@ import {
   SidebarTrigger
 } from '@/components/ui/sidebar';
 import {
-  User, Search, Send, Share2, Briefcase, Settings, Table as TableIcon, Users, MailCheck, Mail, LayoutDashboard, Building2, LogOut, Ban, Shield, LayoutGrid
+  User, Search, Send, Share2, Briefcase, Settings, Table as TableIcon, Users, MailCheck, Mail, LayoutDashboard, Building2, LogOut, Ban, Shield, LayoutGrid, Bot
 } from 'lucide-react';
 import Logo from './logo';
 import { useAuth } from '@/context/AuthContext';
 
 const navItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/antonia', icon: Bot, label: 'Agente ANTONIA' },
   { href: '/profile', icon: User, label: 'Mi Perfil de Empresa' },
   { href: '/search', icon: Search, label: 'Búsqueda de Leads' },
   { href: '/opportunities', icon: Briefcase, label: 'Oportunidades' },
