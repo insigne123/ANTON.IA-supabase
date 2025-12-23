@@ -110,27 +110,28 @@ Saludos,`;
 }
 
 async function executeSearch(task: any, supabase: any, config: any) {
-    // Check Limits
     const usage = await getDailyUsage(supabase, task.organization_id);
-    const limit = config.daily_search_limit || 100;
+    // User requested "busquedas diarias" to mean "executions", limiting to e.g. 3 per day.
+    // Default to 3 if not set
+    const limit = config.daily_search_limit || 3;
 
-    if (usage.leads_searched >= limit) {
-        console.log(`[Limit] Daily search limit reached (${usage.leads_searched}/${limit}).`);
+    // Use search_runs for limiting (frequency, not volume)
+    if ((usage.search_runs || 0) >= limit) {
+        console.log(`[Limit] Daily search execution limit reached (${usage.search_runs}/${limit}).`);
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
     const { jobTitle, location, industry, keywords } = task.payload;
-    console.log('[SEARCH] Starting lead search', { jobTitle, location, industry });
 
-    const remaining = limit - usage.leads_searched;
-    const batchSize = Math.min(50, remaining);
+    // Execute Search - NO LIMIT on results (save everything found)
+    console.log(`[Worker] Searching: ${jobTitle} in ${location}`);
 
     const searchPayload = {
         jobTitles: jobTitle ? [jobTitle] : [],
         locations: location ? [location] : [],
         industries: industry ? [industry] : [],
         keywords: keywords || '',
-        limit: batchSize
+        limit: 100 // Fetch maximum results per search
     };
 
     const response = await fetch(LEAD_SEARCH_URL, {
@@ -147,6 +148,7 @@ async function executeSearch(task: any, supabase: any, config: any) {
     const leads = data.results || [];
 
     if (leads.length > 0) {
+        // Insert with 'saved' status - ALL leads found
         const leadsToInsert = leads.map((lead: any) => ({
             user_id: task.payload.userId,
             organization_id: task.organization_id,
@@ -160,7 +162,10 @@ async function executeSearch(task: any, supabase: any, config: any) {
         }));
 
         await supabase.from('leads').insert(leadsToInsert);
-        await incrementUsage(supabase, task.organization_id, 'search', leads.length);
+
+        // Track stats AND execution count
+        await incrementUsage(supabase, task.organization_id, 'search', leads.length); // Volume for stats
+        await incrementUsage(supabase, task.organization_id, 'search_run', 1);        // Frequency for limits
     }
 
     if (task.payload.enrichmentLevel && leads.length > 0) {
