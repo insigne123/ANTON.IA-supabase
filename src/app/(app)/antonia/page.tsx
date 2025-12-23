@@ -14,7 +14,10 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Settings, Play, Pause, Bot, ArrowRight, CheckCircle2, Target, Briefcase, Globe, Sparkles, Search, Plus, Trash2 } from 'lucide-react';
+import { Loader2, Settings, Play, Pause, Bot, ArrowRight, CheckCircle2, Target, Briefcase, Globe, Sparkles, Search, Plus, Trash2, ChevronDown } from 'lucide-react';
+import { companySizes } from '@/lib/data';
+import { APOLLO_SENIORITIES } from '@/lib/apollo-taxonomies';
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
 
@@ -30,14 +33,16 @@ export default function AntoniaPage() {
     // Wizard State
     const [step, setStep] = useState(1);
     const [wizardData, setWizardData] = useState({
-        industry: '',
-        location: '',
         jobTitle: '',
+        location: '',
+        industry: '',
         keywords: '',
+        companySize: '',
+        seniorities: [] as string[],
+        enrichmentLevel: 'basic' as 'basic' | 'deep',
         campaignName: '',
-        enrichmentLevel: 'standard',
-        autoGenerateCampaign: false,
-        campaignContext: ''
+        campaignContext: '',
+        autoGenerateCampaign: false
     });
 
     const supabase = createClientComponentClient();
@@ -104,14 +109,16 @@ export default function AntoniaPage() {
 
             setStep(1);
             setWizardData({
-                industry: '',
-                location: '',
                 jobTitle: '',
+                location: '',
+                industry: '',
                 keywords: '',
+                companySize: '',
+                seniorities: [],
+                enrichmentLevel: 'basic',
                 campaignName: '',
-                enrichmentLevel: 'standard',
-                autoGenerateCampaign: false,
-                campaignContext: ''
+                campaignContext: '',
+                autoGenerateCampaign: false
             });
 
             toast({ title: 'Misión Iniciada', description: 'ANTONIA está trabajando en tu tarea.' });
@@ -259,13 +266,58 @@ export default function AntoniaPage() {
                                                 />
                                             </div>
                                         </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-2">
+                                                <Label>Industria</Label>
+                                                <Input
+                                                    placeholder="ej. SaaS, Fintech, Salud"
+                                                    value={wizardData.industry}
+                                                    onChange={(e) => setWizardData({ ...wizardData, industry: e.target.value })}
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Tamaño de Empresa</Label>
+                                                <Select value={wizardData.companySize} onValueChange={(v) => setWizardData({ ...wizardData, companySize: v })}>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Seleccionar tamaño" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {companySizes.map(s => <SelectItem key={s} value={s}>{s.replace('+', ' o más')}</SelectItem>)}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
                                         <div className="space-y-2">
-                                            <Label>Industria</Label>
-                                            <Input
-                                                placeholder="ej. SaaS, Fintech, Salud"
-                                                value={wizardData.industry}
-                                                onChange={(e) => setWizardData({ ...wizardData, industry: e.target.value })}
-                                            />
+                                            <Label>Nivel de Management</Label>
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="outline" role="combobox" className="justify-between w-full">
+                                                        <span className="truncate">
+                                                            {wizardData.seniorities.length === 0 ? 'Seleccionar niveles' :
+                                                                wizardData.seniorities.length === 1 ? APOLLO_SENIORITIES.find(o => o.value === wizardData.seniorities[0])?.label ?? '1 seleccionado'
+                                                                    : `${wizardData.seniorities.length} seleccionados`}
+                                                        </span>
+                                                        <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent className="w-full max-h-80 overflow-auto">
+                                                    {APOLLO_SENIORITIES.map(opt => (
+                                                        <DropdownMenuCheckboxItem
+                                                            key={opt.value}
+                                                            checked={wizardData.seniorities.includes(opt.value)}
+                                                            onCheckedChange={(checked) => {
+                                                                const set = new Set(wizardData.seniorities);
+                                                                if (checked) set.add(opt.value); else set.delete(opt.value);
+                                                                setWizardData({ ...wizardData, seniorities: Array.from(set) });
+                                                            }}
+                                                            className="capitalize"
+                                                        >
+                                                            {opt.label}
+                                                        </DropdownMenuCheckboxItem>
+                                                    ))}
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                            <p className="text-xs text-muted-foreground">Opcional: C-Level, VP, Director, Manager, etc.</p>
                                         </div>
                                         <div className="space-y-2">
                                             <Label>Palabras Clave (Opcional)</Label>
