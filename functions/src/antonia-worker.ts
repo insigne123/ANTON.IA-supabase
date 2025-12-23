@@ -1,9 +1,11 @@
 import * as functions from 'firebase-functions';
 import { createClient } from '@supabase/supabase-js';
 
-// Environment variables
-const supabaseUrl = process.env.SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// Environment variables from Firebase config
+const config = functions.config();
+const supabaseUrl = config.supabase?.url || process.env.SUPABASE_URL!;
+const supabaseServiceKey = config.supabase?.service_key || process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const appUrl = config.app?.url || process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
 
 // Helper functions
@@ -300,7 +302,6 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
     const remaining = limit - currentUsage;
     const leadsToProcess = leads.slice(0, Math.min(remaining, leads.length));
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL;
     if (!appUrl) throw new Error('APP_URL not configured');
 
     const enrichUrl = `${appUrl}/api/opportunities/enrich-apollo`;
