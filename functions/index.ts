@@ -1,7 +1,22 @@
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
+// Define secrets globally for configuration, but access them only inside functions
+const SUPABASE_URL_SECRET = 'SUPABASE_URL';
+const SUPABASE_KEY_SECRET = 'SUPABASE_SERVICE_ROLE_KEY';
+
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
+
+// Helper to get Supabase client safely
+function getSupabase() {
+    const url = process.env[SUPABASE_URL_SECRET];
+    const key = process.env[SUPABASE_KEY_SECRET];
+
+    if (!url || !key) {
+        throw new Error('Missing Supabase configuration');
+    }
+    return createClient(url, key);
+}
 
 // --- WORKER LOGIC ---
 
@@ -142,7 +157,10 @@ async function executeEnrichment(task: any, supabase: SupabaseClient) {
         revealPhone: revealPhone
     };
 
-    const enrichUrl = `${process.env.APP_URL}/api/opportunities/enrich-apollo`;
+    // Use default URL if APP_URL is not set (e.g. during dev/deploy if accessed improperly)
+    // But strictly, we should assume the env var is present at runtime.
+    const baseUrl = process.env.APP_URL || 'http://localhost:3000';
+    const enrichUrl = `${baseUrl}/api/opportunities/enrich-apollo`;
 
     const response = await fetch(enrichUrl, {
         method: 'POST',
@@ -241,12 +259,10 @@ async function executeReport(task: any, supabase: SupabaseClient) {
  */
 export const antoniaTick = functions.scheduler.onSchedule({
     schedule: 'every 1 minutes',
-    secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']
+    secrets: [SUPABASE_URL_SECRET, SUPABASE_KEY_SECRET]
 }, async () => {
-    const supabase = createClient(
-        process.env.SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    // Only initialize Supabase INSIDE the handler
+    const supabase = getSupabase();
     console.log('[AntoniaTick] waking up...');
 
     const { data: tasks, error } = await supabase
