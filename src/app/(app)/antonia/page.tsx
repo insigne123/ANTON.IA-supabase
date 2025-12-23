@@ -81,11 +81,17 @@ export default function AntoniaPage() {
                     .single();
 
                 if (memberError) {
-                    console.error('[ANTONIA] Error getting organization membership:', memberError);
+                    console.error('[ANTONIA] Error getting organization membership:', {
+                        code: memberError.code,
+                        message: memberError.message,
+                        details: memberError.details,
+                        hint: memberError.hint,
+                        fullError: memberError
+                    });
                     toast({
                         variant: 'destructive',
                         title: 'Error',
-                        description: 'No se pudo cargar tu organización. Verifica que pertenezcas a una organización.'
+                        description: `No se pudo cargar tu organización: ${memberError.message || 'Error desconocido'}`
                     });
                     setLoading(false);
                     return;
@@ -413,7 +419,7 @@ export default function AntoniaPage() {
                                             <Label>Nivel de Enriquecimiento</Label>
                                             <Select
                                                 value={wizardData.enrichmentLevel}
-                                                onValueChange={(v) => setWizardData({ ...wizardData, enrichmentLevel: v })}
+                                                onValueChange={(v) => setWizardData({ ...wizardData, enrichmentLevel: v as 'basic' | 'deep' })}
                                             >
                                                 <SelectTrigger>
                                                     <SelectValue />
