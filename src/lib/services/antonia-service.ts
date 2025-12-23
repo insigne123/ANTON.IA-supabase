@@ -135,6 +135,29 @@ export const antoniaService = {
     },
 
     /**
+     * Get Campaigns for Organization
+     */
+    getCampaigns: async (organizationId: string) => {
+        const { data, error } = await supabase
+            .from('campaigns')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // Map to CamelCase to match Campaign type
+        return data.map((c: any) => ({
+            id: c.id,
+            name: c.name,
+            status: c.status,
+            createdAt: c.created_at,
+            updatedAt: c.updated_at,
+            organizationId: c.organization_id
+        }));
+    },
+
+    /**
      * Get Recent Logs
      */
     getLogs: async (organizationId: string, limit = 50) => {

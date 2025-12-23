@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { antoniaService } from '@/lib/services/antonia-service';
-import { AntoniaMission, AntoniaConfig } from '@/lib/types';
+import { AntoniaMission, AntoniaConfig, Campaign } from '@/lib/types';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,8 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Settings, Play, Pause, Bot, ArrowRight, CheckCircle2, Target, Briefcase, Globe, Sparkles } from 'lucide-react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Loader2, Settings, Play, Pause, Bot, ArrowRight, CheckCircle2, Target, Briefcase, Globe, Sparkles, Search, Plus, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
 
@@ -23,6 +24,8 @@ export default function AntoniaPage() {
     const [config, setConfig] = useState<AntoniaConfig | null>(null);
     const [orgId, setOrgId] = useState<string | null>(null);
     const [userId, setUserId] = useState<string | null>(null);
+    const [existingCampaigns, setExistingCampaigns] = useState<Campaign[]>([]);
+    const [campaignSearch, setCampaignSearch] = useState('');
 
     // Wizard State
     const [step, setStep] = useState(1);
@@ -54,12 +57,14 @@ export default function AntoniaPage() {
 
             if (member) {
                 setOrgId(member.organization_id);
-                const [missionsData, configData] = await Promise.all([
+                const [missionsData, configData, campaignsData] = await Promise.all([
                     antoniaService.getActiveMissions(member.organization_id),
-                    antoniaService.getConfig(member.organization_id)
+                    antoniaService.getConfig(member.organization_id),
+                    antoniaService.getCampaigns(member.organization_id)
                 ]);
                 setMissions(missionsData);
                 setConfig(configData);
+                setExistingCampaigns(campaignsData as Campaign[]);
             }
             setLoading(false);
         }
@@ -126,6 +131,31 @@ export default function AntoniaPage() {
         } catch (e) {
             toast({ title: 'Error al Guardar', variant: 'destructive' });
         }
+    };
+
+    // Email Management
+    const [notificationEmails, setNotificationEmails] = useState<string[]>([]);
+    const [newEmail, setNewEmail] = useState('');
+
+    useEffect(() => {
+        if (config?.notificationEmail) {
+            setNotificationEmails(config.notificationEmail.split(',').filter(Boolean));
+        }
+    }, [config?.notificationEmail]);
+
+    const handleAddEmail = () => {
+        if (newEmail && newEmail.includes('@') && !notificationEmails.includes(newEmail)) {
+            const updated = [...notificationEmails, newEmail];
+            setNotificationEmails(updated);
+            setNewEmail(''); // Clear input
+            handleUpdateConfig('notificationEmail', updated.join(','));
+        }
+    };
+
+    const handleRemoveEmail = (email: string) => {
+        const updated = notificationEmails.filter(e => e !== email);
+        setNotificationEmails(updated);
+        handleUpdateConfig('notificationEmail', updated.join(','));
     };
 
     if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary" /></div>;
@@ -281,13 +311,66 @@ export default function AntoniaPage() {
                                             </div>
 
                                             {!wizardData.autoGenerateCampaign && (
-                                                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                                                    <Label>Nombre de Campaña Existente</Label>
-                                                    <Input
-                                                        placeholder="ej. 'Outreach V1'"
-                                                        value={wizardData.campaignName}
-                                                        onChange={(e) => setWizardData({ ...wizardData, campaignName: e.target.value })}
-                                                    />
+                                                <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <Search className="w-4 h-4 text-muted-foreground" />
+                                                        <Input
+                                                            placeholder="Buscar campaña..."
+                                                            value={campaignSearch}
+                                                            onChange={(e) => setCampaignSearch(e.target.value)}
+                                                            className="h-8"
+                                                        />
+                                                    </div>
+
+                                                    <div className="border rounded-md max-h-[200px] overflow-auto">
+                                                        <Table>
+                                                            <TableHeader>
+                                                                <TableRow>
+                                                                    <TableHead>Nombre</TableHead>
+                                                                    <TableHead>Estado</TableHead>
+                                                                    <TableHead className="text-right">Creación</TableHead>
+                                                                </TableRow>
+                                                            </TableHeader>
+                                                            <TableBody>
+                                                                {existingCampaigns
+                                                                    .filter(c => c.name.toLowerCase().includes(campaignSearch.toLowerCase()))
+                                                                    .map((campaign) => (
+                                                                        <TableRow
+                                                                            key={campaign.id}
+                                                                            className={`cursor-pointer transition-colors ${wizardData.campaignName === campaign.name ? 'bg-primary/10 border-l-4 border-primary' : 'hover:bg-secondary/50'}`}
+                                                                            onClick={() => setWizardData({ ...wizardData, campaignName: campaign.name })}
+                                                                        >
+                                                                            <TableCell className="font-medium">
+                                                                                {campaign.name}
+                                                                                {wizardData.campaignName === campaign.name && (
+                                                                                    <CheckCircle2 className="w-3 h-3 text-primary inline ml-2" />
+                                                                                )}
+                                                                            </TableCell>
+                                                                            <TableCell>
+                                                                                <Badge variant={campaign.status === 'paused' ? "secondary" : "default"} className="text-[10px] h-5">
+                                                                                    {campaign.status === 'paused' ? 'Pausada' : 'Activa'}
+                                                                                </Badge>
+                                                                            </TableCell>
+                                                                            <TableCell className="text-right text-xs text-muted-foreground">
+                                                                                {new Date(campaign.createdAt).toLocaleDateString()}
+                                                                            </TableCell>
+                                                                        </TableRow>
+                                                                    ))}
+                                                                {existingCampaigns.length === 0 && (
+                                                                    <TableRow>
+                                                                        <TableCell colSpan={3} className="text-center py-4 text-muted-foreground">
+                                                                            No tienes campañas creadas.
+                                                                        </TableCell>
+                                                                    </TableRow>
+                                                                )}
+                                                            </TableBody>
+                                                        </Table>
+                                                    </div>
+                                                    {wizardData.campaignName && !existingCampaigns.find(c => c.name === wizardData.campaignName) && (
+                                                        <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                                                            Nota: "{wizardData.campaignName}" no coincide con ninguna campaña existente. Se creará una nueva si no es intencional.
+                                                        </p>
+                                                    )}
                                                 </div>
                                             )}
 
@@ -444,14 +527,52 @@ export default function AntoniaPage() {
                                         onCheckedChange={(c) => handleUpdateConfig('instantAlertsEnabled', c)}
                                     />
                                 </div>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="notification-email">Email de Notificaciones</Label>
-                                    <Input
-                                        id="notification-email"
-                                        value={config?.notificationEmail || ''}
-                                        onChange={(e) => handleUpdateConfig('notificationEmail', e.target.value)}
-                                        placeholder="¿Dónde enviamos los reportes?"
-                                    />
+                                <div>
+                                    <Label>Emails de Notificación</Label>
+                                    <p className="text-sm text-muted-foreground mb-2">Recibe reportes y alertas en estas direcciones.</p>
+
+                                    <div className="space-y-3">
+                                        <div className="flex gap-2">
+                                            <Input
+                                                placeholder="ej. equipo@empresa.com"
+                                                value={newEmail}
+                                                onChange={(e) => setNewEmail(e.target.value)}
+                                                onKeyDown={(e) => e.key === 'Enter' && handleAddEmail()}
+                                            />
+                                            <Button onClick={handleAddEmail} size="icon">
+                                                <Plus className="w-4 h-4" />
+                                            </Button>
+                                        </div>
+
+                                        <div className="border rounded-md overflow-hidden">
+                                            <Table>
+                                                <TableBody>
+                                                    {notificationEmails.map((email) => (
+                                                        <TableRow key={email}>
+                                                            <TableCell className="py-2">{email}</TableCell>
+                                                            <TableCell className="py-2 text-right">
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    onClick={() => handleRemoveEmail(email)}
+                                                                    className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                                                                >
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                </Button>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                    {notificationEmails.length === 0 && (
+                                                        <TableRow>
+                                                            <TableCell colSpan={2} className="text-center text-muted-foreground py-4 text-sm">
+                                                                No hay emails configurados.
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    )}
+                                                </TableBody>
+                                            </Table>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
