@@ -24,13 +24,17 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Mission not found' }, { status: 404 });
         }
 
-        // Create initial SEARCH task
+        // Check for Auto Campaign Strategy
+        const isAutoCampaign = mission.params.autoGenerateCampaign;
+        const initialTaskType = isAutoCampaign ? 'GENERATE_CAMPAIGN' : 'SEARCH';
+
+        // Create initial task (SEARCH or GENERATE_CAMPAIGN)
         const { data: task, error: taskError } = await supabase
             .from('antonia_tasks')
             .insert({
                 mission_id: missionId,
                 organization_id: mission.organization_id,
-                type: 'SEARCH',
+                type: initialTaskType,
                 status: 'pending',
                 payload: {
                     userId: mission.user_id,
@@ -39,9 +43,11 @@ export async function POST(req: NextRequest) {
                     industry: mission.params.industry,
                     keywords: mission.params.keywords,
                     enrichmentLevel: mission.params.enrichmentLevel,
-                    campaignName: mission.params.campaignName
+                    campaignName: mission.params.campaignName,
+                    campaignContext: mission.params.campaignContext || '',
+                    missionTitle: mission.title
                 },
-                idempotency_key: `mission_${missionId}_search_${Date.now()}`,
+                idempotency_key: `mission_${missionId}_init_${Date.now()}`,
                 created_at: new Date().toISOString()
             })
             .select()

@@ -32,7 +32,9 @@ export default function AntoniaPage() {
         jobTitle: '',
         keywords: '',
         campaignName: '',
-        enrichmentLevel: 'standard'
+        enrichmentLevel: 'standard',
+        autoGenerateCampaign: false,
+        campaignContext: ''
     });
 
     const supabase = createClientComponentClient();
@@ -96,7 +98,16 @@ export default function AntoniaPage() {
             }
 
             setStep(1);
-            setWizardData({ industry: '', location: '', jobTitle: '', keywords: '', campaignName: '', enrichmentLevel: 'standard' });
+            setWizardData({
+                industry: '',
+                location: '',
+                jobTitle: '',
+                keywords: '',
+                campaignName: '',
+                enrichmentLevel: 'standard',
+                autoGenerateCampaign: false,
+                campaignContext: ''
+            });
 
             toast({ title: 'Misión Iniciada', description: 'ANTONIA está trabajando en tu tarea.' });
         } catch (e) {
@@ -257,14 +268,39 @@ export default function AntoniaPage() {
                                             </Select>
                                             <p className="text-xs text-muted-foreground">El nivel profundo consume más créditos pero obtiene datos completos.</p>
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label>Campaña a Activar</Label>
-                                            <Input
-                                                placeholder="Escribe el nombre de una campaña (ej. 'Outreach V1')"
-                                                value={wizardData.campaignName}
-                                                onChange={(e) => setWizardData({ ...wizardData, campaignName: e.target.value })}
-                                            />
-                                            <p className="text-xs text-muted-foreground">Deja vacío para solo guardar los leads sin enviar emails.</p>
+                                        <div className="space-y-4 border p-4 rounded-lg bg-secondary/10">
+                                            <div className="flex items-center justify-between">
+                                                <div className="space-y-0.5">
+                                                    <Label>Campaña Inteligente</Label>
+                                                    <p className="text-xs text-muted-foreground">Deja que ANTONIA redacte y configure la campaña por ti.</p>
+                                                </div>
+                                                <Switch
+                                                    checked={wizardData.autoGenerateCampaign}
+                                                    onCheckedChange={(c) => setWizardData({ ...wizardData, autoGenerateCampaign: c, campaignName: c ? '' : wizardData.campaignName })}
+                                                />
+                                            </div>
+
+                                            {!wizardData.autoGenerateCampaign && (
+                                                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                                                    <Label>Nombre de Campaña Existente</Label>
+                                                    <Input
+                                                        placeholder="ej. 'Outreach V1'"
+                                                        value={wizardData.campaignName}
+                                                        onChange={(e) => setWizardData({ ...wizardData, campaignName: e.target.value })}
+                                                    />
+                                                </div>
+                                            )}
+
+                                            {wizardData.autoGenerateCampaign && (
+                                                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                                                    <Label>Contexto Adicional (Opcional)</Label>
+                                                    <Input
+                                                        placeholder="ej. 'Sé formal y enfócate en ROI'"
+                                                        value={wizardData.campaignContext || ''}
+                                                        onChange={(e) => setWizardData({ ...wizardData, campaignContext: e.target.value })}
+                                                    />
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 )}
@@ -294,7 +330,11 @@ export default function AntoniaPage() {
                                             </div>
                                             <div className="flex justify-between">
                                                 <span className="text-muted-foreground">Acción:</span>
-                                                <span className="font-medium">{wizardData.campaignName ? `Agregar a '${wizardData.campaignName}'` : 'Solo Guardar'}</span>
+                                                <span className="font-medium">
+                                                    {wizardData.autoGenerateCampaign
+                                                        ? 'Generar Campaña IA'
+                                                        : (wizardData.campaignName ? `Agregar a '${wizardData.campaignName}'` : 'Solo Guardar')}
+                                                </span>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2 text-sm text-muted-foreground bg-green-50 dark:bg-green-950/20 p-3 rounded-lg border border-green-200 dark:border-green-800">
@@ -412,6 +452,44 @@ export default function AntoniaPage() {
                                         onChange={(e) => handleUpdateConfig('notificationEmail', e.target.value)}
                                         placeholder="¿Dónde enviamos los reportes?"
                                     />
+                                </div>
+                            </div>
+
+                            <Separator />
+
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-medium">Límites y Cuotas Diarias</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="search-limit">Búsquedas Diarias (Leads)</Label>
+                                        <Input
+                                            id="search-limit"
+                                            type="number"
+                                            value={config?.dailySearchLimit || 100}
+                                            onChange={(e) => handleUpdateConfig('dailySearchLimit', parseInt(e.target.value))}
+                                        />
+                                        <p className="text-xs text-muted-foreground">Máx. leads nuevos a encontrar</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="enrich-limit">Enriquecimientos Diarios</Label>
+                                        <Input
+                                            id="enrich-limit"
+                                            type="number"
+                                            value={config?.dailyEnrichLimit || 50}
+                                            onChange={(e) => handleUpdateConfig('dailyEnrichLimit', parseInt(e.target.value))}
+                                        />
+                                        <p className="text-xs text-muted-foreground">Máx. leads a verificar email</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="investigate-limit">Investigaciones Diarias (Deep)</Label>
+                                        <Input
+                                            id="investigate-limit"
+                                            type="number"
+                                            value={config?.dailyInvestigateLimit || 20}
+                                            onChange={(e) => handleUpdateConfig('dailyInvestigateLimit', parseInt(e.target.value))}
+                                        />
+                                        <p className="text-xs text-muted-foreground">Máx. leads con datos completos (Tel)</p>
+                                    </div>
                                 </div>
                             </div>
 

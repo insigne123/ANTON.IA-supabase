@@ -451,6 +451,9 @@ export interface AntoniaConfig {
   notificationEmail?: string;
   dailyReportEnabled: boolean;
   instantAlertsEnabled: boolean;
+  dailySearchLimit?: number;
+  dailyEnrichLimit?: number;
+  dailyInvestigateLimit?: number;
   createdAt: string;
   updatedAt: string;
 }
