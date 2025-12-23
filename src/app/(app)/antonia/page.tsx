@@ -74,11 +74,11 @@ export default function AntoniaPage() {
                 console.log('[ANTONIA] User loaded:', user.id);
                 setUserId(user.id);
 
-                const { data: member, error: memberError } = await supabase
+                const { data: members, error: memberError } = await supabase
                     .from('organization_members')
                     .select('organization_id')
                     .eq('user_id', user.id)
-                    .single();
+                    .limit(1);
 
                 if (memberError) {
                     console.error('[ANTONIA] Error getting organization membership:', {
@@ -97,7 +97,7 @@ export default function AntoniaPage() {
                     return;
                 }
 
-                if (!member) {
+                if (!members || members.length === 0) {
                     console.warn('[ANTONIA] User is not a member of any organization');
                     toast({
                         variant: 'destructive',
@@ -108,8 +108,10 @@ export default function AntoniaPage() {
                     return;
                 }
 
+                const member = members[0];
                 console.log('[ANTONIA] Organization loaded:', member.organization_id);
                 setOrgId(member.organization_id);
+
 
                 const [missionsData, configData, campaignsData] = await Promise.all([
                     antoniaService.getActiveMissions(member.organization_id),
