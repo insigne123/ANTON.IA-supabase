@@ -445,3 +445,84 @@ export interface SavedSearch {
   };
 }
 
+// --- ANTONIA AUTOMATION ---
+export interface AntoniaConfig {
+  organizationId: string;
+  notificationEmail?: string;
+  dailyReportEnabled: boolean;
+  instantAlertsEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IntegrationToken {
+  userId: string;
+  provider: 'google' | 'outlook';
+  refreshToken: string; // Stored encrypted? In client, we might just see a flag/placeholder
+  updatedAt: string;
+}
+
+export type AntoniaMissionStatus = 'active' | 'paused' | 'completed' | 'failed';
+
+export interface AntoniaMission {
+  id: string;
+  organizationId: string;
+  userId: string;
+  title: string;
+  status: AntoniaMissionStatus;
+  goalSummary?: string;
+  params: any; // JSONB
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AntoniaTaskType = 'SEARCH' | 'ENRICH' | 'CONTACT' | 'REPORT' | 'ALERT';
+export type AntoniaTaskStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface AntoniaTask {
+  id: string;
+  missionId?: string;
+  organizationId: string;
+  type: AntoniaTaskType;
+  status: AntoniaTaskStatus;
+  payload: any;
+  result?: any;
+  errorMessage?: string;
+  processingStartedAt?: string;
+  idempotencyKey?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AntoniaLogLevel = 'info' | 'success' | 'warning' | 'error';
+
+export interface AntoniaLog {
+  id: string;
+  missionId?: string;
+  organizationId?: string;
+  level: AntoniaLogLevel;
+  message: string;
+  details?: any;
+  createdAt: string;
+}
+
+export interface AntoniaMetric {
+  id: string;
+  missionId?: string;
+  metricType: string;
+  value: number;
+  context?: any;
+  recordedAt: string;
+}
+
+export type AntoniaSuggestionType = 'feature' | 'optimization' | 'bug';
+
+export interface AntoniaAppSuggestion {
+  id: string;
+  suggestionType: AntoniaSuggestionType;
+  description: string;
+  context?: string;
+  suggestedByMissionId?: string;
+  isRead: boolean;
+  createdAt: string;
+}
