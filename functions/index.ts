@@ -94,26 +94,20 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
-    const { jobTitle, location, industry, keywords } = task.payload;
+    const { jobTitle, location, industry, keywords, companySize, userId } = task.payload;
     console.log('[SEARCH] Searching leads:', { jobTitle, location, industry });
 
-    const searchPayload: any = {
-        limit: 100
+    // Payload structure matching exactly what external API expects (based on nextjs route.ts)
+    const searchPayload = {
+        user_id: userId,
+        titles: jobTitle ? [jobTitle] : [],
+        company_location: location ? [location] : [],
+        industry_keywords: industry ? [industry] : [],
+        employee_range: companySize ? [companySize] : [],
+        max_results: 100
     };
 
-    // Only include non-empty fields
-    if (jobTitle && jobTitle.trim()) {
-        searchPayload.jobTitles = [jobTitle];
-    }
-    if (location && location.trim()) {
-        searchPayload.locations = [location];
-    }
-    if (industry && industry.trim()) {
-        searchPayload.industries = [industry];
-    }
-    if (keywords && keywords.trim()) {
-        searchPayload.keywords = keywords;
-    }
+    console.log('[SEARCH] Sending payload:', JSON.stringify(searchPayload));
 
     const response = await fetch(LEAD_SEARCH_URL, {
         method: 'POST',
@@ -121,10 +115,14 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
         body: JSON.stringify(searchPayload)
     });
 
-    if (!response.ok) throw new Error(`Search API failed: ${response.statusText}`);
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[SEARCH] API Error Response:', errorText);
+        throw new Error(`Search API failed: ${response.statusText} - ${errorText}`);
+    }
 
     const data = await response.json();
-    const leads = data.results || [];
+    const leads = data.results || data.leads || []; // Handle potentially different response structures
 
     if (leads.length > 0) {
         const leadsToInsert = leads.map((lead: any) => ({
