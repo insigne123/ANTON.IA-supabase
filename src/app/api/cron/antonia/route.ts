@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import { notificationService } from '@/lib/services/notification-service';
 
 // Initialize Supabase Admin Client
 const supabaseUrl = process.env.SUPABASE_URL!;
@@ -355,6 +356,38 @@ async function processTask(task: any, supabase: any) {
             details: result
         });
 
+        // Send notification for important task completions
+        if (!result.skipped && config?.instant_alerts_enabled) {
+            const { data: mission } = await supabase
+                .from('antonia_missions')
+                .select('title')
+                .eq('id', task.mission_id)
+                .single();
+
+            const missionTitle = mission?.title || 'Misión';
+
+            // Send alerts for significant events
+            if (task.type === 'SEARCH' && result.leadsFound > 0) {
+                await notificationService.sendAlert(
+                    task.organization_id,
+                    `Nuevos Leads Encontrados - ${missionTitle}`,
+                    `ANTONIA encontró ${result.leadsFound} nuevos leads para tu misión "${missionTitle}".`
+                );
+            } else if (task.type === 'ENRICH' && result.enrichedCount > 0) {
+                await notificationService.sendAlert(
+                    task.organization_id,
+                    `Leads Enriquecidos - ${missionTitle}`,
+                    `ANTONIA enriqueció ${result.enrichedCount} leads con datos de contacto para "${missionTitle}".`
+                );
+            } else if (task.type === 'CONTACT' && result.contactedCount > 0) {
+                await notificationService.sendAlert(
+                    task.organization_id,
+                    `Contactos Agregados - ${missionTitle}`,
+                    `ANTONIA agregó ${result.contactedCount} leads a tu campaña para "${missionTitle}".`
+                );
+            }
+        }
+
     } catch (e: any) {
         console.error(`[Worker] Task ${task.id} Failed`, e);
         await supabase.from('antonia_tasks').update({
@@ -369,6 +402,23 @@ async function processTask(task: any, supabase: any) {
             level: 'error',
             message: `Task ${task.type} failed: ${e.message}`
         });
+
+        // Send error notification if instant alerts are enabled
+        if (config?.instant_alerts_enabled) {
+            const { data: mission } = await supabase
+                .from('antonia_missions')
+                .select('title')
+                .eq('id', task.mission_id)
+                .single();
+
+            const missionTitle = mission?.title || 'Misión';
+
+            await notificationService.sendAlert(
+                task.organization_id,
+                `Error en Misión - ${missionTitle}`,
+                `ANTONIA encontró un error al procesar la tarea ${task.type}: ${e.message}`
+            );
+        }
     }
 }
 

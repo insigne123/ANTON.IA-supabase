@@ -4,6 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { antoniaService } from '@/lib/services/antonia-service';
 import { AntoniaMission, AntoniaConfig, Campaign } from '@/lib/types';
+import { googleAuthService } from '@/lib/google-auth-service';
+import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -90,6 +92,11 @@ export default function AntoniaPage() {
     const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
     const [logsLoading, setLogsLoading] = useState(false);
     const [deletingMissionId, setDeletingMissionId] = useState<string | null>(null);
+
+    // Integration Connection State
+    const [googleConnected, setGoogleConnected] = useState(false);
+    const [outlookConnected, setOutlookConnected] = useState(false);
+    const [connectingProvider, setConnectingProvider] = useState<'google' | 'outlook' | null>(null);
 
     const supabase = createClientComponentClient();
     const { toast } = useToast();
@@ -187,6 +194,25 @@ export default function AntoniaPage() {
         }
         loadData();
     }, [supabase, toast]);
+
+    // Load integration connection status
+    useEffect(() => {
+        async function checkConnectionStatus() {
+            if (!userId) return;
+
+            try {
+                const res = await fetch('/api/integrations/store-token');
+                if (res.ok) {
+                    const connections = await res.json();
+                    setGoogleConnected(connections.google || false);
+                    setOutlookConnected(connections.outlook || false);
+                }
+            } catch (error) {
+                console.error('[OAuth] Failed to load connection status:', error);
+            }
+        }
+        checkConnectionStatus();
+    }, [userId]);
 
     const handleCreateMission = async () => {
         console.log('[ANTONIA] Creating mission...', { orgId, userId, wizardData });
@@ -403,6 +429,85 @@ export default function AntoniaPage() {
         const updated = notificationEmails.filter(e => e !== email);
         setNotificationEmails(updated);
         handleUpdateConfig('notificationEmail', updated.join(','));
+    };
+
+    // OAuth Integration Handlers
+    const handleConnectGoogle = async () => {
+        setConnectingProvider('google');
+        try {
+            await googleAuthService.login();
+            const session = googleAuthService.getSession();
+
+            if (session?.accessToken && userId) {
+                // Store token for server-side use
+                const res = await fetch('/api/integrations/store-token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        provider: 'google',
+                        userId: userId
+                    })
+                });
+
+                if (res.ok) {
+                    setGoogleConnected(true);
+                    toast({
+                        title: 'Google Conectado',
+                        description: 'Tu cuenta está lista para enviar notificaciones.'
+                    });
+                } else {
+                    throw new Error('Failed to store token');
+                }
+            }
+        } catch (error: any) {
+            console.error('[OAuth] Google connection failed:', error);
+            toast({
+                variant: 'destructive',
+                title: 'Error',
+                description: error.message || 'No se pudo conectar con Google.'
+            });
+        } finally {
+            setConnectingProvider(null);
+        }
+    };
+
+    const handleConnectOutlook = async () => {
+        setConnectingProvider('outlook');
+        try {
+            await microsoftAuthService.login();
+            const identity = microsoftAuthService.getUserIdentity();
+
+            if (identity?.email && userId) {
+                // Store connection for server-side use
+                const res = await fetch('/api/integrations/store-token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        provider: 'outlook',
+                        userId: userId
+                    })
+                });
+
+                if (res.ok) {
+                    setOutlookConnected(true);
+                    toast({
+                        title: 'Outlook Conectado',
+                        description: 'Tu cuenta está lista para enviar notificaciones.'
+                    });
+                } else {
+                    throw new Error('Failed to store token');
+                }
+            }
+        } catch (error: any) {
+            console.error('[OAuth] Outlook connection failed:', error);
+            toast({
+                variant: 'destructive',
+                title: 'Error',
+                description: error.message || 'No se pudo conectar con Outlook.'
+            });
+        } finally {
+            setConnectingProvider(null);
+        }
     };
 
     if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary" /></div>;
@@ -1002,8 +1107,17 @@ export default function AntoniaPage() {
                                             <p className="font-medium">Google / Gmail</p>
                                             <p className="text-sm text-muted-foreground">Requerido para envío automático de emails</p>
                                         </div>
-                                        <Button variant="outline" onClick={() => toast({ title: "Próximamente", description: "La integración con Google estará disponible en breve." })}>
-                                            <Settings className="w-4 h-4 mr-2" /> Conectar Cuenta
+                                        <Button
+                                            variant="outline"
+                                            onClick={handleConnectGoogle}
+                                            disabled={connectingProvider !== null}
+                                        >
+                                            {connectingProvider === 'google' ? (
+                                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                            ) : (
+                                                <Settings className="w-4 h-4 mr-2" />
+                                            )}
+                                            {googleConnected ? 'Reconectar' : 'Conectar'} Cuenta
                                         </Button>
                                     </div>
 
@@ -1012,8 +1126,17 @@ export default function AntoniaPage() {
                                             <p className="font-medium">Microsoft Outlook</p>
                                             <p className="text-sm text-muted-foreground">Alternativa para envío automático de emails</p>
                                         </div>
-                                        <Button variant="outline" onClick={() => toast({ title: "Próximamente", description: "La integración con Outlook estará disponible en breve." })}>
-                                            <Settings className="w-4 h-4 mr-2" /> Conectar Cuenta
+                                        <Button
+                                            variant="outline"
+                                            onClick={handleConnectOutlook}
+                                            disabled={connectingProvider !== null}
+                                        >
+                                            {connectingProvider === 'outlook' ? (
+                                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                            ) : (
+                                                <Settings className="w-4 h-4 mr-2" />
+                                            )}
+                                            {outlookConnected ? 'Reconectar' : 'Conectar'} Cuenta
                                         </Button>
                                     </div>
                                 </div>

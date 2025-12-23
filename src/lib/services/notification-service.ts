@@ -1,19 +1,59 @@
 import { supabase } from '../supabase';
 import { antoniaService } from './antonia-service';
-// In a server environment (Firebase Functions), we might use Nodemailer directly.
-// In Next.js client/edge, we might use an API route that wraps Nodemailer/Resend.
-// For now, let's assume we have a generic 'sendEmail' utility or usage of existing mailer.
+import { sendGmail, sendOutlook } from '../server-email-sender';
+import { tokenManager } from './token-manager';
 
-// We'll define a simple interface for the "System Mailer" 
-// (the system sending emails to the user, not the user sending emails to leads)
-
+/**
+ * Send system email using stored OAuth tokens
+ * This function is designed to be called from server-side contexts (workers, cron jobs)
+ */
 async function sendSystemEmail(to: string, subject: string, html: string) {
-    // This implies we have a way to send transactional emails (Resend, SendGrid, etc.)
-    // For now, we'll log it or use a placeholder API call.
-    console.log(`[SystemMail] To: ${to} | Subject: ${subject}`);
+    try {
+        // Get the user ID from the email address
+        // Note: In a real implementation, you'd need to map email -> userId
+        // For now, we'll try to find a connected integration for any user
+        const { data: tokens, error } = await supabase
+            .from('integration_tokens')
+            .select('user_id, provider, connected')
+            .eq('connected', true)
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .single();
 
-    // Example: Call our own internal API
-    // await fetch('https://api.myapp.com/system-mail', { ... })
+        if (error || !tokens) {
+            console.error('[SystemMail] No connected integration found:', error);
+            // Fallback: just log the email
+            console.log(`[SystemMail] Would send: To: ${to} | Subject: ${subject}`);
+            return;
+        }
+
+        const { user_id, provider } = tokens;
+
+        // Get fresh access token
+        const accessToken = await tokenManager.getFreshAccessToken(user_id, provider as 'google' | 'outlook');
+
+        if (!accessToken) {
+            console.error('[SystemMail] Failed to get access token for provider:', provider);
+            console.log(`[SystemMail] Would send: To: ${to} | Subject: ${subject}`);
+            return;
+        }
+
+        // Send email using the appropriate provider
+        if (provider === 'google') {
+            await sendGmail(accessToken, to, subject, html);
+            console.log(`[SystemMail] ✅ Sent via Gmail to: ${to} | Subject: ${subject}`);
+        } else if (provider === 'outlook') {
+            await sendOutlook(accessToken, to, subject, html);
+            console.log(`[SystemMail] ✅ Sent via Outlook to: ${to} | Subject: ${subject}`);
+        } else {
+            console.warn(`[SystemMail] Unknown provider: ${provider}`);
+            console.log(`[SystemMail] Would send: To: ${to} | Subject: ${subject}`);
+        }
+    } catch (error) {
+        console.error('[SystemMail] Error sending email:', error);
+        // Don't throw - we don't want to break the worker if email fails
+        console.log(`[SystemMail] Failed to send: To: ${to} | Subject: ${subject}`);
+    }
 }
 
 export const notificationService = {
