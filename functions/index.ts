@@ -350,7 +350,8 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     return { investigatedCount: investigatedLeads.length };
 }
 
-async function executeContact(task: any, supabase: SupabaseClient) {
+// --- 4. EXECUTE INITIAL CONTACT (Personalized) ---
+async function executeInitialContact(task: any, supabase: SupabaseClient) {
     // Get mission limits
     const { data: mission } = await supabase
         .from('antonia_missions')
@@ -379,54 +380,196 @@ async function executeContact(task: any, supabase: SupabaseClient) {
 
     console.log(`[CONTACT] Contacting ${leadsToContact.length} leads`);
 
-    // Get campaign details
-    const { data: campaign } = await supabase
-        .from('campaigns')
-        .select('*')
-        .eq('organization_id', task.organization_id)
-        .eq('name', campaignName)
-        .single();
+    // Use default introduction template with research variables
+    // Note: Campaign is ignored here as this is the initial research-based outreach
+    const subject = 'Oportunidad de colaboración - {{company}}';
+    const body = `Hola {{name}},
 
-    if (!campaign) {
-        throw new Error('Campaign not found');
-    }
+Estuve leyendo sobre {{company}} y vi que {{research.summary}}
+
+Me pareció muy interesante y me gustaría conectar contigo para explorar posibles oportunidades de colaboración.
+
+¿Tendrías disponibilidad para una breve conversación?
+
+Saludos,`;
+
+    console.log(`[CONTACT_INITIAL] Using research-based template`);
 
     const appUrl = APP_URL;
     let contactedCount = 0;
 
-    // Extract subject and body from settings
-    const subject = campaign.settings?.subject || 'Oportunidad de colaboración';
-    const body = campaign.settings?.body || 'Hola,\n\nMe gustaría conversar contigo.\n\nSaludos,';
-
     for (const lead of leadsToContact) {
         try {
+            // Replace template variables
+            const personalizedSubject = subject
+                .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || 'there')
+                .replace(/\{\{company\}\}/g, lead.companyName || lead.company_name || 'your company');
+
+            const personalizedBody = body
+                .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || 'there')
+                .replace(/\{\{company\}\}/g, lead.companyName || lead.company_name || 'your company')
+                .replace(/\{\{title\}\}/g, lead.title || 'your role');
+
+            console.log(`[CONTACT] Sending email to ${lead.email}`);
+
             const response = await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-user-id': userId
+                },
                 body: JSON.stringify({
                     to: lead.email,
-                    subject: subject,
-                    body: body,
+                    subject: personalizedSubject,
+                    body: personalizedBody,
                     leadId: lead.id,
-                    campaignId: campaign.id,
+                    campaignId: null,
                     userId: userId
                 })
             });
 
+            console.log(`[CONTACT] API response status: ${response.status}`);
+
             if (response.ok) {
                 contactedCount++;
+                console.log(`[CONTACT] Successfully contacted lead`);
+            } else {
+                const errorText = await response.text();
+                console.error(`[CONTACT] API error: ${response.status} - ${errorText}`);
             }
         } catch (e) {
             console.error('[CONTACT] Failed to contact lead:', e);
         }
     }
 
-    // Mark mission as completed if this was the last task
+    // Do NOT mark mission as completed immediately. 
+    // The mission continues with the evaluation phase.
+
+    return { contactedCount };
+}
+// --- 5. EXECUTE EVALUATION (AI Brain) ---
+async function executeEvaluate(task: any, supabase: SupabaseClient) {
+    // Determine which leads need evaluation
+    // In a real scenario, this task would receive specific leads to evaluate
+    // For now, let's assume the payload contains the leads to evaluate
+    const { leads } = task.payload;
+    let qualifiedCount = 0;
+
+    for (const lead of leads) {
+        // Fetch interaction history
+        const { data: interactions } = await supabase
+            .from('lead_responses')
+            .select('*')
+            .eq('lead_id', lead.id);
+
+        const { data: contactedLead } = await supabase
+            .from('contacted_leads')
+            .select('engagement_score')
+            .eq('lead_id', lead.id)
+            .single();
+
+        const score = contactedLead?.engagement_score || 0;
+        const hasReplied = interactions?.some((i: any) => i.type === 'reply');
+
+        console.log(`[EVALUATE] Leading ${lead.email} - Score: ${score}, Replied: ${hasReplied}`);
+
+        // AI LOGIC PLACEHOLDER (To be replaced with actual LLM call)
+        // Rule-based fallback for now:
+        // 1. If replied -> Action Required (Manual)
+        // 2. If Score > 3 (e.g. clicked or multiple opens) -> Qualified
+        // 3. If Score <= 3 -> Disqualified (or wait)
+
+        let newStatus = 'disqualified';
+
+        if (hasReplied) {
+            newStatus = 'action_required';
+        } else if (score > 1) { // Low threshold for testing: > 1 open
+            newStatus = 'qualified';
+            qualifiedCount++;
+
+            // Trigger Campaign Follow-up
+            await supabase.from('antonia_tasks').insert({
+                mission_id: task.mission_id,
+                organization_id: task.organization_id,
+                type: 'CONTACT_CAMPAIGN',
+                status: 'pending',
+                payload: {
+                    leads: [lead],
+                    userId: task.payload.userId,
+                    campaignName: task.payload.campaignName
+                },
+                position: task.position + 1
+            });
+            console.log(`[EVALUATE] Lead qualified! Created CONTACT_CAMPAIGN task.`);
+        }
+
+        // Update status
+        await supabase.from('contacted_leads').update({
+            evaluation_status: newStatus
+        }).eq('lead_id', lead.id);
+    }
+
+    return { evaluatedCount: leads.length, qualifiedCount };
+}
+
+// --- 6. EXECUTE CONTACT CAMPAIGN (Follow-up) ---
+async function executeContactCampaign(task: any, supabase: SupabaseClient) {
+    // This function sends the actual campaign sequence to QUALIFIED leads
+    // Logic is similar to legacy executeContact but specific to campaigns
+
+    // Reuse legacy logic for now, but ensure we mark as completed
+    const result = await executeLegacyContact(task, supabase);
+
+    // Complete the mission for this lead
+    // Note: If we have multiple tasks per mission, we might need smarter completion logic
+    // For single-flow missions, this is fine
     await supabase
         .from('antonia_missions')
         .update({ status: 'completed', updated_at: new Date().toISOString() })
         .eq('id', task.mission_id);
 
+    return result;
+}
+
+// Reuse legacy contact logic helper
+async function executeLegacyContact(task: any, supabase: SupabaseClient) {
+    const { leads, userId, campaignName } = task.payload;
+    const appUrl = APP_URL;
+    let contactedCount = 0;
+
+    // Fetch Campaign
+    const { data: campaign } = await supabase
+        .from('campaigns')
+        .select('*')
+        .eq('organization_id', task.organization_id)
+        .eq('name', campaignName)
+        .maybeSingle();
+
+    const subject = campaign?.settings?.subject || 'Follow up';
+    const body = campaign?.settings?.body || 'Just checking in...';
+
+    for (const lead of leads) {
+        try {
+            console.log(`[CONTACT_CAMPAIGN] Sending campaign email to ${lead.email}`);
+            const response = await fetch(`${appUrl}/api/contact/send`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-user-id': userId
+                },
+                body: JSON.stringify({
+                    to: lead.email,
+                    subject: subject,
+                    body: body,
+                    leadId: lead.id,
+                    campaignId: campaign?.id,
+                    userId: userId,
+                    metadata: { type: 'campaign_followup' }
+                })
+            });
+            if (response.ok) contactedCount++;
+        } catch (e) { console.error(e); }
+    }
     return { contactedCount };
 }
 
@@ -460,8 +603,15 @@ async function processTask(task: any, supabase: SupabaseClient) {
             case 'INVESTIGATE':
                 result = await executeInvestigate(task, supabase);
                 break;
-            case 'CONTACT':
-                result = await executeContact(task, supabase);
+            case 'EVALUATE':
+                result = await executeEvaluate(task, supabase);
+                break;
+            case 'CONTACT_CAMPAIGN':
+                result = await executeContactCampaign(task, supabase);
+                break;
+            case 'CONTACT': // Legacy support
+            case 'CONTACT_INITIAL':
+                result = await executeInitialContact(task, supabase);
                 break;
         }
 
@@ -513,6 +663,7 @@ export const antoniaTick = functions.scheduler.onSchedule({
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // --- 1. PROCESS PENDING TASKS ---
     const { data: tasks, error } = await supabase
         .from('antonia_tasks')
         .select('*')
@@ -521,14 +672,78 @@ export const antoniaTick = functions.scheduler.onSchedule({
 
     if (error) {
         console.error('Error fetching tasks', error);
-        return;
+    } else if (tasks && tasks.length > 0) {
+        console.log(`[AntoniaTick] Processing ${tasks.length} tasks`);
+        await Promise.all(tasks.map(t => processTask(t, supabase)));
     }
 
-    if (!tasks || tasks.length === 0) {
-        console.log('[AntoniaTick] No pending tasks.');
-        return;
-    }
+    // --- 2. SCAN FOR EVALUATION (The Heartbeat) ---
+    // Find leads contacted > 2 days ago (or > 5 mins for testing) with status 'pending'
+    // For testing purposes, we'll use 5 minutes delay
+    const checkTime = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
-    console.log(`[AntoniaTick] Processing ${tasks.length} tasks`);
-    await Promise.all(tasks.map(t => processTask(t, supabase)));
+    const { data: pendingLeads } = await supabase
+        .from('contacted_leads')
+        .select(`
+                lead_id, 
+                organization_id, 
+                leads!inner ( id, email, organization_id )
+            `)
+        .eq('evaluation_status', 'pending')
+        .lt('last_interaction_at', checkTime)
+        .limit(10);
+
+    if (pendingLeads && pendingLeads.length > 0) {
+        console.log(`[AntoniaTick] Found ${pendingLeads.length} leads pending evaluation`);
+
+        // Group by Organization to create tasks efficiently
+        const orgGroups = groupBy(pendingLeads, 'organization_id');
+
+        for (const orgId of Object.keys(orgGroups)) {
+            // Find an active mission for this org (simplification: just find the latest active one)
+            // ideally we should store mission_id in contacted_leads table
+            const { data: mission } = await supabase
+                .from('antonia_missions')
+                .select('id, created_by')
+                .eq('organization_id', orgId)
+                .eq('status', 'active')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (mission) {
+                const leadsForOrg = orgGroups[orgId].map((pl: any) => pl.leads);
+
+                // Create EVALUATE task
+                await supabase.from('antonia_tasks').insert({
+                    mission_id: mission.id,
+                    organization_id: orgId,
+                    type: 'EVALUATE',
+                    status: 'pending',
+                    payload: {
+                        leads: leadsForOrg,
+                        userId: mission.created_by,
+                        campaignName: 'Smart Campaign' // Placeholder
+                    }
+                });
+                console.log(`[AntoniaTick] Created EVALUATE task for Org ${orgId}`);
+
+                // Update status to 'evaluating' to avoid double processing
+                const leadIds = leadsForOrg.map((l: any) => l.id);
+                await supabase
+                    .from('contacted_leads')
+                    .update({ evaluation_status: 'evaluating' }) // Temporary status
+                    .in('lead_id', leadIds);
+            }
+        }
+    }
 });
+
+// Helper for grouping
+function groupBy(xs: any[], key: string) {
+    return xs.reduce(function (rv, x) {
+        (rv[x[key]] = rv[x[key]] || []).push(x);
+        return rv;
+    }, {});
+}
+
