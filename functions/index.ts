@@ -111,7 +111,10 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
 
     const response = await fetch(LEAD_SEARCH_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'x-user-id': userId
+        },
         body: JSON.stringify(searchPayload)
     });
 

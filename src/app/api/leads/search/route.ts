@@ -97,12 +97,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.redirect(url, 307);
   }
 
-  // 1. Authenticate and get User ID
-  const supabase = createRouteHandlerClient({ cookies });
-  const { data: { user } } = await supabase.auth.getUser();
+  // 1. Authenticate: Support both session cookies and x-user-id header (for Cloud Functions)
+  const userIdFromHeader = req.headers.get('x-user-id')?.trim() || '';
 
-  if (!user) {
-    return NextResponse.json({ error: "UNAUTHORIZED", message: "User must be logged in" }, { status: 401 });
+  let userId: string;
+
+  if (userIdFromHeader) {
+    // Server-to-server call from Cloud Functions
+    userId = userIdFromHeader;
+  } else {
+    // Regular user session
+    const supabase = createRouteHandlerClient({ cookies });
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "UNAUTHORIZED", message: "User must be logged in" }, { status: 401 });
+    }
+
+    userId = user.id;
   }
 
   let body: unknown = null;
