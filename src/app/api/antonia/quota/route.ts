@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
         .from('contacted_leads')
         .select('*', { count: 'exact', head: true })
         .eq('organization_id', organizationId)
-        .gte('contacted_at', `${today}T00:00:00Z`);
+        .gte('created_at', `${today}T00:00:00Z`);
 
     const quotaData = {
         searches: {

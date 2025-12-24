@@ -370,7 +370,7 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
         .from('contacted_leads')
         .select('*', { count: 'exact', head: true })
         .eq('organization_id', task.organization_id)
-        .gte('contacted_at', `${today}T00:00:00Z`);
+        .gte('created_at', `${today}T00:00:00Z`);
 
     if ((contactsToday || 0) >= limit) {
         console.log(`[CONTACT] Daily limit reached (${contactsToday}/${limit})`);
