@@ -49,14 +49,17 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
 
     const { data: existing } = await supabase
         .from('campaigns')
-        .select('id, name')
+        .select('id, name, subject, body')
         .eq('organization_id', task.organization_id)
         .eq('name', generatedName)
-        .single();
+        .maybeSingle();
+
+    let subject = existing?.subject || '';
+    let body = existing?.body || '';
 
     if (!existing) {
-        const subject = `Oportunidad para innovar en ${industry}`;
-        const body = `Hola {{firstName}},\n\nEspero que estés muy bien.\n\nVi que estás liderando iniciativas de ${jobTitle} y me pareció muy relevante contactarte.\n${campaignContext ? `\nContexto específico: ${campaignContext}\n` : ''}\nMe gustaría conversar sobre cómo podemos potenciar sus resultados.\n\n¿Tienes 5 minutos esta semana?\n\nSaludos,`;
+        subject = `Oportunidad para innovar en ${industry}`;
+        body = `Hola {{firstName}},\n\nEspero que estés muy bien.\n\nVi que estás liderando iniciativas de ${jobTitle} y me pareció muy relevante contactarte.\n${campaignContext ? `\nContexto específico: ${campaignContext}\n` : ''}\nMe gustaría conversar sobre cómo podemos potenciar sus resultados.\n\n¿Tienes 5 minutos esta semana?\n\nSaludos,`;
 
         await supabase.from('campaigns').insert({
             organization_id: task.organization_id,
