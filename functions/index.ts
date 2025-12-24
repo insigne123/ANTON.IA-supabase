@@ -292,18 +292,37 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
     for (const lead of leadsToInvestigate) {
         try {
-            const response = await fetch(`${appUrl}/api/research/investigate`, {
+            console.log(`[INVESTIGATE] Investigating lead:`, {
+                name: lead.fullName || lead.full_name,
+                company: lead.companyName || lead.company_name
+            });
+
+            const response = await fetch(`${appUrl}/api/research/n8n`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-user-id': userId
+                },
                 body: JSON.stringify({
-                    lead: lead,
-                    userId: userId
+                    id: lead.id,
+                    fullName: lead.fullName || lead.full_name || lead.name,
+                    title: lead.title,
+                    email: lead.email,
+                    linkedinUrl: lead.linkedinUrl || lead.linkedin_url,
+                    companyName: lead.companyName || lead.company_name || lead.organization?.name,
+                    companyDomain: lead.companyDomain || lead.company_domain
                 })
             });
 
+            console.log(`[INVESTIGATE] API response status: ${response.status}`);
+
             if (response.ok) {
                 const data = await response.json();
-                investigatedLeads.push(data);
+                investigatedLeads.push({ ...lead, research: data });
+                console.log(`[INVESTIGATE] Successfully investigated lead`);
+            } else {
+                const errorText = await response.text();
+                console.error(`[INVESTIGATE] API error: ${response.status} - ${errorText}`);
             }
         } catch (e) {
             console.error('[INVESTIGATE] Failed to investigate lead:', e);
