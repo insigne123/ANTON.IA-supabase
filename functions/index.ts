@@ -1,8 +1,11 @@
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Environment variables from Firebase config
-const config = functions.params;
+// Define parameters for Firebase Functions v2
+const APP_URL = functions.params.defineString('APP_URL', {
+    default: 'https://studio--studio-6624658482-61b7b.us-central1.hosted.app'
+});
+
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
 
 // Helper functions
@@ -196,7 +199,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
 
     console.log(`[ENRICH] Enriching ${leadsToEnrich.length} leads`);
 
-    const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+    const appUrl = APP_URL.value();
     console.log(`[ENRICH] Using appUrl: ${appUrl}`);
 
     if (!appUrl) {
@@ -287,7 +290,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
     console.log(`[INVESTIGATE] Investigating ${leadsToInvestigate.length} leads`);
 
-    const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+    const appUrl = APP_URL.value();
     const investigatedLeads = [];
 
     for (const lead of leadsToInvestigate) {
@@ -372,7 +375,7 @@ async function executeContact(task: any, supabase: SupabaseClient) {
         throw new Error('Campaign not found');
     }
 
-    const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+    const appUrl = APP_URL.value();
     let contactedCount = 0;
 
     // Extract subject and body from settings
