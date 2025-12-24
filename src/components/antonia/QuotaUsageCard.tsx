@@ -84,7 +84,27 @@ export function QuotaUsageCard() {
   }
 
   if (!quota) {
-    return null;
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex justify-between items-start">
+            <CardTitle>Uso de Cuotas Diarias</CardTitle>
+            <button
+              onClick={fetchQuota}
+              className="p-2 hover:bg-gray-100 rounded-md transition-colors"
+              title="Reintentar"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="text-sm text-muted-foreground text-center py-4">
+            No se pudo cargar la información de cuotas.
+          </div>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (

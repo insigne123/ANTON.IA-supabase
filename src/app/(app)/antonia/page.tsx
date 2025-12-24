@@ -46,6 +46,19 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import {
+    Sheet,
+    SheetContent,
+    SheetHeader,
+    SheetTitle,
+    SheetDescription,
+} from "@/components/ui/sheet";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
     AlertDialog,
     AlertDialogAction,
     AlertDialogCancel,
@@ -97,6 +110,8 @@ export default function AntoniaPage() {
     const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
     const [logsLoading, setLogsLoading] = useState(false);
     const [deletingMissionId, setDeletingMissionId] = useState<string | null>(null);
+    const [activitySheetOpen, setActivitySheetOpen] = useState(false);
+    const [selectedActivityMission, setSelectedActivityMission] = useState<AntoniaMission | null>(null);
 
     // Integration Connection State
     const [googleConnected, setGoogleConnected] = useState(false);
@@ -526,7 +541,50 @@ export default function AntoniaPage() {
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* Left: Helper */}
                         <div className="lg:col-span-1 space-y-4">
-                            <AgentActivityFeed />
+                            <Card className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-950/20 dark:to-pink-950/20 border-purple-200 dark:border-purple-800">
+                                <CardHeader>
+                                    <div className="flex items-center gap-2">
+                                        <Bot className="w-5 h-5 text-purple-600" />
+                                        <CardTitle className="text-lg">¿Cómo funciona?</CardTitle>
+                                    </div>
+                                </CardHeader>
+                                <CardContent className="text-sm space-y-4">
+                                    <div className="flex gap-3">
+                                        <div className="mt-1 p-2 bg-white dark:bg-gray-900 rounded-lg border shadow-sm">
+                                            <Target className="w-4 h-4 text-purple-600" />
+                                        </div>
+                                        <div>
+                                            <p className="font-semibold text-gray-900 dark:text-gray-100">1. Define tu Objetivo</p>
+                                            <p className="text-gray-600 dark:text-gray-400 text-xs mt-1">Especifica cargo, ubicación e industria de tus prospectos ideales.</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <div className="mt-1 p-2 bg-white dark:bg-gray-900 rounded-lg border shadow-sm">
+                                            <Globe className="w-4 h-4 text-blue-600" />
+                                        </div>
+                                        <div>
+                                            <p className="font-semibold text-gray-900 dark:text-gray-100">2. Búsqueda Automática</p>
+                                            <p className="text-gray-600 dark:text-gray-400 text-xs mt-1">ANTONIA busca en LinkedIn, Apollo y bases de datos públicas 24/7.</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <div className="mt-1 p-2 bg-white dark:bg-gray-900 rounded-lg border shadow-sm">
+                                            <Briefcase className="w-4 h-4 text-orange-600" />
+                                        </div>
+                                        <div>
+                                            <p className="font-semibold text-gray-900 dark:text-gray-100">3. Enriquecimiento y Contacto</p>
+                                            <p className="text-gray-600 dark:text-gray-400 text-xs mt-1">Verifica emails, enriquece datos y activa campañas automáticamente.</p>
+                                        </div>
+                                    </div>
+                                    <Separator />
+                                    <div className="bg-white/50 dark:bg-gray-900/50 p-3 rounded-lg border">
+                                        <div className="flex items-center gap-2 text-xs text-purple-700 dark:text-purple-300">
+                                            <Sparkles className="w-3 h-3" />
+                                            <span className="font-medium">ANTONIA trabaja incluso cuando estás offline</span>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
                         </div>
 
                         {/* Right: Wizard Form */}
@@ -653,7 +711,21 @@ export default function AntoniaPage() {
 
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div className="space-y-2">
-                                                    <Label className="text-sm">Búsquedas por día</Label>
+                                                    <div className="flex items-center gap-2">
+                                                        <Label className="text-sm">Búsquedas por día</Label>
+                                                        <TooltipProvider>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <div className="cursor-help text-muted-foreground hover:text-primary">
+                                                                        <Bot className="w-3 h-3" />
+                                                                    </div>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent>
+                                                                    <p className="max-w-xs">Número de veces que el agente buscará nuevos prospectos en LinkedIn y otras fuentes diariamente.</p>
+                                                                </TooltipContent>
+                                                            </Tooltip>
+                                                        </TooltipProvider>
+                                                    </div>
                                                     <Input
                                                         type="number"
                                                         min="1"
@@ -665,7 +737,21 @@ export default function AntoniaPage() {
                                                 </div>
 
                                                 <div className="space-y-2">
-                                                    <Label className="text-sm">Leads a enriquecer</Label>
+                                                    <div className="flex items-center gap-2">
+                                                        <Label className="text-sm">Leads a enriquecer</Label>
+                                                        <TooltipProvider>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <div className="cursor-help text-muted-foreground hover:text-primary">
+                                                                        <Sparkles className="w-3 h-3" />
+                                                                    </div>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent>
+                                                                    <p className="max-w-xs">Cantidad máxima de personas cuyos correos electrónicos serán verificados y validados por día.</p>
+                                                                </TooltipContent>
+                                                            </Tooltip>
+                                                        </TooltipProvider>
+                                                    </div>
                                                     <Input
                                                         type="number"
                                                         min="1"
@@ -677,7 +763,21 @@ export default function AntoniaPage() {
                                                 </div>
 
                                                 <div className="space-y-2">
-                                                    <Label className="text-sm">Leads a investigar</Label>
+                                                    <div className="flex items-center gap-2">
+                                                        <Label className="text-sm">Leads a investigar</Label>
+                                                        <TooltipProvider>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <div className="cursor-help text-muted-foreground hover:text-primary">
+                                                                        <Search className="w-3 h-3" />
+                                                                    </div>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent>
+                                                                    <p className="max-w-xs">Cantidad de perfiles que serán analizados en profundidad (skills, actividad reciente) para personalizar mensajes.</p>
+                                                                </TooltipContent>
+                                                            </Tooltip>
+                                                        </TooltipProvider>
+                                                    </div>
                                                     <Input
                                                         type="number"
                                                         min="1"
@@ -689,7 +789,21 @@ export default function AntoniaPage() {
                                                 </div>
 
                                                 <div className="space-y-2">
-                                                    <Label className="text-sm">Leads a contactar</Label>
+                                                    <div className="flex items-center gap-2">
+                                                        <Label className="text-sm">Leads a contactar</Label>
+                                                        <TooltipProvider>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <div className="cursor-help text-muted-foreground hover:text-primary">
+                                                                        <FileText className="w-3 h-3" />
+                                                                    </div>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent>
+                                                                    <p className="max-w-xs">Número máximo de correos electrónicos de primer contacto que se enviarán automáticamente por día.</p>
+                                                                </TooltipContent>
+                                                            </Tooltip>
+                                                        </TooltipProvider>
+                                                    </div>
                                                     <Input
                                                         type="number"
                                                         min="1"
@@ -854,155 +968,116 @@ export default function AntoniaPage() {
                 </TabsContent>
 
                 <TabsContent value="active" className="space-y-6">
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* Missions Grid */}
-                        <div className="lg:col-span-2">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {missions.length === 0 ? (
-                                    <div className="col-span-full flex flex-col items-center justify-center py-16 text-muted-foreground border-2 border-dashed rounded-xl">
-                                        <Bot className="w-12 h-12 mb-4 opacity-50" />
-                                        <p className="text-lg font-medium">No hay misiones activas</p>
-                                        <p className="text-sm">Crea una nueva misión para comenzar.</p>
+                    {/* Quota Usage Dashboard (Visible locally in active tab too) */}
+                    <QuotaUsageCard />
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {missions.length === 0 ? (
+                            <div className="col-span-full flex flex-col items-center justify-center py-16 text-muted-foreground border-2 border-dashed rounded-xl">
+                                <Bot className="w-12 h-12 mb-4 opacity-50" />
+                                <p className="text-lg font-medium">No hay misiones activas</p>
+                                <p className="text-sm">Crea una nueva misión para comenzar.</p>
+                            </div>
+                        ) : (
+                            missions.map((mission) => (
+                                <Card key={mission.id} className="relative overflow-hidden group hover:border-primary/50 transition-colors">
+                                    <div className="absolute top-0 right-0 p-2 opacity-50">
+                                        <Bot className="w-12 h-12 text-secondary" />
                                     </div>
-                                ) : (
-                                    missions.map((mission) => (
-                                        <Card key={mission.id} className="relative overflow-hidden group hover:border-primary/50 transition-colors">
-                                            <div className="absolute top-0 right-0 p-2 opacity-50">
-                                                <Bot className="w-12 h-12 text-secondary" />
-                                            </div>
-                                            <CardHeader>
-                                                <div className="flex justify-between items-start relative z-10">
-                                                    <Badge variant={mission.status === 'active' ? 'default' : 'secondary'} className={mission.status === 'active' ? 'bg-green-500' : ''}>
-                                                        {mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : mission.status.toUpperCase()}
-                                                    </Badge>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-xs text-muted-foreground">
-                                                            {new Date(mission.createdAt).toLocaleDateString('es-AR')}
-                                                        </span>
-                                                        {editingMissionId !== mission.id && (
-                                                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEditingMission(mission)}>
-                                                                <Edit2 className="w-3 h-3 text-muted-foreground" />
-                                                            </Button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                {editingMissionId === mission.id ? (
-                                                    <div className="flex items-center gap-2 mt-2 relative z-20">
-                                                        <Input
-                                                            value={currentMissionTitle}
-                                                            onChange={(e) => setCurrentMissionTitle(e.target.value)}
-                                                            className="h-8 text-sm"
-                                                            autoFocus
-                                                        />
-                                                        <Button size="sm" onClick={() => saveMissionTitle(mission.id)} className="h-8">Guardar</Button>
-                                                        <Button size="icon" variant="ghost" onClick={() => setEditingMissionId(null)} className="h-8 w-8">
-                                                            <X className="w-4 h-4" />
-                                                        </Button>
-                                                    </div>
-                                                ) : (
-                                                    <CardTitle className="mt-2 line-clamp-1 relative z-10">{mission.title}</CardTitle>
+                                    <CardHeader>
+                                        <div className="flex justify-between items-start relative z-10">
+                                            <Badge variant={mission.status === 'active' ? 'default' : 'secondary'} className={mission.status === 'active' ? 'bg-green-500' : ''}>
+                                                {mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : mission.status.toUpperCase()}
+                                            </Badge>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-muted-foreground">
+                                                    {mission.createdAt ? new Date(mission.createdAt).toLocaleDateString('es-AR') : '-'}
+                                                </span>
+                                                {editingMissionId !== mission.id && (
+                                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEditingMission(mission)}>
+                                                        <Edit2 className="w-3 h-3 text-muted-foreground" />
+                                                    </Button>
                                                 )}
-                                            </CardHeader>
-                                            <CardContent className="relative z-10">
-                                                <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
-                                                    {mission.goalSummary}
-                                                </p>
+                                            </div>
+                                        </div>
+                                        {editingMissionId === mission.id ? (
+                                            <div className="flex items-center gap-2 mt-2 relative z-20">
+                                                <Input
+                                                    value={currentMissionTitle}
+                                                    onChange={(e) => setCurrentMissionTitle(e.target.value)}
+                                                    className="h-8 text-sm"
+                                                    autoFocus
+                                                />
+                                                <Button size="sm" onClick={() => saveMissionTitle(mission.id)} className="h-8">Guardar</Button>
+                                                <Button size="icon" variant="ghost" onClick={() => setEditingMissionId(null)} className="h-8 w-8">
+                                                    <X className="w-4 h-4" />
+                                                </Button>
+                                            </div>
+                                        ) : (
+                                            <CardTitle className="mt-2 line-clamp-1 relative z-10">{mission.title}</CardTitle>
+                                        )}
+                                    </CardHeader>
+                                    <CardContent className="relative z-10">
+                                        <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
+                                            {mission.goalSummary}
+                                        </p>
 
-                                                {/* Mission Parameters */}
-                                                <div className="mb-4 p-3 bg-secondary/20 rounded-lg border text-xs space-y-1">
-                                                    <div className="flex justify-between">
-                                                        <span className="text-muted-foreground">Objetivo:</span>
-                                                        <span className="font-medium">{mission.params?.jobTitle || 'N/A'}</span>
-                                                    </div>
-                                                    <div className="flex justify-between">
-                                                        <span className="text-muted-foreground">Ubicación:</span>
-                                                        <span className="font-medium">{mission.params?.location || 'N/A'}</span>
-                                                    </div>
-                                                    {mission.params?.industry && (
-                                                        <div className="flex justify-between">
-                                                            <span className="text-muted-foreground">Industria:</span>
-                                                            <span className="font-medium">{mission.params.industry}</span>
-                                                        </div>
-                                                    )}
-                                                    <div className="flex justify-between">
-                                                        <span className="text-muted-foreground">Enriquecimiento:</span>
-                                                        <span className="font-medium capitalize">{mission.params?.enrichmentLevel || 'basic'}</span>
-                                                    </div>
-                                                    {mission.params?.campaignName && (
-                                                        <div className="flex justify-between">
-                                                            <span className="text-muted-foreground">Campaña:</span>
-                                                            <span className="font-medium">{mission.params.campaignName}</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                <div className="mt-4 flex gap-2">
-                                                    <Button
-                                                        variant="outline"
-                                                        size="sm"
-                                                        className="flex-1"
-                                                        onClick={() => handleShowLogs(mission.id)}
-                                                    >
-                                                        <FileText className="w-3 h-3 mr-2" /> Ver Logs
-                                                    </Button>
-                                                    <Button
-                                                        variant="default"
-                                                        size="sm"
-                                                        className="flex-1"
-                                                        onClick={async () => {
-                                                            try {
-                                                                const res = await fetch('/api/cron/antonia');
-                                                                const data = await res.json();
-                                                                toast({
-                                                                    title: 'Worker Ejecutado',
-                                                                    description: `Procesadas ${data.processed || 0} tareas`
-                                                                });
-                                                                // Reload logs after execution
-                                                                setTimeout(() => handleShowLogs(mission.id), 2000);
-                                                            } catch (error) {
-                                                                toast({
-                                                                    variant: 'destructive',
-                                                                    title: 'Error',
-                                                                    description: 'No se pudo ejecutar el worker'
-                                                                });
-                                                            }
-                                                        }}
-                                                    >
-                                                        <Play className="w-3 h-3 mr-2" /> Ejecutar Ahora
-                                                    </Button>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="text-muted-foreground hover:text-primary"
-                                                        onClick={() => handlePauseMission(mission)}
-                                                    >
-                                                        {mission.status === 'active' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                                                    </Button>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="text-muted-foreground hover:text-red-500"
-                                                        onClick={() => setDeletingMissionId(mission.id)}
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </Button>
-                                                </div>
-                                            </CardContent>
-                                            {mission.status === 'active' && (
-                                                <div className="absolute bottom-0 left-0 h-1 bg-primary/20 w-full">
-                                                    <div className="h-full bg-gradient-to-r from-purple-600 to-pink-600 w-1/3 animate-pulse"></div>
+                                        {/* Mission Parameters */}
+                                        <div className="mb-4 p-3 bg-secondary/20 rounded-lg border text-xs space-y-1">
+                                            <div className="flex justify-between">
+                                                <span className="text-muted-foreground">Objetivo:</span>
+                                                <span className="font-medium">{mission.params?.jobTitle || 'N/A'}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-muted-foreground">Ubicación:</span>
+                                                <span className="font-medium">{mission.params?.location || 'N/A'}</span>
+                                            </div>
+                                            {mission.params?.industry && (
+                                                <div className="flex justify-between">
+                                                    <span className="text-muted-foreground">Industria:</span>
+                                                    <span className="font-medium">{mission.params.industry}</span>
                                                 </div>
                                             )}
-                                        </Card>
-                                    ))
-                                )}
-                            </div>
-                        </div>
+                                        </div>
 
-                        {/* Activity Feed (Sidebar) */}
-                        <div className="lg:col-span-1">
-                            <AgentActivityFeed />
-                        </div>
+                                        <div className="mt-4 grid grid-cols-2 gap-2">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="w-full"
+                                                onClick={() => {
+                                                    setSelectedActivityMission(mission);
+                                                    setActivitySheetOpen(true);
+                                                }}
+                                            >
+                                                <Sparkles className="w-3 h-3 mr-2 text-indigo-500" /> Actividad
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="w-full"
+                                                onClick={() => handleShowLogs(mission.id)}
+                                            >
+                                                <FileText className="w-3 h-3 mr-2" /> Logs
+                                            </Button>
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
+                                                className="w-full col-span-2"
+                                                onClick={() => handlePauseMission(mission)}
+                                            >
+                                                {mission.status === 'active' ? <Pause className="w-3 h-3 mr-2" /> : <Play className="w-3 h-3 mr-2" />}
+                                                {mission.status === 'active' ? 'Pausar' : 'Reanudar'}
+                                            </Button>
+                                        </div>
+                                    </CardContent>
+                                    {mission.status === 'active' && (
+                                        <div className="absolute bottom-0 left-0 h-1 bg-primary/20 w-full">
+                                            <div className="h-full bg-gradient-to-r from-purple-600 to-pink-600 w-1/3 animate-pulse"></div>
+                                        </div>
+                                    )}
+                                </Card>
+                            ))
+                        )}
                     </div>
                 </TabsContent>
 
@@ -1301,6 +1376,15 @@ export default function AntoniaPage() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+            <Sheet open={activitySheetOpen} onOpenChange={setActivitySheetOpen}>
+                <SheetContent side="right" className="w-full sm:w-[500px] p-0">
+                    <div className="h-full py-6 px-4">
+                        {selectedActivityMission && (
+                            <AgentActivityFeed missionId={selectedActivityMission.id} />
+                        )}
+                    </div>
+                </SheetContent>
+            </Sheet>
         </div>
     );
 }
