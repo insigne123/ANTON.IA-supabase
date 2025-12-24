@@ -36,6 +36,7 @@ import {
     FileText,
     X
 } from 'lucide-react';
+import { QuotaUsageCard } from '@/components/antonia/QuotaUsageCard';
 import {
     Dialog,
     DialogContent,
