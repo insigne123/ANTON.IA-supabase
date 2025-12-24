@@ -204,66 +204,66 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
         throw new Error('APP_URL environment variable not configured');
     }
 
-    const enrichedLeads = [];
+    // Map leads to the format expected by the API
+    const leadsFormatted = leadsToEnrich.map(lead => ({
+        fullName: lead.name || lead.full_name,
+        title: lead.title,
+        companyName: lead.organization?.name || lead.organization_name || lead.company_name,
+        linkedinUrl: lead.linkedin_url,
+        sourceOpportunityId: lead.id
+    }));
 
-    for (const lead of leadsToEnrich) {
-        try {
-            console.log(`[ENRICH] Enriching lead:`, {
-                name: lead.full_name || lead.name,
-                company: lead.organization_name || lead.company_name
-            });
+    console.log(`[ENRICH] Calling enrichment API with ${leadsFormatted.length} leads`);
 
-            const response = await fetch(`${appUrl}/api/opportunities/enrich-apollo`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    lead: {
-                        name: lead.full_name || lead.name,
-                        title: lead.title,
-                        company: lead.organization_name || lead.company_name,
-                        linkedin_url: lead.linkedin_url
-                    },
-                    userId: userId,
-                    enrichmentType: enrichmentLevel === 'premium' ? 'both' : 'email'
-                })
-            });
-
-            console.log(`[ENRICH] API response status: ${response.status}`);
-
-            if (response.ok) {
-                const data = await response.json();
-                enrichedLeads.push(data);
-                console.log(`[ENRICH] Successfully enriched lead`);
-            } else {
-                const errorText = await response.text();
-                console.error(`[ENRICH] API error: ${response.status} - ${errorText}`);
-            }
-        } catch (e) {
-            console.error('[ENRICH] Failed to enrich lead:', e);
-        }
-    }
-
-    console.log(`[ENRICH] Total enriched: ${enrichedLeads.length}`);
-
-    await incrementUsage(supabase, task.organization_id, 'enrich', enrichedLeads.length);
-
-    // Chain to INVESTIGATE if configured and we have enriched leads
-    if (enrichedLeads.length > 0) {
-        await supabase.from('antonia_tasks').insert({
-            mission_id: task.mission_id,
-            organization_id: task.organization_id,
-            type: 'INVESTIGATE',
-            status: 'pending',
-            payload: {
-                userId: userId,
-                leads: enrichedLeads,
-                campaignName: campaignName
+    try {
+        const response = await fetch(`${appUrl}/api/opportunities/enrich-apollo`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-user-id': userId
             },
-            created_at: new Date().toISOString()
+            body: JSON.stringify({
+                leads: leadsFormatted,
+                revealEmail: true,
+                revealPhone: enrichmentLevel === 'premium'
+            })
         });
-    }
 
-    return { enrichedCount: enrichedLeads.length };
+        console.log(`[ENRICH] API response status: ${response.status}`);
+
+        if (response.ok) {
+            const data = await response.json();
+            console.log(`[ENRICH] Successfully enriched ${data.enriched?.length || 0} leads`);
+
+            const enrichedLeads = data.enriched || [];
+            await incrementUsage(supabase, task.organization_id, 'enrich', enrichedLeads.length);
+
+            // Chain to INVESTIGATE if configured and we have enriched leads
+            if (enrichedLeads.length > 0) {
+                await supabase.from('antonia_tasks').insert({
+                    mission_id: task.mission_id,
+                    organization_id: task.organization_id,
+                    type: 'INVESTIGATE',
+                    status: 'pending',
+                    payload: {
+                        userId: userId,
+                        leads: enrichedLeads,
+                        campaignName: campaignName
+                    },
+                    created_at: new Date().toISOString()
+                });
+            }
+
+            return { enrichedCount: enrichedLeads.length };
+        } else {
+            const errorText = await response.text();
+            console.error(`[ENRICH] API error: ${response.status} - ${errorText}`);
+            return { enrichedCount: 0, error: errorText };
+        }
+    } catch (e) {
+        console.error('[ENRICH] Failed to enrich leads:', e);
+        return { enrichedCount: 0, error: String(e) };
+    }
 }
 
 async function executeInvestigate(task: any, supabase: SupabaseClient) {
