@@ -82,7 +82,12 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
         created_at: new Date().toISOString()
     });
 
-    return { campaignGenerated: true, campaignName: generatedName };
+    return {
+        campaignGenerated: true,
+        campaignName: generatedName,
+        subjectPreview: subject,
+        bodyPreview: body.substring(0, 150) + '...'
+    };
 }
 
 async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: any) {
@@ -161,7 +166,11 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
         }
     }
 
-    return { leadsFound: leads.length };
+    return {
+        leadsFound: leads.length,
+        searchCriteria: { jobTitle, location, industry, keywords },
+        sampleLeads: leads.slice(0, 5).map((l: any) => ({ name: l.full_name || l.name, company: l.organization_name || l.company_name, title: l.title }))
+    };
 }
 
 async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig: any) {
@@ -256,7 +265,15 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
                 });
             }
 
-            return { enrichedCount: enrichedLeads.length };
+            return {
+                enrichedCount: enrichedLeads.length,
+                enrichedLeadsSummary: enrichedLeads.map((l: any) => ({
+                    name: l.fullName || l.name,
+                    company: l.companyName || l.organization?.name,
+                    emailFound: !!l.email,
+                    linkedinFound: !!(l.linkedinUrl || l.linkedin_url)
+                }))
+            };
         } else {
             const errorText = await response.text();
             console.error(`[ENRICH] API error: ${response.status} - ${errorText}`);
@@ -349,7 +366,14 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         });
     }
 
-    return { investigatedCount: investigatedLeads.length };
+    return {
+        investigatedCount: investigatedLeads.length,
+        investigations: investigatedLeads.map((l: any) => ({
+            name: l.fullName || l.name || l.full_name,
+            company: l.companyName || l.company_name || l.organization?.name,
+            summarySnippet: l.research?.summary ? l.research.summary.substring(0, 100) + '...' : 'No summary available'
+        }))
+    };
 }
 
 // --- 4. EXECUTE INITIAL CONTACT (Personalized) ---
@@ -447,7 +471,15 @@ Saludos,`;
     // Do NOT mark mission as completed immediately. 
     // The mission continues with the evaluation phase.
 
-    return { contactedCount };
+    return {
+        contactedCount,
+        contactedList: leadsToContact.map((l: any) => ({
+            name: l.fullName || l.full_name,
+            email: l.email,
+            company: l.companyName || l.company_name,
+            status: 'sent'
+        }))
+    };
 }
 // --- 5. EXECUTE EVALUATION (AI Brain) ---
 async function executeEvaluate(task: any, supabase: SupabaseClient) {
