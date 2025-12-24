@@ -49,9 +49,6 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
 
     const { data: existing } = await supabase
         .from('campaigns')
-        .select('id, name, settings') // Changed to get settings where subject/body usually live, OR direct columns if that's schema.
-        // Looking at line 65/66 in the original file, it inserts into 'subject' and 'body' COLUMNS directly.
-        // So I should select them.
         .select('id, name, subject, body')
         .eq('organization_id', task.organization_id)
         .eq('name', generatedName)
