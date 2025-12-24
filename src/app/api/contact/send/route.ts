@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { tokenService } from '@/lib/services/token-service';
 
@@ -19,12 +20,32 @@ export async function POST(req: NextRequest) {
         console.log(`[CONTACT_DEBUG] Body UserID: '${bodyUserId}'`);
         console.log(`[CONTACT_DEBUG] Final UserID: '${userId}'`);
 
-        const supabase = createRouteHandlerClient({ cookies });
+        let supabase;
 
-        if (!userId) {
-            const { data: { user } } = await supabase.auth.getUser();
-            userId = user?.id;
-            console.log(`[CONTACT_DEBUG] Session UserID lookup result: '${userId}'`);
+        // CRITICAL FIX: If call comes from Cloud Functions (headerUserId exists), 
+        // we must use SERVICE ROLE to bypass RLS, because there are no cookies.
+        if (headerUserId && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+            console.log('[CONTACT_DEBUG] Using SERVICE ROLE client (Server-to-Server)');
+            supabase = createClient(
+                process.env.NEXT_PUBLIC_SUPABASE_URL!,
+                process.env.SUPABASE_SERVICE_ROLE_KEY!,
+                {
+                    auth: {
+                        autoRefreshToken: false,
+                        persistSession: false
+                    }
+                }
+            );
+        } else {
+            console.log('[CONTACT_DEBUG] Using SESSION client (Browser/Cookie)');
+            supabase = createRouteHandlerClient({ cookies });
+
+            // If no explicit userId, try to get from session
+            if (!userId) {
+                const { data: { user } } = await supabase.auth.getUser();
+                userId = user?.id;
+                console.log(`[CONTACT_DEBUG] Session UserID lookup result: '${userId}'`);
+            }
         }
 
         if (!userId) {
@@ -47,6 +68,7 @@ export async function POST(req: NextRequest) {
 
         if (!tokenData?.refresh_token) {
             console.error(`[CONTACT_DEBUG] NO TOKEN FOUND for UserID: '${userId}'. Returning 400.`);
+            console.error(`[CONTACT_DEBUG] Potential causes: RLS blocking read (if not using service role), or user truly has no tokens.`);
             return NextResponse.json({ error: 'No connected email provider found for user' }, { status: 400 });
         }
 
