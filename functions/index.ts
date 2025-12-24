@@ -3,7 +3,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Hardcoded URLs for Cloud Functions
 const APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
-const LEAD_SEARCH_URL = "https://studio--leadflowai-3yjcy.us-central1.hosted.app/api/leads/search";
+const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
 
 // Helper functions
 async function getDailyUsage(supabase: SupabaseClient, organizationId: string) {
@@ -112,8 +112,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
     const response = await fetch(LEAD_SEARCH_URL, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json',
-            'x-user-id': userId
+            'Content-Type': 'application/json'
         },
         body: JSON.stringify(searchPayload)
     });
