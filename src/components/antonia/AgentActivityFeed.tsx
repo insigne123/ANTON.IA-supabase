@@ -51,7 +51,7 @@ interface AntoniaTask {
     updated_at: string;
 }
 
-export function AgentActivityFeed() {
+export function AgentActivityFeed({ missionId }: { missionId: string }) {
     const [tasks, setTasks] = useState<AntoniaTask[]>([]);
     const supabase = createClientComponentClient();
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -60,13 +60,14 @@ export function AgentActivityFeed() {
         fetchRecentTasks();
 
         const channel = supabase
-            .channel('antonia_tasks_feed')
+            .channel(`antonia_tasks_${missionId}`)
             .on(
                 'postgres_changes',
                 {
                     event: '*',
                     schema: 'public',
                     table: 'antonia_tasks',
+                    filter: `mission_id=eq.${missionId}`
                 },
                 (payload) => {
                     handleRealtimeUpdate(payload);
@@ -77,14 +78,15 @@ export function AgentActivityFeed() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, []);
+    }, [missionId]);
 
     const fetchRecentTasks = async () => {
         const { data } = await supabase
             .from('antonia_tasks')
             .select('*')
+            .eq('mission_id', missionId)
             .order('created_at', { ascending: false })
-            .limit(20);
+            .limit(50);
 
         if (data) setTasks(data);
     };
@@ -211,69 +213,66 @@ export function AgentActivityFeed() {
     };
 
     return (
-        <Card className="h-[600px] flex flex-col">
-            <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
+        <div className="h-full flex flex-col">
+            <div className="mb-4">
+                <h3 className="text-lg font-medium flex items-center gap-2">
                     <Sparkles className="h-5 w-5 text-indigo-500" />
-                    Actividad del Agente
-                </CardTitle>
-                <CardDescription>
-                    Monitoreo en tiempo real de las acciones de ANTONIA
-                </CardDescription>
-            </CardHeader>
-            <CardContent className="flex-1 min-h-0 p-0">
-                <ScrollArea className="h-full px-6 pb-6">
-                    <div className="space-y-6">
-                        {tasks.length === 0 && (
-                            <div className="text-center text-muted-foreground py-10">
-                                Esperando actividad...
-                            </div>
-                        )}
-                        {tasks.map((task, index) => (
-                            <div key={task.id} className="relative pl-6 border-l-2 border-muted last:border-l-0 pb-6 last:pb-0">
-                                {/* Status Dot */}
-                                <div className={`absolute -left-[9px] top-0 h-4 w-4 rounded-full border-2 border-background 
+                    Historial de Actividad
+                </h3>
+                <p className="text-sm text-muted-foreground">Monitoreo en tiempo real de esta misión</p>
+            </div>
+
+            <ScrollArea className="flex-1 pr-4">
+                <div className="space-y-6">
+                    {tasks.length === 0 && (
+                        <div className="text-center text-muted-foreground py-10">
+                            Esperando actividad...
+                        </div>
+                    )}
+                    {tasks.map((task, index) => (
+                        <div key={task.id} className="relative pl-6 border-l-2 border-muted last:border-l-0 pb-6 last:pb-0">
+                            {/* Status Dot */}
+                            <div className={`absolute -left-[9px] top-0 h-4 w-4 rounded-full border-2 border-background 
                             ${task.status === 'completed' ? 'bg-green-500' :
-                                        task.status === 'failed' ? 'bg-red-500' :
-                                            task.status === 'processing' ? 'bg-blue-500 animate-pulse' : 'bg-gray-300'}`}
-                                />
+                                    task.status === 'failed' ? 'bg-red-500' :
+                                        task.status === 'processing' ? 'bg-blue-500 animate-pulse' : 'bg-gray-300'}`}
+                            />
 
-                                <div className="flex flex-col gap-1">
-                                    <div className="flex items-center justify-between">
-                                        <span className="font-semibold text-sm flex items-center gap-2">
-                                            {getTaskIcon(task.type)}
-                                            {getTaskLabel(task.type)}
-                                        </span>
-                                        <span className="text-xs text-muted-foreground">
-                                            {formatDistanceToNow(new Date(task.created_at), { addSuffix: true, locale: es })}
-                                        </span>
-                                    </div>
-
-                                    {task.error_message && (
-                                        <div className="text-xs text-red-500 bg-red-50 p-2 rounded mt-1">
-                                            Error: {task.error_message}
-                                        </div>
-                                    )}
-
-                                    {/* Collapsible Details */}
-                                    {task.status === 'completed' && task.result && (
-                                        <Accordion type="single" collapsible className="w-full">
-                                            <AccordionItem value="details" className="border-b-0">
-                                                <AccordionTrigger className="py-1 text-xs text-muted-foreground hover:no-underline">
-                                                    Ver detalles
-                                                </AccordionTrigger>
-                                                <AccordionContent>
-                                                    {renderTaskDetails(task)}
-                                                </AccordionContent>
-                                            </AccordionItem>
-                                        </Accordion>
-                                    )}
+                            <div className="flex flex-col gap-1">
+                                <div className="flex items-center justify-between">
+                                    <span className="font-semibold text-sm flex items-center gap-2">
+                                        {getTaskIcon(task.type)}
+                                        {getTaskLabel(task.type)}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">
+                                        {formatDistanceToNow(new Date(task.created_at), { addSuffix: true, locale: es })}
+                                    </span>
                                 </div>
+
+                                {task.error_message && (
+                                    <div className="text-xs text-red-500 bg-red-50 p-2 rounded mt-1">
+                                        Error: {task.error_message}
+                                    </div>
+                                )}
+
+                                {/* Collapsible Details */}
+                                {task.status === 'completed' && task.result && (
+                                    <Accordion type="single" collapsible className="w-full">
+                                        <AccordionItem value="details" className="border-b-0">
+                                            <AccordionTrigger className="py-1 text-xs text-muted-foreground hover:no-underline">
+                                                Ver detalles
+                                            </AccordionTrigger>
+                                            <AccordionContent>
+                                                {renderTaskDetails(task)}
+                                            </AccordionContent>
+                                        </AccordionItem>
+                                    </Accordion>
+                                )}
                             </div>
-                        ))}
-                    </div>
-                </ScrollArea>
-            </CardContent>
-        </Card>
+                        </div>
+                    ))}
+                </div>
+            </ScrollArea>
+        </div>
     );
 }
