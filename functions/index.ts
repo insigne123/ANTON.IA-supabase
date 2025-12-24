@@ -3,7 +3,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Hardcoded URLs for Cloud Functions
 const APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
-const LEAD_SEARCH_URL = "https://studio--leadflowai-3yjcy.us-central1.hosted.app/api/lead-search";
+const LEAD_SEARCH_URL = "https://studio--leadflowai-3yjcy.us-central1.hosted.app/api/leads/search";
 
 // Helper functions
 async function getDailyUsage(supabase: SupabaseClient, organizationId: string) {
