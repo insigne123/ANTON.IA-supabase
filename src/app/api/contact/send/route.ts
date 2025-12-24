@@ -14,27 +14,39 @@ export async function POST(req: NextRequest) {
         const headerUserId = req.headers.get('x-user-id');
         let userId = headerUserId || bodyUserId;
 
+        console.log(`[CONTACT_DEBUG] START Request`);
+        console.log(`[CONTACT_DEBUG] Header UserID: '${headerUserId}'`);
+        console.log(`[CONTACT_DEBUG] Body UserID: '${bodyUserId}'`);
+        console.log(`[CONTACT_DEBUG] Final UserID: '${userId}'`);
+
         const supabase = createRouteHandlerClient({ cookies });
 
         if (!userId) {
             const { data: { user } } = await supabase.auth.getUser();
             userId = user?.id;
+            console.log(`[CONTACT_DEBUG] Session UserID lookup result: '${userId}'`);
         }
 
         if (!userId) {
+            console.error('[CONTACT_DEBUG] Unauthorized - Missing user ID');
             return NextResponse.json({ error: 'Unauthorized - Missing user ID' }, { status: 401 });
         }
 
         // 2. Get User's Token (Check Google first, then Outlook)
+        console.log(`[CONTACT_DEBUG] Checking tokens for UserID: '${userId}' in provider_tokens table`);
         let provider = 'google';
         let tokenData = await tokenService.getToken(supabase, userId, 'google');
 
         if (!tokenData?.refresh_token) {
+            console.log(`[CONTACT_DEBUG] No Google token found, checking Outlook...`);
             provider = 'outlook';
             tokenData = await tokenService.getToken(supabase, userId, 'outlook');
+        } else {
+            console.log(`[CONTACT_DEBUG] Found Google token`);
         }
 
         if (!tokenData?.refresh_token) {
+            console.error(`[CONTACT_DEBUG] NO TOKEN FOUND for UserID: '${userId}'. Returning 400.`);
             return NextResponse.json({ error: 'No connected email provider found for user' }, { status: 400 });
         }
 
@@ -48,6 +60,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (!accessToken) {
+            console.error('[CONTACT_DEBUG] Failed to refresh access token');
             return NextResponse.json({ error: 'Failed to refresh access token calling provider' }, { status: 401 });
         }
 
@@ -60,9 +73,11 @@ export async function POST(req: NextRequest) {
         }
 
         if (!result.success) {
+            console.error(`[CONTACT_DEBUG] Send failed: ${result.error}`);
             return NextResponse.json({ error: result.error }, { status: 500 });
         }
 
+        console.log(`[CONTACT_DEBUG] Email sent successfully via ${provider}`);
         return NextResponse.json({ success: true, provider });
 
     } catch (error: any) {
