@@ -40,7 +40,6 @@ import { QuotaUsageCard } from '@/components/antonia/QuotaUsageCard';
 import { AgentActivityFeed } from '@/components/antonia/AgentActivityFeed';
 import { ReportsHistory } from '@/components/antonia/ReportsHistory';
 import { ReportViewer } from '@/components/antonia/ReportViewer';
-import { ReportViewer } from '@/components/antonia/ReportViewer';
 import {
     Dialog,
     DialogContent,
@@ -1110,6 +1109,10 @@ export default function AntoniaPage() {
                                             >
                                                 <Sparkles className="w-3 h-3 mr-2 text-indigo-500" /> Actividad
                                             </Button>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="w-full"
                                                 onClick={() => handleShowLogs(mission.id)}
                                             >
                                                 <FileText className="w-3 h-3 mr-2" /> Logs
@@ -1146,10 +1149,10 @@ export default function AntoniaPage() {
 
                 <TabsContent value="reportes" className="space-y-6">
                     <div className="grid grid-cols-1 gap-6">
-                        <ReportsHistory 
-                            reports={reports} 
-                            loading={reportsLoading} 
-                            onView={handleViewReport} 
+                        <ReportsHistory
+                            reports={reports}
+                            loading={reportsLoading}
+                            onView={handleViewReport}
                         />
                     </div>
                 </TabsContent>
@@ -1398,7 +1401,7 @@ export default function AntoniaPage() {
                                             .replace(/SEARCH/g, 'Búsqueda')
                                             .replace(/ENRICH/g, 'Enriquecimiento')
                                             .replace(/CONTACT/g, 'Contacto')
-                                            .replace(/GENERATE_CAMPAIGN/g, 'Generación de Campaña');
+                                            .replace(/GENERATE_CAMPAIGN/g, 'generacion de Campaña');
                                     };
 
                                     return (
