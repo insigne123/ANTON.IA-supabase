@@ -259,15 +259,15 @@ export const antoniaService = {
         return data;
     },
 
-    /**
-     * Delete a Mission
-     */
+    deleteMission: async (missionId: string) => {
+        const { error } = await supabase
+            .from('antonia_missions')
             .delete()
-        .eq('id', missionId);
+            .eq('id', missionId);
 
-    if(error) throw error;
-    return true;
-},
+        if (error) throw error;
+        return true;
+    },
 
     /**
      * Generate a Historic Report for a Mission
@@ -280,30 +280,30 @@ export const antoniaService = {
         });
     },
 
-        /**
-         * Get Reports for Organization
-         */
-        getReports: async (organizationId: string) => {
-            const { data, error } = await supabase
-                .from('antonia_reports')
-                .select('*')
-                .eq('organization_id', organizationId)
-                .order('created_at', { ascending: false });
+    /**
+     * Get Reports for Organization
+     */
+    getReports: async (organizationId: string) => {
+        const { data, error } = await supabase
+            .from('antonia_reports')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .order('created_at', { ascending: false });
 
-            if (error && error.code !== 'PGRST116') {
-                console.error('Error fetching reports:', error);
-                return [];
-            }
-
-            return data?.map((r: any) => ({
-                id: r.id,
-                organizationId: r.organization_id,
-                missionId: r.mission_id,
-                type: r.type,
-                content: r.content,
-                summaryData: r.summary_data,
-                sentTo: r.sent_to,
-                createdAt: r.created_at
-            })) || [];
+        if (error && error.code !== 'PGRST116') {
+            console.error('Error fetching reports:', error);
+            return [];
         }
+
+        return data?.map((r: any) => ({
+            id: r.id,
+            organizationId: r.organization_id,
+            missionId: r.mission_id,
+            type: r.type,
+            content: r.content,
+            summaryData: r.summary_data,
+            sentTo: r.sent_to,
+            createdAt: r.created_at
+        })) || [];
+    }
 };

@@ -1469,11 +1469,4 @@ export default function AntoniaPage() {
             />
         </div >
     );
-    <ReportViewer
-        isOpen={viewerOpen}
-        onClose={() => setViewerOpen(false)}
-        report={selectedReport}
-    />
-        </div >
-    );
 }
