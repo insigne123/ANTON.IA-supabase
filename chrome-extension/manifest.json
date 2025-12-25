@@ -5,7 +5,6 @@
     "description": "Automatización segura de LinkedIn para Anton.IA",
     "permissions": [
         "activeTab",
-        "storage",
         "tabs"
     ],
     "host_permissions": [
