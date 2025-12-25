@@ -105,7 +105,18 @@ export const antoniaService = {
             .single();
 
         if (error) throw error;
-        return data as AntoniaMission;
+
+        return {
+            id: data.id,
+            organizationId: data.organization_id,
+            userId: data.user_id,
+            title: data.title,
+            status: data.status,
+            goalSummary: data.goal_summary,
+            params: data.params,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+        } as AntoniaMission;
     },
 
     /**
@@ -161,7 +172,18 @@ export const antoniaService = {
             .order('created_at', { ascending: false });
 
         if (error) throw error;
-        return data as AntoniaMission[];
+
+        return data.map((m: any) => ({
+            id: m.id,
+            organizationId: m.organization_id,
+            userId: m.user_id,
+            title: m.title,
+            status: m.status,
+            goalSummary: m.goal_summary,
+            params: m.params,
+            createdAt: m.created_at,
+            updatedAt: m.updated_at
+        })) as AntoniaMission[];
     },
 
     /**
@@ -202,7 +224,18 @@ export const antoniaService = {
             .single();
 
         if (error) throw error;
-        return data as AntoniaMission;
+
+        return {
+            id: data.id,
+            organizationId: data.organization_id,
+            userId: data.user_id,
+            title: data.title,
+            status: data.status,
+            goalSummary: data.goal_summary,
+            params: data.params,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+        } as AntoniaMission;
     },
 
     /**
@@ -229,13 +262,48 @@ export const antoniaService = {
     /**
      * Delete a Mission
      */
-    deleteMission: async (missionId: string) => {
-        const { error } = await supabase
-            .from('antonia_missions')
             .delete()
-            .eq('id', missionId);
+        .eq('id', missionId);
 
-        if (error) throw error;
-        return true;
-    }
+    if(error) throw error;
+    return true;
+},
+
+    /**
+     * Generate a Historic Report for a Mission
+     */
+    generateMissionReport: async (organizationId: string, missionId: string, userId: string) => {
+        return antoniaService.createTask(organizationId, 'GENERATE_REPORT', {
+            reportType: 'mission_historic',
+            missionId,
+            userId
+        });
+    },
+
+        /**
+         * Get Reports for Organization
+         */
+        getReports: async (organizationId: string) => {
+            const { data, error } = await supabase
+                .from('antonia_reports')
+                .select('*')
+                .eq('organization_id', organizationId)
+                .order('created_at', { ascending: false });
+
+            if (error && error.code !== 'PGRST116') {
+                console.error('Error fetching reports:', error);
+                return [];
+            }
+
+            return data?.map((r: any) => ({
+                id: r.id,
+                organizationId: r.organization_id,
+                missionId: r.mission_id,
+                type: r.type,
+                content: r.content,
+                summaryData: r.summary_data,
+                sentTo: r.sent_to,
+                createdAt: r.created_at
+            })) || [];
+        }
 };

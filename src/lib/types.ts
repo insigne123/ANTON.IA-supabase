@@ -479,7 +479,7 @@ export interface AntoniaMission {
   updatedAt: string;
 }
 
-export type AntoniaTaskType = 'SEARCH' | 'ENRICH' | 'CONTACT' | 'REPORT' | 'ALERT';
+export type AntoniaTaskType = 'SEARCH' | 'ENRICH' | 'CONTACT' | 'REPORT' | 'ALERT' | 'GENERATE_REPORT' | 'CONTACT_CAMPAIGN' | 'CONTACT_INITIAL' | 'EVALUATE' | 'INVESTIGATE' | 'GENERATE_CAMPAIGN';
 export type AntoniaTaskStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
 export interface AntoniaTask {

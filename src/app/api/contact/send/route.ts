@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        const { to, subject, body: emailBody, userId: bodyUserId } = body;
+        const { to, subject, body: emailBody, userId: bodyUserId, isHtml } = body;
 
         // 1. Authenticate (support both x-user-id header and session)
         const headerUserId = req.headers.get('x-user-id');
@@ -89,9 +89,9 @@ export async function POST(req: NextRequest) {
         // 4. Send Email
         let result;
         if (provider === 'google') {
-            result = await sendGmail(accessToken, to, subject, emailBody);
+            result = await sendGmail(accessToken, to, subject, emailBody, isHtml);
         } else {
-            result = await sendOutlook(accessToken, to, subject, emailBody);
+            result = await sendOutlook(accessToken, to, subject, emailBody, isHtml);
         }
 
         if (!result.success) {
@@ -154,12 +154,14 @@ async function refreshOutlookToken(refreshToken: string) {
     return data.access_token;
 }
 
-async function sendGmail(accessToken: string, to: string, subject: string, body: string) {
+async function sendGmail(accessToken: string, to: string, subject: string, body: string, isHtml: boolean = false) {
     // Construct raw email
+    const contentType = isHtml ? 'text/html' : 'text/plain';
     const str = [
         `To: ${to}`,
         `Subject: ${subject}`,
-        'Content-Type: text/plain; charset=utf-8',
+        `Content-Type: ${contentType}; charset=utf-8`,
+        'MIME-Version: 1.0',
         '',
         body
     ].join('\n');
@@ -182,7 +184,7 @@ async function sendGmail(accessToken: string, to: string, subject: string, body:
     return { success: true };
 }
 
-async function sendOutlook(accessToken: string, to: string, subject: string, body: string) {
+async function sendOutlook(accessToken: string, to: string, subject: string, body: string, isHtml: boolean = false) {
     const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
         method: 'POST',
         headers: {
@@ -193,7 +195,7 @@ async function sendOutlook(accessToken: string, to: string, subject: string, bod
             message: {
                 subject: subject,
                 body: {
-                    contentType: 'Text',
+                    contentType: isHtml ? 'HTML' : 'Text',
                     content: body
                 },
                 toRecipients: [

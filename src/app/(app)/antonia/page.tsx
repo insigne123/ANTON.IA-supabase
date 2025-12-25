@@ -38,6 +38,9 @@ import {
 } from 'lucide-react';
 import { QuotaUsageCard } from '@/components/antonia/QuotaUsageCard';
 import { AgentActivityFeed } from '@/components/antonia/AgentActivityFeed';
+import { ReportsHistory } from '@/components/antonia/ReportsHistory';
+import { ReportViewer } from '@/components/antonia/ReportViewer';
+import { ReportViewer } from '@/components/antonia/ReportViewer';
 import {
     Dialog,
     DialogContent,
@@ -112,6 +115,12 @@ export default function AntoniaPage() {
     const [deletingMissionId, setDeletingMissionId] = useState<string | null>(null);
     const [activitySheetOpen, setActivitySheetOpen] = useState(false);
     const [selectedActivityMission, setSelectedActivityMission] = useState<AntoniaMission | null>(null);
+
+    // Reports State
+    const [reports, setReports] = useState<any[]>([]);
+    const [reportsLoading, setReportsLoading] = useState(false);
+    const [selectedReport, setSelectedReport] = useState<any>(null);
+    const [viewerOpen, setViewerOpen] = useState(false);
 
     // Integration Connection State
     const [googleConnected, setGoogleConnected] = useState(false);
@@ -214,6 +223,23 @@ export default function AntoniaPage() {
         }
         loadData();
     }, [supabase, toast]);
+
+    // Load Reports
+    useEffect(() => {
+        const loadReports = async () => {
+            if (!orgId) return;
+            setReportsLoading(true);
+            try {
+                const data = await antoniaService.getReports(orgId);
+                setReports(data);
+            } catch (error) {
+                console.error('Failed to load reports', error);
+            } finally {
+                setReportsLoading(false);
+            }
+        };
+        if (orgId) loadReports();
+    }, [orgId]);
 
     // Load integration connection status
     useEffect(() => {
@@ -384,6 +410,31 @@ export default function AntoniaPage() {
         }
     };
 
+    const handleGenerateReport = async (missionId: string) => {
+        if (!orgId || !userId) return;
+        toast({
+            title: "Generando reporte...",
+            description: "El reporte se está generando. Podrás verlo en la pestaña Reportes en unos momentos."
+        });
+
+        try {
+            await antoniaService.generateMissionReport(orgId, missionId, userId);
+            // Refresh reports list after delay
+            setTimeout(async () => {
+                const data = await antoniaService.getReports(orgId);
+                setReports(data);
+            }, 5000);
+        } catch (error) {
+            console.error(error);
+            toast({ title: "Error", description: "Fallo al iniciar generación de reporte", variant: "destructive" });
+        }
+    };
+
+    const handleViewReport = (report: any) => {
+        setSelectedReport(report);
+        setViewerOpen(true);
+    };
+
 
 
 
@@ -530,6 +581,9 @@ export default function AntoniaPage() {
                 <TabsList className="grid w-full max-w-md grid-cols-3">
                     <TabsTrigger value="builder">Crear Misión</TabsTrigger>
                     <TabsTrigger value="active">Activas ({missions.length})</TabsTrigger>
+                    <TabsTrigger value="reportes" className="flex items-center gap-2">
+                        <FileText className="w-4 h-4" /> Reports
+                    </TabsTrigger>
                     <TabsTrigger value="settings">Configuración</TabsTrigger>
                 </TabsList>
 
@@ -1056,13 +1110,17 @@ export default function AntoniaPage() {
                                             >
                                                 <Sparkles className="w-3 h-3 mr-2 text-indigo-500" /> Actividad
                                             </Button>
+                                                onClick={() => handleShowLogs(mission.id)}
+                                            >
+                                                <FileText className="w-3 h-3 mr-2" /> Logs
+                                            </Button>
                                             <Button
                                                 variant="outline"
                                                 size="sm"
                                                 className="w-full"
-                                                onClick={() => handleShowLogs(mission.id)}
+                                                onClick={() => handleGenerateReport(mission.id)}
                                             >
-                                                <FileText className="w-3 h-3 mr-2" /> Logs
+                                                <FileText className="w-3 h-3 mr-2" /> Reporte Histórico
                                             </Button>
                                             <Button
                                                 variant="secondary"
@@ -1083,6 +1141,16 @@ export default function AntoniaPage() {
                                 </Card>
                             ))
                         )}
+                    </div>
+                </TabsContent>
+
+                <TabsContent value="reportes" className="space-y-6">
+                    <div className="grid grid-cols-1 gap-6">
+                        <ReportsHistory 
+                            reports={reports} 
+                            loading={reportsLoading} 
+                            onView={handleViewReport} 
+                        />
                     </div>
                 </TabsContent>
 
@@ -1382,14 +1450,30 @@ export default function AntoniaPage() {
                 </AlertDialogContent>
             </AlertDialog>
             <Sheet open={activitySheetOpen} onOpenChange={setActivitySheetOpen}>
-                <SheetContent side="right" className="w-full sm:w-[500px] p-0">
-                    <div className="h-full py-6 px-4">
+                <SheetContent side="right" className="w-full sm:w-[500px] p-0 flex flex-col">
+                    <SheetHeader className="px-6 py-4 border-b">
+                        <SheetTitle>Actividad: {selectedActivityMission?.title || 'Misión'}</SheetTitle>
+                    </SheetHeader>
+                    <div className="flex-1 overflow-y-auto py-6 px-4">
                         {selectedActivityMission && (
                             <AgentActivityFeed missionId={selectedActivityMission.id} />
                         )}
                     </div>
                 </SheetContent>
             </Sheet>
-        </div>
+
+            <ReportViewer
+                isOpen={viewerOpen}
+                onClose={() => setViewerOpen(false)}
+                report={selectedReport}
+            />
+        </div >
+    );
+    <ReportViewer
+        isOpen={viewerOpen}
+        onClose={() => setViewerOpen(false)}
+        report={selectedReport}
+    />
+        </div >
     );
 }
