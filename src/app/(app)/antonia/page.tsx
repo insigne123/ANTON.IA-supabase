@@ -993,9 +993,14 @@ export default function AntoniaPage() {
                                                     {mission.createdAt ? new Date(mission.createdAt).toLocaleDateString('es-AR') : '-'}
                                                 </span>
                                                 {editingMissionId !== mission.id && (
-                                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEditingMission(mission)}>
-                                                        <Edit2 className="w-3 h-3 text-muted-foreground" />
-                                                    </Button>
+                                                    <>
+                                                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => startEditingMission(mission)}>
+                                                            <Edit2 className="w-3 h-3 text-muted-foreground" />
+                                                        </Button>
+                                                        <Button variant="ghost" size="icon" className="h-6 w-6 hover:text-red-500" onClick={() => setDeletingMissionId(mission.id)}>
+                                                            <Trash2 className="w-3 h-3 text-muted-foreground hover:text-red-500" />
+                                                        </Button>
+                                                    </>
                                                 )}
                                             </div>
                                         </div>
