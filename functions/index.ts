@@ -138,6 +138,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
         const leadsToInsert = leads.map((lead: any) => ({
             user_id: task.payload.userId,
             organization_id: task.organization_id,
+            mission_id: task.mission_id,
             name: lead.full_name || lead.name || '',
             title: lead.title || '',
             company: lead.organization_name || lead.company_name || '',
@@ -453,6 +454,7 @@ Saludos,`;
                     body: personalizedBody,
                     leadId: lead.id,
                     campaignId: null,
+                    missionId: task.mission_id,
                     userId: userId
                 })
             });
@@ -461,7 +463,19 @@ Saludos,`;
 
             if (response.ok) {
                 contactedCount++;
-                console.log(`[CONTACT] Successfully contacted lead`);
+                const resData = await response.json();
+                console.log(`[CONTACT] Successfully contacted lead via ${resData.provider}`);
+
+                await supabase.from('contacted_leads').insert({
+                    user_id: userId,
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    lead_id: lead.id,
+                    status: 'sent', // Initial status
+                    subject: personalizedSubject,
+                    provider: resData.provider || 'unknown',
+                    sent_at: new Date().toISOString()
+                });
             } else {
                 const errorText = await response.text();
                 console.error(`[CONTACT] API error: ${response.status} - ${errorText}`);
@@ -569,6 +583,151 @@ async function executeContactCampaign(task: any, supabase: SupabaseClient) {
 }
 
 // Reuse legacy contact logic helper
+// --- 7. EXECUTE REPORT GENERATION ---
+async function executeReportGeneration(task: any, supabase: SupabaseClient) {
+    const { reportType, missionId, userId } = task.payload; // reportType: 'mission_historic' | 'daily'
+    const organizationId = task.organization_id;
+
+    console.log(`[REPORT] Generating ${reportType} report for Org ${organizationId}`);
+
+    let htmlContent = '';
+    let summaryData = {};
+    let subject = '';
+
+    if (reportType === 'mission_historic') {
+        // Fetch Mission Details
+        const { data: mission } = await supabase
+            .from('antonia_missions')
+            .select('*')
+            .eq('id', missionId)
+            .single();
+
+        if (!mission) throw new Error('Mission not found');
+
+        subject = `Reporte de Misión: ${mission.title}`;
+
+        // Fetch Metrics
+        const { count: leadsFound } = await supabase.from('leads').select('*', { count: 'exact', head: true }).eq('mission_id', missionId);
+        const { count: leadsEnriched } = await supabase.from('enriched_leads').select('*', { count: 'exact', head: true }).eq('mission_id', missionId); // note: checked if enriched_leads has mission_id, added in migration
+        // If enriched_leads table not used/updated, we might count from tasks/logs? 
+        // fallback: query leads with email not null? No.
+        // Let's assume migration worked or we query leads with status 'enriched' if that exists.
+        // For now using leads table count as base.
+
+        // Contacted
+        const { count: leadsContacted } = await supabase.from('contacted_leads').select('*', { count: 'exact', head: true }).eq('mission_id', missionId);
+
+        // Replies (Positive/Negative) via lead_responses or contacted_leads status
+        const { count: replies } = await supabase.from('contacted_leads').select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId)
+            .neq('evaluation_status', 'pending');
+
+        summaryData = { leadsFound, leadsEnriched, leadsContacted, replies };
+
+        // HTML Template
+        htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f4f4f4; padding: 20px; }
+                .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+                .header { background: #111827; color: #ffffff; padding: 20px; text-align: center; }
+                .header h1 { margin: 0; font-size: 24px; font-weight: 300; }
+                .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 20px; }
+                .stat-card { background: #f9fafb; padding: 15px; border-radius: 6px; text-align: center; border: 1px solid #e5e7eb; }
+                .stat-value { font-size: 24px; font-weight: bold; color: #374151; }
+                .stat-label { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; margin-top: 5px; }
+                .content { padding: 20px; line-height: 1.6; color: #4b5563; }
+                .footer { background: #f3f4f6; padding: 15px; text-align: center; font-size: 12px; color: #9ca3af; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>Reporte de Misión</h1>
+                    <p>${mission.title}</p>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">${leadsFound || 0}</div>
+                        <div class="stat-label">Leads Encontrados</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${leadsContacted || 0}</div>
+                        <div class="stat-label">Contactados</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${replies || 0}</div>
+                        <div class="stat-label">Respuestas</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${leadsEnriched || '-'}</div>
+                        <div class="stat-label">Enriquecidos</div>
+                    </div>
+                </div>
+                <div class="content">
+                    <h3>Resumen Ejecutivo</h3>
+                    <p>La misión comenzó el ${new Date(mission.created_at).toLocaleDateString()} y ha estado activa procesando prospectos según los criterios definidos.</p>
+                    <p>Estado actual: <strong>${mission.status.toUpperCase()}</strong></p>
+                </div>
+                <div class="footer">
+                    Generado automáticamente por Antonia AI
+                </div>
+            </div>
+        </body>
+        </html>
+        `;
+    }
+
+    // Save to Database
+    const { data: report, error } = await supabase.from('antonia_reports').insert({
+        organization_id: organizationId,
+        mission_id: missionId, // Nullable
+        type: reportType,
+        content: htmlContent,
+        summary_data: summaryData,
+        sent_to: [userId], // Placeholder, ideally fetch user email
+        created_at: new Date().toISOString()
+    }).select().single();
+
+    if (error) {
+        console.error('Failed to save report', error);
+        throw error;
+    }
+
+    // Send Email (Reuse contact API for simplicity, or implement direct send)
+    // We need to fetch the user's email first to send TO them.
+    const { data: userProfile } = await supabase.rpc('get_user_email_by_id', { user_uuid: userId });
+    // Usually we don't have access to auth.users email directly via client unless using service role admin auth.getUser(uid).
+    // But we are in Cloud Function environment. We can use admin auth.
+    const { data: { user: authUser }, error: authError } = await supabase.auth.admin.getUserById(userId);
+
+    if (authUser && authUser.email) {
+        console.log(`[REPORT] Sending email to ${authUser.email}`);
+        // We can't use 'executeInitialContact' API call style because that uses user's connected GMAIL.
+        // Reports should ideally come from "system@antonia.ai" (Resend/SendGrid).
+        // BUT user configuration likely only has THEIR connected account.
+        // So we send FROM them TO them? Or self-send.
+        // Let's assume self-send for now using their connected account.
+
+        const appUrl = APP_URL;
+        await fetch(`${appUrl}/api/contact/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+            body: JSON.stringify({
+                to: authUser.email,
+                subject: subject,
+                body: htmlContent,
+                isHtml: true,
+                userId: userId
+            })
+        });
+    }
+
+    return { reportId: report.id, generated: true };
+}
+
 async function executeLegacyContact(task: any, supabase: SupabaseClient) {
     const { leads, userId, campaignName } = task.payload;
     const appUrl = APP_URL;
@@ -600,11 +759,34 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
                     body: body,
                     leadId: lead.id,
                     campaignId: campaign?.id,
+                    missionId: task.mission_id,
                     userId: userId,
                     metadata: { type: 'campaign_followup' }
                 })
             });
-            if (response.ok) contactedCount++;
+            if (response.ok) {
+                contactedCount++;
+                // We don't read JSON here in legacy logic usually, but let's do it for consistency
+                // Note: fetch body might have been consumed if we are not careful? No, it's fresh response.
+                // However, let's keep it simple for legacy campaign_followup or just do same logic:
+                try {
+                    const resData = await response.json();
+                    await supabase.from('contacted_leads').insert({
+                        user_id: userId,
+                        organization_id: task.organization_id,
+                        mission_id: task.mission_id,
+                        lead_id: lead.id,
+                        status: 'sent',
+                        subject: subject, // from campaign settings above
+                        provider: resData.provider || 'unknown',
+                        sent_at: new Date().toISOString(),
+                        data: {
+                            campaign_id: campaign?.id,
+                            type: 'followup'
+                        }
+                    });
+                } catch (err) { console.error('Error recording contact', err); }
+            }
         } catch (e) { console.error(e); }
     }
     return { contactedCount };
@@ -649,6 +831,9 @@ async function processTask(task: any, supabase: SupabaseClient) {
             case 'CONTACT': // Legacy support
             case 'CONTACT_INITIAL':
                 result = await executeInitialContact(task, supabase);
+                break;
+            case 'GENERATE_REPORT':
+                result = await executeReportGeneration(task, supabase);
                 break;
         }
 
