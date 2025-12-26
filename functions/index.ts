@@ -622,7 +622,10 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
             .eq('mission_id', missionId)
             .neq('evaluation_status', 'pending');
 
-        summaryData = { leadsFound, leadsEnriched, leadsContacted, replies };
+        // Calculate conversion rates
+        const enrichmentRate = leadsFound ? ((leadsEnriched || 0) / leadsFound * 100).toFixed(1) : '0';
+        const contactRate = leadsFound ? ((leadsContacted || 0) / leadsFound * 100).toFixed(1) : '0';
+        const responseRate = leadsContacted ? ((replies || 0) / leadsContacted * 100).toFixed(1) : '0';
 
         // HTML Template
         htmlContent = `
@@ -630,49 +633,318 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         <html>
         <head>
             <style>
-                body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f4f4f4; padding: 20px; }
-                .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-                .header { background: #111827; color: #ffffff; padding: 20px; text-align: center; }
-                .header h1 { margin: 0; font-size: 24px; font-weight: 300; }
-                .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 20px; }
-                .stat-card { background: #f9fafb; padding: 15px; border-radius: 6px; text-align: center; border: 1px solid #e5e7eb; }
-                .stat-value { font-size: 24px; font-weight: bold; color: #374151; }
-                .stat-label { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; margin-top: 5px; }
-                .content { padding: 20px; line-height: 1.6; color: #4b5563; }
-                .footer { background: #f3f4f6; padding: 15px; text-align: center; font-size: 12px; color: #9ca3af; }
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { 
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    padding: 20px;
+                    line-height: 1.6;
+                }
+                .container { 
+                    max-width: 800px; 
+                    margin: 0 auto; 
+                    background: #ffffff; 
+                    border-radius: 16px; 
+                    overflow: hidden; 
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                }
+                .header { 
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: #ffffff; 
+                    padding: 40px 30px; 
+                    text-align: center;
+                    position: relative;
+                }
+                .header::after {
+                    content: '';
+                    position: absolute;
+                    bottom: 0;
+                    left: 0;
+                    right: 0;
+                    height: 4px;
+                    background: linear-gradient(90deg, #fbbf24, #f59e0b, #fbbf24);
+                }
+                .header h1 { 
+                    margin: 0 0 10px 0; 
+                    font-size: 32px; 
+                    font-weight: 700;
+                    text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+                .header p { 
+                    font-size: 18px; 
+                    opacity: 0.95;
+                    font-weight: 300;
+                }
+                .mission-info {
+                    background: #f8fafc;
+                    padding: 20px 30px;
+                    border-bottom: 1px solid #e2e8f0;
+                }
+                .mission-info-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                    gap: 15px;
+                }
+                .info-item {
+                    display: flex;
+                    flex-direction: column;
+                }
+                .info-label {
+                    font-size: 11px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    color: #64748b;
+                    font-weight: 600;
+                    margin-bottom: 4px;
+                }
+                .info-value {
+                    font-size: 16px;
+                    color: #1e293b;
+                    font-weight: 600;
+                }
+                .stats-section {
+                    padding: 30px;
+                }
+                .section-title {
+                    font-size: 20px;
+                    font-weight: 700;
+                    color: #1e293b;
+                    margin-bottom: 20px;
+                    padding-bottom: 10px;
+                    border-bottom: 2px solid #e2e8f0;
+                }
+                .stats-grid { 
+                    display: grid; 
+                    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); 
+                    gap: 20px; 
+                    margin-bottom: 30px;
+                }
+                .stat-card { 
+                    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+                    padding: 24px; 
+                    border-radius: 12px; 
+                    text-align: center; 
+                    border: 1px solid #e2e8f0;
+                    transition: transform 0.2s, box-shadow 0.2s;
+                    position: relative;
+                    overflow: hidden;
+                }
+                .stat-card::before {
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    height: 3px;
+                    background: linear-gradient(90deg, #667eea, #764ba2);
+                }
+                .stat-card:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+                }
+                .stat-value { 
+                    font-size: 36px; 
+                    font-weight: 800; 
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    background-clip: text;
+                    margin-bottom: 8px;
+                }
+                .stat-label { 
+                    font-size: 13px; 
+                    text-transform: uppercase; 
+                    letter-spacing: 1px; 
+                    color: #64748b; 
+                    font-weight: 600;
+                }
+                .conversion-metrics {
+                    background: #fefce8;
+                    border: 1px solid #fde047;
+                    border-radius: 12px;
+                    padding: 20px;
+                    margin-bottom: 30px;
+                }
+                .conversion-title {
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: #854d0e;
+                    margin-bottom: 15px;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+                .conversion-title::before {
+                    content: '📊';
+                    font-size: 20px;
+                }
+                .conversion-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                    gap: 15px;
+                }
+                .conversion-item {
+                    text-align: center;
+                }
+                .conversion-value {
+                    font-size: 28px;
+                    font-weight: 800;
+                    color: #ca8a04;
+                }
+                .conversion-label {
+                    font-size: 12px;
+                    color: #854d0e;
+                    margin-top: 4px;
+                }
+                .progress-bar {
+                    background: #e2e8f0;
+                    height: 8px;
+                    border-radius: 4px;
+                    overflow: hidden;
+                    margin-top: 8px;
+                }
+                .progress-fill {
+                    height: 100%;
+                    background: linear-gradient(90deg, #667eea, #764ba2);
+                    border-radius: 4px;
+                    transition: width 0.3s ease;
+                }
+                .summary-section {
+                    background: #f8fafc;
+                    padding: 25px;
+                    border-radius: 12px;
+                    margin-bottom: 20px;
+                }
+                .summary-section h3 {
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: #1e293b;
+                    margin-bottom: 15px;
+                }
+                .summary-section p {
+                    color: #475569;
+                    line-height: 1.8;
+                    margin-bottom: 12px;
+                }
+                .status-badge {
+                    display: inline-block;
+                    padding: 6px 16px;
+                    border-radius: 20px;
+                    font-size: 13px;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }
+                .status-active {
+                    background: #dcfce7;
+                    color: #166534;
+                }
+                .status-paused {
+                    background: #fef3c7;
+                    color: #92400e;
+                }
+                .status-completed {
+                    background: #dbeafe;
+                    color: #1e40af;
+                }
+                .footer { 
+                    background: #1e293b;
+                    padding: 20px; 
+                    text-align: center; 
+                    font-size: 13px; 
+                    color: #94a3b8;
+                }
+                .footer strong {
+                    color: #e2e8f0;
+                }
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>Reporte de Misión</h1>
+                    <h1>📊 Reporte de Misión</h1>
                     <p>${mission.title}</p>
                 </div>
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-value">${leadsFound || 0}</div>
-                        <div class="stat-label">Leads Encontrados</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">${leadsContacted || 0}</div>
-                        <div class="stat-label">Contactados</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">${replies || 0}</div>
-                        <div class="stat-label">Respuestas</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value">${leadsEnriched || '-'}</div>
-                        <div class="stat-label">Enriquecidos</div>
+                
+                <div class="mission-info">
+                    <div class="mission-info-grid">
+                        <div class="info-item">
+                            <span class="info-label">Fecha de Inicio</span>
+                            <span class="info-value">${new Date(mission.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Estado</span>
+                            <span class="status-badge status-${mission.status}">${mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : 'COMPLETADA'}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Objetivo</span>
+                            <span class="info-value">${mission.params?.jobTitle || 'N/A'}</span>
+                        </div>
                     </div>
                 </div>
-                <div class="content">
-                    <h3>Resumen Ejecutivo</h3>
-                    <p>La misión comenzó el ${new Date(mission.created_at).toLocaleDateString()} y ha estado activa procesando prospectos según los criterios definidos.</p>
-                    <p>Estado actual: <strong>${mission.status.toUpperCase()}</strong></p>
+
+                <div class="stats-section">
+                    <h2 class="section-title">Métricas Principales</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value">${leadsFound || 0}</div>
+                            <div class="stat-label">Leads Encontrados</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 100%;"></div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${leadsEnriched || 0}</div>
+                            <div class="stat-label">Enriquecidos</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${enrichmentRate}%;"></div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${leadsContacted || 0}</div>
+                            <div class="stat-label">Contactados</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${contactRate}%;"></div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${replies || 0}</div>
+                            <div class="stat-label">Respuestas</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${responseRate}%;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="conversion-metrics">
+                        <div class="conversion-title">Tasas de Conversión</div>
+                        <div class="conversion-grid">
+                            <div class="conversion-item">
+                                <div class="conversion-value">${enrichmentRate}%</div>
+                                <div class="conversion-label">Enriquecimiento</div>
+                            </div>
+                            <div class="conversion-item">
+                                <div class="conversion-value">${contactRate}%</div>
+                                <div class="conversion-label">Contacto</div>
+                            </div>
+                            <div class="conversion-item">
+                                <div class="conversion-value">${responseRate}%</div>
+                                <div class="conversion-label">Respuesta</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="summary-section">
+                        <h3>📋 Resumen Ejecutivo</h3>
+                        <p>La misión <strong>"${mission.title}"</strong> comenzó el <strong>${new Date(mission.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}</strong> y ha estado procesando prospectos de forma automática según los criterios definidos.</p>
+                        <p><strong>Progreso:</strong> De ${leadsFound || 0} leads encontrados, se han enriquecido ${leadsEnriched || 0} (${enrichmentRate}%) y contactado ${leadsContacted || 0} (${contactRate}%). Se han recibido ${replies || 0} respuestas, lo que representa una tasa de respuesta del ${responseRate}%.</p>
+                        <p><strong>Estado actual:</strong> <span class="status-badge status-${mission.status}">${mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : 'COMPLETADA'}</span></p>
+                    </div>
                 </div>
+
                 <div class="footer">
-                    Generado automáticamente por Antonia AI
+                    <strong>🤖 Generado automáticamente por Antonia AI</strong><br>
+                    ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </div>
             </div>
         </body>
