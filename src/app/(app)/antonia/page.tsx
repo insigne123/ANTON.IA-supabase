@@ -577,13 +577,15 @@ export default function AntoniaPage() {
             />
 
             <Tabs defaultValue="builder" className="w-full">
-                <TabsList className="grid w-full max-w-md grid-cols-3">
+                <TabsList className="grid w-full max-w-2xl grid-cols-4">
                     <TabsTrigger value="builder">Crear Misión</TabsTrigger>
                     <TabsTrigger value="active">Activas ({missions.length})</TabsTrigger>
                     <TabsTrigger value="reportes" className="flex items-center gap-2">
                         <FileText className="w-4 h-4" /> Reports
                     </TabsTrigger>
-                    <TabsTrigger value="settings">Configuración</TabsTrigger>
+                    <TabsTrigger value="settings" className="flex items-center gap-2">
+                        <Settings className="w-4 h-4" /> Configuración
+                    </TabsTrigger>
                 </TabsList>
 
                 {/* --- MISSION BUILDER WIZARD --- */}
