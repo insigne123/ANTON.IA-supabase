@@ -483,8 +483,11 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
 
     // Use default introduction template with research variables
     // Note: Campaign is ignored here as this is the initial research-based outreach
-    const subject = 'Oportunidad de colaboración - {{company}}';
-    const body = `Hola {{name}},
+    // Use default introduction template with research variables
+    // Note: Campaign is ignored here as this is the initial research-based outreach
+    // Fix: Use unicode escape for 'ón' to avoid encoding issues in subject: colaboración -> colaboraci\u00f3n
+    const subject = 'Oportunidad de colaboraci\u00f3n - {{company}}';
+    let body = `Hola {{name}},
 
 Estuve leyendo sobre {{company}} y vi que {{research.summary}}
 
@@ -492,7 +495,15 @@ Me pareció muy interesante y me gustaría conectar contigo para explorar posibl
 
 ¿Tendrías disponibilidad para una breve conversación?
 
-Saludos,`;
+Saludos,
+
+ANTON.IA Agent
+Enviado automáticamente por ANTON.IA
+`;
+
+    // Add Unsubscribe Link (Mock for now, or link to app settings)
+    const unsubscribeFooter = `\n\n-----------------------------------\nSi no deseas recibir más correos, responde "BAJA".`;
+    body += unsubscribeFooter;
 
     console.log(`[CONTACT_INITIAL] Using research-based template`);
 
@@ -501,6 +512,9 @@ Saludos,`;
 
     for (const lead of leadsToContact) {
         try {
+            // Safe access to research summary
+            const researchSummary = lead.research?.summary || lead.research_summary || 'tienen iniciativas interesantes en curso.';
+
             // Replace template variables
             const personalizedSubject = subject
                 .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || 'there')
@@ -509,7 +523,8 @@ Saludos,`;
             const personalizedBody = body
                 .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || 'there')
                 .replace(/\{\{company\}\}/g, lead.companyName || lead.company_name || 'your company')
-                .replace(/\{\{title\}\}/g, lead.title || 'your role');
+                .replace(/\{\{title\}\}/g, lead.title || 'your role')
+                .replace(/\{\{research\.summary\}\}/g, researchSummary);
 
             console.log(`[CONTACT] Sending email to ${lead.email}`);
 
