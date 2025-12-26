@@ -677,17 +677,18 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
                 }
                 .mission-info {
                     background: #f8fafc;
-                    padding: 20px 30px;
+                    padding: 25px 30px;
                     border-bottom: 1px solid #e2e8f0;
                 }
                 .mission-info-grid {
                     display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                    gap: 15px;
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: 20px;
                 }
                 .info-item {
                     display: flex;
                     flex-direction: column;
+                    gap: 6px;
                 }
                 .info-label {
                     font-size: 11px;
@@ -695,12 +696,13 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
                     letter-spacing: 0.5px;
                     color: #64748b;
                     font-weight: 600;
-                    margin-bottom: 4px;
+                    line-height: 1.2;
                 }
                 .info-value {
-                    font-size: 16px;
+                    font-size: 15px;
                     color: #1e293b;
                     font-weight: 600;
+                    line-height: 1.3;
                 }
                 .stats-section {
                     padding: 30px;
