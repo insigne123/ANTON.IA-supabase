@@ -13,9 +13,10 @@ DECLARE
     mission_id uuid;
     lead_json jsonb;
 BEGIN
-    -- 1. Get an existing Organization and User (picking the first active one found)
+    -- 1. Get an existing Organization and User (using the user that has email tokens)
     SELECT id INTO my_org_id FROM organizations LIMIT 1;
-    SELECT id INTO my_user_id FROM auth.users LIMIT 1;
+    -- Use the specific user ID that has Google/Outlook tokens configured
+    my_user_id := 'de3a3194-29b1-449a-828a-53608a7ebe47';
 
     -- 2. Create a temporary Test Mission
     INSERT INTO antonia_missions (organization_id, user_id, title, status, goal_summary)

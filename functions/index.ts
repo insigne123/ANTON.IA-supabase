@@ -481,12 +481,24 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
 
     console.log(`[CONTACT] Contacting ${leadsToContact.length} leads`);
 
+    // Fetch user's email signature from profiles
+    const { data: profile } = await supabase
+        .from('profiles')
+        .select('signatures')
+        .eq('id', userId)
+        .single();
+
+    // Get the signature for the provider being used (google or outlook)
+    // Signatures are stored as: { google: "...", outlook: "..." }
+    let userSignature = '';
+    if (profile?.signatures) {
+        // Try to get signature for google first (most common), fallback to outlook
+        userSignature = profile.signatures.google || profile.signatures.outlook || '';
+    }
+
     // Use default introduction template with research variables
     // Note: Campaign is ignored here as this is the initial research-based outreach
-    // Use default introduction template with research variables
-    // Note: Campaign is ignored here as this is the initial research-based outreach
-    // Fix: Use unicode escape for 'ón' to avoid encoding issues in subject: colaboración -> colaboraci\u00f3n
-    const subject = 'Oportunidad de colaboraci\u00f3n - {{company}}';
+    const subject = 'Oportunidad de colaboración - {{company}}';
     let body = `Hola {{name}},
 
 Estuve leyendo sobre {{company}} y vi que {{research.summary}}
@@ -495,14 +507,17 @@ Me pareció muy interesante y me gustaría conectar contigo para explorar posibl
 
 ¿Tendrías disponibilidad para una breve conversación?
 
-Saludos,
+Saludos,`;
 
-ANTON.IA Agent
-Enviado automáticamente por ANTON.IA
-`;
+    // Add user signature if available, otherwise use default
+    if (userSignature) {
+        body += `\n\n${userSignature}`;
+    } else {
+        body += `\n\nANTON.IA Agent\nEnviado automáticamente por ANTON.IA`;
+    }
 
-    // Add Unsubscribe Link (Mock for now, or link to app settings)
-    const unsubscribeFooter = `\n\n-----------------------------------\nSi no deseas recibir más correos, responde "BAJA".`;
+    // Add Unsubscribe Link
+    const unsubscribeFooter = `\n\n-----------------------------------\nSi no deseas recibir más correos, haz clic aquí: ${appUrl}/unsubscribe?email={{email}}`;
     body += unsubscribeFooter;
 
     console.log(`[CONTACT_INITIAL] Using research-based template`);
@@ -524,7 +539,8 @@ Enviado automáticamente por ANTON.IA
                 .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || 'there')
                 .replace(/\{\{company\}\}/g, lead.companyName || lead.company_name || 'your company')
                 .replace(/\{\{title\}\}/g, lead.title || 'your role')
-                .replace(/\{\{research\.summary\}\}/g, researchSummary);
+                .replace(/\{\{research\.summary\}\}/g, researchSummary)
+                .replace(/\{\{email\}\}/g, lead.email || '');
 
             console.log(`[CONTACT] Sending email to ${lead.email}`);
 
