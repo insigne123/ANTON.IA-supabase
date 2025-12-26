@@ -565,9 +565,13 @@ Enviado automáticamente por ANTON.IA
             } else {
                 const errorText = await response.text();
                 console.error(`[CONTACT] API error: ${response.status} - ${errorText}`);
+
+                // Track error for reporting
+                lead.error = `API Error ${response.status}: ${errorText.substring(0, 100)}`;
             }
-        } catch (e) {
+        } catch (e: any) {
             console.error('[CONTACT] Failed to contact lead:', e);
+            lead.error = `Exception: ${e.message}`;
         }
     }
 
@@ -580,7 +584,8 @@ Enviado automáticamente por ANTON.IA
             name: l.fullName || l.full_name,
             email: l.email,
             company: l.companyName || l.company_name,
-            status: 'sent'
+            status: l.error ? 'failed' : 'sent',
+            error: l.error || null
         }))
     };
 }

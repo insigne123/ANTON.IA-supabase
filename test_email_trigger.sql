@@ -5,7 +5,7 @@
 
 DO $$
 DECLARE
-    target_email text := 'TU_EMAIL_AQUI'; -- <<< CAMBIA ESTO
+    target_email text := 'nicogun123@gmail.com'; -- <<< CAMBIA ESTO
     
     -- Variables to fetch existing context
     my_org_id uuid;
