@@ -425,6 +425,22 @@ async function processTask(task: any, supabase: any) {
 export async function GET(request: Request) {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // STEP 1: Schedule daily tasks for active missions (runs once per day check)
+    try {
+        const { data: scheduledMissions, error: scheduleError } = await supabase
+            .rpc('schedule_daily_mission_tasks');
+
+        if (scheduleError) {
+            console.error('[Cron] Error scheduling daily missions:', scheduleError);
+        } else if (scheduledMissions && scheduledMissions.length > 0) {
+            console.log(`[Cron] Scheduled tasks for ${scheduledMissions.length} active missions`);
+        }
+    } catch (e) {
+        console.error('[Cron] Failed to schedule missions:', e);
+        // Don't fail the entire cron if scheduling fails
+    }
+
+    // STEP 2: Process pending tasks
     const { data: tasks, error } = await supabase
         .from('antonia_tasks')
         .select('*')
