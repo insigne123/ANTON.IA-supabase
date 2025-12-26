@@ -7,6 +7,8 @@ DECLARE
     mission_record RECORD;
     task_count integer;
     today_date date;
+    result_mission_id uuid;
+    result_tasks_created integer;
 BEGIN
     today_date := CURRENT_DATE;
     
@@ -27,11 +29,12 @@ BEGIN
         task_count := 0;
         
         -- Check if we already created a SEARCH task today for this mission
+        -- Use qualified column names to avoid ambiguity
         IF NOT EXISTS (
-            SELECT 1 FROM antonia_tasks
-            WHERE mission_id = mission_record.id
-            AND type = 'SEARCH'
-            AND DATE(created_at) = today_date
+            SELECT 1 FROM antonia_tasks t
+            WHERE t.mission_id = mission_record.id
+            AND t.type = 'SEARCH'
+            AND DATE(t.created_at) = today_date
         ) THEN
             -- Create a new SEARCH task for today
             INSERT INTO antonia_tasks (
@@ -56,8 +59,10 @@ BEGIN
         END IF;
         
         -- Return the mission and number of tasks created
-        mission_id := mission_record.id;
-        tasks_created := task_count;
+        result_mission_id := mission_record.id;
+        result_tasks_created := task_count;
+        mission_id := result_mission_id;
+        tasks_created := result_tasks_created;
         RETURN NEXT;
     END LOOP;
     
