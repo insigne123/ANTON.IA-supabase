@@ -356,18 +356,89 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
     // Chain to CONTACT if we have investigated leads
     if (investigatedLeads.length > 0) {
-        await supabase.from('antonia_tasks').insert({
-            mission_id: task.mission_id,
-            organization_id: task.organization_id,
-            type: 'CONTACT',
-            status: 'pending',
-            payload: {
-                userId: userId,
-                leads: investigatedLeads,
-                campaignName: campaignName
-            },
-            created_at: new Date().toISOString()
-        });
+
+        // --- TIMEZONE SCHEDULING LOGIC ---
+        // Default target hour: 8 AM
+        // Default Timezone: Chile (UTC-3 summer, UTC-4 winter) -> Let's use generic offset logic for simplicity or UTC
+        // Since we don't have a lookup table yet, we'll use a simplified mapping.
+
+        for (const lead of investigatedLeads) {
+            let scheduledFor = new Date().toISOString(); // Default to NOW (immediate)
+
+            try {
+                // Heuristic for timezone offset based on location string
+                // Map: Location -> Offset from UTC (approximate standard time)
+                // Chile: -4 (or -3), Colombia: -5, Mexico: -6, Spain: +1
+
+                const location = (lead.company_location?.[0] || lead.location || '').toLowerCase();
+                let utcOffset = -3; // Default to Chile (UTC-3 for Summer)
+
+                if (location.includes('colombia') || location.includes('peru') || location.includes('ecuador') || location.includes('panama')) {
+                    utcOffset = -5;
+                } else if (location.includes('mexico') || location.includes('costa rica') || location.includes('guatemala')) {
+                    utcOffset = -6;
+                } else if (location.includes('argentina') || location.includes('uruguay') || location.includes('chile') || location.includes('brasil')) {
+                    // Chile/Argentina/Uruguay/Brazil -> UTC-3 (approx)
+                    utcOffset = -3;
+                } else if (location.includes('spain') || location.includes('espana') || location.includes('madrid') || location.includes('barcelona')) {
+                    utcOffset = +1;
+                }
+
+                // Calculate target time (8 AM in target timezone)
+                const now = new Date();
+                const targetHour = 8; // 8 AM
+
+                // Get current UTC time
+                const currentUtcHour = now.getUTCHours();
+
+                // Calculate what time it is physically in the target location
+                // LocalHour = UTCHour + Offset
+                const currentLocalHour = currentUtcHour + utcOffset;
+
+                // Determine schedule date
+                let scheduleDate = new Date(now);
+
+                // If it's already past 8 AM locally, schedule for tomorrow
+                if (currentLocalHour >= targetHour) {
+                    scheduleDate.setDate(scheduleDate.getDate() + 1);
+                }
+
+                // Set the target time in UTC
+                // UTCTarget = 8 AM - Offset
+                // e.g. Colombia (UTC-5): 8 - (-5) = 13 UTC
+                const targetUtcHour = targetHour - utcOffset;
+
+                scheduleDate.setUTCHours(targetUtcHour, Math.floor(Math.random() * 30), 0, 0); // Random minute 0-30 for jitter
+
+                scheduledFor = scheduleDate.toISOString();
+                console.log(`[SCHEDULING] Scheduled contact for ${lead.email} in ${location} (Offset ${utcOffset}) at ${scheduledFor}`);
+
+            } catch (err) {
+                console.error('[SCHEDULING] Error calculating schedule, default to NOW:', err);
+                // scheduledFor remains NOW
+            }
+
+            // Create individual CONTACT tasks per lead to allow individual scheduling
+            // Note: Your schema/loop structure previously batched them.
+            // If we want individual scheduling, we should insert tasks individually.
+            // BUT currently the system processes a batch.
+            // Compromise: Schedule the batch based on the FIRST lead's location or majority.
+            // OR split insertion. Splitting is cleaner for scheduling.
+
+            await supabase.from('antonia_tasks').insert({
+                mission_id: task.mission_id,
+                organization_id: task.organization_id,
+                type: 'CONTACT',
+                status: 'pending',
+                payload: {
+                    userId: userId,
+                    leads: [lead], // Single lead per task for precise scheduling
+                    campaignName: campaignName
+                },
+                scheduled_for: scheduledFor,
+                created_at: new Date().toISOString()
+            });
+        }
     }
 
     return {

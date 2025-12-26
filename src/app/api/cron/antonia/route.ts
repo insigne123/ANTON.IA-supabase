@@ -441,10 +441,13 @@ export async function GET(request: Request) {
     }
 
     // STEP 2: Process pending tasks
+    // Select tasks that are pending AND (scheduled_for IS NULL OR scheduled_for <= NOW)
+    const now = new Date().toISOString();
     const { data: tasks, error } = await supabase
         .from('antonia_tasks')
         .select('*')
         .eq('status', 'pending')
+        .or(`scheduled_for.is.null,scheduled_for.lte.${now}`)
         .limit(5);
 
     if (error) {
@@ -452,7 +455,7 @@ export async function GET(request: Request) {
     }
 
     if (!tasks || tasks.length === 0) {
-        return NextResponse.json({ message: 'No pending tasks' });
+        return NextResponse.json({ message: 'No executable tasks found' });
     }
 
     await Promise.all(tasks.map(t => processTask(t, supabase)));
