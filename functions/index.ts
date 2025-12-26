@@ -516,13 +516,15 @@ Saludos,`;
         body += `\n\nANTON.IA Agent\nEnviado automáticamente por ANTON.IA`;
     }
 
+    // Get app URL for unsubscribe link
+    const appUrl = APP_URL;
+
     // Add Unsubscribe Link
     const unsubscribeFooter = `\n\n-----------------------------------\nSi no deseas recibir más correos, haz clic aquí: ${appUrl}/unsubscribe?email={{email}}`;
     body += unsubscribeFooter;
 
     console.log(`[CONTACT_INITIAL] Using research-based template`);
 
-    const appUrl = APP_URL;
     let contactedCount = 0;
 
     for (const lead of leadsToContact) {
