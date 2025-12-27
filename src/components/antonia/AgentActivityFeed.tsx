@@ -2,11 +2,22 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Loader2, CheckCircle2, XCircle, Search, Sparkles, Brain, Mail, FileText, ChevronRight } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+    Loader2,
+    CheckCircle2,
+    XCircle,
+    Search,
+    Sparkles,
+    Brain,
+    Mail,
+    FileText,
+    AlertTriangle,
+    Terminal,
+} from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -14,6 +25,7 @@ interface TaskResult {
     // Campaign Spec
     subjectPreview?: string;
     bodyPreview?: string;
+    campaignName?: string;
 
     // Search Spec
     searchCriteria?: {
@@ -23,22 +35,25 @@ interface TaskResult {
         keywords?: string;
     };
     sampleLeads?: { name: string; company: string; title: string }[];
+    leadsFound?: number;
 
     // Enrich Spec
     enrichedLeadsSummary?: { name: string; company: string; emailFound: boolean }[];
+    enrichedCount?: number;
 
     // Investigate Spec
     investigations?: { name: string; company: string; summarySnippet: string }[];
+    investigatedCount?: number;
 
     // Contact Spec
-    contactedList?: { name: string; email: string; company: string; status: string }[];
-
-    // Fallback counts
-    leadsFound?: number;
-    enrichedCount?: number;
-    investigatedCount?: number;
+    contactedList?: { name: string; email: string; company: string; status: string; error?: string }[];
     contactedCount?: number;
-    campaignGenerated?: boolean;
+
+    // Generic
+    skipped?: boolean;
+    reason?: string;
+    error?: string;
+    [key: string]: any; // Catch-all for other props
 }
 
 interface AntoniaTask {
@@ -46,6 +61,7 @@ interface AntoniaTask {
     type: string;
     status: 'pending' | 'processing' | 'completed' | 'failed';
     result: TaskResult;
+    payload: any;
     error_message?: string;
     created_at: string;
     updated_at: string;
@@ -53,6 +69,7 @@ interface AntoniaTask {
 
 export function AgentActivityFeed({ missionId }: { missionId: string }) {
     const [tasks, setTasks] = useState<AntoniaTask[]>([]);
+    const [filter, setFilter] = useState<'all' | 'errors' | 'success' | 'processing'>('all');
     const supabase = createClientComponentClient();
     const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -86,7 +103,7 @@ export function AgentActivityFeed({ missionId }: { missionId: string }) {
             .select('*')
             .eq('mission_id', missionId)
             .order('created_at', { ascending: false })
-            .limit(50);
+            .limit(100);
 
         if (data) setTasks(data);
     };
@@ -108,166 +125,266 @@ export function AgentActivityFeed({ missionId }: { missionId: string }) {
             case 'ENRICH': return <Sparkles className="h-4 w-4" />;
             case 'INVESTIGATE': return <Brain className="h-4 w-4" />;
             case 'CONTACT':
-            case 'CONTACT_INITIAL': return <Mail className="h-4 w-4" />;
+            case 'CONTACT_INITIAL':
+            case 'CONTACT_CAMPAIGN': return <Mail className="h-4 w-4" />;
+            case 'GENERATE_REPORT': return <FileText className="h-4 w-4" />;
             default: return <CheckCircle2 className="h-4 w-4" />;
         }
     };
 
     const getTaskLabel = (type: string) => {
         switch (type) {
-            case 'GENERATE_CAMPAIGN': return 'Generando Estrategia';
-            case 'SEARCH': return 'Buscando Leads';
-            case 'ENRICH': return 'Enriqueciendo Datos';
-            case 'INVESTIGATE': return 'Investigando Perfiles';
-            case 'CONTACT': return 'Contactando Leads';
-            case 'CONTACT_INITIAL': return 'Contacto Inicial';
+            case 'GENERATE_CAMPAIGN': return 'Estrategia';
+            case 'SEARCH': return 'Búsqueda';
+            case 'ENRICH': return 'Enriquecimiento';
+            case 'INVESTIGATE': return 'Investigación';
+            case 'CONTACT':
+            case 'CONTACT_INITIAL': return 'Contacto';
+            case 'CONTACT_CAMPAIGN': return 'Seguimiento';
+            case 'GENERATE_REPORT': return 'Reporte';
             default: return type;
+        }
+    };
+
+    const getStatusColor = (status: string) => {
+        switch (status) {
+            case 'completed': return 'bg-green-500';
+            case 'failed': return 'bg-red-500';
+            case 'processing': return 'bg-blue-500';
+            default: return 'bg-slate-300 dark:bg-slate-700';
+        }
+    };
+
+    const filteredTasks = tasks.filter(task => {
+        if (filter === 'all') return true;
+        if (filter === 'errors') return task.status === 'failed' || task.error_message;
+        if (filter === 'success') return task.status === 'completed';
+        if (filter === 'processing') return task.status === 'processing' || task.status === 'pending';
+        return true;
+    });
+
+    const renderTaskSummary = (task: AntoniaTask) => {
+        const { result, type, status } = task;
+
+        if (status === 'failed') {
+            return <span className="text-red-500 font-medium line-clamp-1">{task.error_message || 'Falló la ejecución'}</span>;
+        }
+
+        if (status === 'pending') return <span className="text-muted-foreground italic">En cola...</span>;
+        if (status === 'processing') return <span className="text-blue-500 font-medium animate-pulse">Procesando...</span>;
+
+        if (!result) return <span className="text-muted-foreground">Completado</span>;
+
+        if (result.skipped) {
+            return <span className="text-yellow-600 dark:text-yellow-500 italic">Omitido: {result.reason}</span>;
+        }
+
+        switch (type) {
+            case 'SEARCH':
+                return <span>Encontrados {result.leadsFound || 0} prospectos</span>;
+            case 'ENRICH':
+                return <span>Enriquecidos {result.enrichedCount || 0} contactos</span>;
+            case 'INVESTIGATE':
+                return <span>Investigados {result.investigatedCount || 0} perfiles</span>;
+            case 'CONTACT':
+            case 'CONTACT_INITIAL':
+            case 'CONTACT_CAMPAIGN':
+                return <span>Enviados {result.contactedCount || 0} correos</span>;
+            case 'GENERATE_CAMPAIGN':
+                return <span className="italic">"{result.campaignName || 'Campaña'}" generada</span>;
+            default:
+                return <span className="text-muted-foreground">Tarea finalizada exitosamente</span>;
         }
     };
 
     const renderTaskDetails = (task: AntoniaTask) => {
         const { result, type } = task;
-        if (!result) return null;
 
-        switch (type) {
-            case 'GENERATE_CAMPAIGN':
-                return (
-                    <div className="space-y-2 mt-2">
-                        {result.subjectPreview && (
-                            <div className="text-sm bg-muted p-2 rounded-md">
-                                <p className="font-semibold text-xs text-muted-foreground uppercase">Asunto Generado</p>
-                                <p>{result.subjectPreview}</p>
+        return (
+            <div className="space-y-4 pt-2">
+                {/* Visual Summaries based on Type */}
+                {result && !result.skipped && (
+                    <div className="text-xs space-y-2">
+                        {type === 'GENERATE_CAMPAIGN' && (
+                            <div className="bg-secondary/30 p-2 rounded border">
+                                <p className="font-semibold text-[10px] uppercase text-muted-foreground mb-1">Asunto</p>
+                                <p className="mb-2 font-medium">{result.subjectPreview}</p>
+                                <p className="font-semibold text-[10px] uppercase text-muted-foreground mb-1">Cuerpo</p>
+                                <p className="italic text-muted-foreground">{result.bodyPreview}</p>
                             </div>
                         )}
-                        {result.bodyPreview && (
-                            <p className="text-xs text-muted-foreground italic">"{result.bodyPreview}"</p>
-                        )}
-                    </div>
-                );
 
-            case 'SEARCH':
-                return (
-                    <div className="space-y-2 mt-2">
-                        <div className="flex gap-2 flex-wrap">
-                            {result.searchCriteria && Object.entries(result.searchCriteria).map(([key, val]) => (
-                                val && <Badge key={key} variant="secondary" className="text-xs">{val}</Badge>
-                            ))}
-                        </div>
-                        {result.sampleLeads && result.sampleLeads.length > 0 && (
-                            <div className="text-xs text-muted-foreground">
-                                <p className="mb-1">Encontrados recientemente:</p>
-                                <ul className="list-disc list-inside">
-                                    {result.sampleLeads.map((l, i) => (
-                                        <li key={i}>{l.name} @ {l.company}</li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-                    </div>
-                );
-
-            case 'ENRICH':
-                return (
-                    <div className="mt-2 text-xs">
-                        {result.enrichedLeadsSummary && (
-                            <ul className="space-y-1">
-                                {result.enrichedLeadsSummary.map((l, i) => (
-                                    <li key={i} className="flex items-center gap-2">
-                                        {l.emailFound ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : <XCircle className="h-3 w-3 text-red-300" />}
-                                        <span>{l.name} ({l.company})</span>
-                                    </li>
+                        {type === 'SEARCH' && result.sampleLeads && (
+                            <div className="space-y-1">
+                                <p className="font-semibold text-muted-foreground">Muestra de resultados:</p>
+                                {result.sampleLeads.map((l, i) => (
+                                    <div key={i} className="flex items-center gap-2 py-1 border-b border-border/50 last:border-0">
+                                        <div className="w-1 h-1 rounded-full bg-slate-400" />
+                                        <span className="font-medium">{l.name}</span>
+                                        <span className="text-muted-foreground truncate max-w-[150px]"> - {l.company}</span>
+                                    </div>
                                 ))}
-                            </ul>
+                            </div>
+                        )}
+
+                        {type === 'ENRICH' && result.enrichedLeadsSummary && (
+                            <div className="space-y-1">
+                                {result.enrichedLeadsSummary.map((l, i) => (
+                                    <div key={i} className="flex items-center justify-between py-1 border-b border-border/50 last:border-0">
+                                        <div className="flex items-center gap-2">
+                                            {l.emailFound ? <CheckCircle2 className="w-3 h-3 text-green-500" /> : <XCircle className="w-3 h-3 text-red-400" />}
+                                            <span>{l.name}</span>
+                                        </div>
+                                        <span className="text-muted-foreground truncate max-w-[100px]">{l.company}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {(type.includes('CONTACT')) && result.contactedList && (
+                            <div className="space-y-1">
+                                {result.contactedList.map((c, i) => (
+                                    <div key={i} className="flex items-center justify-between py-1 border-b border-border/50 last:border-0">
+                                        <div className="flex items-center gap-2">
+                                            {c.status === 'sent' ? <CheckCircle2 className="w-3 h-3 text-green-500" /> : <AlertTriangle className="w-3 h-3 text-red-500" />}
+                                            <span>{c.name}</span>
+                                        </div>
+                                        {c.error ? (
+                                            <span className="text-red-500 truncate max-w-[150px] ml-2" title={c.error}>{c.error}</span>
+                                        ) : (
+                                            <span className="text-xs bg-secondary px-1.5 py-0.5 rounded text-muted-foreground">Enviado</span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
                         )}
                     </div>
-                );
+                )}
 
-            case 'INVESTIGATE':
-                return (
-                    <div className="mt-2 space-y-2">
-                        {result.investigations?.map((inv, i) => (
-                            <div key={i} className="text-xs bg-muted/50 p-2 rounded">
-                                <p className="font-medium">{inv.name} - {inv.company}</p>
-                                <p className="text-muted-foreground mt-1 line-clamp-2">{inv.summarySnippet}</p>
+                {/* Technical JSON Details */}
+                <Accordion type="single" collapsible className="w-full border rounded-md">
+                    <AccordionItem value="tech-details" className="border-0">
+                        <AccordionTrigger className="px-3 py-2 text-xs hover:bg-secondary/50 hover:no-underline">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                                <Terminal className="w-3 h-3" />
+                                <span>Detalles Técnicos (JSON)</span>
                             </div>
-                        ))}
-                    </div>
-                );
-
-            case 'CONTACT':
-            case 'CONTACT_INITIAL':
-                return (
-                    <div className="mt-2 text-xs">
-                        {result.contactedList?.map((c, i) => (
-                            <div key={i} className="flex items-center justify-between py-1 border-b last:border-0">
-                                <span>{c.name}</span>
-                                <Badge variant="outline" className="text-[10px] h-4">Enviado</Badge>
-                            </div>
-                        ))}
-                    </div>
-                );
-
-            default:
-                return null;
-        }
+                        </AccordionTrigger>
+                        <AccordionContent className="p-0 border-t bg-slate-950">
+                            <ScrollArea className="h-[200px] w-full">
+                                <div className="p-3 text-xs font-mono">
+                                    <p className="text-slate-500 mb-1">// Input Payload</p>
+                                    <pre className="text-blue-300 mb-4 whitespace-pre-wrap word-break-break-all">
+                                        {JSON.stringify(task.payload, null, 2)}
+                                    </pre>
+                                    <p className="text-slate-500 mb-1">// Output Result</p>
+                                    <pre className="text-green-300 whitespace-pre-wrap word-break-break-all">
+                                        {JSON.stringify(result, null, 2)}
+                                    </pre>
+                                    {task.error_message && (
+                                        <>
+                                            <p className="text-slate-500 mb-1 mt-4">// Error</p>
+                                            <pre className="text-red-400 whitespace-pre-wrap word-break-break-all">
+                                                {task.error_message}
+                                            </pre>
+                                        </>
+                                    )}
+                                </div>
+                            </ScrollArea>
+                        </AccordionContent>
+                    </AccordionItem>
+                </Accordion>
+            </div>
+        );
     };
 
     return (
-        <div className="h-full flex flex-col">
-            <div className="mb-4">
-                <h3 className="text-lg font-medium flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-indigo-500" />
-                    Historial de Actividad
-                </h3>
-                <p className="text-sm text-muted-foreground">Monitoreo en tiempo real de esta misión</p>
+        <div className="h-full flex flex-col bg-background" ref={scrollRef}>
+            <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b pb-4 px-1 pt-1">
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 className="text-lg font-semibold flex items-center gap-2">
+                            <Badge variant="outline" className="h-6 w-6 rounded-full p-0 flex items-center justify-center border-2 border-primary">
+                                <Sparkles className="h-3 w-3 text-primary animate-pulse" />
+                            </Badge>
+                            Monitor de Actividad
+                        </h3>
+                        <p className="text-sm text-muted-foreground ml-8">
+                            {tasks.length} operaciones registradas
+                        </p>
+                    </div>
+                </div>
+
+                <Tabs defaultValue="all" value={filter} onValueChange={(v) => setFilter(v as any)} className="w-full">
+                    <TabsList className="grid w-full grid-cols-4 h-9">
+                        <TabsTrigger value="all" className="text-xs">Todo</TabsTrigger>
+                        <TabsTrigger value="processing" className="text-xs flex gap-1">
+                            <span className="w-2 h-2 rounded-full bg-blue-500" />
+                            Procesando
+                        </TabsTrigger>
+                        <TabsTrigger value="success" className="text-xs flex gap-1">
+                            <span className="w-2 h-2 rounded-full bg-green-500" />
+                            Éxitos
+                        </TabsTrigger>
+                        <TabsTrigger value="errors" className="text-xs flex gap-1">
+                            <span className="w-2 h-2 rounded-full bg-red-500" />
+                            Errores
+                        </TabsTrigger>
+                    </TabsList>
+                </Tabs>
             </div>
 
-            <ScrollArea className="flex-1 pr-4">
-                <div className="space-y-6">
-                    {tasks.length === 0 && (
-                        <div className="text-center text-muted-foreground py-10">
-                            Esperando actividad...
+            <ScrollArea className="flex-1 -mx-4 px-4 pt-4">
+                <div className="space-y-6 pb-20">
+                    {filteredTasks.length === 0 && (
+                        <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground space-y-4">
+                            <div className="p-4 rounded-full bg-secondary/50">
+                                <Search className="w-8 h-8 opacity-20" />
+                            </div>
+                            <p>No hay actividad registrada con este filtro.</p>
                         </div>
                     )}
-                    {tasks.map((task, index) => (
-                        <div key={task.id} className="relative pl-6 border-l-2 border-muted last:border-l-0 pb-6 last:pb-0">
-                            {/* Status Dot */}
-                            <div className={`absolute -left-[9px] top-0 h-4 w-4 rounded-full border-2 border-background 
-                            ${task.status === 'completed' ? 'bg-green-500' :
-                                    task.status === 'failed' ? 'bg-red-500' :
-                                        task.status === 'processing' ? 'bg-blue-500 animate-pulse' : 'bg-gray-300'}`}
-                            />
 
-                            <div className="flex flex-col gap-1">
+                    {filteredTasks.map((task) => (
+                        <div key={task.id} className="group relative pl-6 border-l-2 border-border/60 hover:border-primary/50 transition-colors pb-6 last:pb-0">
+                            {/* Status Dot */}
+                            <div className={`absolute -left-[9px] top-1.5 h-4 w-4 rounded-full border-4 border-background transition-colors duration-300 ${getStatusColor(task.status)} group-hover:scale-110`} />
+
+                            <div className="flex flex-col gap-1.5">
+                                {/* Header */}
                                 <div className="flex items-center justify-between">
-                                    <span className="font-semibold text-sm flex items-center gap-2">
-                                        {getTaskIcon(task.type)}
-                                        {getTaskLabel(task.type)}
-                                    </span>
-                                    <span className="text-xs text-muted-foreground">
-                                        {formatDistanceToNow(new Date(task.created_at), { addSuffix: true, locale: es })}
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        <Badge variant="outline" className="font-mono text-[10px] tracking-wider uppercase h-5">
+                                            {getTaskLabel(task.type)}
+                                        </Badge>
+                                        <span className="text-xs text-muted-foreground">
+                                            {formatDistanceToNow(new Date(task.created_at), { addSuffix: true, locale: es })}
+                                        </span>
+                                    </div>
                                 </div>
 
-                                {task.error_message && (
-                                    <div className="text-xs text-red-500 bg-red-50 p-2 rounded mt-1">
-                                        Error: {task.error_message}
+                                {/* Main Summary */}
+                                <div className="text-sm border rounded-lg bg-card p-3 shadow-sm group-hover:shadow-md transition-shadow">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        {getTaskIcon(task.type)}
+                                        {renderTaskSummary(task)}
                                     </div>
-                                )}
 
-                                {/* Collapsible Details */}
-                                {task.status === 'completed' && task.result && (
-                                    <Accordion type="single" collapsible className="w-full">
-                                        <AccordionItem value="details" className="border-b-0">
-                                            <AccordionTrigger className="py-1 text-xs text-muted-foreground hover:no-underline">
-                                                Ver detalles
-                                            </AccordionTrigger>
-                                            <AccordionContent>
-                                                {renderTaskDetails(task)}
-                                            </AccordionContent>
-                                        </AccordionItem>
-                                    </Accordion>
-                                )}
+                                    {/* Actionable Details & JSON */}
+                                    {(task.status === 'completed' || task.status === 'failed') && (
+                                        <Accordion type="single" collapsible className="w-full mt-2 border-t pt-2">
+                                            <AccordionItem value="details" className="border-0">
+                                                <AccordionTrigger className="py-1 text-xs text-muted-foreground hover:text-primary hover:no-underline justify-start gap-2">
+                                                    <span>Ver detalles</span>
+                                                    {task.error_message && <Badge variant="destructive" className="h-4 px-1 py-0 text-[10px]">Error</Badge>}
+                                                </AccordionTrigger>
+                                                <AccordionContent>
+                                                    {renderTaskDetails(task)}
+                                                </AccordionContent>
+                                            </AccordionItem>
+                                        </Accordion>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     ))}

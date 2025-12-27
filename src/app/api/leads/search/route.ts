@@ -137,11 +137,11 @@ export async function POST(req: NextRequest) {
 
   // 3. Construct new payload
   console.log("Current Params from request:", currentParams);
-  console.log("Authenticated User ID:", user.id);
+  console.log("Authenticated User ID:", userId);
 
   const newPayload = {
     // Strict payload based on specific service requirements
-    user_id: user.id || undefined,
+    user_id: userId || undefined,
 
     industry_keywords: currentParams.industry_keywords,
     company_location: currentParams.company_location,

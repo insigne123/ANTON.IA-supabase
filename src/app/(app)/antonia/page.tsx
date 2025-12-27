@@ -40,13 +40,7 @@ import { QuotaUsageCard } from '@/components/antonia/QuotaUsageCard';
 import { AgentActivityFeed } from '@/components/antonia/AgentActivityFeed';
 import { ReportsHistory } from '@/components/antonia/ReportsHistory';
 import { ReportViewer } from '@/components/antonia/ReportViewer';
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
+
 import {
     Sheet,
     SheetContent,
@@ -106,11 +100,8 @@ export default function AntoniaPage() {
         dailyContactLimit: 3
     });
 
-    const [logsOpen, setLogsOpen] = useState(false);
-    const [taskLogs, setTaskLogs] = useState<any[]>([]);
     const [currentMissionTitle, setCurrentMissionTitle] = useState('');
     const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
-    const [logsLoading, setLogsLoading] = useState(false);
     const [deletingMissionId, setDeletingMissionId] = useState<string | null>(null);
     const [activitySheetOpen, setActivitySheetOpen] = useState(false);
     const [selectedActivityMission, setSelectedActivityMission] = useState<AntoniaMission | null>(null);
@@ -394,20 +385,6 @@ export default function AntoniaPage() {
         }
     };
 
-    const handleShowLogs = async (missionId: string) => {
-        setLogsOpen(true);
-        setLogsLoading(true);
-        try {
-            if (!orgId) return;
-            const logs = await antoniaService.getLogs(orgId, 100, missionId);
-            setTaskLogs(logs || []);
-        } catch (error) {
-            console.error('[ANTONIA] Error loading logs:', error);
-            toast({ variant: 'destructive', title: 'Error', description: 'No se pudieron cargar los logs.' });
-        } finally {
-            setLogsLoading(false);
-        }
-    };
 
     const handleGenerateReport = async (missionId: string) => {
         if (!orgId || !userId) return;
@@ -1115,14 +1092,6 @@ export default function AntoniaPage() {
                                                 variant="outline"
                                                 size="sm"
                                                 className="w-full"
-                                                onClick={() => handleShowLogs(mission.id)}
-                                            >
-                                                <FileText className="w-3 h-3 mr-2" /> Logs
-                                            </Button>
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                className="w-full"
                                                 onClick={() => handleGenerateReport(mission.id)}
                                             >
                                                 <FileText className="w-3 h-3 mr-2" /> Reporte Histórico
@@ -1346,97 +1315,6 @@ export default function AntoniaPage() {
                 </TabsContent>
             </Tabs>
 
-            <Dialog open={logsOpen} onOpenChange={setLogsOpen}>
-                <DialogContent className="max-w-3xl h-[80vh] flex flex-col">
-                    <DialogHeader>
-                        <DialogTitle>Logs de la Misión</DialogTitle>
-                        <DialogDescription>Registro detallado de actividades</DialogDescription>
-                    </DialogHeader>
-
-                    <ScrollArea className="flex-1 p-4 border rounded-md bg-slate-950 text-slate-50 font-mono text-sm">
-                        {logsLoading ? (
-                            <div className="flex items-center justify-center h-full">
-                                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-                            </div>
-                        ) : taskLogs.length === 0 ? (
-                            <div className="text-center text-muted-foreground py-8">
-                                No hay logs registrados para esta misión.
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {taskLogs.map((log) => {
-                                    const formatDate = (dateStr: string) => {
-                                        try {
-                                            const date = new Date(dateStr);
-                                            if (isNaN(date.getTime())) return 'Fecha no disponible';
-                                            return date.toLocaleString('es-AR', {
-                                                day: '2-digit',
-                                                month: '2-digit',
-                                                year: 'numeric',
-                                                hour: '2-digit',
-                                                minute: '2-digit'
-                                            });
-                                        } catch {
-                                            return 'Fecha no disponible';
-                                        }
-                                    };
-
-                                    const getLevelIcon = (level: string) => {
-                                        if (level === 'error') return '❌';
-                                        if (level === 'warning' || level === 'warn') return '⚠️';
-                                        if (level === 'success') return '✅';
-                                        return 'ℹ️';
-                                    };
-
-                                    const getLevelColor = (level: string) => {
-                                        if (level === 'error') return 'text-red-400';
-                                        if (level === 'warning' || level === 'warn') return 'text-yellow-400';
-                                        if (level === 'success') return 'text-green-400';
-                                        return 'text-blue-400';
-                                    };
-
-                                    const formatMessage = (msg: string) => {
-                                        // Make technical messages more user-friendly
-                                        return msg
-                                            .replace(/Task (\w+) completed\./g, '✓ Tarea $1 completada')
-                                            .replace(/Task (\w+) failed:/g, '✗ Error en tarea $1:')
-                                            .replace(/SEARCH/g, 'Búsqueda')
-                                            .replace(/ENRICH/g, 'Enriquecimiento')
-                                            .replace(/CONTACT/g, 'Contacto')
-                                            .replace(/GENERATE_CAMPAIGN/g, 'generacion de Campaña');
-                                    };
-
-                                    return (
-                                        <div key={log.id} className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
-                                            <div className="flex justify-between items-start mb-2">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-base">{getLevelIcon(log.level)}</span>
-                                                    <span className={`text-xs font-semibold uppercase ${getLevelColor(log.level)}`}>
-                                                        {log.level === 'warn' ? 'Advertencia' :
-                                                            log.level === 'error' ? 'Error' :
-                                                                log.level === 'success' ? 'Éxito' : 'Info'}
-                                                    </span>
-                                                </div>
-                                                <span className="text-xs text-slate-500">{formatDate(log.created_at)}</span>
-                                            </div>
-                                            <p className="text-sm text-slate-200 leading-relaxed">{formatMessage(log.message)}</p>
-                                            {log.details && Object.keys(log.details).length > 0 && (
-                                                <details className="mt-2">
-                                                    <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-300">Ver detalles técnicos</summary>
-                                                    <pre className="mt-2 text-xs text-slate-500 overflow-x-auto bg-slate-950 p-2 rounded">
-                                                        {JSON.stringify(log.details, null, 2)}
-                                                    </pre>
-                                                </details>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                                })
-                            </div>
-                        )}
-                    </ScrollArea>
-                </DialogContent>
-            </Dialog>
 
             <AlertDialog open={!!deletingMissionId} onOpenChange={(open) => !open && setDeletingMissionId(null)}>
                 <AlertDialogContent>

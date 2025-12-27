@@ -240,6 +240,7 @@ export const antoniaService = {
 
     /**
      * Get Recent Logs
+     * @deprecated Logs are now tracked in antonia_tasks and visualized in AgentActivityFeed
      */
     getLogs: async (organizationId: string, limit = 50, missionId?: string) => {
         let query = supabase
