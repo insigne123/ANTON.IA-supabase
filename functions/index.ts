@@ -305,8 +305,24 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
-    const { leads, userId, campaignName } = task.payload;
+    let { leads, userId, campaignName } = task.payload;
     const leadsToInvestigate = leads.slice(0, limit - (usage.leads_investigated || 0));
+
+    // ROBUST FALLBACK: If userId is missing in payload, fetch it from the mission
+    if (!userId || userId === 'anon') {
+        const { data: mission } = await supabase
+            .from('antonia_missions')
+            .select('created_by')
+            .eq('id', task.mission_id)
+            .single();
+
+        if (mission && mission.created_by) {
+            userId = mission.created_by;
+            console.log(`[INVESTIGATE] Recovered missing userId from mission: ${userId}`);
+        } else {
+            console.warn(`[INVESTIGATE] Could not recover userId. N8N payload may fail.`);
+        }
+    }
 
     console.log(`[INVESTIGATE] Investigating ${leadsToInvestigate.length} leads`);
 
@@ -315,31 +331,32 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     const investigatedLeads = [];
 
     // Fetch User Profile for Context (Name, Job Title)
+    // We use the recovered userId here
     const { data: userProfile } = await supabase
         .from('profiles')
         .select('full_name, first_name, last_name, job_title, organization_id')
         .eq('id', userId)
         .single();
 
-    // Fetch User Company Profile (if available)
-    // Assuming 'antonia_companies' or similar table stores this, OR we construe it from organization info.
-    // For now, let's look for a company profile linked to the org.
-    const { data: companyProfile } = await supabase
-        .from('antonia_companies') // Verify table name if possible, or use organization_id to fetch from profiles/orgs
-        .select('*')
-        .eq('id', task.organization_id) // Assuming organization_id maps to company profile or similar
+    // Fetch Organization Data (Table 'organizations' only has 'name')
+    // We replaced the call to 'antonia_companies' which does not exist
+    const { data: orgData } = await supabase
+        .from('organizations') // Correct table name
+        .select('name')
+        .eq('id', task.organization_id)
         .maybeSingle();
 
-    // If no specific company profile table, we might need to rely on static data or what's in 'organization' table.
-    // Let's assume there's a valid structure or default to minimal info.
+    // Construct simplified profile using available data + defaults
     const userCompanyProfile = {
-        name: companyProfile?.name || 'Empresa',
-        sector: companyProfile?.sector || 'Tecnología',
-        description: companyProfile?.description || '',
-        services: companyProfile?.services || '',
-        valueProposition: companyProfile?.value_proposition || '',
-        website: companyProfile?.website || ''
+        name: orgData?.name || 'Tu Empresa',
+        sector: 'Tecnología', // Default since not in DB
+        description: '',
+        services: '',
+        valueProposition: '',
+        website: ''
     };
+
+
 
     const userContext = {
         id: userId,
@@ -543,7 +560,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         investigations: investigatedLeads.map((l: any) => ({
             name: l.fullName || l.name || l.full_name,
             company: l.companyName || l.company_name || l.organization?.name,
-            summarySnippet: l.research?.summary ? l.research.summary.substring(0, 100) + '...' : 'No summary available'
+            summarySnippet: l.research?.summary || l.research?.overview ? (l.research.summary || l.research.overview).substring(0, 100) + '...' : 'No summary available'
         }))
     };
 }
