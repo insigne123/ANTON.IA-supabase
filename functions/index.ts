@@ -620,11 +620,31 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
     return {
         investigatedCount: investigatedLeads.length,
-        investigations: investigatedLeads.map((l: any) => ({
-            name: l.fullName || l.name || l.full_name,
-            company: l.companyName || l.company_name || l.organization?.name,
-            summarySnippet: l.research?.summary || l.research?.overview ? (l.research.summary || l.research.overview).substring(0, 100) + '...' : 'No summary available'
-        }))
+        investigations: investigatedLeads.map((l: any) => {
+            const summary = l.research?.summary || l.research?.overview;
+
+            // Fallback: If no summary, try to construct one from sub-fields like company description
+            const fallbackSummary = l.research?.company?.description;
+
+            // DEBUG INFO if everything fails
+            let snippet = 'No summary available';
+            if (summary) {
+                snippet = summary;
+            } else if (fallbackSummary) {
+                snippet = fallbackSummary;
+            } else {
+                // Return debug info about what we ACTUALLY have
+                const keys = l.research ? Object.keys(l.research).join(', ') : 'null';
+                const preview = l.research ? JSON.stringify(l.research).substring(0, 50) : 'null';
+                snippet = `DEBUG: No summary. Keys: [${keys}]. Preview: ${preview}`;
+            }
+
+            return {
+                name: l.fullName || l.name || l.full_name,
+                company: l.companyName || l.company_name || l.organization?.name,
+                summarySnippet: snippet.substring(0, 150) + (snippet.length > 150 ? '...' : '')
+            };
+        })
     };
 }
 
