@@ -220,7 +220,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
     }
 
     // Map leads to the format expected by the API
-    const leadsFormatted = leadsToEnrich.map(lead => ({
+    const leadsFormatted = leadsToEnrich.map((lead: any) => ({
         fullName: lead.name || lead.full_name,
         title: lead.title,
         companyName: lead.organization?.name || lead.organization_name || lead.company_name,
