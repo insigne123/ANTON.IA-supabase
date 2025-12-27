@@ -41,8 +41,44 @@ async function incrementUsage(supabase: SupabaseClient, organizationId: string, 
 }
 
 // Task execution functions
+
+// Helper to reliably get UserId from payload or mission
+async function getTaskUserId(task: any, supabase: SupabaseClient): Promise<string> {
+    let { userId } = task.payload || {};
+
+    if (userId && userId !== 'anon') {
+        return userId;
+    }
+
+    // Fallback: Fetch from mission
+    // console.log(`[${task.type}] Missing userId in payload (val: ${userId}), recovering from mission...`);
+
+    // Optimistic check: maybe task row already has it? (No, task row doesn't store user_id explicitly usually, 
+    // unless added recently? Check schema? We assume NO for safety).
+
+    const { data: mission } = await supabase
+        .from('antonia_missions')
+        .select('created_by')
+        .eq('id', task.mission_id)
+        .single();
+
+    if (mission && mission.created_by) {
+        // console.log(`[${task.type}] Recovered userId: ${mission.created_by}`);
+        return mission.created_by;
+    }
+
+    console.warn(`[${task.type}] CRITICAL: Could not recover userId. Operations may fail.`);
+    return 'anon'; // Proceed with anon to let downstream fail with clear error if needed
+}
+
 async function executeCampaignGeneration(task: any, supabase: SupabaseClient, taskConfig: any) {
-    const { jobTitle, industry, campaignContext, userId, missionTitle } = task.payload;
+    let { jobTitle, industry, campaignContext, userId, missionTitle } = task.payload;
+
+    // Ensure userId
+    if (!userId || userId === 'anon') {
+        userId = await getTaskUserId(task, supabase);
+    }
+
     const generatedName = `Misión: ${missionTitle || 'Campaña Inteligente'}`;
 
     console.log('[GENERATE] Generating campaign...', generatedName);
@@ -80,6 +116,7 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
         status: 'pending',
         payload: {
             ...task.payload,
+            userId: userId, // Ensure we use the recovered userId
             campaignName: generatedName
         },
         created_at: new Date().toISOString()
@@ -102,7 +139,9 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
-    const { jobTitle, location, industry, keywords, companySize, userId } = task.payload;
+    const { jobTitle, location, industry, keywords, companySize } = task.payload;
+    const userId = await getTaskUserId(task, supabase);
+
     console.log('[SEARCH] Searching leads:', { jobTitle, location, industry });
 
     // Payload structure matching exactly what external API expects (based on nextjs route.ts)
@@ -136,7 +175,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
 
     if (leads.length > 0) {
         const leadsToInsert = leads.map((lead: any) => ({
-            user_id: task.payload.userId,
+            user_id: userId,
             organization_id: task.organization_id,
             mission_id: task.mission_id,
             name: lead.full_name || lead.name || '',
@@ -160,7 +199,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
                 type: 'ENRICH',
                 status: 'pending',
                 payload: {
-                    userId: task.payload.userId,
+                    userId: userId,
                     leads: leads.slice(0, 10),
                     enrichmentLevel: task.payload.enrichmentLevel,
                     campaignName: task.payload.campaignName
@@ -193,7 +232,8 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
-    const { leads, userId, enrichmentLevel, campaignName } = task.payload;
+    const { leads, enrichmentLevel, campaignName } = task.payload;
+    const userId = await getTaskUserId(task, supabase);
 
     console.log(`[ENRICH] Task payload:`, JSON.stringify({
         leadsCount: leads?.length || 0,
@@ -305,25 +345,13 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
-    let { leads, userId, campaignName } = task.payload;
+    let { leads, campaignName } = task.payload;
+    // Use helper for Robust Fallback
+    const userId = await getTaskUserId(task, supabase);
+
     const leadsToInvestigate = leads.slice(0, limit - (usage.leads_investigated || 0));
 
-    // ROBUST FALLBACK: If userId is missing in payload, fetch it from the mission
-    if (!userId || userId === 'anon') {
-        const { data: mission } = await supabase
-            .from('antonia_missions')
-            .select('created_by')
-            .eq('id', task.mission_id)
-            .single();
-
-        if (mission && mission.created_by) {
-            userId = mission.created_by;
-            console.log(`[INVESTIGATE] Recovered missing userId from mission: ${userId}`);
-        } else {
-            console.warn(`[INVESTIGATE] Could not recover userId. N8N payload may fail.`);
-        }
-    }
-
+    // Restore appUrl if missing (it seems present in line 354, but good to be sure or just define leadsToInvestigate)
     console.log(`[INVESTIGATE] Investigating ${leadsToInvestigate.length} leads`);
 
 
@@ -421,6 +449,10 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
             if (response.ok) {
                 // The N8N workflow returns an array, we need to extract the first item's message content if it matches the structure
                 const responseData = await response.json();
+
+                // --- DEBUGGING LOG ---
+                console.log(`[INVESTIGATE] Raw N8N Response for ${lead.email}:`, JSON.stringify(responseData).substring(0, 500));
+                // ---------------------
 
                 // Handle different response shapes (Array vs Object)
                 let researchData = null;
