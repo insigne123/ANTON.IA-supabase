@@ -1268,11 +1268,29 @@ export const antoniaTick = functions.scheduler.onSchedule({
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // --- 0. SCHEDULE DAILY TASKS FOR ACTIVE MISSIONS ---
+    // This runs the SQL function that creates daily SEARCH tasks for active missions
+    // The function uses date-based idempotency to ensure only one task per mission per day
+    try {
+        const { data: scheduledMissions, error: scheduleError } = await supabase
+            .rpc('schedule_daily_mission_tasks');
+
+        if (scheduleError) {
+            console.error('[AntoniaTick] Error scheduling daily missions:', scheduleError);
+        } else if (scheduledMissions && scheduledMissions.length > 0) {
+            console.log(`[AntoniaTick] Scheduled tasks for ${scheduledMissions.length} active missions`);
+        }
+    } catch (e) {
+        console.error('[AntoniaTick] Failed to schedule missions:', e);
+        // Don't fail the entire tick if scheduling fails
+    }
+
     // --- 1. PROCESS PENDING TASKS ---
     const { data: tasks, error } = await supabase
         .from('antonia_tasks')
         .select('*')
         .eq('status', 'pending')
+        .or(`scheduled_for.is.null,scheduled_for.lte.${new Date().toISOString()}`)
         .limit(5);
 
     if (error) {
