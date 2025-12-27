@@ -481,6 +481,16 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 }
 
                 if (researchData) {
+                    // --- ENHANCED DEBUG LOG ---
+                    console.log(`[INVESTIGATE] Parsed researchData structure:`, JSON.stringify({
+                        hasOverview: !!researchData.overview,
+                        hasSummary: !!researchData.summary,
+                        overviewPreview: researchData.overview?.substring(0, 100),
+                        summaryPreview: researchData.summary?.substring(0, 100),
+                        topLevelKeys: Object.keys(researchData)
+                    }));
+                    // -------------------------
+
                     investigatedLeads.push({ ...lead, research: researchData });
                     console.log(`[INVESTIGATE] Successfully investigated lead`);
                 } else {
