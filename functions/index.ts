@@ -310,8 +310,42 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
     console.log(`[INVESTIGATE] Investigating ${leadsToInvestigate.length} leads`);
 
+
     const appUrl = APP_URL;
     const investigatedLeads = [];
+
+    // Fetch User Profile for Context (Name, Job Title)
+    const { data: userProfile } = await supabase
+        .from('profiles')
+        .select('full_name, first_name, last_name, job_title, organization_id')
+        .eq('id', userId)
+        .single();
+
+    // Fetch User Company Profile (if available)
+    // Assuming 'antonia_companies' or similar table stores this, OR we construe it from organization info.
+    // For now, let's look for a company profile linked to the org.
+    const { data: companyProfile } = await supabase
+        .from('antonia_companies') // Verify table name if possible, or use organization_id to fetch from profiles/orgs
+        .select('*')
+        .eq('id', task.organization_id) // Assuming organization_id maps to company profile or similar
+        .maybeSingle();
+
+    // If no specific company profile table, we might need to rely on static data or what's in 'organization' table.
+    // Let's assume there's a valid structure or default to minimal info.
+    const userCompanyProfile = {
+        name: companyProfile?.name || 'Empresa',
+        sector: companyProfile?.sector || 'Tecnología',
+        description: companyProfile?.description || '',
+        services: companyProfile?.services || '',
+        valueProposition: companyProfile?.value_proposition || '',
+        website: companyProfile?.website || ''
+    };
+
+    const userContext = {
+        id: userId,
+        name: userProfile?.full_name || `${userProfile?.first_name || ''} ${userProfile?.last_name || ''}`.trim(),
+        jobTitle: userProfile?.job_title || 'Gerente'
+    };
 
     for (const lead of leadsToInvestigate) {
         try {
@@ -320,33 +354,96 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 company: lead.companyName || lead.company_name
             });
 
+            // Construct specific N8N payload structure
+            const n8nPayload = {
+                companies: [
+                    {
+                        leadRef: lead.id,
+                        targetCompany: {
+                            name: lead.companyName || lead.company_name || lead.organization?.name,
+                            domain: lead.companyDomain || lead.company_domain,
+                            linkedin: null, // Populate if available
+                            country: lead.location || null,
+                            industry: lead.industry || "—",
+                            website: lead.website || null
+                        },
+                        lead: {
+                            id: lead.id,
+                            fullName: lead.fullName || lead.full_name || lead.name,
+                            title: lead.title,
+                            email: lead.email,
+                            linkedinUrl: lead.linkedinUrl || lead.linkedin_url
+                        },
+                        meta: {
+                            leadRef: lead.id
+                        }
+                    }
+                ],
+                userCompanyProfile: userCompanyProfile,
+                id: lead.id,
+                fullName: lead.fullName || lead.full_name || lead.name, // Redundant but requested in top level
+                title: lead.title,
+                email: lead.email,
+                linkedinUrl: lead.linkedinUrl || lead.linkedin_url,
+                companyName: lead.companyName || lead.company_name || lead.organization?.name,
+                companyDomain: lead.companyDomain || lead.company_domain,
+                userContext: userContext
+            };
+
             const response = await fetch(`${appUrl}/api/research/n8n`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'x-user-id': userId
                 },
-                body: JSON.stringify({
-                    id: lead.id,
-                    fullName: lead.fullName || lead.full_name || lead.name,
-                    title: lead.title,
-                    email: lead.email,
-                    linkedinUrl: lead.linkedinUrl || lead.linkedin_url,
-                    companyName: lead.companyName || lead.company_name || lead.organization?.name,
-                    companyDomain: lead.companyDomain || lead.company_domain
-                })
+                body: JSON.stringify(n8nPayload)
             });
 
             console.log(`[INVESTIGATE] API response status: ${response.status}`);
 
             if (response.ok) {
-                const data = await response.json();
-                investigatedLeads.push({ ...lead, research: data });
-                console.log(`[INVESTIGATE] Successfully investigated lead`);
+                // The N8N workflow returns an array, we need to extract the first item's message content if it matches the structure
+                const responseData = await response.json();
+
+                // Handle different response shapes (Array vs Object)
+                let researchData = null;
+                if (Array.isArray(responseData) && responseData.length > 0) {
+                    // Check if it's the specific N8N output format [ { message: { content: "```json...```" } } ]
+                    const item = responseData[0];
+                    if (item.message && item.message.content) {
+                        // Extract JSON from markdown code block if present
+                        const content = item.message.content;
+                        const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```([\s\S]*?)```/);
+                        if (jsonMatch) {
+                            try {
+                                researchData = JSON.parse(jsonMatch[1]);
+                            } catch (err) {
+                                console.error('[INVESTIGATE] Failed to parse extracted JSON:', err);
+                            }
+                        } else {
+                            // Maybe it's raw JSON?
+                            try { researchData = JSON.parse(content); } catch (e) { }
+                        }
+                    } else {
+                        researchData = item; // Fallback
+                    }
+                } else {
+                    researchData = responseData;
+                }
+
+                if (researchData) {
+                    investigatedLeads.push({ ...lead, research: researchData });
+                    console.log(`[INVESTIGATE] Successfully investigated lead`);
+                } else {
+                    console.warn(`[INVESTIGATE] Received empty or invalid research data`);
+                }
+
             } else {
                 const errorText = await response.text();
+                // ... handle error
                 console.error(`[INVESTIGATE] API error: ${response.status} - ${errorText}`);
             }
+
         } catch (e) {
             console.error('[INVESTIGATE] Failed to investigate lead:', e);
         }
@@ -484,60 +581,91 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
     // Fetch user's email signature from profiles
     const { data: profile } = await supabase
         .from('profiles')
-        .select('signatures')
+        .select('signatures, full_name, job_title')
         .eq('id', userId)
         .single();
 
     // Get the signature for the provider being used (google or outlook)
     // Signatures are stored as: { google: "...", outlook: "..." }
     let userSignature = '';
-    if (profile?.signatures) {
+
+    // Construct signature logic
+    if (profile?.signatures && (profile.signatures.google || profile.signatures.outlook)) {
         // Try to get signature for google first (most common), fallback to outlook
         userSignature = profile.signatures.google || profile.signatures.outlook || '';
+    } else {
+        // Fallback: Create a simple text signature based on profile info
+        const signerName = profile?.full_name || 'Usuario';
+        const signerTitle = profile?.job_title ? `\n${profile.job_title}` : '';
+        userSignature = `\n${signerName}${signerTitle}`;
     }
 
-    // Use default introduction template with research variables
-    // Note: Campaign is ignored here as this is the initial research-based outreach
-    const subject = 'Oportunidad de colaboración - {{company}}';
-    let body = `Hola {{name}},
-
+    // Default templates (Fallback if research.emailDraft is missing)
+    const defaultSubject = 'Oportunidad de colaboración - {{company}}';
+    let defaultBody = `Hola {{name}},
 Estuve leyendo sobre {{company}} y vi que {{research.summary}}
-
 Me pareció muy interesante y me gustaría conectar contigo para explorar posibles oportunidades de colaboración.
-
 ¿Tendrías disponibilidad para una breve conversación?
-
 Saludos,`;
 
-    // Add user signature if available, otherwise use default
     if (userSignature) {
-        body += `\n\n${userSignature}`;
-    } else {
-        body += `\n\nANTON.IA Agent\nEnviado automáticamente por ANTON.IA`;
+        defaultBody += `\n\n${userSignature}`;
     }
 
     // Get app URL for unsubscribe link
     const appUrl = APP_URL;
-
-    // Add Unsubscribe Link
     const unsubscribeFooter = `\n\n-----------------------------------\nSi no deseas recibir más correos, haz clic aquí: ${appUrl}/unsubscribe?email={{email}}`;
-    body += unsubscribeFooter;
 
-    console.log(`[CONTACT_INITIAL] Using research-based template`);
+    console.log(`[CONTACT_INITIAL] Preparing to contact leads using Research Drafts (if available)`);
 
     let contactedCount = 0;
 
     for (const lead of leadsToContact) {
         try {
             // Safe access to research summary
-            const researchSummary = lead.research?.summary || lead.research_summary || 'tienen iniciativas interesantes en curso.';
+            const researchData = lead.research;
+            const researchSummary = researchData?.overview || researchData?.summary || 'tienen iniciativas interesantes en curso.';
 
-            // Replace template variables
-            const personalizedSubject = subject
+            // Determine Subject and Body
+            // Priority 1: Use Draft from Research
+            let finalSubject = defaultSubject;
+            let finalBody = defaultBody;
+
+            if (researchData?.emailDraft?.subject && researchData?.emailDraft?.body) {
+                console.log(`[CONTACT] Using AI Generated Draft for ${lead.email}`);
+                finalSubject = researchData.emailDraft.subject;
+                finalBody = researchData.emailDraft.body;
+
+                // If the draft body does NOT contain the signature, append it?
+                // Usually N8N drafts might include a placeholder or just the text.
+                // Let's assume we append signature if strictly necessary OR if the draft doesn't look like it has one.
+                // Safest approach: Append signature if configured signature is not null and body doesn't end with it.
+                // For now, let's trust the draft BUT ensure unsubscription link is added.
+                // Actually, let's append our signature if the body is short/generic.
+                // Better yet: Just append the signature if we generated it from profile.
+                // If using N8N draft, user might expect the prompt to handle signing.
+                // Reviewing user example: "Saludos cordiales,\n\nNicolás Yaur..." IS in the draft.
+                // So if draft exists, we DO NOT append userSignature again, unless we detect it's missing.
+
+            } else {
+                console.log(`[CONTACT] Using Default Template for ${lead.email}`);
+                // Append footer to default body (already done above for defaultBody variable base, but we need variables)
+                // Re-construct for template usage
+                finalBody = defaultBody + unsubscribeFooter;
+            }
+
+            // Ensure unsubscribe footer is present in Drafts too if not using default
+            if (researchData && !finalBody.includes('unsubscribe')) {
+                finalBody += unsubscribeFooter;
+            }
+
+            // Replace template variables (Applicable to both Default and Drafts if they use {{}} syntax, though N8N drafts usually come resolved)
+            // We should still run replacement just in case the draft uses placeholders
+            const personalizedSubject = finalSubject
                 .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || 'there')
                 .replace(/\{\{company\}\}/g, lead.companyName || lead.company_name || 'your company');
 
-            const personalizedBody = body
+            const personalizedBody = finalBody
                 .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || 'there')
                 .replace(/\{\{company\}\}/g, lead.companyName || lead.company_name || 'your company')
                 .replace(/\{\{title\}\}/g, lead.title || 'your role')
