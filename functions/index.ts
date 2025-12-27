@@ -461,17 +461,34 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                     const item = responseData[0];
                     if (item.message && item.message.content) {
                         // Extract JSON from markdown code block if present
-                        const content = item.message.content;
-                        const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```([\s\S]*?)```/);
+                        let content = item.message.content;
+
+                        // N8N might return \n as literal string characters, so replace them with actual newlines
+                        content = content.replace(/\\n/g, '\n');
+
+                        // Try multiple regex patterns to extract JSON
+                        const jsonMatch =
+                            content.match(/```json\s*\n([\s\S]*?)\n```/) ||  // Standard markdown with newlines
+                            content.match(/```json\s*([\s\S]*?)```/) ||       // Without newlines after json
+                            content.match(/```\s*\n([\s\S]*?)\n```/) ||       // Without json language specifier
+                            content.match(/```([\s\S]*?)```/);                // Minimal markdown
+
                         if (jsonMatch) {
                             try {
-                                researchData = JSON.parse(jsonMatch[1]);
+                                researchData = JSON.parse(jsonMatch[1].trim());
+                                console.log('[INVESTIGATE] Successfully parsed JSON from markdown code block');
                             } catch (err) {
                                 console.error('[INVESTIGATE] Failed to parse extracted JSON:', err);
+                                console.error('[INVESTIGATE] Attempted to parse:', jsonMatch[1].substring(0, 200));
                             }
                         } else {
-                            // Maybe it's raw JSON?
-                            try { researchData = JSON.parse(content); } catch (e) { }
+                            // Maybe it's raw JSON without markdown?
+                            try {
+                                researchData = JSON.parse(content);
+                                console.log('[INVESTIGATE] Successfully parsed raw JSON');
+                            } catch (e) {
+                                console.error('[INVESTIGATE] No markdown code block found and not valid JSON');
+                            }
                         }
                     } else {
                         researchData = item; // Fallback
