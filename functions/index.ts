@@ -1,3 +1,7 @@
+/**
+ * ANTON.IA Cloud Functions
+ * Force Deploy: 2025-12-27T10:58:00
+ */
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
