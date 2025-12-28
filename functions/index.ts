@@ -459,54 +459,56 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 // ---------------------
 
                 // Handle different response shapes (Array vs Object)
-                let researchData = null;
+                let item = null;
                 if (Array.isArray(responseData) && responseData.length > 0) {
-                    // Check if it's the specific N8N output format [ { message: { content: "```json...```" } } ]
-                    const item = responseData[0];
-                    if (item.message && item.message.content) {
-                        // Extract JSON from markdown code block if present
-                        let content = item.message.content;
+                    item = responseData[0];
+                } else if (responseData && typeof responseData === 'object') {
+                    item = responseData;
+                }
 
-                        // Normalize newlines (handle literal \n and CRLF)
-                        content = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+                let researchData = null;
 
-                        let jsonStr = null;
+                if (item && item.message && item.message.content) {
+                    // Extract JSON from markdown code block if present
+                    let content = item.message.content;
 
-                        // Strategy 1: Simple Regex for code blocks
-                        const match = content.match(/```json\s*([\s\S]*?)```/);
-                        if (match) {
-                            jsonStr = match[1];
-                        } else {
-                            // Strategy 2: Brute force find first '{' and last '}'
-                            // This ignores markdown fences entirely and just looks for the JSON object
-                            const firstOpen = content.indexOf('{');
-                            const lastClose = content.lastIndexOf('}');
+                    // Normalize newlines (handle literal \n and CRLF)
+                    content = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
 
-                            if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
-                                jsonStr = content.substring(firstOpen, lastClose + 1);
-                            }
+                    let jsonStr = null;
+
+                    // Strategy 1: Simple Regex for code blocks
+                    const match = content.match(/```json\s*([\s\S]*?)```/);
+                    if (match) {
+                        jsonStr = match[1];
+                    } else {
+                        // Strategy 2: Brute force find first '{' and last '}'
+                        const firstOpen = content.indexOf('{');
+                        const lastClose = content.lastIndexOf('}');
+
+                        if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
+                            jsonStr = content.substring(firstOpen, lastClose + 1);
                         }
+                    }
 
-                        if (jsonStr) {
-                            try {
-                                researchData = JSON.parse(jsonStr.trim());
-                                console.log('[INVESTIGATE] Successfully parsed JSON via ' + (match ? 'regex' : 'brute-force'));
-                            } catch (err) {
-                                console.error('[INVESTIGATE] Failed to parse extracted JSON:', err);
-                            }
-                        } else {
-                            try {
-                                researchData = JSON.parse(content);
-                                console.log('[INVESTIGATE] Successfully parsed raw JSON content');
-                            } catch (e) {
-                                // Ignore
-                            }
+                    if (jsonStr) {
+                        try {
+                            researchData = JSON.parse(jsonStr.trim());
+                            console.log('[INVESTIGATE] Successfully parsed JSON via ' + (match ? 'regex' : 'brute-force'));
+                        } catch (err) {
+                            console.error('[INVESTIGATE] Failed to parse extracted JSON:', err);
                         }
                     } else {
-                        researchData = item; // Fallback if message or content is missing
+                        try {
+                            researchData = JSON.parse(content);
+                            console.log('[INVESTIGATE] Successfully parsed raw JSON content');
+                        } catch (e) {
+                            // Ignore
+                        }
                     }
                 } else {
-                    researchData = responseData; // Fallback if not an array or empty array
+                    // Fallback to raw item if structure doesn't match
+                    researchData = item || responseData;
                 }
 
 
