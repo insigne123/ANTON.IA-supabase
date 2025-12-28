@@ -1,6 +1,6 @@
 /**
  * ANTON.IA Cloud Functions
- * Force Deploy: 2025-12-28T15:15:00
+ * Force Deploy: 2025-12-28T15:40:00
  */
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -472,8 +472,8 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                     // Extract JSON from markdown code block if present
                     let content = item.message.content;
 
-                    // Normalize newlines (handle literal \n and CRLF)
-                    content = content.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+                    // Normalize newlines - N8N returns DOUBLE-escaped newlines (\\n as literal string)
+                    content = content.replace(/\\\\n/g, '\n').replace(/\r\n/g, '\n');
 
                     let jsonStr = null;
 
@@ -497,13 +497,14 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                             console.log('[INVESTIGATE] Successfully parsed JSON via ' + (match ? 'regex' : 'brute-force'));
                         } catch (err) {
                             console.error('[INVESTIGATE] Failed to parse extracted JSON:', err);
+                            researchData = item; // Fallback to raw item
                         }
                     } else {
                         try {
                             researchData = JSON.parse(content);
                             console.log('[INVESTIGATE] Successfully parsed raw JSON content');
                         } catch (e) {
-                            // Ignore
+                            researchData = item; // Fallback to raw item
                         }
                     }
                 } else {
