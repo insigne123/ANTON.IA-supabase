@@ -1,6 +1,6 @@
 /**
  * ANTON.IA Cloud Functions
- * Force Deploy: 2025-12-28T13:45:00
+ * Force Deploy: 2025-12-28T15:15:00
  */
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -520,7 +520,28 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                     console.warn(`[INVESTIGATE] Parsed data missing 'overview' field`);
                 } else {
                     console.warn(`[INVESTIGATE] Received empty or invalid research data`);
-                    investigatedLeads.push({ ...lead, research: { overview: "Error parsing research data." } });
+
+                    // DEBUG: Capture why it failed
+                    let debugMsg = "Error parsing.";
+                    if (!item) debugMsg += " Item is null.";
+                    else if (!item.message) debugMsg += " No message.";
+                    else if (!item.message.content) debugMsg += " No content.";
+                    else {
+                        const c = item.message.content;
+                        debugMsg += ` Len=${c.length} Start=${c.substring(0, 20).replace(/\n/g, '\\n')}`;
+                        // Check brute force failure
+                        const first = c.indexOf('{');
+                        const last = c.lastIndexOf('}');
+                        debugMsg += ` Brute=${first},${last}`;
+                        if (first !== -1 && last !== -1) {
+                            try {
+                                JSON.parse(c.substring(first, last + 1));
+                            } catch (e: any) {
+                                debugMsg += ` Err:${e.message}`;
+                            }
+                        }
+                    }
+                    investigatedLeads.push({ ...lead, research: { overview: debugMsg } });
                 }
 
             } else {
