@@ -1,6 +1,6 @@
 /**
  * ANTON.IA Cloud Functions
- * Force Deploy: 2025-12-28T15:40:00
+ * Force Deploy: 2025-12-28T15:55:00
  */
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -560,10 +560,14 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     // Chain to CONTACT if we have investigated leads
     if (investigatedLeads.length > 0) {
 
-        // --- TIMEZONE SCHEDULING LOGIC ---
+        // --- SMART BUSINESS HOURS SCHEDULING ---
+        // Send emails between 8 AM - 6 PM in the lead's local timezone
         const now = new Date();
         const currentUtcHour = now.getUTCHours();
-        const targetHour = 8; // 8 AM local time
+        const currentUtcMinute = now.getUTCMinutes();
+
+        const businessHoursStart = 8;  // 8 AM
+        const businessHoursEnd = 18;   // 6 PM
 
         const timezoneOffsets: Record<string, number> = {
             'Chile': -3, 'Colombia': -5, 'Mexico': -6, 'Peru': -5, 'Argentina': -3, 'Spain': 1, 'España': 1
@@ -572,21 +576,54 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         const location = (leads[0]?.location || 'Chile').split(',')[0].trim();
         const utcOffset = timezoneOffsets[location] || -3;
 
-        // Calculate schedule date
-        const currentLocalHour = currentUtcHour + utcOffset;
-        let scheduleDate = new Date(now);
+        // Calculate current local time in lead's timezone
+        let currentLocalHour = currentUtcHour + utcOffset;
+        let currentLocalMinute = currentUtcMinute;
 
-        if (currentLocalHour >= targetHour) {
-            scheduleDate.setDate(scheduleDate.getDate() + 1);
+        // Handle day overflow/underflow
+        let dayOffset = 0;
+        if (currentLocalHour >= 24) {
+            currentLocalHour -= 24;
+            dayOffset = 1;
+        } else if (currentLocalHour < 0) {
+            currentLocalHour += 24;
+            dayOffset = -1;
         }
 
-        const targetUtcHour = targetHour - utcOffset;
+        let scheduleDate = new Date(now);
+        let targetLocalHour: number;
+        let targetLocalMinute: number;
+
+        // Determine when to send
+        if (currentLocalHour >= businessHoursStart && currentLocalHour < businessHoursEnd) {
+            // We're in business hours - send immediately (or within a few minutes for natural spacing)
+            targetLocalHour = currentLocalHour;
+            targetLocalMinute = currentLocalMinute + Math.floor(Math.random() * 5); // 0-5 min delay
+            console.log(`[SCHEDULING] Within business hours (${currentLocalHour}:${currentLocalMinute}), sending immediately`);
+        } else if (currentLocalHour < businessHoursStart) {
+            // Before business hours today - schedule for 8 AM today
+            targetLocalHour = businessHoursStart;
+            targetLocalMinute = Math.floor(Math.random() * 30); // Random 0-30 min after 8 AM
+            console.log(`[SCHEDULING] Before business hours, scheduling for 8 AM today`);
+        } else {
+            // After business hours - schedule for 8 AM tomorrow
+            targetLocalHour = businessHoursStart;
+            targetLocalMinute = Math.floor(Math.random() * 30);
+            dayOffset += 1;
+            console.log(`[SCHEDULING] After business hours, scheduling for 8 AM tomorrow`);
+        }
+
+        // Apply day offset
+        scheduleDate.setDate(scheduleDate.getDate() + dayOffset);
+
+        // Convert target local time to UTC
+        const targetUtcHour = targetLocalHour - utcOffset;
+        scheduleDate.setUTCHours(targetUtcHour, targetLocalMinute, 0, 0);
 
         for (const lead of investigatedLeads) {
-            scheduleDate.setUTCHours(targetUtcHour, Math.floor(Math.random() * 30), 0, 0);
             const scheduledFor = scheduleDate.toISOString();
 
-            console.log(`[SCHEDULING] Scheduled contact for ${lead.email} in ${location} at ${scheduledFor}`);
+            console.log(`[SCHEDULING] Contact for ${lead.email} in ${location} (UTC${utcOffset >= 0 ? '+' : ''}${utcOffset}) at ${scheduledFor}`);
 
             await supabase.from('antonia_tasks').insert({
                 mission_id: task.mission_id,
