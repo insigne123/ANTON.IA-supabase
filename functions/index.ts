@@ -1,6 +1,6 @@
 /**
  * ANTON.IA Cloud Functions
- * Force Deploy: 2025-12-27T10:58:00
+ * Force Deploy: 2025-12-28T13:45:00
  */
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -633,10 +633,21 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
             } else if (fallbackSummary) {
                 snippet = fallbackSummary;
             } else {
-                // Return debug info about what we ACTUALLY have
-                const keys = l.research ? Object.keys(l.research).join(', ') : 'null';
-                const preview = l.research ? JSON.stringify(l.research).substring(0, 50) : 'null';
-                snippet = `DEBUG: No summary. Keys: [${keys}]. Preview: ${preview}`;
+                // Deep inspection of what we have
+                const msgContent = l.research?.message?.content;
+                const msgKeys = l.research?.message ? Object.keys(l.research.message).join(',') : 'no_msg';
+                const reportsInfo = l.research?.reports ? `Reports: ${l.research.reports.length}` : 'no_reports';
+
+                if (typeof msgContent === 'string') {
+                    snippet = `DEBUG: Content found (${msgContent.length} chars): ${msgContent.substring(0, 100)}`;
+                } else if (l.research?.message) {
+                    snippet = `DEBUG: Message keys: [${msgKeys}]. Type of content: ${typeof msgContent}`;
+                } else if (l.research?.reports) {
+                    snippet = `DEBUG: Found reports. ${reportsInfo}. First report keys: ${Object.keys(l.research.reports[0] || {}).join(',')}`;
+                } else {
+                    const keys = l.research ? Object.keys(l.research).join(', ') : 'null';
+                    snippet = `DEBUG: Unknown struct. Keys: [${keys}]`;
+                }
             }
 
             return {
