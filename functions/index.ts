@@ -1,10 +1,9 @@
 /**
  * ANTON.IA Cloud Functions
- * Force Deploy: 2025-12-29T16:00:00 - Phase 1+2 Complete (Final)
+ * Force Deploy: 2025-12-29T19:45:00 - N8N Payload Fix
  */
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-
 // Hardcoded URLs for Cloud Functions
 const APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
@@ -46,7 +45,7 @@ async function incrementUsage(
         }
     }
 
-    console.log(`[incrementUsage] 📊 Incrementing ${type} by ${count} for org ${organizationId}${taskId ? ` (task: ${taskId})` : ''}`);
+    console.log(`[incrementUsage] 📊 Incrementing ${type} by ${count} for org ${organizationId}${taskId ? ` (task: ${taskId})` : ''} `);
 
     // Use atomic SQL function to prevent race conditions
     const params: any = {
@@ -113,7 +112,7 @@ async function getTaskUserId(task: any, supabase: SupabaseClient): Promise<strin
     }
 
     // Fallback: Fetch from mission
-    // console.log(`[${task.type}] Missing userId in payload (val: ${userId}), recovering from mission...`);
+    // console.log(`[${ task.type }] Missing userId in payload(val: ${ userId }), recovering from mission...`);
 
     const { data: mission } = await supabase
         .from('antonia_missions')
@@ -122,11 +121,11 @@ async function getTaskUserId(task: any, supabase: SupabaseClient): Promise<strin
         .single();
 
     if (mission && mission.user_id) {
-        // console.log(`[${task.type}] Recovered userId: ${mission.user_id}`);
+        // console.log(`[${ task.type }] Recovered userId: ${ mission.user_id } `);
         return mission.user_id;
     }
 
-    console.warn(`[${task.type}] CRITICAL: Could not recover userId. Operations may fail.`);
+    console.warn(`[${task.type}]CRITICAL: Could not recover userId.Operations may fail.`);
     return 'anon'; // Proceed with anon to let downstream fail with clear error if needed
 }
 
@@ -138,7 +137,7 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
         userId = await getTaskUserId(task, supabase);
     }
 
-    const generatedName = `Misión: ${missionTitle || 'Campaña Inteligente'}`;
+    const generatedName = `Misión: ${missionTitle || 'Campaña Inteligente'} `;
 
     console.log('[GENERATE] Generating campaign...', generatedName);
 
@@ -153,8 +152,8 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
     let body = existing?.body || '';
 
     if (!existing) {
-        subject = `Oportunidad para innovar en ${industry}`;
-        body = `Hola {{firstName}},\n\nEspero que estés muy bien.\n\nVi que estás liderando iniciativas de ${jobTitle} y me pareció muy relevante contactarte.\n${campaignContext ? `\nContexto específico: ${campaignContext}\n` : ''}\nMe gustaría conversar sobre cómo podemos potenciar sus resultados.\n\n¿Tienes 5 minutos esta semana?\n\nSaludos,`;
+        subject = `Oportunidad para innovar en ${industry} `;
+        body = `Hola { { firstName } }, \n\nEspero que estés muy bien.\n\nVi que estás liderando iniciativas de ${jobTitle} y me pareció muy relevante contactarte.\n${campaignContext ? `\nContexto específico: ${campaignContext}\n` : ''} \nMe gustaría conversar sobre cómo podemos potenciar sus resultados.\n\n¿Tienes 5 minutos esta semana ?\n\nSaludos, `;
 
         await supabase.from('campaigns').insert({
             organization_id: task.organization_id,
@@ -194,7 +193,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
     const limit = taskConfig?.daily_search_limit || 3;
 
     if ((usage.search_runs || 0) >= limit) {
-        console.log(`[SEARCH] Daily limit reached (${usage.search_runs}/${limit})`);
+        console.log(`[SEARCH] Daily limit reached(${usage.search_runs} / ${limit})`);
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
@@ -226,7 +225,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
     if (!response.ok) {
         const errorText = await response.text();
         console.error('[SEARCH] API Error Response:', errorText);
-        throw new Error(`Search API failed: ${response.statusText} - ${errorText}`);
+        throw new Error(`Search API failed: ${response.statusText} - ${errorText} `);
     }
 
     const data = await response.json();
@@ -248,7 +247,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
 
         await supabase.from('leads').insert(leadsToInsert);
 
-        console.log(`[SEARCH] 📊 Incrementing usage:`, {
+        console.log(`[SEARCH] 📊 Incrementing usage: `, {
             organization_id: task.organization_id,
             leads_searched: leads.length,
             search_runs: 1
@@ -293,7 +292,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
     const usage = await getDailyUsage(supabase, task.organization_id);
     const limit = mission?.daily_enrich_limit || 10;
 
-    console.log(`[ENRICH] 🔍 QUOTA CHECK:`, {
+    console.log(`[ENRICH] 🔍 QUOTA CHECK: `, {
         organization_id: task.organization_id,
         mission_id: task.mission_id,
         current_enriched: usage.leads_enriched || 0,
@@ -303,14 +302,14 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
     });
 
     if ((usage.leads_enriched || 0) >= limit) {
-        console.log(`[ENRICH] ⚠️ Daily limit reached (${usage.leads_enriched}/${limit})`);
+        console.log(`[ENRICH] ⚠️ Daily limit reached(${usage.leads_enriched} / ${limit})`);
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
     const { leads, enrichmentLevel, campaignName } = task.payload;
     const userId = await getTaskUserId(task, supabase);
 
-    console.log(`[ENRICH] Task payload:`, JSON.stringify({
+    console.log(`[ENRICH] Task payload: `, JSON.stringify({
         leadsCount: leads?.length || 0,
         userId,
         enrichmentLevel,
@@ -327,7 +326,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
     console.log(`[ENRICH] Enriching ${leadsToEnrich.length} leads`);
 
     const appUrl = APP_URL;
-    console.log(`[ENRICH] Using appUrl: ${appUrl}`);
+    console.log(`[ENRICH] Using appUrl: ${appUrl} `);
 
     if (!appUrl) {
         console.error('[ENRICH] APP_URL not configured!');
@@ -346,7 +345,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
     console.log(`[ENRICH] Calling enrichment API with ${leadsFormatted.length} leads`);
 
     try {
-        const response = await fetch(`${appUrl}/api/opportunities/enrich-apollo`, {
+        const response = await fetch(`${appUrl} /api/opportunities / enrich - apollo`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -359,7 +358,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
             })
         });
 
-        console.log(`[ENRICH] API response status: ${response.status}`);
+        console.log(`[ENRICH] API response status: ${response.status} `);
 
         if (response.ok) {
             const data = await response.json();
@@ -395,7 +394,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
             };
         } else {
             const errorText = await response.text();
-            console.error(`[ENRICH] API error: ${response.status} - ${errorText}`);
+            console.error(`[ENRICH] API error: ${response.status} - ${errorText} `);
             return { enrichedCount: 0, error: errorText };
         }
     } catch (e) {
@@ -415,7 +414,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     const usage = await getDailyUsage(supabase, task.organization_id);
     const limit = mission?.daily_investigate_limit || 5;
 
-    console.log(`[INVESTIGATE] 🔍 QUOTA CHECK:`, {
+    console.log(`[INVESTIGATE] 🔍 QUOTA CHECK: `, {
         organization_id: task.organization_id,
         mission_id: task.mission_id,
         current_investigated: usage.leads_investigated || 0,
@@ -425,7 +424,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     });
 
     if ((usage.leads_investigated || 0) >= limit) {
-        console.log(`[INVESTIGATE] ⚠️ Daily limit reached (${usage.leads_investigated}/${limit})`);
+        console.log(`[INVESTIGATE] ⚠️ Daily limit reached(${usage.leads_investigated} / ${limit})`);
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
@@ -463,13 +462,13 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
     const userContext = {
         id: userId,
-        name: userProfile?.full_name || `${userProfile?.first_name || ''} ${userProfile?.last_name || ''}`.trim(),
+        name: userProfile?.full_name || `${userProfile?.first_name || ''} ${userProfile?.last_name || ''} `.trim(),
         jobTitle: userProfile?.job_title || profileExtended.role || 'Gerente'
     };
 
     for (const lead of leadsToInvestigate) {
         try {
-            console.log(`[INVESTIGATE] Investigating lead:`, {
+            console.log(`[INVESTIGATE] Investigating lead: `, {
                 name: lead.fullName || lead.full_name,
                 company: lead.companyName || lead.company_name
             });
@@ -510,7 +509,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 userContext: userContext
             };
 
-            const response = await fetch(`${appUrl}/api/research/n8n`, {
+            const response = await fetch(`${appUrl} /api/research / n8n`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -519,14 +518,14 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 body: JSON.stringify(n8nPayload)
             });
 
-            console.log(`[INVESTIGATE] API response status: ${response.status}`);
+            console.log(`[INVESTIGATE] API response status: ${response.status} `);
 
             if (response.ok) {
                 // The N8N workflow returns an array, we need to extract the first item's message content if it matches the structure
                 const responseData = await response.json();
 
                 // --- DEBUGGING LOG ---
-                console.log(`[INVESTIGATE] Raw N8N Response for ${lead.email}:`, JSON.stringify(responseData).substring(0, 500));
+                console.log(`[INVESTIGATE] Raw N8N Response for ${lead.email}: `, JSON.stringify(responseData).substring(0, 500));
                 // ---------------------
 
                 // Handle different response shapes (Array vs Object)
@@ -549,7 +548,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                     let jsonStr = null;
 
                     // Strategy 1: Simple Regex for code blocks
-                    const match = content.match(/```json\s*([\s\S]*?)```/);
+                    const match = content.match(/```json\s * ([\s\S] *?)```/);
                     if (match) {
                         jsonStr = match[1];
                     } else {
@@ -600,16 +599,16 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                     else if (!item.message.content) debugMsg += " No content.";
                     else {
                         const c = item.message.content;
-                        debugMsg += ` Len=${c.length} Start=${c.substring(0, 20).replace(/\n/g, '\\n')}`;
+                        debugMsg += ` Len = ${c.length} Start = ${c.substring(0, 20).replace(/\n/g, '\\n')} `;
                         // Check brute force failure
                         const first = c.indexOf('{');
                         const last = c.lastIndexOf('}');
-                        debugMsg += ` Brute=${first},${last}`;
+                        debugMsg += ` Brute = ${first},${last} `;
                         if (first !== -1 && last !== -1) {
                             try {
                                 JSON.parse(c.substring(first, last + 1));
                             } catch (e: any) {
-                                debugMsg += ` Err:${e.message}`;
+                                debugMsg += ` Err:${e.message} `;
                             }
                         }
                     }
@@ -618,15 +617,15 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
             } else {
                 const errorText = await response.text();
-                console.error(`[INVESTIGATE] API error: ${response.status} - ${errorText}`);
+                console.error(`[INVESTIGATE] API error: ${response.status} - ${errorText} `);
             }
 
         } catch (e) {
             console.error('[INVESTIGATE] Failed to investigate lead:', e);
 
             // Fallback: Use generic summary based on available lead data
-            const fallbackSummary = `${lead.companyName || 'Company'} - ${lead.title || 'Professional'}. ` +
-                `${lead.email ? `Contact: ${lead.email}` : 'Contact information available.'}`;
+            const fallbackSummary = `${lead.companyName || 'Company'} - ${lead.title || 'Professional'}.` +
+                `${lead.email ? `Contact: ${lead.email}` : 'Contact information available.'} `;
 
             investigatedLeads.push({
                 ...lead,
@@ -685,7 +684,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
             // We're in business hours - send immediately (or within a few minutes for natural spacing)
             targetLocalHour = currentLocalHour;
             targetLocalMinute = currentLocalMinute + Math.floor(Math.random() * 5); // 0-5 min delay
-            console.log(`[SCHEDULING] Within business hours (${currentLocalHour}:${currentLocalMinute}), sending immediately`);
+            console.log(`[SCHEDULING] Within business hours(${currentLocalHour}: ${currentLocalMinute}), sending immediately`);
         } else if (currentLocalHour < businessHoursStart) {
             // Before business hours today - schedule for 8 AM today
             targetLocalHour = businessHoursStart;
@@ -709,7 +708,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         for (const lead of investigatedLeads) {
             const scheduledFor = scheduleDate.toISOString();
 
-            console.log(`[SCHEDULING] Contact for ${lead.email} in ${location} (UTC${utcOffset >= 0 ? '+' : ''}${utcOffset}) at ${scheduledFor}`);
+            console.log(`[SCHEDULING] Contact for ${lead.email} in ${location}(UTC${utcOffset >= 0 ? '+' : ''}${utcOffset}) at ${scheduledFor} `);
 
             await supabase.from('antonia_tasks').insert({
                 mission_id: task.mission_id,
@@ -757,10 +756,10 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
         .from('contacted_leads')
         .select('*', { count: 'exact', head: true })
         .eq('organization_id', task.organization_id)
-        .gte('created_at', `${today}T00:00:00Z`);
+        .gte('created_at', `${today} T00:00:00Z`);
 
     if ((contactsToday || 0) >= limit) {
-        console.log(`[CONTACT] Daily limit reached (${contactsToday}/${limit})`);
+        console.log(`[CONTACT] Daily limit reached(${contactsToday} / ${limit})`);
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
@@ -787,20 +786,20 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
     } else {
         // Fallback: Create a simple text signature based on profile info
         const signerName = profile?.full_name || 'Usuario';
-        const signerTitle = profile?.job_title ? `\n${profile.job_title}` : '';
-        userSignature = `\n${signerName}${signerTitle}`;
+        const signerTitle = profile?.job_title ? `\n${profile.job_title} ` : '';
+        userSignature = `\n${signerName}${signerTitle} `;
     }
 
     // Default templates (Fallback if research.emailDraft is missing)
     const defaultSubject = 'Oportunidad de colaboración - {{company}}';
-    let defaultBody = `Hola {{name}},
-Estuve leyendo sobre {{company}} y vi que {{research.summary}}
+    let defaultBody = `Hola { { name } },
+Estuve leyendo sobre { { company } } y vi que { { research.summary } }
 Me pareció muy interesante y me gustaría conectar contigo para explorar posibles oportunidades de colaboración.
-¿Tendrías disponibilidad para una breve conversación?
-Saludos,`;
+¿Tendrías disponibilidad para una breve conversación ?
+    Saludos, `;
 
     if (userSignature) {
-        defaultBody += `\n\n${userSignature}`;
+        defaultBody += `\n\n${userSignature} `;
     }
 
     // Get app URL for unsubscribe link
@@ -868,13 +867,13 @@ Saludos,`;
             let cleanedBody = personalizedBody;
 
             if (unreplacedVars && unreplacedVars.length > 0) {
-                console.warn(`[CONTACT] Unreplaced variables found for ${lead.email}:`, unreplacedVars);
+                console.warn(`[CONTACT] Unreplaced variables found for ${lead.email}: `, unreplacedVars);
                 cleanedBody = personalizedBody.replace(/\{\{[^}]+\}\}/g, '[información]');
             }
 
-            console.log(`[CONTACT] Sending email to ${lead.email}`);
+            console.log(`[CONTACT] Sending email to ${lead.email} `);
 
-            const response = await fetch(`${appUrl}/api/contact/send`, {
+            const response = await fetch(`${appUrl} /api/contact / send`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -891,12 +890,12 @@ Saludos,`;
                 })
             });
 
-            console.log(`[CONTACT] API response status: ${response.status}`);
+            console.log(`[CONTACT] API response status: ${response.status} `);
 
             if (response.ok) {
                 contactedCount++;
                 const resData = await response.json();
-                console.log(`[CONTACT] Successfully contacted lead via ${resData.provider}`);
+                console.log(`[CONTACT] Successfully contacted lead via ${resData.provider} `);
 
                 await supabase.from('contacted_leads').insert({
                     user_id: userId,
@@ -910,14 +909,14 @@ Saludos,`;
                 });
             } else {
                 const errorText = await response.text();
-                console.error(`[CONTACT] API error: ${response.status} - ${errorText}`);
+                console.error(`[CONTACT] API error: ${response.status} - ${errorText} `);
 
                 // Track error for reporting
-                lead.error = `API Error ${response.status}: ${errorText.substring(0, 100)}`;
+                lead.error = `API Error ${response.status}: ${errorText.substring(0, 100)} `;
             }
         } catch (e: any) {
             console.error('[CONTACT] Failed to contact lead:', e);
-            lead.error = `Exception: ${e.message}`;
+            lead.error = `Exception: ${e.message} `;
         }
     }
 
@@ -959,7 +958,7 @@ async function executeEvaluate(task: any, supabase: SupabaseClient) {
         const score = contactedLead?.engagement_score || 0;
         const hasReplied = interactions?.some((i: any) => i.type === 'reply');
 
-        console.log(`[EVALUATE] Leading ${lead.email} - Score: ${score}, Replied: ${hasReplied}`);
+        console.log(`[EVALUATE] Leading ${lead.email} - Score: ${score}, Replied: ${hasReplied} `);
 
         // AI LOGIC PLACEHOLDER (To be replaced with actual LLM call)
         // Rule-based fallback for now:
@@ -1041,7 +1040,7 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
 
         if (!mission) throw new Error('Mission not found');
 
-        subject = `Reporte de Misión: ${mission.title}`;
+        subject = `Reporte de Misión: ${mission.title} `;
 
         // Fetch Metrics
         const { count: leadsFound } = await supabase.from('leads').select('*', { count: 'exact', head: true }).eq('mission_id', missionId);
@@ -1066,328 +1065,328 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
 
         // HTML Template
         htmlContent = `
-        <!DOCTYPE html>
+    < !DOCTYPE html >
         <html>
         <head>
-            <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { 
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    padding: 20px;
-                    line-height: 1.6;
-                }
-                .container { 
-                    max-width: 800px; 
-                    margin: 0 auto; 
-                    background: #ffffff; 
-                    border-radius: 16px; 
-                    overflow: hidden; 
-                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-                }
-                .header { 
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: #ffffff; 
-                    padding: 40px 30px; 
-                    text-align: center;
-                    position: relative;
-                }
+        <style>
+                * { margin: 0; padding: 0; box- sizing: border - box; }
+                body {
+    font - family: -apple - system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans - serif;
+    background: linear - gradient(135deg, #667eea 0 %, #764ba2 100 %);
+    padding: 20px;
+    line - height: 1.6;
+}
+                .container {
+    max - width: 800px;
+    margin: 0 auto;
+    background: #ffffff;
+    border - radius: 16px;
+    overflow: hidden;
+    box - shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+                .header {
+    background: linear - gradient(135deg, #667eea 0 %, #764ba2 100 %);
+    color: #ffffff;
+    padding: 40px 30px;
+    text - align: center;
+    position: relative;
+}
                 .header::after {
-                    content: '';
-                    position: absolute;
-                    bottom: 0;
-                    left: 0;
-                    right: 0;
-                    height: 4px;
-                    background: linear-gradient(90deg, #fbbf24, #f59e0b, #fbbf24);
-                }
-                .header h1 { 
-                    margin: 0 0 10px 0; 
-                    font-size: 32px; 
-                    font-weight: 700;
-                    text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                }
-                .header p { 
-                    font-size: 18px; 
-                    opacity: 0.95;
-                    font-weight: 300;
-                }
-                .mission-info {
-                    background: #f8fafc;
-                    padding: 25px 30px;
-                    border-bottom: 1px solid #e2e8f0;
-                }
-                .mission-info-grid {
-                    display: grid;
-                    grid-template-columns: repeat(3, 1fr);
-                    gap: 20px;
-                }
-                .info-item {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 6px;
-                }
-                .info-label {
-                    font-size: 11px;
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                    color: #64748b;
-                    font-weight: 600;
-                    line-height: 1.2;
-                }
-                .info-value {
-                    font-size: 15px;
-                    color: #1e293b;
-                    font-weight: 600;
-                    line-height: 1.3;
-                }
-                .stats-section {
-                    padding: 30px;
-                }
-                .section-title {
-                    font-size: 20px;
-                    font-weight: 700;
-                    color: #1e293b;
-                    margin-bottom: 20px;
-                    padding-bottom: 10px;
-                    border-bottom: 2px solid #e2e8f0;
-                }
-                .stats-grid { 
-                    display: grid; 
-                    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); 
-                    gap: 20px; 
-                    margin-bottom: 30px;
-                }
-                .stat-card { 
-                    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-                    padding: 24px; 
-                    border-radius: 12px; 
-                    text-align: center; 
-                    border: 1px solid #e2e8f0;
-                    transition: transform 0.2s, box-shadow 0.2s;
-                    position: relative;
-                    overflow: hidden;
-                }
-                .stat-card::before {
-                    content: '';
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    height: 3px;
-                    background: linear-gradient(90deg, #667eea, #764ba2);
-                }
-                .stat-card:hover {
-                    transform: translateY(-2px);
-                    box-shadow: 0 8px 16px rgba(0,0,0,0.1);
-                }
-                .stat-value { 
-                    font-size: 36px; 
-                    font-weight: 800; 
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
-                    background-clip: text;
-                    margin-bottom: 8px;
-                }
-                .stat-label { 
-                    font-size: 13px; 
-                    text-transform: uppercase; 
-                    letter-spacing: 1px; 
-                    color: #64748b; 
-                    font-weight: 600;
-                }
-                .conversion-metrics {
-                    background: #fefce8;
-                    border: 1px solid #fde047;
-                    border-radius: 12px;
-                    padding: 20px;
-                    margin-bottom: 30px;
-                }
-                .conversion-title {
-                    font-size: 16px;
-                    font-weight: 700;
-                    color: #854d0e;
-                    margin-bottom: 15px;
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                }
-                .conversion-title::before {
-                    content: '📊';
-                    font-size: 20px;
-                }
-                .conversion-grid {
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-                    gap: 15px;
-                }
-                .conversion-item {
-                    text-align: center;
-                }
-                .conversion-value {
-                    font-size: 28px;
-                    font-weight: 800;
-                    color: #ca8a04;
-                }
-                .conversion-label {
-                    font-size: 12px;
-                    color: #854d0e;
-                    margin-top: 4px;
-                }
-                .progress-bar {
-                    background: #e2e8f0;
-                    height: 8px;
-                    border-radius: 4px;
-                    overflow: hidden;
-                    margin-top: 8px;
-                }
-                .progress-fill {
-                    height: 100%;
-                    background: linear-gradient(90deg, #667eea, #764ba2);
-                    border-radius: 4px;
-                    transition: width 0.3s ease;
-                }
-                .summary-section {
-                    background: #f8fafc;
-                    padding: 25px;
-                    border-radius: 12px;
-                    margin-bottom: 20px;
-                }
-                .summary-section h3 {
-                    font-size: 18px;
-                    font-weight: 700;
-                    color: #1e293b;
-                    margin-bottom: 15px;
-                }
-                .summary-section p {
-                    color: #475569;
-                    line-height: 1.8;
-                    margin-bottom: 12px;
-                }
-                .status-badge {
-                    display: inline-block;
-                    padding: 6px 16px;
-                    border-radius: 20px;
-                    font-size: 13px;
-                    font-weight: 700;
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                }
-                .status-active {
-                    background: #dcfce7;
-                    color: #166534;
-                }
-                .status-paused {
-                    background: #fef3c7;
-                    color: #92400e;
-                }
-                .status-completed {
-                    background: #dbeafe;
-                    color: #1e40af;
-                }
-                .footer { 
-                    background: #1e293b;
-                    padding: 20px; 
-                    text-align: center; 
-                    font-size: 13px; 
-                    color: #94a3b8;
-                }
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear - gradient(90deg, #fbbf24, #f59e0b, #fbbf24);
+}
+                .header h1 {
+    margin: 0 0 10px 0;
+    font - size: 32px;
+    font - weight: 700;
+    text - shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+                .header p {
+    font - size: 18px;
+    opacity: 0.95;
+    font - weight: 300;
+}
+                .mission - info {
+    background: #f8fafc;
+    padding: 25px 30px;
+    border - bottom: 1px solid #e2e8f0;
+}
+                .mission - info - grid {
+    display: grid;
+    grid - template - columns: repeat(3, 1fr);
+    gap: 20px;
+}
+                .info - item {
+    display: flex;
+    flex - direction: column;
+    gap: 6px;
+}
+                .info - label {
+    font - size: 11px;
+    text - transform: uppercase;
+    letter - spacing: 0.5px;
+    color: #64748b;
+    font - weight: 600;
+    line - height: 1.2;
+}
+                .info - value {
+    font - size: 15px;
+    color: #1e293b;
+    font - weight: 600;
+    line - height: 1.3;
+}
+                .stats - section {
+    padding: 30px;
+}
+                .section - title {
+    font - size: 20px;
+    font - weight: 700;
+    color: #1e293b;
+    margin - bottom: 20px;
+    padding - bottom: 10px;
+    border - bottom: 2px solid #e2e8f0;
+}
+                .stats - grid {
+    display: grid;
+    grid - template - columns: repeat(auto - fit, minmax(180px, 1fr));
+    gap: 20px;
+    margin - bottom: 30px;
+}
+                .stat - card {
+    background: linear - gradient(135deg, #f8fafc 0 %, #f1f5f9 100 %);
+    padding: 24px;
+    border - radius: 12px;
+    text - align: center;
+    border: 1px solid #e2e8f0;
+    transition: transform 0.2s, box - shadow 0.2s;
+    position: relative;
+    overflow: hidden;
+}
+                .stat - card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear - gradient(90deg, #667eea, #764ba2);
+}
+                .stat - card:hover {
+    transform: translateY(-2px);
+    box - shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+}
+                .stat - value {
+    font - size: 36px;
+    font - weight: 800;
+    background: linear - gradient(135deg, #667eea 0 %, #764ba2 100 %);
+    -webkit - background - clip: text;
+    -webkit - text - fill - color: transparent;
+    background - clip: text;
+    margin - bottom: 8px;
+}
+                .stat - label {
+    font - size: 13px;
+    text - transform: uppercase;
+    letter - spacing: 1px;
+    color: #64748b;
+    font - weight: 600;
+}
+                .conversion - metrics {
+    background: #fefce8;
+    border: 1px solid #fde047;
+    border - radius: 12px;
+    padding: 20px;
+    margin - bottom: 30px;
+}
+                .conversion - title {
+    font - size: 16px;
+    font - weight: 700;
+    color: #854d0e;
+    margin - bottom: 15px;
+    display: flex;
+    align - items: center;
+    gap: 8px;
+}
+                .conversion - title::before {
+    content: '📊';
+    font - size: 20px;
+}
+                .conversion - grid {
+    display: grid;
+    grid - template - columns: repeat(auto - fit, minmax(150px, 1fr));
+    gap: 15px;
+}
+                .conversion - item {
+    text - align: center;
+}
+                .conversion - value {
+    font - size: 28px;
+    font - weight: 800;
+    color: #ca8a04;
+}
+                .conversion - label {
+    font - size: 12px;
+    color: #854d0e;
+    margin - top: 4px;
+}
+                .progress - bar {
+    background: #e2e8f0;
+    height: 8px;
+    border - radius: 4px;
+    overflow: hidden;
+    margin - top: 8px;
+}
+                .progress - fill {
+    height: 100 %;
+    background: linear - gradient(90deg, #667eea, #764ba2);
+    border - radius: 4px;
+    transition: width 0.3s ease;
+}
+                .summary - section {
+    background: #f8fafc;
+    padding: 25px;
+    border - radius: 12px;
+    margin - bottom: 20px;
+}
+                .summary - section h3 {
+    font - size: 18px;
+    font - weight: 700;
+    color: #1e293b;
+    margin - bottom: 15px;
+}
+                .summary - section p {
+    color: #475569;
+    line - height: 1.8;
+    margin - bottom: 12px;
+}
+                .status - badge {
+    display: inline - block;
+    padding: 6px 16px;
+    border - radius: 20px;
+    font - size: 13px;
+    font - weight: 700;
+    text - transform: uppercase;
+    letter - spacing: 0.5px;
+}
+                .status - active {
+    background: #dcfce7;
+    color: #166534;
+}
+                .status - paused {
+    background: #fef3c7;
+    color: #92400e;
+}
+                .status - completed {
+    background: #dbeafe;
+    color: #1e40af;
+}
+                .footer {
+    background: #1e293b;
+    padding: 20px;
+    text - align: center;
+    font - size: 13px;
+    color: #94a3b8;
+}
                 .footer strong {
-                    color: #e2e8f0;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>📊 Reporte de Misión</h1>
-                    <p>${mission.title}</p>
-                </div>
-                
-                <div class="mission-info">
-                    <div class="mission-info-grid">
-                        <div class="info-item">
-                            <span class="info-label">Fecha de Inicio</span>
-                            <span class="info-value">${new Date(mission.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Estado</span>
-                            <span class="status-badge status-${mission.status}">${mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : 'COMPLETADA'}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Objetivo</span>
-                            <span class="info-value">${mission.params?.jobTitle || 'N/A'}</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="stats-section">
-                    <h2 class="section-title">Métricas Principales</h2>
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="stat-value">${leadsFound || 0}</div>
-                            <div class="stat-label">Leads Encontrados</div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: 100%;"></div>
-                            </div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-value">${leadsEnriched || 0}</div>
-                            <div class="stat-label">Enriquecidos</div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: ${enrichmentRate}%;"></div>
-                            </div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-value">${leadsContacted || 0}</div>
-                            <div class="stat-label">Contactados</div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: ${contactRate}%;"></div>
-                            </div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-value">${replies || 0}</div>
-                            <div class="stat-label">Respuestas</div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: ${responseRate}%;"></div>
-                            </div>
-                        </div>
+    color: #e2e8f0;
+}
+</style>
+    </head>
+    < body >
+    <div class="container" >
+        <div class="header" >
+            <h1>📊 Reporte de Misión </h1>
+                < p > ${mission.title} </p>
                     </div>
 
-                    <div class="conversion-metrics">
-                        <div class="conversion-title">Tasas de Conversión</div>
-                        <div class="conversion-grid">
-                            <div class="conversion-item">
-                                <div class="conversion-value">${enrichmentRate}%</div>
-                                <div class="conversion-label">Enriquecimiento</div>
-                            </div>
-                            <div class="conversion-item">
-                                <div class="conversion-value">${contactRate}%</div>
-                                <div class="conversion-label">Contacto</div>
-                            </div>
-                            <div class="conversion-item">
-                                <div class="conversion-value">${responseRate}%</div>
-                                <div class="conversion-label">Respuesta</div>
-                            </div>
-                        </div>
-                    </div>
+                    < div class="mission-info" >
+                        <div class="mission-info-grid" >
+                            <div class="info-item" >
+                                <span class="info-label" > Fecha de Inicio </span>
+                                    < span class="info-value" > ${new Date(mission.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })} </span>
+                                        </div>
+                                        < div class="info-item" >
+                                            <span class="info-label" > Estado </span>
+                                                < span class="status-badge status-${mission.status}" > ${mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : 'COMPLETADA'} </span>
+                                                    </div>
+                                                    < div class="info-item" >
+                                                        <span class="info-label" > Objetivo </span>
+                                                            < span class="info-value" > ${mission.params?.jobTitle || 'N/A'} </span>
+                                                                </div>
+                                                                </div>
+                                                                </div>
 
-                    <div class="summary-section">
-                        <h3>📋 Resumen Ejecutivo</h3>
-                        <p>La misión <strong>"${mission.title}"</strong> comenzó el <strong>${new Date(mission.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}</strong> y ha estado procesando prospectos de forma automática según los criterios definidos.</p>
-                        <p><strong>Progreso:</strong> De ${leadsFound || 0} leads encontrados, se han enriquecido ${leadsEnriched || 0} (${enrichmentRate}%) y contactado ${leadsContacted || 0} (${contactRate}%). Se han recibido ${replies || 0} respuestas, lo que representa una tasa de respuesta del ${responseRate}%.</p>
-                        <p><strong>Estado actual:</strong> <span class="status-badge status-${mission.status}">${mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : 'COMPLETADA'}</span></p>
-                    </div>
-                </div>
+                                                                < div class="stats-section" >
+                                                                    <h2 class="section-title" > Métricas Principales </h2>
+                                                                        < div class="stats-grid" >
+                                                                            <div class="stat-card" >
+                                                                                <div class="stat-value" > ${leadsFound || 0} </div>
+                                                                                    < div class="stat-label" > Leads Encontrados </div>
+                                                                                        < div class="progress-bar" >
+                                                                                            <div class="progress-fill" style = "width: 100%;" > </div>
+                                                                                                </div>
+                                                                                                </div>
+                                                                                                < div class="stat-card" >
+                                                                                                    <div class="stat-value" > ${leadsEnriched || 0} </div>
+                                                                                                        < div class="stat-label" > Enriquecidos </div>
+                                                                                                            < div class="progress-bar" >
+                                                                                                                <div class="progress-fill" style = "width: ${enrichmentRate}%;" > </div>
+                                                                                                                    </div>
+                                                                                                                    </div>
+                                                                                                                    < div class="stat-card" >
+                                                                                                                        <div class="stat-value" > ${leadsContacted || 0} </div>
+                                                                                                                            < div class="stat-label" > Contactados </div>
+                                                                                                                                < div class="progress-bar" >
+                                                                                                                                    <div class="progress-fill" style = "width: ${contactRate}%;" > </div>
+                                                                                                                                        </div>
+                                                                                                                                        </div>
+                                                                                                                                        < div class="stat-card" >
+                                                                                                                                            <div class="stat-value" > ${replies || 0} </div>
+                                                                                                                                                < div class="stat-label" > Respuestas </div>
+                                                                                                                                                    < div class="progress-bar" >
+                                                                                                                                                        <div class="progress-fill" style = "width: ${responseRate}%;" > </div>
+                                                                                                                                                            </div>
+                                                                                                                                                            </div>
+                                                                                                                                                            </div>
 
-                <div class="footer">
-                    <strong>🤖 Generado automáticamente por Antonia AI</strong><br>
+                                                                                                                                                            < div class="conversion-metrics" >
+                                                                                                                                                                <div class="conversion-title" > Tasas de Conversión </div>
+                                                                                                                                                                    < div class="conversion-grid" >
+                                                                                                                                                                        <div class="conversion-item" >
+                                                                                                                                                                            <div class="conversion-value" > ${enrichmentRate}% </div>
+                                                                                                                                                                                < div class="conversion-label" > Enriquecimiento </div>
+                                                                                                                                                                                    </div>
+                                                                                                                                                                                    < div class="conversion-item" >
+                                                                                                                                                                                        <div class="conversion-value" > ${contactRate}% </div>
+                                                                                                                                                                                            < div class="conversion-label" > Contacto </div>
+                                                                                                                                                                                                </div>
+                                                                                                                                                                                                < div class="conversion-item" >
+                                                                                                                                                                                                    <div class="conversion-value" > ${responseRate}% </div>
+                                                                                                                                                                                                        < div class="conversion-label" > Respuesta </div>
+                                                                                                                                                                                                            </div>
+                                                                                                                                                                                                            </div>
+                                                                                                                                                                                                            </div>
+
+                                                                                                                                                                                                            < div class="summary-section" >
+                                                                                                                                                                                                                <h3>📋 Resumen Ejecutivo </h3>
+                                                                                                                                                                                                                    < p > La misión < strong > "${mission.title}" < /strong> comenzó el <strong>${new Date(mission.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}</strong > y ha estado procesando prospectos de forma automática según los criterios definidos.</p>
+                                                                                                                                                                                                                        < p > <strong>Progreso: </strong> De ${leadsFound || 0} leads encontrados, se han enriquecido ${leadsEnriched || 0} (${enrichmentRate}%) y contactado ${leadsContacted || 0} (${contactRate}%). Se han recibido ${replies || 0} respuestas, lo que representa una tasa de respuesta del ${responseRate}%.</p >
+                                                                                                                                                                                                                            <p><strong>Estado actual: </strong> <span class="status-badge status-${mission.status}">${mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : 'COMPLETADA'}</span > </p>
+                                                                                                                                                                                                                                </div>
+                                                                                                                                                                                                                                </div>
+
+                                                                                                                                                                                                                                < div class="footer" >
+                                                                                                                                                                                                                                    <strong>🤖 Generado automáticamente por Antonia AI </strong><br>
                     ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                </div>
-            </div>
-        </body>
-        </html>
+</div>
+    </div>
+    </body>
+    </html>
         `;
     }
 
@@ -1415,7 +1414,7 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
     const { data: { user: authUser }, error: authError } = await supabase.auth.admin.getUserById(userId);
 
     if (authUser && authUser.email) {
-        console.log(`[REPORT] Sending email to ${authUser.email}`);
+        console.log(`[REPORT] Sending email to ${authUser.email} `);
         // We can't use 'executeInitialContact' API call style because that uses user's connected GMAIL.
         // Reports should ideally come from "system@antonia.ai" (Resend/SendGrid).
         // BUT user configuration likely only has THEIR connected account.
@@ -1423,7 +1422,7 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         // Let's assume self-send for now using their connected account.
 
         const appUrl = APP_URL;
-        await fetch(`${appUrl}/api/contact/send`, {
+        await fetch(`${appUrl} /api/contact / send`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
             body: JSON.stringify({
@@ -1457,8 +1456,8 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
 
     for (const lead of leads) {
         try {
-            console.log(`[CONTACT_CAMPAIGN] Sending campaign email to ${lead.email}`);
-            const response = await fetch(`${appUrl}/api/contact/send`, {
+            console.log(`[CONTACT_CAMPAIGN] Sending campaign email to ${lead.email} `);
+            const response = await fetch(`${appUrl} /api/contact / send`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
