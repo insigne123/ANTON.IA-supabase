@@ -345,7 +345,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
     console.log(`[ENRICH] Calling enrichment API with ${leadsFormatted.length} leads`);
 
     try {
-        const response = await fetch(`${appUrl} /api/opportunities / enrich - apollo`, {
+        const response = await fetch(`${appUrl}/api/opportunities/enrich-apollo`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
