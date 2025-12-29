@@ -1,6 +1,6 @@
 /**
  * ANTON.IA Cloud Functions
- * Force Deploy: 2025-12-28T15:55:00
+ * Force Deploy: 2025-12-29T16:00:00 - Phase 1+2 Complete (Final)
  */
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -25,23 +25,39 @@ async function getDailyUsage(supabase: SupabaseClient, organizationId: string) {
 async function incrementUsage(supabase: SupabaseClient, organizationId: string, type: 'search' | 'enrich' | 'investigate' | 'search_run', count: number) {
     const today = new Date().toISOString().split('T')[0];
 
-    let col = '';
-    if (type === 'search') col = 'leads_searched';
-    else if (type === 'search_run') col = 'search_runs';
-    else if (type === 'enrich') col = 'leads_enriched';
-    else col = 'leads_investigated';
+    // Use atomic SQL function to prevent race conditions
+    const params: any = {
+        p_organization_id: organizationId,
+        p_date: today,
+        p_leads_searched: type === 'search' ? count : 0,
+        p_search_runs: type === 'search_run' ? count : 0,
+        p_leads_enriched: type === 'enrich' ? count : 0,
+        p_leads_investigated: type === 'investigate' ? count : 0
+    };
 
-    const current = await getDailyUsage(supabase, organizationId);
-    const newCount = (current[col] || 0) + count;
+    const { error } = await supabase.rpc('increment_daily_usage', params);
 
-    await supabase
-        .from('antonia_daily_usage')
-        .upsert({
-            organization_id: organizationId,
-            date: today,
-            [col]: newCount,
-            updated_at: new Date().toISOString()
-        }, { onConflict: 'organization_id,date' });
+    if (error) {
+        console.error('[incrementUsage] Failed to increment:', error);
+        // Fallback to old method if RPC fails
+        const current = await getDailyUsage(supabase, organizationId);
+        let col = '';
+        if (type === 'search') col = 'leads_searched';
+        else if (type === 'search_run') col = 'search_runs';
+        else if (type === 'enrich') col = 'leads_enriched';
+        else col = 'leads_investigated';
+
+        const newCount = (current[col] || 0) + count;
+
+        await supabase
+            .from('antonia_daily_usage')
+            .upsert({
+                organization_id: organizationId,
+                date: today,
+                [col]: newCount,
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'organization_id,date' });
+    }
 }
 
 // Task execution functions
@@ -552,6 +568,21 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
         } catch (e) {
             console.error('[INVESTIGATE] Failed to investigate lead:', e);
+
+            // Fallback: Use generic summary based on available lead data
+            const fallbackSummary = `${lead.companyName || 'Company'} - ${lead.title || 'Professional'}. ` +
+                `${lead.email ? `Contact: ${lead.email}` : 'Contact information available.'}`;
+
+            investigatedLeads.push({
+                ...lead,
+                research: {
+                    overview: fallbackSummary,
+                    source: 'fallback',
+                    note: 'Research service temporarily unavailable'
+                }
+            });
+
+            console.log(`[INVESTIGATE] Using fallback summary for ${lead.email}`);
         }
     }
 
@@ -777,6 +808,15 @@ Saludos,`;
                 .replace(/\{\{research\.summary\}\}/g, researchSummary)
                 .replace(/\{\{email\}\}/g, lead.email || '');
 
+            // Validate and clean unreplaced variables
+            const unreplacedVars = personalizedBody.match(/\{\{[^}]+\}\}/g);
+            let cleanedBody = personalizedBody;
+
+            if (unreplacedVars && unreplacedVars.length > 0) {
+                console.warn(`[CONTACT] Unreplaced variables found for ${lead.email}:`, unreplacedVars);
+                cleanedBody = personalizedBody.replace(/\{\{[^}]+\}\}/g, '[información]');
+            }
+
             console.log(`[CONTACT] Sending email to ${lead.email}`);
 
             const response = await fetch(`${appUrl}/api/contact/send`, {
@@ -788,7 +828,7 @@ Saludos,`;
                 body: JSON.stringify({
                     to: lead.email,
                     subject: personalizedSubject,
-                    body: personalizedBody,
+                    body: cleanedBody, // Use cleaned body instead of personalizedBody
                     leadId: lead.id,
                     campaignId: null,
                     missionId: task.mission_id,
@@ -1408,13 +1448,49 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
     return { contactedCount };
 }
 
+// Timeout wrapper to prevent tasks from hanging indefinitely
+async function processTaskWithTimeout(task: any, supabase: SupabaseClient) {
+    const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Task execution timeout after 5 minutes')), TIMEOUT_MS)
+    );
+
+    try {
+        await Promise.race([
+            processTask(task, supabase),
+            timeoutPromise
+        ]);
+    } catch (e: any) {
+        if (e.message?.includes('timeout')) {
+            console.error(`[Worker] Task ${task.id} timed out`);
+            await supabase.from('antonia_tasks').update({
+                status: 'failed',
+                error_message: 'Task execution timeout after 5 minutes',
+                updated_at: new Date().toISOString()
+            }).eq('id', task.id);
+
+            await supabase.from('antonia_logs').insert({
+                mission_id: task.mission_id,
+                organization_id: task.organization_id,
+                level: 'error',
+                message: `Task ${task.type} timed out after 5 minutes`
+            });
+        }
+        throw e;
+    }
+}
+
 async function processTask(task: any, supabase: SupabaseClient) {
     console.log(`[Worker] Processing task ${task.id} (${task.type})`);
 
-    await supabase.from('antonia_tasks').update({
-        status: 'processing',
-        processing_started_at: new Date().toISOString()
-    }).eq('id', task.id);
+    // Note: Status already set to 'processing' by optimistic lock in antoniaTick
+    // This update is redundant but kept for backwards compatibility if processTask is called directly
+    // (which should not happen in normal operation)
+    // await supabase.from('antonia_tasks').update({
+    //     status: 'processing',
+    //     processing_started_at: new Date().toISOString()
+    // }).eq('id', task.id);
 
     try {
         const { data: taskConfig } = await supabase
@@ -1451,6 +1527,8 @@ async function processTask(task: any, supabase: SupabaseClient) {
             case 'GENERATE_REPORT':
                 result = await executeReportGeneration(task, supabase);
                 break;
+            default:
+                throw new Error(`Unknown task type: ${task.type}. Valid types are: GENERATE_CAMPAIGN, SEARCH, ENRICH, INVESTIGATE, EVALUATE, CONTACT, CONTACT_INITIAL, CONTACT_CAMPAIGN, GENERATE_REPORT`);
         }
 
         await supabase.from('antonia_tasks').update({
@@ -1468,19 +1546,64 @@ async function processTask(task: any, supabase: SupabaseClient) {
         });
 
     } catch (e: any) {
-        console.error(`[Worker] Task ${task.id} Failed`, e);
-        await supabase.from('antonia_tasks').update({
-            status: 'failed',
-            error_message: e.message,
-            updated_at: new Date().toISOString()
-        }).eq('id', task.id);
+        console.error(`[Worker] Task ${task.id} Failed`, e.stack || e);
 
-        await supabase.from('antonia_logs').insert({
-            mission_id: task.mission_id,
-            organization_id: task.organization_id,
-            level: 'error',
-            message: `Task ${task.type} failed: ${e.message}`
-        });
+        // Determine if error is retryable
+        const retryableErrors = [
+            'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED',
+            '429', '503', '502', '504',
+            'timeout', 'network', 'fetch failed'
+        ];
+
+        const isRetryable = retryableErrors.some(pattern =>
+            e.message?.toLowerCase().includes(pattern.toLowerCase()) ||
+            e.code?.toString().toLowerCase().includes(pattern.toLowerCase()) ||
+            e.status?.toString().includes(pattern)
+        );
+
+        const retryCount = task.retry_count || 0;
+        const maxRetries = 3;
+
+        if (retryCount < maxRetries && isRetryable) {
+            // Exponential backoff: 1min, 2min, 4min
+            const backoffMinutes = Math.pow(2, retryCount);
+            const scheduledFor = new Date(Date.now() + backoffMinutes * 60000).toISOString();
+
+            console.log(`[Worker] Scheduling retry ${retryCount + 1}/${maxRetries} for task ${task.id} in ${backoffMinutes} min`);
+
+            await supabase.from('antonia_tasks').update({
+                status: 'pending',
+                retry_count: retryCount + 1,
+                scheduled_for: scheduledFor,
+                error_message: `Retry ${retryCount + 1}/${maxRetries}: ${e.message}`,
+                updated_at: new Date().toISOString()
+            }).eq('id', task.id);
+
+            await supabase.from('antonia_logs').insert({
+                mission_id: task.mission_id,
+                organization_id: task.organization_id,
+                level: 'warning',
+                message: `Task ${task.type} will retry (${retryCount + 1}/${maxRetries}): ${e.message}`
+            });
+        } else {
+            // Permanent failure
+            const failureReason = isRetryable
+                ? `Max retries (${maxRetries}) exceeded`
+                : 'Non-retryable error';
+
+            await supabase.from('antonia_tasks').update({
+                status: 'failed',
+                error_message: `${failureReason}: ${e.message}`,
+                updated_at: new Date().toISOString()
+            }).eq('id', task.id);
+
+            await supabase.from('antonia_logs').insert({
+                mission_id: task.mission_id,
+                organization_id: task.organization_id,
+                level: 'error',
+                message: `Task ${task.type} failed permanently: ${e.message}`
+            });
+        }
     }
 }
 
@@ -1518,20 +1641,29 @@ export const antoniaTick = functions.scheduler.onSchedule({
         // Don't fail the entire tick if scheduling fails
     }
 
+
     // --- 1. PROCESS PENDING TASKS ---
+    // Use optimistic locking to prevent race conditions:
+    // Update status to 'processing' atomically, then process only the tasks we locked
+    const now = new Date().toISOString();
     const { data: tasks, error } = await supabase
         .from('antonia_tasks')
-        .select('*')
+        .update({
+            status: 'processing',
+            processing_started_at: now
+        })
         .eq('status', 'pending')
-        .or(`scheduled_for.is.null,scheduled_for.lte.${new Date().toISOString()}`)
+        .or(`scheduled_for.is.null,scheduled_for.lte.${now}`)
+        .select()
         .limit(5);
 
     if (error) {
-        console.error('Error fetching tasks', error);
+        console.error('[AntoniaTick] Error fetching tasks', error);
     } else if (tasks && tasks.length > 0) {
         console.log(`[AntoniaTick] Processing ${tasks.length} tasks`);
-        await Promise.all(tasks.map(t => processTask(t, supabase)));
+        await Promise.all(tasks.map(t => processTaskWithTimeout(t, supabase)));
     }
+
 
     // --- 2. SCAN FOR EVALUATION (The Heartbeat) ---
     // Find leads contacted > 2 days ago (or > 5 mins for testing) with status 'pending'
