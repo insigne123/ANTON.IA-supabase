@@ -73,18 +73,15 @@ async function getTaskUserId(task: any, supabase: SupabaseClient): Promise<strin
     // Fallback: Fetch from mission
     // console.log(`[${task.type}] Missing userId in payload (val: ${userId}), recovering from mission...`);
 
-    // Optimistic check: maybe task row already has it? (No, task row doesn't store user_id explicitly usually, 
-    // unless added recently? Check schema? We assume NO for safety).
-
     const { data: mission } = await supabase
         .from('antonia_missions')
-        .select('created_by')
+        .select('user_id') // Correct column name is 'user_id'
         .eq('id', task.mission_id)
         .single();
 
-    if (mission && mission.created_by) {
-        // console.log(`[${task.type}] Recovered userId: ${mission.created_by}`);
-        return mission.created_by;
+    if (mission && mission.user_id) {
+        // console.log(`[${task.type}] Recovered userId: ${mission.user_id}`);
+        return mission.user_id;
     }
 
     console.warn(`[${task.type}] CRITICAL: Could not recover userId. Operations may fail.`);
@@ -386,18 +383,10 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         .eq('id', userId)
         .single();
 
-    // Fetch Organization Data (Table 'organizations' only has 'name')
-    // We replaced the call to 'antonia_companies' which does not exist
-    const { data: orgData } = await supabase
-        .from('organizations') // Correct table name
-        .select('name')
-        .eq('id', task.organization_id)
-        .maybeSingle();
-
-    // Construct simplified profile using available data + defaults
+    // Simplified Company Profile construction since 'organizations' table is not fully populated
     const userCompanyProfile = {
-        name: orgData?.name || 'Tu Empresa',
-        sector: 'Tecnología', // Default since not in DB
+        name: 'Tu Empresa', // Fallback
+        sector: 'Tecnología',
         description: '',
         services: '',
         valueProposition: '',
