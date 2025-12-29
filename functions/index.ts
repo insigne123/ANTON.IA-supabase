@@ -442,30 +442,29 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     const appUrl = APP_URL;
     const investigatedLeads = [];
 
-    // Fetch User Profile for Context (Name, Job Title)
-    // We use the recovered userId here
+    // Fetch User Profile for Context (Name, Job Title, Company Profile)
     const { data: userProfile } = await supabase
         .from('profiles')
-        .select('full_name, first_name, last_name, job_title, organization_id')
+        .select('full_name, first_name, last_name, job_title, company_name, company_domain, signatures, organization_id')
         .eq('id', userId)
         .single();
 
-    // Simplified Company Profile construction since 'organizations' table is not fully populated
+    // Extract company profile from signatures.profile_extended
+    const profileExtended = userProfile?.signatures?.['profile_extended'] || {};
+
     const userCompanyProfile = {
-        name: 'Tu Empresa', // Fallback
-        sector: 'Tecnología',
-        description: '',
-        services: '',
-        valueProposition: '',
-        website: ''
+        name: userProfile?.company_name || profileExtended.companyName || 'Tu Empresa',
+        sector: profileExtended.sector || 'Tecnología',
+        description: profileExtended.description || '',
+        services: profileExtended.services || '',
+        valueProposition: profileExtended.valueProposition || '',
+        website: userProfile?.company_domain || profileExtended.website || ''
     };
-
-
 
     const userContext = {
         id: userId,
         name: userProfile?.full_name || `${userProfile?.first_name || ''} ${userProfile?.last_name || ''}`.trim(),
-        jobTitle: userProfile?.job_title || 'Gerente'
+        jobTitle: userProfile?.job_title || profileExtended.role || 'Gerente'
     };
 
     for (const lead of leadsToInvestigate) {
