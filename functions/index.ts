@@ -22,8 +22,31 @@ async function getDailyUsage(supabase: SupabaseClient, organizationId: string) {
     return data || { leads_searched: 0, leads_enriched: 0, leads_investigated: 0, search_runs: 0 };
 }
 
-async function incrementUsage(supabase: SupabaseClient, organizationId: string, type: 'search' | 'enrich' | 'investigate' | 'search_run', count: number) {
+async function incrementUsage(
+    supabase: SupabaseClient,
+    organizationId: string,
+    type: 'search' | 'enrich' | 'investigate' | 'search_run',
+    count: number,
+    taskId?: string  // Optional task ID for deduplication
+) {
     const today = new Date().toISOString().split('T')[0];
+
+    // 🛡️ IDEMPOTENCY: Check if we already incremented for this task
+    if (taskId) {
+        const { data: existing } = await supabase
+            .from('antonia_usage_increments')
+            .select('id')
+            .eq('task_id', taskId)
+            .eq('increment_type', type)
+            .maybeSingle();
+
+        if (existing) {
+            console.log(`[incrementUsage] ⏭️ Already incremented ${type} for task ${taskId}, skipping`);
+            return;
+        }
+    }
+
+    console.log(`[incrementUsage] 📊 Incrementing ${type} by ${count} for org ${organizationId}${taskId ? ` (task: ${taskId})` : ''}`);
 
     // Use atomic SQL function to prevent race conditions
     const params: any = {
@@ -57,6 +80,25 @@ async function incrementUsage(supabase: SupabaseClient, organizationId: string, 
                 [col]: newCount,
                 updated_at: new Date().toISOString()
             }, { onConflict: 'organization_id,date' });
+    }
+
+    // 🛡️ IDEMPOTENCY: Record that we incremented for this task
+    if (taskId) {
+        const { error: logError } = await supabase
+            .from('antonia_usage_increments')
+            .insert({
+                task_id: taskId,
+                organization_id: organizationId,
+                increment_type: type,
+                amount: count
+            });
+
+        if (logError) {
+            // If insert fails due to unique constraint, that's OK (already incremented)
+            if (logError.code !== '23505') { // 23505 = unique_violation
+                console.error('[incrementUsage] Failed to log increment:', logError);
+            }
+        }
     }
 }
 
@@ -205,8 +247,15 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
         }));
 
         await supabase.from('leads').insert(leadsToInsert);
-        await incrementUsage(supabase, task.organization_id, 'search', leads.length);
-        await incrementUsage(supabase, task.organization_id, 'search_run', 1);
+
+        console.log(`[SEARCH] 📊 Incrementing usage:`, {
+            organization_id: task.organization_id,
+            leads_searched: leads.length,
+            search_runs: 1
+        });
+
+        await incrementUsage(supabase, task.organization_id, 'search', leads.length, task.id);
+        await incrementUsage(supabase, task.organization_id, 'search_run', 1, task.id);
 
         // Chain to ENRICH if configured
         if (task.payload.enrichmentLevel && leads.length > 0) {
@@ -244,8 +293,17 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
     const usage = await getDailyUsage(supabase, task.organization_id);
     const limit = mission?.daily_enrich_limit || 10;
 
+    console.log(`[ENRICH] 🔍 QUOTA CHECK:`, {
+        organization_id: task.organization_id,
+        mission_id: task.mission_id,
+        current_enriched: usage.leads_enriched || 0,
+        limit: limit,
+        remaining: limit - (usage.leads_enriched || 0),
+        will_skip: (usage.leads_enriched || 0) >= limit
+    });
+
     if ((usage.leads_enriched || 0) >= limit) {
-        console.log(`[ENRICH] Daily limit reached (${usage.leads_enriched}/${limit})`);
+        console.log(`[ENRICH] ⚠️ Daily limit reached (${usage.leads_enriched}/${limit})`);
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
@@ -308,7 +366,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
             console.log(`[ENRICH] Successfully enriched ${data.enriched?.length || 0} leads`);
 
             const enrichedLeads = data.enriched || [];
-            await incrementUsage(supabase, task.organization_id, 'enrich', enrichedLeads.length);
+            await incrementUsage(supabase, task.organization_id, 'enrich', enrichedLeads.length, task.id);
 
             // Chain to INVESTIGATE if configured and we have enriched leads
             if (enrichedLeads.length > 0) {
@@ -357,8 +415,17 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     const usage = await getDailyUsage(supabase, task.organization_id);
     const limit = mission?.daily_investigate_limit || 5;
 
+    console.log(`[INVESTIGATE] 🔍 QUOTA CHECK:`, {
+        organization_id: task.organization_id,
+        mission_id: task.mission_id,
+        current_investigated: usage.leads_investigated || 0,
+        limit: limit,
+        remaining: limit - (usage.leads_investigated || 0),
+        will_skip: (usage.leads_investigated || 0) >= limit
+    });
+
     if ((usage.leads_investigated || 0) >= limit) {
-        console.log(`[INVESTIGATE] Daily limit reached (${usage.leads_investigated}/${limit})`);
+        console.log(`[INVESTIGATE] ⚠️ Daily limit reached (${usage.leads_investigated}/${limit})`);
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
@@ -575,7 +642,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         }
     }
 
-    await incrementUsage(supabase, task.organization_id, 'investigate', investigatedLeads.length);
+    await incrementUsage(supabase, task.organization_id, 'investigate', investigatedLeads.length, task.id);
 
     // Chain to CONTACT if we have investigated leads
     if (investigatedLeads.length > 0) {
