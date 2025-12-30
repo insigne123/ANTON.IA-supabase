@@ -379,7 +379,8 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
                     payload: {
                         userId: userId,
                         leads: enrichedLeads,
-                        campaignName: campaignName
+                        campaignName: campaignName,
+                        dryRun: task.payload.dryRun // Propagate dryRun flag
                     },
                     created_at: new Date().toISOString()
                 });
