@@ -3,7 +3,7 @@
  * Force Deploy: 2025-12-29T19:45:00 - N8N Payload Fix
  */
 // Cloud Functions for Antonia AI
-// Last Updated: 2025-12-30 01:25 Force Deploy Contact URL Final Fix
+// Last Updated: 2025-12-30 01:50 Force Deploy User Context Fix
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // Hardcoded URLs for Cloud Functions
@@ -109,7 +109,7 @@ async function incrementUsage(
 async function getTaskUserId(task: any, supabase: SupabaseClient): Promise<string> {
     let { userId } = task.payload || {};
 
-    if (userId && userId !== 'anon') {
+    if (userId && userId !== 'anon' && userId !== 'undefined') {
         return userId;
     }
 
@@ -123,12 +123,12 @@ async function getTaskUserId(task: any, supabase: SupabaseClient): Promise<strin
         .single();
 
     if (mission && mission.user_id) {
-        // console.log(`[${ task.type }] Recovered userId: ${ mission.user_id } `);
+        console.log(`[${task.type}] Recovered userId: ${mission.user_id} `);
         return mission.user_id;
     }
 
-    console.warn(`[${task.type}]CRITICAL: Could not recover userId.Operations may fail.`);
-    return 'anon'; // Proceed with anon to let downstream fail with clear error if needed
+    console.error(`[${task.type}] CRITICAL: Could not recover userId. Operations may fail.`);
+    throw new Error(`Failed to recover userId for task ${task.id}`);
 }
 
 async function executeCampaignGeneration(task: any, supabase: SupabaseClient, taskConfig: any) {
@@ -765,7 +765,8 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
-    const { leads, userId, campaignName } = task.payload;
+    const { leads, campaignName } = task.payload;
+    const userId = await getTaskUserId(task, supabase);
     const leadsToContact = leads.slice(0, limit - (contactsToday || 0));
 
     console.log(`[CONTACT] Contacting ${leadsToContact.length} leads`);
