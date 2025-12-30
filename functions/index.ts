@@ -2,6 +2,8 @@
  * ANTON.IA Cloud Functions
  * Force Deploy: 2025-12-29T19:45:00 - N8N Payload Fix
  */
+// Cloud Functions for Antonia AI
+// Last Updated: 2025-12-30 01:10 Force Deploy URL Fix
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // Hardcoded URLs for Cloud Functions
