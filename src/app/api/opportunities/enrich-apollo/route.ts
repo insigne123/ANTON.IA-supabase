@@ -221,7 +221,10 @@ export async function POST(req: NextRequest) {
                 emailStatus: statusToSave,
                 linkedinUrl: p.linkedin_url || l.linkedinUrl,
                 companyName: p.organization?.name || l.companyName,
-                title: p.title || l.title
+                title: p.title || l.title,
+                companyDomain: p.organization?.primary_domain || cleanDomain(l.companyDomain),
+                industry: p.industry,
+                location: p.country ? `${p.city || ''}, ${p.country}` : (p.city || '')
               };
             }
           } else {
@@ -308,7 +311,9 @@ export async function POST(req: NextRequest) {
         email: emailResult?.email || l.email,
         emailStatus: emailResult?.emailStatus || 'unknown',
         linkedinUrl: normalizeLinkedin(l.linkedinUrl || ''),
-        companyDomain: l.companyDomain,
+        companyDomain: emailResult?.companyDomain || l.companyDomain,
+        industry: emailResult?.industry,
+        location: emailResult?.location,
         phoneNumbers: [],
         primaryPhone: null,
         // If phone requested, it's pending. If only email, it's completed.

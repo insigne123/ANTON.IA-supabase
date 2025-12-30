@@ -3,7 +3,7 @@
  * Force Deploy: 2025-12-29T19:45:00 - N8N Payload Fix
  */
 // Cloud Functions for Antonia AI
-// Last Updated: 2025-12-30 02:05 Force Deploy Debug Logs
+// Last Updated: 2025-12-30 02:45 Dry Run & N8N Fields Fix
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // Hardcoded URLs for Cloud Functions
@@ -778,9 +778,34 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
-    const { leads, campaignName } = task.payload;
+    const { leads, campaignName, dryRun } = task.payload;
     const userId = await getTaskUserId(task, supabase);
-    const leadsToContact = leads.slice(0, limit - (contactsToday || 0));
+    // If dryRun, we don't consume daily limit? Or do we? 
+    // User wants to "test", usually tests shouldn't burn quota, but for safety let's assume they might?
+    // Actually, let's allow dryRun to bypass contactsToday check IF we want to allow unlimited testing,
+    // but typically we should still respect limits or at least logs. 
+    // Let's keep limit check for now to simulate real behavior.
+
+    // [DOMAIN BLACKLIST CHECK]
+    const { data: excludedDomains } = await supabase
+        .from('excluded_domains')
+        .select('domain')
+        .eq('organization_id', task.organization_id);
+
+    const blacklistedSet = new Set((excludedDomains || []).map((d: any) => d.domain.toLowerCase().trim().replace('@', '')));
+
+    // Filter out blacklisted domains
+    const leadsFiltered = leads.filter((l: any) => {
+        if (!l.email) return false;
+        const domain = l.email.split('@')[1]?.toLowerCase();
+        if (domain && blacklistedSet.has(domain)) {
+            console.log(`[CONTACT] 🚫 Skipping ${l.email} due to Blacklisted Domain: ${domain}`);
+            return false;
+        }
+        return true;
+    });
+
+    const leadsToContact = leadsFiltered.slice(0, limit - (contactsToday || 0));
 
     console.log(`[CONTACT] Contacting ${leadsToContact.length} leads`);
 
@@ -888,6 +913,30 @@ Me pareció muy interesante y me gustaría conectar contigo para explorar posibl
             }
 
             console.log(`[CONTACT] Sending email to ${lead.email} `);
+
+            // [DRY RUN CHECK]
+            if (dryRun) {
+                console.log(`[DRY_RUN] 🛑 SKIPPING API CALL for ${lead.email}`);
+                console.log(`[DRY_RUN] 📧 Subject: ${personalizedSubject}`);
+                console.log(`[DRY_RUN] 📝 Body Preview: ${cleanedBody.substring(0, 200)}...`);
+                console.log(`[DRY_RUN] 📝 Full Body Length: ${cleanedBody.length}`);
+
+                // Simulate success
+                contactedCount++;
+                console.log(`[CONTACT] Dry Run success for ${lead.email}`);
+
+                await supabase.from('contacted_leads').insert({
+                    user_id: userId,
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    lead_id: lead.id,
+                    status: 'sent', // Keep 'sent' to satisfy constraints if any
+                    subject: personalizedSubject,
+                    provider: 'dry_run', // Distinguish here
+                    sent_at: new Date().toISOString()
+                });
+                continue; // Skip the rest of the loop (actual fetch)
+            }
 
             const response = await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
