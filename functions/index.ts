@@ -446,7 +446,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     // Fetch User Profile for Context (Name, Job Title, Company Profile)
     const { data: userProfile } = await supabase
         .from('profiles')
-        .select('full_name, first_name, last_name, job_title, company_name, company_domain, signatures, organization_id')
+        .select('full_name, job_title, company_name, company_domain, signatures')
         .eq('id', userId)
         .single();
 
@@ -464,7 +464,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
     const userContext = {
         id: userId,
-        name: userProfile?.full_name || `${userProfile?.first_name || ''} ${userProfile?.last_name || ''} `.trim(),
+        name: userProfile?.full_name || 'Usuario',
         jobTitle: userProfile?.job_title || profileExtended.role || 'Gerente'
     };
 
