@@ -3,7 +3,7 @@
  * Force Deploy: 2025-12-29T19:45:00 - N8N Payload Fix
  */
 // Cloud Functions for Antonia AI
-// Last Updated: 2025-12-30 01:10 Force Deploy URL Fix
+// Last Updated: 2025-12-30 01:25 Force Deploy Contact URL Final Fix
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // Hardcoded URLs for Cloud Functions
@@ -511,7 +511,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 userContext: userContext
             };
 
-            const response = await fetch(`${appUrl} /api/research / n8n`, {
+            const response = await fetch(`${appUrl}/api/research/n8n`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -875,7 +875,7 @@ Me pareció muy interesante y me gustaría conectar contigo para explorar posibl
 
             console.log(`[CONTACT] Sending email to ${lead.email} `);
 
-            const response = await fetch(`${appUrl} /api/contact / send`, {
+            const response = await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
