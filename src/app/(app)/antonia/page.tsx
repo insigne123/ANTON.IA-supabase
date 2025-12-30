@@ -103,6 +103,7 @@ export default function AntoniaPage() {
     const [currentMissionTitle, setCurrentMissionTitle] = useState('');
     const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
     const [deletingMissionId, setDeletingMissionId] = useState<string | null>(null);
+    const [isCreating, setIsCreating] = useState(false);
     const [activitySheetOpen, setActivitySheetOpen] = useState(false);
     const [selectedActivityMission, setSelectedActivityMission] = useState<AntoniaMission | null>(null);
 
@@ -251,6 +252,9 @@ export default function AntoniaPage() {
     }, [userId]);
 
     const handleCreateMission = async () => {
+        if (isCreating) return;
+        setIsCreating(true);
+
         console.log('[ANTONIA] Creating mission...', { orgId, userId, wizardData });
 
         if (!orgId || !userId) {
@@ -260,6 +264,7 @@ export default function AntoniaPage() {
                 title: 'Error',
                 description: 'No se pudo identificar tu organización o usuario. Intenta recargar la página.'
             });
+            setIsCreating(false);
             return;
         }
 
@@ -330,6 +335,8 @@ export default function AntoniaPage() {
                 title: 'Error al crear misión',
                 description: error.message || 'Ocurrió un error inesperado.'
             });
+        } finally {
+            setIsCreating(false);
         }
     };
 

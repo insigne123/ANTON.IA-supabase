@@ -1422,7 +1422,7 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         // Let's assume self-send for now using their connected account.
 
         const appUrl = APP_URL;
-        await fetch(`${appUrl} /api/contact / send`, {
+        await fetch(`${appUrl}/api/contact/send`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
             body: JSON.stringify({
@@ -1457,7 +1457,7 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
     for (const lead of leads) {
         try {
             console.log(`[CONTACT_CAMPAIGN] Sending campaign email to ${lead.email} `);
-            const response = await fetch(`${appUrl} /api/contact / send`, {
+            const response = await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
