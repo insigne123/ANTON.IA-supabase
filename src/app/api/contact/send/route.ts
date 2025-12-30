@@ -86,12 +86,61 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Failed to refresh access token calling provider' }, { status: 401 });
         }
 
+        // 3.1. CHECK TRACKING CONFIG
+        let finalBody = emailBody;
+        const { missionId, leadId } = body;
+
+        if (missionId && leadId) {
+            try {
+                // Get OrgID from Mission
+                const { data: mission } = await supabase
+                    .from('antonia_missions')
+                    .select('organization_id')
+                    .eq('id', missionId)
+                    .single();
+
+                if (mission) {
+                    const { data: config } = await supabase
+                        .from('antonia_config')
+                        .select('tracking_enabled')
+                        .eq('organization_id', mission.organization_id)
+                        .single();
+
+                    if (config?.tracking_enabled) {
+                        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+                        const pixelUrl = `${appUrl}/api/tracking/open?id=${leadId}`;
+                        const pixelHtml = `<img src="${pixelUrl}" width="1" height="1" style="display:none;" alt="" />`;
+
+                        console.log(`[CONTACT_DEBUG] Injecting tracking pixel for lead ${leadId}`);
+                        if (isHtml) {
+                            finalBody = emailBody + pixelHtml;
+                        } else {
+                            // If text/plain, we can't really inject a pixel easily without Multipart/Alternative which is complex here.
+                            // We force HTML if not already, or just skip for text.
+                            // Assuming rich text editor always sends HTML or we treat as such for tracking.
+                            // For now, only append if isHtml is true or we decide to treat plain text as HTML wrapper.
+                            // Let's assume we can wrap plain text in simple HTML
+                            finalBody = `<div>${emailBody.replace(/\n/g, '<br>')}</div>${pixelHtml}`;
+                            // Update flag to force HTML sending
+                            // isHtml = true; // Cannot reassign const destructure. Handled below.
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('[CONTACT_DEBUG] Error checking tracking config:', e);
+            }
+        }
+
         // 4. Send Email
         let result;
+        // Use finalBody and force isHtml=true if we injected pixel (or if it was already html)
+        // Determine isHtml effective
+        const effectiveIsHtml = isHtml || (finalBody !== emailBody);
+
         if (provider === 'google') {
-            result = await sendGmail(accessToken, to, subject, emailBody, isHtml);
+            result = await sendGmail(accessToken, to, subject, finalBody, effectiveIsHtml);
         } else {
-            result = await sendOutlook(accessToken, to, subject, emailBody, isHtml);
+            result = await sendOutlook(accessToken, to, subject, finalBody, effectiveIsHtml);
         }
 
         if (!result.success) {

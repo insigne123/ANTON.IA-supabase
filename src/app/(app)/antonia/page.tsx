@@ -34,10 +34,12 @@ import {
     ChevronDown,
     Edit2,
     FileText,
+    BarChart,
     X
 } from 'lucide-react';
 import { QuotaUsageCard } from '@/components/antonia/QuotaUsageCard';
 import { AgentActivityFeed } from '@/components/antonia/AgentActivityFeed';
+import { MetricsDashboard } from '@/components/antonia/MetricsDashboard';
 import { ReportsHistory } from '@/components/antonia/ReportsHistory';
 import { ReportViewer } from '@/components/antonia/ReportViewer';
 
@@ -565,7 +567,10 @@ export default function AntoniaPage() {
                     <TabsTrigger value="builder">Crear Misión</TabsTrigger>
                     <TabsTrigger value="active">Activas ({missions.length})</TabsTrigger>
                     <TabsTrigger value="reportes" className="flex items-center gap-2">
-                        <FileText className="w-4 h-4" /> Reports
+                        <FileText className="w-4 h-4" /> Reportes
+                    </TabsTrigger>
+                    <TabsTrigger value="metrics" className="flex items-center gap-2">
+                        <BarChart className="w-4 h-4" /> Métricas
                     </TabsTrigger>
                     <TabsTrigger value="settings" className="flex items-center gap-2">
                         <Settings className="w-4 h-4" /> Configuración
@@ -1135,6 +1140,18 @@ export default function AntoniaPage() {
                     </div>
                 </TabsContent>
 
+                <TabsContent value="metrics">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Rendimiento de Campañas</CardTitle>
+                            <CardDescription>Visualiza las tasas de apertura y respuesta de tus misiones.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {orgId && <MetricsDashboard organizationId={orgId} />}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
                 <TabsContent value="settings" className="space-y-6">
                     <Card>
                         <CardHeader>
@@ -1164,6 +1181,17 @@ export default function AntoniaPage() {
                                         id="instant-alerts"
                                         checked={config?.instantAlertsEnabled}
                                         onCheckedChange={(c) => handleUpdateConfig('instantAlertsEnabled', c)}
+                                    />
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <Label htmlFor="tracking-enabled">Tracking de Aperturas</Label>
+                                        <p className="text-sm text-muted-foreground">Inyectar pixel invisible en emails</p>
+                                    </div>
+                                    <Switch
+                                        id="tracking-enabled"
+                                        checked={!!config?.trackingEnabled}
+                                        onCheckedChange={(c) => handleUpdateConfig('trackingEnabled', c)}
                                     />
                                 </div>
                                 <div>

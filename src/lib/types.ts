@@ -454,6 +454,7 @@ export interface AntoniaConfig {
   dailySearchLimit?: number;
   dailyEnrichLimit?: number;
   dailyInvestigateLimit?: number;
+  trackingEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
 }

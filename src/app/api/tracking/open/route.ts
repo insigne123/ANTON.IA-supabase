@@ -1,58 +1,70 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { NextRequest, NextResponse } from 'next/server';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
+import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
+    const searchParams = req.nextUrl.searchParams;
+    const leadId = searchParams.get('id');
 
-    if (id) {
-        // Use Service Role to bypass RLS for tracking updates
-        const supabaseAdmin = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY!
-        );
+    // 1x1 Transparent GIF
+    const transparentGif = Buffer.from(
+        'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+        'base64'
+    );
 
-        // Await the update to ensure it completes before the response is sent (Serverless execution model)
-        // Await the update... (existing code)
-        try {
-            await supabaseAdmin
-                .from('contacted_leads')
-                .update({
-                    opened_at: new Date().toISOString(),
-                    last_update_at: new Date().toISOString(),
-                })
-                .eq('id', id);
-        } catch (err) {
-            console.error("Tracking Open error:", err);
-        }
-
-        const redirectUrl = searchParams.get("redirect");
-        if (redirectUrl) {
-            // Validate URL to prevent open redirect vulnerabilities (optional but good practice)
-            // For now, assuming relatively trusted internal usage, but we should at least check http protocol
-            try {
-                const urlObj = new URL(redirectUrl);
-                if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
-                    return NextResponse.redirect(redirectUrl, 307); // 307 ensures method preservation if relevant, though GET is just GET
-                }
-            } catch (e) {
-                // Invalid URL, fall through to pixel
-            }
-        }
-
-        // Transparent 1x1 PNG pixel
-        const pixel = Buffer.from(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-            "base64"
-        );
-
-        return new NextResponse(pixel, {
+    if (!leadId) {
+        return new NextResponse(transparentGif, {
             headers: {
-                "Content-Type": "image/png",
-                "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+                'Content-Type': 'image/gif',
+                'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
             },
         });
     }
+
+    // Fire and forget update (don't block the image load)
+    (async () => {
+        try {
+            // Use Service Role to bypass RLS for public pixel access
+            const supabase = createClient(
+                process.env.NEXT_PUBLIC_SUPABASE_URL!,
+                process.env.SUPABASE_SERVICE_ROLE_KEY!,
+                {
+                    auth: {
+                        autoRefreshToken: false,
+                        persistSession: false
+                    }
+                }
+            );
+
+            // Update opened_at only if it's currently null (track first open)
+            // OR update list of opens if we wanted to support multiple
+            // For now, simple logic: set opened_at if null
+            const { error } = await supabase
+                .from('contacted_leads')
+                .update({
+                    opened_at: new Date().toISOString(),
+                    // Optionally increment open count if column existed, but we stick to schema
+                })
+                .eq('lead_id', leadId)
+                .is('opened_at', null); // Only update if not already opened
+
+            if (error) {
+                console.error('[TRACKING] Error updating read status:', error);
+            } else {
+                console.log(`[TRACKING] Recorded open for lead ${leadId}`);
+            }
+        } catch (err) {
+            console.error('[TRACKING] Exception:', err);
+        }
+    })();
+
+    return new NextResponse(transparentGif, {
+        headers: {
+            'Content-Type': 'image/gif',
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        },
+    });
 }
