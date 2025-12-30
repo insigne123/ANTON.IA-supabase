@@ -143,12 +143,16 @@ export async function POST(req: Request): Promise<Response> {
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
   // --- FETCH USER PROFILE (Name & Job Title) ---
-  let userJobTitle: string | null = null;
-  let userFullName: string | null = null;
-  let userCompanyName: string | null = null;
-  let userCompanyDomain: string | null = null;
+  // If userContext is already provided in body (e.g. from Cloud Function), use it.
+  // Otherwise, fetch from DB (frontend calls).
+  let userContext = body.userContext;
 
-  if (userId && userId !== 'anon') {
+  if (!userContext && userId && userId !== 'anon') {
+    let userJobTitle: string | null = null;
+    let userFullName: string | null = null;
+    let userCompanyName: string | null = null;
+    let userCompanyDomain: string | null = null;
+
     try {
       const { data: profile } = await supabase
         .from('profiles')
@@ -165,18 +169,17 @@ export async function POST(req: Request): Promise<Response> {
     } catch (err) {
       console.warn('[research:n8n] Failed to fetch user profile:', err);
     }
-  }
 
-  // Identificación del usuario en el payload para n8n
-  const userContext = {
-    id: userId,
-    name: userFullName,
-    jobTitle: userJobTitle,
-    company: {
-      name: userCompanyName,
-      domain: userCompanyDomain
-    }
-  };
+    userContext = {
+      id: userId,
+      name: userFullName,
+      jobTitle: userJobTitle,
+      company: {
+        name: userCompanyName,
+        domain: userCompanyDomain
+      }
+    };
+  }
 
   let n8nRes: Response;
   try {

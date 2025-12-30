@@ -447,20 +447,20 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     // Fetch User Profile for Context (Name, Job Title, Company Profile)
     const { data: userProfile } = await supabase
         .from('profiles')
-        .select('full_name, job_title, company_name, company_domain, company_profile')
+        .select('full_name, job_title, company_name, company_domain, signatures')
         .eq('id', userId)
         .single();
 
-    // Extract company profile from company_profile.signatures.profile_extended (fallback)
-    const profileExtended = userProfile?.company_profile?.signatures?.profile_extended || {};
+    // Extract company profile from signatures.profile_extended (same as UI)
+    const profileExtended = userProfile?.signatures?.profile_extended || {};
 
-    // 🔧 FIX: Prioritize direct profile columns over empty profile_extended
+    // 🔧 FIX: Use signatures.profile_extended (has data) not company_profile.signatures
     const userCompanyProfile = {
         name: userProfile?.company_name || profileExtended.companyName || 'Tu Empresa',
-        sector: profileExtended.sector || 'Tecnología',
-        description: profileExtended.description || `Empresa dedicada a soluciones tecnológicas innovadoras`,
-        services: profileExtended.services || `Automatización de procesos, Inteligencia Artificial, Desarrollo de Software`,
-        valueProposition: profileExtended.valueProposition || `Optimizamos procesos empresariales mediante IA y automatización`,
+        sector: profileExtended.sector || '',
+        description: profileExtended.description || '',
+        services: profileExtended.services || '',
+        valueProposition: profileExtended.valueProposition || '',
         website: userProfile?.company_domain || profileExtended.website || ''
     };
 
