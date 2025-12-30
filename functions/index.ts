@@ -526,7 +526,10 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 userContext: userContext
             };
 
-            const response = await fetch(`${appUrl}/api/research/n8n`, {
+            // 🚀 BYPASS: Call N8N directly to ensure userContext is preserved
+            const N8N_WEBHOOK_URL = "https://nicogun.app.n8n.cloud/webhook/ANTONIA";
+
+            const response = await fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
