@@ -3,7 +3,7 @@
  * Force Deploy: 2025-12-29T19:45:00 - N8N Payload Fix
  */
 // Cloud Functions for Antonia AI
-// Last Updated: 2025-12-30 01:50 Force Deploy User Context Fix
+// Last Updated: 2025-12-30 02:05 Force Deploy Debug Logs
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // Hardcoded URLs for Cloud Functions
@@ -467,6 +467,16 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         name: userProfile?.full_name || `${userProfile?.first_name || ''} ${userProfile?.last_name || ''} `.trim(),
         jobTitle: userProfile?.job_title || profileExtended.role || 'Gerente'
     };
+
+    // 🛡️ CRITICAL GUARD: Ensure we have a valid user context before calling N8N
+    if (userContext.id === 'anon' || !userContext.id || userCompanyProfile.name === 'Tu Empresa') {
+        console.error('[INVESTIGATE] 🚨 CRITICAL: Invalid User Context detected. Aborting to prevent bad webhook.', {
+            userId: userContext.id,
+            company: userCompanyProfile.name,
+            profileFound: !!userProfile
+        });
+        throw new Error('Invalid User Context for Investigation. userId: ' + userId);
+    }
 
     for (const lead of leadsToInvestigate) {
         try {
