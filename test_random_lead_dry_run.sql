@@ -1,7 +1,7 @@
--- test_full_flow_dry_run.sql
--- 1. Finds the specific lead requested (Felipe Ochoa Cornejo) and a valid user.
--- 2. Inserts an ENRICH task with dryRun: true.
--- This will trigger: ENRICH -> INVESTIGATE (dryRun) -> CONTACT (dryRun).
+-- test_random_lead_dry_run.sql
+-- 1. Finds ANY random lead that has Email and Company Name (to ensure success).
+-- 2. Uses your valid User ID (Nicolas Yarur).
+-- 3. Triggers the full flow (Enrich -> Investigate -> Contact) in DRY RUN mode.
 
 WITH target_data AS (
     SELECT 
@@ -15,8 +15,12 @@ WITH target_data AS (
         l.organization_id,
         p.id as user_id
     FROM leads l, profiles p
-    WHERE l.id = 'c41ae90f-c1e9-425b-9f53-1eca5953459d' -- The specific lead provided
-    AND p.id = 'de3a3194-29b1-449a-828a-53608a7ebe47' -- The valid User ID
+    WHERE l.email IS NOT NULL 
+      AND l.company IS NOT NULL 
+      AND l.company != ''
+      -- We explicitly select your user to ensure the "Company Profile" is valid
+      AND p.id = 'de3a3194-29b1-449a-828a-53608a7ebe47' 
+    ORDER BY random() -- Pick a random one
     LIMIT 1
 )
 INSERT INTO antonia_tasks (
@@ -30,12 +34,12 @@ INSERT INTO antonia_tasks (
 SELECT 
     mission_id,
     organization_id,
-    'ENRICH', -- Start from Enrichment as requested
+    'ENRICH',
     'pending',
     jsonb_build_object(
-        'userId', user_id, -- Uses a valid User ID from profiles
-        'dryRun', true, -- 🔴 ACTIVAR MODO DRY RUN (Se propagará a Investigate y luego a Contact)
-        'campaignName', 'Full Flow Dry Run Test',
+        'userId', user_id,
+        'dryRun', true, -- 🔴 DRY RUN ENABLED
+        'campaignName', 'Random Lead Dry Run Test',
         'enrichmentLevel', 'standard',
         'leads', jsonb_build_array(
             jsonb_build_object(
