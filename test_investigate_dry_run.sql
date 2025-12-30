@@ -2,9 +2,9 @@
 -- Create a manual INVESTIGATE task that will call N8N but then trigger a DRY RUN contact.
 
 WITH target_lead AS (
-    SELECT id, mission_id, organization_id, email, full_name, company_name, title, linkedin_url
+    SELECT id, mission_id, organization_id, email, name, company, title, linkedin_url
     FROM leads
-    WHERE email IS NOT NULL
+    WHERE email IS NOT NULL AND mission_id IS NOT NULL
     ORDER BY created_at DESC
     LIMIT 1
 )
@@ -29,8 +29,8 @@ SELECT
             jsonb_build_object(
                 'id', id,
                 'email', email,
-                'fullName', full_name,
-                'companyName', company_name,
+                'fullName', name, -- Map 'name' to 'fullName' for payload
+                'companyName', company, -- Map 'company' to 'companyName' for payload
                 'title', title,
                 'linkedinUrl', linkedin_url,
                 -- Mocking the new fields expected from Enrichment
