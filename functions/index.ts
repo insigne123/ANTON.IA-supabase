@@ -733,7 +733,8 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 payload: {
                     userId: userId,
                     leads: [lead],
-                    campaignName: campaignName
+                    campaignName: campaignName,
+                    dryRun: task.payload.dryRun // Pass dryRun flag
                 },
                 scheduled_for: scheduledFor,
                 created_at: new Date().toISOString()

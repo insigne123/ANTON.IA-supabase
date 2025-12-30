@@ -14,6 +14,11 @@ CREATE INDEX IF NOT EXISTS idx_excluded_domains_org_domain ON excluded_domains(o
 -- RLS Policies
 ALTER TABLE excluded_domains ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies to ensure idempotency
+DROP POLICY IF EXISTS "Users can view excluded domains for their org" ON excluded_domains;
+DROP POLICY IF EXISTS "Users can insert excluded domains for their org" ON excluded_domains;
+DROP POLICY IF EXISTS "Users can delete excluded domains for their org" ON excluded_domains;
+
 -- Policy: Users can view excluded domains for their organization
 CREATE POLICY "Users can view excluded domains for their org"
 ON excluded_domains FOR SELECT
