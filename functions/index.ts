@@ -470,12 +470,15 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
     // 🛡️ CRITICAL GUARD: Ensure we have a valid user context before calling N8N
     if (userContext.id === 'anon' || !userContext.id || userCompanyProfile.name === 'Tu Empresa') {
-        console.error('[INVESTIGATE] 🚨 CRITICAL: Invalid User Context detected. Aborting to prevent bad webhook.', {
-            userId: userContext.id,
-            company: userCompanyProfile.name,
-            profileFound: !!userProfile
+        const debugInfo = JSON.stringify({
+            userId: userId,
+            profileFound: !!userProfile,
+            compNameDB: userProfile?.company_name,
+            compNameExt: profileExtended?.companyName,
+            finalName: userCompanyProfile.name
         });
-        throw new Error('Invalid User Context for Investigation. userId: ' + userId);
+        console.error('[INVESTIGATE] 🚨 CRITICAL: Invalid User Context detected.', debugInfo);
+        throw new Error(`Invalid User Context. Debug: ${debugInfo}`);
     }
 
     for (const lead of leadsToInvestigate) {
