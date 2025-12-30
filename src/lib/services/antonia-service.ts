@@ -34,6 +34,7 @@ export const antoniaService = {
             dailySearchLimit: data.daily_search_limit,
             dailyEnrichLimit: data.daily_enrich_limit,
             dailyInvestigateLimit: data.daily_investigate_limit,
+            trackingEnabled: data.tracking_enabled,
             createdAt: data.created_at,
             updatedAt: data.updated_at
         };
@@ -52,6 +53,7 @@ export const antoniaService = {
             daily_search_limit: config.dailySearchLimit ?? 3,
             daily_enrich_limit: config.dailyEnrichLimit ?? 50,
             daily_investigate_limit: config.dailyInvestigateLimit ?? 20,
+            tracking_enabled: config.trackingEnabled,
             updated_at: new Date().toISOString()
         };
 
@@ -72,6 +74,7 @@ export const antoniaService = {
             dailySearchLimit: data.daily_search_limit,
             dailyEnrichLimit: data.daily_enrich_limit,
             dailyInvestigateLimit: data.daily_investigate_limit,
+            trackingEnabled: data.tracking_enabled,
             createdAt: data.created_at,
             updatedAt: data.updated_at
         };
