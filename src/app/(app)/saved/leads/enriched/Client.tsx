@@ -1569,6 +1569,38 @@ export default function EnrichedLeadsClient() {
           {reportToView?.cross && (
             <div className="space-y-4 text-sm leading-relaxed max-h-[70vh] overflow-y-auto pr-4">
               <div className="text-lg font-semibold">{reportToView.cross.company.name}</div>
+
+              {/* --- Social Context / LinkedIn --- */}
+              {reportToView.cross.leadContext && (reportToView.cross.leadContext.iceBreaker || reportToView.cross.leadContext.recentActivitySummary) && (
+                <div className="mb-4 border border-blue-100 bg-blue-50/50 rounded-md p-3">
+                  <h3 className="text-sm font-semibold mb-2 flex items-center gap-2 text-blue-800">
+                    <Linkedin className="h-4 w-4" />
+                    Contexto Social (LinkedIn)
+                  </h3>
+                  <div className="text-xs space-y-3">
+                    {reportToView.cross.leadContext.iceBreaker && (
+                      <div className="bg-white p-2 rounded border border-blue-100 shadow-sm">
+                        <strong className="text-blue-700 block mb-1">Icebreaker Sugerido:</strong>
+                        <p className="italic text-gray-700">"{reportToView.cross.leadContext.iceBreaker}"</p>
+                      </div>
+                    )}
+
+                    {reportToView.cross.leadContext.recentActivitySummary && (
+                      <div>
+                        <strong className="text-blue-700 block mb-1">Resumen de Actividad:</strong>
+                        <p className="text-gray-700 leading-relaxed">{reportToView.cross.leadContext.recentActivitySummary}</p>
+                      </div>
+                    )}
+
+                    {reportToView.cross.leadContext.profileSummary && (
+                      <div className="mt-2 pt-2 border-t border-blue-100">
+                        <p className="text-gray-500">{reportToView.cross.leadContext.profileSummary}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {reportToView.cross.overview && <p>{reportToView.cross.overview}</p>}
 
               {reportToView.cross.pains?.length > 0 && (

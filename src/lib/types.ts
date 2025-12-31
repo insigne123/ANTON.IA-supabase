@@ -268,6 +268,12 @@ export type CrossReport = {
   subjectLines: string[];
   emailDraft: { subject: string; body: string };
   sources?: Array<{ title?: string; url: string }>;
+  leadContext?: {
+    iceBreaker?: string | null;
+    recentActivitySummary?: string | null;
+    foundRecentActivity?: boolean;
+    profileSummary?: string;
+  };
 };
 
 export type LeadResearchReport = {
