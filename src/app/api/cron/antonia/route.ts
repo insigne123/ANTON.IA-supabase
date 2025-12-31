@@ -247,8 +247,6 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
 
     if (leadsToProcess.length === 0) return { skipped: true, reason: 'no_leads_to_process' };
 
-    if (leadsToProcess.length === 0) return { skipped: true, reason: 'daily_limit_reached' };
-
     const revealPhone = isDeep;
     const enrichPayload = {
         leads: leadsToProcess.map((l: any) => ({
