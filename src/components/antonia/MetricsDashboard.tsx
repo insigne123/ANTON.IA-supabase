@@ -34,7 +34,8 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
             let missionQuery = supabase
                 .from('antonia_missions')
                 .select('id, title')
-                .eq('organization_id', organizationId);
+                .eq('organization_id', organizationId)
+                .eq('status', 'active'); // Solo misiones activas
 
             if (activeMissionId) {
                 missionQuery = missionQuery.eq('id', activeMissionId);

@@ -159,6 +159,7 @@ async function executeSearch(task: any, supabase: any, config: any) {
             email: lead.email || null,
             linkedin_url: lead.linkedin_url || null,
             status: 'saved',
+            mission_id: task.mission_id, // Link to mission
             created_at: new Date().toISOString()
         }));
 
@@ -176,8 +177,10 @@ async function executeSearch(task: any, supabase: any, config: any) {
             type: 'ENRICH',
             status: 'pending',
             payload: {
+                // Instead of passing leads array, we tell it to pull from the queue
+                // This ensures we process from the DB and track status correctly
                 userId: task.payload.userId,
-                leads: leads.slice(0, 10),
+                source: 'queue',
                 enrichmentLevel: task.payload.enrichmentLevel,
                 campaignName: task.payload.campaignName // Pass down for Contact step
             },
@@ -207,7 +210,42 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const capacity = limit - currentUsage;
-    const leadsToProcess = leads.slice(0, capacity);
+
+    // FETCH LEADS FROM QUEUE if not provided in payload
+    let leadsToProcess = leads || [];
+
+    if (leadsToProcess.length === 0 || task.payload.source === 'queue') {
+        console.log(`[Enrich] Fetching leads from queue for Mission ${task.mission_id} (Capacity: ${capacity})`);
+
+        const { data: queuedLeads } = await supabase
+            .from('leads')
+            .select('*')
+            .eq('mission_id', task.mission_id)
+            .eq('status', 'saved')
+            // .is('email', null) // Optional: only process those without email? 
+            // Better to rely on 'saved' status vs 'enriched' status
+            .limit(capacity);
+
+        leadsToProcess = queuedLeads || [];
+    }
+
+    // Fallback for types (map DB fields to API fields if needed, but local leads table usually matches API expect)
+    // The API expects: { fullName, linkedinUrl, companyName, companyDomain, title, email }
+    // Leads table: { name, linkedin_url, company, ... }
+
+    // We need to map DB columns to API expected format
+    leadsToProcess = leadsToProcess.map((l: any) => ({
+        id: l.id, // Keep ID to update later
+        name: l.name,
+        full_name: l.name,
+        linkedin_url: l.linkedin_url,
+        company_name: l.company,
+        organization_website_url: l.company_website,
+        title: l.title,
+        email: l.emailRaw || l.email
+    }));
+
+    if (leadsToProcess.length === 0) return { skipped: true, reason: 'no_leads_to_process' };
 
     if (leadsToProcess.length === 0) return { skipped: true, reason: 'daily_limit_reached' };
 
@@ -246,6 +284,26 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
 
     if (enriched.length > 0) {
         await incrementUsage(supabase, task.organization_id, usageType, enriched.length);
+
+        // UPDATE LEADS STATUS in DB
+        // We need to mark them as 'enriched' so they don't get picked up again
+        // enriched contains the API response. We need to match back to DB IDs?
+        // The enrichment API might not return the original ID unless we pass it.
+        // If we can't match, we rely on the fact that now they have emails (maybe) or we update by email?
+        // Better: The 'enrich-apollo' API usually returns the enriched data.
+        // Let's assume we can map back or we just update the leads we *sent*.
+
+        const leadIds = leadsToProcess.map((l: any) => l.id).filter((id: any) => id);
+
+        if (leadIds.length > 0) {
+            await supabase
+                .from('leads')
+                .update({
+                    status: 'enriched',
+                    last_enriched_at: new Date().toISOString()
+                })
+                .in('id', leadIds);
+        }
     }
 
     if (task.payload.campaignName && enriched.length > 0) {
