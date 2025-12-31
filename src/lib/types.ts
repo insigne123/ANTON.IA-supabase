@@ -405,6 +405,8 @@ export interface Organization {
   id: string;
   name: string;
   createdAt: string;
+  social_search_credits?: number;
+  feature_social_search_enabled?: boolean;
 }
 
 export interface OrganizationMember {

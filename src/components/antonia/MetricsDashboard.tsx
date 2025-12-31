@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { AntoniaMission } from '@/lib/types'; // Adjust path
-import { BarChart, Activity, Mail, MessageSquare, MousePointer2 } from 'lucide-react';
+import { AntoniaMission } from '@/lib/types';
+import { BarChart, Activity, Mail, MessageSquare, TrendingUp, Zap } from 'lucide-react';
 
 interface MetricsDashboardProps {
     organizationId: string;
-    activeMissionId?: string; // Optional filtering
+    activeMissionId?: string;
 }
 
 interface MissionMetrics {
@@ -31,7 +31,6 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
     const loadMetrics = async () => {
         setLoading(true);
         try {
-            // 1. Fetch Missions
             let missionQuery = supabase
                 .from('antonia_missions')
                 .select('id, title')
@@ -46,14 +45,12 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
             if (missionError) throw missionError;
             if (!missions || missions.length === 0) {
                 setMetrics([]);
+                setLoading(false);
                 return;
             }
 
             const missionIds = missions.map(m => m.id);
 
-            // 2. Fetch Contacted Leads Stats
-            // We'll fetch all relevant rows and aggregate in memory for simplicity 
-            // (or use RPC if available, but raw query is fine for reasonable volume)
             const { data: leads, error: leadsError } = await supabase
                 .from('contacted_leads')
                 .select('mission_id, status, opened_at, clicked_at, replied_at')
@@ -61,13 +58,12 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
 
             if (leadsError) throw leadsError;
 
-            // 3. Aggregate
             const aggregated = missions.map(mission => {
                 const missionLeads = leads?.filter(l => l.mission_id === mission.id) || [];
                 return {
                     missionId: mission.id,
                     missionTitle: mission.title,
-                    totalSent: missionLeads.length, // Assume all in table were sent
+                    totalSent: missionLeads.length,
                     totalOpened: missionLeads.filter(l => l.opened_at).length,
                     totalclicked: missionLeads.filter(l => l.clicked_at).length,
                     totalReplied: missionLeads.filter(l => l.replied_at).length
@@ -84,14 +80,28 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
     };
 
     if (loading) {
-        return <div className="p-4 text-center text-gray-500">Cargando métricas...</div>;
+        return (
+            <div className="flex items-center justify-center py-12">
+                <div className="flex flex-col items-center gap-3">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                    <p className="text-sm text-muted-foreground">Cargando métricas...</p>
+                </div>
+            </div>
+        );
     }
 
     if (metrics.length === 0) {
-        return <div className="p-4 text-center text-gray-500">No hay datos de campaña aún.</div>;
+        return (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+                <BarChart className="h-12 w-12 text-muted-foreground/50 mb-4" />
+                <h3 className="text-lg font-medium text-foreground mb-2">No hay datos disponibles</h3>
+                <p className="text-sm text-muted-foreground max-w-md">
+                    Aún no se han enviado correos en ninguna misión. Las métricas aparecerán aquí una vez que comiences a contactar leads.
+                </p>
+            </div>
+        );
     }
 
-    // Calculate totals for Summary Cards
     const grandTotalSent = metrics.reduce((acc, curr) => acc + curr.totalSent, 0);
     const grandTotalOpened = metrics.reduce((acc, curr) => acc + curr.totalOpened, 0);
     const grandTotalReplied = metrics.reduce((acc, curr) => acc + curr.totalReplied, 0);
@@ -100,101 +110,167 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
     const replyRate = grandTotalSent > 0 ? Math.round((grandTotalReplied / grandTotalSent) * 100) : 0;
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-8">
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card className="bg-gradient-to-br from-blue-50 to-white border-blue-100">
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-sm font-medium text-blue-600">Enviados</CardTitle>
-                        <Mail className="h-4 w-4 text-blue-500" />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Emails Sent */}
+                <Card className="relative overflow-hidden border-border/50 bg-card hover:shadow-lg transition-all duration-300">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-500/10 to-transparent rounded-full -mr-16 -mt-16" />
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 relative">
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Emails Enviados</CardTitle>
+                        <div className="p-2 bg-blue-500/10 rounded-lg">
+                            <Mail className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                        </div>
                     </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{grandTotalSent}</div>
-                        <p className="text-xs text-blue-400 mt-1">Correos totales</p>
+                    <CardContent className="relative">
+                        <div className="text-3xl font-bold text-foreground">{grandTotalSent}</div>
+                        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                            <Zap className="h-3 w-3" />
+                            Total de correos enviados
+                        </p>
                     </CardContent>
                 </Card>
 
-                <Card className="bg-gradient-to-br from-green-50 to-white border-green-100">
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-sm font-medium text-green-600">Tasa de Apertura</CardTitle>
-                        <Activity className="h-4 w-4 text-green-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{openRate}%</div>
-                        <div className="flex items-center text-xs text-green-500 mt-1">
-                            <span className="font-medium mr-1">{grandTotalOpened}</span> abiertos
+                {/* Open Rate */}
+                <Card className="relative overflow-hidden border-border/50 bg-card hover:shadow-lg transition-all duration-300">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-emerald-500/10 to-transparent rounded-full -mr-16 -mt-16" />
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 relative">
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Tasa de Apertura</CardTitle>
+                        <div className="p-2 bg-emerald-500/10 rounded-lg">
+                            <Activity className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
                         </div>
+                    </CardHeader>
+                    <CardContent className="relative">
+                        <div className="flex items-baseline gap-2">
+                            <span className="text-3xl font-bold text-foreground">{openRate}%</span>
+                            {openRate > 20 && (
+                                <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                                    <TrendingUp className="h-3 w-3" />
+                                    Excelente
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                            <span className="font-semibold text-foreground">{grandTotalOpened}</span> de {grandTotalSent} abiertos
+                        </p>
                     </CardContent>
                 </Card>
 
-                <Card className="bg-gradient-to-br from-purple-50 to-white border-purple-100">
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-sm font-medium text-purple-600">Tasa de Respuesta</CardTitle>
-                        <MessageSquare className="h-4 w-4 text-purple-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{replyRate}%</div>
-                        <div className="flex items-center text-xs text-purple-500 mt-1">
-                            <span className="font-medium mr-1">{grandTotalReplied}</span> respuestas
+                {/* Reply Rate */}
+                <Card className="relative overflow-hidden border-border/50 bg-card hover:shadow-lg transition-all duration-300">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-violet-500/10 to-transparent rounded-full -mr-16 -mt-16" />
+                    <CardHeader className="flex flex-row items-center justify-between pb-2 relative">
+                        <CardTitle className="text-sm font-medium text-muted-foreground">Tasa de Respuesta</CardTitle>
+                        <div className="p-2 bg-violet-500/10 rounded-lg">
+                            <MessageSquare className="h-5 w-5 text-violet-600 dark:text-violet-400" />
                         </div>
+                    </CardHeader>
+                    <CardContent className="relative">
+                        <div className="flex items-baseline gap-2">
+                            <span className="text-3xl font-bold text-foreground">{replyRate}%</span>
+                            {replyRate > 5 && (
+                                <span className="text-xs font-medium text-violet-600 dark:text-violet-400 flex items-center gap-0.5">
+                                    <TrendingUp className="h-3 w-3" />
+                                    Muy bueno
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                            <span className="font-semibold text-foreground">{grandTotalReplied}</span> respuestas recibidas
+                        </p>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* Mission Breakdown Bars */}
+            {/* Mission Breakdown */}
             <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-gray-700 flex items-center gap-2">
-                    <BarChart className="h-5 w-5" />
-                    Rendimiento por Misión
-                </h3>
+                <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                        <BarChart className="h-5 w-5 text-primary" />
+                        Rendimiento por Misión
+                    </h3>
+                    <span className="text-xs text-muted-foreground">
+                        {metrics.length} {metrics.length === 1 ? 'misión activa' : 'misiones activas'}
+                    </span>
+                </div>
 
-                {metrics.map((m) => {
-                    const mOpenRate = m.totalSent > 0 ? (m.totalOpened / m.totalSent) * 100 : 0;
-                    const mReplyRate = m.totalSent > 0 ? (m.totalReplied / m.totalSent) * 100 : 0;
+                <div className="space-y-3">
+                    {metrics.map((m) => {
+                        const mOpenRate = m.totalSent > 0 ? (m.totalOpened / m.totalSent) * 100 : 0;
+                        const mReplyRate = m.totalSent > 0 ? (m.totalReplied / m.totalSent) * 100 : 0;
 
-                    return (
-                        <Card key={m.missionId} className="p-4 hover:shadow-md transition-shadow">
-                            <div className="flex justify-between items-center mb-3">
-                                <span className="font-medium text-slate-800">{m.missionTitle}</span>
-                                <span className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-600">
-                                    {m.totalSent} enviados
-                                </span>
-                            </div>
+                        return (
+                            <Card key={m.missionId} className="border-border/50 hover:border-primary/50 transition-all duration-200">
+                                <CardContent className="p-5">
+                                    {/* Header */}
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="flex-1">
+                                            <h4 className="font-semibold text-foreground text-base mb-1">{m.missionTitle}</h4>
+                                            <p className="text-xs text-muted-foreground">
+                                                {m.totalSent} {m.totalSent === 1 ? 'correo enviado' : 'correos enviados'}
+                                            </p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <div className="text-right">
+                                                <div className="text-xs text-muted-foreground">Apertura</div>
+                                                <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                                                    {Math.round(mOpenRate)}%
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className="text-xs text-muted-foreground">Respuesta</div>
+                                                <div className="text-sm font-bold text-violet-600 dark:text-violet-400">
+                                                    {Math.round(mReplyRate)}%
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
 
-                            {/* Open Rate Bar */}
-                            <div className="mb-3">
-                                <div className="flex justify-between text-xs mb-1">
-                                    <span className="text-gray-500 flex items-center gap-1">
-                                        <Activity className="h-3 w-3" /> Aperturas
-                                    </span>
-                                    <span className="font-mono text-green-600">{m.totalOpened} ({Math.round(mOpenRate)}%)</span>
-                                </div>
-                                <div className="w-full bg-gray-100 rounded-full h-2">
-                                    <div
-                                        className="bg-green-500 h-2 rounded-full transition-all duration-500"
-                                        style={{ width: `${mOpenRate}%` }}
-                                    ></div>
-                                </div>
-                            </div>
+                                    {/* Progress Bars */}
+                                    <div className="space-y-3">
+                                        {/* Open Rate Bar */}
+                                        <div>
+                                            <div className="flex justify-between items-center text-xs mb-1.5">
+                                                <span className="text-muted-foreground flex items-center gap-1.5">
+                                                    <Activity className="h-3.5 w-3.5 text-emerald-500" />
+                                                    Aperturas
+                                                </span>
+                                                <span className="font-mono font-medium text-foreground">
+                                                    {m.totalOpened} / {m.totalSent}
+                                                </span>
+                                            </div>
+                                            <div className="w-full bg-secondary/50 rounded-full h-2 overflow-hidden">
+                                                <div
+                                                    className="bg-gradient-to-r from-emerald-500 to-emerald-400 h-2 rounded-full transition-all duration-700 ease-out"
+                                                    style={{ width: `${Math.min(mOpenRate, 100)}%` }}
+                                                />
+                                            </div>
+                                        </div>
 
-                            {/* Reply Rate Bar */}
-                            <div>
-                                <div className="flex justify-between text-xs mb-1">
-                                    <span className="text-gray-500 flex items-center gap-1">
-                                        <MessageSquare className="h-3 w-3" /> Respuestas
-                                    </span>
-                                    <span className="font-mono text-purple-600">{m.totalReplied} ({Math.round(mReplyRate)}%)</span>
-                                </div>
-                                <div className="w-full bg-gray-100 rounded-full h-2">
-                                    <div
-                                        className="bg-purple-500 h-2 rounded-full transition-all duration-500"
-                                        style={{ width: `${mReplyRate}%` }}
-                                    ></div>
-                                </div>
-                            </div>
-                        </Card>
-                    );
-                })}
+                                        {/* Reply Rate Bar */}
+                                        <div>
+                                            <div className="flex justify-between items-center text-xs mb-1.5">
+                                                <span className="text-muted-foreground flex items-center gap-1.5">
+                                                    <MessageSquare className="h-3.5 w-3.5 text-violet-500" />
+                                                    Respuestas
+                                                </span>
+                                                <span className="font-mono font-medium text-foreground">
+                                                    {m.totalReplied} / {m.totalSent}
+                                                </span>
+                                            </div>
+                                            <div className="w-full bg-secondary/50 rounded-full h-2 overflow-hidden">
+                                                <div
+                                                    className="bg-gradient-to-r from-violet-500 to-violet-400 h-2 rounded-full transition-all duration-700 ease-out"
+                                                    style={{ width: `${Math.min(mReplyRate, 100)}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        );
+                    })}
+                </div>
             </div>
         </div>
     );

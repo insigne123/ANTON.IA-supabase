@@ -56,9 +56,29 @@ const extractDomainFromEmail = (email?: string | null) =>
 
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
 
+import { organizationService } from '@/lib/services/organization-service';
+
 export default function EnrichedLeadsClient() {
   const router = useRouter();
   const { toast } = useToast();
+  // ... existing state
+
+  // --- Social Credits ---
+  const [socialCredits, setSocialCredits] = useState<number | null>(null);
+  const [socialEnabled, setSocialEnabled] = useState(true);
+
+  // ... existing useEffects
+
+  useEffect(() => {
+    // Load credits on mount
+    organizationService.getCredits().then(res => {
+      if (res) {
+        setSocialCredits(res.credits);
+        setSocialEnabled(res.enabled);
+      }
+    });
+  }, []);
+
   const [enriched, setEnriched] = useState<EnrichedLead[]>([]);
   const [sel, setSel] = useState<Record<string, boolean>>({});           // selección para INVESTIGAR
   const [reports, setReports] = useState<LeadResearchReport[]>([]);
@@ -707,6 +727,10 @@ export default function EnrichedLeadsClient() {
       }
     } finally {
       setSeqRunning(false);
+      // Refresh credits
+      organizationService.getCredits().then(res => {
+        if (res) setSocialCredits(res.credits);
+      });
       toast({ title: 'Investigación completa', description: `Procesados ${selected.length} leads.` });
     }
   }
@@ -1180,6 +1204,18 @@ export default function EnrichedLeadsClient() {
         description="Selecciona, investiga con n8n y luego contacta."
       />
       <BackBar fallbackHref="/saved/leads" className="mb-2" />
+
+      {socialCredits !== null && (
+        <div className={`mb-4 px-4 py-2 rounded-md text-sm border flex items-center justify-between ${socialCredits > 0 ? 'bg-blue-50 text-blue-800 border-blue-100' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+          <div className="flex items-center gap-2">
+            <span className="text-lg">⚡</span>
+            <span>
+              <strong>Investigación Profunda (LinkedIn):</strong> {socialCredits} créditos restantes.
+              {socialCredits === 0 && <span className="ml-2 opacity-80">(Se usará investigación estándar sin LinkedIn)</span>}
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="mb-4">
         <DailyQuotaProgress kinds={['research']} compact />

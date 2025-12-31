@@ -58,6 +58,27 @@ export const organizationService = {
         return true;
     },
 
+    async getCredits(): Promise<{ credits: number, enabled: boolean } | null> {
+        const orgId = await this.getCurrentOrganizationId();
+        if (!orgId) return null;
+
+        const { data, error } = await supabase
+            .from('organizations')
+            .select('social_search_credits, feature_social_search_enabled')
+            .eq('id', orgId)
+            .single();
+
+        if (error) {
+            console.error('Error fetching credits:', error);
+            return null;
+        }
+
+        return {
+            credits: data.social_search_credits ?? 0,
+            enabled: data.feature_social_search_enabled ?? false
+        };
+    },
+
     async getOrganizationDetails(): Promise<{ organization: any, members: any[] } | null> {
         const orgId = await this.getCurrentOrganizationId();
         if (!orgId) return null;
