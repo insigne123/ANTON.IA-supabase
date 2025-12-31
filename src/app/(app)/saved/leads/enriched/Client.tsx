@@ -1573,7 +1573,7 @@ export default function EnrichedLeadsClient() {
                 <div className="text-lg font-semibold">{reportToView.cross.company.name}</div>
 
                 {/* --- Social Context / LinkedIn --- */}
-                {reportToView.cross.leadContext && (reportToView.cross.leadContext.iceBreaker || reportToView.cross.leadContext.recentActivitySummary) && (
+                {reportToView.cross.leadContext && (reportToView.cross.leadContext.iceBreaker || reportToView.cross.leadContext.recentActivitySummary || reportToView.cross.leadContext.profileSummary) && (
                   <div className="border border-blue-200 bg-blue-50 rounded-lg p-4 shadow-sm">
                     <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-blue-900">
                       <Linkedin className="h-5 w-5" />
