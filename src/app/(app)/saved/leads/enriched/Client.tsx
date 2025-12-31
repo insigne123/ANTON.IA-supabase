@@ -25,6 +25,7 @@ import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
 import { sendEmail } from '@/lib/outlook-email-service';
 import { sendGmailEmail } from '@/lib/gmail-email-service';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { isResearched, markResearched, unmarkResearched } from '@/lib/researched-leads-storage';
 import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
@@ -1550,7 +1551,7 @@ export default function EnrichedLeadsClient() {
       </Card>
 
       <Dialog open={openReport} onOpenChange={setOpenReport}>
-        <DialogContent className="max-w-4xl" onEscapeKeyDown={() => setOpenReport(false)}>
+        <DialogContent className="max-w-4xl max-h-[90vh]" onEscapeKeyDown={() => setOpenReport(false)}>
           <DialogHeader>
             <DialogTitle>Reporte · {reportToView?.cross?.company.name}</DialogTitle>
           </DialogHeader>
@@ -1567,106 +1568,109 @@ export default function EnrichedLeadsClient() {
             </div>
           )}
           {reportToView?.cross && (
-            <div className="space-y-4 text-sm leading-relaxed max-h-[70vh] overflow-y-auto pr-4">
-              <div className="text-lg font-semibold">{reportToView.cross.company.name}</div>
+            <ScrollArea className="h-[calc(90vh-180px)] pr-4">
+              <div className="space-y-4 text-sm leading-relaxed">
+                <div className="text-lg font-semibold">{reportToView.cross.company.name}</div>
 
-              {/* --- Social Context / LinkedIn --- */}
-              {reportToView.cross.leadContext && (reportToView.cross.leadContext.iceBreaker || reportToView.cross.leadContext.recentActivitySummary) && (
-                <div className="mb-4 border border-blue-100 bg-blue-50/50 rounded-md p-3">
-                  <h3 className="text-sm font-semibold mb-2 flex items-center gap-2 text-blue-800">
-                    <Linkedin className="h-4 w-4" />
-                    Contexto Social (LinkedIn)
-                  </h3>
-                  <div className="text-xs space-y-3">
-                    {reportToView.cross.leadContext.iceBreaker && (
-                      <div className="bg-white p-2 rounded border border-blue-100 shadow-sm">
-                        <strong className="text-blue-700 block mb-1">Icebreaker Sugerido:</strong>
-                        <p className="italic text-gray-700">"{reportToView.cross.leadContext.iceBreaker}"</p>
-                      </div>
-                    )}
+                {/* --- Social Context / LinkedIn --- */}
+                {reportToView.cross.leadContext && (reportToView.cross.leadContext.iceBreaker || reportToView.cross.leadContext.recentActivitySummary) && (
+                  <div className="border border-blue-200 bg-blue-50 rounded-lg p-4 shadow-sm">
+                    <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-blue-900">
+                      <Linkedin className="h-5 w-5" />
+                      Contexto Social (LinkedIn)
+                    </h3>
+                    <div className="space-y-3">
+                      {reportToView.cross.leadContext.iceBreaker && (
+                        <div className="bg-white p-3 rounded-md border border-blue-200 shadow-sm">
+                          <strong className="text-blue-800 block mb-2 text-sm">💬 Icebreaker Sugerido:</strong>
+                          <p className="italic text-gray-800 text-sm leading-relaxed">"{reportToView.cross.leadContext.iceBreaker}"</p>
+                        </div>
+                      )}
 
-                    {reportToView.cross.leadContext.recentActivitySummary && (
-                      <div>
-                        <strong className="text-blue-700 block mb-1">Resumen de Actividad:</strong>
-                        <p className="text-gray-700 leading-relaxed">{reportToView.cross.leadContext.recentActivitySummary}</p>
-                      </div>
-                    )}
+                      {reportToView.cross.leadContext.recentActivitySummary && (
+                        <div className="bg-white p-3 rounded-md border border-blue-200">
+                          <strong className="text-blue-800 block mb-2 text-sm">📊 Resumen de Actividad:</strong>
+                          <p className="text-gray-700 text-sm leading-relaxed">{reportToView.cross.leadContext.recentActivitySummary}</p>
+                        </div>
+                      )}
 
-                    {reportToView.cross.leadContext.profileSummary && (
-                      <div className="mt-2 pt-2 border-t border-blue-100">
-                        <p className="text-gray-500">{reportToView.cross.leadContext.profileSummary}</p>
-                      </div>
-                    )}
+                      {reportToView.cross.leadContext.profileSummary && (
+                        <div className="pt-3 border-t border-blue-200">
+                          <strong className="text-blue-800 block mb-2 text-sm">👤 Resumen de Perfil:</strong>
+                          <p className="text-gray-600 text-sm leading-relaxed">{reportToView.cross.leadContext.profileSummary}</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {reportToView.cross.overview && <p>{reportToView.cross.overview}</p>}
+                {reportToView.cross.overview && <p>{reportToView.cross.overview}</p>}
 
-              {reportToView.cross.pains?.length > 0 && (
-                <section>
-                  <h4 className="text-xs font-semibold uppercase text-muted-foreground">Pains</h4>
-                  <ul className="list-disc pl-5">
-                    {reportToView.cross.pains.map((x, i) => <li key={i}>{x}</li>)}
-                  </ul>
-                </section>
-              )}
+                {reportToView.cross.pains?.length > 0 && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Pains</h4>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.pains.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  </section>
+                )}
 
-              {reportToView.cross.valueProps?.length > 0 && (
-                <section>
-                  <h4 className="text-xs font-semibold uppercase text-muted-foreground">Cómo ayudamos</h4>
-                  <ul className="list-disc pl-5">
-                    {reportToView.cross.valueProps.map((x, i) => <li key={i}>{x}</li>)}
-                  </ul>
-                </section>
-              )}
+                {reportToView.cross.valueProps?.length > 0 && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Cómo ayudamos</h4>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.valueProps.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  </section>
+                )}
 
-              {reportToView.cross.useCases?.length > 0 && (
-                <section>
-                  <h4 className="text-xs font-semibold uppercase text-muted-foreground">Casos de uso</h4>
-                  <ul className="list-disc pl-5">
-                    {reportToView.cross.useCases.map((x, i) => <li key={i}>{x}</li>)}
-                  </ul>
-                </section>
-              )}
+                {reportToView.cross.useCases?.length > 0 && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Casos de uso</h4>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.useCases.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  </section>
+                )}
 
-              {reportToView.cross.talkTracks?.length > 0 && (
-                <section>
-                  <h4 className="text-xs font-semibold uppercase text-muted-foreground">Talk tracks</h4>
-                  <ul className="list-disc pl-5">
-                    {reportToView.cross.talkTracks.map((x, i) => <li key={i}>{x}</li>)}
-                  </ul>
-                </section>
-              )}
+                {reportToView.cross.talkTracks?.length > 0 && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Talk tracks</h4>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.talkTracks.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  </section>
+                )}
 
-              {reportToView.cross.subjectLines?.length > 0 && (
-                <section>
-                  <h4 className="text-xs font-semibold uppercase text-muted-foreground">Asuntos sugeridos</h4>
-                  <ul className="list-disc pl-5">
-                    {reportToView.cross.subjectLines.map((x, i) => <li key={i}>{x}</li>)}
-                  </ul>
-                </section>
-              )}
+                {reportToView.cross.subjectLines?.length > 0 && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Asuntos sugeridos</h4>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.subjectLines.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  </section>
+                )}
 
-              {reportToView.cross.emailDraft && (
-                <section className="border rounded p-3 bg-muted/50">
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Borrador de correo</div>
-                  <div><strong>Asunto:</strong> {reportToView.cross.emailDraft.subject}</div>
-                  <pre className="whitespace-pre-wrap mt-2 font-mono text-xs">{reportToView.cross.emailDraft.body}</pre>
-                </section>
-              )}
+                {reportToView.cross.emailDraft && (
+                  <section className="border rounded p-3 bg-muted/50">
+                    <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Borrador de correo</div>
+                    <div><strong>Asunto:</strong> {reportToView.cross.emailDraft.subject}</div>
+                    <pre className="whitespace-pre-wrap mt-2 font-mono text-xs">{reportToView.cross.emailDraft.body}</pre>
+                  </section>
+                )}
 
-              {reportToView.cross.sources?.length ? (
-                <section>
-                  <h4 className="text-xs font-semibold uppercase text-muted-foreground">Fuentes</h4>
-                  <ul className="space-y-1">
-                    {reportToView.cross.sources.map((s, i) => (
-                      <li key={i}>• <a className="underline" href={s.url} target="_blank">{s.title || s.url}</a></li>
-                    ))}
-                  </ul>
-                </section>
-              ) : null}
-            </div>
+                {reportToView.cross.sources?.length ? (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Fuentes</h4>
+                    <ul className="space-y-1">
+                      {reportToView.cross.sources.map((s, i) => (
+                        <li key={i}>• <a className="underline" href={s.url} target="_blank">{s.title || s.url}</a></li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+              </div>
+            </ScrollArea>
           )}
         </DialogContent>
       </Dialog>
