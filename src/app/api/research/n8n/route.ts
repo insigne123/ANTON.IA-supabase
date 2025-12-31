@@ -198,6 +198,9 @@ export async function POST(req: Request): Promise<Response> {
           if (enabled && credits > 0) {
             useSocialContext = true;
           }
+          console.log('[research:n8n] Org Check:', { organizationId, credits, enabled, useSocialContext });
+        } else {
+          console.warn('[research:n8n] Organization not found for ID:', organizationId);
         }
       }
 
@@ -256,13 +259,19 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // --- DEDUCT CREDITS IF SUCCESS AND USED ---
+  // --- DEDUCT CREDITS IF SUCCESS AND USED ---
   if (useSocialContext && organizationId) {
-    // Fire and forget (don't block response) - or await if we want to be sure
-    supabase.rpc('decrement_social_credit', { org_id: organizationId })
-      .then(({ data, error }: any) => {
-        if (error) console.error('[research:n8n] Failed to decrement credits:', error);
-        else console.info('[research:n8n] Credits decremented. New balance:', data);
-      });
+    // Must await in serverless/Next.js to ensure execution before teardown
+    try {
+      const { data, error } = await supabase.rpc('decrement_social_credit', { org_id: organizationId });
+      if (error) {
+        console.error('[research:n8n] Failed to decrement credits:', error);
+      } else {
+        console.info('[research:n8n] Credits decremented. New balance:', data);
+      }
+    } catch (err) {
+      console.error('[research:n8n] Unexpected error decrementing credits:', err);
+    }
   }
 
   // Normalizamos campos esperados por el cliente
