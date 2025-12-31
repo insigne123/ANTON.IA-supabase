@@ -563,7 +563,7 @@ export default function AntoniaPage() {
             />
 
             <Tabs defaultValue="builder" className="w-full">
-                <TabsList className="grid w-full max-w-2xl grid-cols-4">
+                <TabsList className="grid w-full max-w-3xl grid-cols-5">
                     <TabsTrigger value="builder">Crear Misión</TabsTrigger>
                     <TabsTrigger value="active">Activas ({missions.length})</TabsTrigger>
                     <TabsTrigger value="reportes" className="flex items-center gap-2">

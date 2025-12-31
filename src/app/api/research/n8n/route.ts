@@ -145,15 +145,20 @@ export async function POST(req: Request): Promise<Response> {
   // --- FETCH USER PROFILE (Name & Job Title) ---
   // If userContext is already provided in body (e.g. from Cloud Function), use it.
   // Otherwise, fetch from DB (frontend calls).
+  // --- FETCH USER PROFILE & ORGANIZATION ---
   let userContext = body.userContext;
+  let organizationId: string | null = null;
+  let useSocialContext = false;
 
-  if (!userContext && userId && userId !== 'anon') {
+  if (userId && userId !== 'anon') {
+    // 1. Fetch User details
     let userJobTitle: string | null = null;
     let userFullName: string | null = null;
     let userCompanyName: string | null = null;
     let userCompanyDomain: string | null = null;
 
     try {
+      // Fetch Profile
       const { data: profile } = await supabase
         .from('profiles')
         .select('full_name, job_title, company_name, company_domain')
@@ -166,26 +171,64 @@ export async function POST(req: Request): Promise<Response> {
         userCompanyName = profile.company_name || null;
         userCompanyDomain = profile.company_domain || null;
       }
+
+      // 2. Fetch Organization & Credits
+      // Try to find org via members table
+      const { data: member } = await supabase
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', userId)
+        .limit(1)
+        .single();
+
+      if (member) {
+        organizationId = member.organization_id;
+
+        // Check credits
+        const { data: org } = await supabase
+          .from('organizations')
+          .select('social_search_credits, feature_social_search_enabled')
+          .eq('id', organizationId)
+          .single();
+
+        if (org) {
+          const credits = org.social_search_credits ?? 0; // Default 0 if null (though migration sets 100)
+          const enabled = org.feature_social_search_enabled ?? true;
+
+          if (enabled && credits > 0) {
+            useSocialContext = true;
+          }
+        }
+      }
+
     } catch (err) {
-      console.warn('[research:n8n] Failed to fetch user profile:', err);
+      console.warn('[research:n8n] Failed to fetch user/org profile:', err);
     }
 
-    userContext = {
-      id: userId,
-      name: userFullName,
-      jobTitle: userJobTitle,
-      company: {
-        name: userCompanyName,
-        domain: userCompanyDomain
-      }
-    };
+    if (!userContext) {
+      userContext = {
+        id: userId,
+        name: userFullName,
+        jobTitle: userJobTitle,
+        company: {
+          name: userCompanyName,
+          domain: userCompanyDomain
+        }
+      };
+    }
   }
 
   let n8nRes: Response;
   try {
     // Reenviamos el body original pero garantizando campos canónicos en raíz
-    // Add userContext
-    const forward = { ...body, ...canon, userContext };
+    // Add userContext and social search flag
+    // We send `use_social_context` explicitly for n8n to switch logic
+    const forward = {
+      ...body,
+      ...canon,
+      userContext,
+      use_social_context: useSocialContext
+    };
 
     n8nRes = await withTimeout(fetch(webhook, {
       method: 'POST',
@@ -210,6 +253,16 @@ export async function POST(req: Request): Promise<Response> {
   if (!n8nRes.ok) {
     console.warn('[research:n8n] n8n HTTP', n8nRes.status, result);
     return json(n8nRes.status, typeof result === 'string' ? { error: result } : result);
+  }
+
+  // --- DEDUCT CREDITS IF SUCCESS AND USED ---
+  if (useSocialContext && organizationId) {
+    // Fire and forget (don't block response) - or await if we want to be sure
+    supabase.rpc('decrement_social_credit', { org_id: organizationId })
+      .then(({ data, error }: any) => {
+        if (error) console.error('[research:n8n] Failed to decrement credits:', error);
+        else console.info('[research:n8n] Credits decremented. New balance:', data);
+      });
   }
 
   // Normalizamos campos esperados por el cliente
@@ -249,6 +302,6 @@ export async function POST(req: Request): Promise<Response> {
     console.warn('[research:n8n] fallback parse failed:', (e as any)?.message);
   }
 
-  console.info('[research:n8n] OK → n8n aceptó', { userId, name: userFullName, jobTitle: userJobTitle, reports: out.reports?.length ?? 0, skipped: out.skipped?.length ?? 0 });
+  console.info('[research:n8n] OK → n8n aceptó', { userId, useSocialContext, reports: out.reports?.length ?? 0, skipped: out.skipped?.length ?? 0 });
   return json(200, out);
 }
