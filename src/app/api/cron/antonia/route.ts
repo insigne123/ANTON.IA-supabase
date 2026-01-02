@@ -217,7 +217,7 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
     if (leadsToProcess.length === 0 || task.payload.source === 'queue') {
         console.log(`[Enrich] Fetching leads from queue for Mission ${task.mission_id} (Capacity: ${capacity})`);
 
-        const { data: queuedLeads } = await supabase
+        const { data: queuedLeads, error: queueError } = await supabase
             .from('leads')
             .select('*')
             .eq('mission_id', task.mission_id)
@@ -226,6 +226,12 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
             // Better to rely on 'saved' status vs 'enriched' status
             .limit(capacity);
 
+        if (queueError) {
+            console.error('[Enrich] Error fetching from queue:', queueError);
+            return { skipped: true, reason: 'queue_fetch_error', error: queueError.message };
+        }
+
+        console.log(`[Enrich] Fetched ${queuedLeads?.length || 0} leads from queue`);
         leadsToProcess = queuedLeads || [];
     }
 

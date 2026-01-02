@@ -16,4 +16,9 @@ BEGIN
     -- Add a comment
     COMMENT ON COLUMN leads.mission_id IS 'Reference to the Antonia Mission that found this lead';
 
+    -- Add last_enriched_at column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'leads' AND column_name = 'last_enriched_at') THEN
+        ALTER TABLE leads ADD COLUMN last_enriched_at TIMESTAMPTZ;
+    END IF;
+
 END $$;
