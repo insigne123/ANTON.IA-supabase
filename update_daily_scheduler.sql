@@ -18,6 +18,7 @@ BEGIN
         SELECT 
             m.id,
             m.organization_id,
+            m.user_id,
             m.title,
             m.params,
             m.daily_search_limit,
@@ -61,7 +62,7 @@ BEGIN
                     'ENRICH',
                     'pending',
                     jsonb_build_object(
-                        'userId', mission_record.params->>'userId', -- Extract from params
+                        'userId', mission_record.user_id,
                         'source', 'queue',
                         'queueCount', queue_count,
                         'enrichmentLevel', mission_record.params->>'enrichmentLevel',
