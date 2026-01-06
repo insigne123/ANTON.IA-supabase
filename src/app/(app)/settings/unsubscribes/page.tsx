@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { organizationService } from '@/lib/services/organization-service';
 
 export default function UnsubscribesPage() {
     const { toast } = useToast();
@@ -120,6 +121,10 @@ export default function UnsubscribesPage() {
         setTesting(true);
         setTestResult(null);
         try {
+            // Get current organization ID
+            const orgId = await organizationService.getCurrentOrganizationId();
+            console.log('[Test] Using organization:', orgId);
+
             // We use providers/send to test. We assume Google as default provider or just check the blocking logic.
             // The blocking logic runs BEFORE provider check.
             const res = await fetch('/api/providers/send', {
@@ -129,7 +134,8 @@ export default function UnsubscribesPage() {
                     provider: 'google', // Dummy provider, we just want to hit the block check
                     to: testEmail,
                     subject: 'Test de Bloqueo Antonia',
-                    htmlBody: '<p>Este es un correo de prueba para verificar bloqueos.</p>'
+                    htmlBody: '<p>Este es un correo de prueba para verificar bloqueos.</p>',
+                    organizationId: orgId // Send the organization ID
                 })
             });
 
@@ -189,8 +195,8 @@ export default function UnsubscribesPage() {
 
                             {testResult && (
                                 <div className={`p-3 rounded-md text-sm font-medium ${testResult.status === 'blocked' ? 'bg-green-100 text-green-800 border border-green-200' :
-                                        testResult.status === 'success' ? 'bg-red-100 text-red-800 border border-red-200' :
-                                            'bg-yellow-100 text-yellow-800 border border-yellow-200'
+                                    testResult.status === 'success' ? 'bg-red-100 text-red-800 border border-red-200' :
+                                        'bg-yellow-100 text-yellow-800 border border-yellow-200'
                                     }`}>
                                     {testResult.status === 'blocked' && "✅ "}
                                     {testResult.status === 'success' && "⚠️ "}

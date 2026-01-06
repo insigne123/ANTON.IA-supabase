@@ -203,7 +203,7 @@ export async function POST(req: Request) {
       console.log('[gmail/send] Domain check result:', { blockedDomain, domainError });
 
       if (blockedDomain) {
-        console.warn(`[gmail/send] Blocked domain ${domain} to ${body.to} (User: ${user.id})`);
+        console.warn(`[gmail/send] Blocked domain ${domain} to ${body.to} (User: ${user.id}, Org: ${orgId})`);
         return NextResponse.json({ error: `El dominio ${domain} está bloqueado por tu organización.` }, { status: 403 });
       }
     } else {
