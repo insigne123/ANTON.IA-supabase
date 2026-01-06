@@ -182,9 +182,26 @@ export async function POST(req: Request) {
     }
     const { data: blocked } = await blacklistQuery.maybeSingle();
 
+
     if (blocked) {
       console.warn(`[gmail/send] Blocked email to ${body.to} (User: ${user.id})`);
       return NextResponse.json({ error: 'El destinatario se ha dado de baja de tus envíos.' }, { status: 403 });
+    }
+
+    // --- Domain Blacklist Check ---
+    const domain = body.to.split('@')[1]?.toLowerCase().trim();
+    if (domain && orgId) {
+      const { data: blockedDomain } = await supabase
+        .from('excluded_domains')
+        .select('id')
+        .eq('organization_id', orgId)
+        .eq('domain', domain)
+        .maybeSingle();
+
+      if (blockedDomain) {
+        console.warn(`[gmail/send] Blocked domain ${domain} to ${body.to} (User: ${user.id})`);
+        return NextResponse.json({ error: `El dominio ${domain} está bloqueado por tu organización.` }, { status: 403 });
+      }
     }
 
     // --- Inject Unsubscribe Link ---

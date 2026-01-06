@@ -109,12 +109,105 @@ export default function UnsubscribesPage() {
         }
     }
 
+    // --- Actions: Test Block ---
+    const [isTestOpen, setIsTestOpen] = useState(false);
+    const [testEmail, setTestEmail] = useState('');
+    const [testing, setTesting] = useState(false);
+    const [testResult, setTestResult] = useState<{ status: 'success' | 'blocked' | 'error', message: string } | null>(null);
+
+    async function handleTestEmail() {
+        if (!testEmail.trim()) return;
+        setTesting(true);
+        setTestResult(null);
+        try {
+            // We use providers/send to test. We assume Google as default provider or just check the blocking logic.
+            // The blocking logic runs BEFORE provider check.
+            const res = await fetch('/api/providers/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider: 'google', // Dummy provider, we just want to hit the block check
+                    to: testEmail,
+                    subject: 'Test de Bloqueo Antonia',
+                    htmlBody: '<p>Este es un correo de prueba para verificar bloqueos.</p>'
+                })
+            });
+
+            const data = await res.json();
+
+            if (res.status === 403) {
+                setTestResult({ status: 'blocked', message: '¡Correcto! El correo fue bloqueado: ' + data.error });
+            } else if (res.ok) {
+                setTestResult({ status: 'success', message: 'El correo NO fue bloqueado y se intentó enviar.' });
+            } else {
+                // Determine if it was a block fail or just a system error (like no token)
+                // If "Not connected", it means it passed the block check!
+                if (data.error && (data.error.includes('Not connected') || data.error.includes('Unauthorized'))) {
+                    setTestResult({ status: 'success', message: 'No bloqueado (falló envío por falta de conexión, pero pasó el filtro).' });
+                } else {
+                    setTestResult({ status: 'error', message: 'Error inesperado: ' + (data.error || res.statusText) });
+                }
+            }
+        } catch (e: any) {
+            setTestResult({ status: 'error', message: 'Error de red: ' + e.message });
+        } finally {
+            setTesting(false);
+        }
+    }
+
     return (
         <div className="container mx-auto space-y-6">
             <PageHeader
                 title="Bajas y Bloqueos"
                 description="Gestiona quien no debe recibir correos de Antonia, ya sea por dirección individual o dominio completo."
-            />
+            >
+                <Dialog open={isTestOpen} onOpenChange={(open) => { setIsTestOpen(open); if (!open) setTestResult(null); }}>
+                    <DialogTrigger asChild>
+                        <Button variant="secondary">
+                            <ShieldBan className="h-4 w-4 mr-2" />
+                            Probar Bloqueo
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Probar Bloqueo de Correos</DialogTitle>
+                            <DialogDescription>
+                                Ingresa un correo para verificar si el sistema lo bloquearía.
+                                Intenta con un correo de un dominio bloqueado.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="test-email">Correo de prueba</Label>
+                                <Input
+                                    id="test-email"
+                                    placeholder="ej: prueba@dominio-bloqueado.com"
+                                    value={testEmail}
+                                    onChange={(e) => setTestEmail(e.target.value)}
+                                />
+                            </div>
+
+                            {testResult && (
+                                <div className={`p-3 rounded-md text-sm font-medium ${testResult.status === 'blocked' ? 'bg-green-100 text-green-800 border border-green-200' :
+                                        testResult.status === 'success' ? 'bg-red-100 text-red-800 border border-red-200' :
+                                            'bg-yellow-100 text-yellow-800 border border-yellow-200'
+                                    }`}>
+                                    {testResult.status === 'blocked' && "✅ "}
+                                    {testResult.status === 'success' && "⚠️ "}
+                                    {testResult.message}
+                                </div>
+                            )}
+                        </div>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setIsTestOpen(false)}>Cerrar</Button>
+                            <Button onClick={handleTestEmail} disabled={testing || !testEmail}>
+                                {testing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                Verificar
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            </PageHeader>
 
             <Tabs defaultValue="emails" className="w-full">
                 <div className="flex justify-between items-center mb-4">
