@@ -7,9 +7,6 @@ DECLARE
     test_org_id uuid;
     test_user_id uuid;
     test_mission_id uuid;
-    lead_id1 uuid;
-    lead_id2 uuid;
-    lead_id3 uuid;
 BEGIN
     -- 1. Get existing organization, user, and mission
     SELECT id INTO test_org_id FROM organizations LIMIT 1;
@@ -66,8 +63,7 @@ BEGIN
         'https://linkedin.com/in/test3',
         'enriched',
         NOW()
-    )
-    RETURNING id INTO lead_id1;
+    );
 
     RAISE NOTICE '✅ Created 3 test enriched leads';
     RAISE NOTICE 'These leads are marked as "enriched" but have NOT been contacted yet';
