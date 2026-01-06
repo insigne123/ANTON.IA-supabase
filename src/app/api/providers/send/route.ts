@@ -33,9 +33,10 @@ export async function POST(req: NextRequest) {
                 .select('organization_id')
                 .eq('user_id', user.id)
                 .limit(1)
-                .single();
+                .maybeSingle();
             if (member) orgId = member.organization_id;
         }
+        console.log('[providers/send] User:', user.id, 'OrgId:', orgId);
 
         // Check if blacklisted
         let blacklistQuery = supabase
@@ -62,18 +63,23 @@ export async function POST(req: NextRequest) {
 
         // Check if domain is blacklisted
         const domain = to.split('@')[1]?.toLowerCase().trim();
+        console.log('[providers/send] Checking domain block for:', domain, 'OrgId:', orgId);
         if (domain && orgId) {
-            const { data: blockedDomain } = await supabase
+            const { data: blockedDomain, error: domainError } = await supabase
                 .from('excluded_domains')
                 .select('id')
                 .eq('organization_id', orgId)
                 .eq('domain', domain)
                 .maybeSingle();
 
+            console.log('[providers/send] Domain check result:', { blockedDomain, domainError });
+
             if (blockedDomain) {
                 console.warn(`Blocked domain attempt to ${to} (Domain: ${domain}, User: ${user.id}, Org: ${orgId})`);
                 return NextResponse.json({ error: `El dominio ${domain} está bloqueado por tu organización.` }, { status: 403 });
             }
+        } else {
+            console.log('[providers/send] Skipping domain check - domain:', domain, 'orgId:', orgId);
         }
 
         // Append Unsubscribe Link
