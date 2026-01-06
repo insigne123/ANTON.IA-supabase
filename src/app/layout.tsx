@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { ThemeProvider } from '@/components/providers/theme-provider';
 import { AuthProvider } from '@/context/AuthContext';
 import { PresenceProvider } from '@/context/PresenceContext';
+import { ExtensionInitializer } from '@/components/extension-initializer';
 
 export const metadata: Metadata = {
   title: 'ANTON.IA - Lead Automation',
@@ -42,6 +43,7 @@ export default function RootLayout({
           <AuthProvider>
             <PresenceProvider>
               {children}
+              <ExtensionInitializer />
               <Toaster />
             </PresenceProvider>
           </AuthProvider>
