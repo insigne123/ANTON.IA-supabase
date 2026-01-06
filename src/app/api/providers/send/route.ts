@@ -51,12 +51,29 @@ export async function POST(req: NextRequest) {
 
         const { data: blocked } = await blacklistQuery.maybeSingle();
 
+
         if (blocked) {
             console.warn(`Blocked email attempt to ${to} (User: ${user.id}, Org: ${orgId})`);
             // We return success to not break bulk flows, but with a warning or separate status?
             // Actually, usually we soft-fail or error. 
             // If we error, the frontend 'sendBulk' will count it as fail. That is appropriate.
             return NextResponse.json({ error: 'El destinatario se ha dado de baja de tus envíos.' }, { status: 403 });
+        }
+
+        // Check if domain is blacklisted
+        const domain = to.split('@')[1]?.toLowerCase().trim();
+        if (domain && orgId) {
+            const { data: blockedDomain } = await supabase
+                .from('excluded_domains')
+                .select('id')
+                .eq('organization_id', orgId)
+                .eq('domain', domain)
+                .maybeSingle();
+
+            if (blockedDomain) {
+                console.warn(`Blocked domain attempt to ${to} (Domain: ${domain}, User: ${user.id}, Org: ${orgId})`);
+                return NextResponse.json({ error: `El dominio ${domain} está bloqueado por tu organización.` }, { status: 403 });
+            }
         }
 
         // Append Unsubscribe Link
