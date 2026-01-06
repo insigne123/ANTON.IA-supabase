@@ -274,6 +274,116 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
                 created_at: new Date().toISOString()
             });
         }
+    } else {
+        // NO LEADS FOUND - EXHAUSTION DETECTION
+        console.log('[SEARCH] ⚠️ No leads found with current filters - checking for uncontacted leads from previous searches');
+
+        // 1. Log the exhaustion event
+        await supabase.from('antonia_logs').insert({
+            mission_id: task.mission_id,
+            organization_id: task.organization_id,
+            level: 'warning',
+            message: 'No se encontraron nuevos leads con los filtros actuales',
+            details: {
+                searchCriteria: { jobTitle, location, industry, keywords },
+                action: 'checking_previous_leads'
+            }
+        });
+
+        // 2. Check for previously found but uncontacted leads
+        // Get list of already contacted lead IDs
+        const { data: contactedLeadIds } = await supabase
+            .from('contacted_leads')
+            .select('lead_id')
+            .eq('mission_id', task.mission_id);
+
+        const contactedIds = (contactedLeadIds || []).map((c: any) => c.lead_id);
+
+        // Find enriched leads that haven't been contacted
+        const { data: uncontactedLeads, error: queryError } = await supabase
+            .from('leads')
+            .select('id, name, email, title, company, linkedin_url')
+            .eq('mission_id', task.mission_id)
+            .eq('status', 'enriched')
+            .not('id', 'in', `(${contactedIds.length > 0 ? contactedIds.join(',') : '00000000-0000-0000-0000-000000000000'})`)
+            .limit(50);
+
+        if (queryError) {
+            console.error('[SEARCH] Error querying uncontacted leads:', queryError);
+        }
+
+        if (uncontactedLeads && uncontactedLeads.length > 0) {
+            console.log(`[SEARCH] ✅ Found ${uncontactedLeads.length} previously enriched but uncontacted leads`);
+
+            // 3. Create INVESTIGATE + CONTACT tasks for these leads
+            await supabase.from('antonia_tasks').insert({
+                mission_id: task.mission_id,
+                organization_id: task.organization_id,
+                type: 'INVESTIGATE',
+                status: 'pending',
+                payload: {
+                    userId: userId,
+                    leads: uncontactedLeads.slice(0, 10), // Process in batches
+                    source: 'reused_from_previous_searches'
+                },
+                created_at: new Date().toISOString()
+            });
+
+            await supabase.from('antonia_logs').insert({
+                mission_id: task.mission_id,
+                organization_id: task.organization_id,
+                level: 'info',
+                message: `Reutilizando ${uncontactedLeads.length} leads encontrados previamente`,
+                details: {
+                    uncontactedCount: uncontactedLeads.length,
+                    action: 'reusing_previous_leads'
+                }
+            });
+
+            return {
+                leadsFound: 0,
+                reusedLeads: uncontactedLeads.length,
+                exhausted: true,
+                message: 'No se encontraron nuevos leads. Reutilizando leads previos no contactados.'
+            };
+        } else {
+            // 4. No new leads AND no uncontacted previous leads
+            console.log('[SEARCH] ❌ CRITICAL: No new leads and no uncontacted previous leads available');
+
+            await supabase.from('antonia_logs').insert({
+                mission_id: task.mission_id,
+                organization_id: task.organization_id,
+                level: 'error',
+                message: '⚠️ AGOTAMIENTO TOTAL: No hay más leads disponibles',
+                details: {
+                    searchCriteria: { jobTitle, location, industry, keywords },
+                    recommendation: 'Considere ampliar los filtros de búsqueda o pausar la misión'
+                }
+            });
+
+            // Create a notification task to alert the user
+            await supabase.from('antonia_tasks').insert({
+                mission_id: task.mission_id,
+                organization_id: task.organization_id,
+                type: 'GENERATE_REPORT',
+                status: 'pending',
+                payload: {
+                    reportType: 'lead_exhaustion_alert',
+                    userId: userId,
+                    missionId: task.mission_id,
+                    searchCriteria: { jobTitle, location, industry, keywords }
+                },
+                created_at: new Date().toISOString()
+            });
+
+            return {
+                leadsFound: 0,
+                reusedLeads: 0,
+                exhausted: true,
+                critical: true,
+                message: 'AGOTAMIENTO TOTAL: No hay más leads disponibles con estos filtros.'
+            };
+        }
     }
 
     return {
@@ -1101,7 +1211,331 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
     let summaryData = {};
     let subject = '';
 
-    if (reportType === 'mission_historic') {
+    if (reportType === 'daily') {
+        const today = new Date().toISOString().split('T')[0];
+        subject = `Reporte Diario Antonia AI - ${today}`;
+
+        // 1. Fetch Daily Activity for Org
+        // We look at antonia_daily_usage table
+        const { data: usage } = await supabase
+            .from('antonia_daily_usage')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .eq('date', today)
+            .maybeSingle();
+
+        // 2. Use antonia_daily_usage as primary source (most accurate)
+        // This table is updated atomically by the Cloud Function
+        const leadsSearched = usage?.leads_searched || 0;
+        const leadsEnriched = usage?.leads_enriched || 0;
+        const searchRuns = usage?.search_runs || 0;
+
+        // 3. Count contacted leads today
+        const { count: contacted } = await supabase.from('contacted_leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+            .gte('created_at', `${today}T00:00:00Z`);
+
+        // 4. Count responses today
+        const { count: replies } = await supabase.from('lead_responses')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+            .gte('created_at', `${today}T00:00:00Z`)
+            .eq('type', 'reply');
+
+        // 5. Get Active Missions
+        const { data: missions } = await supabase
+            .from('antonia_missions')
+            .select('title, status, daily_search_limit')
+            .eq('organization_id', organizationId)
+            .eq('status', 'active');
+
+        // Summary Data Object
+        summaryData = {
+            date: today,
+            searchRuns: searchRuns,
+            leadsFound: leadsSearched,
+            leadsEnriched: leadsEnriched,
+            contacted: contacted || 0,
+            replies: replies || 0,
+            activeMissions: missions?.length || 0
+        };
+
+        // --- HTML TEMPLATE (DAILIY) ---
+        htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f3f4f6; padding: 20px; color: #1f2937; }
+                .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+                .header { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 30px; text-align: center; color: white; }
+                .header h1 { margin: 0; font-size: 24px; font-weight: 700; }
+                .date { opacity: 0.9; margin-top: 5px; font-size: 14px; }
+                .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; padding: 20px; }
+                .card { background: #f9fafb; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #e5e7eb; }
+                .value { font-size: 28px; font-weight: 800; color: #4f46e5; }
+                .label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-top: 5px; }
+                .section { padding: 0 20px 20px; }
+                .section-title { font-size: 16px; font-weight: 700; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #e5e7eb; display: flex; align-items: center; gap: 8px; }
+                .mission-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f8fafc; border-radius: 6px; margin-bottom: 8px; font-size: 14px; }
+                .badge { background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+                .footer { background: #1f2937; color: #9ca3af; padding: 20px; text-align: center; font-size: 12px; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>Reporte Diario</h1>
+                    <div class="date">${new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                </div>
+                
+                <div class="grid">
+                    <div class="card">
+                        <div class="value">${summaryData.searchRuns}</div>
+                        <div class="label">Búsquedas Ejecutadas</div>
+                    </div>
+                    <div class="card">
+                        <div class="value">${summaryData.leadsFound}</div>
+                        <div class="label">Leads Encontrados</div>
+                    </div>
+                    <div class="card">
+                        <div class="value">${summaryData.leadsEnriched}</div>
+                        <div class="label">Leads Enriquecidos</div>
+                    </div>
+                    <div class="card">
+                        <div class="value">${summaryData.contacted}</div>
+                        <div class="label">Contactados</div>
+                    </div>
+                    <div class="card">
+                        <div class="value">${summaryData.replies}</div>
+                        <div class="label">Respuestas</div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-title">📊 Misiones Activas (${summaryData.activeMissions})</div>
+                    ${missions?.map((m: any) => `
+                        <div class="mission-item">
+                            <span>${m.title}</span>
+                            <span class="badge">ACTIVA</span>
+                        </div>
+                    `).join('') || '<div style="text-align:center;color:#9ca3af;font-style:italic">No hay misiones activas</div>'}
+                </div>
+
+                <div class="footer">
+                    Generado automáticamente por Antonia AI<br>
+                    <a href="${APP_URL}" style="color:white;text-decoration:underline">Ir al Dashboard</a>
+                </div>
+            </div>
+        </body>
+        </html>
+        `;
+
+    } else if (reportType === 'weekly') {
+        const weekStart = new Date();
+        weekStart.setDate(weekStart.getDate() - 7);
+        const weekStartStr = weekStart.toISOString().split('T')[0];
+        subject = `Resumen Semanal de Progreso - Antonia AI`;
+
+        // 1. Aggregate Weekly Stats from antonia_daily_usage
+        const { data: weeklyUsage } = await supabase
+            .from('antonia_daily_usage')
+            .select('leads_searched, leads_enriched, search_runs')
+            .eq('organization_id', organizationId)
+            .gte('date', weekStartStr);
+
+        // Sum up the weekly totals
+        const weeklyTotals = weeklyUsage?.reduce((acc, day) => ({
+            leadsSearched: acc.leadsSearched + (day.leads_searched || 0),
+            leadsEnriched: acc.leadsEnriched + (day.leads_enriched || 0),
+            searchRuns: acc.searchRuns + (day.search_runs || 0)
+        }), { leadsSearched: 0, leadsEnriched: 0, searchRuns: 0 }) || { leadsSearched: 0, leadsEnriched: 0, searchRuns: 0 };
+
+        // 2. Count contacted leads in the last 7 days
+        const { count: contacted } = await supabase.from('contacted_leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+            .gte('created_at', weekStart.toISOString());
+
+        summaryData = {
+            range: '7 days',
+            searchRuns: weeklyTotals.searchRuns,
+            leadsFound: weeklyTotals.leadsSearched,
+            leadsEnriched: weeklyTotals.leadsEnriched,
+            contacted: contacted || 0
+        };
+
+        htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: -apple-system, sans-serif; background: #f3f4f6; padding: 20px; }
+                .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; }
+                .header { background: #1e293b; padding: 40px; text-align: center; color: white; }
+                .stat-row { display: flex; border-bottom: 1px solid #e2e8f0; }
+                .stat-item { flex: 1; padding: 20px; text-align: center; }
+                .stat-val { font-size: 24px; font-weight: bold; color: #3b82f6; }
+                .stat-lbl { font-size: 12px; color: #64748b; text-transform: uppercase; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>Resumen Semanal</h1>
+                    <p>Tus métricas de los últimos 7 días</p>
+                </div>
+                <div class="stat-row">
+                    <div class="stat-item">
+                        <div class="stat-val">${summaryData.searchRuns}</div>
+                        <div class="stat-lbl">Búsquedas</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-val">${summaryData.leadsFound}</div>
+                        <div class="stat-lbl">Leads Encontrados</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-val">${summaryData.leadsEnriched}</div>
+                        <div class="stat-lbl">Enriquecidos</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-val">${summaryData.contacted}</div>
+                        <div class="stat-lbl">Contactados</div>
+                    </div>
+                </div>
+                 <div style="padding:20px;text-align:center;background:#f8fafc">
+                    <p style="color:#64748b;margin:0">Sigue así! Tu agente está trabajando duro.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        `;
+
+    } else if (reportType === 'lead_exhaustion_alert') {
+        const { missionId, searchCriteria } = task.payload;
+
+        // Fetch mission details
+        const { data: mission } = await supabase
+            .from('antonia_missions')
+            .select('title, params')
+            .eq('id', missionId)
+            .single();
+
+        subject = `⚠️ Alerta: Agotamiento de Leads - ${mission?.title}`;
+
+        // Get stats
+        const { count: totalLeads } = await supabase
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId);
+
+        const { count: contactedCount } = await supabase
+            .from('contacted_leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId);
+
+        // Get contacted lead IDs to exclude
+        const { data: contactedLeadIds } = await supabase
+            .from('contacted_leads')
+            .select('lead_id')
+            .eq('mission_id', missionId);
+
+        const contactedIds = (contactedLeadIds || []).map((c: any) => c.lead_id);
+
+        const { count: uncontactedEnriched } = await supabase
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId)
+            .eq('status', 'enriched')
+            .not('id', 'in', `(${contactedIds.length > 0 ? contactedIds.join(',') : '00000000-0000-0000-0000-000000000000'})`);
+
+        summaryData = {
+            missionTitle: mission?.title,
+            totalLeadsFound: totalLeads || 0,
+            contacted: contactedCount || 0,
+            uncontactedEnriched: uncontactedEnriched || 0,
+            searchCriteria: searchCriteria
+        };
+
+        htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: -apple-system, sans-serif; background: #f3f4f6; padding: 20px; }
+                .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); padding: 30px; text-align: center; color: white; }
+                .header h1 { margin: 0; font-size: 24px; }
+                .alert-icon { font-size: 48px; margin-bottom: 10px; }
+                .content { padding: 30px; }
+                .stat-box { background: #fef2f2; border-left: 4px solid #ef4444; padding: 15px; margin: 15px 0; border-radius: 4px; }
+                .stat-label { font-size: 12px; color: #991b1b; text-transform: uppercase; font-weight: 600; }
+                .stat-value { font-size: 24px; color: #dc2626; font-weight: 800; margin-top: 5px; }
+                .criteria { background: #f9fafb; padding: 15px; border-radius: 8px; margin: 20px 0; }
+                .criteria-item { margin: 8px 0; color: #374151; }
+                .recommendation { background: #fffbeb; border: 1px solid #fbbf24; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                .recommendation h3 { margin: 0 0 10px 0; color: #92400e; }
+                .footer { background: #1f2937; color: #9ca3af; padding: 20px; text-align: center; font-size: 12px; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <div class="alert-icon">⚠️</div>
+                    <h1>Alerta de Agotamiento de Leads</h1>
+                    <p>Misión: ${mission?.title}</p>
+                </div>
+                
+                <div class="content">
+                    <p><strong>La búsqueda no ha encontrado nuevos leads con los filtros actuales.</strong></p>
+                    
+                    <div class="stat-box">
+                        <div class="stat-label">Total de Leads Encontrados</div>
+                        <div class="stat-value">${summaryData.totalLeadsFound}</div>
+                    </div>
+                    
+                    <div class="stat-box">
+                        <div class="stat-label">Leads Contactados</div>
+                        <div class="stat-value">${summaryData.contacted}</div>
+                    </div>
+                    
+                    <div class="stat-box">
+                        <div class="stat-label">Leads Enriquecidos Sin Contactar</div>
+                        <div class="stat-value">${summaryData.uncontactedEnriched}</div>
+                    </div>
+                    
+                    <div class="criteria">
+                        <h3 style="margin-top:0; color:#1f2937;">Filtros de Búsqueda Actuales:</h3>
+                        <div class="criteria-item"><strong>Cargo:</strong> ${searchCriteria.jobTitle || 'No especificado'}</div>
+                        <div class="criteria-item"><strong>Ubicación:</strong> ${searchCriteria.location || 'No especificado'}</div>
+                        <div class="criteria-item"><strong>Industria:</strong> ${searchCriteria.industry || 'No especificado'}</div>
+                        <div class="criteria-item"><strong>Palabras clave:</strong> ${searchCriteria.keywords || 'No especificado'}</div>
+                    </div>
+                    
+                    <div class="recommendation">
+                        <h3>💡 Recomendaciones</h3>
+                        <ul style="margin:10px 0; padding-left:20px; color:#78350f;">
+                            ${summaryData.uncontactedEnriched > 0
+                ? '<li>El agente continuará contactando los leads enriquecidos pendientes.</li>'
+                : '<li>No hay más leads disponibles para contactar.</li>'}
+                            <li>Considere ampliar los filtros de búsqueda (ubicación, cargo, industria).</li>
+                            <li>Revise si los criterios son demasiado específicos.</li>
+                            <li>Puede pausar la misión temporalmente si es necesario.</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="footer">
+                    Generado automáticamente por Antonia AI<br>
+                    <a href="${APP_URL}/missions/${missionId}" style="color:white;text-decoration:underline">Ver Misión</a>
+                </div>
+            </div>
+        </body>
+        </html>
+        `;
+
+    } else if (reportType === 'mission_historic') {
         // Fetch Mission Details
         const { data: mission } = await supabase
             .from('antonia_missions')
@@ -1368,92 +1802,92 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
 }
 </style>
     </head>
-    < body >
+    <body >
     <div class="container" >
         <div class="header" >
             <h1>📊 Reporte de Misión </h1>
-                < p > ${mission.title} </p>
+                <p> ${mission.title} </p>
                     </div>
 
-                    < div class="mission-info" >
+                    <div class="mission-info" >
                         <div class="mission-info-grid" >
                             <div class="info-item" >
                                 <span class="info-label" > Fecha de Inicio </span>
-                                    < span class="info-value" > ${new Date(mission.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })} </span>
+                                    <span class="info-value" > ${new Date(mission.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })} </span>
                                         </div>
-                                        < div class="info-item" >
+                                        <div class="info-item" >
                                             <span class="info-label" > Estado </span>
-                                                < span class="status-badge status-${mission.status}" > ${mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : 'COMPLETADA'} </span>
+                                                <span class="status-badge status-${mission.status}" > ${mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : 'COMPLETADA'} </span>
                                                     </div>
-                                                    < div class="info-item" >
+                                                    <div class="info-item" >
                                                         <span class="info-label" > Objetivo </span>
-                                                            < span class="info-value" > ${mission.params?.jobTitle || 'N/A'} </span>
+                                                            <span class="info-value" > ${mission.params?.jobTitle || 'N/A'} </span>
                                                                 </div>
                                                                 </div>
                                                                 </div>
 
-                                                                < div class="stats-section" >
+                                                                <div class="stats-section" >
                                                                     <h2 class="section-title" > Métricas Principales </h2>
-                                                                        < div class="stats-grid" >
+                                                                        <div class="stats-grid" >
                                                                             <div class="stat-card" >
                                                                                 <div class="stat-value" > ${leadsFound || 0} </div>
-                                                                                    < div class="stat-label" > Leads Encontrados </div>
-                                                                                        < div class="progress-bar" >
+                                                                                    <div class="stat-label" > Leads Encontrados </div>
+                                                                                        <div class="progress-bar" >
                                                                                             <div class="progress-fill" style = "width: 100%;" > </div>
                                                                                                 </div>
                                                                                                 </div>
-                                                                                                < div class="stat-card" >
+                                                                                                <div class="stat-card" >
                                                                                                     <div class="stat-value" > ${leadsEnriched || 0} </div>
-                                                                                                        < div class="stat-label" > Enriquecidos </div>
-                                                                                                            < div class="progress-bar" >
+                                                                                                        <div class="stat-label" > Enriquecidos </div>
+                                                                                                            <div class="progress-bar" >
                                                                                                                 <div class="progress-fill" style = "width: ${enrichmentRate}%;" > </div>
                                                                                                                     </div>
                                                                                                                     </div>
-                                                                                                                    < div class="stat-card" >
+                                                                                                                    <div class="stat-card" >
                                                                                                                         <div class="stat-value" > ${leadsContacted || 0} </div>
-                                                                                                                            < div class="stat-label" > Contactados </div>
-                                                                                                                                < div class="progress-bar" >
+                                                                                                                            <div class="stat-label" > Contactados </div>
+                                                                                                                                <div class="progress-bar" >
                                                                                                                                     <div class="progress-fill" style = "width: ${contactRate}%;" > </div>
                                                                                                                                         </div>
                                                                                                                                         </div>
-                                                                                                                                        < div class="stat-card" >
+                                                                                                                                        <div class="stat-card" >
                                                                                                                                             <div class="stat-value" > ${replies || 0} </div>
-                                                                                                                                                < div class="stat-label" > Respuestas </div>
-                                                                                                                                                    < div class="progress-bar" >
+                                                                                                                                                <div class="stat-label" > Respuestas </div>
+                                                                                                                                                    <div class="progress-bar" >
                                                                                                                                                         <div class="progress-fill" style = "width: ${responseRate}%;" > </div>
                                                                                                                                                             </div>
                                                                                                                                                             </div>
                                                                                                                                                             </div>
 
-                                                                                                                                                            < div class="conversion-metrics" >
+                                                                                                                                                            <div class="conversion-metrics" >
                                                                                                                                                                 <div class="conversion-title" > Tasas de Conversión </div>
-                                                                                                                                                                    < div class="conversion-grid" >
+                                                                                                                                                                    <div class="conversion-grid" >
                                                                                                                                                                         <div class="conversion-item" >
                                                                                                                                                                             <div class="conversion-value" > ${enrichmentRate}% </div>
-                                                                                                                                                                                < div class="conversion-label" > Enriquecimiento </div>
+                                                                                                                                                                                <div class="conversion-label" > Enriquecimiento </div>
                                                                                                                                                                                     </div>
-                                                                                                                                                                                    < div class="conversion-item" >
+                                                                                                                                                                                    <div class="conversion-item" >
                                                                                                                                                                                         <div class="conversion-value" > ${contactRate}% </div>
-                                                                                                                                                                                            < div class="conversion-label" > Contacto </div>
+                                                                                                                                                                                            <div class="conversion-label" > Contacto </div>
                                                                                                                                                                                                 </div>
-                                                                                                                                                                                                < div class="conversion-item" >
+                                                                                                                                                                                                <div class="conversion-item" >
                                                                                                                                                                                                     <div class="conversion-value" > ${responseRate}% </div>
-                                                                                                                                                                                                        < div class="conversion-label" > Respuesta </div>
+                                                                                                                                                                                                        <div class="conversion-label" > Respuesta </div>
                                                                                                                                                                                                             </div>
                                                                                                                                                                                                             </div>
                                                                                                                                                                                                             </div>
 
-                                                                                                                                                                                                            < div class="summary-section" >
+                                                                                                                                                                                                            <div class="summary-section" >
                                                                                                                                                                                                                 <h3>📋 Resumen Ejecutivo </h3>
-                                                                                                                                                                                                                    < p > La misión < strong > "${mission.title}" < /strong> comenzó el <strong>${new Date(mission.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}</strong > y ha estado procesando prospectos de forma automática según los criterios definidos.</p>
+                                                                                                                                                                                                                    <p> La misión <strong> "${mission.title}" </strong> comenzó el <strong>${new Date(mission.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}</strong> y ha estado procesando prospectos de forma automática según los criterios definidos.</p>
                                                                                                                                                                                                                         < p > <strong>Progreso: </strong> De ${leadsFound || 0} leads encontrados, se han enriquecido ${leadsEnriched || 0} (${enrichmentRate}%) y contactado ${leadsContacted || 0} (${contactRate}%). Se han recibido ${replies || 0} respuestas, lo que representa una tasa de respuesta del ${responseRate}%.</p >
                                                                                                                                                                                                                             <p><strong>Estado actual: </strong> <span class="status-badge status-${mission.status}">${mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : 'COMPLETADA'}</span > </p>
                                                                                                                                                                                                                                 </div>
                                                                                                                                                                                                                                 </div>
 
-                                                                                                                                                                                                                                < div class="footer" >
+                                                                                                                                                                                                                                <div class="footer" >
                                                                                                                                                                                                                                     <strong>🤖 Generado automáticamente por Antonia AI </strong><br>
-                    ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                                                                                                                                                                                                    ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
 </div>
     </div>
     </body>
@@ -1468,7 +1902,7 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         type: reportType,
         content: htmlContent,
         summary_data: summaryData,
-        sent_to: [userId], // Placeholder, ideally fetch user email
+        sent_to: [userId], // Placeholder, will be updated below
         created_at: new Date().toISOString()
     }).select().single();
 
@@ -1477,33 +1911,51 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         throw error;
     }
 
-    // Send Email (Reuse contact API for simplicity, or implement direct send)
-    // We need to fetch the user's email first to send TO them.
-    const { data: userProfile } = await supabase.rpc('get_user_email_by_id', { user_uuid: userId });
-    // Usually we don't have access to auth.users email directly via client unless using service role admin auth.getUser(uid).
-    // But we are in Cloud Function environment. We can use admin auth.
-    const { data: { user: authUser }, error: authError } = await supabase.auth.admin.getUserById(userId);
+    // --- SEND EMAIL ---
+    // User Request: Send to the email configured in Antonia Settings
 
-    if (authUser && authUser.email) {
-        console.log(`[REPORT] Sending email to ${authUser.email} `);
-        // We can't use 'executeInitialContact' API call style because that uses user's connected GMAIL.
-        // Reports should ideally come from "system@antonia.ai" (Resend/SendGrid).
-        // BUT user configuration likely only has THEIR connected account.
-        // So we send FROM them TO them? Or self-send.
-        // Let's assume self-send for now using their connected account.
+    // 1. Fetch Config again to be sure (or reuse taskConfig if available, but safe to fetch)
+    const { data: config } = await supabase
+        .from('antonia_config')
+        .select('notification_email')
+        .eq('organization_id', organizationId)
+        .single();
+
+    let targetEmail = config?.notification_email;
+
+    // 2. Fallback to Admin User Email if config is missing
+    if (!targetEmail) {
+        console.log('[REPORT] No notification_email in config, fetching admin user email...');
+        const { data: { user: authUser }, error: authError } = await supabase.auth.admin.getUserById(userId);
+        if (authUser) {
+            targetEmail = authUser.email;
+        }
+    }
+
+    if (targetEmail) {
+        console.log(`[REPORT] Sending email to ${targetEmail}`);
+
+        // Update sent_to in report record
+        await supabase.from('antonia_reports').update({
+            sent_to: [targetEmail]
+        }).eq('id', report.id);
 
         const appUrl = APP_URL;
         await fetch(`${appUrl}/api/contact/send`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
             body: JSON.stringify({
-                to: authUser.email,
+                to: targetEmail,
                 subject: subject,
                 body: htmlContent,
                 isHtml: true,
-                userId: userId
+                userId: userId,
+                // Use a dedicated provider for system emails if possible, or default to user's
+                missionId: missionId
             })
         });
+    } else {
+        console.warn('[REPORT] No email found to send report to.');
     }
 
     return { reportId: report.id, generated: true };

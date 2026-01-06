@@ -100,7 +100,7 @@ BEGIN
             END IF;
             
         END IF;
-        
+
         -- Return results
         result_mission_id := mission_record.id;
         result_tasks_created := task_count;
@@ -108,6 +108,92 @@ BEGIN
         tasks_created := result_tasks_created;
         RETURN NEXT;
     END LOOP;
+
+    -- ==================================================================================
+    -- 2. GLOBAL REPORTS SCHEDULING (Per Organization)
+    -- ==================================================================================
+    DECLARE
+        org_record RECORD;
+        report_count integer;
+    BEGIN
+        FOR org_record IN 
+             SELECT 
+                c.organization_id, 
+                c.daily_report_enabled,
+                c.notification_email,
+                -- We need a user_id to assign the task to. We can pick the owner or any member.
+                -- For simplicity, let's pick the first admin-like user found or the one who set up config.
+                -- Ideally antonia_config should have a 'user_id' or 'created_by'. 
+                -- If not, we query members.
+                (SELECT user_id FROM organization_members om WHERE om.organization_id = c.organization_id LIMIT 1) as admin_user_id
+             FROM antonia_config c
+             WHERE c.daily_report_enabled = true
+        LOOP
+             -- DAILY REPORT
+             IF NOT EXISTS (
+                SELECT 1 FROM antonia_tasks t 
+                WHERE t.organization_id = org_record.organization_id 
+                AND t.type = 'GENERATE_REPORT'
+                AND t.payload->>'reportType' = 'daily'
+                AND DATE(t.created_at) = today_date
+             ) THEN
+                INSERT INTO antonia_tasks (
+                    organization_id,
+                    type,
+                    status,
+                    payload,
+                    idempotency_key,
+                    created_at
+                ) VALUES (
+                    org_record.organization_id,
+                    'GENERATE_REPORT',
+                    'pending',
+                    jsonb_build_object(
+                         'reportType', 'daily',
+                         'userId', org_record.admin_user_id,
+                         'date', today_date
+                    ),
+                    'daily_report_' || org_record.organization_id || '_' || today_date,
+                    NOW()
+                );
+                RAISE NOTICE 'Org %: Scheduled DAILY REPORT', org_record.organization_id;
+             END IF;
+
+             -- WEEKLY REPORT (Mondays)
+             -- EXTRACT(DOW FROM current_date) returns 1 for Monday
+             IF EXTRACT(DOW FROM today_date) = 1 THEN
+                 IF NOT EXISTS (
+                    SELECT 1 FROM antonia_tasks t 
+                    WHERE t.organization_id = org_record.organization_id 
+                    AND t.type = 'GENERATE_REPORT'
+                    AND t.payload->>'reportType' = 'weekly'
+                    AND DATE(t.created_at) = today_date
+                 ) THEN
+                    INSERT INTO antonia_tasks (
+                        organization_id,
+                        type,
+                        status,
+                        payload,
+                        idempotency_key,
+                        created_at
+                    ) VALUES (
+                        org_record.organization_id,
+                        'GENERATE_REPORT',
+                        'pending',
+                        jsonb_build_object(
+                             'reportType', 'weekly',
+                             'userId', org_record.admin_user_id,
+                             'weekStart', today_date - 7,
+                             'weekEnd', today_date
+                        ),
+                        'weekly_report_' || org_record.organization_id || '_' || today_date,
+                        NOW()
+                    );
+                    RAISE NOTICE 'Org %: Scheduled WEEKLY REPORT', org_record.organization_id;
+                 END IF;
+             END IF;
+        END LOOP;
+    END;
     
     RETURN;
 END;
