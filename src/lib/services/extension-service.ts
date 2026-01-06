@@ -80,4 +80,7 @@ export const extensionService = {
 // Start listening immediately
 if (typeof window !== 'undefined') {
     extensionService.initListener();
+
+    // Make it globally accessible for debugging
+    (window as any).extensionService = extensionService;
 }
