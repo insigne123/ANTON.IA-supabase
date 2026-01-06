@@ -144,11 +144,16 @@ async function runDMFlow(profileUrl, message, sendResponse) {
         document.execCommand('delete', false, null); // Clear existing draft if any? careful
         document.execCommand('insertText', false, message);
 
-        // 5. Click Send (Simulated for Phase 1 - we leave it typed)
-        // const sendBtn = document.querySelector('button.msg-form__send-button');
-        // if (sendBtn) sendBtn.click();
+        // 5. Click Send
+        const sendBtn = document.querySelector('button.msg-form__send-button');
+        if (sendBtn) {
+            sendBtn.click();
+            console.log('Clicked Send Button');
+        } else {
+            console.warn('Send button not found, message typed but not sent.');
+        }
 
-        sendResponse({ success: true, status: 'Typed, waiting for manual send (Safety Mode)' });
+        sendResponse({ success: true, status: 'Message sent successfully' });
 
     } catch (e) {
         console.error(e);
