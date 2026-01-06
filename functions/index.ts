@@ -477,6 +477,28 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
             console.log(`[ENRICH] Successfully enriched ${data.enriched?.length || 0} leads`);
 
             const enrichedLeads = data.enriched || [];
+
+            // Update lead status to 'enriched' in the database
+            const leadIds = enrichedLeads.map((l: any) => l.id).filter(Boolean);
+
+            if (leadIds.length > 0) {
+                console.log(`[ENRICH] Updating ${leadIds.length} leads to status='enriched'`);
+
+                const { error: updateError } = await supabase
+                    .from('leads')
+                    .update({
+                        status: 'enriched',
+                        last_enriched_at: new Date().toISOString()
+                    })
+                    .in('id', leadIds);
+
+                if (updateError) {
+                    console.error('[ENRICH] Error updating lead status:', updateError);
+                } else {
+                    console.log(`[ENRICH] ✅ Successfully updated ${leadIds.length} leads to status='enriched'`);
+                }
+            }
+
             await incrementUsage(supabase, task.organization_id, 'enrich', enrichedLeads.length, task.id);
 
             // Chain to INVESTIGATE if configured and we have enriched leads
