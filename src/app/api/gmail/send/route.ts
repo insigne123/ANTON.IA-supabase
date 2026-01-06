@@ -168,6 +168,7 @@ export async function POST(req: Request) {
       .limit(1)
       .maybeSingle();
     if (member) orgId = member.organization_id;
+    console.log('[gmail/send] User:', user.id, 'OrgId:', orgId);
 
     // --- Blacklist Check ---
     let blacklistQuery = supabase
@@ -190,18 +191,23 @@ export async function POST(req: Request) {
 
     // --- Domain Blacklist Check ---
     const domain = body.to.split('@')[1]?.toLowerCase().trim();
+    console.log('[gmail/send] Checking domain block for:', domain, 'OrgId:', orgId);
     if (domain && orgId) {
-      const { data: blockedDomain } = await supabase
+      const { data: blockedDomain, error: domainError } = await supabase
         .from('excluded_domains')
         .select('id')
         .eq('organization_id', orgId)
         .eq('domain', domain)
         .maybeSingle();
 
+      console.log('[gmail/send] Domain check result:', { blockedDomain, domainError });
+
       if (blockedDomain) {
         console.warn(`[gmail/send] Blocked domain ${domain} to ${body.to} (User: ${user.id})`);
         return NextResponse.json({ error: `El dominio ${domain} está bloqueado por tu organización.` }, { status: 403 });
       }
+    } else {
+      console.log('[gmail/send] Skipping domain check - domain:', domain, 'orgId:', orgId);
     }
 
     // --- Inject Unsubscribe Link ---
