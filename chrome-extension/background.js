@@ -1,4 +1,20 @@
-const API_BASE = 'http://localhost:3000'; // Make sure this matches user env or use production URL
+// Dynamic API base detection - supports localhost and production
+let API_BASE = 'http://localhost:3000';
+
+// Try to detect production URL from manifest externally_connectable
+const manifest = chrome.runtime.getManifest();
+const productionUrls = manifest.externally_connectable?.matches?.filter(
+    url => !url.includes('localhost')
+) || [];
+
+if (productionUrls.length > 0) {
+    // Extract base URL from first production match (remove /* wildcard)
+    const prodUrl = productionUrls[0].replace('/*', '');
+    // Prefer production if available, fallback to localhost
+    API_BASE = prodUrl || 'http://localhost:3000';
+}
+
+console.log('[Anton.IA Background] API_BASE configured:', API_BASE);
 
 // Setup polling
 chrome.alarms.create('check_schedule', { periodInMinutes: 1 });

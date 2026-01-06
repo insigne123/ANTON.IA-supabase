@@ -43,3 +43,63 @@ Si aún no tienes cuenta:
 1. Dale a "Enviar a revisión".
 2. La revisión para "No listado" suele ser rápida (horas o pocos días).
 3. Una vez aprobada, copia el **Link de la tienda** y envíaselo a tus usuarios.
+
+---
+
+## 7. Verificación y Troubleshooting
+
+### Verificar Instalación
+Después de instalar la extensión:
+
+1. **Verificar que esté activa:**
+   - Chrome → Extensiones (chrome://extensions/)
+   - Buscar "Anton.IA Automation"
+   - Debe estar activada (toggle azul)
+
+2. **Verificar permisos:**
+   - Click en "Detalles" de la extensión
+   - Verificar que tenga acceso a:
+     - `https://www.linkedin.com/*`
+     - Tu dominio de producción
+
+3. **Verificar detección en la app:**
+   - Abrir tu aplicación web
+   - Abrir Console (F12)
+   - Buscar mensaje: `[App] ✅ Extension detected`
+   - Ejecutar: `console.log(extensionService.isInstalled)` → debe retornar `true`
+
+### Troubleshooting Común
+
+**Problema: La app no detecta la extensión**
+- Solución: Recargar la página de la aplicación
+- Verificar en Console si aparece `[Anton.IA Ext] Web Injector Loaded`
+- Verificar que el dominio esté en `manifest.json` → `externally_connectable`
+
+**Problema: No encuentra botones de LinkedIn**
+- Solución: LinkedIn cambió su UI, los selectores CSS necesitan actualizarse
+- Revisar Console para ver qué botones están disponibles
+- Reportar el error con screenshots
+
+**Problema: Timeout al enviar mensaje**
+- Solución: Verificar que estás en un perfil válido de LinkedIn
+- Verificar que el perfil permite enviar mensajes
+- Revisar Console del Service Worker (chrome://extensions/ → Service Worker)
+
+### Logs de Debugging
+
+La extensión ahora incluye logging comprehensivo:
+
+**En la aplicación web (Console):**
+- `[App] Extension Service Status` - Estado de detección
+- `[App] 📤 Sending LinkedIn DM request` - Envío iniciado
+- `[App] 📥 Received extension response` - Respuesta recibida
+
+**En LinkedIn (Console):**
+- `[Anton.IA] Extension Status` - Estado general
+- `[Anton.IA] Found editor` - Editor de mensajes encontrado
+- `[Anton.IA] Clicked Send Button` - Mensaje enviado
+
+**En Background Script (Service Worker):**
+- `[Anton.IA Background] API_BASE configured` - URL del API detectada
+- `[Anton.IA Background] Received` - Mensajes recibidos
+

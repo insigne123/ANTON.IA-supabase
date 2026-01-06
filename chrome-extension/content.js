@@ -133,8 +133,19 @@ async function runDMFlow(profileUrl, message, sendResponse) {
 
         // 3. Wait for chat overlay
         await delay(2000);
-        const editor = document.querySelector('div[role="textbox"][contenteditable="true"]');
-        if (!editor) throw new Error('Chat editor not found');
+
+        // Try multiple selectors for the message editor (LinkedIn changes these frequently)
+        const editor = document.querySelector('div[role="textbox"][contenteditable="true"]') ||
+            document.querySelector('.msg-form__contenteditable') ||
+            document.querySelector('[data-artdeco-is-focused="true"]') ||
+            document.querySelector('.msg-form__msg-content-container [contenteditable="true"]');
+
+        if (!editor) {
+            console.error('[Anton.IA] Chat editor not found. Tried multiple selectors.');
+            throw new Error('Chat editor not found - LinkedIn UI may have changed');
+        }
+
+        console.log('[Anton.IA] Found editor:', editor.className);
 
         // 4. Type message
         // Updating contenteditable is tricky (React virtual DOM).
@@ -144,13 +155,20 @@ async function runDMFlow(profileUrl, message, sendResponse) {
         document.execCommand('delete', false, null); // Clear existing draft if any? careful
         document.execCommand('insertText', false, message);
 
-        // 5. Click Send
-        const sendBtn = document.querySelector('button.msg-form__send-button');
+        // 5. Click Send - try multiple selectors
+        const sendBtn = document.querySelector('button.msg-form__send-button') ||
+            document.querySelector('button[type="submit"]') ||
+            Array.from(document.querySelectorAll('button')).find(b =>
+                b.innerText.toLowerCase().includes('send') ||
+                b.innerText.toLowerCase().includes('enviar')
+            );
+
         if (sendBtn) {
             sendBtn.click();
-            console.log('Clicked Send Button');
+            console.log('[Anton.IA] Clicked Send Button');
         } else {
-            console.warn('Send button not found, message typed but not sent.');
+            console.error('[Anton.IA] Send button not found, message typed but not sent.');
+            throw new Error('Send button not found - message was typed but could not be sent');
         }
 
         sendResponse({ success: true, status: 'Message sent successfully' });
@@ -164,10 +182,17 @@ async function runDMFlow(profileUrl, message, sendResponse) {
 function findMessageButton() {
     // Strategy: Find button with text "Message" or "Mensaje"
     const buttons = Array.from(document.querySelectorAll('button'));
-    return buttons.find(b => {
+    const messageBtn = buttons.find(b => {
         const text = b.innerText.toLowerCase();
         return text.includes('message') || text.includes('mensaje') || text.includes('enviar mensaje');
     });
+
+    if (!messageBtn) {
+        console.error('[Anton.IA] Message button not found. Available buttons:',
+            buttons.slice(0, 5).map(b => b.innerText.substring(0, 20)));
+    }
+
+    return messageBtn;
 }
 
 function delay(ms) {

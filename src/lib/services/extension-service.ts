@@ -10,7 +10,7 @@ export const extensionService = {
             if (event.source !== window) return;
             if (event.data.type === 'ANTON_EXTENSION_READY') {
                 this.isInstalled = true;
-                console.log('[App] Extension detected!');
+                console.log('[App] ✅ Extension detected via ANTON_EXTENSION_READY message!');
             }
         });
 
@@ -19,13 +19,26 @@ export const extensionService = {
         // For now, rely on the content script's initial broadcast or 'data-' attribute.
         if (document.body.getAttribute('data-anton-extension-installed')) {
             this.isInstalled = true;
+            console.log('[App] ✅ Extension detected via data-anton-extension-installed attribute!');
         }
+
+        // Log status after initialization
+        setTimeout(() => {
+            console.log('[App] Extension Service Status:', {
+                isInstalled: this.isInstalled,
+                hasDataAttribute: !!document.body.getAttribute('data-anton-extension-installed'),
+                currentUrl: window.location.href
+            });
+        }, 1000);
     },
 
     async sendLinkedinDM(profileUrl: string, message: string): Promise<{ success: boolean; error?: string }> {
         if (!this.isInstalled) {
+            console.error('[App] ❌ Cannot send LinkedIn DM: Extension not installed');
             return { success: false, error: 'Extension not installed' };
         }
+
+        console.log('[App] 📤 Sending LinkedIn DM request:', { profileUrl, messageLength: message.length });
 
         return new Promise((resolve) => {
             const handler = (event: MessageEvent) => {
@@ -33,6 +46,8 @@ export const extensionService = {
                 if (event.data.type === 'EXTENSION_Response') {
                     // We might need an ID to match request/response if concurrent, but for now simple 1-1
                     window.removeEventListener('message', handler);
+                    console.log('[App] 📥 Received extension response:', event.data.payload);
+
                     if (event.data.payload.success) {
                         resolve({ success: true });
                     } else {
@@ -55,7 +70,8 @@ export const extensionService = {
             // Timeout safety
             setTimeout(() => {
                 window.removeEventListener('message', handler);
-                resolve({ success: false, error: 'Timeout waiting for extension' });
+                console.error('[App] ⏱️ Timeout waiting for extension response');
+                resolve({ success: false, error: 'Timeout waiting for extension (30s)' });
             }, 30000);
         });
     }
