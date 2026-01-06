@@ -1202,14 +1202,12 @@ async function executeContactCampaign(task: any, supabase: SupabaseClient) {
 // Reuse legacy contact logic helper
 // --- 7. EXECUTE REPORT GENERATION ---
 async function executeReportGeneration(task: any, supabase: SupabaseClient) {
-    const { reportType, missionId, userId } = task.payload; // reportType: 'mission_historic' | 'daily'
+    const { reportType, userId, missionId } = task.payload;
     const organizationId = task.organization_id;
 
-    console.log(`[REPORT] Generating ${reportType} report for Org ${organizationId}`);
-
-    let htmlContent = '';
-    let summaryData = {};
     let subject = '';
+    let htmlContent = '';
+    let summaryData: any = {}; // Initialize with proper type
 
     if (reportType === 'daily') {
         const today = new Date().toISOString().split('T')[0];
