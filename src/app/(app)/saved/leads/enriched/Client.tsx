@@ -81,7 +81,7 @@ export default function EnrichedLeadsClient() {
   }, []);
 
   const [enriched, setEnriched] = useState<EnrichedLead[]>([]);
-  const [sel, setSel] = useState<Record<string, boolean>>({});           // selecciÃ³n para INVESTIGAR
+  const [sel, setSel] = useState<Record<string, boolean>>({});           // selección para INVESTIGAR
   const [reports, setReports] = useState<LeadResearchReport[]>([]);
   const [openReport, setOpenReport] = useState(false);
   // Estados para Modal de llamada
@@ -247,7 +247,7 @@ export default function EnrichedLeadsClient() {
     excCompany: '', excLead: '', excTitle: '',
   });
 
-  // --- PAGINACIÃ“N ---
+  // --- PAGINACIÓN ---
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState<number>(1);
 
@@ -303,8 +303,8 @@ export default function EnrichedLeadsClient() {
             // Detect Status Change: Pending -> Completed
             if (newData.enrichment_status === 'completed' && oldData.enrichment_status === 'pending_phone') {
               toast({
-                title: 'Â¡TelÃ©fono encontrado!',
-                description: `N8N completÃ³ la bÃºsqueda para ${newData.full_name || 'un lead'}.`,
+                title: '¡Teléfono encontrado!',
+                description: `N8N completó la búsqueda para ${newData.full_name || 'un lead'}.`,
                 duration: 5000,
               });
             }
@@ -352,7 +352,7 @@ export default function EnrichedLeadsClient() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // ðŸ”„ Refrescar si otro tab/pÃ¡gina (compose) modifica el localStorage
+  // 🔄 Refrescar si otro tab/página (compose) modifica el localStorage
   // DEPRECATED: Cloud sync handles this differently (realtime), removing local storage listener.
   /*
   useEffect(() => {
@@ -398,7 +398,7 @@ export default function EnrichedLeadsClient() {
 
   const canContact = (lead: EnrichedLead) => hasReport(lead) && !!lead.email;
 
-  // Normaliza cadenas (quita acentos y pasa a minÃºsculas)
+  // Normaliza cadenas (quita acentos y pasa a minúsculas)
   const norm = (s?: string | null) =>
     (s || '')
       .toLowerCase()
@@ -411,7 +411,7 @@ export default function EnrichedLeadsClient() {
       .map(t => norm(t).trim())
       .filter(Boolean);
 
-  // ---- AplicaciÃ³n de filtros con soporte de mÃºltiples tÃ©rminos (separados por coma) ----
+  // ---- Aplicación de filtros con soporte de múltiples términos (separados por coma) ----
   const filtered = useMemo(() => {
     // incluye
     const incCompanies = splitTerms(applied.incCompany);
@@ -448,16 +448,16 @@ export default function EnrichedLeadsClient() {
     );
   }, [enriched, applied]);
 
-  // Mantener nÃºmero de pÃ¡gina vÃ¡lido si cambia la cantidad total
+  // Mantener número de página válido si cambia la cantidad total
   useEffect(() => {
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     if (page > totalPages) setPage(totalPages);
   }, [filtered.length, pageSize, page]);
 
-  // Resetear a la primera pÃ¡gina si cambia el tamaÃ±o de pÃ¡gina
+  // Resetear a la primera página si cambia el tamaño de página
   useEffect(() => { setPage(1); }, [pageSize]);
 
-  // --- CÃ¡lculo de la pÃ¡gina actual (sobre filtrados) ---
+  // --- Cálculo de la página actual (sobre filtrados) ---
   const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const startIdx = (page - 1) * pageSize;
@@ -470,9 +470,9 @@ export default function EnrichedLeadsClient() {
     [filtered, reports]
   );
 
-  // === MÃ©tricas para los "seleccionar todos" ===
+  // === Métricas para los "seleccionar todos" ===
   const researchEligiblePage = useMemo(
-    // Elegible si: tiene email, NO estÃ¡ marcado investigado y NO tiene reporte por ref (otros leads no bloquean)
+    // Elegible si: tiene email, NO está marcado investigado y NO tiene reporte por ref (otros leads no bloquean)
     () => pageLeads.filter(e => e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)).length,
     [pageLeads, reports]
   );
@@ -524,13 +524,13 @@ export default function EnrichedLeadsClient() {
 
   const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-  /** Obtiene/crea sesiÃ³n MSAL y devuelve email/uid para cabecera X-User-Id. */
+  /** Obtiene/crea sesión MSAL y devuelve email/uid para cabecera X-User-Id. */
   /** Obtiene ID de usuario autenticado de Supabase para headers. */
   async function getUserIdOrFail(): Promise<string> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user?.id) {
-      // Si no hay usuario, redirigir (aunque el middleware ya deberÃ­a proteger)
-      toast({ variant: 'destructive', title: 'Error de sesiÃ³n', description: 'No se detectÃ³ usuario. Recarga la pÃ¡gina.' });
+      // Si no hay usuario, redirigir (aunque el middleware ya debería proteger)
+      toast({ variant: 'destructive', title: 'Error de sesión', description: 'No se detectó usuario. Recarga la página.' });
       throw new Error('no_identity');
     }
     return user.id;
@@ -604,14 +604,14 @@ export default function EnrichedLeadsClient() {
 
     if (!res.ok) {
       const msg = data?.error
-        || (text?.startsWith('<') ? 'El backend devolviÃ³ HTML (error interno). Revisa /api/research/n8n.' : (text || 'n8n error'));
+        || (text?.startsWith('<') ? 'El backend devolvió HTML (error interno). Revisa /api/research/n8n.' : (text || 'n8n error'));
       throw new Error(msg);
     }
 
     // Espejo local de cuota
     Quota.incClientQuota('research');
 
-    // NormalizaciÃ³n de reports (cross/meta.leadRef), igual que en Oportunidades
+    // Normalización de reports (cross/meta.leadRef), igual que en Oportunidades
     // Check for phone enrichment data from N8N
     if (data?.phoneNumbers || data?.primaryPhone) {
       // Update Supabase
@@ -632,11 +632,11 @@ export default function EnrichedLeadsClient() {
         return item;
       }));
 
-      toast({ title: 'Â¡TelÃ©fono encontrado!', description: `Se enriqueciÃ³ el lead con ${data.phoneNumbers?.length || 1} nÃºmero(s).` });
+      toast({ title: '¡Teléfono encontrado!', description: `Se enriqueció el lead con ${data.phoneNumbers?.length || 1} número(s).` });
     } else {
       console.log('[runOneInvestigation] No phone data in N8N response. Keys:', Object.keys(data || {}));
-      // Opcional: avisar que no llegÃ³ telÃ©fono, para depuraciÃ³n
-      // toast({ variant: 'outline', title: 'Sin telÃ©fono', description: 'La investigaciÃ³n no retornÃ³ datos de contacto telefÃ³nico.' });
+      // Opcional: avisar que no llegó teléfono, para depuración
+      // toast({ variant: 'outline', title: 'Sin teléfono', description: 'La investigación no retornó datos de contacto telefónico.' });
     }
 
     if (Array.isArray(data?.reports) && data.reports.length) {
@@ -677,10 +677,10 @@ export default function EnrichedLeadsClient() {
         });
         return;
       }
-    } catch { /* ignoramos si falla el GET, el POST igual reportarÃ¡ */ }
+    } catch { /* ignoramos si falla el GET, el POST igual reportará */ }
 
     if (!Quota.canUseClientQuota('research')) {
-      toast({ variant: 'destructive', title: 'LÃ­mite diario alcanzado', description: `Has llegado al lÃ­mite de investigaciones por hoy.` });
+      toast({ variant: 'destructive', title: 'Límite diario alcanzado', description: `Has llegado al límite de investigaciones por hoy.` });
       return;
     }
 
@@ -695,7 +695,7 @@ export default function EnrichedLeadsClient() {
         toast({
           variant: 'destructive',
           title: 'Conecta Outlook',
-          description: 'Inicia sesiÃ³n en Outlook para continuar con la investigaciÃ³n.',
+          description: 'Inicia sesión en Outlook para continuar con la investigación.',
         });
         throw new Error('missing user id');
       });
@@ -723,10 +723,10 @@ export default function EnrichedLeadsClient() {
           }
         }
         if (lastErr) {
-          console.error(`InvestigaciÃ³n fallÃ³ para ${e.companyName}:`, lastErr?.message);
+          console.error(`Investigación falló para ${e.companyName}:`, lastErr?.message);
           toast({
             variant: "destructive",
-            title: `InvestigaciÃ³n fallÃ³ para ${e.companyName}`,
+            title: `Investigación falló para ${e.companyName}`,
             description: lastErr?.message || "Error desconocido. Revisa la consola o el webhook de n8n."
           });
         }
@@ -739,14 +739,14 @@ export default function EnrichedLeadsClient() {
       organizationService.getCredits().then(res => {
         if (res) setSocialCredits(res.credits);
       });
-      toast({ title: 'InvestigaciÃ³n completa', description: `Procesados ${selected.length} leads.` });
+      toast({ title: 'Investigación completa', description: `Procesados ${selected.length} leads.` });
     }
   }
 
-  /** Borra reportes de investigaciÃ³n y desmarca "investigado" para TODOS los leads visibles. */
+  /** Borra reportes de investigación y desmarca "investigado" para TODOS los leads visibles. */
   function clearInvestigations() {
     if (!enriched.length) return;
-    const ok = confirm('Â¿Borrar todos los reportes e investigaciones de los leads listados? PodrÃ¡s investigarlos nuevamente.');
+    const ok = confirm('¿Borrar todos los reportes e investigaciones de los leads listados? Podrás investigarlos nuevamente.');
     if (!ok) return;
 
     // 1) Construir referencias y dominios objetivo
@@ -765,8 +765,8 @@ export default function EnrichedLeadsClient() {
 
     // 4) Refrescar estado
     setReports(getLeadReports());
-    setSel({});                         // limpiar selecciÃ³n de investigar
-    setSelectedToContact(new Set());    // limpiar selecciÃ³n de contactar
+    setSel({});                         // limpiar selección de investigar
+    setSelectedToContact(new Set());    // limpiar selección de contactar
 
     // 5) Aviso
     toast({
@@ -777,11 +777,11 @@ export default function EnrichedLeadsClient() {
     });
   }
 
-  /** Borra reportes e investigaciÃ³n SOLO de los "Contactar seleccionados". */
+  /** Borra reportes e investigación SOLO de los "Contactar seleccionados". */
   function clearInvestigationsSelected() {
-    if (!selectedToContact.size) return;
-    const targets = enriched.filter(e => selectedToContact.has(e.id));
-    const ok = confirm(`Â¿Borrar investigaciones de ${targets.length} lead(s) seleccionados? PodrÃ¡s investigarlos nuevamente.`);
+    const targets = enriched.filter(l => selectedToContact.has(l.id));
+    if (!targets.length) return;
+    const ok = confirm(`¿Borrar investigaciones de ${targets.length} lead(s) seleccionados? Podrás investigarlos nuevamente.`);
     if (!ok) return;
 
     const refs = targets.map(leadRefOf).filter(Boolean);
@@ -795,7 +795,7 @@ export default function EnrichedLeadsClient() {
 
     unmarkResearched(refs);
 
-    // Limpiar selecciÃ³n de contactar para los que ya no tienen reporte
+    // Limpiar selección de contactar para los que ya no tienen reporte
     const nextSel = new Set<string>(selectedToContact);
     targets.forEach(t => nextSel.delete(t.id));
     setSelectedToContact(nextSel);
@@ -807,9 +807,9 @@ export default function EnrichedLeadsClient() {
     });
   }
 
-  /** Borra reportes e investigaciÃ³n de un Ãºnico lead (usado en el modal de reporte). */
-  function clearInvestigationFor(lead: EnrichedLead) {
-    const ok = confirm(`Â¿Borrar la investigaciÃ³n de ${lead.fullName}?`);
+  /** Borra reportes e investigación de un único lead (usado en el modal de reporte). */
+  function clearSingleInvestigation(lead: EnrichedLead) {
+    const ok = confirm(`¿Borrar la investigación de ${lead.fullName}?`);
     if (!ok) return;
     const ref = leadRefOf(lead);
     const dom = (lead.companyDomain || '').trim();
@@ -824,8 +824,8 @@ export default function EnrichedLeadsClient() {
     setReports(getLeadReports());
     setOpenReport(false);
     toast({
-      title: 'InvestigaciÃ³n borrada',
-      description: removedCount > 0 ? 'Se eliminÃ³ el reporte. Ya puedes reinvestigar.' : 'No se encontrÃ³ reporte para borrar.',
+      title: 'Investigación borrada',
+      description: removedCount > 0 ? 'Se eliminó el reporte. Ya puedes reinvestigar.' : 'No se encontró reporte para borrar.',
     });
   }
 
@@ -846,7 +846,7 @@ export default function EnrichedLeadsClient() {
     const leadsToProcess = enriched.filter(l => selectedToContact.has(l.id) && l.linkedinUrl);
 
     if (leadsToProcess.length === 0) {
-      toast({ title: 'No hay leads vÃ¡lidos', description: 'Selecciona leads que tengan URL de LinkedIn.' });
+      toast({ title: 'No hay leads válidos', description: 'Selecciona leads que tengan URL de LinkedIn.' });
       return;
     }
 
@@ -854,8 +854,8 @@ export default function EnrichedLeadsClient() {
     if (!extensionService.isInstalled) {
       toast({
         variant: 'destructive',
-        title: 'ExtensiÃ³n no detectada',
-        description: 'Instala la extensiÃ³n de Chrome de Anton.IA para usar esta funciÃ³n.'
+        title: 'Extensión no detectada',
+        description: 'Instala la extensión de Chrome de Anton.IA para usar esta función.'
       });
       return;
     }
@@ -863,10 +863,10 @@ export default function EnrichedLeadsClient() {
     // 3. Warning for large selections
     if (leadsToProcess.length > 20) {
       const confirmed = confirm(
-        `âš ï¸ Vas a contactar ${leadsToProcess.length} leads.\n\n` +
-        `Esto tomarÃ¡ aproximadamente ${Math.round(leadsToProcess.length * 7.5 / 60)} minutos.\n\n` +
-        `Procesar muchos leads aumenta el riesgo de detecciÃ³n por LinkedIn.\n\n` +
-        `Â¿Deseas continuar?`
+        `⚠️ Vas a contactar ${leadsToProcess.length} leads.\n\n` +
+        `Esto tomará aproximadamente ${Math.round(leadsToProcess.length * 7.5 / 60)} minutos.\n\n` +
+        `Procesar muchos leads aumenta el riesgo de detección por LinkedIn.\n\n` +
+        `¿Deseas continuar?`
       );
       if (!confirmed) return;
     }
@@ -901,7 +901,7 @@ export default function EnrichedLeadsClient() {
         });
 
         const draft = generateLinkedinDraft(lead, rep);
-        const messageBody = draft || `Hola ${getFirstNameSafe(lead.fullName)}, me gustarÃ­a conectar contigo.`;
+        const messageBody = draft || `Hola ${getFirstNameSafe(lead.fullName)}, me gustaría conectar contigo.`;
 
         // 3. Send via Extension
         console.log(`[Bulk LinkedIn] Processing ${lead.fullName}...`);
@@ -1004,7 +1004,7 @@ export default function EnrichedLeadsClient() {
       const plan = plannerService.calculateSchedule(leadsToSchedule, scheduleConfig);
       await plannerService.saveSchedule(plan);
 
-      toast({ title: 'CampaÃ±a Agendada', description: `Se programaron ${plan.length} envÃ­os.` });
+      toast({ title: 'Campaña Agendada', description: `Se programaron ${plan.length} envíos.` });
       setOpenSchedule(false);
       router.push('/planner');
     } catch (e: any) {
@@ -1023,8 +1023,8 @@ export default function EnrichedLeadsClient() {
       if (!extensionService.isInstalled) {
         toast({
           variant: 'destructive',
-          title: 'ExtensiÃ³n no detectada',
-          description: 'Instala la extensiÃ³n de Chrome de Anton.IA para enviar DMs.'
+          title: 'Extensión no detectada',
+          description: 'Instala la extensión de Chrome de Anton.IA para enviar DMs.'
         });
         setSendingLinkedin(false);
         return;
@@ -1057,17 +1057,18 @@ export default function EnrichedLeadsClient() {
           lastUpdateAt: new Date().toISOString()
         });
 
-        toast({ title: 'Mensaje Enviado', description: 'La extensiÃ³n procesÃ³ el envÃ­o correctamente.' });
+        toast({ title: 'Mensaje Enviado', description: 'La extensión procesó el envío correctamente.' });
         setOpenLinkedin(false);
 
         // Optional: Remove from enriched?
         // await removeEnrichedLeadById(linkedinLead.id);
       } else {
-        toast({ variant: 'destructive', title: 'Error en EnvÃ­o', description: res.error });
+        console.error('Extension returned error:', res.error);
+        toast({ variant: 'destructive', title: 'Error en Envío', description: res.error });
       }
 
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'ExcepciÃ³n', description: e.message });
+      toast({ variant: 'destructive', title: 'Excepción', description: e.message });
     } finally {
       setSendingLinkedin(false);
     }
@@ -1093,7 +1094,7 @@ export default function EnrichedLeadsClient() {
           );
           subj = gen.subject; body = gen.body;
         } else {
-          // InvestigaciÃ³n (comportamiento actual)
+          // Investigación (comportamiento actual)
           const seed = rep?.cross?.emailDraft
             ? { subject: rep.cross.emailDraft.subject, body: rep.cross.emailDraft.body }
             : (() => {
@@ -1198,7 +1199,7 @@ export default function EnrichedLeadsClient() {
           sentAt: new Date().toISOString(),
           status: 'sent',
           provider: bulkProvider,
-          // Campos segÃºn proveedor
+          // Campos según proveedor
           messageId: bulkProvider === 'outlook' ? res?.messageId : res?.id,
           conversationId: bulkProvider === 'outlook' ? res?.conversationId : undefined,
           internetMessageId: bulkProvider === 'outlook' ? res?.internetMessageId : undefined,
@@ -1206,7 +1207,7 @@ export default function EnrichedLeadsClient() {
           lastUpdateAt: new Date().toISOString(),
         });
 
-        // âœ… mover fuera de Enriquecidos si el envÃ­o fue OK
+        // ✅ mover fuera de Enriquecidos si el envío fue OK
         await removeEnrichedLeadById(lead.id);
         removedIds.add(lead.id);
       } catch (e: any) {
@@ -1240,7 +1241,7 @@ export default function EnrichedLeadsClient() {
   async function generateEmailFromReportFor(e: EnrichedLead) {
     const report = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
     if (!report?.cross?.emailDraft) {
-      toast({ title: 'Sin borrador de IA', description: 'Investiga con n8n y asegÃºrate de que el flujo genere un borrador de correo.' });
+      toast({ title: 'Sin borrador de IA', description: 'Investiga con n8n y asegúrate de que el flujo genere un borrador de correo.' });
       if (report) openReportFor(e);
       return;
     }
@@ -1275,9 +1276,9 @@ export default function EnrichedLeadsClient() {
     try {
       // 1. Guardar en Contactados con notas completas
       const resultLabel = result === 'connected' ? 'Contactado' :
-        result === 'voicemail' ? 'BuzÃ³n de voz' :
-          result === 'wrong_number' ? 'NÃºmero equivocado' :
-            'No contestÃ³';
+        result === 'voicemail' ? 'Buzón de voz' :
+          result === 'wrong_number' ? 'Número equivocado' :
+            'No contestó';
 
       await contactedLeadsStorage.add({
         id: uuid(),
@@ -1289,7 +1290,7 @@ export default function EnrichedLeadsClient() {
         industry: leadToCall.industry || undefined,
         city: leadToCall.city || leadToCall.country || undefined,
         country: leadToCall.country || undefined,
-        subject: notes ? `Llamada: ${resultLabel} - ${notes}` : `Llamada telefÃ³nica: ${resultLabel}`,
+        subject: notes ? `Llamada: ${resultLabel} - ${notes}` : `Llamada telefónica: ${resultLabel}`,
         sentAt: new Date().toISOString(),
         status: result === 'connected' ? 'sent' : 'failed',
         provider: 'phone',
@@ -1311,22 +1312,22 @@ export default function EnrichedLeadsClient() {
   }
 
   async function handleDeleteEnriched(id: string) {
-    const ok = confirm('Â¿Eliminar este lead de Enriquecidos?');
+    const ok = confirm('¿Eliminar este lead de Enriquecidos?');
     if (!ok) return;
     const next = await removeEnrichedLeadById(id);
     setEnriched(next);
     // limpia selecciones
     setSel(prev => { const p = { ...prev }; delete p[id]; return p; });
     const s = new Set(selectedToContact); s.delete(id); setSelectedToContact(s);
-    toast({ title: 'Eliminado', description: 'Se quitÃ³ el lead de Enriquecidos.' });
+    toast({ title: 'Eliminado', description: 'Se quitó el lead de Enriquecidos.' });
   }
 
-  // Contadores para toda la selecciÃ³n (no solo la pÃ¡gina actual)
+  // Contadores para toda la selección (no solo la página actual)
   const researchCount = Object.values(sel).filter(Boolean).length;
   const contactCount = selectedToContact.size;
 
   // ---------- Export helpers ----------
-  const exportHeaders = ['Nombre', 'Cargo', 'Empresa', 'Email', 'TelÃ©fono', 'LinkedIn', 'Dominio'];
+  const exportHeaders = ['Nombre', 'Cargo', 'Empresa', 'Email', 'Teléfono', 'LinkedIn', 'Dominio'];
   const toRow = (e: EnrichedLead): (string | number)[] => ([
     e.fullName || '',
     e.title || '',
@@ -1357,10 +1358,10 @@ export default function EnrichedLeadsClient() {
       {socialCredits !== null && (
         <div className={`mb-4 px-4 py-2 rounded-md text-sm border flex items-center justify-between ${socialCredits > 0 ? 'bg-blue-50 text-blue-800 border-blue-100' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
           <div className="flex items-center gap-2">
-            <span className="text-lg">âš¡</span>
+            <span className="text-lg">⚡</span>
             <span>
-              <strong>InvestigaciÃ³n Profunda (LinkedIn):</strong> {socialCredits} crÃ©ditos restantes.
-              {socialCredits === 0 && <span className="ml-2 opacity-80">(Se usarÃ¡ investigaciÃ³n estÃ¡ndar sin LinkedIn)</span>}
+              <strong>Investigación Profunda (LinkedIn):</strong> {socialCredits} créditos restantes.
+              {socialCredits === 0 && <span className="ml-2 opacity-80">(Se usará investigación estándar sin LinkedIn)</span>}
             </span>
           </div>
         </div>
@@ -1401,7 +1402,7 @@ export default function EnrichedLeadsClient() {
               variant="destructive"
               onClick={clearInvestigations}
               disabled={!anyInvestigated}
-              title={anyInvestigated ? 'Borrar todos los reportes y marcas de investigaciÃ³n' : 'No hay investigaciones que borrar'}
+              title={anyInvestigated ? 'Borrar todos los reportes y marcas de investigación' : 'No hay investigaciones que borrar'}
             >
               <Eraser className="mr-2 h-4 w-4" />
               Borrar investigaciones
@@ -1434,7 +1435,7 @@ export default function EnrichedLeadsClient() {
               onClick={() => setOpenSchedule(true)}
               disabled={selectedToContact.size === 0}
             >
-              Agendar CampaÃ±a
+              Agendar Campaña
             </Button>
             <Button
               onClick={() => investigateOneByOne()}
@@ -1469,28 +1470,28 @@ export default function EnrichedLeadsClient() {
             <div className="mb-4 border rounded-md p-3 bg-muted/30">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir Â· Empresa</div>
-                  <Input value={fIncCompany} onChange={e => setFIncCompany(e.target.value)} placeholder="contieneâ€¦ (separa con comas)" />
+                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir · Empresa</div>
+                  <Input value={fIncCompany} onChange={e => setFIncCompany(e.target.value)} placeholder="contiene… (separa con comas)" />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir Â· Nombre</div>
-                  <Input value={fIncLead} onChange={e => setFIncLead(e.target.value)} placeholder="contieneâ€¦ (separa con comas)" />
+                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir · Nombre</div>
+                  <Input value={fIncLead} onChange={e => setFIncLead(e.target.value)} placeholder="contiene… (separa con comas)" />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir Â· Cargo</div>
-                  <Input value={fIncTitle} onChange={e => setFIncTitle(e.target.value)} placeholder="contieneâ€¦ (separa con comas)" />
+                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir · Cargo</div>
+                  <Input value={fIncTitle} onChange={e => setFIncTitle(e.target.value)} placeholder="contiene… (separa con comas)" />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Excluir Â· Empresa</div>
-                  <Input value={fExcCompany} onChange={e => setFExcCompany(e.target.value)} placeholder="no contengaâ€¦ (separa con comas)" />
+                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Excluir · Empresa</div>
+                  <Input value={fExcCompany} onChange={e => setFExcCompany(e.target.value)} placeholder="no contenga… (separa con comas)" />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Excluir Â· Nombre</div>
-                  <Input value={fExcLead} onChange={e => setFExcLead(e.target.value)} placeholder="no contengaâ€¦ (separa con comas)" />
+                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Excluir · Nombre</div>
+                  <Input value={fExcLead} onChange={e => setFExcLead(e.target.value)} placeholder="no contenga… (separa con comas)" />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Excluir Â· Cargo</div>
-                  <Input value={fExcTitle} onChange={e => setFExcTitle(e.target.value)} placeholder="no contengaâ€¦ (separa con comas)" />
+                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Excluir · Cargo</div>
+                  <Input value={fExcTitle} onChange={e => setFExcTitle(e.target.value)} placeholder="no contenga… (separa con comas)" />
                 </div>
               </div>
               <div className="mt-3 flex justify-end gap-2">
@@ -1561,7 +1562,7 @@ export default function EnrichedLeadsClient() {
                   <TableHead>Cargo</TableHead>
                   <TableHead>Empresa</TableHead>
                   <TableHead>Email</TableHead>
-                  <TableHead>TelÃ©fono</TableHead>
+                  <TableHead>Teléfono</TableHead>
                   <TableHead>LinkedIn</TableHead>
                   <TableHead>Dominio</TableHead>
                   <TableHead className="w-64 text-right">Acciones</TableHead>
@@ -1601,12 +1602,12 @@ export default function EnrichedLeadsClient() {
                       />
                     </TableCell>
                     <TableCell>{e.fullName}</TableCell>
-                    <TableCell>{e.title || 'â€”'}</TableCell>
-                    <TableCell>{e.companyName || 'â€”'}</TableCell>
+                    <TableCell>{e.title || '—'}</TableCell>
+                    <TableCell>{e.companyName || '—'}</TableCell>
                     <TableCell>
                       {e.email === 'Not Found'
                         ? <span className="text-muted-foreground text-xs italic">Not Found</span>
-                        : (e.email || (e.emailStatus === 'locked' ? '(locked)' : 'â€”'))}
+                        : (e.email || (e.emailStatus === 'locked' ? '(locked)' : '—'))}
                     </TableCell>
                     <TableCell>
                       {e.primaryPhone === 'Not Found' ? (
@@ -1627,7 +1628,7 @@ export default function EnrichedLeadsClient() {
                             <span>{e.primaryPhone}</span>
                           </div>
                           {e.phoneNumbers && e.phoneNumbers.length > 1 && (
-                            <span className="text-[10px] text-muted-foreground">+{e.phoneNumbers.length - 1} mÃ¡s</span>
+                            <span className="text-[10px] text-muted-foreground">+{e.phoneNumbers.length - 1} más</span>
                           )}
                         </div>
                       ) : (e.enrichmentStatus === 'pending_phone') ? (
@@ -1650,11 +1651,11 @@ export default function EnrichedLeadsClient() {
                            `}</style>
                         </div>
                       ) : (
-                        <span className="text-muted-foreground text-xs italic">â€”</span>
+                        <span className="text-muted-foreground text-xs italic">—</span>
                       )}
                     </TableCell>
-                    <TableCell>{e.linkedinUrl ? <a className="underline" target="_blank" href={e.linkedinUrl}>Perfil</a> : 'â€”'}</TableCell>
-                    <TableCell>{e.companyDomain || 'â€”'}</TableCell>
+                    <TableCell>{e.linkedinUrl ? <a className="underline" target="_blank" href={e.linkedinUrl}>Perfil</a> : '—'}</TableCell>
+                    <TableCell>{e.companyDomain || '—'}</TableCell>
                     <TableCell className="text-right space-x-2">
                       <Button size="sm" variant="outline" onClick={() => openReportFor(e)}>Ver reporte</Button>
                       <Button size="sm" onClick={() => generateEmailFromReportFor(e)} disabled={!canContact(e)}>Contactar</Button>
@@ -1679,11 +1680,11 @@ export default function EnrichedLeadsClient() {
           {/* Paginador inferior (igual al superior) */}
           <div className="flex items-center justify-between mt-3 text-sm">
             <div className="text-muted-foreground">
-              Mostrando {total === 0 ? 0 : startIdx + 1}â€“{endIdx} de {total}
+              Mostrando {total === 0 ? 0 : startIdx + 1}–{endIdx} de {total}
             </div>
             <div className="flex items-center gap-1">
-              <Button variant="outline" size="sm" onClick={() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === 1}>Â«</Button>
-              <Button variant="outline" size="sm" onClick={() => { setPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === 1}>â€¹</Button>
+              <Button variant="outline" size="sm" onClick={() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === 1}>«</Button>
+              <Button variant="outline" size="sm" onClick={() => { setPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === 1}>‹</Button>
               {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
                 const half = 3;
                 let start = Math.max(1, page - half);
@@ -1703,8 +1704,8 @@ export default function EnrichedLeadsClient() {
                   </Button>
                 );
               })}
-              <Button variant="outline" size="sm" onClick={() => { setPage(p => Math.min(totalPages, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === totalPages}>â€º</Button>
-              <Button variant="outline" size="sm" onClick={() => { setPage(totalPages); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === totalPages}>Â»</Button>
+              <Button variant="outline" size="sm" onClick={() => { setPage(p => Math.min(totalPages, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === totalPages}>›</Button>
+              <Button variant="outline" size="sm" onClick={() => { setPage(totalPages); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === totalPages}>»</Button>
             </div>
           </div>
         </CardContent>
@@ -1713,7 +1714,7 @@ export default function EnrichedLeadsClient() {
       <Dialog open={openReport} onOpenChange={setOpenReport}>
         <DialogContent className="max-w-4xl max-h-[90vh]" onEscapeKeyDown={() => setOpenReport(false)}>
           <DialogHeader>
-            <DialogTitle>Reporte Â· {reportToView?.cross?.company.name}</DialogTitle>
+            <DialogTitle>Reporte · {reportToView?.cross?.company.name}</DialogTitle>
           </DialogHeader>
           {reportToView?.cross && reportLead && (
             <div className="w-full flex justify-end mb-2">
@@ -1721,9 +1722,9 @@ export default function EnrichedLeadsClient() {
                 variant="destructive"
                 size="sm"
                 onClick={() => clearInvestigationFor(reportLead)}
-                title="Eliminar investigaciÃ³n de este lead"
+                title="Eliminar investigación de este lead"
               >
-                <Eraser className="h-4 w-4 mr-1" /> Eliminar investigaciÃ³n de este lead
+                <Eraser className="h-4 w-4 mr-1" /> Eliminar investigación de este lead
               </Button>
             </div>
           )}
@@ -1742,21 +1743,21 @@ export default function EnrichedLeadsClient() {
                     <div className="space-y-3">
                       {reportToView.cross.leadContext.iceBreaker && (
                         <div className="bg-white p-3 rounded-md border border-blue-200 shadow-sm">
-                          <strong className="text-blue-800 block mb-2 text-sm">ðŸ’¬ Icebreaker Sugerido:</strong>
+                          <strong className="text-blue-800 block mb-2 text-sm">💬 Icebreaker Sugerido:</strong>
                           <p className="italic text-gray-800 text-sm leading-relaxed">"{reportToView.cross.leadContext.iceBreaker}"</p>
                         </div>
                       )}
 
                       {reportToView.cross.leadContext.recentActivitySummary && (
                         <div className="bg-white p-3 rounded-md border border-blue-200">
-                          <strong className="text-blue-800 block mb-2 text-sm">ðŸ“Š Resumen de Actividad:</strong>
+                          <strong className="text-blue-800 block mb-2 text-sm">📊 Resumen de Actividad:</strong>
                           <p className="text-gray-700 text-sm leading-relaxed">{reportToView.cross.leadContext.recentActivitySummary}</p>
                         </div>
                       )}
 
                       {reportToView.cross.leadContext.profileSummary && (
                         <div className="pt-3 border-t border-blue-200">
-                          <strong className="text-blue-800 block mb-2 text-sm">ðŸ‘¤ Resumen de Perfil:</strong>
+                          <strong className="text-blue-800 block mb-2 text-sm">👤 Resumen de Perfil:</strong>
                           <p className="text-gray-600 text-sm leading-relaxed">{reportToView.cross.leadContext.profileSummary}</p>
                         </div>
                       )}
@@ -1777,7 +1778,7 @@ export default function EnrichedLeadsClient() {
 
                 {reportToView.cross.valueProps?.length > 0 && (
                   <section>
-                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">CÃ³mo ayudamos</h4>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Cómo ayudamos</h4>
                     <ul className="list-disc pl-5">
                       {reportToView.cross.valueProps.map((x, i) => <li key={i}>{x}</li>)}
                     </ul>
@@ -1824,7 +1825,7 @@ export default function EnrichedLeadsClient() {
                     <h4 className="text-xs font-semibold uppercase text-muted-foreground">Fuentes</h4>
                     <ul className="space-y-1">
                       {reportToView.cross.sources.map((s, i) => (
-                        <li key={i}>â€¢ <a className="underline" href={s.url} target="_blank">{s.title || s.url}</a></li>
+                        <li key={i}>• <a className="underline" href={s.url} target="_blank">{s.title || s.url}</a></li>
                       ))}
                     </ul>
                   </section>
@@ -1845,7 +1846,7 @@ export default function EnrichedLeadsClient() {
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => setDraftSource('investigation')} />
-                  InvestigaciÃ³n (n8n)
+                  Investigación (n8n)
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="radio" name="draft-source" value="style" checked={draftSource === 'style'} onChange={() => {
@@ -1870,7 +1871,7 @@ export default function EnrichedLeadsClient() {
               </select>
             </div>
             <div className="col-span-1">
-              <div className="text-xs text-muted-foreground mb-1">Proveedor de envÃ­o</div>
+              <div className="text-xs text-muted-foreground mb-1">Proveedor de envío</div>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="radio" name="bulk-provider" value="outlook" checked={bulkProvider === 'outlook'} onChange={() => setBulkProvider('outlook')} />
@@ -1883,7 +1884,7 @@ export default function EnrichedLeadsClient() {
               </div>
             </div>
           </div>
-          {/* Barra superior del modal: ayuda y botÃ³n de ediciÃ³n IA */}
+          {/* Barra superior del modal: ayuda y botón de edición IA */}
           <div className="flex items-center justify-between mb-2">
             <div className="text-xs text-muted-foreground">
               Revisa y ajusta los borradores antes de enviar. Proveedor: <strong>{bulkProvider}</strong>
@@ -1897,12 +1898,12 @@ export default function EnrichedLeadsClient() {
           {showBulkEditor && (
             <div className="mb-3 border rounded-md p-3 bg-muted/40">
               <div className="text-sm text-muted-foreground mb-1">
-                Describe cÃ³mo quieres modificar los correos (se aplicarÃ¡ a todos). Ejemplos:
+                Describe cómo quieres modificar los correos (se aplicará a todos). Ejemplos:
                 <ul className="list-disc pl-5 mt-1">
-                  <li>Agrega una lÃ­nea: "Hemos trabajado con empresas relacionadas al outsourcing".</li>
-                  <li>AÃ±ade al asunto "Piloto gratis".</li>
+                  <li>Agrega una línea: "Hemos trabajado con empresas relacionadas al outsourcing".</li>
+                  <li>Añade al asunto "Piloto gratis".</li>
                   <li>
-                    Menciona colaboraciÃ³n con <code>{'{{company.name}}'}</code> si aplica.
+                    Menciona colaboración con <code>{'{{company.name}}'}</code> si aplica.
                   </li>
                 </ul>
               </div>
@@ -1910,7 +1911,7 @@ export default function EnrichedLeadsClient() {
                 value={editInstruction}
                 onChange={(e) => setEditInstruction(e.target.value)}
                 rows={5}
-                placeholder='Ej: Agrega una lÃ­nea: "Hemos trabajado con empresas relacionadas al outsourcing".'
+                placeholder='Ej: Agrega una línea: "Hemos trabajado con empresas relacionadas al outsourcing".'
               />
               <div className="mt-2 flex gap-2 justify-end">
                 <Button
@@ -1947,23 +1948,23 @@ export default function EnrichedLeadsClient() {
                         body: JSON.stringify(payload),
                       });
                       const j = await r.json();
-                      if (!r.ok) throw new Error(j?.error || 'No se pudo aplicar la ediciÃ³n');
+                      if (!r.ok) throw new Error(j?.error || 'No se pudo aplicar la edición');
                       const edited = (j?.drafts || []) as Array<{ subject: string; body: string }>;
                       if (edited.length === composeList.length) {
                         setComposeList(prev => prev.map((it, i) => ({ ...it, subject: edited[i].subject, body: edited[i].body })));
                       }
                       setShowBulkEditor(false);
                       setEditInstruction('');
-                      toast({ title: 'EdiciÃ³n aplicada', description: `Se actualizaron ${edited.length} borradores.` });
+                      toast({ title: 'Edición aplicada', description: `Se actualizaron ${edited.length} borradores.` });
                     } catch (e: any) {
-                      toast({ variant: 'destructive', title: 'Error', description: e?.message || 'FallÃ³ la ediciÃ³n con IA' });
+                      toast({ variant: 'destructive', title: 'Error', description: e?.message || 'Falló la edición con IA' });
                     } finally {
                       setApplyingEdit(false);
                     }
                   }}
                   disabled={applyingEdit || !editInstruction.trim() || composeList.length === 0}
                 >
-                  {applyingEdit ? 'Aplicandoâ€¦' : 'Aplicar a todos'}
+                  {applyingEdit ? 'Aplicando…' : 'Aplicar a todos'}
                 </Button>
               </div>
             </div>
@@ -1985,7 +1986,7 @@ export default function EnrichedLeadsClient() {
                   <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded ml-1">Recomendado</span>
                 </label>
                 <p className="text-xs text-muted-foreground ml-6">
-                  Inserta un pÃ­xel invisible para detectar aperturas.
+                  Inserta un píxel invisible para detectar aperturas.
                 </p>
               </div>
 
@@ -2005,17 +2006,17 @@ export default function EnrichedLeadsClient() {
               </div>
 
               <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Solicita confirmaciÃ³n de lectura estÃ¡ndar">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Solicita confirmación de lectura estándar">
                   <input
                     type="checkbox"
                     checked={useReadReceipt}
                     onChange={(e) => setUseReadReceipt(e.target.checked)}
                     className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
                   />
-                  Solicitar ConfirmaciÃ³n
+                  Solicitar Confirmación
                 </label>
                 <p className="text-xs text-muted-foreground ml-6">
-                  Pide confirmaciÃ³n explÃ­cita al destinatario.
+                  Pide confirmación explícita al destinatario.
                 </p>
               </div>
             </div>
@@ -2092,7 +2093,7 @@ export default function EnrichedLeadsClient() {
                         const next = [...prev]; next[i] = { ...next[i], subject: subj, body: bod }; return next;
                       });
                       emailDraftsStorage.set(lead.id, subj, bod);
-                      toast({ title: 'Borrador regenerado', description: `Se personalizÃ³ para ${ctx.lead.firstName}.` });
+                      toast({ title: 'Borrador regenerado', description: `Se personalizó para ${ctx.lead.firstName}.` });
                     }}
                     title="Regenerar con IA orientado a persona"
                   >
@@ -2103,7 +2104,7 @@ export default function EnrichedLeadsClient() {
                     size="sm"
                     onClick={() => {
                       emailDraftsStorage.remove(lead.id);
-                      toast({ title: 'Borrador restaurado', description: 'Se eliminÃ³ la ediciÃ³n local.' });
+                      toast({ title: 'Borrador restaurado', description: 'Se eliminó la edición local.' });
                       // Reabrimos el modal recomputando con overrides limpios
                       setComposeList(prev => {
                         const next = [...prev];
@@ -2121,7 +2122,7 @@ export default function EnrichedLeadsClient() {
                     size="sm"
                     onClick={() => {
                       emailDraftsStorage.set(lead.id, subject, body);
-                      toast({ title: 'Guardado', description: 'Se guardÃ³ el borrador editado.' });
+                      toast({ title: 'Guardado', description: 'Se guardó el borrador editado.' });
                     }}
                     title="Guardar cambios del borrador"
                   >
@@ -2133,14 +2134,14 @@ export default function EnrichedLeadsClient() {
           </div>
           <div className="mt-4 flex items-center justify-between">
             {sendingBulk
-              ? <div className="text-xs">Enviandoâ€¦ {sendProgress.done}/{sendProgress.total}</div>
+              ? <div className="text-xs">Enviando… {sendProgress.done}/{sendProgress.total}</div>
               : <div className="text-xs text-muted-foreground">
                 Revisa y ajusta los borradores antes de enviar. Proveedor: <strong>{bulkProvider}</strong>
               </div>}
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setOpenCompose(false)} disabled={sendingBulk}>Cerrar</Button>
               <Button onClick={sendBulk} disabled={sendingBulk || !composeList?.length}>
-                {sendingBulk ? 'Enviandoâ€¦' : `Enviar todos (${bulkProvider})`}
+                {sendingBulk ? 'Enviando…' : `Enviar todos (${bulkProvider})`}
               </Button>
             </div>
           </div>
@@ -2153,7 +2154,7 @@ export default function EnrichedLeadsClient() {
           <DialogHeader>
             <DialogTitle>Contactar por LinkedIn</DialogTitle>
             <CardDescription>
-              Se abrirÃ¡ una pestaÃ±a de LinkedIn y la extensiÃ³n escribirÃ¡ por ti.
+              Se abrirá una pestaña de LinkedIn y la extensión escribirá por ti.
             </CardDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -2164,15 +2165,15 @@ export default function EnrichedLeadsClient() {
               value={linkedinMessage}
               onChange={(e) => setLinkedinMessage(e.target.value)}
               rows={6}
-              placeholder="Escribe tu mensaje aquÃ­..."
+              placeholder="Escribe tu mensaje aquí..."
             />
             <div className="text-xs text-muted-foreground">
-              * AntÃ³n.IA simularÃ¡ escritura humana. No cierres la nueva pestaÃ±a inmediatamente.
+              * Antón.IA simulará escritura humana. No cierres la nueva pestaña inmediatamente.
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setOpenLinkedin(false)}>Cancelar</Button>
               <Button onClick={handleSendLinkedin} disabled={sendingLinkedin}>
-                {sendingLinkedin ? 'Enviando...' : 'Enviar con ExtensiÃ³n'}
+                {sendingLinkedin ? 'Enviando...' : 'Enviar con Extensión'}
               </Button>
             </div>
           </div>
@@ -2183,9 +2184,9 @@ export default function EnrichedLeadsClient() {
       <Dialog open={openSchedule} onOpenChange={setOpenSchedule}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Agendar CampaÃ±a Inteligente</DialogTitle>
+            <DialogTitle>Agendar Campaña Inteligente</DialogTitle>
             <CardDescription>
-              Distribuye {selectedToContact.size} leads automÃ¡ticamente en el calendario.
+              Distribuye {selectedToContact.size} leads automáticamente en el calendario.
             </CardDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -2229,7 +2230,7 @@ export default function EnrichedLeadsClient() {
                   onChange={(e) => setScheduleConfig({ ...scheduleConfig, msgsPerDay: parseInt(e.target.value) || 0 })}
                   className="w-20"
                 />
-                <span className="text-sm text-muted-foreground">mensajes / dÃ­a</span>
+                <span className="text-sm text-muted-foreground">mensajes / día</span>
               </div>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
@@ -2273,7 +2274,7 @@ export default function EnrichedLeadsClient() {
       <Dialog open={openBulkLinkedin} onOpenChange={(open) => {
         // Prevent closing during execution
         if (bulkLinkedinRunning && !open) {
-          const confirmed = confirm('Â¿Seguro que deseas detener el proceso? Los leads ya contactados se han registrado.');
+          const confirmed = confirm('¿Seguro que deseas detener el proceso? Los leads ya contactados se han registrado.');
           if (confirmed) {
             bulkLinkedinStopRef.current = true;
           }
@@ -2283,21 +2284,21 @@ export default function EnrichedLeadsClient() {
       }}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>{bulkLinkedinRunning ? 'Procesando Contactos LinkedIn' : 'âš ï¸ InformaciÃ³n Importante'}</DialogTitle>
+            <DialogTitle>{bulkLinkedinRunning ? 'Procesando Contactos LinkedIn' : '⚠️ Información Importante'}</DialogTitle>
           </DialogHeader>
 
           {!bulkLinkedinRunning ? (
             <div className="space-y-4">
               <div className="bg-amber-50 border-l-4 border-amber-500 p-4 text-amber-700">
-                <p className="font-bold">Â¡No minimices esta ventana!</p>
+                <p className="font-bold">¡No minimices esta ventana!</p>
                 <p className="text-sm mt-1">
-                  Para que la automatizaciÃ³n funcione correctamente, el navegador debe estar <strong>activo y visible</strong>.
-                  Si minimizas la ventana o cambias de pestaÃ±a por mucho tiempo, el navegador "congelarÃ¡" el proceso para ahorrar baterÃ­a.
+                  Para que la automatización funcione correctamente, el navegador debe estar <strong>activo y visible</strong>.
+                  Si minimizas la ventana o cambias de pestaña por mucho tiempo, el navegador "congelará" el proceso para ahorrar batería.
                 </p>
               </div>
               <p className="text-sm text-gray-600">
                 Te recomendamos usar <strong>pantalla dividida</strong> o abrir esta app en una ventana separada visible.
-                El sistema contactarÃ¡ a <strong>{selectedToContact.size} leads</strong> uno por uno, con pausas de seguridad de 5-10 segundos.
+                El sistema contactará a <strong>{selectedToContact.size} leads</strong> uno por uno, con pausas de seguridad de 5-10 segundos.
               </p>
               <div className="flex justify-end gap-3 mt-4">
                 <Button variant="outline" onClick={() => setOpenBulkLinkedin(false)}>Cancelar</Button>
