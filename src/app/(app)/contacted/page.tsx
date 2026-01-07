@@ -64,19 +64,60 @@ export default function ContactedPage() {
 
   const handleViewPhoneNotes = (item: ContactedLead) => {
     setViewSubject(item.subject || 'Llamada telefónica');
+
+    // Extraer el resultado y las notas del subject
+    const subjectParts = item.subject?.split(' - ') || [];
+    const resultado = subjectParts[0] || item.subject;
+    const notas = subjectParts.slice(1).join(' - ') || 'Sin notas adicionales';
+
     setViewBodyHtml(`
-      <div style="padding: 20px; font-family: system-ui, -apple-system, sans-serif;">
-        <h3 style="margin-bottom: 16px; color: #1f2937;">Detalles de la Llamada</h3>
-        <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
-          <p style="margin: 8px 0;"><strong>Lead:</strong> ${item.name}</p>
-          <p style="margin: 8px 0;"><strong>Email:</strong> ${item.email}</p>
-          ${item.company ? `<p style="margin: 8px 0;"><strong>Empresa:</strong> ${item.company}</p>` : ''}
-          ${item.role ? `<p style="margin: 8px 0;"><strong>Cargo:</strong> ${item.role}</p>` : ''}
-          <p style="margin: 8px 0;"><strong>Fecha:</strong> ${new Date(item.sentAt).toLocaleString('es-CL', { dateStyle: 'full', timeStyle: 'short' })}</p>
+      <div style="padding: 0; font-family: system-ui, -apple-system, sans-serif;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 24px; border-radius: 12px 12px 0 0; color: white; margin: -20px -20px 20px -20px;">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+            </svg>
+            <h2 style="margin: 0; font-size: 24px; font-weight: 600;">Detalles de la Llamada</h2>
+          </div>
+          <p style="margin: 0; opacity: 0.9; font-size: 14px;">${new Date(item.sentAt).toLocaleString('es-CL', { dateStyle: 'full', timeStyle: 'short' })}</p>
         </div>
-        <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border-left: 4px solid #3b82f6;">
-          <h4 style="margin-bottom: 12px; color: #1e40af;">Resultado y Notas</h4>
-          <p style="white-space: pre-wrap; line-height: 1.6; color: #374151;">${item.subject}</p>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+          <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border-left: 3px solid #3b82f6;">
+            <div style="font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Lead</div>
+            <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">${item.name}</div>
+            <div style="font-size: 14px; color: #64748b;">${item.email}</div>
+          </div>
+          
+          <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border-left: 3px solid #8b5cf6;">
+            <div style="font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Empresa</div>
+            <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">${item.company || 'No especificada'}</div>
+            <div style="font-size: 14px; color: #64748b;">${item.role || 'Cargo no especificado'}</div>
+          </div>
+        </div>
+        
+        <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 20px; border-radius: 12px; margin-bottom: 16px; box-shadow: 0 4px 6px rgba(16, 185, 129, 0.2);">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <div style="font-size: 14px; font-weight: 600; color: white; opacity: 0.9;">RESULTADO DE LA LLAMADA</div>
+          </div>
+          <div style="font-size: 18px; font-weight: 700; color: white; letter-spacing: 0.3px;">${resultado}</div>
+        </div>
+        
+        <div style="background: white; border: 2px solid #e2e8f0; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            <div style="font-size: 14px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">Notas de la Llamada</div>
+          </div>
+          <div style="white-space: pre-wrap; line-height: 1.7; color: #1e293b; font-size: 15px; padding: 12px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6;">${notas}</div>
         </div>
       </div>
     `);

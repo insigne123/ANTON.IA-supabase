@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Anton.IA Automation",
-    "version": "2.7",
+    "version": "2.9",
     "description": "Automatización segura de LinkedIn para Anton.IA",
     "permissions": [
         "activeTab",

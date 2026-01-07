@@ -348,13 +348,33 @@ async function sendMessageInEditor(editor, message) {
     }
 
     await delay(1000);
-    const sendBtn = findButtonByText(['send', 'enviar']);
+
+    // Improved Send Button Strategy:
+    // 1. Look for the specific "Send" button class (usually the blue circle/pill)
+    // 2. Look for type="submit" (standard forms)
+    // 3. Fallback to text search (aria-label or innerText)
+    const sendBtn = document.querySelector('.msg-form__send-button') ||
+        document.querySelector('button[type="submit"]') ||
+        document.querySelector('.msg-form__footer button.artdeco-button--primary') ||
+        findButtonByText(['send', 'enviar', 'enviar mensaje']);
 
     if (sendBtn) {
+        console.log('[Anton.IA Content] Found Send button:', sendBtn.className || sendBtn.innerText || 'Unknown');
+
+        // Ensure it's not disabled
+        if (sendBtn.disabled) {
+            console.error('[Anton.IA Content] Send button found but DISABLED.');
+            throw new Error('Send button is disabled (maybe message is empty?)');
+        }
+
         sendBtn.click();
         console.log('[Anton.IA Content] DM Sent!');
         return { success: true, status: 'Message sent via DM' };
     }
+
+    console.error('[Anton.IA Content] Send button NOT found. Visible buttons:',
+        Array.from(document.querySelectorAll('button')).map(b => b.innerText || b.getAttribute('aria-label')).slice(0, 10));
+
     throw new Error('Send button not found in DM editor');
 }
 
@@ -405,70 +425,79 @@ async function handleConnectFlow(message) {
     console.log('[Anton.IA Content] Waiting for Connect modal to appear...');
     await delay(2000);
 
-    // Check if the click just sent the request immediately (Quick Connect)
-    // We can check if "Pending" button appeared or if a toast appeared.
-    // But usually for 3rd degree it asks. 
-    // If "Add a note" is missing, we might need to verify if we are just blocked.
+    const modal = document.querySelector('.artdeco-modal');
 
-    // 3. Find "Add a note" button
-    const addNoteTexts = ['add a note', 'añadir una nota', 'agregar una nota', 'personalize', 'personalizar'];
-    const addNoteBtn = findButtonByText(addNoteTexts);
+    // CASE A: Modal Appeared -> Add Note
+    if (modal) {
+        console.log('[Anton.IA Content] Modal appeared. Looking for "Add a note"...');
 
-    if (addNoteBtn) {
-        console.log('[Anton.IA Content] Clicking "Add a note"...');
-        addNoteBtn.click();
+        // 3. Find "Add a note" button
+        const addNoteTexts = ['add a note', 'añadir una nota', 'agregar una nota', 'personalize', 'personalizar'];
+        const addNoteBtn = findButtonByText(addNoteTexts);
 
-        await delay(1000);
-        const noteEditor = document.querySelector('textarea[name="message"]') ||
-            document.querySelector('#custom-message');
-
-        if (noteEditor) {
-            console.log('[Anton.IA Content] Typing note...');
-            noteEditor.value = message;
-            noteEditor.dispatchEvent(new Event('input', { bubbles: true }));
+        if (addNoteBtn) {
+            console.log('[Anton.IA Content] Clicking "Add a note"...');
+            addNoteBtn.click();
 
             await delay(1000);
-            const sendInviteTexts = ['send', 'enviar', 'done', 'listo', 'connect', 'conectar'];
-            const sendInviteBtn = findButtonByText(sendInviteTexts);
+            const noteEditor = document.querySelector('textarea[name="message"]') ||
+                document.querySelector('#custom-message');
 
-            if (sendInviteBtn) {
-                console.log('[Anton.IA Content] Sending Invitation...');
-                sendInviteBtn.click();
-                return { success: true, status: 'Connection request sent with note' };
+            if (noteEditor) {
+                console.log('[Anton.IA Content] Typing note...');
+                noteEditor.value = message;
+                noteEditor.dispatchEvent(new Event('input', { bubbles: true }));
+
+                await delay(1000);
+                const sendInviteTexts = ['send', 'enviar', 'done', 'listo', 'connect', 'conectar'];
+                const sendInviteBtn = findButtonByText(sendInviteTexts);
+
+                if (sendInviteBtn) {
+                    console.log('[Anton.IA Content] Sending Invitation...');
+                    sendInviteBtn.click();
+                    return { success: true, status: 'Connection request sent with note' };
+                } else {
+                    console.error('[Anton.IA Content] Send/Done button in note modal not found');
+                }
             } else {
-                console.error('[Anton.IA Content] Send/Done button in note modal not found');
+                console.error('[Anton.IA Content] Note textarea not found');
             }
         } else {
-            console.error('[Anton.IA Content] Note textarea not found');
-        }
-    } else {
-        console.warn('[Anton.IA Content] "Add a note" button not found.');
+            console.warn('[Anton.IA Content] "Add a note" button not found within modal.');
+            // Check if it's the "How do you do know this person?" modal or "You've reached the limit"
+            const modalText = modal.innerText.toLowerCase();
 
-        let errorDetails = 'Add a note button not found';
-
-        // Debug: Log all visible buttons in the modal to see what we missed
-        const modal = document.querySelector('.artdeco-modal');
-        if (modal) {
-            const btns = Array.from(modal.querySelectorAll('button')).map(b => b.innerText);
-            const modalText = modal.innerText.substring(0, 200).replace(/\n/g, ' '); // Capture first 200 chars
-            console.log('[Anton.IA Content] Buttons found in modal:', btns);
-            console.log('[Anton.IA Content] Modal text:', modalText);
-
-            errorDetails += `. Modal Buttons: [${btns.join(', ')}]. Modal Text: "${modalText}..."`;
-
-            // Check if maybe we are restricted?
-            if (modalText.toLowerCase().includes('limit') || modalText.toLowerCase().includes('límite')) {
+            if (modalText.includes('limit') || modalText.includes('límite')) {
                 throw new Error('Weekly invitation limit reached');
             }
-        } else {
-            errorDetails += '. No modal found (selector .artdeco-modal unsuccessful).';
-            console.log('[Anton.IA Content] No modal found after Connect click?');
+
+            // If we can't add a note, maybe just send it?
+            const sendWithoutNoteBtn = findButtonByText(['send', 'enviar', 'connect', 'conectar', 'done', 'listo']);
+            if (sendWithoutNoteBtn) {
+                console.log('[Anton.IA Content] Sending without note (Note button missing)...');
+                sendWithoutNoteBtn.click();
+                return { success: true, status: 'Connection request sent (No note option)' };
+            }
+        }
+    }
+    // CASE B: No Modal -> Check if it was a "Quick Connect"
+    else {
+        console.log('[Anton.IA Content] No modal appeared. Checking if request was sent instantly...');
+
+        // Look for "Pending" status
+        const pendingBtn = findButtonByText(['pending', 'pendiente']);
+        const successToast = document.querySelector('.artdeco-toast');
+
+        if (pendingBtn || successToast) {
+            console.log('[Anton.IA Content] Request appears to have been sent instantly!');
+            return { success: true, status: 'Connection request sent (Quick Connect)' };
         }
 
-        throw new Error(`Failed to Connect: ${errorDetails}`);
+        console.error('[Anton.IA Content] No modal and no "Pending" status found.');
+        throw new Error('Click appeared to fail: No modal and not pending.');
     }
 
-    throw new Error('Failed to send Connection Request with Note (Unknown state)');
+    throw new Error('Failed to send Connection Request (Unknown final state)');
 }
 
 function findButtonByText(texts) {
