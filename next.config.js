@@ -4,12 +4,7 @@ const nextConfig = {
   // Cualquier integración de Genkit debe ir en rutas (API) vía @genkit-ai/next.
 
   /* config options here */
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
+  /* config options here */
   images: {
     remotePatterns: [
       {
