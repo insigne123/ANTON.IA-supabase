@@ -5,10 +5,18 @@ export const generateCampaignFlow = ai.defineFlow(
     {
         name: 'generateCampaign',
         inputSchema: z.object({
-            goal: z.string().describe('The main goal of the campaign (e.g. "Recover inactive clients")'),
-            companyName: z.string().optional().describe('Name of the user company'),
-            targetAudience: z.string().optional().describe('Description of the target audience'),
-            language: z.string().optional().default('es').describe('Language for the emails'),
+            // Frontend usage
+            goal: z.string().optional(),
+            companyName: z.string().optional(),
+            targetAudience: z.string().optional(),
+            language: z.string().optional(),
+
+            // Antonia usage
+            jobTitle: z.string().optional(),
+            industry: z.string().optional(),
+            missionTitle: z.string().optional(),
+            campaignContext: z.string().optional(),
+            userName: z.string().optional(),
         }),
         outputSchema: z.object({
             steps: z.array(z.object({
@@ -19,25 +27,53 @@ export const generateCampaignFlow = ai.defineFlow(
             })),
         }),
     },
-    async ({ goal, companyName, targetAudience, language }) => {
-        const prompt = `
-      Act as an expert email marketing copywriter.
-      Create a drip campaign sequence (3-5 emails) for the following scenario:
-      
-      Goal: ${goal}
-      My Company: ${companyName || 'Unknown'}
-      Target Audience: ${targetAudience || 'General'}
-      Language: ${language}
+    async (input) => {
+        const { goal, jobTitle, industry, missionTitle, campaignContext, userName, companyName, targetAudience, language } = input;
 
-      For each email step, provide:
-      - A descriptive internal name (e.g. "Value Proposition", "Case Study").
-      - Recommended offset days from the previous email (0 for the first one).
-      - A catchy Subject line.
-      - The Body in HTML format (use <p>, <br>, <strong>). 
-        - Use placeholders {{lead.name}} for the lead's name and {{company}} for the lead's company.
-        - Use {{sender.name}} for my name.
-        - Keep it professional but engaging.
-    `;
+        // Mode detection: If jobTitle is present, it's a specific Antonia mission
+        const isAntoniaMission = !!jobTitle;
+
+        let prompt = '';
+
+        if (isAntoniaMission) {
+            prompt = `
+                Act as an expert B2B copywriter for a campaign mission: "${missionTitle || 'Outreach'}".
+                
+                Target Persona: ${jobTitle} in the ${industry} industry.
+                Context/Offer: ${campaignContext || 'General partnership opportunity'}
+                Sender Name: ${userName || '{{sender.name}}'}
+                Language: ${language || 'es'}
+
+                Write a 1-step campaign sequence for initial contact.
+                
+                Requirements:
+                - Step name: Set to "Initial Contact"
+                - offsetDays: Set to 0 (this is the first contact)
+                - Subject: Catchy and relevant to the target persona
+                - Body: HTML format (use <p>, <br>, <strong>)
+                - Personalization: Use {{lead.name}} for lead name, {{company}} for lead company, {{sender.name}} for sender
+                - Tone: Professional but conversational
+                - Length: Concise and impactful
+            `;
+        } else {
+            prompt = `
+              Act as an expert email marketing copywriter.
+              Create a drip campaign sequence (3-5 emails) for the following scenario:
+              
+              Goal: ${goal || 'Outreach'}
+              My Company: ${companyName || 'Unknown'}
+              Target Audience: ${targetAudience || 'General'}
+              Language: ${language || 'es'}
+
+              For each email step, provide:
+              - A descriptive internal name (e.g. "Value Proposition", "Case Study").
+              - Recommended offset days from the previous email.
+              - A catchy Subject line.
+              - The Body in HTML format (use <p>, <br>, <strong>). 
+                - Use placeholders {{lead.name}} for the lead's name and {{company}} for the lead's company.
+                - Use {{sender.name}} for my name.
+            `;
+        }
 
         const { output } = await ai.generate({
             prompt,
