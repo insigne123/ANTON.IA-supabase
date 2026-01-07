@@ -62,6 +62,7 @@ import { organizationService } from '@/lib/services/organization-service';
 export default function EnrichedLeadsClient() {
   const router = useRouter();
   const { toast } = useToast();
+  const [tick, setTick] = useState(0); // Force re-render
   // ... existing state
 
   // --- Social Credits ---
@@ -741,6 +742,20 @@ export default function EnrichedLeadsClient() {
       });
       toast({ title: 'Investigación completa', description: `Procesados ${selected.length} leads.` });
     }
+  }
+  function clearInvestigationFor(lead: EnrichedLead) {
+    if (!confirm(`¿Borrar investigación para ${lead.fullName}?`)) return;
+    const ref = leadRefOf(lead);
+    const domain = (lead.companyDomain || '').trim();
+
+    leadResearchStorage.removeWhere(r => {
+      const rRef = (r?.meta?.leadRef || '').trim();
+      const rDom = (r?.company?.domain || '').trim();
+      return Boolean((ref && rRef === ref) || (domain && rDom === domain));
+    });
+
+    toast({ title: 'Investigación eliminada', description: `Se borraron los datos de ${lead.fullName}.` });
+    setTick(t => t + 1);
   }
 
   /** Borra reportes de investigación y desmarca "investigado" para TODOS los leads visibles. */
