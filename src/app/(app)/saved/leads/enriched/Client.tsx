@@ -1130,7 +1130,12 @@ export default function EnrichedLeadsClient() {
     if (!leadToCall) return;
 
     try {
-      // 1. Guardar en Contactados
+      // 1. Guardar en Contactados con notas completas
+      const resultLabel = result === 'connected' ? 'Contactado' :
+        result === 'voicemail' ? 'Buzón de voz' :
+          result === 'wrong_number' ? 'Número equivocado' :
+            'No contestó';
+
       await contactedLeadsStorage.add({
         id: uuid(),
         leadId: leadToCall.id,
@@ -1139,23 +1144,23 @@ export default function EnrichedLeadsClient() {
         company: leadToCall.companyName,
         role: leadToCall.title,
         industry: leadToCall.industry || undefined,
-        city: leadToCall.city || leadToCall.country || undefined, // Mapping helper could be better but direct here
+        city: leadToCall.city || leadToCall.country || undefined,
         country: leadToCall.country || undefined,
-        subject: `Llamada: ${result}`,
+        subject: notes ? `Llamada: ${resultLabel} - ${notes}` : `Llamada telefónica: ${resultLabel}`,
         sentAt: new Date().toISOString(),
-        status: 'sent', // Asumido como contactado
+        status: result === 'connected' ? 'sent' : 'failed',
         provider: 'phone',
         lastUpdateAt: new Date().toISOString(),
-        // Usamos campos genéricos para guardar notas de la llamada si es necesario, 
-        // o idealmente el backend soportaría notes. Por ahora lo dejamos en subject o simulado.
-        // Como 'subject' es visible, "Llamada: connected" es útil.
       });
 
       // 2. Remover de Enriquecidos
       await removeEnrichedLeadById(leadToCall.id);
       setEnriched(prev => prev.filter(e => e.id !== leadToCall.id));
 
-      toast({ title: 'Llamada registrada', description: `Lead movido a Contactados (${result}).` });
+      toast({
+        title: 'Llamada registrada',
+        description: `Lead movido a Contactados. ${notes ? 'Notas guardadas.' : ''}`
+      });
     } catch (e) {
       console.error(e);
       toast({ variant: 'destructive', title: 'Error', description: 'No se pudo guardar la llamada.' });

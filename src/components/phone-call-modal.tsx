@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Phone, CheckCircle2, UserX, Voicemail, FileText } from 'lucide-react';
+import { Loader2, Phone, CheckCircle2, UserX, Voicemail, FileText, Copy, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { EnrichedLead, LeadResearchReport } from '@/lib/types';
 import { getCompanyProfile } from '@/lib/data';
@@ -26,6 +26,18 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
     const [script, setScript] = useState<{ opening: string; pitch: string; objections: string; closing: string } | null>(null);
     const [callResult, setCallResult] = useState<'connected' | 'voicemail' | 'wrong_number' | 'no_answer'>('connected');
     const [notes, setNotes] = useState('');
+    const [callDuration, setCallDuration] = useState(0);
+    const [isTimerRunning, setIsTimerRunning] = useState(false);
+
+    // Quick notes presets
+    const quickNotes = [
+        "Llamar el próximo martes",
+        "Enviar información por email",
+        "No está interesado en este momento",
+        "Agendar reunión de 15 minutos",
+        "Dejé mensaje en buzón de voz",
+        "Solicita presupuesto"
+    ];
 
     useEffect(() => {
         if (open && lead) {
@@ -33,6 +45,8 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
             setScript(null);
             setNotes('');
             setCallResult('connected');
+            setCallDuration(0);
+            setIsTimerRunning(false);
 
             // Auto-generate script if report exists
             if (report) {
@@ -41,26 +55,59 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
         }
     }, [open, lead, report]);
 
+    // Call timer
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+        if (isTimerRunning) {
+            interval = setInterval(() => {
+                setCallDuration(d => d + 1);
+            }, 1000);
+        }
+        return () => clearInterval(interval);
+    }, [isTimerRunning]);
+
+    const formatDuration = (seconds: number) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
     async function generateScript() {
-        if (!lead || !report) return;
+        if (!lead) return;
         setLoadingScript(true);
         try {
             const companyProfile = getCompanyProfile();
             const res = await fetch('/api/ai/generate-phone-script', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ lead, report, companyProfile }),
+                body: JSON.stringify({ lead, report: report || {}, companyProfile }),
             });
-            if (!res.ok) throw new Error('Error generando guion');
+            if (!res.ok) {
+                const errorData = await res.json();
+                throw new Error(errorData.error || 'Error generando guion');
+            }
             const data = await res.json();
             setScript(data);
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
-            toast({ variant: 'destructive', title: 'Error', description: 'No se pudo generar el guion IA.' });
+            toast({
+                variant: 'destructive',
+                title: 'Error',
+                description: error.message || 'No se pudo generar el guion IA.'
+            });
         } finally {
             setLoadingScript(false);
         }
     }
+
+    const copyToClipboard = (text: string, label: string) => {
+        navigator.clipboard.writeText(text);
+        toast({ title: 'Copiado', description: `${label} copiado al portapapeles` });
+    };
+
+    const addQuickNote = (note: string) => {
+        setNotes(prev => prev ? `${prev}\n${note}` : note);
+    };
 
     const handleSave = () => {
         onLogCall(callResult, notes);
@@ -73,13 +120,28 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-4xl h-[90vh] flex flex-col p-0 gap-0">
                 <DialogHeader className="px-6 py-4 border-b">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-primary/10 p-2 rounded-full">
-                            <Phone className="h-5 w-5 text-primary" />
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-primary/10 p-2 rounded-full">
+                                <Phone className="h-5 w-5 text-primary" />
+                            </div>
+                            <div>
+                                <DialogTitle>Llamada con {lead.fullName}</DialogTitle>
+                                <DialogDescription>{lead.title} @ {lead.companyName}</DialogDescription>
+                            </div>
                         </div>
-                        <div>
-                            <DialogTitle>Llamada con {lead.fullName}</DialogTitle>
-                            <DialogDescription>{lead.title} @ {lead.companyName}</DialogDescription>
+                        <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2 bg-muted px-3 py-2 rounded-md">
+                                <Clock className="h-4 w-4 text-muted-foreground" />
+                                <span className="font-mono text-sm font-medium">{formatDuration(callDuration)}</span>
+                            </div>
+                            <Button
+                                size="sm"
+                                variant={isTimerRunning ? "destructive" : "default"}
+                                onClick={() => setIsTimerRunning(!isTimerRunning)}
+                            >
+                                {isTimerRunning ? "Pausar" : "Iniciar"}
+                            </Button>
                         </div>
                     </div>
                 </DialogHeader>
@@ -132,13 +194,7 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
                     {/* Panel Central/Derecho: Script y Log */}
                     <div className="w-2/3 flex flex-col">
                         <div className="flex-1 p-6 overflow-y-auto">
-                            {!report ? (
-                                <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground">
-                                    <FileText className="h-10 w-10 mb-2 opacity-20" />
-                                    <p>No hay reporte de investigación para generar guion.</p>
-                                    <p className="text-xs mt-1">Investiga el lead primero para usar la IA.</p>
-                                </div>
-                            ) : loadingScript ? (
+                            {loadingScript ? (
                                 <div className="flex flex-col items-center justify-center h-full text-muted-foreground space-y-3">
                                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
                                     <p className="text-sm">La IA está escribiendo tu guion personalizado...</p>
@@ -153,6 +209,17 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
                                     </TabsList>
 
                                     <TabsContent value="opening" className="space-y-4 animate-in fade-in slide-in-from-left-2">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <h3 className="text-sm font-semibold text-muted-foreground">APERTURA</h3>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => copyToClipboard(script.opening, 'Apertura')}
+                                            >
+                                                <Copy className="h-4 w-4 mr-1" />
+                                                Copiar
+                                            </Button>
+                                        </div>
                                         <div className="prose dark:prose-invert">
                                             <p className="text-lg font-medium text-primary">"Hola {lead.fullName.split(' ')[0]}..."</p>
                                             <div className="bg-muted p-4 rounded-md italic border-l-4 border-primary">
@@ -161,17 +228,49 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
                                         </div>
                                     </TabsContent>
                                     <TabsContent value="pitch" className="space-y-4 animate-in fade-in slide-in-from-left-2">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <h3 className="text-sm font-semibold text-muted-foreground">PROPUESTA DE VALOR</h3>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => copyToClipboard(script.pitch, 'Pitch')}
+                                            >
+                                                <Copy className="h-4 w-4 mr-1" />
+                                                Copiar
+                                            </Button>
+                                        </div>
                                         <div className="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-lg">
-                                            <h3 className="text-sm font-bold text-blue-700 dark:text-blue-300 mb-2 uppercase">Propuesta de Valor</h3>
                                             <p className="text-base leading-relaxed">{script.pitch}</p>
                                         </div>
                                     </TabsContent>
                                     <TabsContent value="objections" className="space-y-4 animate-in fade-in slide-in-from-left-2">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <h3 className="text-sm font-semibold text-muted-foreground">MANEJO DE OBJECIONES</h3>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => copyToClipboard(script.objections, 'Objeciones')}
+                                            >
+                                                <Copy className="h-4 w-4 mr-1" />
+                                                Copiar
+                                            </Button>
+                                        </div>
                                         <div className="prose dark:prose-invert text-sm">
                                             <ReactMarkdown>{script.objections}</ReactMarkdown>
                                         </div>
                                     </TabsContent>
                                     <TabsContent value="closing" className="space-y-4 animate-in fade-in slide-in-from-left-2">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <h3 className="text-sm font-semibold text-muted-foreground">CIERRE</h3>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => copyToClipboard(script.closing, 'Cierre')}
+                                            >
+                                                <Copy className="h-4 w-4 mr-1" />
+                                                Copiar
+                                            </Button>
+                                        </div>
                                         <div className="p-6 border-2 border-dashed rounded-xl text-center">
                                             <p className="text-xl font-semibold mb-2">Objetivo: Agendar Reunión</p>
                                             <p className="text-muted-foreground">{script.closing}</p>
@@ -187,6 +286,22 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
 
                         {/* Footer de Registro */}
                         <div className="border-t p-4 bg-muted/10 space-y-3">
+                            <div>
+                                <div className="text-xs font-semibold text-muted-foreground mb-2">Notas rápidas</div>
+                                <div className="flex gap-2 flex-wrap mb-3">
+                                    {quickNotes.map(note => (
+                                        <Button
+                                            key={note}
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => addQuickNote(note)}
+                                            className="text-xs"
+                                        >
+                                            {note}
+                                        </Button>
+                                    ))}
+                                </div>
+                            </div>
                             <Textarea
                                 placeholder="Notas de la llamada... (ej: 'Me pidió llamar el martes')"
                                 value={notes}

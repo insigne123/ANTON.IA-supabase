@@ -16,7 +16,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger
 } from '@/components/ui/alert-dialog';
 import { deleteContactedCascade } from '@/lib/delete-contacted-cascade';
-import { Loader2, Trash2 } from 'lucide-react';
+import { Loader2, Trash2, Phone } from 'lucide-react';
 import type { ContactedLead } from '@/lib/types';
 import Link from 'next/link';
 import { openSentMessageFor } from '@/lib/open-sent-message';
@@ -60,6 +60,28 @@ export default function ContactedPage() {
         description: e?.message || 'Asegúrate de que la sesión esté activa y los permisos sean correctos.',
       });
     }
+  };
+
+  const handleViewPhoneNotes = (item: ContactedLead) => {
+    setViewSubject(item.subject || 'Llamada telefónica');
+    setViewBodyHtml(`
+      <div style="padding: 20px; font-family: system-ui, -apple-system, sans-serif;">
+        <h3 style="margin-bottom: 16px; color: #1f2937;">Detalles de la Llamada</h3>
+        <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+          <p style="margin: 8px 0;"><strong>Lead:</strong> ${item.name}</p>
+          <p style="margin: 8px 0;"><strong>Email:</strong> ${item.email}</p>
+          ${item.company ? `<p style="margin: 8px 0;"><strong>Empresa:</strong> ${item.company}</p>` : ''}
+          ${item.role ? `<p style="margin: 8px 0;"><strong>Cargo:</strong> ${item.role}</p>` : ''}
+          <p style="margin: 8px 0;"><strong>Fecha:</strong> ${new Date(item.sentAt).toLocaleString('es-CL', { dateStyle: 'full', timeStyle: 'short' })}</p>
+        </div>
+        <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border-left: 4px solid #3b82f6;">
+          <h4 style="margin-bottom: 12px; color: #1e40af;">Resultado y Notas</h4>
+          <p style="white-space: pre-wrap; line-height: 1.6; color: #374151;">${item.subject}</p>
+        </div>
+      </div>
+    `);
+    setViewWebLink(undefined);
+    setViewOpen(true);
   };
 
   async function handleVerifyRead(it: ContactedLead) {
@@ -333,7 +355,12 @@ export default function ContactedPage() {
                       <TableCell className="max-w-[420px] truncate">{it.subject}</TableCell>
                       <TableCell>{sentAt}</TableCell>
                       <TableCell>
-                        {status === 'replied'
+                        {it.provider === 'phone' ? (
+                          <Badge className="bg-green-600 hover:bg-green-700">
+                            <Phone className="h-3 w-3 mr-1" />
+                            Llamada
+                          </Badge>
+                        ) : status === 'replied'
                           ? <Badge variant="default">Respondido</Badge>
                           : (it.clickCount && it.clickCount > 0)
                             ? <Badge className="bg-blue-600 hover:bg-blue-700">Clickeado ({it.clickCount})</Badge>
@@ -344,18 +371,26 @@ export default function ContactedPage() {
                                 : <Badge variant="secondary">No abierto</Badge>}
                       </TableCell>
                       <TableCell className="text-right space-x-2">
-                        <Button size="sm" variant="outline" onClick={() => handleViewEmail(it)}>
-                          Ver email
-                        </Button>
-                        <Button size="sm" variant="secondary" disabled={!canVerifyRead} onClick={() => handleVerifyRead(it)}>
-                          Verificar lectura
-                        </Button>
-                        <Button size="sm" disabled={!canVerifyReply} onClick={() => handleVerifyReply(it)}>
-                          Verificar respuesta
-                        </Button>
-                        <Button size="sm" variant="outline" disabled={!hasReply} onClick={() => handleViewReply(it)}>
-                          Ver respuesta
-                        </Button>
+                        {it.provider === 'phone' ? (
+                          <Button size="sm" variant="outline" onClick={() => handleViewPhoneNotes(it)}>
+                            Ver notas
+                          </Button>
+                        ) : (
+                          <>
+                            <Button size="sm" variant="outline" onClick={() => handleViewEmail(it)}>
+                              Ver email
+                            </Button>
+                            <Button size="sm" variant="secondary" disabled={!canVerifyRead} onClick={() => handleVerifyRead(it)}>
+                              Verificar lectura
+                            </Button>
+                            <Button size="sm" disabled={!canVerifyReply} onClick={() => handleVerifyReply(it)}>
+                              Verificar respuesta
+                            </Button>
+                            <Button size="sm" variant="outline" disabled={!hasReply} onClick={() => handleViewReply(it)}>
+                              Ver respuesta
+                            </Button>
+                          </>
+                        )}
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
                             <Button size="sm" variant="destructive" onClick={() => confirmDelete(it)}>
