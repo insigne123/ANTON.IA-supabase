@@ -107,6 +107,12 @@ export default function EnrichedLeadsClient() {
   const [usePixel, setUsePixel] = useState(true);
   const [useLinkTracking, setUseLinkTracking] = useState(false);
   const [useReadReceipt, setUseReadReceipt] = useState(false);
+
+  // Bulk LinkedIn State
+  const [openBulkLinkedin, setOpenBulkLinkedin] = useState(false);
+  const [bulkLinkedinRunning, setBulkLinkedinRunning] = useState(false);
+  const [bulkLinkedinProgress, setBulkLinkedinProgress] = useState<{ current: number; total: number; currentName: string }>({ current: 0, total: 0, currentName: '' });
+
   // Editor IA inline (dentro del modal actual, sin abrir otro <Dialog/>)
   const [showBulkEditor, setShowBulkEditor] = useState(false);
   const [editInstruction, setEditInstruction] = useState('');
@@ -832,6 +838,97 @@ export default function EnrichedLeadsClient() {
 
     setLinkedinMessage(draft);
     setOpenLinkedin(true);
+  }
+
+  async function handleBulkLinkedin() {
+    // 1. Get selected leads with LinkedIn URLs
+    const leadsToProcess = enriched.filter(l => selectedToContact.has(l.id) && l.linkedinUrl);
+
+    if (leadsToProcess.length === 0) {
+      toast({ title: 'No hay leads válidos', description: 'Selecciona leads que tengan URL de LinkedIn.' });
+      return;
+    }
+
+    setBulkLinkedinRunning(true);
+    setBulkLinkedinProgress({ current: 0, total: leadsToProcess.length, currentName: '' });
+
+    let processedCount = 0;
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const lead of leadsToProcess) {
+      setBulkLinkedinProgress(prev => ({ ...prev, currentName: lead.fullName || 'Desconocido', current: processedCount + 1 }));
+
+      try {
+        // 2. Generate message using same logic as single contact
+        const company = getCompanyProfile() || {};
+        const rep = findReportForLead({
+          leadId: leadRefOf(lead),
+          companyDomain: lead.companyDomain || null,
+          companyName: lead.companyName || null
+        });
+
+        const draft = generateLinkedinDraft(lead, rep);
+        const messageBody = draft || `Hola ${getFirstNameSafe(lead.fullName)}, me gustaría conectar contigo.`;
+
+        // 3. Send via Extension
+        console.log(`[Bulk LinkedIn] Processing ${lead.fullName}...`);
+        const res = await extensionService.sendLinkedinDM(lead.linkedinUrl!, messageBody);
+
+        // 4. Log Result
+        if (res.success) {
+          successCount++;
+          await handleLogCall({
+            leadId: lead.id,
+            outcome: 'Contactado (LinkedIn)',
+            notes: `Mensaje enviado automáticamente via Extensión.\n\n${messageBody}`,
+            duration: 60,
+            channel: 'linkedin'
+          });
+
+          // Remove from selection
+          setSelectedToContact(prev => {
+            const next = new Set(prev);
+            next.delete(lead.id);
+            return next;
+          });
+        } else {
+          failCount++;
+          console.error('[Bulk LinkedIn] Failed for:', lead.fullName, res.error);
+          toast({
+            title: `Error: ${lead.fullName}`,
+            description: res.error || 'No se pudo enviar el mensaje',
+            variant: 'destructive'
+          });
+        }
+
+      } catch (err) {
+        failCount++;
+        console.error('[Bulk LinkedIn] Exception:', err);
+        toast({
+          title: `Error: ${lead.fullName}`,
+          description: 'Error inesperado al procesar',
+          variant: 'destructive'
+        });
+      }
+
+      processedCount++;
+
+      // 5. Wait safely between contacts (5-10s random delay)
+      if (processedCount < leadsToProcess.length) {
+        const delayTime = 5000 + Math.random() * 5000;
+        console.log(`[Bulk LinkedIn] Waiting ${Math.round(delayTime / 1000)}s before next contact...`);
+        await new Promise(r => setTimeout(r, delayTime));
+      }
+    }
+
+    setBulkLinkedinRunning(false);
+    setOpenBulkLinkedin(false);
+
+    toast({
+      title: 'Proceso finalizado',
+      description: `Procesados: ${processedCount} | Exitosos: ${successCount} | Fallidos: ${failCount}`
+    });
   }
 
   async function handleScheduleCampaign() {
