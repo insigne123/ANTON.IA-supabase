@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { notificationService } from '@/lib/services/notification-service';
+import { generateCampaignFlow } from '@/ai/flows/generate-campaign';
 
 // Initialize Supabase Admin Client
 const supabaseUrl = process.env.SUPABASE_URL!;
@@ -62,21 +63,40 @@ async function executeCampaignGeneration(task: any, supabase: any, config: any) 
     let campaignName = generatedName;
 
     if (!existing) {
-        // 2. Generate Content (Mock LLM)
-        // In production, this would call OpenAI/Genkit with `campaignContext`
-        const subject = `Oportunidad para innovar en ${industry}`;
-        const body = `Hola {{firstName}},
-        
-Espero que estés muy bien.
+        // 2. Generate Content (Real LLM using Genkit)
+        console.log('[GENERATE] Invoking Genkit flow for:', generatedName);
 
-Vi que estás liderando iniciativas de ${jobTitle} y me pareció muy relevante contactarte.
-${campaignContext ? `\nContexto específico: ${campaignContext}\n` : ''}
+        let subject = `Oportunidad para innovar en ${industry}`;
+        let body = `Hola {{firstName}},\n\nMe gustaría conversar.`;
 
-Me gustaría conversar sobre cómo podemos potenciar sus resultados.
+        try {
+            console.log('[GENERATE] AI Input:', { jobTitle, industry, missionTitle, campaignContext });
 
-¿Tienes 5 minutos esta semana?
+            const aiResult = await generateCampaignFlow({
+                jobTitle,
+                industry,
+                missionTitle,
+                campaignContext,
+            });
 
-Saludos,`;
+            console.log('[GENERATE] AI Output:', aiResult);
+
+            // Validate AI response
+            if (!aiResult?.steps?.length) {
+                throw new Error('AI returned empty campaign steps');
+            }
+
+            subject = aiResult.steps[0].subject;
+            body = aiResult.steps[0].bodyHtml;
+        } catch (error: any) {
+            console.error('[GENERATE] Genkit Flow Failed:', error);
+            // Fallback not strictly needed if we want to fail hard, but safer to have default or fail task.
+            // Let's rely on the outer try/catch to mark task as failed if AI fails, 
+            // OR use fallback strings if we want to be lenient. 
+            // Given "Critical" nature, maybe failing is better so they know AI keys are missing?
+            // Actually, let's bubble up the error so it shows in the UI logs as "Failed".
+            throw new Error(`AI Generation Failed: ${error.message}`);
+        }
 
         const { error } = await supabase.from('campaigns').insert({
             organization_id: task.organization_id,
