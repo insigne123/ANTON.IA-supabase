@@ -88,7 +88,7 @@ export async function GET(req: NextRequest) {
             },
             investigations: {
                 used: usage?.leads_investigated || 0,
-                limit: enrichLimit
+                limit: mission?.daily_investigate_limit || 5 // Default fallbacks
             },
             contacts: {
                 used: contactsToday || 0,

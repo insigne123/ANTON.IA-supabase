@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { RefreshCw } from 'lucide-react';
@@ -130,7 +131,7 @@ export function QuotaUsageCard() {
         <QuotaItem
           label="Búsquedas"
           used={quota.searches.runs}
-          limit={10}
+          limit={quota.searches.limit}
         />
         <QuotaItem
           label="Enriquecimientos"

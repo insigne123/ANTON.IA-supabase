@@ -42,6 +42,7 @@ import { AgentActivityFeed } from '@/components/antonia/AgentActivityFeed';
 import { MetricsDashboard } from '@/components/antonia/MetricsDashboard';
 import { ReportsHistory } from '@/components/antonia/ReportsHistory';
 import { ReportViewer } from '@/components/antonia/ReportViewer';
+import { MissionQueues } from '@/components/antonia/MissionQueues';
 
 import {
     Sheet,
@@ -1368,15 +1369,33 @@ export default function AntoniaPage() {
                 </AlertDialogContent>
             </AlertDialog>
             <Sheet open={activitySheetOpen} onOpenChange={setActivitySheetOpen}>
-                <SheetContent side="right" className="w-full sm:w-[500px] p-0 flex flex-col">
+                <SheetContent side="right" className="w-[500px] sm:w-[600px] p-0 flex flex-col">
                     <SheetHeader className="px-6 py-4 border-b">
-                        <SheetTitle>Actividad: {selectedActivityMission?.title || 'Misión'}</SheetTitle>
+                        <SheetTitle>Detalles: {selectedActivityMission?.title || 'Misión'}</SheetTitle>
                     </SheetHeader>
-                    <div className="flex-1 overflow-y-auto py-6 px-4">
-                        {selectedActivityMission && (
-                            <AgentActivityFeed missionId={selectedActivityMission.id} />
-                        )}
-                    </div>
+
+                    {selectedActivityMission && (
+                        <Tabs defaultValue="activity" className="flex-1 flex flex-col overflow-hidden">
+                            <div className="px-6 pt-2 border-b">
+                                <TabsList className="grid w-full grid-cols-2">
+                                    <TabsTrigger value="activity">Actividad</TabsTrigger>
+                                    <TabsTrigger value="queues">Cola de Leads</TabsTrigger>
+                                </TabsList>
+                            </div>
+
+                            <TabsContent value="activity" className="flex-1 overflow-hidden p-0 m-0 relative">
+                                <div className="absolute inset-0">
+                                    <AgentActivityFeed missionId={selectedActivityMission.id} />
+                                </div>
+                            </TabsContent>
+
+                            <TabsContent value="queues" className="flex-1 overflow-hidden p-0 m-0 relative">
+                                <div className="absolute inset-0">
+                                    <MissionQueues missionId={selectedActivityMission.id} />
+                                </div>
+                            </TabsContent>
+                        </Tabs>
+                    )}
                 </SheetContent>
             </Sheet>
 
