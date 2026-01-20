@@ -243,19 +243,66 @@ async function executeSearch(task: any, supabase: any, config: any) {
             return { leadsFound: 0, savedLeadsUsed: savedLeads.length, fallbackUsed: true };
         }
 
-        // No new leads AND no saved leads available
-        console.log('[Search] No new leads found and no saved leads available.');
+        // No new leads AND no saved leads available.
+        // CHECK FOR STRANDED 'ENRICHED' LEADS (Leads that were enriched but missed contact task)
+        // Only if campaignName is configured
+        if (config.daily_contact_limit > 0 && task.payload.campaignName) {
+            console.log('[Search] Checking for stranded enriched leads to contact...');
+
+            // We need leads that are 'enriched' AND NOT in 'contacted_leads'? 
+            // Or just trust 'status=enriched' now that we update it to 'contacted'?
+            // Since we just added the update logic, old leads are still 'enriched'.
+            // So relying on status='enriched' is safe for now to pick them up.
+
+            const { data: strandedLeads, error: strandedError } = await supabase
+                .from('leads')
+                .select('*')
+                .eq('mission_id', task.mission_id)
+                .eq('status', 'enriched')
+                .limit(config.daily_contact_limit || 10);
+
+            if (strandedLeads && strandedLeads.length > 0) {
+                console.log(`[Search] Found ${strandedLeads.length} stranded enriched leads. Scheduling CONTACT task.`);
+
+                await supabase.from('antonia_tasks').insert({
+                    mission_id: task.mission_id,
+                    organization_id: task.organization_id,
+                    type: 'CONTACT',
+                    status: 'pending',
+                    payload: {
+                        userId: task.payload.userId,
+                        enrichedLeads: strandedLeads.map((l: any) => ({
+                            id: l.id,
+                            fullName: l.name,
+                            full_name: l.name,
+                            name: l.name,
+                            email: l.email,
+                            linkedinUrl: l.linkedin_url,
+                            companyName: l.company,
+                            title: l.title
+                        })),
+                        campaignName: task.payload.campaignName
+                    },
+                    created_at: new Date().toISOString()
+                });
+
+                await incrementUsage(supabase, task.organization_id, 'search_run', 1); // Count as activity run
+                return { leadsFound: 0, strandedLeadsRecovered: strandedLeads.length, fallbackUsed: true };
+            }
+        }
+
+        console.log('[Search] No new leads found, no saved leads, and no stranded enriched leads.');
         await incrementUsage(supabase, task.organization_id, 'search_run', 1);
 
         await supabase.from('antonia_logs').insert({
             mission_id: task.mission_id,
             organization_id: task.organization_id,
             level: 'warning',
-            message: 'No new leads found and no saved leads available to process.',
+            message: 'Pipeline empty: No new, saved, or pending enriched leads found.',
             details: { fallbackUsed: false }
         });
 
-        return { leadsFound: 0, fallbackUsed: false, message: 'No new or saved leads available' };
+        return { leadsFound: 0, fallbackUsed: false, message: 'Pipeline empty' };
     }
 
     // Create ENRICH task for new leads found
@@ -507,6 +554,17 @@ async function executeContact(task: any, supabase: any) {
 
     if (contactedLeads.length > 0) {
         await supabase.from('contacted_leads').insert(contactedLeads);
+
+        // Update leads status to 'contacted' to remove from queue
+        // We only update the ones that were successfully SENT
+        const sentLeadIds = contactedLeads.map(c => c.lead_id);
+        if (sentLeadIds.length > 0) {
+            await supabase
+                .from('leads')
+                .update({ status: 'contacted', last_contacted_at: new Date().toISOString() })
+                .in('id', sentLeadIds);
+        }
+
         // Track contact metrics
         await incrementUsage(supabase, task.organization_id, 'contact', contactedLeads.length);
     }
