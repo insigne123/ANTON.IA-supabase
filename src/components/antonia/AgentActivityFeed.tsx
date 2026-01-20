@@ -95,7 +95,7 @@ export function AgentActivityFeed({ missionId }: { missionId: string }) {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [missionId]);
+    }, [missionId, supabase]);
 
     const fetchRecentTasks = async () => {
         const { data } = await supabase

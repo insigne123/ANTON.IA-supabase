@@ -26,7 +26,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
     useEffect(() => {
         loadMetrics();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [organizationId, activeMissionId]);
+    }, [organizationId, activeMissionId, supabase]);
 
     const loadMetrics = async () => {
         setLoading(true);

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
 
 export async function POST(req: NextRequest) {
     try {
@@ -14,8 +16,16 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'missionId required' }, { status: 400 });
         }
 
-        // Get mission details
-        const { data: mission, error: missionError } = await supabase
+        // 1. Auth Check - Triggering requires authentication
+        const supabaseAuth = createRouteHandlerClient({ cookies });
+        const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+
+        if (authError || !user) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
+        // Get mission details - Use authenticated client to ensure RLS applies
+        const { data: mission, error: missionError } = await supabaseAuth
             .from('antonia_missions')
             .select('*')
             .eq('id', missionId)
