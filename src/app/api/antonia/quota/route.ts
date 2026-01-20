@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
         // Get active mission limits
         const { data: mission, error: missionError } = await supabase
             .from('antonia_missions')
-            .select('daily_enrich_limit, daily_contact_limit')
+            .select('daily_enrich_limit, daily_contact_limit, daily_investigate_limit')
             .eq('organization_id', organizationId)
             .eq('status', 'active')
             .order('created_at', { ascending: false })
@@ -61,9 +61,11 @@ export async function GET(req: NextRequest) {
             console.error('[QuotaAPI] Mission Query Error:', missionError);
         }
 
+        const activeMission = mission as any;
+
         // Default limits if no mission
-        const enrichLimit = mission?.daily_enrich_limit || 10;
-        const contactLimit = mission?.daily_contact_limit || 3;
+        const enrichLimit = activeMission?.daily_enrich_limit || 10;
+        const contactLimit = activeMission?.daily_contact_limit || 3;
 
         // Count contacts today (from contacted_leads table)
         const { count: contactsToday, error: contactsError } = await supabase
@@ -88,7 +90,7 @@ export async function GET(req: NextRequest) {
             },
             investigations: {
                 used: usage?.leads_investigated || 0,
-                limit: mission?.daily_investigate_limit || 5 // Default fallbacks
+                limit: activeMission?.daily_investigate_limit || 5 // Default fallbacks
             },
             contacts: {
                 used: contactsToday || 0,
