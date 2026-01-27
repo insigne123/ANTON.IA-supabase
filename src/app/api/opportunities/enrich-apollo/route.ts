@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
 
         const enrichmentPayload: any = {
           record_id: enrichedId,
-          table_name: tableName,
+          table_name: 'people_search_leads', // Force table name for external service compatibility
           lead: {
             first_name: firstName,
             last_name: lastName,
