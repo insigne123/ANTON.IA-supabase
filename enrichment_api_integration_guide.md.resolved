@@ -1,0 +1,329 @@
+# Lead Enrichment API - Integration Guide
+
+## Overview
+This document provides complete instructions for integrating with the Lead Enrichment API endpoint.
+
+---
+
+## Endpoint Information
+
+**Base URL:** `https://0.0.0.0:8080` (or your deployed domain)
+
+**Enrichment Endpoint:** `POST /api/enrich`
+
+**Purpose:** Enriches lead data by fetching complete information from Apollo.io including full name, email, phone numbers, location, professional details, and organization information.
+
+---
+
+## Authentication
+
+The API requires authentication via secret key. You have **two options**:
+
+### Option 1: Query Parameter (Recommended for simplicity)
+Add the secret key to the URL:
+```
+POST https://0.0.0.0:8080/api/enrich?secret_key=YOUR_SECRET_KEY_HERE
+```
+
+### Option 2: HTTP Header
+Include the secret key in request headers:
+```
+Header: x-api-secret-key: YOUR_SECRET_KEY_HERE
+```
+
+**Note:** Replace `YOUR_SECRET_KEY_HERE` with the actual value from the backend's `API_SECRET_KEY` environment variable (starts with `sk_`).
+
+---
+
+## Request Format
+
+### Required Fields
+```json
+{
+  "record_id": "string",      // Unique identifier for the lead record
+  "table_name": "string",     // Database table name (e.g., "people_search_leads")
+  "lead": {
+    "apollo_id": "string",    // OPTIONAL: Apollo person ID (if known)
+    "first_name": "string",   // OPTIONAL: First name for matching
+    "last_name": "string",    // OPTIONAL: Last name for matching
+    "organization_name": "string",  // OPTIONAL: Company name
+    "organization_domain": "string" // OPTIONAL: Company domain
+  }
+}
+```
+
+### Example Request (with Apollo ID)
+```json
+{
+  "record_id": "69f6f1aa-eeb9-4cc3-a0a5-c8adaff090d5",
+  "table_name": "people_search_leads",
+  "lead": {
+    "apollo_id": "60f6f043af01830001acc18b"
+  }
+}
+```
+
+### Example Request (without Apollo ID - uses matching)
+```json
+{
+  "record_id": "69f6f1aa-eeb9-4cc3-a0a5-c8adaff090d5",
+  "table_name": "people_search_leads",
+  "lead": {
+    "first_name": "Ronaldo",
+    "last_name": "Silva",
+    "organization_name": "SONDA",
+    "organization_domain": "sonda.com"
+  }
+}
+```
+
+---
+
+## Response Format
+
+### Success Response (200 OK)
+```json
+{
+  "success": true,
+  "enrichment_status": "completed",
+  "data_found": true,
+  "debug_apollo_response": { /* Full Apollo API response */ },
+  "extracted_data": {
+    // Basic Fields
+    "first_name": "Ronaldo",
+    "last_name": "Silva",
+    "linkedin_url": "https://linkedin.com/in/ronaldo-silva",
+    "title": "Software Engineer",
+    
+    // Location Data
+    "city": "São Paulo",
+    "state": "SP",
+    "country": "Brazil",
+    
+    // Professional Info
+    "headline": "Software Engineer at SONDA",
+    "photo_url": "https://...",
+    "seniority": "senior",
+    "departments": ["Engineering", "IT"],
+    
+    // Contact Details
+    "email": "ronaldo.silva@sonda.com",
+    "email_status": "verified",
+    "phone_numbers": [
+      {
+        "type": "mobile",
+        "sanitized_number": "+5511999999999",
+        "number": "+55 11 99999-9999"
+      }
+    ],
+    "primary_phone": "+5511999999999",
+    
+    // Organization Details
+    "organization_name": "SONDA",
+    "organization_domain": "sonda.com",
+    "organization_industry": "Information Technology",
+    "organization_size": 5000,
+    
+    // Status
+    "enrichment_status": "completed",
+    "updated_at": "2026-01-27T20:39:11.963Z"
+  }
+}
+```
+
+### Error Response (401 Unauthorized)
+```json
+{
+  "error": "Unauthorized: Missing valid x-api-secret-key header or secret_key param"
+}
+```
+
+### Error Response (400 Bad Request)
+```json
+{
+  "error": "Missing required fields: record_id, lead, or table_name"
+}
+```
+
+### Error Response (500 Internal Server Error)
+```json
+{
+  "error": "Database update failed: [error message]"
+}
+```
+
+---
+
+## Data Fields Returned
+
+The `extracted_data` object contains the following fields (all optional, depending on Apollo data availability):
+
+### Basic Information
+- `first_name` - First name
+- `last_name` - Full last name (not obfuscated)
+- `linkedin_url` - LinkedIn profile URL
+- `title` - Job title
+
+### Location
+- `city` - City
+- `state` - State/Province
+- `country` - Country
+
+### Professional Details
+- `headline` - Professional headline
+- `photo_url` - Profile photo URL
+- `seniority` - Seniority level (e.g., "senior", "entry", "manager")
+- `departments` - Array of departments
+
+### Contact Information
+- `email` - Email address
+- `email_status` - Email verification status (e.g., "verified")
+- `phone_numbers` - Array of phone objects with `type`, `sanitized_number`, `number`
+- `primary_phone` - Primary phone number (sanitized format)
+
+### Organization
+- `organization_name` - Company name
+- `organization_domain` - Company domain
+- `organization_industry` - Industry
+- `organization_size` - Number of employees
+
+### Metadata
+- `enrichment_status` - Status: "completed", "pending", or "failed"
+- `updated_at` - ISO timestamp
+
+---
+
+## Implementation Instructions
+
+### Step 1: Configure Authentication
+In your application's configuration, set:
+```
+ENRICHMENT_API_URL = "https://0.0.0.0:8080/api/enrich"
+ENRICHMENT_API_SECRET = "sk_YOUR_SECRET_KEY"  // Get this from backend team
+```
+
+### Step 2: Make the Request
+Use your HTTP client to POST to the endpoint:
+
+**Using Query Parameter:**
+```javascript
+const url = `${ENRICHMENT_API_URL}?secret_key=${ENRICHMENT_API_SECRET}`;
+const response = await fetch(url, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    record_id: leadId,
+    table_name: 'people_search_leads',
+    lead: {
+      apollo_id: apolloId || undefined,
+      first_name: firstName,
+      last_name: lastName,
+      organization_name: companyName,
+      organization_domain: companyDomain
+    }
+  })
+});
+```
+
+**Using Header:**
+```javascript
+const response = await fetch(ENRICHMENT_API_URL, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'x-api-secret-key': ENRICHMENT_API_SECRET
+  },
+  body: JSON.stringify({
+    record_id: leadId,
+    table_name: 'people_search_leads',
+    lead: { /* ... */ }
+  })
+});
+```
+
+### Step 3: Handle the Response
+```javascript
+const data = await response.json();
+
+if (response.ok) {
+  // Success - data.extracted_data contains enriched fields
+  console.log('Enriched data:', data.extracted_data);
+  
+  // Update your UI with the new data
+  updateLeadUI(data.extracted_data);
+} else {
+  // Error
+  console.error('Enrichment failed:', data.error);
+  
+  if (response.status === 401) {
+    // Authentication error - check your secret key
+  }
+}
+```
+
+---
+
+## Testing
+
+### Test 1: Health Check
+First verify connectivity:
+```bash
+curl https://0.0.0.0:8080/api/enrich-health
+```
+Expected: `{"status":"ok","message":"Enrichment endpoint is reachable",...}`
+
+### Test 2: Enrichment with Secret Key
+```bash
+curl -X POST "https://0.0.0.0:8080/api/enrich?secret_key=YOUR_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "record_id": "test-123",
+    "table_name": "people_search_leads",
+    "lead": {
+      "apollo_id": "60f6f043af01830001acc18b"
+    }
+  }'
+```
+
+---
+
+## Monitoring
+
+Enrichment activities are logged to the `enrichment_logs` table and visible in the "Enrichment Live Monitor" UI at the main application dashboard.
+
+Each enrichment creates a log entry with:
+- `record_id` - The lead ID
+- `table_name` - Target table
+- `status` - "completed", "pending", or "failed"
+- `details` - Full enrichment details including Apollo response and extracted data
+
+---
+
+## Troubleshooting
+
+### Issue: 401 Unauthorized
+**Cause:** Missing or incorrect secret key
+**Solution:** Verify `ENRICHMENT_API_SECRET` matches the backend's `API_SECRET_KEY`
+
+### Issue: No data in Live Monitor
+**Cause:** Requests not reaching the endpoint
+**Solution:** Check URL configuration and test with `/api/enrich-health` first
+
+### Issue: Fields returning `undefined`
+**Cause:** Database columns don't exist
+**Solution:** Run migration [008_add_enrichment_fields.sql](file:///C:/Users/nicog/.gemini/antigravity/brain/960b5222-ede9-48bf-a583-526046561eef/008_add_enrichment_fields.sql) in Supabase
+
+### Issue: Apollo returns limited data
+**Cause:** Apollo API limitations or data not available for that contact
+**Solution:** Check `debug_apollo_response` to see what Apollo returned
+
+---
+
+## Notes
+
+- **Apollo Credits:** Each enrichment consumes 1 Apollo credit
+- **Async Processing:** Some enrichments may be async (webhook-based)
+- **Rate Limits:** Apollo has rate limits; the API includes retry logic
+- **Data Privacy:** Only request enrichment for leads you have permission to process

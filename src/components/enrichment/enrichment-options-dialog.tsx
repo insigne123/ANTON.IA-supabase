@@ -22,7 +22,8 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
     const totalCost = costPerLead * leadCount;
 
     const handleConfirm = () => {
-        onConfirm({ revealEmail, revealPhone });
+        // Enviar ambas banderas activas para mantener compatibilidad con la API (aunque ahora sea unificada)
+        onConfirm({ revealEmail: true, revealPhone: true });
         onOpenChange(false);
     };
 
@@ -38,32 +39,23 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
 
                 <div className="grid gap-4 py-4">
                     <div className="flex items-center space-x-2 border p-4 rounded-md">
-                        <Checkbox id="email" checked={revealEmail} onCheckedChange={(c) => setRevealEmail(!!c)} />
-                        <Label htmlFor="email" className="flex-1 flex items-center gap-2 cursor-pointer">
-                            <Mail className="w-4 h-4 text-muted-foreground" />
-                            Obtener Email Personal
+                        <Checkbox id="enrich" checked={true} disabled />
+                        <Label htmlFor="enrich" className="flex-1 flex items-center gap-2 cursor-pointer">
+                            <Calculator className="w-4 h-4 text-muted-foreground" />
+                            Enriquecimiento Completo (Email + Teléfono + Datos)
                         </Label>
                         <span className="text-xs font-medium bg-secondary px-2 py-1 rounded">1 crédito</span>
                     </div>
 
-                    <div className="flex items-center space-x-2 border p-4 rounded-md">
-                        <Checkbox id="phone" checked={revealPhone} onCheckedChange={(c) => setRevealPhone(!!c)} />
-                        <Label htmlFor="phone" className="flex-1 flex items-center gap-2 cursor-pointer">
-                            <Phone className="w-4 h-4 text-muted-foreground" />
-                            Obtener Teléfono Móvil/Directo
-                        </Label>
-                        <span className="text-xs font-medium bg-secondary px-2 py-1 rounded">1 crédito</span>
-                    </div>
-
-                    {totalCost > 0 && (
-                        <Alert>
-                            <Calculator className="h-4 w-4" />
-                            <AlertTitle>Estimación de Costo</AlertTitle>
-                            <AlertDescription>
-                                Enriquecer <strong>{leadCount}</strong> leads costará aproximadamente <strong>{totalCost}</strong> créditos de Apollo.
-                            </AlertDescription>
-                        </Alert>
-                    )}
+                    <Alert>
+                        <Calculator className="h-4 w-4" />
+                        <AlertTitle>Estimación de Costo</AlertTitle>
+                        <AlertDescription>
+                            Enriquecer <strong>{leadCount}</strong> leads costará <strong>{leadCount}</strong> créditos.
+                            <br />
+                            <span className="text-xs text-muted-foreground">Incluye validación de email, búsqueda de teléfonos móviles y datos corporativos extendidos.</span>
+                        </AlertDescription>
+                    </Alert>
 
                     {totalCost === 0 && (
                         <Alert variant="destructive">

@@ -201,9 +201,26 @@ export type EnrichedLead = {
   companyDomain?: string;
   descriptionSnippet?: string;
   createdAt: string;
+
+  // Location fields
   country?: string;
+  state?: string;
   city?: string;
+
+  // Professional details
+  headline?: string;
+  photoUrl?: string;
+  seniority?: string;
+  departments?: string[];
+
+  // Organization details
+  organizationDomain?: string;
+  organizationIndustry?: string;
+  organizationSize?: number;
+
+  // Legacy location field (for backwards compatibility)
   industry?: string;
+
   // Phone Enrichment
   phoneNumbers?: Array<{
     raw_number: string;
@@ -214,6 +231,10 @@ export type EnrichedLead = {
   }> | null;
   primaryPhone?: string | null;
   enrichmentStatus?: 'completed' | 'pending_phone' | 'failed' | string;
+
+  // Metadata
+  updatedAt?: string;
+
   report?: CrossReport; // Persistent Report
 };
 
@@ -229,6 +250,26 @@ export type EnrichedOppLead = {
   companyDomain?: string;
   descriptionSnippet?: string;
   createdAt: string;
+
+  // Location fields
+  country?: string;
+  state?: string;
+  city?: string;
+
+  // Professional details
+  headline?: string;
+  photoUrl?: string;
+  seniority?: string;
+  departments?: string[];
+
+  // Organization details
+  organizationDomain?: string;
+  organizationIndustry?: string;
+  organizationSize?: number;
+
+  // Legacy field
+  industry?: string;
+
   phoneNumbers?: Array<{
     raw_number: string;
     sanitized_number: string;
@@ -238,6 +279,7 @@ export type EnrichedOppLead = {
   }> | null;
   primaryPhone?: string | null;
   enrichmentStatus?: 'completed' | 'pending_phone' | 'failed' | string;
+  updatedAt?: string;
   report?: CrossReport; // Persistent Report
 };
 

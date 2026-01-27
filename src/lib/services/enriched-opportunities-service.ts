@@ -19,18 +19,42 @@ function mapRowToEnrichedLead(row: any): EnrichedLead {
         companyName: row.company_name,
         title: row.title,
         linkedinUrl: row.linkedin_url,
-        emailStatus: row.data?.emailStatus,
+        emailStatus: row.email_status || row.data?.emailStatus,
         companyDomain: row.data?.companyDomain,
         descriptionSnippet: row.data?.descriptionSnippet,
         createdAt: row.created_at,
-        country: row.data?.country,
-        city: row.data?.city,
+
+        // Location fields
+        country: row.country || row.data?.country,
+        state: row.state,
+        city: row.city || row.data?.city,
+
+        // Professional details
+        headline: row.headline,
+        photoUrl: row.photo_url,
+        seniority: row.seniority,
+        departments: typeof row.departments === 'string'
+            ? tryParse(row.departments)
+            : (Array.isArray(row.departments) ? row.departments : undefined),
+
+        // Organization details
+        organizationDomain: row.organization_domain,
+        organizationIndustry: row.organization_industry,
+        organizationSize: row.organization_size,
+
+        // Legacy field for backwards compatibility
         industry: row.data?.industry,
+
+        // Phone enrichment
         phoneNumbers: typeof row.phone_numbers === 'string'
             ? tryParse(row.phone_numbers)
             : (Array.isArray(row.phone_numbers) ? row.phone_numbers : []),
         primaryPhone: row.primary_phone,
         enrichmentStatus: row.enrichment_status,
+
+        // Metadata
+        updatedAt: row.updated_at,
+
         report: row.data?.report,
     };
 }
@@ -53,20 +77,42 @@ function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string, organizationId
         organization_id: organizationId,
         full_name: lead.fullName,
         email: lead.email,
+        email_status: lead.emailStatus,
         company_name: lead.companyName,
         title: lead.title,
         linkedin_url: lead.linkedinUrl,
         created_at: lead.createdAt || new Date().toISOString(),
+
+        // Location fields
+        country: lead.country,
+        state: lead.state,
+        city: lead.city,
+
+        // Professional details
+        headline: lead.headline,
+        photo_url: lead.photoUrl,
+        seniority: lead.seniority,
+        departments: lead.departments ? JSON.stringify(lead.departments) : null,
+
+        // Organization details
+        organization_domain: lead.organizationDomain,
+        organization_industry: lead.organizationIndustry,
+        organization_size: lead.organizationSize,
+
+        // Phone enrichment
         phone_numbers: lead.phoneNumbers,
         primary_phone: lead.primaryPhone,
         enrichment_status: lead.enrichmentStatus ?? 'completed',
+
+        // Metadata
+        updated_at: lead.updatedAt || new Date().toISOString(),
+
+        // Legacy data field for backwards compatibility
         data: {
             sourceOpportunityId: lead.sourceOpportunityId,
             emailStatus: lead.emailStatus,
             companyDomain: lead.companyDomain,
             descriptionSnippet: lead.descriptionSnippet,
-            country: lead.country,
-            city: lead.city,
             industry: lead.industry,
             report: lead.report,
         },
