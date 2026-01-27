@@ -271,6 +271,8 @@ export default function OpportunitiesPage() {
         title: l.title || undefined,
         sourceOpportunityId: (l as any).sourceJobId || undefined,
         clientRef: (l as any)?.id || `${l.fullName}-${i}`, // usa id si existe
+        id: (l as any).id,
+        apolloId: (l as any).id,
       }));
 
       const res = await fetch('/api/opportunities/enrich-apollo', {
