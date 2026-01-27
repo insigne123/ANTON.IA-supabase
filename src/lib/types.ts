@@ -190,6 +190,7 @@ export type LeadFromApollo = {
 
 export type EnrichedLead = {
   id: string;
+  apolloId?: string; // New field for integration
   organizationId?: string;
   sourceOpportunityId?: string;
   fullName: string;
