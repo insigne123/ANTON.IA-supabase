@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import type { EnrichedOppLead, LeadResearchReport, StyleProfile } from '@/lib/types';
+import { EnrichedLeadDetailsDialog } from '@/components/enrichment/enriched-lead-details-dialog';
 // FIXED IMPORT
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
 import { extractPrimaryEmail } from '@/lib/email-utils';
@@ -57,6 +58,10 @@ export default function EnrichedOpportunitiesPage() {
   const [reportToView, setReportToView] = useState<LeadResearchReport | null>(null);
   const [reportLead, setReportLead] = useState<EnrichedOppLead | null>(null);
   const [openReport, setOpenReport] = useState(false);
+
+  // Details Modal
+  const [detailsLead, setDetailsLead] = useState<EnrichedOppLead | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -598,6 +603,7 @@ export default function EnrichedOpportunitiesPage() {
                   <TableHead>Nombre</TableHead>
                   <TableHead>Cargo</TableHead>
                   <TableHead>Empresa</TableHead>
+                  <TableHead>Ubicación</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Teléfono</TableHead>
                   <TableHead>LinkedIn</TableHead>
@@ -607,7 +613,7 @@ export default function EnrichedOpportunitiesPage() {
               </TableHeader>
               <TableBody>
                 {pageLeads.length === 0 ? (
-                  <TableRow><TableCell colSpan={10} className="h-24 text-center text-muted-foreground">No hay leads.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={11} className="h-24 text-center text-muted-foreground">No hay leads.</TableCell></TableRow>
                 ) : (
                   pageLeads.map((e) => {
                     const emailData = extractPrimaryEmail(e);
@@ -637,9 +643,15 @@ export default function EnrichedOpportunitiesPage() {
                             title={!canContact(e) ? 'Debes investigar el lead antes de contactar' : 'Marcar para contactar'}
                           />
                         </TableCell>
-                        <TableCell>{e.fullName}</TableCell>
+                        <TableCell>
+                          <div className="font-medium">{e.fullName}</div>
+                          {e.headline && <div className="text-xs text-muted-foreground truncate max-w-[150px]" title={e.headline}>{e.headline}</div>}
+                        </TableCell>
                         <TableCell>{e.title || '—'}</TableCell>
                         <TableCell>{e.companyName || '—'}</TableCell>
+                        <TableCell className="text-sm">
+                          {[e.city, e.country].filter(Boolean).join(', ') || '—'}
+                        </TableCell>
                         <TableCell>
                           {hasEmail ? (
                             <span className={emailData.status === 'verified' ? 'text-green-600' : 'text-yellow-600'}>
@@ -664,6 +676,9 @@ export default function EnrichedOpportunitiesPage() {
                         <TableCell>{e.linkedinUrl ? <a className="underline" target="_blank" href={e.linkedinUrl}>Perfil</a> : '—'}</TableCell>
                         <TableCell>{e.companyDomain || '—'}</TableCell>
                         <TableCell className="text-right space-x-2">
+                          <Button size="icon" variant="ghost" title="Ver detalles completos" onClick={() => { setDetailsLead(e); setShowDetails(true); }}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
                           <Button size="sm" variant="outline" onClick={() => { setReportLead(e); setReportToView(report ? { leadRef: leadRefOf(e), cross: report } as any : null); setOpenReport(true); }}>
                             {report ? 'Ver reporte' : 'Sin reporte'}
                           </Button>
@@ -905,6 +920,11 @@ export default function EnrichedOpportunitiesPage() {
       {/* CALL MODAL */}
       {leadToCall && <PhoneCallModal open={callModalOpen} onOpenChange={setCallModalOpen} lead={leadToCall as any} report={reportToView} onLogCall={(r, n) => console.log('Call logged:', r, n)} />}
 
+      <EnrichedLeadDetailsDialog
+        open={showDetails}
+        onOpenChange={setShowDetails}
+        lead={detailsLead}
+      />
     </div>
   );
 }

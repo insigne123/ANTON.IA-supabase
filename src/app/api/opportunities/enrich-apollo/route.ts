@@ -147,159 +147,142 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // [STEP 2] PHASE 1: EMAIL ENRICHMENT (Internal)
-      if (revealEmail) {
-        try {
-          const payload: any = {
-            reveal_personal_emails: true,
-            reveal_phone_number: false, // Phone is handled externally
-          };
-          if (l.linkedinUrl) payload.linkedin_url = normalizeLinkedin(l.linkedinUrl);
-          if (l.fullName) {
-            payload.name = l.fullName;
-            const parts = l.fullName.trim().split(/\s+/);
-            if (parts.length > 1) {
-              payload.first_name = parts[0];
-              payload.last_name = parts.slice(1).join(' ');
-            }
-          }
-          if (l.email) payload.email = l.email;
-          if (l.title) payload.title = l.title;
-          if (l.companyDomain) payload.organization_domain = cleanDomain(l.companyDomain);
-          if (l.companyName) payload.organization_name = l.companyName;
-
-          log('Fetching Email (Internal Apollo):', payload);
-          const res = await fetchWithLog('APOLLO (Email)', `${BASE}/people/match`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Api-Key': apiKey, 'Cache-Control': 'no-cache' },
-            body: JSON.stringify(payload)
-          });
-
-          if (res.ok) {
-            const j = await res.json();
-            const p = j.person || j;
-            if (p && (p.email || p.id)) {
-              // Found!
-              foundApolloId = p.id;
-
-              // Fallback/Locked Logic
-              const rawEmail: string | undefined = p.email || p.personal_email || p.primary_email;
-              const locked = !!rawEmail && /email_not_unlocked@domain\.com/i.test(rawEmail);
-              let emailToSave = locked ? undefined : rawEmail;
-              let statusToSave = locked ? 'locked' : (p.email_status || 'verified');
-
-              // Fallback to input email if Apollo failed to unlock
-              if (!emailToSave && l.email) {
-                emailToSave = l.email;
-                statusToSave = 'verified';
-              }
-
-              const updateData: any = {
-                full_name: p.name || l.fullName,
-                title: p.title || l.title,
-                linkedin_url: p.linkedin_url || l.linkedinUrl,
-                company_name: p.organization?.name || l.companyName,
-                email: emailToSave,
-                data: {
-                  sourceOpportunityId: l.sourceOpportunityId,
-                  companyDomain: p.organization?.primary_domain || cleanDomain(l.companyDomain),
-                  emailStatus: statusToSave,
-                  city: p.city,
-                  country: p.country,
-                  industry: p.industry,
-                  // Preserve apolloId in data usage if valuable
-                  apolloId: p.id
-                }
-              };
-
-              // Update DB immediately
-              await getSupabaseAdmin().from(tableName).update(updateData).eq('id', enrichedId);
-
-              // Store result for UI response
-              emailResult = {
-                email: emailToSave,
-                emailStatus: statusToSave,
-                linkedinUrl: p.linkedin_url || l.linkedinUrl,
-                companyName: p.organization?.name || l.companyName,
-                title: p.title || l.title,
-                companyDomain: p.organization?.primary_domain || cleanDomain(l.companyDomain),
-                industry: p.industry,
-                location: p.country ? `${p.city || ''}, ${p.country}` : (p.city || '')
-              };
-            }
-          } else {
-            console.warn('Apollo Email Match failed', res.status);
-          }
-        } catch (e) {
-          console.error('Email Enrichment Error', e);
-        }
-      }
-
-      // [STEP 3] PHASE 2: PHONE ENRICHMENT (External)
-      if (revealPhone) {
-        // Validation log
+      // [STEP 2] CONSOLIDATED ENRICHMENT (New API)
+      // The new API handles both email and phone enrichment in a single call
+      try {
         const externalUrl = (process.env.ENRICHMENT_SERVICE_URL || '').trim();
-        const secret = (process.env.ENRICHMENT_SERVICE_SECRET || '').trim(); // FORCE TRIM
-        const maskedSecret = secret ? `${secret.substring(0, 4)}...${secret.substring(secret.length - 4)}` : '(empty)';
+        const secret = (process.env.ENRICHMENT_SERVICE_SECRET || '').trim();
 
-        log(`[enrich-hybrid] Phase 2 Phone. URL present? ${!!externalUrl}. Value: ${externalUrl || '(empty)'}`);
-        log(`[enrich-hybrid] [${new Date().toISOString()}] Secret loaded? ${!!secret}. Length: ${secret.length}. Masked: ${maskedSecret}`);
+        if (!externalUrl) {
+          log('[ERROR] ENRICHMENT_SERVICE_URL not configured. Skipping enrichment.');
+          continue;
+        }
 
-        const servicePayload: any = {
+        // Prepare request payload for new API
+        const parts = l.fullName.trim().split(/\s+/);
+        const firstName = parts.length > 0 ? parts[0] : '';
+        const lastName = parts.length > 1 ? parts.slice(1).join(' ') : '';
+
+        const enrichmentPayload = {
           record_id: enrichedId,
           table_name: tableName,
           lead: {
-            first_name: '',
-            last_name: '',
-            full_name: l.fullName,
-            email: emailResult?.email || l.email || undefined,
-            company_name: l.companyName,
-            company_domain: l.companyDomain,
-            linkedin_url: l.linkedinUrl,
-            title: l.title,
-            source_id: l.sourceOpportunityId,
-            apollo_id: foundApolloId
-          },
-          userId: userId,
-          config: {
-            reveal_phone: true,
-            reveal_email: false
+            first_name: firstName,
+            last_name: lastName,
+            organization_name: l.companyName,
+            organization_domain: cleanDomain(l.companyDomain)
           }
         };
 
-        if (l.fullName) {
-          const parts = l.fullName.trim().split(/\s+/);
-          if (parts.length > 1) {
-            servicePayload.lead.first_name = parts[0];
-            servicePayload.lead.last_name = parts.slice(1).join(' ');
-          } else { servicePayload.lead.first_name = parts[0]; }
+        // Add optional fields if available
+        if (foundApolloId) {
+          enrichmentPayload.lead.apollo_id = foundApolloId;
         }
 
-        if (externalUrl) {
-          log('Forwarding to External Service:', externalUrl);
-          log('Payload to External:', JSON.stringify(servicePayload));
-          // We will AWAIT this fetch to ensure we catch network errors in the logs immediately, 
-          // even if it slows down the response slightly (it's a trade-off for debugging).
-          try {
-            const extRes = await fetch(externalUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-api-secret-key': secret },
-              body: JSON.stringify(servicePayload)
-            });
-            log('External Service Response Status:', extRes.status);
-            if (!extRes.ok) {
-              const txt = await extRes.text();
-              log(`[enrich-hybrid] External Service Error Body: ${txt}`);
+        log('[enrich-consolidated] Calling new enrichment API:', externalUrl);
+        log('[enrich-consolidated] Payload:', JSON.stringify(enrichmentPayload));
+
+        // Call the new consolidated enrichment API
+        const enrichUrl = `${externalUrl}?secret_key=${secret}`;
+        const enrichRes = await fetch(enrichUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(enrichmentPayload)
+        });
+
+        log('[enrich-consolidated] Response status:', enrichRes.status);
+
+        if (enrichRes.ok) {
+          const enrichData = await enrichRes.json();
+          log('[enrich-consolidated] Success:', JSON.stringify(enrichData));
+
+          if (enrichData.success && enrichData.extracted_data) {
+            const extracted = enrichData.extracted_data;
+
+            // Map the response to our database structure
+            const updateData: any = {
+              full_name: extracted.first_name && extracted.last_name
+                ? `${extracted.first_name} ${extracted.last_name}`
+                : l.fullName,
+              email: extracted.email || l.email,
+              email_status: extracted.email_status || 'unknown',
+              title: extracted.title || l.title,
+              linkedin_url: extracted.linkedin_url || l.linkedinUrl,
+              company_name: extracted.organization_name || l.companyName,
+
+              // Location fields
+              city: extracted.city,
+              state: extracted.state,
+              country: extracted.country,
+
+              // Professional details
+              headline: extracted.headline,
+              photo_url: extracted.photo_url,
+              seniority: extracted.seniority,
+              departments: extracted.departments ? JSON.stringify(extracted.departments) : null,
+
+              // Organization details
+              organization_domain: extracted.organization_domain || cleanDomain(l.companyDomain),
+              organization_industry: extracted.organization_industry,
+              organization_size: extracted.organization_size,
+
+              // Phone data
+              phone_numbers: extracted.phone_numbers || [],
+              primary_phone: extracted.primary_phone,
+
+              // Status and metadata
+              enrichment_status: extracted.enrichment_status || 'completed',
+              updated_at: new Date().toISOString(),
+
+              // Preserve existing data and add new fields
+              data: {
+                sourceOpportunityId: l.sourceOpportunityId,
+                companyDomain: extracted.organization_domain || cleanDomain(l.companyDomain),
+                emailStatus: extracted.email_status,
+                apolloId: foundApolloId
+              }
+            };
+
+            // Update database with enriched data
+            const { error: updateError } = await getSupabaseAdmin()
+              .from(tableName)
+              .update(updateData)
+              .eq('id', enrichedId);
+
+            if (updateError) {
+              log('[ERROR] Failed to update enriched data:', updateError.message);
+            } else {
+              log('[SUCCESS] Lead enriched and saved:', enrichedId);
             }
-          } catch (e: any) {
-            log(`[enrich-hybrid] External Service Connection Failed: ${e?.message || e}`);
+
+            // Prepare response data
+            emailResult = {
+              email: extracted.email,
+              emailStatus: extracted.email_status,
+              linkedinUrl: extracted.linkedin_url,
+              companyName: extracted.organization_name,
+              title: extracted.title,
+              companyDomain: extracted.organization_domain,
+              industry: extracted.organization_industry,
+              location: extracted.country ? `${extracted.city || ''}, ${extracted.state || ''}, ${extracted.country}`.replace(/^,\s*|,\s*,/g, ',').trim() : (extracted.city || ''),
+              phoneNumbers: extracted.phone_numbers,
+              primaryPhone: extracted.primary_phone,
+              seniority: extracted.seniority,
+              departments: extracted.departments,
+              headline: extracted.headline,
+              photoUrl: extracted.photo_url
+            };
+          } else {
+            log('[WARNING] Enrichment API returned no data');
           }
         } else {
-          console.warn('[enrich-hybrid] NO ENRICHMENT_SERVICE_URL DEFINED. Skipping external call.');
-          console.log('--- MOCK EXTERNAL PAYLOAD ---');
-          console.log(JSON.stringify(servicePayload, null, 2));
+          const errorText = await enrichRes.text();
+          log('[ERROR] Enrichment API failed:', enrichRes.status, errorText);
         }
+      } catch (e: any) {
+        log('[ERROR] Enrichment exception:', e?.message || e);
       }
+
 
       // Add to output
       enrichedOut.push({
