@@ -270,9 +270,9 @@ export default function OpportunitiesPage() {
         companyDomain: l.companyDomain ? displayDomain(l.companyDomain) : undefined,
         title: l.title || undefined,
         sourceOpportunityId: (l as any).sourceJobId || undefined,
-        clientRef: (l as any)?.id || `${l.fullName}-${i}`, // usa id si existe
-        id: (l as any).id,
-        apolloId: (l as any).id,
+        clientRef: (l as any)?.id || `${l.fullName}-${i}`, // usa id para referencia cliente
+        // id: do not send (l as any).id because it is an Apollo ID (non-UUID), we want backend to gen UUID
+        apolloId: (l as any).id, // Send Apollo ID for precise enrichment
       }));
 
       const res = await fetch('/api/opportunities/enrich-apollo', {

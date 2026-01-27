@@ -201,7 +201,12 @@ export default function SavedLeadsPage() {
         linkedinUrl: l.linkedinUrl || undefined,
         companyName: l.company || undefined,
         companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
+        companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
         clientRef: l.id,
+        companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
+        clientRef: l.id,
+        id: l.id,
+        // apolloId is not available for saved leads (l.id is UUID)
       }));
 
       const r = await fetch('/api/opportunities/enrich-apollo', {
