@@ -183,7 +183,6 @@ async function executeSearch(task: any, supabase: any, config: any) {
             email: lead.email || null,
             linkedin_url: lead.linkedin_url || null,
             status: 'saved',
-            status: 'saved',
             mission_id: task.mission_id, // Link to mission
             apollo_id: lead.id, // Save Apollo ID
             created_at: new Date().toISOString()
