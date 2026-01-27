@@ -64,6 +64,7 @@ export interface Lead {
   location?: string;
   country?: string | null;
   city?: string | null;
+  apolloId?: string;
 }
 
 export type SavedLead = Lead;

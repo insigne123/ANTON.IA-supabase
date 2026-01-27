@@ -203,6 +203,7 @@ export default function SavedLeadsPage() {
         companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
         clientRef: l.id,
         id: l.id,
+        apolloId: l.apolloId,
       }));
 
       const r = await fetch('/api/opportunities/enrich-apollo', {
