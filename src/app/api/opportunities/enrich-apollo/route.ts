@@ -166,7 +166,7 @@ export async function POST(req: NextRequest) {
         const lastName = parts.length > 1 ? parts.slice(1).join(' ') : '';
 
         const enrichmentPayload: any = {
-          record_id: enrichedId,
+          record_id: l.apolloId || enrichedId, // Use Apollo ID if available regarding guide
           table_name: 'people_search_leads', // Force table name for external service compatibility
           lead: {
             first_name: firstName,
