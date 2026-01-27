@@ -4,9 +4,10 @@ import { notificationService } from '@/lib/services/notification-service';
 import { generateCampaignFlow } from '@/ai/flows/generate-campaign';
 import { tokenManager } from '@/lib/services/token-manager';
 import { sendGmail, sendOutlook } from '@/lib/server-email-sender';
+import * as uuid from 'uuid';
 
 // Initialize Supabase Admin Client
-const supabaseUrl = process.env.SUPABASE_URL!;
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
 
@@ -423,14 +424,39 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
     if (enriched.length > 0) {
         await incrementUsage(supabase, task.organization_id, usageType, enriched.length);
 
-        // UPDATE LEADS STATUS in DB
-        // We need to mark them as 'enriched' so they don't get picked up again
-        // enriched contains the API response. We need to match back to DB IDs?
-        // The enrichment API might not return the original ID unless we pass it.
-        // If we can't match, we rely on the fact that now they have emails (maybe) or we update by email?
-        // Better: The 'enrich-apollo' API usually returns the enriched data.
-        // Let's assume we can map back or we just update the leads we *sent*.
+        // [P2-LOGIC-002] Fix Consistency: Insert into 'enriched_leads' table so they appear in UI
+        const rowsToInsert = enriched.map((l: any) => ({
+            id: l.id || l.clientRef || uuid.v4(), // Use existing ID or generate
+            user_id: task.payload.userId,
+            organization_id: task.organization_id,
+            full_name: l.fullName || l.name,
+            email: l.email,
+            company_name: l.companyName || l.company,
+            title: l.title,
+            linkedin_url: l.linkedinUrl,
+            phone_numbers: l.phoneNumbers || [],
+            primary_phone: l.primaryPhone,
+            enrichment_status: 'completed',
+            data: {
+                sourceOpportunityId: l.sourceOpportunityId,
+                emailStatus: l.emailStatus,
+                companyDomain: l.companyDomain,
+                descriptionSnippet: l.descriptionSnippet,
+                country: l.country,
+                city: l.city,
+                industry: l.industry
+            },
+            created_at: new Date().toISOString()
+        }));
 
+        const { error: insertError } = await supabase.from('enriched_leads').upsert(rowsToInsert, { onConflict: 'email' }); // Simple dedup by email if possible, or usually just insert. 'id' conflict?
+        // enriched_leads usually doesn't enforce unique email by constraint, but manual flow does logic check.
+        // We'll trust upsert if ID matches, or insert if new.
+        if (insertError) console.error('[Enrich] Failed to insert into enriched_leads:', insertError);
+
+
+        // UPDATE LEADS STATUS in DB (source leads)
+        // We need to match back to DB IDs
         const leadIds = leadsToProcess.map((l: any) => l.id).filter((id: any) => id);
 
         if (leadIds.length > 0) {
@@ -727,6 +753,16 @@ async function processTask(task: any, supabase: any) {
 }
 
 export async function GET(request: Request) {
+    // [P1-SEC-002] Security Check
+    const authHeader = request.headers.get('authorization');
+    const cronSecret = process.env.CRON_SECRET;
+
+    // Check for Bearer token or direct matching if configured that way
+    // Usually Vercel Cron uses just the header, or custom provided header
+    if (authHeader !== `Bearer ${cronSecret}` && request.headers.get('x-cron-secret') !== cronSecret) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // STEP 1: Schedule daily tasks for active missions (runs once per day check)

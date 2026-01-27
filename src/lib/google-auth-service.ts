@@ -89,11 +89,11 @@ function clearSession() {
 const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 const GMAIL_READ_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const OIDC_SCOPES = ['openid', 'email', 'profile'] as const;
-const BASE_SCOPES = [GMAIL_SEND_SCOPE, ...OIDC_SCOPES] as const;
+const BASE_SCOPES = [GMAIL_SEND_SCOPE, GMAIL_READ_SCOPE, ...OIDC_SCOPES] as const;
 
 function validateScopes(scopes: string[]) {
   if (!scopes.length) throw new Error('Scopes vacíos');
-  if (scopes.some(s => s.includes(',') )) {
+  if (scopes.some(s => s.includes(','))) {
     throw new Error('Scopes mal formateados (usa espacios, no comas)');
   }
 }

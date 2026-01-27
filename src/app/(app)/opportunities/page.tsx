@@ -165,7 +165,7 @@ export default function OpportunitiesPage() {
         await sleep(delay);
         delay = Math.min(delay + 500, 3500);
       }
-      toast({ variant: 'destructive', title: 'Demora inusual', description: 'El proceso sigue en Apify; intenta consultar de nuevo en unos segundos.' });
+      toast({ variant: 'default', title: 'Seguimos procesando...', description: 'La búsqueda esta tomando tiempo. Los resultados apareceran aqui pronto.' });
     } finally {
       setLoading(false);
     }
@@ -208,14 +208,17 @@ export default function OpportunitiesPage() {
 
       const ident = (microsoftAuthService as any)?.getUserIdentity?.();
       const userId = ident?.email || ident?.id || 'anonymous';
-      const res = await fetch('/api/opportunities/leads', {
+      const res = await fetch('/api/opportunities/leads-apollo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
         body: JSON.stringify({
-          companies: companies.map(c => ({ companyName: c.companyName, companyDomain: c.companyDomain })),
+          // Adapt payload for leads-apollo
+          companyNames: companies.map(c => c.companyName),
+          domains: companies.map(c => c.companyDomain).filter(Boolean),
           personTitles,
           personLocations: personLocs,
-          countPerCompany: 100,
+          perPage: 100, // Replacing countPerCompany
+          maxPages: 1 // Limit pages for now to match similar volume
         }),
       });
       const parsed = await parseJsonResponse(res);
