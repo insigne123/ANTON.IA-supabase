@@ -183,7 +183,9 @@ async function executeSearch(task: any, supabase: any, config: any) {
             email: lead.email || null,
             linkedin_url: lead.linkedin_url || null,
             status: 'saved',
+            status: 'saved',
             mission_id: task.mission_id, // Link to mission
+            apollo_id: lead.id, // Save Apollo ID
             created_at: new Date().toISOString()
         }));
 
@@ -383,7 +385,8 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
         company_name: l.company,
         organization_website_url: l.company_website,
         title: l.title,
-        email: l.emailRaw || l.email
+        email: l.emailRaw || l.email,
+        apolloId: l.apollo_id // Map DB apollo_id
     }));
 
     if (leadsToProcess.length === 0) return { skipped: true, reason: 'no_leads_to_process' };
@@ -396,7 +399,10 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
             companyName: l.organization_name || l.company_name,
             companyDomain: l.organization_website_url,
             title: l.title,
-            email: l.email
+            email: l.email,
+            id: l.id,
+            clientRef: l.id,
+            apolloId: l.apolloId
         })),
         revealEmail: true,
         revealPhone: revealPhone
