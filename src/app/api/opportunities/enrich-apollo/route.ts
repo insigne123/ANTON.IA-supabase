@@ -163,7 +163,7 @@ export async function POST(req: NextRequest) {
         const firstName = parts.length > 0 ? parts[0] : '';
         const lastName = parts.length > 1 ? parts.slice(1).join(' ') : '';
 
-        const enrichmentPayload = {
+        const enrichmentPayload: any = {
           record_id: enrichedId,
           table_name: tableName,
           lead: {
