@@ -192,6 +192,8 @@ export default function SavedOpportunitiesPage() {
                     sourceOpportunityId: currentOpp?.id,
                     linkedinUrl: l.linkedinUrl,
                     email: l.email, // [IMPROVED MATCHING] Send email if we have it
+                    id: l.id,
+                    apolloId: l.id, // Pass ID as apolloId too just in case
                 })),
                 revealEmail: opts.revealEmail,
                 revealPhone: opts.revealPhone

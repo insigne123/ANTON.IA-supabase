@@ -44,6 +44,8 @@ type EnrichInput = {
     clientRef?: string;
     email?: string;
     existingRecordId?: string;
+    apolloId?: string;
+    id?: string;
   }>;
 };
 
@@ -110,8 +112,8 @@ export async function POST(req: NextRequest) {
       }
 
       const isRetry = !!l.existingRecordId;
-      const enrichedId = l.existingRecordId || uuid();
-      let foundApolloId: string | undefined = undefined;
+      const enrichedId = l.existingRecordId || l.id || uuid();
+      let foundApolloId: string | undefined = l.apolloId;
       let emailResult: any = null;
 
       // [STEP 1] Ensure Row Exists

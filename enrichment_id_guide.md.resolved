@@ -1,0 +1,45 @@
+# Guía Express: Uso del ID para Enriquecimiento
+
+Esta guía explica exclusivamente cómo manejar el ID del lead para asegurar que el enriquecimiento funcione correctamente.
+
+## 1. Obtener el ID de la Búsqueda
+Cuando tu aplicación busca leads (endpoint `/api/lead-search`), la respuesta JSON contiene un array de leads. Cada objeto lead tiene un campo `id`.
+
+**Ejemplo de Respuesta de Búsqueda:**
+```json
+{
+  "batch_run_id": "...",
+  "leads": [
+    {
+      "id": "69f6f1aa-eeb9-4cc3-a0a5-c8adaff090d5",  <-- ESTE ES EL ID QUE NECESITAS
+      "first_name": "Ronaldo",
+      "last_name": "Go***z",
+      "organization_name": "SONDA",
+      ...
+    }
+  ]
+}
+```
+
+Debes capturar este valor `id` y guardarlo temporalmente en tu flujo.
+
+## 2. Enviar el ID al Enriquecimiento
+Cuando llames al endpoint de enriquecimiento (`/api/enrich`), debes pasar ese mismo ID en el campo `record_id`.
+
+Además, es **obligatorio** especificar la tabla correcta: `people_search_leads`.
+
+**Payload Correcto para Enriquecer:**
+```json
+{
+  "record_id": "69f6f1aa-eeb9-4cc3-a0a5-c8adaff090d5",  // El ID que obtuviste en el paso 1
+  "table_name": "people_search_leads",                 // SIEMPRE usa este nombre de tabla
+  "lead": {
+    "apollo_id": "..." // Opcional si ya tienes el ID interno
+  }
+}
+```
+
+## Resumen para la otra IA
+1. **Extraer** `lead.id` de la respuesta de búsqueda.
+2. **Inyectar** ese valor en `record_id` de la petición de enriquecimiento.
+3. **Fijar** `table_name` como `"people_search_leads"`.

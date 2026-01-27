@@ -12,6 +12,7 @@ const TABLE = 'enriched_opportunities';
 function mapRowToEnrichedLead(row: any): EnrichedLead {
     return {
         id: row.id,
+        apolloId: row.data?.apolloId,
         organizationId: row.organization_id,
         sourceOpportunityId: row.data?.sourceOpportunityId,
         fullName: row.full_name,
@@ -115,6 +116,7 @@ function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string, organizationId
             descriptionSnippet: lead.descriptionSnippet,
             industry: lead.industry,
             report: lead.report,
+            apolloId: lead.apolloId,
         },
     };
 }
