@@ -1,10 +1,12 @@
+// src/app/api/opportunities/leads-apollo/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import type { LeadFromApollo } from '@/lib/types';
 import { fetchWithLog } from '@/lib/debug';
 import * as San from '@/lib/input-sanitize';
+import { requireAuth, handleAuthError } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs'; // <-- asegura Node runtime
+export const runtime = 'nodejs';
 
 const BASE = 'https://api.apollo.io/api/v1';
 
@@ -25,6 +27,10 @@ const LOCKED_RE = /email_not_unlocked@domain\.com/i;
 
 export async function POST(req: NextRequest) {
   try {
+    const { user, organizationId } = await requireAuth();
+
+    // We could check quota here too if needed (e.g. 'leadSearch' quota)
+
     const {
       personTitles = [],
       domains = [],
@@ -111,7 +117,7 @@ export async function POST(req: NextRequest) {
         const outEmail = includeLockedEmails
           ? rawEmail
           : (isLocked ? undefined : rawEmail);
-        
+
         leads.push({
           id: p.id ?? p.person_id, // <-- usamos id de Apollo
           fullName: p.name ?? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim(),
@@ -173,6 +179,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ leads: final, total: leads.length, returned: final.length, domains: domainList });
   } catch (e: any) {
+    const authRes = handleAuthError(e);
+    if (authRes.status !== 500 || e.name === 'AuthError') return authRes;
+
     console.error("[leads-apollo] fatal", { message: e?.message, stack: e?.stack });
     return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 });
   }

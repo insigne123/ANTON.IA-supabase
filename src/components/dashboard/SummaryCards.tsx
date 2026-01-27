@@ -5,10 +5,8 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Users, Send, MailCheck, Briefcase } from 'lucide-react';
-import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
-import { campaignsStorage } from '@/lib/campaigns-storage';
-import { getEnrichedLeads } from '@/lib/services/enriched-leads-service';
-import { savedOpportunitiesStorage } from '@/lib/services/opportunities-service';
+// Imports removed: Storage services are no longer used for counts to improve performance.
+
 
 type Summary = {
   contacted: number;
@@ -30,25 +28,67 @@ export default function SummaryCards() {
   useEffect(() => {
     async function load() {
       try {
-        const contactsPromise = contactedLeadsStorage.get();
-        const campaignsPromise = campaignsStorage.get();
-        const enrichedPromise = getEnrichedLeads();
-        const oppsPromise = savedOpportunitiesStorage.get();
+        // [P2-PERF-001] Optimized Count Queries (HEAD request)
+        // Instead of downloading all rows (approx 2MB+ json), we just get the count (kB).
 
-        const [contacted, campaigns, enriched, opps] = await Promise.all([
-          contactsPromise.catch(() => []),
-          campaignsPromise.catch(() => []),
-          enrichedPromise.catch(() => []),
-          oppsPromise.catch(() => [])
+        // We need organization context. Assuming RLS handles visibility, 
+        // but explicit filter is safer if service uses specific logic.
+        // Services usually use `organization_id`.
+
+        const { data: { user } } = await import('@/lib/supabase').then(m => m.supabase.auth.getUser());
+        if (!user) return;
+
+        const supabase = (await import('@/lib/supabase')).supabase;
+        const orgService = (await import('@/lib/services/organization-service')).organizationService;
+        const orgId = await orgService.getCurrentOrganizationId();
+
+        // Parallelize queries
+        const [
+          contactedRes,
+          repliedRes,
+          campaignsRes,
+          enrichedRes,
+          oppsRes
+        ] = await Promise.all([
+          // 1. Contacted Leads (Total)
+          supabase.from('contacted_leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', orgId),
+
+          // 2. Replies (Status='replied')
+          supabase.from('contacted_leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', orgId)
+            .eq('status', 'replied'),
+
+          // 3. Active Campaigns
+          supabase.from('campaigns')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', orgId)
+            .eq('status', 'active'),
+
+          // 4. Enriched Leads
+          // Note: service uses 'enriched_leads' table
+          supabase.from('enriched_leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', orgId),
+
+          // 5. Saved Opportunities
+          // Note: service does not use orgId yet (legacy?), uses user_id implicitly via RLS?
+          // Checking service: it inserts with user_id. RLS likely filters by user_id for now.
+          supabase.from('opportunities')
+            .select('*', { count: 'exact', head: true })
+          // .eq('user_id', user.id) // Redundant if RLS enabled, but safe.
         ]);
 
         setSummary({
-          contacted: contacted?.length || 0,
-          replied: contacted?.filter(c => c.status === 'replied').length || 0,
-          activeCampaigns: campaigns?.filter(c => c.status === 'active').length || 0,
-          enrichedLeads: enriched?.length || 0,
-          savedOpps: opps?.length || 0,
+          contacted: contactedRes.count || 0,
+          replied: repliedRes.count || 0,
+          activeCampaigns: campaignsRes.count || 0,
+          enrichedLeads: enrichedRes.count || 0,
+          savedOpps: oppsRes.count || 0,
         });
+
       } catch (error) {
         console.error("Error loading summary cards:", error);
       }

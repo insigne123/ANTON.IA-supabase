@@ -1,5 +1,6 @@
 // src/app/api/opportunities/search/route.ts
 import { getApifyClient, hasApifyAuth } from '@/lib/apify-client';
+import { requireAuth, handleAuthError } from '@/lib/server/auth-utils';
 
 type Body = {
   jobTitle?: string;
@@ -13,6 +14,11 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: Request) {
   const startedAt = Date.now();
   try {
+    // 1. Auth Check
+    const { user, organizationId } = await requireAuth(); // Throws if invalid
+
+    // We could use user/orgId here for logging/quota if needed in the future
+
     const body = (await req.json().catch(() => ({}))) as Partial<Body>;
     const location = String(body.location || '').trim();
     if (!location) {
@@ -51,6 +57,9 @@ export async function POST(req: Request) {
 
     return j({ ok: true, runId: run.id }, 202);
   } catch (err: any) {
+    const authRes = handleAuthError(err);
+    if (authRes.status !== 500 || err.name === 'AuthError') return authRes;
+
     const raw = String(err?.message || err);
     if (raw.includes('user-or-token-not-found')) {
       return j(
