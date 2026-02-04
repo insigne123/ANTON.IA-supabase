@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
         // Get active mission limits
         const { data: mission, error: missionError } = await supabase
             .from('antonia_missions')
-            .select('daily_enrich_limit, daily_contact_limit, daily_investigate_limit')
+            .select('daily_search_limit, daily_enrich_limit, daily_contact_limit, daily_investigate_limit')
             .eq('organization_id', organizationId)
             .eq('status', 'active')
             .order('created_at', { ascending: false })
@@ -64,6 +64,7 @@ export async function GET(req: NextRequest) {
         const activeMission = mission as any;
 
         // Default limits if no mission
+        const searchRunLimit = activeMission?.daily_search_limit || 3;
         const enrichLimit = activeMission?.daily_enrich_limit || 10;
         const contactLimit = activeMission?.daily_contact_limit || 3;
 
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
         const quotaData = {
             searches: {
                 used: usage?.leads_searched || 0,
-                limit: 1000,
+                limit: searchRunLimit,
                 runs: usage?.search_runs || 0
             },
             enrichments: {

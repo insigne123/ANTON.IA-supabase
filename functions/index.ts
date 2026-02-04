@@ -6,6 +6,7 @@
 // Last Updated: 2025-12-30 02:45 Dry Run & N8N Fields Fix
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { randomUUID } from 'crypto';
 // Hardcoded URLs for Cloud Functions
 const APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
@@ -139,7 +140,7 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
         userId = await getTaskUserId(task, supabase);
     }
 
-    const generatedName = `Misión: ${missionTitle || 'Campaña Inteligente'} `;
+    const generatedName = `Misión: ${missionTitle || 'Campaña Inteligente'}`;
 
     console.log('[GENERATE] Generating campaign...', generatedName);
 
@@ -154,8 +155,8 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
     let body = existing?.body || '';
 
     if (!existing) {
-        subject = `Oportunidad para innovar en ${industry} `;
-        body = `Hola { { firstName } }, \n\nEspero que estés muy bien.\n\nVi que estás liderando iniciativas de ${jobTitle} y me pareció muy relevante contactarte.\n${campaignContext ? `\nContexto específico: ${campaignContext}\n` : ''} \nMe gustaría conversar sobre cómo podemos potenciar sus resultados.\n\n¿Tienes 5 minutos esta semana ?\n\nSaludos, `;
+        subject = `Oportunidad para innovar en ${industry}`;
+        body = `Hola {{firstName}},\n\nEspero que estés muy bien.\n\nVi que estás liderando iniciativas de ${jobTitle} y me pareció muy relevante contactarte.\n${campaignContext ? `\nContexto específico: ${campaignContext}\n` : ''}\nMe gustaría conversar sobre cómo podemos potenciar sus resultados.\n\n¿Tienes 5 minutos esta semana?\n\nSaludos,`;
 
         await supabase.from('campaigns').insert({
             organization_id: task.organization_id,
@@ -234,20 +235,48 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
     const leads = data.results || data.leads || []; // Handle potentially different response structures
 
     if (leads.length > 0) {
-        const leadsToInsert = leads.map((lead: any) => ({
-            user_id: userId,
-            organization_id: task.organization_id,
-            mission_id: task.mission_id,
-            name: lead.full_name || lead.name || '',
-            title: lead.title || '',
-            company: lead.organization_name || lead.company_name || '',
-            email: lead.email || null,
-            linkedin_url: lead.linkedin_url || null,
-            status: 'saved',
-            created_at: new Date().toISOString()
-        }));
+        // IMPORTANT: We generate and persist the DB UUIDs here and propagate them across the whole pipeline.
+        // This prevents the ENRICH endpoint from generating new IDs that don't match `leads.id`.
+        const nowIso = new Date().toISOString();
+        const leadsToInsert = leads.map((lead: any) => {
+            const id = randomUUID();
+            const name = lead.full_name || lead.name || '';
+            const title = lead.title || '';
+            const company = lead.organization_name || lead.company_name || '';
 
-        await supabase.from('leads').insert(leadsToInsert);
+            return {
+                id,
+                user_id: userId,
+                organization_id: task.organization_id,
+                mission_id: task.mission_id,
+
+                name,
+                title,
+                company,
+
+                email: lead.email || null,
+                linkedin_url: lead.linkedin_url || null,
+
+                // Optional enrichment hints
+                company_website: lead.organization_website_url || null,
+                industry: lead.organization_industry || lead.industry || null,
+                location: lead.location || null,
+                country: lead.country || lead.organization_location_country || null,
+                city: lead.city || lead.organization_location_city || null,
+
+                // External source ID (Apollo/actor)
+                apollo_id: lead.id || null,
+
+                status: 'saved',
+                created_at: nowIso
+            };
+        });
+
+        const { error: insertError } = await supabase.from('leads').insert(leadsToInsert);
+        if (insertError) {
+            console.error('[SEARCH] Failed to insert leads:', insertError);
+            throw new Error(`Failed to insert leads: ${insertError.message}`);
+        }
 
         console.log(`[SEARCH] 📊 Incrementing usage: `, {
             organization_id: task.organization_id,
@@ -260,6 +289,29 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
 
         // Chain to ENRICH if configured
         if (task.payload.enrichmentLevel && leads.length > 0) {
+            // Provide DB-backed leads with stable IDs (use `id`/`clientRef`) so enrichment can update
+            // and later steps can reference `leads.id` reliably.
+            const leadsForEnrich = leadsToInsert.slice(0, 10).map((row: any) => ({
+                id: row.id,
+                clientRef: row.id,
+                name: row.name,
+                full_name: row.name,
+                fullName: row.name,
+                title: row.title,
+                company: row.company,
+                company_name: row.company,
+                companyName: row.company,
+                email: row.email,
+                linkedin_url: row.linkedin_url,
+                linkedinUrl: row.linkedin_url,
+                company_website: row.company_website,
+                companyDomain: row.company_website,
+                apollo_id: row.apollo_id,
+                apolloId: row.apollo_id,
+                location: row.location,
+                industry: row.industry,
+            }));
+
             await supabase.from('antonia_tasks').insert({
                 mission_id: task.mission_id,
                 organization_id: task.organization_id,
@@ -267,9 +319,10 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
                 status: 'pending',
                 payload: {
                     userId: userId,
-                    leads: leads.slice(0, 10),
+                    leads: leadsForEnrich,
                     enrichmentLevel: task.payload.enrichmentLevel,
-                    campaignName: task.payload.campaignName
+                    campaignName: task.payload.campaignName,
+                    source: 'search_inserted'
                 },
                 created_at: new Date().toISOString()
             });
@@ -297,16 +350,21 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
             .select('lead_id')
             .eq('mission_id', task.mission_id);
 
-        const contactedIds = (contactedLeadIds || []).map((c: any) => c.lead_id);
+        const contactedIds = (contactedLeadIds || []).map((c: any) => c.lead_id).filter(Boolean);
 
         // Find enriched leads that haven't been contacted
-        const { data: uncontactedLeads, error: queryError } = await supabase
+        let uncontactedQuery = supabase
             .from('leads')
-            .select('id, name, email, title, company, linkedin_url')
+            .select('id, name, email, title, company, linkedin_url, company_website, apollo_id, industry, location')
             .eq('mission_id', task.mission_id)
             .eq('status', 'enriched')
-            .not('id', 'in', `(${contactedIds.length > 0 ? contactedIds.join(',') : '00000000-0000-0000-0000-000000000000'})`)
             .limit(50);
+
+        if (contactedIds.length > 0) {
+            uncontactedQuery = uncontactedQuery.not('id', 'in', `(${contactedIds.join(',')})`);
+        }
+
+        const { data: uncontactedLeads, error: queryError } = await uncontactedQuery;
 
         if (queryError) {
             console.error('[SEARCH] Error querying uncontacted leads:', queryError);
@@ -418,7 +476,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
         return { skipped: true, reason: 'daily_limit_reached' };
     }
 
-    const { leads, enrichmentLevel, campaignName } = task.payload;
+    let { leads, enrichmentLevel, campaignName } = task.payload;
     const userId = await getTaskUserId(task, supabase);
 
     console.log(`[ENRICH] Task payload: `, JSON.stringify({
@@ -428,12 +486,37 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
         campaignName
     }));
 
-    if (!leads || leads.length === 0) {
-        console.log('[ENRICH] No leads to enrich in payload');
+    const remaining = Math.max(0, limit - (usage.leads_enriched || 0));
+
+    // Backward compatibility:
+    // - Old tasks might include raw leads from the external service (no DB UUIDs)
+    // - New tasks should include DB-backed leads with stable `id`
+    // If we can't guarantee stable IDs, we fetch from the DB queue.
+    const hasStableIds = Array.isArray(leads) && leads.some((l: any) => typeof l?.id === 'string' && l.id.length >= 32);
+
+    if (!Array.isArray(leads) || leads.length === 0 || !hasStableIds) {
+        console.log('[ENRICH] No stable leads in payload. Fetching from DB queue (status=saved)...');
+        const { data: queued, error: qErr } = await supabase
+            .from('leads')
+            .select('id, name, email, title, company, linkedin_url, company_website, apollo_id, industry, location')
+            .eq('mission_id', task.mission_id)
+            .eq('status', 'saved')
+            .order('created_at', { ascending: false })
+            .limit(Math.min(remaining, 50));
+
+        if (qErr) {
+            console.error('[ENRICH] Failed to fetch queue leads:', qErr);
+            return { enrichedCount: 0, skipped: true, reason: 'queue_fetch_failed' };
+        }
+        leads = queued || [];
+    }
+
+    if (!Array.isArray(leads) || leads.length === 0) {
+        console.log('[ENRICH] No leads to enrich after fallback');
         return { enrichedCount: 0, skipped: true, reason: 'no_leads' };
     }
 
-    const leadsToEnrich = leads.slice(0, limit - (usage.leads_enriched || 0));
+    const leadsToEnrich = leads.slice(0, remaining);
 
     console.log(`[ENRICH] Enriching ${leadsToEnrich.length} leads`);
 
@@ -445,12 +528,21 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
         throw new Error('APP_URL environment variable not configured');
     }
 
-    // Map leads to the format expected by the API
+    const revealPhone = enrichmentLevel === 'deep' || enrichmentLevel === 'premium' || enrichmentLevel === 'phone';
+
+    // Map leads to the format expected by the API.
+    // CRITICAL: include `id`/`clientRef` so the enrichment result keeps the SAME UUID as `leads.id`.
     const leadsFormatted = leadsToEnrich.map((lead: any) => ({
-        fullName: lead.name || lead.full_name,
-        title: lead.title,
-        companyName: lead.organization?.name || lead.organization_name || lead.company_name,
-        linkedinUrl: lead.linkedin_url,
+        id: lead.id,
+        clientRef: lead.id,
+        fullName: lead.fullName || lead.full_name || lead.name || '',
+        title: lead.title || '',
+        companyName: lead.companyName || lead.company_name || lead.company || lead.organization?.name || lead.organization_name || '',
+        linkedinUrl: lead.linkedinUrl || lead.linkedin_url || null,
+        companyDomain: lead.companyDomain || lead.company_domain || lead.company_website || lead.organization_website_url || null,
+        email: lead.email || null,
+        apolloId: lead.apolloId || lead.apollo_id || null,
+        // Keep a reference (not used as identifier)
         sourceOpportunityId: lead.id
     }));
 
@@ -463,12 +555,12 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
                 'Content-Type': 'application/json',
                 'x-user-id': userId
             },
-            body: JSON.stringify({
-                leads: leadsFormatted,
-                revealEmail: true,
-                revealPhone: enrichmentLevel === 'premium'
-            })
-        });
+                body: JSON.stringify({
+                    leads: leadsFormatted,
+                    revealEmail: true,
+                    revealPhone
+                })
+            });
 
         console.log(`[ENRICH] API response status: ${response.status} `);
 
@@ -478,28 +570,31 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
 
             const enrichedLeads = data.enriched || [];
 
-            // Update lead status to 'enriched' in the database
-            const leadIds = enrichedLeads.map((l: any) => l.id).filter(Boolean);
+            // Persist enriched fields back into `leads` so later steps (INVESTIGATE/CONTACT) have email/linkedin/etc.
+            // NOTE: /api/opportunities/enrich-apollo already consumes/records daily quota in antonia_daily_usage.
+            // Do NOT increment usage here to avoid double counting.
+            for (const l of enrichedLeads) {
+                if (!l?.id) continue;
 
-            if (leadIds.length > 0) {
-                console.log(`[ENRICH] Updating ${leadIds.length} leads to status='enriched'`);
+                const updateData: any = {
+                    status: 'enriched',
+                };
+                if (l.email !== undefined) updateData.email = l.email || null;
+                if (l.linkedinUrl !== undefined) updateData.linkedin_url = l.linkedinUrl || null;
+                if (l.title) updateData.title = l.title;
+                if (l.companyName) updateData.company = l.companyName;
+                if (l.industry) updateData.industry = l.industry;
+                if (l.location) updateData.location = l.location;
 
                 const { error: updateError } = await supabase
                     .from('leads')
-                    .update({
-                        status: 'enriched',
-                        last_enriched_at: new Date().toISOString()
-                    })
-                    .in('id', leadIds);
+                    .update(updateData)
+                    .eq('id', l.id);
 
                 if (updateError) {
-                    console.error('[ENRICH] Error updating lead status:', updateError);
-                } else {
-                    console.log(`[ENRICH] ✅ Successfully updated ${leadIds.length} leads to status='enriched'`);
+                    console.error('[ENRICH] Error updating lead row:', l.id, updateError);
                 }
             }
-
-            await incrementUsage(supabase, task.organization_id, 'enrich', enrichedLeads.length, task.id);
 
             // Chain to INVESTIGATE if configured and we have enriched leads
             if (enrichedLeads.length > 0) {
@@ -567,7 +662,44 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     // Use helper for Robust Fallback
     const userId = await getTaskUserId(task, supabase);
 
-    const leadsToInvestigate = leads.slice(0, limit - (usage.leads_investigated || 0));
+    const remaining = Math.max(0, limit - (usage.leads_investigated || 0));
+
+    if (!Array.isArray(leads) || leads.length === 0) {
+        console.log('[INVESTIGATE] No leads in payload. Fetching from DB (status=enriched, not contacted)...');
+
+        const { data: contactedLeadIds } = await supabase
+            .from('contacted_leads')
+            .select('lead_id')
+            .eq('mission_id', task.mission_id);
+
+        const contactedIds = (contactedLeadIds || []).map((c: any) => c.lead_id).filter(Boolean);
+
+        let q = supabase
+            .from('leads')
+            .select('id, name, email, title, company, linkedin_url, company_website, apollo_id, industry, location')
+            .eq('mission_id', task.mission_id)
+            .eq('status', 'enriched')
+            .order('created_at', { ascending: false })
+            .limit(Math.min(remaining, 50));
+
+        if (contactedIds.length > 0) {
+            q = q.not('id', 'in', `(${contactedIds.join(',')})`);
+        }
+
+        const { data: fallbackLeads, error: qErr } = await q;
+        if (qErr) {
+            console.error('[INVESTIGATE] Failed to fetch enriched leads:', qErr);
+            return { skipped: true, reason: 'queue_fetch_failed' };
+        }
+        leads = fallbackLeads || [];
+    }
+
+    if (!Array.isArray(leads) || leads.length === 0) {
+        console.log('[INVESTIGATE] No leads to investigate after fallback');
+        return { skipped: true, reason: 'no_leads' };
+    }
+
+    const leadsToInvestigate = leads.slice(0, remaining);
 
     // Restore appUrl if missing (it seems present in line 354, but good to be sure or just define leadsToInvestigate)
     console.log(`[INVESTIGATE] Investigating ${leadsToInvestigate.length} leads`);
@@ -618,8 +750,8 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     for (const lead of leadsToInvestigate) {
         try {
             console.log(`[INVESTIGATE] Investigating lead: `, {
-                name: lead.fullName || lead.full_name,
-                company: lead.companyName || lead.company_name
+                name: lead.fullName || lead.full_name || lead.name,
+                company: lead.companyName || lead.company_name || lead.company
             });
 
             // Construct specific N8N payload structure
@@ -628,12 +760,12 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                     {
                         leadRef: lead.id,
                         targetCompany: {
-                            name: lead.companyName || lead.company_name || lead.organization?.name,
-                            domain: lead.companyDomain || lead.company_domain,
+                            name: lead.companyName || lead.company_name || lead.company || lead.organization?.name,
+                            domain: lead.companyDomain || lead.company_domain || lead.company_website,
                             linkedin: null, // Populate if available
                             country: lead.location || null,
                             industry: lead.industry || "—",
-                            website: lead.website || null
+                            website: lead.website || lead.company_website || null
                         },
                         lead: {
                             id: lead.id,
@@ -653,8 +785,8 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 title: lead.title,
                 email: lead.email,
                 linkedinUrl: lead.linkedinUrl || lead.linkedin_url,
-                companyName: lead.companyName || lead.company_name || lead.organization?.name,
-                companyDomain: lead.companyDomain || lead.company_domain,
+                companyName: lead.companyName || lead.company_name || lead.company || lead.organization?.name,
+                companyDomain: lead.companyDomain || lead.company_domain || lead.company_website,
                 userContext: userContext
             };
 
@@ -776,7 +908,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
             console.error('[INVESTIGATE] Failed to investigate lead:', e);
 
             // Fallback: Use generic summary based on available lead data
-            const fallbackSummary = `${lead.companyName || 'Company'} - ${lead.title || 'Professional'}.` +
+            const fallbackSummary = `${lead.companyName || lead.company || 'Company'} - ${lead.title || 'Professional'}.` +
                 `${lead.email ? `Contact: ${lead.email}` : 'Contact information available.'} `;
 
             investigatedLeads.push({
@@ -810,7 +942,9 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
             'Chile': -3, 'Colombia': -5, 'Mexico': -6, 'Peru': -5, 'Argentina': -3, 'Spain': 1, 'España': 1
         };
 
-        const location = (leads[0]?.location || 'Chile').split(',')[0].trim();
+        const locationStr = String(leads[0]?.location || (leads[0] as any)?.country || 'Chile');
+        // Use last segment as best guess for country/timezone key (e.g. "Santiago, Chile" -> "Chile")
+        const location = locationStr.split(',').map(s => s.trim()).filter(Boolean).pop() || 'Chile';
         const utcOffset = timezoneOffsets[location] || -3;
 
         // Calculate current local time in lead's timezone
@@ -883,7 +1017,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         investigatedCount: investigatedLeads.length,
         investigations: investigatedLeads.map((l: any) => ({
             name: l.fullName || l.name || l.full_name,
-            company: l.companyName || l.company_name || l.organization?.name,
+            company: l.companyName || l.company_name || l.company || l.organization?.name,
             summarySnippet: l.research?.summary || l.research?.overview
                 ? (l.research.summary || l.research.overview).substring(0, 150) + '...'
                 : (l.research?.company?.description ? l.research.company.description.substring(0, 150) + '...' : 'No summary available')
@@ -909,7 +1043,7 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
         .from('contacted_leads')
         .select('*', { count: 'exact', head: true })
         .eq('organization_id', task.organization_id)
-        .gte('created_at', `${today} T00:00:00Z`);
+        .gte('created_at', `${today}T00:00:00Z`);
 
     if ((contactsToday || 0) >= limit) {
         console.log(`[CONTACT] Daily limit reached(${contactsToday} / ${limit})`);
@@ -918,6 +1052,7 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
 
     const { leads, campaignName, dryRun } = task.payload;
     const userId = await getTaskUserId(task, supabase);
+    const leadsList = Array.isArray(leads) ? leads : [];
     // If dryRun, we don't consume daily limit? Or do we? 
     // User wants to "test", usually tests shouldn't burn quota, but for safety let's assume they might?
     // Actually, let's allow dryRun to bypass contactsToday check IF we want to allow unlimited testing,
@@ -933,7 +1068,7 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
     const blacklistedSet = new Set((excludedDomains || []).map((d: any) => d.domain.toLowerCase().trim().replace('@', '')));
 
     // Filter out blacklisted domains
-    const leadsFiltered = leads.filter((l: any) => {
+    const leadsFiltered = leadsList.filter((l: any) => {
         if (!l.email) return false;
         const domain = l.email.split('@')[1]?.toLowerCase();
         if (domain && blacklistedSet.has(domain)) {
@@ -971,19 +1106,22 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
 
     // Default templates (Fallback if research.emailDraft is missing)
     const defaultSubject = 'Oportunidad de colaboración - {{company}}';
-    let defaultBody = `Hola { { name } },
-Estuve leyendo sobre { { company } } y vi que { { research.summary } }
+    let defaultBody = `Hola {{name}},
+
+Estuve leyendo sobre {{company}} y vi que {{research.summary}}
+
 Me pareció muy interesante y me gustaría conectar contigo para explorar posibles oportunidades de colaboración.
-¿Tendrías disponibilidad para una breve conversación ?
-    Saludos, `;
+
+¿Tendrías disponibilidad para una breve conversación?
+
+Saludos,`;
 
     if (userSignature) {
         defaultBody += `\n\n${userSignature} `;
     }
 
-    // Get app URL for unsubscribe link
+    // App URL (server-to-server)
     const appUrl = APP_URL;
-    const unsubscribeFooter = `\n\n-----------------------------------\nSi no deseas recibir más correos, haz clic aquí: ${appUrl}/unsubscribe?email={{email}}`;
 
     console.log(`[CONTACT_INITIAL] Preparing to contact leads using Research Drafts (if available)`);
 
@@ -1018,25 +1156,19 @@ Me pareció muy interesante y me gustaría conectar contigo para explorar posibl
 
             } else {
                 console.log(`[CONTACT] Using Default Template for ${lead.email}`);
-                // Append footer to default body (already done above for defaultBody variable base, but we need variables)
-                // Re-construct for template usage
-                finalBody = defaultBody + unsubscribeFooter;
-            }
-
-            // Ensure unsubscribe footer is present in Drafts too if not using default
-            if (researchData && !finalBody.includes('unsubscribe')) {
-                finalBody += unsubscribeFooter;
+                // Use fallback template (unsubscribe footer is appended server-side in /api/contact/send)
+                finalBody = defaultBody;
             }
 
             // Replace template variables (Applicable to both Default and Drafts if they use {{}} syntax, though N8N drafts usually come resolved)
             // We should still run replacement just in case the draft uses placeholders
             const personalizedSubject = finalSubject
-                .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || 'there')
-                .replace(/\{\{company\}\}/g, lead.companyName || lead.company_name || 'your company');
+                .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || lead.name || 'there')
+                .replace(/\{\{company\}\}/g, lead.companyName || lead.company_name || lead.company || 'your company');
 
             const personalizedBody = finalBody
-                .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || 'there')
-                .replace(/\{\{company\}\}/g, lead.companyName || lead.company_name || 'your company')
+                .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || lead.name || 'there')
+                .replace(/\{\{company\}\}/g, lead.companyName || lead.company_name || lead.company || 'your company')
                 .replace(/\{\{title\}\}/g, lead.title || 'your role')
                 .replace(/\{\{research\.summary\}\}/g, researchSummary)
                 .replace(/\{\{email\}\}/g, lead.email || '');
@@ -1063,16 +1195,43 @@ Me pareció muy interesante y me gustaría conectar contigo para explorar posibl
                 contactedCount++;
                 console.log(`[CONTACT] Dry Run success for ${lead.email}`);
 
+                const sentAt = new Date().toISOString();
+
                 await supabase.from('contacted_leads').insert({
                     user_id: userId,
                     organization_id: task.organization_id,
                     mission_id: task.mission_id,
                     lead_id: lead.id,
-                    status: 'sent', // Keep 'sent' to satisfy constraints if any
+
+                    // Store display fields for UI/analytics
+                    name: lead.fullName || lead.full_name || lead.name || '',
+                    email: lead.email,
+                    company: lead.companyName || lead.company_name || lead.company || '',
+                    role: lead.title || '',
+                    industry: lead.industry || null,
+                    city: lead.city || null,
+                    country: lead.country || null,
+
+                    status: 'sent',
                     subject: personalizedSubject,
-                    provider: 'dry_run', // Distinguish here
-                    sent_at: new Date().toISOString()
-                });
+                    provider: 'gmail',
+                    sent_at: sentAt,
+
+                    // Seed evaluation fields so the heartbeat can pick it up
+                    evaluation_status: 'pending',
+                    last_interaction_at: sentAt,
+                    engagement_score: 0,
+                    last_update_at: sentAt,
+                } as any);
+
+                // Mark lead as contacted so it leaves the enriched queue
+                if (lead.id) {
+                    const { error: leadUpdateErr } = await supabase
+                        .from('leads')
+                        .update({ status: 'contacted' })
+                        .eq('id', lead.id);
+                    if (leadUpdateErr) console.error('[CONTACT] Failed to update lead status to contacted (dry_run):', lead.id, leadUpdateErr);
+                }
                 continue; // Skip the rest of the loop (actual fetch)
             }
 
@@ -1100,16 +1259,40 @@ Me pareció muy interesante y me gustaría conectar contigo para explorar posibl
                 const resData = await response.json();
                 console.log(`[CONTACT] Successfully contacted lead via ${resData.provider} `);
 
+                const sentAt = new Date().toISOString();
+
                 await supabase.from('contacted_leads').insert({
                     user_id: userId,
                     organization_id: task.organization_id,
                     mission_id: task.mission_id,
                     lead_id: lead.id,
-                    status: 'sent', // Initial status
+
+                    name: lead.fullName || lead.full_name || lead.name || '',
+                    email: lead.email,
+                    company: lead.companyName || lead.company_name || lead.company || '',
+                    role: lead.title || '',
+                    industry: lead.industry || null,
+                    city: lead.city || null,
+                    country: lead.country || null,
+
+                    status: 'sent',
                     subject: personalizedSubject,
                     provider: resData.provider || 'unknown',
-                    sent_at: new Date().toISOString()
-                });
+                    sent_at: sentAt,
+
+                    evaluation_status: 'pending',
+                    last_interaction_at: sentAt,
+                    engagement_score: 0,
+                    last_update_at: sentAt,
+                } as any);
+
+                if (lead.id) {
+                    const { error: leadUpdateErr } = await supabase
+                        .from('leads')
+                        .update({ status: 'contacted' })
+                        .eq('id', lead.id);
+                    if (leadUpdateErr) console.error('[CONTACT] Failed to update lead status to contacted:', lead.id, leadUpdateErr);
+                }
             } else {
                 const errorText = await response.text();
                 console.error(`[CONTACT] API error: ${response.status} - ${errorText} `);
@@ -1129,9 +1312,9 @@ Me pareció muy interesante y me gustaría conectar contigo para explorar posibl
     return {
         contactedCount,
         contactedList: leadsToContact.map((l: any) => ({
-            name: l.fullName || l.full_name,
+            name: l.fullName || l.full_name || l.name,
             email: l.email,
-            company: l.companyName || l.company_name,
+            company: l.companyName || l.company_name || l.company,
             status: l.error ? 'failed' : 'sent',
             error: l.error || null
         }))
@@ -1156,7 +1339,10 @@ async function executeEvaluate(task: any, supabase: SupabaseClient) {
             .from('contacted_leads')
             .select('engagement_score')
             .eq('lead_id', lead.id)
-            .single();
+            .eq('mission_id', task.mission_id)
+            .order('sent_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
 
         const score = contactedLead?.engagement_score || 0;
         const hasReplied = interactions?.some((i: any) => i.type === 'reply');
@@ -1187,8 +1373,7 @@ async function executeEvaluate(task: any, supabase: SupabaseClient) {
                     leads: [lead],
                     userId: task.payload.userId,
                     campaignName: task.payload.campaignName
-                },
-                position: task.position + 1
+                }
             });
             console.log(`[EVALUATE] Lead qualified! Created CONTACT_CAMPAIGN task.`);
         }
@@ -1196,7 +1381,7 @@ async function executeEvaluate(task: any, supabase: SupabaseClient) {
         // Update status
         await supabase.from('contacted_leads').update({
             evaluation_status: newStatus
-        }).eq('lead_id', lead.id);
+        }).eq('lead_id', lead.id).eq('mission_id', task.mission_id);
     }
 
     return { evaluatedCount: leads.length, qualifiedCount };
@@ -1923,7 +2108,7 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         type: reportType,
         content: htmlContent,
         summary_data: summaryData,
-        sent_to: [userId], // Placeholder, will be updated below
+        sent_to: [],
         created_at: new Date().toISOString()
     }).select().single();
 
@@ -1942,39 +2127,57 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         .eq('organization_id', organizationId)
         .single();
 
-    let targetEmail = config?.notification_email;
+    const parseRecipients = (raw?: string | null) => {
+        if (!raw) return [] as string[];
+        const parts = String(raw)
+            .split(/[,;\n\r\t ]+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+        const uniq = new Set<string>();
+        const out: string[] = [];
+        for (const p of parts) {
+            const v = p.toLowerCase();
+            // Minimal sanity check
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) continue;
+            if (uniq.has(v)) continue;
+            uniq.add(v);
+            out.push(v);
+        }
+        return out;
+    };
 
-    // 2. Fallback to Admin User Email if config is missing
-    if (!targetEmail) {
+    let targetEmails = parseRecipients(config?.notification_email);
+
+    // 2. Fallback to Admin User Email if config is missing/empty
+    if (targetEmails.length === 0) {
         console.log('[REPORT] No notification_email in config, fetching admin user email...');
-        const { data: { user: authUser }, error: authError } = await supabase.auth.admin.getUserById(userId);
-        if (authUser) {
-            targetEmail = authUser.email;
+        const { data: { user: authUser } } = await supabase.auth.admin.getUserById(userId);
+        if (authUser?.email) {
+            targetEmails = [authUser.email.toLowerCase()];
         }
     }
 
-    if (targetEmail) {
-        console.log(`[REPORT] Sending email to ${targetEmail}`);
+    if (targetEmails.length > 0) {
+        console.log(`[REPORT] Sending report to ${targetEmails.join(', ')}`);
 
         // Update sent_to in report record
-        await supabase.from('antonia_reports').update({
-            sent_to: [targetEmail]
-        }).eq('id', report.id);
+        await supabase.from('antonia_reports').update({ sent_to: targetEmails }).eq('id', report.id);
 
         const appUrl = APP_URL;
-        await fetch(`${appUrl}/api/contact/send`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
-            body: JSON.stringify({
-                to: targetEmail,
-                subject: subject,
-                body: htmlContent,
-                isHtml: true,
-                userId: userId,
-                // Use a dedicated provider for system emails if possible, or default to user's
-                missionId: missionId
-            })
-        });
+        for (const to of targetEmails) {
+            await fetch(`${appUrl}/api/contact/send`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+                body: JSON.stringify({
+                    to,
+                    subject,
+                    body: htmlContent,
+                    isHtml: true,
+                    userId,
+                    missionId
+                })
+            });
+        }
     } else {
         console.warn('[REPORT] No email found to send report to.');
     }
@@ -2205,11 +2408,7 @@ async function processTask(task: any, supabase: SupabaseClient) {
     }
 }
 
-// Main scheduler function
-export const antoniaTick = functions.scheduler.onSchedule({
-    schedule: 'every 1 minutes',
-    secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']
-}, async (event) => {
+async function runAntoniaTick() {
     console.log('[AntoniaTick] waking up...');
 
     const supabaseUrl = process.env.SUPABASE_URL;
@@ -2222,9 +2421,35 @@ export const antoniaTick = functions.scheduler.onSchedule({
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // --- 0.5 RESCUE STUCK TASKS (backup worker / crashes) ---
+    try {
+        const nowIso = new Date().toISOString();
+        const stuckBefore = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+
+        const { data: rescued, error: rescueErr } = await supabase
+            .from('antonia_tasks')
+            .update({
+                status: 'pending',
+                scheduled_for: nowIso,
+                updated_at: nowIso,
+                error_message: '[auto-rescue] task stuck in processing (likely worker timeout)'
+            })
+            .eq('status', 'processing')
+            .not('processing_started_at', 'is', null)
+            .lt('processing_started_at', stuckBefore)
+            .select('id')
+            .limit(25);
+
+        if (rescueErr) {
+            console.error('[AntoniaTick] Rescue error:', rescueErr);
+        } else if (rescued && rescued.length > 0) {
+            console.warn(`[AntoniaTick] Rescued ${rescued.length} stuck tasks`);
+        }
+    } catch (e) {
+        console.error('[AntoniaTick] Rescue exception:', e);
+    }
+
     // --- 0. SCHEDULE DAILY TASKS FOR ACTIVE MISSIONS ---
-    // This runs the SQL function that creates daily SEARCH tasks for active missions
-    // The function uses date-based idempotency to ensure only one task per mission per day
     try {
         const { data: scheduledMissions, error: scheduleError } = await supabase
             .rpc('schedule_daily_mission_tasks');
@@ -2236,13 +2461,9 @@ export const antoniaTick = functions.scheduler.onSchedule({
         }
     } catch (e) {
         console.error('[AntoniaTick] Failed to schedule missions:', e);
-        // Don't fail the entire tick if scheduling fails
     }
 
-
     // --- 1. PROCESS PENDING TASKS ---
-    // Use optimistic locking to prevent race conditions:
-    // Update status to 'processing' atomically, then process only the tasks we locked
     const now = new Date().toISOString();
     const { data: tasks, error } = await supabase
         .from('antonia_tasks')
@@ -2259,13 +2480,10 @@ export const antoniaTick = functions.scheduler.onSchedule({
         console.error('[AntoniaTick] Error fetching tasks', error);
     } else if (tasks && tasks.length > 0) {
         console.log(`[AntoniaTick] Processing ${tasks.length} tasks`);
-        await Promise.all(tasks.map(t => processTaskWithTimeout(t, supabase)));
+        await Promise.all(tasks.map((t: any) => processTaskWithTimeout(t, supabase)));
     }
 
-
     // --- 2. SCAN FOR EVALUATION (The Heartbeat) ---
-    // Find leads contacted > 2 days ago (or > 5 mins for testing) with status 'pending'
-    // For testing purposes, we'll use 5 minutes delay
     const checkTime = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
     const { data: pendingLeads } = await supabase
@@ -2273,6 +2491,7 @@ export const antoniaTick = functions.scheduler.onSchedule({
         .select(`
                 lead_id, 
                 organization_id, 
+                mission_id,
                 leads!inner ( id, email, organization_id )
             `)
         .eq('evaluation_status', 'pending')
@@ -2282,46 +2501,78 @@ export const antoniaTick = functions.scheduler.onSchedule({
     if (pendingLeads && pendingLeads.length > 0) {
         console.log(`[AntoniaTick] Found ${pendingLeads.length} leads pending evaluation`);
 
-        // Group by Organization to create tasks efficiently
-        const orgGroups = groupBy(pendingLeads, 'organization_id');
+        const missionGroups = groupBy(pendingLeads.filter((x: any) => x.mission_id), 'mission_id');
 
-        for (const orgId of Object.keys(orgGroups)) {
-            // Find an active mission for this org (simplification: just find the latest active one)
-            // ideally we should store mission_id in contacted_leads table
+        for (const missionId of Object.keys(missionGroups)) {
+            const rows = missionGroups[missionId] || [];
+            if (!rows.length) continue;
+
             const { data: mission } = await supabase
                 .from('antonia_missions')
-                .select('id, created_by')
-                .eq('organization_id', orgId)
-                .eq('status', 'active')
-                .order('created_at', { ascending: false })
-                .limit(1)
+                .select('id, user_id, organization_id')
+                .eq('id', missionId)
                 .maybeSingle();
 
-            if (mission) {
-                const leadsForOrg = orgGroups[orgId].map((pl: any) => pl.leads);
+            if (!mission) continue;
 
-                // Create EVALUATE task
-                await supabase.from('antonia_tasks').insert({
-                    mission_id: mission.id,
-                    organization_id: orgId,
-                    type: 'EVALUATE',
-                    status: 'pending',
-                    payload: {
-                        leads: leadsForOrg,
-                        userId: mission.created_by,
-                        campaignName: 'Smart Campaign' // Placeholder
-                    }
-                });
-                console.log(`[AntoniaTick] Created EVALUATE task for Org ${orgId}`);
+            const leadsForMission = rows.map((pl: any) => pl.leads).filter(Boolean);
+            if (leadsForMission.length === 0) continue;
 
-                // Update status to 'evaluating' to avoid double processing
-                const leadIds = leadsForOrg.map((l: any) => l.id);
+            await supabase.from('antonia_tasks').insert({
+                mission_id: mission.id,
+                organization_id: mission.organization_id || rows[0].organization_id,
+                type: 'EVALUATE',
+                status: 'pending',
+                payload: {
+                    leads: leadsForMission,
+                    userId: mission.user_id,
+                    campaignName: 'Smart Campaign'
+                }
+            });
+            console.log(`[AntoniaTick] Created EVALUATE task for Mission ${missionId}`);
+
+            const leadIds = leadsForMission.map((l: any) => l.id).filter(Boolean);
+            if (leadIds.length > 0) {
                 await supabase
                     .from('contacted_leads')
-                    .update({ evaluation_status: 'evaluating' }) // Temporary status
+                    .update({ evaluation_status: 'evaluating' })
+                    .eq('mission_id', missionId)
                     .in('lead_id', leadIds);
             }
         }
+    }
+}
+
+// Main scheduler function
+export const antoniaTick = functions.scheduler.onSchedule({
+    schedule: 'every 1 minutes',
+    secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']
+}, async () => {
+    await runAntoniaTick();
+});
+
+// Manual trigger (backup scheduler can call this to force a tick)
+export const antoniaTickHttp = functions.https.onRequest({
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ANTONIA_TICK_SECRET']
+} as any, async (req: any, res: any) => {
+    try {
+        const secret = process.env.ANTONIA_TICK_SECRET;
+        const authHeader = req.get('authorization') || '';
+        const bearer = authHeader.replace(/^Bearer\s+/i, '');
+        const headerSecret = req.get('x-cron-secret') || '';
+
+        if (!secret || (bearer !== secret && headerSecret !== secret)) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        await runAntoniaTick();
+        res.status(200).json({ ok: true });
+    } catch (e: any) {
+        console.error('[antoniaTickHttp] error', e);
+        res.status(500).json({ error: e?.message || 'Internal error' });
     }
 });
 

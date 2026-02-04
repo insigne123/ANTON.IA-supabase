@@ -743,7 +743,7 @@ export default function AntoniaPage() {
                                                     <SelectValue />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="standard">Estándar (Verificación de Email)</SelectItem>
+                                                    <SelectItem value="basic">Básico (Email verificado)</SelectItem>
                                                     <SelectItem value="deep">Profundo (Teléfonos + Redes Sociales)</SelectItem>
                                                 </SelectContent>
                                             </Select>

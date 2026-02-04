@@ -98,21 +98,29 @@ export async function GET(req: NextRequest) {
                     // ELIGIBLE! Send email.
 
                     // Get provider token
-                    const provider = lead.provider; // 'google' or 'outlook'
-                    const userToken = tokens.find(t => t.user_id === userId && t.provider === provider);
+                    // contacted_leads.provider can be 'gmail'|'outlook' (UI) or legacy 'google'|'outlook'
+                    const leadProvider = lead.provider;
+                    const tokenProvider = leadProvider === 'gmail' ? 'google' : leadProvider;
+
+                    if (tokenProvider !== 'google' && tokenProvider !== 'outlook') {
+                        console.log(`Unsupported provider for follow-up: ${leadProvider}`);
+                        continue;
+                    }
+
+                    const userToken = tokens.find(t => t.user_id === userId && t.provider === tokenProvider);
 
                     if (!userToken) {
-                        console.log(`No token for user ${userId} provider ${provider}`);
+                        console.log(`No token for user ${userId} provider ${tokenProvider}`);
                         continue;
                     }
 
                     // Refresh token
                     let accessToken = '';
                     try {
-                        if (provider === 'google') {
+                        if (tokenProvider === 'google') {
                             const refreshed = await refreshGoogleToken(userToken.refresh_token, process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!, process.env.GOOGLE_CLIENT_SECRET!);
                             accessToken = refreshed.access_token;
-                        } else if (provider === 'outlook') {
+                        } else if (tokenProvider === 'outlook') {
                             const refreshed = await refreshMicrosoftToken(userToken.refresh_token, process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID!, process.env.AZURE_AD_CLIENT_SECRET!, process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID!);
                             accessToken = refreshed.access_token;
                             if (refreshed.refresh_token) {
@@ -153,7 +161,7 @@ export async function GET(req: NextRequest) {
                             const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
                             body += `\n<br>${trackingPixel}`;
                         }              // Use 'body' (the modified one) instead of raw template
-                        if (provider === 'google') {
+                        if (tokenProvider === 'google') {
                             await sendGmail(accessToken, lead.email, subject, body);
                         } else {
                             await sendOutlook(accessToken, lead.email, subject, body);

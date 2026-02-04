@@ -725,9 +725,13 @@ async function processTask(task: any, supabase: any) {
 
     } catch (e: any) {
         console.error(`[Worker] Task ${task.id} Failed`, e);
+        // Backup worker should not permanently fail tasks.
+        // We return them to the queue so Firebase (primary) can process.
+        const scheduledFor = new Date(Date.now() + 2 * 60 * 1000).toISOString();
         await supabase.from('antonia_tasks').update({
-            status: 'failed',
-            error_message: e.message,
+            status: 'pending',
+            scheduled_for: scheduledFor,
+            error_message: `[next-backup] ${e.message}`,
             updated_at: new Date().toISOString()
         }).eq('id', task.id);
 
@@ -738,22 +742,7 @@ async function processTask(task: any, supabase: any) {
             message: `Task ${task.type} failed: ${e.message}`
         });
 
-        // Send error notification if instant alerts are enabled
-        if (config?.instant_alerts_enabled) {
-            const { data: mission } = await supabase
-                .from('antonia_missions')
-                .select('title')
-                .eq('id', task.mission_id)
-                .single();
-
-            const missionTitle = mission?.title || 'Misión';
-
-            await notificationService.sendAlert(
-                task.organization_id,
-                `Error en Misión - ${missionTitle}`,
-                `ANTONIA encontró un error al procesar la tarea ${task.type}: ${e.message}`
-            );
-        }
+        // Don't send alerts from backup worker to avoid duplicate/noisy notifications.
     }
 }
 
@@ -785,25 +774,70 @@ export async function GET(request: Request) {
         // Don't fail the entire cron if scheduling fails
     }
 
-    // STEP 2: Process pending tasks
-    // Select tasks that are pending AND (scheduled_for IS NULL OR scheduled_for <= NOW)
+    // STEP 1.5: Trigger Firebase primary worker if configured
+    const tickUrl = process.env.ANTONIA_FIREBASE_TICK_URL;
+    const tickSecret = process.env.ANTONIA_FIREBASE_TICK_SECRET;
+
+    if (tickUrl && tickSecret) {
+        try {
+            const r = await fetch(tickUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${tickSecret}`,
+                    'x-cron-secret': tickSecret,
+                },
+                cache: 'no-store',
+            });
+
+            const text = await r.text().catch(() => '');
+            return NextResponse.json({
+                forwarded: true,
+                worker: 'firebase',
+                status: r.status,
+                bodyPreview: text.slice(0, 400),
+            }, { status: 200 });
+        } catch (e: any) {
+            console.error('[Cron] Failed to trigger Firebase worker:', e);
+            // fall through to backup processing only if explicitly enabled
+        }
+    }
+
+    // STEP 2: Process pending tasks (Backup Worker)
+    // Default: disabled. Enable only if you intentionally want Vercel/Next to pick tasks when Firebase is down.
+    // This avoids two workers producing divergent behavior.
+    const enableBackup = String(process.env.ANTONIA_NEXT_BACKUP_PROCESSING || 'false') === 'true';
+
     const now = new Date().toISOString();
-    const { data: tasks, error } = await supabase
-        .from('antonia_tasks')
-        .select('*')
-        .eq('status', 'pending')
-        .or(`scheduled_for.is.null,scheduled_for.lte.${now}`)
-        .limit(5);
+    const allowTypes = ['GENERATE_CAMPAIGN', 'SEARCH', 'ENRICH', 'CONTACT', 'REPORT', 'GENERATE_REPORT'];
+
+    const { data: tasks, error } = enableBackup
+        ? await supabase
+            .from('antonia_tasks')
+            .update({
+                status: 'processing',
+                processing_started_at: now
+            })
+            .eq('status', 'pending')
+            .in('type', allowTypes)
+            .or(`scheduled_for.is.null,scheduled_for.lte.${now}`)
+            .select('*')
+            // Keep very low to avoid timeouts (Firebase worker is primary)
+            .limit(1)
+        : { data: [], error: null } as any;
 
     if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    if (!enableBackup) {
+        return NextResponse.json({ message: 'Backup processing disabled (ANTONIA_NEXT_BACKUP_PROCESSING=false)' });
     }
 
     if (!tasks || tasks.length === 0) {
         return NextResponse.json({ message: 'No executable tasks found' });
     }
 
-    await Promise.all(tasks.map(t => processTask(t, supabase)));
+    await Promise.all(tasks.map((t: any) => processTask(t, supabase)));
 
-    return NextResponse.json({ processed: tasks.length, tasks: tasks.map(t => t.id) });
+    return NextResponse.json({ processed: tasks.length, tasks: tasks.map((t: any) => t.id) });
 }

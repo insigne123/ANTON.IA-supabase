@@ -3,8 +3,10 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { tokenService } from '@/lib/services/token-service';
+import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
     try {
@@ -88,7 +90,10 @@ export async function POST(req: NextRequest) {
 
         // 3.1. CHECK TRACKING CONFIG
         let finalBody = emailBody;
+        let effectiveIsHtml = Boolean(isHtml);
         const { missionId, leadId } = body;
+
+        let missionOrgId: string | null = null;
 
         if (missionId && leadId) {
             try {
@@ -100,6 +105,58 @@ export async function POST(req: NextRequest) {
                     .single();
 
                 if (mission) {
+                    missionOrgId = mission.organization_id;
+
+                    // Block if unsubscribed (user-level or org-level)
+                    try {
+                        const toEmail = String(to || '').trim().toLowerCase();
+                        if (toEmail) {
+                            const { data: unsubUser } = await supabase
+                                .from('unsubscribed_emails')
+                                .select('id')
+                                .ilike('email', toEmail)
+                                .eq('user_id', userId)
+                                .maybeSingle();
+
+                            const { data: unsubOrg } = missionOrgId
+                                ? await supabase
+                                    .from('unsubscribed_emails')
+                                    .select('id')
+                                    .ilike('email', toEmail)
+                                    .eq('organization_id', missionOrgId)
+                                    .maybeSingle()
+                                : { data: null } as any;
+
+                            if (unsubUser || unsubOrg) {
+                                console.warn('[CONTACT_DEBUG] Recipient is unsubscribed:', toEmail);
+                                return NextResponse.json({ error: 'Recipient unsubscribed' }, { status: 409 });
+                            }
+                        }
+                    } catch (e) {
+                        console.error('[CONTACT_DEBUG] Failed unsubscribe check:', e);
+                    }
+
+                    // Block if org domain is excluded
+                    try {
+                        const toEmail = String(to || '').trim().toLowerCase();
+                        const domain = toEmail.split('@')[1]?.trim() || '';
+                        if (domain && missionOrgId) {
+                            const { data: blockedDomain } = await supabase
+                                .from('excluded_domains')
+                                .select('id')
+                                .eq('organization_id', missionOrgId)
+                                .eq('domain', domain)
+                                .maybeSingle();
+
+                            if (blockedDomain) {
+                                console.warn('[CONTACT_DEBUG] Recipient domain is blocked:', domain);
+                                return NextResponse.json({ error: `Domain blocked: ${domain}` }, { status: 403 });
+                            }
+                        }
+                    } catch (e) {
+                        console.error('[CONTACT_DEBUG] Failed domain blacklist check:', e);
+                    }
+
                     const { data: config } = await supabase
                         .from('antonia_config')
                         .select('tracking_enabled')
@@ -112,7 +169,7 @@ export async function POST(req: NextRequest) {
                         const pixelHtml = `<img src="${pixelUrl}" width="1" height="1" style="display:none;" alt="" />`;
 
                         console.log(`[CONTACT_DEBUG] Injecting tracking pixel for lead ${leadId}`);
-                        if (isHtml) {
+                        if (effectiveIsHtml) {
                             finalBody = emailBody + pixelHtml;
                         } else {
                             // If text/plain, we can't really inject a pixel easily without Multipart/Alternative which is complex here.
@@ -121,9 +178,28 @@ export async function POST(req: NextRequest) {
                             // For now, only append if isHtml is true or we decide to treat plain text as HTML wrapper.
                             // Let's assume we can wrap plain text in simple HTML
                             finalBody = `<div>${emailBody.replace(/\n/g, '<br>')}</div>${pixelHtml}`;
-                            // Update flag to force HTML sending
-                            // isHtml = true; // Cannot reassign const destructure. Handled below.
+                            effectiveIsHtml = true;
                         }
+                    }
+
+                    // Append signed unsubscribe link (only for outbound lead emails)
+                    try {
+                        const toEmail = String(to || '').trim();
+                        if (toEmail) {
+                            const unsubLink = generateUnsubscribeLink(toEmail, userId, missionOrgId);
+                            const hasUnsub = String(finalBody || '').includes('/unsubscribe?') || String(finalBody || '').toLowerCase().includes('darte de baja');
+                            if (!hasUnsub) {
+                                if (effectiveIsHtml) {
+                                    finalBody += `
+<br><hr style="border:none;border-top:1px solid #e5e7eb;margin:18px 0;">
+<p style="font-size:12px;color:#6b7280;line-height:1.4;">Si no deseas recibir más correos, puedes <a href="${unsubLink}" style="color:#2563eb;text-decoration:underline;">darte de baja aquí</a>.</p>`;
+                                } else {
+                                    finalBody += `\n\n---\nSi no deseas recibir más correos, puedes darte de baja aquí: ${unsubLink}`;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error('[CONTACT_DEBUG] Failed to append unsubscribe link:', e);
                     }
                 }
             } catch (e) {
@@ -133,10 +209,6 @@ export async function POST(req: NextRequest) {
 
         // 4. Send Email
         let result;
-        // Use finalBody and force isHtml=true if we injected pixel (or if it was already html)
-        // Determine isHtml effective
-        const effectiveIsHtml = isHtml || (finalBody !== emailBody);
-
         if (provider === 'google') {
             result = await sendGmail(accessToken, to, subject, finalBody, effectiveIsHtml);
         } else {
@@ -149,7 +221,7 @@ export async function POST(req: NextRequest) {
         }
 
         console.log(`[CONTACT_DEBUG] Email sent successfully via ${provider}`);
-        return NextResponse.json({ success: true, provider });
+        return NextResponse.json({ success: true, provider: provider === 'google' ? 'gmail' : 'outlook' });
 
     } catch (error: any) {
         console.error('[CONTACT_API] Error:', error);

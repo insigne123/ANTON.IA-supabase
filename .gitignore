@@ -7,6 +7,9 @@ service-account.json
 .firebase/
 functions/.webpack/
 .next/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
 # Artefactos
 *.log
 .DS_Store

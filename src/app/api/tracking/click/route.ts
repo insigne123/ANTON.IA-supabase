@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
@@ -17,20 +18,48 @@ export async function GET(req: NextRequest) {
 
         // Await the update to ensure it completes before the response is sent
         try {
-            // Increment click_count atomic update would be better via RPC, but read-write is acceptable for low volume
-            // actually atomic increment: click_count = click_count + 1
-            // But simple approach first:
-            const { data } = await supabaseAdmin.from('contacted_leads').select('click_count').eq('id', id).single();
-            const current = (data?.click_count || 0) + 1;
+            const nowIso = new Date().toISOString();
 
-            await supabaseAdmin
+            // Support both:
+            // - id = contacted_leads.id (legacy followups)
+            // - id = leads.id (agent pipeline)
+            let row: any = null;
+
+            const byId = await supabaseAdmin
                 .from('contacted_leads')
-                .update({
-                    click_count: current,
-                    clicked_at: new Date().toISOString(),
-                    last_update_at: new Date().toISOString()
-                })
-                .eq('id', id);
+                .select('id, click_count, engagement_score')
+                .eq('id', id)
+                .maybeSingle();
+            if (byId.data) {
+                row = byId.data;
+            } else {
+                const byLead = await supabaseAdmin
+                    .from('contacted_leads')
+                    .select('id, click_count, engagement_score')
+                    .eq('lead_id', id)
+                    .order('sent_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                row = byLead.data;
+            }
+
+            if (row?.id) {
+                const currentClicks = (row.click_count || 0) + 1;
+                const currentScore = row.engagement_score || 0;
+                const newScore = currentScore + 3;
+
+                await supabaseAdmin
+                    .from('contacted_leads')
+                    .update({
+                        click_count: currentClicks,
+                        clicked_at: nowIso,
+                        last_interaction_at: nowIso,
+                        engagement_score: newScore,
+                        evaluation_status: 'pending',
+                        last_update_at: nowIso,
+                    } as any)
+                    .eq('id', row.id);
+            }
         } catch (err) {
             console.error("Tracking error:", err);
         }

@@ -1,13 +1,27 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function POST(req: Request) {
     try {
+        // Optional shared-secret protection (recommended in production)
+        const secret = process.env.TRACKING_WEBHOOK_SECRET;
+        if (secret) {
+            const got = req.headers.get('x-webhook-secret') || req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
+            if (got !== secret) {
+                return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+            }
+        }
+
         const events = await req.json();
-        const supabase = createRouteHandlerClient({ cookies });
+        // Webhooks are server-to-server: use service role (no cookies/session)
+        const supabase = createClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!,
+            { auth: { persistSession: false, autoRefreshToken: false } }
+        );
 
         // Handle both single event object and array of events (SendGrid sends array, Mailgun sends object)
         const eventList = Array.isArray(events) ? events : [events];
@@ -37,13 +51,27 @@ export async function POST(req: Request) {
                 // Map 'inbound' (Mailgun) to 'reply'
                 const eventType = type === 'inbound' ? 'reply' : type;
 
+                // Fetch latest contacted row for this lead to attach org/mission and update safely
+                const { data: contacted } = await supabase
+                    .from('contacted_leads')
+                    .select('id, organization_id, mission_id, engagement_score, click_count, opened_at, clicked_at, replied_at')
+                    .eq('lead_id', leadId)
+                    .order('sent_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                const orgId = (contacted as any)?.organization_id ?? null;
+                const missionId = (contacted as any)?.mission_id ?? null;
+
                 await supabase.from('lead_responses').insert({
                     lead_id: leadId,
+                    organization_id: orgId,
+                    mission_id: missionId,
                     email_message_id: messageId,
                     type: eventType,
                     content: event.text || event.html || null, // For replies
                     created_at: timestamp
-                });
+                } as any);
 
                 // 2. Update contacted_leads metrics
                 const scoreIncrement =
@@ -55,23 +83,33 @@ export async function POST(req: Request) {
                 // Ideally we'd have a 'increment_score' function in DB.
                 // For now, let's just update last_interaction_at and trigger a re-calc or just basic update
 
-                const { data: current } = await supabase
-                    .from('contacted_leads')
-                    .select('engagement_score')
-                    .eq('lead_id', leadId)
-                    .single();
+                const currentScore = (contacted as any)?.engagement_score || 0;
+                const currentClickCount = (contacted as any)?.click_count || 0;
+                const newScore = currentScore + scoreIncrement;
+                const evalStatus = eventType === 'reply' ? 'action_required' : 'pending';
 
-                const newScore = (current?.engagement_score || 0) + scoreIncrement;
-                const status = eventType === 'reply' ? 'action_required' : 'pending';
+                const updateData: any = {
+                    last_interaction_at: timestamp,
+                    engagement_score: newScore,
+                    evaluation_status: evalStatus,
+                    last_update_at: timestamp,
+                };
+                if (eventType === 'open' && !(contacted as any)?.opened_at) updateData.opened_at = timestamp;
+                if (eventType === 'click') {
+                    updateData.clicked_at = timestamp;
+                    updateData.click_count = currentClickCount + 1;
+                }
+                if (eventType === 'reply') {
+                    updateData.replied_at = timestamp;
+                    updateData.status = 'replied';
+                }
 
-                await supabase
-                    .from('contacted_leads')
-                    .update({
-                        last_interaction_at: timestamp,
-                        engagement_score: newScore,
-                        evaluation_status: status // If reply, mark for immediate action
-                    })
-                    .eq('lead_id', leadId);
+                if ((contacted as any)?.id) {
+                    await supabase
+                        .from('contacted_leads')
+                        .update(updateData)
+                        .eq('id', (contacted as any).id);
+                }
             }
         }
 
