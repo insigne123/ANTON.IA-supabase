@@ -173,7 +173,7 @@ export default function EnrichedOpportunitiesPage() {
   const allResearchChecked = researchEligiblePage > 0 && pageLeads.filter(e => e.email && !isResearchedLead(e)).every(e => sel[e.id]);
 
   // CONTACT LOGIC: Must be researched + have email
-  const canContact = (e: EnrichedOppLead) => isResearchedLead(e) && !!e.email && e.email !== 'Not Found';
+  const canContact = (e: EnrichedOppLead) => isResearchedLead(e) && !!e.email;
   const toggleAllContact = (checked: boolean) => {
     const next = new Set(selectedToContact);
     pageLeads.forEach(e => {

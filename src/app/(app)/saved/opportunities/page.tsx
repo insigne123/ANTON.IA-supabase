@@ -215,13 +215,13 @@ export default function SavedOpportunitiesPage() {
             const enrichedNow: EnrichedOppLead[] = (j.enriched || []).map((e: any) => ({
                 ...e,
                 descriptionSnippet: currentOpp?.descriptionSnippet,
-                email: e.email || 'Not Found',
+                email: e.email || undefined,
                 emailStatus: e.email ? (e.emailStatus || 'verified') : 'not_found',
-                primaryPhone: e.primaryPhone || (e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : 'Not Found'),
+                primaryPhone: e.primaryPhone || (e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined),
             }));
             await enrichedOpportunitiesStorage.addDedup(enrichedNow);
 
-            const foundCount = enrichedNow.filter(l => l.email !== 'Not Found').length;
+            const foundCount = enrichedNow.filter(l => !!l.email).length;
             toast({ title: 'Enriquecimiento completado', description: `Procesados: ${enrichedNow.length}. Con email: ${foundCount}.` });
             setOrgPickerOpen(false);
             setOpenEnrichOptions(false);

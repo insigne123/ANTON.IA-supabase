@@ -12,7 +12,9 @@
         "https://www.linkedin.com/*",
         "http://localhost:3000/*",
         "https://*.vercel.app/*",
-        "https://*.hosted.app/*"
+        "https://*.hosted.app/*",
+        "https://*.us-central1.hosted.app/*",
+        "https://studio--leadflowai-3yjcy.us-central1.hosted.app/*"
     ],
     "background": {
         "service_worker": "background.js"
@@ -30,7 +32,9 @@
             "matches": [
                 "http://localhost:3000/*",
                 "https://*.vercel.app/*",
-                "https://*.hosted.app/*"
+                "https://*.hosted.app/*",
+                "https://*.us-central1.hosted.app/*",
+                "https://studio--leadflowai-3yjcy.us-central1.hosted.app/*"
             ],
             "js": [
                 "web_injector.js"
@@ -51,7 +55,9 @@
         "matches": [
             "http://localhost:3000/*",
             "https://*.vercel.app/*",
-            "https://*.hosted.app/*"
+            "https://*.hosted.app/*",
+            "https://*.us-central1.hosted.app/*",
+            "https://studio--leadflowai-3yjcy.us-central1.hosted.app/*"
         ]
     }
 }

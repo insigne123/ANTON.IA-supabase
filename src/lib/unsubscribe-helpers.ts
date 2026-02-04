@@ -16,7 +16,7 @@ export function verifyUnsubscribeSignature(email: string, userId: string, orgId:
 export function generateUnsubscribeLink(email: string, userId: string, orgId?: string | null): string {
     // Determine base URL (in Vercel/Next it's tricky, we usually use an ENV or window location on client)
     // Server-side generation needs an explicit base URL.
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
     const sig = generateUnsubscribeSignature(email, userId, orgId);
 
     const params = new URLSearchParams();

@@ -1620,54 +1620,69 @@ export default function EnrichedLeadsClient() {
                     <TableCell>{e.title || '—'}</TableCell>
                     <TableCell>{e.companyName || '—'}</TableCell>
                     <TableCell>
-                      {e.email === 'Not Found'
-                        ? <span className="text-muted-foreground text-xs italic">Not Found</span>
-                        : (e.email || (e.emailStatus === 'locked' ? '(locked)' : '—'))}
+                      {(!e.email || e.email === 'Not Found')
+                        ? (e.emailStatus === 'locked'
+                          ? '(locked)'
+                          : <span className="text-muted-foreground text-xs italic">Not Found</span>)
+                        : e.email}
                     </TableCell>
                     <TableCell>
-                      {e.primaryPhone === 'Not Found' ? (
-                        <span className="text-muted-foreground text-xs italic">Not Found</span>
-                      ) : e.primaryPhone ? (
-                        <div
-                          className="flex flex-col gap-1 cursor-pointer hover:bg-muted/50 p-1 rounded transition-colors group"
-                          onClick={() => {
-                            const rep = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
-                            setLeadToCall(e);
-                            setReportToView(rep || null); // Reusamos estado o pasamos directo
-                            setCallModalOpen(true);
-                          }}
-                          title="Clic para abrir Terminal de Llamada"
-                        >
-                          <div className="flex items-center gap-1 text-sm font-medium text-blue-600 group-hover:text-blue-800">
-                            <Phone className="h-3 w-3" />
-                            <span>{e.primaryPhone}</span>
-                          </div>
-                          {e.phoneNumbers && e.phoneNumbers.length > 1 && (
-                            <span className="text-[10px] text-muted-foreground">+{e.phoneNumbers.length - 1} más</span>
-                          )}
-                        </div>
-                      ) : (e.enrichmentStatus === 'pending_phone') ? (
-                        <div className="w-full max-w-[100px] space-y-1" title="Esperando webhook de Apollo (aprox 90s)...">
-                          <div className="flex justify-between text-[9px] text-muted-foreground uppercase">
-                            <span>Buscando...</span>
-                            <span>90s</span>
-                          </div>
-                          <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                      {(() => {
+                        const fallbackPhone = e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined;
+                        const shownPhone = e.primaryPhone || fallbackPhone;
+
+                        if (e.primaryPhone === 'Not Found' || (!shownPhone && e.enrichmentStatus !== 'pending_phone')) {
+                          return <span className="text-muted-foreground text-xs italic">Not Found</span>;
+                        }
+
+                        if (shownPhone) {
+                          return (
                             <div
-                              className="h-full bg-blue-500 rounded-full animate-progress-90"
-                              style={{ animation: 'progress 90s linear forwards' }}
-                            ></div>
-                          </div>
-                          <style jsx>{`
-                             @keyframes progress {
-                               from { width: 0%; }
-                               to { width: 100%; }
-                             }
-                           `}</style>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground text-xs italic">—</span>
-                      )}
+                              className="flex flex-col gap-1 cursor-pointer hover:bg-muted/50 p-1 rounded transition-colors group"
+                              onClick={() => {
+                                const rep = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
+                                setLeadToCall(e);
+                                setReportToView(rep || null); // Reusamos estado o pasamos directo
+                                setCallModalOpen(true);
+                              }}
+                              title="Clic para abrir Terminal de Llamada"
+                            >
+                              <div className="flex items-center gap-1 text-sm font-medium text-blue-600 group-hover:text-blue-800">
+                                <Phone className="h-3 w-3" />
+                                <span>{shownPhone}</span>
+                              </div>
+                              {e.phoneNumbers && e.phoneNumbers.length > 1 && (
+                                <span className="text-[10px] text-muted-foreground">+{e.phoneNumbers.length - 1} más</span>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        if (e.enrichmentStatus === 'pending_phone') {
+                          return (
+                            <div className="w-full max-w-[100px] space-y-1" title="Esperando webhook de Apollo (aprox 90s)...">
+                              <div className="flex justify-between text-[9px] text-muted-foreground uppercase">
+                                <span>Buscando...</span>
+                                <span>90s</span>
+                              </div>
+                              <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-blue-500 rounded-full animate-progress-90"
+                                  style={{ animation: 'progress 90s linear forwards' }}
+                                ></div>
+                              </div>
+                              <style jsx>{`
+                                 @keyframes progress {
+                                   from { width: 0%; }
+                                   to { width: 100%; }
+                                 }
+                               `}</style>
+                            </div>
+                          );
+                        }
+
+                        return <span className="text-muted-foreground text-xs italic">—</span>;
+                      })()}
                     </TableCell>
                     <TableCell>{e.linkedinUrl ? <a className="underline" target="_blank" href={e.linkedinUrl}>Perfil</a> : '—'}</TableCell>
                     <TableCell>{e.companyDomain || '—'}</TableCell>
