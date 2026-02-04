@@ -286,13 +286,12 @@ export default function SavedLeadsPage() {
 
       console.log('[enrich] Enriched Now (raw):', enrichedNow);
 
-      // 1) Filtrar y Añadir a Enriquecidos
-      // NUEVO: Guardamos TODOS, incluso si no tienen datos, para que el usuario vea "Not Found"
+      // 1) Guardar en Enriquecidos
+      // Nota: no persistimos el string "Not Found" en DB; la UI lo representa cuando falta el dato.
       const leadsToSave = enrichedNow.map(e => ({
         ...e,
-        email: e.email || 'Not Found',
-        primaryPhone: e.primaryPhone || (e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : 'Not Found'),
-        // Si quieres guardar un estado explícito de "no encontrado"
+        email: e.email || undefined,
+        primaryPhone: e.primaryPhone || (e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined),
         emailStatus: e.email ? (e.emailStatus || 'verified') : 'not_found',
       }));
 
@@ -318,7 +317,7 @@ export default function SavedLeadsPage() {
       setSavedLeads(prev => prev.filter(l => !toRemoveIds.has(l.id)));
       setSelLead({});
 
-      const foundCount = leadsToSave.filter(l => l.email !== 'Not Found' || l.primaryPhone !== 'Not Found').length;
+      const foundCount = leadsToSave.filter(l => !!l.email || !!l.primaryPhone).length;
 
       toast({
         title: 'Enriquecimiento completado',

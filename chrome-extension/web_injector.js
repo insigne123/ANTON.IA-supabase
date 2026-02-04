@@ -29,6 +29,23 @@ window.addEventListener('message', function (event) {
     }
 });
 
+// 1b. Listen for messages from the Extension (background -> this content script)
+// and forward them to the web app via window.postMessage.
+chrome.runtime.onMessage.addListener((message) => {
+    try {
+        if (message && message.action === 'REPLY_DETECTED') {
+            console.log('[Anton.IA Ext] Forwarding REPLY_DETECTED to web app');
+            window.postMessage({
+                type: 'ANTON_REPLY_DETECTED',
+                payload: message.payload || {}
+            }, '*');
+        }
+    } catch (e) {
+        console.error('[Anton.IA Ext] Failed to forward extension message:', e);
+    }
+    return false;
+});
+
 // 2. Announce presence
 // We set a flag in sessionStorage or DOM so the Web App knows we are installed immediately
 document.body.setAttribute('data-anton-extension-installed', 'true');

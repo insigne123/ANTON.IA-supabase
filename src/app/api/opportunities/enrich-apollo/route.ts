@@ -11,6 +11,18 @@ export const runtime = 'nodejs';
 const BASE = 'https://api.apollo.io/api/v1';
 const DAILY_LIMIT = 50;
 
+const ALLOWED_TABLES = new Set(['enriched_opportunities', 'enriched_leads']);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(x?: string | null) {
+  const v = String(x || '').trim();
+  return !!v && UUID_RE.test(v);
+}
+function resolveTableName(raw?: string) {
+  const v = String(raw || '').trim();
+  if (!v) return null;
+  return ALLOWED_TABLES.has(v) ? v : null;
+}
+
 // Lazy initialization to avoid build-time evaluation of env vars
 function getSupabaseAdmin() {
   return createClient(
@@ -56,7 +68,10 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as EnrichInput & { tableName?: string };
     const { leads, revealEmail = true, revealPhone = false } = body;
-    const tableName = body.tableName || 'enriched_opportunities';
+    const tableName = resolveTableName(body.tableName) || 'enriched_opportunities';
+    if (body.tableName && !resolveTableName(body.tableName)) {
+      return NextResponse.json({ error: `invalid tableName: ${String(body.tableName)}` }, { status: 400 });
+    }
     if (!Array.isArray(leads) || leads.length === 0) return NextResponse.json({ error: 'leads requerido' }, { status: 400 });
 
     const serverLogs: string[] = [];
@@ -111,9 +126,23 @@ export async function POST(req: NextRequest) {
         quotaStatus.count++; consumed++;
       }
 
-      const isRetry = !!l.existingRecordId;
-      const enrichedId = l.existingRecordId || l.id || uuid();
-      let foundApolloId: string | undefined = l.apolloId;
+      const providedId = typeof l.id === 'string' ? l.id.trim() : '';
+      const clientRef = typeof l.clientRef === 'string' ? l.clientRef.trim() : '';
+      const existingRecordId = typeof l.existingRecordId === 'string' ? l.existingRecordId.trim() : '';
+
+      // Retry/update mode: when we explicitly point to an existing DB row via existingRecordId
+      // or when the caller only provides clientRef (common in the Enriched Leads UI).
+      const isRetry = Boolean(existingRecordId || (!providedId && clientRef));
+      const enrichedId =
+        existingRecordId ||
+        (isUuid(providedId) ? providedId : '') ||
+        (isRetry ? clientRef : '') ||
+        uuid();
+
+      // Prefer explicit Apollo ID; fallback to providedId when it is not a UUID (often Apollo person id)
+      let foundApolloId: string | undefined =
+        (typeof l.apolloId === 'string' && l.apolloId.trim() ? l.apolloId.trim() : undefined) ||
+        (!isUuid(providedId) && providedId ? providedId : undefined);
       let emailResult: any = null;
 
       // [STEP 1] Ensure Row Exists
@@ -137,10 +166,15 @@ export async function POST(req: NextRequest) {
         };
         const { error: insertError } = await getSupabaseAdmin().from(tableName).insert(initialRow);
         if (insertError) {
-          log('[FATAL] Failed to insert initial row:', insertError.message, JSON.stringify(insertError));
-          // STOP processing this lead. If we can't save it, we can't enrich it.
-          // Continue to next lead or throw? Let's skip this lead to be safe but log heavily.
-          continue;
+          const code = (insertError as any)?.code;
+          if (code === '23505') {
+            // Row already exists, continue with enrichment/update.
+            log('[WARN] Initial row already exists. Continuing with enrichment:', enrichedId);
+          } else {
+            log('[FATAL] Failed to insert initial row:', insertError.message, JSON.stringify(insertError));
+            // STOP processing this lead. If we can't save it, we can't enrich it.
+            continue;
+          }
         }
       } else {
         // If retrying phone, mark pending again
@@ -221,7 +255,7 @@ export async function POST(req: NextRequest) {
               headline: extracted.headline,
               photo_url: extracted.photo_url,
               seniority: extracted.seniority,
-              departments: extracted.departments ? JSON.stringify(extracted.departments) : null,
+              departments: extracted.departments ?? null,
 
               // Organization details
               organization_domain: extracted.organization_domain || cleanDomain(l.companyDomain),
@@ -259,6 +293,7 @@ export async function POST(req: NextRequest) {
 
             // Prepare response data
             emailResult = {
+              fullName: updateData.full_name,
               email: extracted.email,
               emailStatus: extracted.email_status,
               linkedinUrl: extracted.linkedin_url,
@@ -272,7 +307,8 @@ export async function POST(req: NextRequest) {
               seniority: extracted.seniority,
               departments: extracted.departments,
               headline: extracted.headline,
-              photoUrl: extracted.photo_url
+              photoUrl: extracted.photo_url,
+              enrichmentStatus: extracted.enrichment_status || updateData.enrichment_status
             };
           } else {
             log('[WARNING] Enrichment API returned no data');
@@ -287,22 +323,32 @@ export async function POST(req: NextRequest) {
 
 
       // Add to output
+      const outPhoneNumbers = (emailResult?.phoneNumbers ?? null) as any;
+      const outPrimaryPhone = (emailResult?.primaryPhone ?? null) as any;
+      const outLinkedin = (emailResult?.linkedinUrl || l.linkedinUrl || '').trim();
+      const outStatus =
+        emailResult?.enrichmentStatus ||
+        (revealPhone
+          ? ((outPrimaryPhone || (Array.isArray(outPhoneNumbers) && outPhoneNumbers.length)) ? 'completed' : 'pending_phone')
+          : 'completed');
+
       enrichedOut.push({
         id: enrichedId,
+        clientRef: clientRef || undefined,
         sourceOpportunityId: l.sourceOpportunityId,
+        apolloId: foundApolloId,
         fullName: emailResult?.fullName || l.fullName,
         companyName: emailResult?.companyName || l.companyName,
         title: emailResult?.title || l.title,
         email: emailResult?.email || l.email,
         emailStatus: emailResult?.emailStatus || 'unknown',
-        linkedinUrl: normalizeLinkedin(l.linkedinUrl || ''),
-        companyDomain: emailResult?.companyDomain || l.companyDomain,
+        linkedinUrl: normalizeLinkedin(outLinkedin),
+        companyDomain: emailResult?.companyDomain || cleanDomain(l.companyDomain),
         industry: emailResult?.industry,
         location: emailResult?.location,
-        phoneNumbers: [],
-        primaryPhone: null,
-        // If phone requested, it's pending. If only email, it's completed.
-        enrichmentStatus: revealPhone ? 'pending_phone' : 'completed',
+        phoneNumbers: outPhoneNumbers,
+        primaryPhone: outPrimaryPhone,
+        enrichmentStatus: outStatus,
         createdAt: new Date().toISOString()
       });
 

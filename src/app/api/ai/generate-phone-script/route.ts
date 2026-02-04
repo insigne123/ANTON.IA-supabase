@@ -11,9 +11,10 @@ export async function POST(req: NextRequest) {
         const { report, companyProfile, lead } = body;
 
         // Validar que existan los campos requeridos
-        if (!report || !companyProfile || !lead) {
+        // NOTE: `report` puede ser vacío si aún no se investigó. En ese caso, generamos un guion más general.
+        if (!companyProfile || !lead) {
             return NextResponse.json(
-                { error: 'Faltan campos requeridos: report, companyProfile, lead' },
+                { error: 'Faltan campos requeridos: companyProfile, lead' },
                 { status: 400 }
             );
         }
@@ -26,24 +27,8 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // Validar que el reporte tenga datos mínimos para generar un guion útil
-        const hasCrossData = report.cross && (
-            report.cross.pains?.length > 0 ||
-            report.cross.company?.name ||
-            report.cross.leadContext
-        );
-
-        const hasBasicData = report.company?.name || report.company?.industry;
-
-        if (!hasCrossData && !hasBasicData) {
-            return NextResponse.json(
-                { error: 'El reporte no tiene suficiente información. Se requiere al menos datos de la empresa o pains detectados.' },
-                { status: 400 }
-            );
-        }
-
         // Generar el script
-        const out = await generatePhoneScript({ report, companyProfile, lead });
+        const out = await generatePhoneScript({ report: report || {}, companyProfile, lead });
         return NextResponse.json(out);
     } catch (e: any) {
         console.error('AI phone script generation error:', e);

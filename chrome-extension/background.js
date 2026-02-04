@@ -18,6 +18,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true; // Keep channel open
     }
 
+    // NEW: Relay LinkedIn reply events to the web app tab(s)
+    if (request.action === 'REPLY_DETECTED') {
+        console.log('[Anton.IA Background] Reply detected, relaying to app tabs...');
+        relayReplyDetected(request).catch((err) => {
+            console.error('[Anton.IA Background] Failed to relay reply:', err);
+        });
+        return false; // no response expected
+    }
+
     // NEW: Handle response from content script
     if (request.action === 'DM_RESULT') {
         console.log('[Anton.IA Background] Received DM result:', request.result);
@@ -31,6 +40,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     return false;
 });
+
+async function relayReplyDetected(payload) {
+    const replyText = payload.replyText || '';
+    const linkedinThreadUrl = payload.linkedinThreadUrl || '';
+    const profileUrl = payload.profileUrl || '';
+
+    // Find any open Anton.IA app tab(s)
+    const appTabs = await chrome.tabs.query({
+        url: [
+            'http://localhost:3000/*',
+            'https://*.vercel.app/*',
+            'https://*.hosted.app/*',
+            'https://*.us-central1.hosted.app/*',
+            'https://studio--leadflowai-3yjcy.us-central1.hosted.app/*'
+        ]
+    });
+
+    if (!appTabs || appTabs.length === 0) {
+        console.log('[Anton.IA Background] No app tabs found. Dropping reply event.');
+        return;
+    }
+
+    for (const tab of appTabs) {
+        if (!tab?.id) continue;
+        try {
+            chrome.tabs.sendMessage(tab.id, {
+                action: 'REPLY_DETECTED',
+                payload: {
+                    replyText,
+                    linkedinThreadUrl,
+                    profileUrl,
+                }
+            });
+        } catch (e) {
+            console.warn('[Anton.IA Background] Failed to send reply to tab', tab?.id, e);
+        }
+    }
+}
 
 async function handleSendDM(payload, sendResponse) {
     console.log('[Anton.IA Background] handleSendDM called with:', payload);

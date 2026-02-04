@@ -3,6 +3,8 @@
 export const extensionService = {
     isInstalled: false,
     _listenerInitialized: false,
+    _lastReplyKey: null as null | string,
+    _lastReplyAtMs: 0,
 
     initListener() {
         if (typeof window === 'undefined') return;
@@ -14,6 +16,13 @@ export const extensionService = {
             if (event.data.type === 'ANTON_EXTENSION_READY') {
                 this.isInstalled = true;
                 console.log('[App] ✅ Extension detected via ANTON_EXTENSION_READY message!');
+            }
+
+            if (event.data.type === 'ANTON_REPLY_DETECTED') {
+                const payload = event.data.payload || {};
+                this.handleReplyDetected(payload).catch((err) => {
+                    console.error('[App] Failed to handle reply detected:', err);
+                });
             }
         });
 
@@ -77,6 +86,39 @@ export const extensionService = {
                 resolve({ success: false, error: 'Timeout waiting for extension (30s)' });
             }, 30000);
         });
+    },
+
+    async handleReplyDetected(payload: { linkedinThreadUrl?: string; replyText?: string; profileUrl?: string }) {
+        const linkedinThreadUrl = payload?.linkedinThreadUrl || '';
+        const replyText = payload?.replyText || '';
+        const profileUrl = payload?.profileUrl || '';
+
+        const replyKey = `${linkedinThreadUrl}::${profileUrl}::${replyText}`;
+        const now = Date.now();
+        if (this._lastReplyKey === replyKey && now - this._lastReplyAtMs < 5000) {
+            return;
+        }
+        this._lastReplyKey = replyKey;
+        this._lastReplyAtMs = now;
+
+        try {
+            const res = await fetch('/api/scheduler/reply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ linkedinThreadUrl, replyText, profileUrl })
+            });
+
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                console.error('[App] /api/scheduler/reply failed:', res.status, text);
+                return;
+            }
+
+            const data = await res.json().catch(() => ({}));
+            console.log('[App] ✅ Reply event saved:', data);
+        } catch (e) {
+            console.error('[App] Network error saving reply:', e);
+        }
     }
 };
 
