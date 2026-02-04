@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
     const searchParams = req.nextUrl.searchParams;
@@ -39,17 +40,49 @@ export async function GET(req: NextRequest) {
                 }
             );
 
-            // Update opened_at only if it's currently null (track first open)
-            // OR update list of opens if we wanted to support multiple
-            // For now, simple logic: set opened_at if null
+            // Record first open + bump engagement score for the latest contact row.
+            const nowIso = new Date().toISOString();
+
+            // Support both:
+            // - id = leads.id (agent pipeline)
+            // - id = contacted_leads.id (legacy campaign followups)
+            let { data: row, error: fetchErr } = await supabase
+                .from('contacted_leads')
+                .select('id, opened_at, engagement_score')
+                .eq('lead_id', leadId)
+                .order('sent_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (!row && !fetchErr) {
+                const retry = await supabase
+                    .from('contacted_leads')
+                    .select('id, opened_at, engagement_score')
+                    .eq('id', leadId)
+                    .maybeSingle();
+                row = retry.data as any;
+                fetchErr = retry.error as any;
+            }
+
+            if (fetchErr) {
+                console.error('[TRACKING] Error fetching contacted_leads row:', fetchErr);
+                return;
+            }
+
+            if (!row) return;
+            if (row.opened_at) return; // already recorded
+
+            const newScore = (row.engagement_score || 0) + 1;
+
             const { error } = await supabase
                 .from('contacted_leads')
                 .update({
-                    opened_at: new Date().toISOString(),
-                    // Optionally increment open count if column existed, but we stick to schema
-                })
-                .eq('lead_id', leadId)
-                .is('opened_at', null); // Only update if not already opened
+                    opened_at: nowIso,
+                    last_interaction_at: nowIso,
+                    engagement_score: newScore,
+                    last_update_at: nowIso,
+                } as any)
+                .eq('id', row.id);
 
             if (error) {
                 console.error('[TRACKING] Error updating read status:', error);
