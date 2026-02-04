@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 export async function GET(request: Request) {
     const requestUrl = new URL(request.url);
     const code = requestUrl.searchParams.get('code');
+    const next = requestUrl.searchParams.get('next');
 
     if (code) {
         const cookieStore = cookies();
@@ -13,5 +14,6 @@ export async function GET(request: Request) {
     }
 
     // URL to redirect to after sign in process completes
-    return NextResponse.redirect(requestUrl.origin);
+    const safeNext = next && next.startsWith('/') ? next : '/';
+    return NextResponse.redirect(new URL(safeNext, requestUrl.origin));
 }

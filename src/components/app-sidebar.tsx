@@ -3,6 +3,7 @@
 
 import React from 'react';
 import { usePathname } from 'next/navigation';
+import Link from 'next/link';
 import {
   Sidebar,
   SidebarHeader,
@@ -62,10 +63,10 @@ export function AppSidebar() {
                 isActive={pathname.startsWith(item.href)}
                 tooltip={item.label}
               >
-                <a href={item.href} className="text-[0.95rem]">
+                <Link href={item.href} className="text-[0.95rem]">
                   <item.icon />
                   <span>{item.label}</span>
-                </a>
+                </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
           ))}

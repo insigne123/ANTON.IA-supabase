@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import type { Lead } from './types';
 import { organizationService } from './services/organization-service';
 import { activityLogService } from './services/activity-log-service';
+import { v4 as uuidv4 } from 'uuid';
 
 const TABLE = 'leads';
 
@@ -31,13 +32,15 @@ function mapRowToLead(row: any): Lead {
 
 // Helper to map Lead type to DB row
 function mapLeadToRow(lead: Lead, userId: string, organizationId: string | null) {
-    // Validate UUID. If invalid, let DB generate one.
+    // Validate UUID. If invalid, generate one locally so we always know the inserted ID.
     const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lead.id || '');
+    const id = isValidUUID ? lead.id : uuidv4();
 
     // If ID is not UUID, it's likely the Apollo ID we want to preserve
     const apolloId = lead.apolloId || (!isValidUUID ? lead.id : undefined);
 
-    const row: any = {
+    return {
+        id,
         user_id: userId,
         organization_id: organizationId,
         name: lead.name,
@@ -56,12 +59,6 @@ function mapLeadToRow(lead: Lead, userId: string, organizationId: string | null)
         city: lead.city,
         apollo_id: apolloId,
     };
-
-    if (isValidUUID) {
-        row.id = lead.id;
-    }
-
-    return row;
 }
 
 export const supabaseService = {

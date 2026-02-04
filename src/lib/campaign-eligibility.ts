@@ -50,7 +50,9 @@ export async function computeEligibilityForCampaign(
   const rows: EligiblePreviewRow[] = [];
 
   for (const lead of contacted) {
-    const leadId: string = (lead as any).id ?? lead.leadId ?? '';
+    // Prefer the source lead ID so exclusions (excludedLeadIds) work as expected.
+    // Fallback to contacted row id if leadId is missing.
+    const leadId: string = lead.leadId ?? (lead as any).id ?? '';
     if (!leadId) continue;
 
     // 1) Filtrado básico local

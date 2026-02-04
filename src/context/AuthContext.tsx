@@ -9,7 +9,7 @@ interface AuthContextType {
     session: Session | null;
     loading: boolean;
     error: string | null;
-    signInWithGoogle: () => Promise<void>;
+    signInWithGoogle: (nextPath?: string) => Promise<void>;
     signInWithPassword: (email: string, password: string) => Promise<void>;
     signUpWithPassword: (email: string, password: string) => Promise<void>;
     signOut: () => Promise<void>;
@@ -43,12 +43,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return () => subscription.unsubscribe();
     }, []);
 
-    const signInWithGoogle = async () => {
+    const signInWithGoogle = async (nextPath?: string) => {
         setError(null);
+
+        const safeNext = typeof nextPath === 'string' && nextPath.startsWith('/') ? nextPath : '';
+        const redirectTo = safeNext
+            ? `${window.location.origin}/api/auth/callback?next=${encodeURIComponent(safeNext)}`
+            : `${window.location.origin}/api/auth/callback`;
+
         const { error } = await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
-                redirectTo: `${window.location.origin}/api/auth/callback`,
+                redirectTo,
             },
         });
         if (error) setError(error.message);

@@ -5,6 +5,14 @@ import { organizationService } from './organization-service';
 
 const TABLE = 'enriched_leads';
 
+function normalizeEmailKey(email?: string | null) {
+    const e = String(email || '').trim().toLowerCase();
+    if (!e) return null;
+    if (e === 'not found') return null;
+    if (!e.includes('@')) return null;
+    return e;
+}
+
 function mapRowToEnrichedLead(row: any): EnrichedLead {
     return {
         id: row.id,
@@ -152,7 +160,12 @@ export async function addEnrichedLeads(items: EnrichedLead[]) {
     const orgId = await organizationService.getCurrentOrganizationId();
 
     const existing = await getEnrichedLeads();
-    const key = (v: EnrichedLead) => (v.id || v.email || `${v.fullName}|${v.companyName}|${v.title}`).toLowerCase();
+    const key = (v: EnrichedLead) => {
+        const emailKey = normalizeEmailKey(v.email);
+        return String(emailKey || v.id || `${v.fullName}|${v.companyName}|${v.title}`)
+            .trim()
+            .toLowerCase();
+    };
     const seen = new Set(existing.map(key));
 
     const toInsert: any[] = [];
@@ -224,7 +237,16 @@ export const enrichedLeadsStorage = {
         const orgId = await organizationService.getCurrentOrganizationId();
 
         const existing = await getEnrichedLeads();
-        const keyOf = (l: EnrichedLead) => (l.id?.trim() || (l.email?.trim() || '') || `${l.fullName || ''}|${l.companyDomain || l.companyName || ''}|${l.title || ''}`).toLowerCase();
+        const keyOf = (l: EnrichedLead) => {
+            const emailKey = normalizeEmailKey(l.email);
+            return String(
+                emailKey ||
+                l.id?.trim() ||
+                `${l.fullName || ''}|${l.companyDomain || l.companyName || ''}|${l.title || ''}`
+            )
+                .trim()
+                .toLowerCase();
+        };
         const seen = new Set(existing.map(keyOf));
 
         const added: EnrichedLead[] = [];
@@ -270,7 +292,16 @@ export const enrichedLeadsStorage = {
     },
     isSaved: async (l: EnrichedLead) => {
         const all = await getEnrichedLeads();
-        const keyOf = (l: EnrichedLead) => (l.id?.trim() || (l.email?.trim() || '') || `${l.fullName || ''}|${l.companyDomain || l.companyName || ''}|${l.title || ''}`).toLowerCase();
+        const keyOf = (l: EnrichedLead) => {
+            const emailKey = normalizeEmailKey(l.email);
+            return String(
+                emailKey ||
+                l.id?.trim() ||
+                `${l.fullName || ''}|${l.companyDomain || l.companyName || ''}|${l.title || ''}`
+            )
+                .trim()
+                .toLowerCase();
+        };
         return all.some(x => keyOf(x) === keyOf(l));
     },
     removeById: async (id: string) => {
