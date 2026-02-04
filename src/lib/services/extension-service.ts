@@ -2,9 +2,12 @@
 
 export const extensionService = {
     isInstalled: false,
+    _listenerInitialized: false,
 
     initListener() {
         if (typeof window === 'undefined') return;
+        if (this._listenerInitialized) return;
+        this._listenerInitialized = true;
 
         window.addEventListener('message', (event) => {
             if (event.source !== window) return;

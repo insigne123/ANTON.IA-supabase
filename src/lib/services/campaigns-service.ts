@@ -65,7 +65,7 @@ function mapRowToCampaign(row: any, steps: any[] = []): Campaign {
         updatedAt: row.updated_at,
         steps: steps.map(s => ({
             id: s.id,
-            name: `Paso ${s.order_index + 1}`,
+            name: s.name || `Paso ${s.order_index + 1}`,
             offsetDays: s.offset_days,
             subject: s.subject_template,
             bodyHtml: s.body_template,
@@ -73,7 +73,7 @@ function mapRowToCampaign(row: any, steps: any[] = []): Campaign {
             variantB: s.variant_b || undefined
         })),
         excludedLeadIds: row.excluded_lead_ids || [],
-        sentRecords: {}, // Not persisted in relational schema yet
+        sentRecords: row.sent_records || row.sentRecords || {},
         settings: row.settings || undefined
     };
 }
@@ -141,7 +141,8 @@ export const campaignsStorage = {
                     name: input.name,
                     status: input.isPaused ? 'paused' : 'active',
                     excluded_lead_ids: input.excludedLeadIds || [],
-                    settings: input.settings || {}
+                    settings: input.settings || {},
+                    sent_records: input.sentRecords || {}
                 })
                 .select()
                 .single();
@@ -156,6 +157,7 @@ export const campaignsStorage = {
                 const stepsPayload = input.steps.map((s, idx) => ({
                     campaign_id: campData.id,
                     order_index: idx,
+                    name: s.name,
                     offset_days: s.offsetDays,
                     subject_template: s.subject,
                     body_template: s.bodyHtml,
@@ -172,7 +174,7 @@ export const campaignsStorage = {
                 }
             }
 
-            return mapRowToCampaign(campData, input.steps?.map((s, i) => ({ ...s, id: 'temp-id', order_index: i })) || []);
+            return await this.getById(campData.id);
         } catch (err) {
             console.error('Error in add campaign:', err);
             return null;
@@ -186,6 +188,7 @@ export const campaignsStorage = {
             if (patch.isPaused !== undefined) updateData.status = patch.isPaused ? 'paused' : 'active';
             if (patch.excludedLeadIds !== undefined) updateData.excluded_lead_ids = patch.excludedLeadIds;
             if (patch.settings !== undefined) updateData.settings = patch.settings;
+            if (patch.sentRecords !== undefined) updateData.sent_records = patch.sentRecords;
 
             const { error } = await supabase
                 .from(TABLE_CAMPAIGNS)
@@ -203,6 +206,7 @@ export const campaignsStorage = {
                 const stepsPayload = patch.steps.map((s, idx) => ({
                     campaign_id: id,
                     order_index: idx,
+                    name: s.name,
                     offset_days: s.offsetDays,
                     subject_template: s.subject,
                     body_template: s.bodyHtml,

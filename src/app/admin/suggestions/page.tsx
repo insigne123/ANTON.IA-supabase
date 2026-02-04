@@ -16,6 +16,16 @@ export default function AdminSuggestionsPage() {
     const supabase = createClientComponentClient();
     const { toast } = useToast();
 
+    const mapRow = (row: any): AntoniaAppSuggestion => ({
+        id: row.id,
+        suggestionType: row.suggestion_type,
+        description: row.description,
+        context: row.context || undefined,
+        suggestedByMissionId: row.suggested_by_mission_id || undefined,
+        isRead: Boolean(row.is_read),
+        createdAt: row.created_at,
+    });
+
     useEffect(() => {
         async function load() {
             // Security: RLS should handle this, but UI can also redirect if not admin
@@ -24,11 +34,16 @@ export default function AdminSuggestionsPage() {
                 .select('*')
                 .order('created_at', { ascending: false });
 
-            if (data) setSuggestions(data);
+            if (error) {
+                console.error('[admin/suggestions] Load error:', error);
+                toast({ variant: 'destructive', title: 'Error', description: 'No se pudieron cargar las sugerencias.' });
+            }
+
+            if (data) setSuggestions(data.map(mapRow));
             setLoading(false);
         }
         load();
-    }, [supabase]);
+    }, [supabase, toast]);
 
     const handleMarkRead = async (id: string) => {
         const { error } = await supabase
@@ -39,6 +54,9 @@ export default function AdminSuggestionsPage() {
         if (!error) {
             setSuggestions(suggestions.map(s => s.id === id ? { ...s, isRead: true } : s));
             toast({ title: 'Marked as Read' });
+        } else {
+            console.error('[admin/suggestions] Mark read error:', error);
+            toast({ variant: 'destructive', title: 'Error', description: 'No se pudo actualizar.' });
         }
     };
 

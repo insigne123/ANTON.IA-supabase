@@ -42,53 +42,59 @@ export default function SavedLeadsPage() {
   const [leadsToEnrich, setLeadsToEnrich] = useState<Lead[]>([]);
 
   useEffect(() => {
-    // Carga inicial desde Supabase
-    supabaseService.getLeads().then(setSavedLeads);
-  }, []);
+    let mounted = true;
 
-  // Efecto de migración: se ejecuta cuando savedLeads cambia
-  useEffect(() => {
-    const withEmail = savedLeads.filter(l => !!l.email);
-    if (withEmail.length === 0) {
-      return; // Nada que migrar
+    async function loadAndMigrateOnce() {
+      // Carga inicial desde Supabase
+      const saved = await supabaseService.getLeads();
+      if (!mounted) return;
+
+      // Migración legacy: si existen leads con email en "Guardados", moverlos a "Enriquecidos".
+      // (Se ejecuta una sola vez al cargar la página.)
+      const withEmail = saved.filter(l => !!l.email);
+      const remaining = saved.filter(l => !l.email);
+
+      if (withEmail.length > 0) {
+        try {
+          const moved: EnrichedLead[] = withEmail.map<EnrichedLead>(l => ({
+            id: l.id,
+            fullName: l.name,
+            title: l.title,
+            email: l.email ?? undefined,
+            emailStatus: 'verified',
+            linkedinUrl: l.linkedinUrl || undefined,
+            companyName: l.company || undefined,
+            companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
+            country: l.country || undefined,
+            city: l.city || undefined,
+            industry: l.industry || undefined,
+            createdAt: new Date().toISOString(),
+          }));
+
+          const res = await enrichedLeadsStorage.addDedup(moved);
+
+          // Eliminar SOLO los leads que migramos (no todos los que tengan email).
+          const ids = new Set(withEmail.map(l => l.id));
+          await supabaseService.removeWhere((l: Lead) => ids.has(l.id));
+
+          const addedCount = (res as any)?.addedCount ?? 0;
+          if (addedCount > 0) {
+            toast({
+              title: 'Leads movidos a Enriquecidos',
+              description: `Se movieron ${addedCount} lead(s) con email a la sección Enriquecidos.`,
+            });
+          }
+        } catch (e) {
+          console.warn('[saved/leads] Migration failed:', e);
+        }
+      }
+
+      setSavedLeads(remaining);
     }
 
-    // 1) Mover a enriquecidos (dedupe)
-    const moved: EnrichedLead[] = withEmail.map<EnrichedLead>(l => ({
-      id: l.id,
-      fullName: l.name,
-      title: l.title,
-      email: l.email ?? undefined,
-      emailStatus: 'verified',
-      linkedinUrl: l.linkedinUrl || undefined,
-      companyName: l.company || undefined,
-      companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
-      country: l.country || undefined,
-      city: l.city || undefined,
-      industry: l.industry || undefined,
-      createdAt: new Date().toISOString(),
-    }));
-
-    // Usamos una función asíncrona autoejecutable para poder usar await si fuera necesario,
-    // aunque en useEffect no se recomienda await directo.
-    // En este caso, enrichedLeadsStorage.addDedup es async.
-    enrichedLeadsStorage.addDedup(moved).then((res) => {
-      // 2) Dejar en guardados sólo los SIN email
-      // En Supabase, eliminamos los que tienen email
-      supabaseService.removeWhere(l => !!l.email).then(() => {
-        const remaining = savedLeads.filter(l => !l.email);
-        setSavedLeads(remaining);
-      });
-
-      const addedCount = (res as any)?.addedCount ?? 0;
-      if (addedCount > 0) {
-        toast({
-          title: 'Leads movidos a Enriquecidos',
-          description: `Se movieron ${addedCount} lead(s) con email a la sección Enriquecidos.`,
-        });
-      }
-    });
-  }, [savedLeads, toast]);
+    loadAndMigrateOnce();
+    return () => { mounted = false; };
+  }, [toast]);
 
   async function handleDeleteLead(id: string) {
     const ok = confirm('¿Eliminar este lead de Guardados?');

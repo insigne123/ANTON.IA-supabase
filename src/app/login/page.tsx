@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,14 +8,18 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
 
-export default function LoginPage() {
+function LoginContent() {
     const { signInWithPassword, signUpWithPassword, signInWithGoogle } = useAuth();
     const [isLoading, setIsLoading] = useState(false);
     const { toast } = useToast();
     const router = useRouter();
+    const searchParams = useSearchParams();
+
+    const nextParam = searchParams.get('next');
+    const redirectTo = nextParam && nextParam.startsWith('/') ? nextParam : '/dashboard';
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -27,7 +31,7 @@ export default function LoginPage() {
         setIsLoading(true);
         try {
             await signInWithPassword(email, password);
-            router.push('/');
+            router.push(redirectTo);
         } catch (error: any) {
             toast({
                 variant: 'destructive',
@@ -60,7 +64,7 @@ export default function LoginPage() {
             });
             // Optional: Auto-login logic is usually handled by Supabase automatically if email confirm is off
             // But we can also redirect just in case
-            router.push('/');
+            router.push(redirectTo);
         } catch (error: any) {
             toast({
                 variant: 'destructive',
@@ -75,7 +79,7 @@ export default function LoginPage() {
     const handleGoogleLogin = async () => {
         setIsLoading(true);
         try {
-            await signInWithGoogle();
+            await signInWithGoogle(redirectTo);
         } catch (error: any) {
             toast({
                 variant: 'destructive',
@@ -236,5 +240,13 @@ export default function LoginPage() {
                 </CardContent>
             </Card>
         </div>
+    );
+}
+
+export default function LoginPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-muted-foreground">Cargando...</div>}>
+            <LoginContent />
+        </Suspense>
     );
 }

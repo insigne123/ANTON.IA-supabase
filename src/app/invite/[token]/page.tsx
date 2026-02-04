@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, use } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { organizationService } from '@/lib/services/organization-service';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,23 +12,24 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
     const router = useRouter();
     const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
     const [message, setMessage] = useState('Verifying invitation...');
-    const resolvedParams = use(params);
+    const [token, setToken] = useState('');
 
     useEffect(() => {
         const accept = async () => {
             try {
+                const resolved = await params;
+                setToken(resolved.token);
+
                 // Check if user is logged in
                 const { data: { session } } = await supabase.auth.getSession();
 
                 if (!session) {
-                    // Redirect to login with return URL
-                    // Ideally we'd use a proper auth flow here, but for now let's just redirect
-                    setMessage('Please login to accept the invitation');
+                    setMessage('Debes iniciar sesión para aceptar la invitación.');
                     setStatus('error');
                     return;
                 }
 
-                await organizationService.acceptInvite(resolvedParams.token);
+                await organizationService.acceptInvite(resolved.token);
                 setStatus('success');
                 setMessage('Invitation accepted! Redirecting to dashboard...');
 
@@ -43,7 +44,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
         };
 
         accept();
-    }, [resolvedParams.token, router]);
+    }, [params, router]);
 
     return (
         <div className="flex items-center justify-center min-h-screen bg-background p-4">
@@ -74,9 +75,17 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
                                 <XCircle className="w-12 h-12" />
                                 <p className="text-center text-foreground">{message}</p>
                             </div>
-                            <Button onClick={() => router.push('/dashboard')} variant="outline">
-                                Go to Dashboard
-                            </Button>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    onClick={() => router.push(`/login?next=${encodeURIComponent(`/invite/${token || ''}`)}`)}
+                                    variant="outline"
+                                >
+                                    Ir a Login
+                                </Button>
+                                <Button onClick={() => router.push('/dashboard')} variant="ghost">
+                                    Ir al Dashboard
+                                </Button>
+                            </div>
                         </div>
                     )}
                 </CardContent>
