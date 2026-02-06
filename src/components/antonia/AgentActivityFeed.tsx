@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -63,6 +63,11 @@ interface AntoniaTask {
     result: TaskResult;
     payload: any;
     error_message?: string;
+    progress_current?: number | null;
+    progress_total?: number | null;
+    progress_label?: string | null;
+    heartbeat_at?: string | null;
+    worker_source?: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -72,6 +77,27 @@ export function AgentActivityFeed({ missionId }: { missionId: string }) {
     const [filter, setFilter] = useState<'all' | 'errors' | 'success' | 'processing'>('all');
     const supabase = createClientComponentClient();
     const scrollRef = useRef<HTMLDivElement>(null);
+
+    const fetchRecentTasks = useCallback(async () => {
+        const { data } = await supabase
+            .from('antonia_tasks')
+            .select('*')
+            .eq('mission_id', missionId)
+            .order('created_at', { ascending: false })
+            .limit(100);
+
+        if (data) setTasks(data);
+    }, [missionId, supabase]);
+
+    const handleRealtimeUpdate = useCallback((payload: any) => {
+        if (payload.eventType === 'INSERT') {
+            setTasks(prev => [payload.new, ...prev]);
+        } else if (payload.eventType === 'UPDATE') {
+            setTasks(prev => prev.map(task =>
+                task.id === payload.new.id ? payload.new : task
+            ));
+        }
+    }, []);
 
     useEffect(() => {
         fetchRecentTasks();
@@ -95,28 +121,7 @@ export function AgentActivityFeed({ missionId }: { missionId: string }) {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [missionId, supabase]);
-
-    const fetchRecentTasks = async () => {
-        const { data } = await supabase
-            .from('antonia_tasks')
-            .select('*')
-            .eq('mission_id', missionId)
-            .order('created_at', { ascending: false })
-            .limit(100);
-
-        if (data) setTasks(data);
-    };
-
-    const handleRealtimeUpdate = (payload: any) => {
-        if (payload.eventType === 'INSERT') {
-            setTasks(prev => [payload.new, ...prev]);
-        } else if (payload.eventType === 'UPDATE') {
-            setTasks(prev => prev.map(task =>
-                task.id === payload.new.id ? payload.new : task
-            ));
-        }
-    };
+    }, [fetchRecentTasks, handleRealtimeUpdate, missionId, supabase]);
 
     const getTaskIcon = (type: string) => {
         switch (type) {
@@ -170,8 +175,19 @@ export function AgentActivityFeed({ missionId }: { missionId: string }) {
             return <span className="text-red-500 font-medium line-clamp-1">{task.error_message || 'Falló la ejecución'}</span>;
         }
 
-        if (status === 'pending') return <span className="text-muted-foreground italic">En cola...</span>;
-        if (status === 'processing') return <span className="text-blue-500 font-medium animate-pulse">Procesando...</span>;
+        if (status === 'pending') {
+            return <span className="text-muted-foreground italic">En cola...</span>;
+        }
+        if (status === 'processing') {
+            const cur = typeof task.progress_current === 'number' ? task.progress_current : null;
+            const tot = typeof task.progress_total === 'number' ? task.progress_total : null;
+            const label = task.progress_label ? String(task.progress_label) : 'Procesando...';
+            return (
+                <span className="text-blue-500 font-medium animate-pulse">
+                    {label}{(cur != null && tot != null) ? ` (${cur}/${tot})` : ''}
+                </span>
+            );
+        }
 
         if (!result) return <span className="text-muted-foreground">Completado</span>;
 
@@ -202,6 +218,21 @@ export function AgentActivityFeed({ missionId }: { missionId: string }) {
 
         return (
             <div className="space-y-4 pt-2">
+                {/* Runtime details */}
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    {task.worker_source && (
+                        <Badge variant="secondary" className="h-5">worker: {task.worker_source}</Badge>
+                    )}
+                    {task.heartbeat_at && (
+                        <Badge variant="outline" className="h-5">
+                            heartbeat {formatDistanceToNow(new Date(task.heartbeat_at), { addSuffix: true, locale: es })}
+                        </Badge>
+                    )}
+                    {task.progress_label && (
+                        <Badge variant="outline" className="h-5">{task.progress_label}</Badge>
+                    )}
+                </div>
+
                 {/* Visual Summaries based on Type */}
                 {result && !result.skipped && (
                     <div className="text-xs space-y-2">

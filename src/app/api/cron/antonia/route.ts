@@ -62,7 +62,7 @@ async function executeCampaignGeneration(task: any, supabase: any, config: any) 
         .select('id, name')
         .eq('organization_id', task.organization_id)
         .eq('name', generatedName)
-        .single();
+        .maybeSingle();
 
     let campaignName = generatedName;
 
@@ -70,8 +70,7 @@ async function executeCampaignGeneration(task: any, supabase: any, config: any) 
         // 2. Generate Content (Real LLM using Genkit)
         console.log('[GENERATE] Invoking Genkit flow for:', generatedName);
 
-        let subject = `Oportunidad para innovar en ${industry}`;
-        let body = `Hola {{firstName}},\n\nMe gustaría conversar.`;
+        let steps: Array<{ name: string; offsetDays: number; subject: string; bodyHtml: string }> = [];
 
         try {
             console.log('[GENERATE] AI Input:', { jobTitle, industry, missionTitle, campaignContext });
@@ -85,35 +84,44 @@ async function executeCampaignGeneration(task: any, supabase: any, config: any) 
 
             console.log('[GENERATE] AI Output:', aiResult);
 
-            // Validate AI response
             if (!aiResult?.steps?.length) {
                 throw new Error('AI returned empty campaign steps');
             }
 
-            subject = aiResult.steps[0].subject;
-            body = aiResult.steps[0].bodyHtml;
+            steps = aiResult.steps;
         } catch (error: any) {
             console.error('[GENERATE] Genkit Flow Failed:', error);
-            // Fallback not strictly needed if we want to fail hard, but safer to have default or fail task.
-            // Let's rely on the outer try/catch to mark task as failed if AI fails, 
-            // OR use fallback strings if we want to be lenient. 
-            // Given "Critical" nature, maybe failing is better so they know AI keys are missing?
-            // Actually, let's bubble up the error so it shows in the UI logs as "Failed".
             throw new Error(`AI Generation Failed: ${error.message}`);
         }
 
-        const { error } = await supabase.from('campaigns').insert({
+        const { data: campaignRow, error } = await supabase.from('campaigns').insert({
             organization_id: task.organization_id,
             user_id: userId,
             name: generatedName,
-            subject: subject,
-            body: body,
-            status: 'draft', // User reviews it? Or active? User said "intelligent campaign designed for the mission", implies ready to use. 
-            // Often campaigns need "steps". If this table structure supports simple body, good.
-            created_at: new Date().toISOString()
-        });
+            status: 'active',
+            excluded_lead_ids: [],
+            settings: { source: 'antonia', aiGenerated: true, missionId: task.mission_id, tracking: { enabled: false, pixel: true, linkTracking: true } },
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        }).select().single();
 
-        if (error) throw new Error(`Failed to create campaign: ${error.message}`);
+        if (error || !campaignRow) throw new Error(`Failed to create campaign: ${error?.message || 'unknown error'}`);
+
+        const stepsPayload = steps.map((s, idx) => ({
+            campaign_id: campaignRow.id,
+            order_index: idx,
+            name: s.name || `Paso ${idx + 1}`,
+            offset_days: Number.isFinite(Number(s.offsetDays)) ? Number(s.offsetDays) : 0,
+            subject_template: s.subject || '',
+            body_template: s.bodyHtml || '',
+            attachments: []
+        }));
+
+        const { error: stepErr } = await supabase
+            .from('campaign_steps')
+            .insert(stepsPayload);
+
+        if (stepErr) throw new Error(`Failed to create campaign steps: ${stepErr.message}`);
     }
 
     // 3. Create SEARCH task (Chaining)
@@ -513,8 +521,18 @@ async function executeContact(task: any, supabase: any) {
     }
 
     const campaign = campaigns[0];
-    const subject = campaign.subject;
-    const bodyTemplate = campaign.body;
+    const { data: stepRows } = await supabase
+        .from('campaign_steps')
+        .select('order_index, subject_template, body_template')
+        .eq('campaign_id', campaign.id)
+        .order('order_index', { ascending: true })
+        .limit(1);
+
+    const subject = stepRows?.[0]?.subject_template || 'Seguimiento';
+    const bodyTemplate = stepRows?.[0]?.body_template || 'Hola {{firstName}},\n\nSolo quería hacer seguimiento.';
+
+    let campaignSentRecords: Record<string, any> | null = campaign.sent_records ? { ...(campaign.sent_records || {}) } : null;
+    let campaignDirty = false;
 
     // 2. Determine Provider & Get Token
     // We try to find a connected account for this user
@@ -576,6 +594,11 @@ async function executeContact(task: any, supabase: any) {
                 created_at: new Date().toISOString()
             });
 
+            if (campaign?.id && campaignSentRecords && lead?.id) {
+                campaignSentRecords[String(lead.id)] = { lastStepIdx: 0, lastSentAt: new Date().toISOString() };
+                campaignDirty = true;
+            }
+
         } catch (err: any) {
             console.error(`[Contact] Failed to send to ${lead.email}:`, err);
             errors.push({ email: lead.email, error: err.message });
@@ -585,6 +608,13 @@ async function executeContact(task: any, supabase: any) {
 
     if (contactedLeads.length > 0) {
         await supabase.from('contacted_leads').insert(contactedLeads);
+
+        if (campaign?.id && campaignDirty && campaignSentRecords) {
+            await supabase
+                .from('campaigns')
+                .update({ sent_records: campaignSentRecords, updated_at: new Date().toISOString() })
+                .eq('id', campaign.id);
+        }
 
         // Update leads status to 'contacted' to remove from queue
         // We only update the ones that were successfully SENT

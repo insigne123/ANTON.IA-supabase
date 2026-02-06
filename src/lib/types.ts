@@ -121,6 +121,14 @@ export interface ContactedLead {
   linkedinThreadUrl?: string;
   linkedinMessageStatus?: 'sent' | 'queued' | 'failed' | 'replied';
   lastReplyText?: string;
+
+  // Reply intelligence
+  replyIntent?: 'meeting_request' | 'positive' | 'negative' | 'unsubscribe' | 'auto_reply' | 'neutral' | 'unknown';
+  replySentiment?: 'positive' | 'negative' | 'neutral';
+  replyConfidence?: number;
+  replySummary?: string;
+  campaignFollowupAllowed?: boolean;
+  campaignFollowupReason?: string;
 }
 
 export interface ContactedOpportunity extends Omit<ContactedLead, 'leadId'> {
@@ -546,6 +554,12 @@ export interface AntoniaTask {
   errorMessage?: string;
   processingStartedAt?: string;
   idempotencyKey?: string;
+  progressCurrent?: number | null;
+  progressTotal?: number | null;
+  progressLabel?: string | null;
+  heartbeatAt?: string | null;
+  workerId?: string | null;
+  workerSource?: string | null;
   createdAt: string;
   updatedAt: string;
 }

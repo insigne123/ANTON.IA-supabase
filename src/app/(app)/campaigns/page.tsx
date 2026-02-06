@@ -86,10 +86,42 @@ export default function CampaignsPage() {
     name: 'Nueva campaña',
     steps: [{ id: crypto.randomUUID(), name: 'Follow-up 1', offsetDays: 3, subject: '', bodyHtml: '', attachments: [] }],
     excludedLeadIds: [],
-    settings: { smartScheduling: { enabled: false, timezone: 'UTC', startHour: 9, endHour: 17 } }
+    settings: {
+      smartScheduling: { enabled: false, timezone: 'UTC', startHour: 9, endHour: 17 },
+      tracking: { enabled: false, pixel: true, linkTracking: true },
+    }
   });
 
   const [contacted, setContacted] = useState<ContactedLead[]>([]);
+
+  const metricsByCampaignId = useMemo(() => {
+    const leadMap = new Map((contacted || []).map((l: any) => [String(l.leadId || l.id || ''), l]));
+    const out: Record<string, { totalSent: number; opened: number; replied: number; clicked: number }> = {};
+
+    for (const campaign of items) {
+      const sentLeadIds = Object.keys(campaign.sentRecords || {});
+      let opened = 0;
+      let replied = 0;
+      let clicked = 0;
+
+      for (const id of sentLeadIds) {
+        const lead = leadMap.get(String(id));
+        if (!lead) continue;
+        if (lead.openedAt) opened++;
+        if (lead.repliedAt || lead.status === 'replied') replied++;
+        if (lead.clickedAt) clicked++;
+      }
+
+      out[campaign.id] = {
+        totalSent: sentLeadIds.length,
+        opened,
+        replied,
+        clicked,
+      };
+    }
+
+    return out;
+  }, [contacted, items]);
 
   useEffect(() => {
     async function load() {
@@ -107,7 +139,10 @@ export default function CampaignsPage() {
       name: 'Nueva campaña',
       steps: [{ id: crypto.randomUUID(), name: 'Follow-up 1', offsetDays: 3, subject: '', bodyHtml: '', attachments: [] }],
       excludedLeadIds: [],
-      settings: { smartScheduling: { enabled: false, timezone: 'UTC', startHour: 9, endHour: 17 } }
+      settings: {
+        smartScheduling: { enabled: false, timezone: 'UTC', startHour: 9, endHour: 17 },
+        tracking: { enabled: false, pixel: true, linkTracking: true },
+      }
     });
     setMode({ kind: 'edit' });
   }
@@ -118,7 +153,10 @@ export default function CampaignsPage() {
       name: c.name,
       steps: c.steps.map((s) => ({ ...s })),
       excludedLeadIds: [...c.excludedLeadIds],
-      settings: c.settings || { smartScheduling: { enabled: false, timezone: 'UTC', startHour: 9, endHour: 17 } }
+      settings: c.settings || {
+        smartScheduling: { enabled: false, timezone: 'UTC', startHour: 9, endHour: 17 },
+        tracking: { enabled: false, pixel: true, linkTracking: true },
+      }
     });
     setMode({ kind: 'edit', id: c.id });
   }
@@ -362,7 +400,30 @@ export default function CampaignsPage() {
 
       const subject = renderTemplate(step.subject || '', contacted, { name: senderName });
       const rawBody = renderTemplate(step.bodyHtml || '', contacted, { name: senderName });
-      const bodyHtml = normalizeBodyHtml(rawBody);
+      let bodyHtml = normalizeBodyHtml(rawBody);
+
+      const tracking = campaign.settings?.tracking;
+      const trackingEnabled = Boolean(tracking?.enabled);
+      const trackLinks = trackingEnabled && (tracking?.linkTracking ?? true);
+      const trackPixel = trackingEnabled && (tracking?.pixel ?? true);
+
+      if (trackingEnabled) {
+        const trackingId = String(contacted.id || contacted.leadId || row.leadId || '').trim();
+        const origin = window.location.origin;
+
+        if (trackLinks && trackingId && !bodyHtml.includes('/api/tracking/click')) {
+          bodyHtml = bodyHtml.replace(/href=("|')(?!(?:\/api\/tracking\/click\?id=))([^"']+)("|')/gi, (match, q, url) => {
+            if (String(url).startsWith('mailto:')) return match;
+            const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
+            return `href=${q}${trackingUrl}${q}`;
+          });
+        }
+
+        if (trackPixel && trackingId && !bodyHtml.includes('/api/tracking/open?id=')) {
+          const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+          bodyHtml += `\n<br><img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
+        }
+      }
 
       const subjectTrim = subject.replace(/\s+/g, ' ').trim();
       const bodyTrim = bodyHtml.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
@@ -507,20 +568,31 @@ export default function CampaignsPage() {
               <div className="border rounded-md overflow-x-auto">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Nombre</TableHead>
-                      <TableHead>Pasos</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead className="text-right">Acciones</TableHead>
-                    </TableRow>
+                      <TableRow>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead>Pasos</TableHead>
+                        <TableHead>Métricas</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead className="text-right">Acciones</TableHead>
+                      </TableRow>
                   </TableHeader>
                   <TableBody>
                     {items.length === 0 ? (
-                      <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No hay campañas.</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No hay campañas.</TableCell></TableRow>
                     ) : items.map((c) => (
                       <TableRow key={c.id}>
                         <TableCell className="font-medium">{c.name}</TableCell>
                         <TableCell>{c.steps.length}</TableCell>
+                        <TableCell>
+                          {(() => {
+                            const m = metricsByCampaignId[c.id] || { totalSent: 0, opened: 0, replied: 0, clicked: 0 };
+                            return (
+                              <div className="text-xs text-muted-foreground">
+                                Env: <span className="text-foreground font-medium">{m.totalSent}</span> · Abr: <span className="text-foreground font-medium">{m.opened}</span> · Clic: <span className="text-foreground font-medium">{m.clicked}</span> · Resp: <span className="text-foreground font-medium">{m.replied}</span>
+                              </div>
+                            );
+                          })()}
+                        </TableCell>
                         <TableCell>{c.isPaused ? 'Pausada' : 'Activa'}</TableCell>
                         <TableCell className="text-right space-x-2">
                           <Button size="sm" variant="outline" onClick={() => doPreview(c)} disabled={previewLoading}><Eye className="mr-1 h-4 w-4" />{previewLoading ? 'Cargando...' : 'Previsualizar'}</Button>
@@ -807,6 +879,78 @@ export default function CampaignsPage() {
                         <Input type="number" min={0} max={23} value={draft.settings.smartScheduling.endHour} onChange={(e) =>
                           setDraft(d => ({ ...d, settings: { ...d.settings, smartScheduling: { ...d.settings.smartScheduling!, endHour: Number(e.target.value) } } }))
                         } />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="h-px bg-border my-6" />
+
+                <div className="space-y-3">
+                  <h3 className="text-sm font-medium">Tracking opcional</h3>
+                  <p className="text-xs text-muted-foreground">Activa solo si deseas medir aperturas y clics en esta campaña.</p>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="track-enabled"
+                      checked={!!draft.settings?.tracking?.enabled}
+                      onCheckedChange={(v) =>
+                        setDraft(d => ({
+                          ...d,
+                          settings: {
+                            ...d.settings,
+                            tracking: {
+                              enabled: v,
+                              pixel: d.settings?.tracking?.pixel ?? true,
+                              linkTracking: d.settings?.tracking?.linkTracking ?? true,
+                            }
+                          }
+                        }))
+                      }
+                    />
+                    <Label htmlFor="track-enabled">Habilitar tracking en esta campaña</Label>
+                  </div>
+
+                  {!!draft.settings?.tracking?.enabled && (
+                    <div className="grid gap-3 md:grid-cols-2 border p-4 rounded-md">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id="track-pixel"
+                          checked={draft.settings?.tracking?.pixel ?? true}
+                          onCheckedChange={(v) =>
+                            setDraft(d => ({
+                              ...d,
+                              settings: {
+                                ...d.settings,
+                                tracking: {
+                                  enabled: true,
+                                  pixel: v,
+                                  linkTracking: d.settings?.tracking?.linkTracking ?? true,
+                                }
+                              }
+                            }))
+                          }
+                        />
+                        <Label htmlFor="track-pixel">Pixel de apertura</Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id="track-links"
+                          checked={draft.settings?.tracking?.linkTracking ?? true}
+                          onCheckedChange={(v) =>
+                            setDraft(d => ({
+                              ...d,
+                              settings: {
+                                ...d.settings,
+                                tracking: {
+                                  enabled: true,
+                                  pixel: d.settings?.tracking?.pixel ?? true,
+                                  linkTracking: v,
+                                }
+                              }
+                            }))
+                          }
+                        />
+                        <Label htmlFor="track-links">Tracking de links</Label>
                       </div>
                     </div>
                   )}

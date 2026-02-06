@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
         // 3.1. CHECK TRACKING CONFIG
         let finalBody = emailBody;
         let effectiveIsHtml = Boolean(isHtml);
-        const { missionId, leadId } = body;
+        const { missionId, leadId, tracking } = body;
 
         let missionOrgId: string | null = null;
 
@@ -163,23 +163,39 @@ export async function POST(req: NextRequest) {
                         .eq('organization_id', mission.organization_id)
                         .single();
 
-                    if (config?.tracking_enabled) {
+                    const trackingEnabled = typeof tracking?.enabled === 'boolean'
+                        ? tracking.enabled
+                        : Boolean(config?.tracking_enabled);
+                    const trackPixel = trackingEnabled && (tracking?.pixel ?? true);
+                    const trackLinks = trackingEnabled && (tracking?.linkTracking ?? true);
+
+                    if (trackingEnabled && effectiveIsHtml) {
+                        // Link tracking (optional)
+                        if (trackLinks && !finalBody.includes('/api/tracking/click')) {
+                            const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+                            finalBody = finalBody.replace(/href=("|')(http[^"']+)("|')/gi, (match: string, quote: string, url: string) => {
+                                if (String(url).includes('/api/tracking/click')) return match;
+                                if (String(url).includes('/unsubscribe?')) return match;
+                                if (String(url).startsWith('mailto:')) return match;
+                                const trackingUrl = `${appUrl}/api/tracking/click?id=${leadId}&url=${encodeURIComponent(url)}`;
+                                return `href=${quote}${trackingUrl}${quote}`;
+                            });
+                        }
+
+                        // Pixel tracking (optional)
+                        if (trackPixel && !finalBody.includes('/api/tracking/open?id=')) {
+                            const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+                            const pixelUrl = `${appUrl}/api/tracking/open?id=${leadId}`;
+                            const pixelHtml = `<img src="${pixelUrl}" width="1" height="1" style="display:none;" alt="" />`;
+                            finalBody = finalBody + pixelHtml;
+                        }
+                    } else if (trackingEnabled && !effectiveIsHtml && trackPixel) {
+                        // If text/plain, wrap into HTML to allow pixel (links tracking skipped)
                         const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
                         const pixelUrl = `${appUrl}/api/tracking/open?id=${leadId}`;
                         const pixelHtml = `<img src="${pixelUrl}" width="1" height="1" style="display:none;" alt="" />`;
-
-                        console.log(`[CONTACT_DEBUG] Injecting tracking pixel for lead ${leadId}`);
-                        if (effectiveIsHtml) {
-                            finalBody = emailBody + pixelHtml;
-                        } else {
-                            // If text/plain, we can't really inject a pixel easily without Multipart/Alternative which is complex here.
-                            // We force HTML if not already, or just skip for text.
-                            // Assuming rich text editor always sends HTML or we treat as such for tracking.
-                            // For now, only append if isHtml is true or we decide to treat plain text as HTML wrapper.
-                            // Let's assume we can wrap plain text in simple HTML
-                            finalBody = `<div>${emailBody.replace(/\n/g, '<br>')}</div>${pixelHtml}`;
-                            effectiveIsHtml = true;
-                        }
+                        finalBody = `<div>${emailBody.replace(/\n/g, '<br>')}</div>${pixelHtml}`;
+                        effectiveIsHtml = true;
                     }
 
                     // Append signed unsubscribe link (only for outbound lead emails)

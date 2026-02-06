@@ -14,7 +14,7 @@ interface MissionMetrics {
     missionTitle: string;
     totalSent: number;
     totalOpened: number;
-    totalclicked: number;
+    totalClicked: number;
     totalReplied: number;
 }
 
@@ -66,7 +66,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
                     missionTitle: mission.title,
                     totalSent: missionLeads.length,
                     totalOpened: missionLeads.filter(l => l.opened_at).length,
-                    totalclicked: missionLeads.filter(l => l.clicked_at).length,
+                    totalClicked: missionLeads.filter(l => l.clicked_at).length,
                     totalReplied: missionLeads.filter(l => l.replied_at).length
                 };
             });

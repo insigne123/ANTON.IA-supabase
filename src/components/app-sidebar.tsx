@@ -22,7 +22,7 @@ import { useAuth } from '@/context/AuthContext';
 
 const navItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { href: '/antonia', icon: Bot, label: 'Agente ANTONIA' },
+  { href: '/antonia', icon: Bot, label: 'Agente ANTON.IA' },
   { href: '/profile', icon: User, label: 'Mi Perfil de Empresa' },
   { href: '/search', icon: Search, label: 'Búsqueda de Leads' },
   { href: '/opportunities', icon: Briefcase, label: 'Oportunidades' },
