@@ -38,6 +38,12 @@ function mapRowToContactedLead(row: any): ContactedLead {
         followUpCount: row.follow_up_count,
         lastFollowUpAt: row.last_follow_up_at,
         lastStepIdx: row.last_step_idx,
+        replyIntent: row.reply_intent,
+        replySentiment: row.reply_sentiment,
+        replyConfidence: row.reply_confidence,
+        replySummary: row.reply_summary,
+        campaignFollowupAllowed: row.campaign_followup_allowed,
+        campaignFollowupReason: row.campaign_followup_reason,
     };
 }
 

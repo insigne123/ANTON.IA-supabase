@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { classifyReply, extractReplyPreview } from '@/lib/reply-classifier';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
                 // Fetch latest contacted row for this lead to attach org/mission and update safely
                 const { data: contacted } = await supabase
                     .from('contacted_leads')
-                    .select('id, organization_id, mission_id, engagement_score, click_count, opened_at, clicked_at, replied_at')
+                    .select('id, user_id, email, organization_id, mission_id, engagement_score, click_count, opened_at, clicked_at, replied_at, campaign_followup_allowed')
                     .eq('lead_id', leadId)
                     .order('sent_at', { ascending: false })
                     .limit(1)
@@ -102,6 +103,46 @@ export async function POST(req: Request) {
                 if (eventType === 'reply') {
                     updateData.replied_at = timestamp;
                     updateData.status = 'replied';
+                    updateData.last_follow_up_at = timestamp;
+
+                    const replyContent = event.text || event.html || '';
+                    const preview = extractReplyPreview(replyContent);
+                    updateData.reply_preview = preview || null;
+                    updateData.last_reply_text = replyContent ? String(replyContent).slice(0, 4000) : null;
+
+                    try {
+                        const classification = await classifyReply(replyContent || '');
+                        updateData.reply_intent = classification.intent;
+                        updateData.reply_sentiment = classification.sentiment;
+                        updateData.reply_confidence = classification.confidence;
+                        updateData.reply_summary = classification.summary || null;
+                        updateData.campaign_followup_allowed = classification.shouldContinue;
+                        updateData.campaign_followup_reason = classification.reason || null;
+
+                        if (!classification.shouldContinue) {
+                            updateData.evaluation_status = classification.intent === 'negative' || classification.intent === 'unsubscribe'
+                                ? 'do_not_contact'
+                                : 'action_required';
+                        }
+
+                        if ((classification.intent === 'unsubscribe' || classification.intent === 'negative') && (contacted as any)?.email) {
+                            await supabase
+                                .from('unsubscribed_emails')
+                                .upsert({
+                                    email: (contacted as any).email,
+                                    user_id: (contacted as any).user_id || null,
+                                    organization_id: orgId,
+                                    reason: `reply:${classification.intent}`,
+                                }, { onConflict: 'email,user_id,organization_id' } as any);
+                        }
+                    } catch (err) {
+                        updateData.reply_intent = 'unknown';
+                        updateData.reply_sentiment = 'neutral';
+                        updateData.reply_confidence = 0.2;
+                        updateData.reply_summary = null;
+                        updateData.campaign_followup_allowed = false;
+                        updateData.campaign_followup_reason = 'classifier_error';
+                    }
                 }
 
                 if ((contacted as any)?.id) {

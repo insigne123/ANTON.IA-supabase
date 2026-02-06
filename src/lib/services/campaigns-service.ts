@@ -52,6 +52,11 @@ export type Campaign = {
             startHour: number; // 0-23
             endHour: number;   // 0-23
         };
+        tracking?: {
+            enabled: boolean;
+            pixel?: boolean;
+            linkTracking?: boolean;
+        };
     };
 };
 

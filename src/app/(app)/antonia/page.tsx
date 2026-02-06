@@ -2,10 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { useRouter } from 'next/navigation';
 import { antoniaService } from '@/lib/services/antonia-service';
 import { AntoniaMission, AntoniaConfig, Campaign } from '@/lib/types';
-import { googleAuthService } from '@/lib/google-auth-service';
-import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,6 +42,8 @@ import { MetricsDashboard } from '@/components/antonia/MetricsDashboard';
 import { ReportsHistory } from '@/components/antonia/ReportsHistory';
 import { ReportViewer } from '@/components/antonia/ReportViewer';
 import { MissionQueues } from '@/components/antonia/MissionQueues';
+import { LeadAuditTrail } from '@/components/antonia/LeadAuditTrail';
+import { ActiveAgentsPanel } from '@/components/antonia/ActiveAgentsPanel';
 
 import {
     Sheet,
@@ -119,10 +120,18 @@ export default function AntoniaPage() {
     // Integration Connection State
     const [googleConnected, setGoogleConnected] = useState(false);
     const [outlookConnected, setOutlookConnected] = useState(false);
-    const [connectingProvider, setConnectingProvider] = useState<'google' | 'outlook' | null>(null);
 
     const supabase = createClientComponentClient();
+    const router = useRouter();
     const { toast } = useToast();
+
+    const missingStep1 = [
+        !wizardData.location.trim() ? 'Ubicacion' : null,
+        !wizardData.industry.trim() ? 'Industria' : null,
+        !wizardData.companySize.trim() ? 'Tamano de empresa' : null,
+    ].filter(Boolean) as string[];
+    const canGoNext = step !== 1 || missingStep1.length === 0;
+    const canLaunch = missingStep1.length === 0;
 
     useEffect(() => {
         async function loadData() {
@@ -241,18 +250,26 @@ export default function AntoniaPage() {
             if (!userId) return;
 
             try {
-                const res = await fetch('/api/integrations/store-token');
-                if (res.ok) {
-                    const connections = await res.json();
-                    setGoogleConnected(connections.google || false);
-                    setOutlookConnected(connections.outlook || false);
+                // Source of truth for offline sending is provider_tokens (refresh token stored server-side)
+                const { data, error } = await supabase
+                    .from('provider_tokens')
+                    .select('provider')
+                    .eq('user_id', userId);
+
+                if (error) {
+                    console.error('[OAuth] Failed to load provider token status:', error);
+                    return;
                 }
+
+                const providers = new Set((data || []).map((r: any) => r.provider));
+                setGoogleConnected(providers.has('google'));
+                setOutlookConnected(providers.has('outlook'));
             } catch (error) {
                 console.error('[OAuth] Failed to load connection status:', error);
             }
         }
         checkConnectionStatus();
-    }, [userId]);
+    }, [userId, supabase]);
 
     const handleCreateMission = async () => {
         if (isCreating) return;
@@ -476,82 +493,12 @@ export default function AntoniaPage() {
     };
 
     // OAuth Integration Handlers
-    const handleConnectGoogle = async () => {
-        setConnectingProvider('google');
-        try {
-            await googleAuthService.login();
-            const session = googleAuthService.getSession();
-
-            if (session?.accessToken && userId) {
-                // Store token for server-side use
-                const res = await fetch('/api/integrations/store-token', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        provider: 'google',
-                        userId: userId
-                    })
-                });
-
-                if (res.ok) {
-                    setGoogleConnected(true);
-                    toast({
-                        title: 'Google Conectado',
-                        description: 'Tu cuenta está lista para enviar notificaciones.'
-                    });
-                } else {
-                    throw new Error('Failed to store token');
-                }
-            }
-        } catch (error: any) {
-            console.error('[OAuth] Google connection failed:', error);
-            toast({
-                variant: 'destructive',
-                title: 'Error',
-                description: error.message || 'No se pudo conectar con Google.'
-            });
-        } finally {
-            setConnectingProvider(null);
-        }
+    const handleConnectGoogle = () => {
+        router.push('/gmail');
     };
 
-    const handleConnectOutlook = async () => {
-        setConnectingProvider('outlook');
-        try {
-            await microsoftAuthService.login();
-            const identity = microsoftAuthService.getUserIdentity();
-
-            if (identity?.email && userId) {
-                // Store connection for server-side use
-                const res = await fetch('/api/integrations/store-token', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        provider: 'outlook',
-                        userId: userId
-                    })
-                });
-
-                if (res.ok) {
-                    setOutlookConnected(true);
-                    toast({
-                        title: 'Outlook Conectado',
-                        description: 'Tu cuenta está lista para enviar notificaciones.'
-                    });
-                } else {
-                    throw new Error('Failed to store token');
-                }
-            }
-        } catch (error: any) {
-            console.error('[OAuth] Outlook connection failed:', error);
-            toast({
-                variant: 'destructive',
-                title: 'Error',
-                description: error.message || 'No se pudo conectar con Outlook.'
-            });
-        } finally {
-            setConnectingProvider(null);
-        }
+    const handleConnectOutlook = () => {
+        router.push('/outlook');
     };
 
     if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary" /></div>;
@@ -559,7 +506,7 @@ export default function AntoniaPage() {
     return (
         <div className="container mx-auto space-y-6">
             <PageHeader
-                title="Agente ANTONIA"
+                title="Agente ANTON.IA"
                 description="Tu asistente de prospección automatizada. Define misiones y ANTONIA se encarga del resto."
             />
 
@@ -582,6 +529,8 @@ export default function AntoniaPage() {
                 <TabsContent value="builder" className="space-y-6">
                     {/* Quota Usage Dashboard */}
                     <QuotaUsageCard />
+
+                    {orgId && <ActiveAgentsPanel organizationId={orgId} />}
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* Left: Helper */}
@@ -826,11 +775,11 @@ export default function AntoniaPage() {
                                                     <Input
                                                         type="number"
                                                         min="1"
-                                                        max="20"
+                                                        max="50"
                                                         value={wizardData.dailyInvestigateLimit}
                                                         onChange={(e) => setWizardData({ ...wizardData, dailyInvestigateLimit: parseInt(e.target.value) || 5 })}
                                                     />
-                                                    <p className="text-xs text-muted-foreground">Máx: 20 leads/día</p>
+                                                    <p className="text-xs text-muted-foreground">Máx: 50 leads/día</p>
                                                 </div>
 
                                                 <div className="space-y-2">
@@ -852,11 +801,11 @@ export default function AntoniaPage() {
                                                     <Input
                                                         type="number"
                                                         min="1"
-                                                        max="10"
+                                                        max="50"
                                                         value={wizardData.dailyContactLimit}
                                                         onChange={(e) => setWizardData({ ...wizardData, dailyContactLimit: parseInt(e.target.value) || 3 })}
                                                     />
-                                                    <p className="text-xs text-muted-foreground">Máx: 10 contactos/día</p>
+                                                    <p className="text-xs text-muted-foreground">Máx: 50 contactos/día</p>
                                                 </div>
                                             </div>
                                         </div>
@@ -999,11 +948,20 @@ export default function AntoniaPage() {
                                     Atrás
                                 </Button>
                                 {step < 3 ? (
-                                    <Button onClick={() => setStep(s => Math.min(3, s + 1))}>
+                                    <Button
+                                        onClick={() => setStep(s => Math.min(3, s + 1))}
+                                        disabled={!canGoNext}
+                                        title={!canGoNext ? `Completa: ${missingStep1.join(', ')}` : undefined}
+                                    >
                                         Siguiente <ArrowRight className="w-4 h-4 ml-2" />
                                     </Button>
                                 ) : (
-                                    <Button onClick={handleCreateMission} className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-md">
+                                    <Button
+                                        onClick={handleCreateMission}
+                                        disabled={!canLaunch}
+                                        title={!canLaunch ? `Completa: ${missingStep1.join(', ')}` : undefined}
+                                        className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-md"
+                                    >
                                         <Play className="w-4 h-4 mr-2" /> Lanzar Misión
                                     </Button>
                                 )}
@@ -1015,6 +973,8 @@ export default function AntoniaPage() {
                 <TabsContent value="active" className="space-y-6">
                     {/* Quota Usage Dashboard (Visible locally in active tab too) */}
                     <QuotaUsageCard />
+
+                    {orgId && <ActiveAgentsPanel organizationId={orgId} />}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {missions.length === 0 ? (
                             <div className="col-span-full flex flex-col items-center justify-center py-16 text-muted-foreground border-2 border-dashed rounded-xl">
@@ -1255,6 +1215,7 @@ export default function AntoniaPage() {
                                             id="search-limit"
                                             type="number"
                                             min="1"
+                                            max="5"
                                             defaultValue={config?.dailySearchLimit ?? 3}
                                             onBlur={(e) => {
                                                 const val = parseInt(e.target.value);
@@ -1263,7 +1224,7 @@ export default function AntoniaPage() {
                                                 }
                                             }}
                                         />
-                                        <p className="text-xs text-muted-foreground">Máx. de veces que ANTONIA busca al día</p>
+                                        <p className="text-xs text-muted-foreground">Máx. 5 búsquedas por día</p>
                                     </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="enrich-limit">Enriquecimientos Diarios</Label>
@@ -1271,6 +1232,7 @@ export default function AntoniaPage() {
                                             id="enrich-limit"
                                             type="number"
                                             min="1"
+                                            max="50"
                                             defaultValue={config?.dailyEnrichLimit ?? 50}
                                             onBlur={(e) => {
                                                 const val = parseInt(e.target.value);
@@ -1279,7 +1241,7 @@ export default function AntoniaPage() {
                                                 }
                                             }}
                                         />
-                                        <p className="text-xs text-muted-foreground">Máx. leads a verificar email</p>
+                                        <p className="text-xs text-muted-foreground">Máx. 50 leads a verificar email</p>
                                     </div>
                                     <div className="space-y-2">
                                         <Label htmlFor="investigate-limit">Investigaciones Diarias (Deep)</Label>
@@ -1287,6 +1249,7 @@ export default function AntoniaPage() {
                                             id="investigate-limit"
                                             type="number"
                                             min="1"
+                                            max="50"
                                             defaultValue={config?.dailyInvestigateLimit ?? 20}
                                             onBlur={(e) => {
                                                 const val = parseInt(e.target.value);
@@ -1295,7 +1258,7 @@ export default function AntoniaPage() {
                                                 }
                                             }}
                                         />
-                                        <p className="text-xs text-muted-foreground">Máx. leads con datos completos (Tel)</p>
+                                        <p className="text-xs text-muted-foreground">Máx. 50 leads con datos completos (Tel)</p>
                                     </div>
                                 </div>
                             </div>
@@ -1315,13 +1278,8 @@ export default function AntoniaPage() {
                                         <Button
                                             variant="outline"
                                             onClick={handleConnectGoogle}
-                                            disabled={connectingProvider !== null}
                                         >
-                                            {connectingProvider === 'google' ? (
-                                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                            ) : (
-                                                <Settings className="w-4 h-4 mr-2" />
-                                            )}
+                                            <Settings className="w-4 h-4 mr-2" />
                                             {googleConnected ? 'Reconectar' : 'Conectar'} Cuenta
                                         </Button>
                                     </div>
@@ -1334,13 +1292,8 @@ export default function AntoniaPage() {
                                         <Button
                                             variant="outline"
                                             onClick={handleConnectOutlook}
-                                            disabled={connectingProvider !== null}
                                         >
-                                            {connectingProvider === 'outlook' ? (
-                                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                            ) : (
-                                                <Settings className="w-4 h-4 mr-2" />
-                                            )}
+                                            <Settings className="w-4 h-4 mr-2" />
                                             {outlookConnected ? 'Reconectar' : 'Conectar'} Cuenta
                                         </Button>
                                     </div>
@@ -1377,9 +1330,10 @@ export default function AntoniaPage() {
                     {selectedActivityMission && (
                         <Tabs defaultValue="activity" className="flex-1 flex flex-col overflow-hidden">
                             <div className="px-6 pt-2 border-b">
-                                <TabsList className="grid w-full grid-cols-2">
+                                <TabsList className="grid w-full grid-cols-3">
                                     <TabsTrigger value="activity">Actividad</TabsTrigger>
                                     <TabsTrigger value="queues">Cola de Leads</TabsTrigger>
+                                    <TabsTrigger value="audit">Auditoria</TabsTrigger>
                                 </TabsList>
                             </div>
 
@@ -1392,6 +1346,12 @@ export default function AntoniaPage() {
                             <TabsContent value="queues" className="flex-1 overflow-hidden p-0 m-0 relative">
                                 <div className="absolute inset-0">
                                     <MissionQueues missionId={selectedActivityMission.id} />
+                                </div>
+                            </TabsContent>
+
+                            <TabsContent value="audit" className="flex-1 overflow-hidden p-0 m-0 relative">
+                                <div className="absolute inset-0">
+                                    <LeadAuditTrail missionId={selectedActivityMission.id} />
                                 </div>
                             </TabsContent>
                         </Tabs>

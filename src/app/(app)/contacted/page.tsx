@@ -186,6 +186,16 @@ export default function ContactedPage() {
           replyPreview: (best as any).snippet || (best as any).bodyPreview || '',
           repliedAt: repliedAtDate.toISOString(),
         });
+        // Classify reply to decide campaign follow-up
+        try {
+          await fetch('/api/replies/classify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contactedId: it.id, text: (best as any).snippet || (best as any).bodyPreview || '' }),
+          });
+        } catch (e) {
+          console.warn('[contacted] classify reply failed:', e);
+        }
         toast({ title: 'Respondido', description: 'El contacto respondió este hilo.' });
         refresh();
       } else {
@@ -289,6 +299,15 @@ export default function ContactedPage() {
             replyPreview: (best as any).snippet || (best as any).bodyPreview || '',
             repliedAt: repliedAtDate.toISOString(),
           } as any);
+          try {
+            await fetch('/api/replies/classify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contactedId: it.id, text: (best as any).snippet || (best as any).bodyPreview || '' }),
+            });
+          } catch (e) {
+            console.warn('[contacted] classify reply failed:', e);
+          }
           found++;
         }
       } catch (e: any) {

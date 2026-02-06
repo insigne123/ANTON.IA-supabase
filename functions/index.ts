@@ -7,9 +7,78 @@
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
-// Hardcoded URLs for Cloud Functions
-const APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
-const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
+
+// NOTE: Keep defaults for backwards compatibility, but prefer env vars in production.
+const DEFAULT_APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
+const DEFAULT_LEAD_SEARCH_URL = 'https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search';
+
+function getAppUrl(): string {
+    return (
+        process.env.ANTONIA_APP_URL ||
+        process.env.APP_URL ||
+        process.env.NEXT_PUBLIC_APP_URL ||
+        DEFAULT_APP_URL
+    );
+}
+
+function getLeadSearchUrl(): string {
+    return process.env.ANTONIA_LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
+}
+
+type LeadEventInsert = {
+    organization_id: string;
+    mission_id?: string | null;
+    task_id?: string | null;
+    lead_id: string;
+    event_type: string;
+    stage?: string | null;
+    outcome?: string | null;
+    message?: string | null;
+    meta?: any;
+    created_at?: string;
+};
+
+async function safeInsertLeadEvents(supabase: SupabaseClient, events: LeadEventInsert[]) {
+    if (!events || events.length === 0) return;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const filtered = events.filter((e) => e.lead_id && uuidRegex.test(String(e.lead_id)));
+    if (filtered.length === 0) return;
+    try {
+        const { error } = await supabase.from('antonia_lead_events').insert(filtered);
+        if (error) {
+            console.error('[antonia_lead_events] insert error:', error);
+        }
+    } catch (e) {
+        console.error('[antonia_lead_events] insert exception:', e);
+    }
+}
+
+async function safeHeartbeatTask(
+    supabase: SupabaseClient,
+    taskId: string,
+    patch?: { progress_current?: number | null; progress_total?: number | null; progress_label?: string | null }
+) {
+    if (!taskId) return;
+    const nowIso = new Date().toISOString();
+    try {
+        const payload: any = {
+            heartbeat_at: nowIso,
+            updated_at: nowIso,
+        };
+        if (patch) {
+            if (patch.progress_current !== undefined) payload.progress_current = patch.progress_current;
+            if (patch.progress_total !== undefined) payload.progress_total = patch.progress_total;
+            if (patch.progress_label !== undefined) payload.progress_label = patch.progress_label;
+        }
+        const { error } = await supabase.from('antonia_tasks').update(payload).eq('id', taskId);
+        if (error) {
+            // Don't fail the task for observability failures.
+            console.warn('[antonia_tasks] heartbeat update failed:', error.message || error);
+        }
+    } catch (e) {
+        console.warn('[antonia_tasks] heartbeat update exception:', e);
+    }
+}
 
 // Helper functions
 async function getDailyUsage(supabase: SupabaseClient, organizationId: string) {
@@ -146,27 +215,121 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
 
     const { data: existing } = await supabase
         .from('campaigns')
-        .select('id, name, subject, body')
+        .select('id, name, sent_records')
         .eq('organization_id', task.organization_id)
         .eq('name', generatedName)
         .maybeSingle();
 
-    let subject = existing?.subject || '';
-    let body = existing?.body || '';
+    let subjectPreview = '';
+    let bodyPreview = '';
 
     if (!existing) {
-        subject = `Oportunidad para innovar en ${industry}`;
-        body = `Hola {{firstName}},\n\nEspero que estés muy bien.\n\nVi que estás liderando iniciativas de ${jobTitle} y me pareció muy relevante contactarte.\n${campaignContext ? `\nContexto específico: ${campaignContext}\n` : ''}\nMe gustaría conversar sobre cómo podemos potenciar sus resultados.\n\n¿Tienes 5 minutos esta semana?\n\nSaludos,`;
+        let steps: Array<{ name?: string; offsetDays?: number; subject?: string; bodyHtml?: string }> = [];
+        let aiGenerated = false;
 
-        await supabase.from('campaigns').insert({
-            organization_id: task.organization_id,
-            user_id: userId,
-            name: generatedName,
-            subject: subject,
-            body: body,
-            status: 'draft',
-            created_at: new Date().toISOString()
-        });
+        try {
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('full_name')
+                .eq('id', userId)
+                .maybeSingle();
+
+            const appUrl = getAppUrl();
+            const aiRes = await fetch(`${appUrl}/api/ai/generate-campaign`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jobTitle,
+                    industry,
+                    missionTitle,
+                    campaignContext,
+                    userName: profile?.full_name || undefined,
+                    language: 'es'
+                })
+            });
+
+            if (aiRes.ok) {
+                const aiData = await aiRes.json();
+                if (Array.isArray(aiData?.steps) && aiData.steps.length > 0) {
+                    steps = aiData.steps;
+                    aiGenerated = true;
+                }
+            } else {
+                const errText = await aiRes.text().catch(() => '');
+                console.warn('[GENERATE] AI request failed:', errText.slice(0, 400));
+            }
+        } catch (e) {
+            console.warn('[GENERATE] AI generation failed, using fallback:', e);
+        }
+
+        if (steps.length === 0) {
+            const fallbackSubject = `Oportunidad para innovar en ${industry}`;
+            const fallbackBody = `Hola {{lead.name}},\n\nEspero que estés muy bien.\n\nVi que estás liderando iniciativas de ${jobTitle} y me pareció muy relevante contactarte.\n${campaignContext ? `\nContexto específico: ${campaignContext}\n` : ''}\nMe gustaría conversar sobre cómo podemos potenciar sus resultados.\n\n¿Tienes 5 minutos esta semana?\n\nSaludos,\n{{sender.name}}`;
+
+            steps = [
+                {
+                    name: 'Contacto inicial',
+                    offsetDays: 0,
+                    subject: fallbackSubject,
+                    bodyHtml: `<p>${fallbackBody.replace(/\n/g, '<br/>')}</p>`
+                }
+            ];
+        }
+
+        subjectPreview = steps[0]?.subject || '';
+        bodyPreview = steps[0]?.bodyHtml || '';
+
+        const { data: campaignRow, error: campaignErr } = await supabase
+            .from('campaigns')
+            .insert({
+                organization_id: task.organization_id,
+                user_id: userId,
+                name: generatedName,
+                status: 'active',
+                excluded_lead_ids: [],
+                settings: {
+                    source: 'antonia',
+                    aiGenerated,
+                    missionId: task.mission_id,
+                    tracking: { enabled: false, pixel: true, linkTracking: true }
+                },
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+        if (campaignErr || !campaignRow) {
+            throw new Error(`Failed to create campaign: ${campaignErr?.message || 'unknown error'}`);
+        }
+
+        const stepsPayload = steps.map((s, idx) => ({
+            campaign_id: campaignRow.id,
+            order_index: idx,
+            name: s.name || `Paso ${idx + 1}`,
+            offset_days: Number.isFinite(Number(s.offsetDays)) ? Number(s.offsetDays) : 0,
+            subject_template: s.subject || '',
+            body_template: s.bodyHtml || '',
+            attachments: []
+        }));
+
+        const { error: stepErr } = await supabase
+            .from('campaign_steps')
+            .insert(stepsPayload);
+
+        if (stepErr) {
+            console.error('[GENERATE] Failed to insert campaign steps:', stepErr);
+        }
+    } else {
+        const { data: existingSteps } = await supabase
+            .from('campaign_steps')
+            .select('subject_template, body_template')
+            .eq('campaign_id', existing.id)
+            .order('order_index', { ascending: true })
+            .limit(1);
+
+        subjectPreview = existingSteps?.[0]?.subject_template || '';
+        bodyPreview = existingSteps?.[0]?.body_template || '';
     }
 
     // Chain to SEARCH task
@@ -186,127 +349,242 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
     return {
         campaignGenerated: true,
         campaignName: generatedName,
-        subjectPreview: subject,
-        bodyPreview: body.substring(0, 150) + '...'
+        subjectPreview,
+        bodyPreview: bodyPreview ? bodyPreview.substring(0, 150) + '...' : ''
     };
 }
 
 async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: any) {
-    const usage = await getDailyUsage(supabase, task.organization_id);
-    const limit = taskConfig?.daily_search_limit || 3;
+    const { jobTitle, location, industry, keywords, companySize } = task.payload || {};
+    const userId = await getTaskUserId(task, supabase);
+    const nowIso = new Date().toISOString();
 
-    if ((usage.search_runs || 0) >= limit) {
-        console.log(`[SEARCH] Daily limit reached(${usage.search_runs} / ${limit})`);
-        return { skipped: true, reason: 'daily_limit_reached' };
+    await safeHeartbeatTask(supabase, task.id, {
+        progress_current: null,
+        progress_total: null,
+        progress_label: 'Buscando leads...'
+    });
+
+    // 1) Global org-level execution limit (protect costs)
+    const usage = await getDailyUsage(supabase, task.organization_id);
+    const globalLimit = taskConfig?.daily_search_limit || 3;
+    if ((usage.search_runs || 0) >= globalLimit) {
+        return { skipped: true, reason: 'daily_limit_reached', scope: 'organization', used: usage.search_runs || 0, limit: globalLimit };
     }
 
-    const { jobTitle, location, industry, keywords, companySize } = task.payload;
-    const userId = await getTaskUserId(task, supabase);
+    // 2) Mission-level limit (the wizard config)
+    try {
+        const { data: mission } = await supabase
+            .from('antonia_missions')
+            .select('daily_search_limit')
+            .eq('id', task.mission_id)
+            .maybeSingle();
+
+        const missionLimit = Math.max(1, Number(mission?.daily_search_limit || 1));
+        const d = new Date();
+        const todayStartUtc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0)).toISOString();
+        const { count: missionSearchesToday } = await supabase
+            .from('antonia_tasks')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', task.mission_id)
+            .eq('type', 'SEARCH')
+            .gte('created_at', todayStartUtc);
+
+        if ((missionSearchesToday || 0) > missionLimit) {
+            return { skipped: true, reason: 'daily_limit_reached', scope: 'mission', used: missionSearchesToday || 0, limit: missionLimit };
+        }
+    } catch (e) {
+        console.warn('[SEARCH] Failed mission limit check (continuing):', e);
+    }
+
+    // 3) Validate required filters (the search API requires these)
+    const missing: string[] = [];
+    if (!String(industry || '').trim()) missing.push('industry');
+    if (!String(location || '').trim()) missing.push('location');
+    if (!String(companySize || '').trim()) missing.push('companySize');
+    if (missing.length > 0) {
+        await safeHeartbeatTask(supabase, task.id, { progress_label: `Omitido: faltan filtros (${missing.join(', ')})` });
+        return { skipped: true, reason: 'missing_filters', missing };
+    }
 
     console.log('[SEARCH] Searching leads:', { jobTitle, location, industry });
 
-    // Payload structure matching exactly what external API expects (based on nextjs route.ts)
-    const searchPayload = {
-        user_id: userId,
-        titles: jobTitle ? [jobTitle] : [],
-        company_location: location ? [location] : [],
-        industry_keywords: industry ? [industry] : [],
-        employee_range: companySize ? [companySize] : [],
-        max_results: 100
-    };
+    // Prefer calling our own API route (centralized logic + USE_APIFY switch)
+    const appUrl = getAppUrl();
+    const internalUrl = `${appUrl}/api/leads/search`;
 
-    console.log('[SEARCH] Sending payload:', JSON.stringify(searchPayload));
+    const internalBody = [
+        {
+            industry_keywords: [String(industry).trim()],
+            company_location: [String(location).trim()],
+            employee_ranges: [String(companySize).trim()],
+            titles: String(jobTitle || '').trim(),
+            seniorities: Array.isArray(task.payload?.seniorities) ? task.payload.seniorities : [],
+            max_results: 100,
+        }
+    ];
 
-    const response = await fetch(LEAD_SEARCH_URL, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(searchPayload)
-    });
+    let data: any = null;
+    try {
+        const response = await fetch(internalUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-user-id': userId,
+            },
+            body: JSON.stringify(internalBody)
+        });
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[SEARCH] API Error Response:', errorText);
-        throw new Error(`Search API failed: ${response.statusText} - ${errorText} `);
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '');
+            throw new Error(`internal_search_failed:${response.status}:${errorText.slice(0, 800)}`);
+        }
+        data = await response.json();
+    } catch (e) {
+        // Backward compatible fallback: hit the external service directly
+        const fallbackUrl = getLeadSearchUrl();
+        console.warn('[SEARCH] Internal search failed. Falling back to external URL:', String(e));
+
+        const searchPayload = {
+            user_id: userId,
+            titles: jobTitle ? [jobTitle] : [],
+            company_location: location ? [location] : [],
+            industry_keywords: industry ? [industry] : [],
+            employee_range: companySize ? [companySize] : [],
+            max_results: 100
+        };
+        const response = await fetch(fallbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(searchPayload)
+        });
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '');
+            throw new Error(`Search API failed: ${response.statusText} - ${errorText}`);
+        }
+        data = await response.json();
     }
 
-    const data = await response.json();
-    const leads = data.results || data.leads || []; // Handle potentially different response structures
+    const rawLeads: any[] = Array.isArray(data?.leads) ? data.leads : (Array.isArray(data?.results) ? data.results : (Array.isArray(data?.data?.leads) ? data.data.leads : []));
+
+    // Normalize across response shapes
+    const normalized = rawLeads.map((lead: any) => {
+        const first = lead.first_name || lead.firstName || '';
+        const last = lead.last_name || lead.lastName || '';
+        const fullName = String(
+            (lead.full_name || lead.fullName) ||
+            `${first} ${last}`.trim() ||
+            lead.name ||
+            ''
+        ).trim();
+
+        const orgName = lead.organization?.name || lead.organization_name || lead.company_name || lead.companyName || lead.company || '';
+        const orgDomain = lead.organization?.domain || lead.organization_domain || lead.company_domain || lead.companyDomain || lead.organization_website_url || null;
+
+        const apolloId = lead.apollo_id || lead.apolloId || lead.id || null;
+
+        return {
+            apolloId: apolloId ? String(apolloId) : null,
+            fullName,
+            title: lead.title || '',
+            email: lead.email || null,
+            linkedinUrl: lead.linkedin_url || lead.linkedinUrl || null,
+            companyName: String(orgName || '').trim(),
+            companyDomain: orgDomain ? String(orgDomain).trim() : null,
+        };
+    }).filter((x: any) => x.fullName);
+
+    const leads = normalized;
 
     if (leads.length > 0) {
-        // IMPORTANT: We generate and persist the DB UUIDs here and propagate them across the whole pipeline.
-        // This prevents the ENRICH endpoint from generating new IDs that don't match `leads.id`.
-        const nowIso = new Date().toISOString();
-        const leadsToInsert = leads.map((lead: any) => {
-            const id = randomUUID();
-            const name = lead.full_name || lead.name || '';
-            const title = lead.title || '';
-            const company = lead.organization_name || lead.company_name || '';
+        // Deduplicate by apollo_id within the mission (best-effort)
+        const apolloIds = Array.from(new Set(leads.map((l: any) => l.apolloId).filter(Boolean)));
+        const existingApollo = new Set<string>();
 
-            return {
-                id,
-                user_id: userId,
-                organization_id: task.organization_id,
-                mission_id: task.mission_id,
-
-                name,
-                title,
-                company,
-
-                email: lead.email || null,
-                linkedin_url: lead.linkedin_url || null,
-
-                // Optional enrichment hints
-                company_website: lead.organization_website_url || null,
-                industry: lead.organization_industry || lead.industry || null,
-                location: lead.location || null,
-                country: lead.country || lead.organization_location_country || null,
-                city: lead.city || lead.organization_location_city || null,
-
-                // External source ID (Apollo/actor)
-                apollo_id: lead.id || null,
-
-                status: 'saved',
-                created_at: nowIso
-            };
-        });
-
-        const { error: insertError } = await supabase.from('leads').insert(leadsToInsert);
-        if (insertError) {
-            console.error('[SEARCH] Failed to insert leads:', insertError);
-            throw new Error(`Failed to insert leads: ${insertError.message}`);
+        if (apolloIds.length > 0) {
+            const { data: existing } = await supabase
+                .from('leads')
+                .select('apollo_id')
+                .eq('mission_id', task.mission_id)
+                .in('apollo_id', apolloIds);
+            (existing || []).forEach((r: any) => {
+                if (r?.apollo_id) existingApollo.add(String(r.apollo_id));
+            });
         }
 
-        console.log(`[SEARCH] 📊 Incrementing usage: `, {
-            organization_id: task.organization_id,
-            leads_searched: leads.length,
-            search_runs: 1
-        });
+        const leadsToInsert = leads
+            .filter((l: any) => !l.apolloId || !existingApollo.has(String(l.apolloId)))
+            .map((l: any) => {
+                const id = randomUUID();
+                return {
+                    id,
+                    user_id: userId,
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
 
-        await incrementUsage(supabase, task.organization_id, 'search', leads.length, task.id);
+                    name: l.fullName,
+                    title: l.title || '',
+                    company: l.companyName || '',
+
+                    email: l.email || null,
+                    linkedin_url: l.linkedinUrl || null,
+
+                    company_website: l.companyDomain || null,
+                    industry: String(industry || '').trim() || null,
+                    location: String(location || '').trim() || null,
+
+                    apollo_id: l.apolloId || null,
+                    status: 'saved',
+                    created_at: nowIso
+                };
+            });
+
+        if (leadsToInsert.length > 0) {
+            const { error: insertError } = await supabase.from('leads').insert(leadsToInsert);
+            if (insertError) {
+                console.error('[SEARCH] Failed to insert leads:', insertError);
+                throw new Error(`Failed to insert leads: ${insertError.message}`);
+            }
+
+            await safeInsertLeadEvents(
+                supabase,
+                leadsToInsert.map((row: any) => ({
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    task_id: task.id,
+                    lead_id: row.id,
+                    event_type: 'lead_found',
+                    stage: 'search',
+                    outcome: 'inserted',
+                    message: `Lead encontrado: ${row.name}`,
+                    meta: {
+                        title: row.title,
+                        company: row.company,
+                        email: row.email,
+                        linkedin_url: row.linkedin_url,
+                        apollo_id: row.apollo_id,
+                    },
+                    created_at: nowIso,
+                }))
+            );
+        }
+
+        const duplicatesSkipped = leads.length - leadsToInsert.length;
+
+        await incrementUsage(supabase, task.organization_id, 'search', leadsToInsert.length, task.id);
         await incrementUsage(supabase, task.organization_id, 'search_run', 1, task.id);
 
         // Chain to ENRICH if configured
-        if (task.payload.enrichmentLevel && leads.length > 0) {
-            // Provide DB-backed leads with stable IDs (use `id`/`clientRef`) so enrichment can update
-            // and later steps can reference `leads.id` reliably.
+        if (task.payload.enrichmentLevel && leadsToInsert.length > 0) {
             const leadsForEnrich = leadsToInsert.slice(0, 10).map((row: any) => ({
                 id: row.id,
                 clientRef: row.id,
-                name: row.name,
-                full_name: row.name,
                 fullName: row.name,
                 title: row.title,
-                company: row.company,
-                company_name: row.company,
                 companyName: row.company,
-                email: row.email,
-                linkedin_url: row.linkedin_url,
                 linkedinUrl: row.linkedin_url,
-                company_website: row.company_website,
                 companyDomain: row.company_website,
-                apollo_id: row.apollo_id,
+                email: row.email,
                 apolloId: row.apollo_id,
                 location: row.location,
                 industry: row.industry,
@@ -324,9 +602,18 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
                     campaignName: task.payload.campaignName,
                     source: 'search_inserted'
                 },
-                created_at: new Date().toISOString()
+                created_at: nowIso
             });
         }
+
+        await safeHeartbeatTask(supabase, task.id, { progress_label: `Búsqueda completada: ${leadsToInsert.length} lead(s)` });
+
+        return {
+            leadsFound: leadsToInsert.length,
+            duplicatesSkipped,
+            searchCriteria: { jobTitle, location, industry, keywords },
+            sampleLeads: leads.slice(0, 5).map((l: any) => ({ name: l.fullName, company: l.companyName, title: l.title }))
+        };
     } else {
         // NO LEADS FOUND - EXHAUSTION DETECTION
         console.log('[SEARCH] ⚠️ No leads found with current filters - checking for uncontacted leads from previous searches');
@@ -444,10 +731,12 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
         }
     }
 
+    await safeHeartbeatTask(supabase, task.id, { progress_label: 'Búsqueda completada: 0 leads' });
+
     return {
-        leadsFound: leads.length,
+        leadsFound: 0,
         searchCriteria: { jobTitle, location, industry, keywords },
-        sampleLeads: leads.slice(0, 5).map((l: any) => ({ name: l.full_name || l.name, company: l.organization_name || l.company_name, title: l.title }))
+        sampleLeads: []
     };
 }
 
@@ -518,15 +807,32 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
 
     const leadsToEnrich = leads.slice(0, remaining);
 
+    // If we had more leads than capacity, record that they were deferred (so the UI can explain "what happened")
+    if (Array.isArray(leads) && leads.length > leadsToEnrich.length) {
+        const deferred = leads.slice(leadsToEnrich.length);
+        await safeInsertLeadEvents(
+            supabase,
+            deferred
+                .filter((l: any) => !!l?.id)
+                .map((l: any) => ({
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    task_id: task.id,
+                    lead_id: String(l.id),
+                    event_type: 'lead_enrich_skipped',
+                    stage: 'enrich',
+                    outcome: 'deferred_by_quota',
+                    message: 'Enriquecimiento diferido por cuota diaria',
+                    meta: { remainingCapacity: remaining },
+                    created_at: new Date().toISOString(),
+                }))
+        );
+    }
+
     console.log(`[ENRICH] Enriching ${leadsToEnrich.length} leads`);
 
-    const appUrl = APP_URL;
+    const appUrl = getAppUrl();
     console.log(`[ENRICH] Using appUrl: ${appUrl} `);
-
-    if (!appUrl) {
-        console.error('[ENRICH] APP_URL not configured!');
-        throw new Error('APP_URL environment variable not configured');
-    }
 
     const revealPhone = enrichmentLevel === 'deep' || enrichmentLevel === 'premium' || enrichmentLevel === 'phone';
 
@@ -548,6 +854,34 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
 
     console.log(`[ENRICH] Calling enrichment API with ${leadsFormatted.length} leads`);
 
+    const attemptAt = new Date().toISOString();
+    await safeHeartbeatTask(supabase, task.id, {
+        progress_current: 0,
+        progress_total: leadsFormatted.length,
+        progress_label: `Enriqueciendo ${leadsFormatted.length} lead(s)...`
+    });
+
+    await safeInsertLeadEvents(
+        supabase,
+        leadsFormatted
+            .filter((l: any) => !!l?.id)
+            .map((l: any) => ({
+                organization_id: task.organization_id,
+                mission_id: task.mission_id,
+                task_id: task.id,
+                lead_id: String(l.id),
+                event_type: 'lead_enrich_started',
+                stage: 'enrich',
+                outcome: 'started',
+                message: 'Enriquecimiento iniciado',
+                meta: {
+                    revealPhone,
+                    enrichmentLevel: enrichmentLevel || null,
+                },
+                created_at: attemptAt,
+            }))
+    );
+
     try {
         const response = await fetch(`${appUrl}/api/opportunities/enrich-apollo`, {
             method: 'POST',
@@ -566,38 +900,111 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
 
         if (response.ok) {
             const data = await response.json();
-            console.log(`[ENRICH] Successfully enriched ${data.enriched?.length || 0} leads`);
+            const enrichedLeads = Array.isArray(data?.enriched) ? data.enriched : [];
+            console.log(`[ENRICH] Successfully enriched ${enrichedLeads.length} leads`);
 
-            const enrichedLeads = data.enriched || [];
+            // Map results by lead id
+            const enrichedById = new Map<string, any>();
+            for (const l of enrichedLeads) {
+                if (l?.id) enrichedById.set(String(l.id), l);
+            }
 
-            // Persist enriched fields back into `leads` so later steps (INVESTIGATE/CONTACT) have email/linkedin/etc.
+            const events: LeadEventInsert[] = [];
+            let emailFoundCount = 0;
+            let noEmailCount = 0;
+            let missingResultCount = 0;
+
+            // Persist enriched fields back into `leads` so later steps can filter reliably.
             // NOTE: /api/opportunities/enrich-apollo already consumes/records daily quota in antonia_daily_usage.
             // Do NOT increment usage here to avoid double counting.
-            for (const l of enrichedLeads) {
-                if (!l?.id) continue;
+            for (const input of leadsFormatted) {
+                const leadId = String(input?.id || '').trim();
+                if (!leadId) continue;
+
+                const out = enrichedById.get(leadId);
+                if (!out) {
+                    missingResultCount++;
+                    // Mark attempt for observability
+                    await supabase
+                        .from('leads')
+                        .update({
+                            last_enrichment_attempt_at: attemptAt,
+                            enrichment_error: 'enrichment_no_result'
+                        } as any)
+                        .eq('id', leadId);
+
+                    events.push({
+                        organization_id: task.organization_id,
+                        mission_id: task.mission_id,
+                        task_id: task.id,
+                        lead_id: leadId,
+                        event_type: 'lead_enrich_failed',
+                        stage: 'enrich',
+                        outcome: 'no_result',
+                        message: 'Enriquecimiento sin resultado (API no devolvio item)',
+                        meta: { revealPhone },
+                        created_at: attemptAt,
+                    });
+                    continue;
+                }
+
+                const emailFound = Boolean(out.email);
+                if (emailFound) emailFoundCount++; else noEmailCount++;
 
                 const updateData: any = {
                     status: 'enriched',
+                    last_enriched_at: attemptAt,
+                    last_enrichment_attempt_at: attemptAt,
+                    enrichment_error: emailFound ? null : 'no_email',
                 };
-                if (l.email !== undefined) updateData.email = l.email || null;
-                if (l.linkedinUrl !== undefined) updateData.linkedin_url = l.linkedinUrl || null;
-                if (l.title) updateData.title = l.title;
-                if (l.companyName) updateData.company = l.companyName;
-                if (l.industry) updateData.industry = l.industry;
-                if (l.location) updateData.location = l.location;
+
+                if (out.email !== undefined) updateData.email = out.email || null;
+                if (out.linkedinUrl !== undefined) updateData.linkedin_url = out.linkedinUrl || null;
+                if (out.title) updateData.title = out.title;
+                if (out.companyName) updateData.company = out.companyName;
+                if (out.industry) updateData.industry = out.industry;
+                if (out.location) updateData.location = out.location;
 
                 const { error: updateError } = await supabase
                     .from('leads')
                     .update(updateData)
-                    .eq('id', l.id);
+                    .eq('id', leadId);
+                if (updateError) console.error('[ENRICH] Error updating lead row:', leadId, updateError);
 
-                if (updateError) {
-                    console.error('[ENRICH] Error updating lead row:', l.id, updateError);
-                }
+                const phoneNumbers = out.phoneNumbers || out.phone_numbers || null;
+                const primaryPhone = out.primaryPhone || out.primary_phone || null;
+                const phoneFound = Boolean(primaryPhone) || (Array.isArray(phoneNumbers) && phoneNumbers.length > 0);
+
+                events.push({
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    task_id: task.id,
+                    lead_id: leadId,
+                    event_type: 'lead_enrich_completed',
+                    stage: 'enrich',
+                    outcome: emailFound ? 'email_found' : 'no_email',
+                    message: emailFound ? 'Email encontrado' : 'Sin email',
+                    meta: {
+                        email: out.email || null,
+                        emailStatus: out.emailStatus || out.email_status || null,
+                        phoneFound,
+                        primaryPhone,
+                        enrichmentStatus: out.enrichmentStatus || out.enrichment_status || null,
+                    },
+                    created_at: attemptAt,
+                });
             }
 
-            // Chain to INVESTIGATE if configured and we have enriched leads
-            if (enrichedLeads.length > 0) {
+            await safeInsertLeadEvents(supabase, events);
+            await safeHeartbeatTask(supabase, task.id, {
+                progress_current: leadsFormatted.length,
+                progress_total: leadsFormatted.length,
+                progress_label: `Enriquecimiento completado: ${emailFoundCount} con email, ${noEmailCount} sin email`
+            });
+
+            // Chain to INVESTIGATE only for contactable leads (email present)
+            const leadsEligible = enrichedLeads.filter((l: any) => !!l?.email);
+            if (leadsEligible.length > 0) {
                 await supabase.from('antonia_tasks').insert({
                     mission_id: task.mission_id,
                     organization_id: task.organization_id,
@@ -605,17 +1012,21 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
                     status: 'pending',
                     payload: {
                         userId: userId,
-                        leads: enrichedLeads,
+                        leads: leadsEligible,
                         campaignName: campaignName,
-                        dryRun: task.payload.dryRun // Propagate dryRun flag
+                        dryRun: task.payload.dryRun
                     },
-                    created_at: new Date().toISOString()
+                    created_at: attemptAt
                 });
             }
 
             return {
                 enrichedCount: enrichedLeads.length,
-                enrichedLeadsSummary: enrichedLeads.map((l: any) => ({
+                emailFoundCount,
+                noEmailCount,
+                missingResultCount,
+                enrichedLeadsSummary: enrichedLeads.slice(0, 30).map((l: any) => ({
+                    id: l.id,
                     name: l.fullName || l.name,
                     company: l.companyName || l.organization?.name,
                     emailFound: !!l.email,
@@ -623,12 +1034,31 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
                 }))
             };
         } else {
-            const errorText = await response.text();
+            const errorText = await response.text().catch(() => '');
             console.error(`[ENRICH] API error: ${response.status} - ${errorText} `);
+
+            // Mark attempts as failed for observability
+            const events: LeadEventInsert[] = leadsFormatted
+                .filter((l: any) => !!l?.id)
+                .map((l: any) => ({
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    task_id: task.id,
+                    lead_id: String(l.id),
+                    event_type: 'lead_enrich_failed',
+                    stage: 'enrich',
+                    outcome: `api_${response.status}`,
+                    message: 'Error llamando API de enriquecimiento',
+                    meta: { error: errorText.slice(0, 800) },
+                    created_at: attemptAt,
+                }));
+            await safeInsertLeadEvents(supabase, events);
+            await safeHeartbeatTask(supabase, task.id, { progress_label: `Error de enriquecimiento (${response.status})` });
             return { enrichedCount: 0, error: errorText };
         }
     } catch (e) {
         console.error('[ENRICH] Failed to enrich leads:', e);
+        await safeHeartbeatTask(supabase, task.id, { progress_label: 'Error de enriquecimiento (exception)' });
         return { enrichedCount: 0, error: String(e) };
     }
 }
@@ -679,6 +1109,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
             .select('id, name, email, title, company, linkedin_url, company_website, apollo_id, industry, location')
             .eq('mission_id', task.mission_id)
             .eq('status', 'enriched')
+            .not('email', 'is', null)
             .order('created_at', { ascending: false })
             .limit(Math.min(remaining, 50));
 
@@ -701,11 +1132,56 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
     const leadsToInvestigate = leads.slice(0, remaining);
 
+    if (Array.isArray(leads) && leads.length > leadsToInvestigate.length) {
+        const deferred = leads.slice(leadsToInvestigate.length);
+        await safeInsertLeadEvents(
+            supabase,
+            deferred
+                .filter((l: any) => !!l?.id)
+                .map((l: any) => ({
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    task_id: task.id,
+                    lead_id: String(l.id),
+                    event_type: 'lead_investigate_skipped',
+                    stage: 'investigate',
+                    outcome: 'deferred_by_quota',
+                    message: 'Investigacion diferida por cuota diaria',
+                    meta: { remainingCapacity: remaining },
+                    created_at: new Date().toISOString(),
+                }))
+        );
+    }
+
+    const attemptAt = new Date().toISOString();
+    await safeHeartbeatTask(supabase, task.id, {
+        progress_current: 0,
+        progress_total: leadsToInvestigate.length,
+        progress_label: `Investigando ${leadsToInvestigate.length} lead(s)...`
+    });
+
+    await safeInsertLeadEvents(
+        supabase,
+        leadsToInvestigate
+            .filter((l: any) => !!l?.id)
+            .map((l: any) => ({
+                organization_id: task.organization_id,
+                mission_id: task.mission_id,
+                task_id: task.id,
+                lead_id: String(l.id),
+                event_type: 'lead_investigate_started',
+                stage: 'investigate',
+                outcome: 'started',
+                message: 'Investigacion iniciada',
+                created_at: attemptAt,
+            }))
+    );
+
     // Restore appUrl if missing (it seems present in line 354, but good to be sure or just define leadsToInvestigate)
     console.log(`[INVESTIGATE] Investigating ${leadsToInvestigate.length} leads`);
 
 
-    const appUrl = APP_URL;
+    const appUrl = getAppUrl();
     const investigatedLeads = [];
 
     // Fetch User Profile for Context (Name, Job Title, Company Profile)
@@ -747,7 +1223,15 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         throw new Error(`Invalid User Context. Debug: ${debugInfo}`);
     }
 
+    let investigateIndex = 0;
     for (const lead of leadsToInvestigate) {
+        investigateIndex++;
+        await safeHeartbeatTask(supabase, task.id, {
+            progress_current: investigateIndex,
+            progress_total: leadsToInvestigate.length,
+            progress_label: `Investigando (${investigateIndex}/${leadsToInvestigate.length}): ${lead.fullName || lead.full_name || lead.name || 'lead'}`
+        });
+
         try {
             console.log(`[INVESTIGATE] Investigating lead: `, {
                 name: lead.fullName || lead.full_name || lead.name,
@@ -790,8 +1274,8 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 userContext: userContext
             };
 
-            // 🚀 BYPASS: Call N8N directly to ensure userContext is preserved
-            const N8N_WEBHOOK_URL = "https://nicogun.app.n8n.cloud/webhook/ANTONIA";
+            // 🚀 Call N8N directly (URL configurable via env)
+            const N8N_WEBHOOK_URL = process.env.ANTONIA_N8N_WEBHOOK_URL || "https://nicogun.app.n8n.cloud/webhook/ANTONIA";
 
             const response = await fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
@@ -832,7 +1316,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                     let jsonStr = null;
 
                     // Strategy 1: Simple Regex for code blocks
-                    const match = content.match(/```json\s * ([\s\S] *?)```/);
+                    const match = content.match(/```json\s*([\s\S]*?)```/);
                     if (match) {
                         jsonStr = match[1];
                     } else {
@@ -899,9 +1383,69 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                     investigatedLeads.push({ ...lead, research: { overview: debugMsg } });
                 }
 
+                // Persist investigation timestamp for quick UI filters
+                if (lead?.id) {
+                    await supabase
+                        .from('leads')
+                        .update({ last_investigated_at: attemptAt, investigation_error: null } as any)
+                        .eq('id', lead.id);
+                }
+
+                await safeInsertLeadEvents(supabase, [
+                    {
+                        organization_id: task.organization_id,
+                        mission_id: task.mission_id,
+                        task_id: task.id,
+                        lead_id: String(lead.id),
+                        event_type: 'lead_investigate_completed',
+                        stage: 'investigate',
+                        outcome: 'completed',
+                        message: 'Investigacion completada',
+                        meta: {
+                            hasOverview: Boolean((investigatedLeads[investigatedLeads.length - 1] as any)?.research?.overview),
+                        },
+                        created_at: attemptAt,
+                    }
+                ]);
+
             } else {
                 const errorText = await response.text();
                 console.error(`[INVESTIGATE] API error: ${response.status} - ${errorText} `);
+
+                // Treat non-OK as a failure, but keep the pipeline moving with a fallback summary
+                const fallbackSummary = `${lead.companyName || lead.company || 'Company'} - ${lead.title || 'Professional'}.` +
+                    `${lead.email ? ` Contact: ${lead.email}` : ' Contact information unavailable.'}`;
+
+                investigatedLeads.push({
+                    ...lead,
+                    research: {
+                        overview: fallbackSummary,
+                        source: 'http_error',
+                        note: `N8N error ${response.status}`
+                    }
+                });
+
+                if (lead?.id) {
+                    await supabase
+                        .from('leads')
+                        .update({ last_investigated_at: attemptAt, investigation_error: `http_${response.status}` } as any)
+                        .eq('id', lead.id);
+                }
+
+                await safeInsertLeadEvents(supabase, [
+                    {
+                        organization_id: task.organization_id,
+                        mission_id: task.mission_id,
+                        task_id: task.id,
+                        lead_id: String(lead.id),
+                        event_type: 'lead_investigate_failed',
+                        stage: 'investigate',
+                        outcome: `http_${response.status}`,
+                        message: 'Investigacion fallo (HTTP)',
+                        meta: { error: errorText.slice(0, 800) },
+                        created_at: attemptAt,
+                    }
+                ]);
             }
 
         } catch (e) {
@@ -919,6 +1463,28 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                     note: 'Research service temporarily unavailable'
                 }
             });
+
+            if (lead?.id) {
+                await supabase
+                    .from('leads')
+                    .update({ last_investigated_at: attemptAt, investigation_error: 'exception' } as any)
+                    .eq('id', lead.id);
+            }
+
+            await safeInsertLeadEvents(supabase, [
+                {
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    task_id: task.id,
+                    lead_id: String(lead.id),
+                    event_type: 'lead_investigate_failed',
+                    stage: 'investigate',
+                    outcome: 'exception',
+                    message: 'Investigacion fallo (exception)',
+                    meta: { error: String((e as any)?.message || e).slice(0, 800) },
+                    created_at: attemptAt,
+                }
+            ]);
 
             console.log(`[INVESTIGATE] Using fallback summary for ${lead.email}`);
         }
@@ -1013,6 +1579,12 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         }
     }
 
+    await safeHeartbeatTask(supabase, task.id, {
+        progress_current: leadsToInvestigate.length,
+        progress_total: leadsToInvestigate.length,
+        progress_label: `Investigación completada: ${investigatedLeads.length} lead(s)`
+    });
+
     return {
         investigatedCount: investigatedLeads.length,
         investigations: investigatedLeads.map((l: any) => ({
@@ -1059,6 +1631,24 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
     // but typically we should still respect limits or at least logs. 
     // Let's keep limit check for now to simulate real behavior.
 
+    // Optional: link initial contact to a campaign for analytics/follow-ups
+    let campaignRef: any = null;
+    let campaignSentRecords: Record<string, any> | null = null;
+    let campaignDirty = false;
+    if (campaignName) {
+        const { data: camp } = await supabase
+            .from('campaigns')
+            .select('id, sent_records, settings')
+            .eq('organization_id', task.organization_id)
+            .eq('name', campaignName)
+            .maybeSingle();
+
+        if (camp?.id) {
+            campaignRef = camp as any;
+            campaignSentRecords = { ...(camp.sent_records || {}) };
+        }
+    }
+
     // [DOMAIN BLACKLIST CHECK]
     const { data: excludedDomains } = await supabase
         .from('excluded_domains')
@@ -1067,20 +1657,120 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
 
     const blacklistedSet = new Set((excludedDomains || []).map((d: any) => d.domain.toLowerCase().trim().replace('@', '')));
 
-    // Filter out blacklisted domains
-    const leadsFiltered = leadsList.filter((l: any) => {
-        if (!l.email) return false;
-        const domain = l.email.split('@')[1]?.toLowerCase();
-        if (domain && blacklistedSet.has(domain)) {
-            console.log(`[CONTACT] 🚫 Skipping ${l.email} due to Blacklisted Domain: ${domain}`);
-            return false;
-        }
-        return true;
+    const attemptAt = new Date().toISOString();
+    const stage = 'contact';
+
+    await safeHeartbeatTask(supabase, task.id, {
+        progress_current: 0,
+        progress_total: leadsList.length,
+        progress_label: `Preparando contacto (${leadsList.length} lead(s))...`
     });
+
+    // Filter out blacklisted domains (but record why we skipped)
+    const leadsFiltered: any[] = [];
+    const skippedEvents: LeadEventInsert[] = [];
+
+    for (const l of leadsList) {
+        const leadId = String(l?.id || '').trim();
+        const email = String(l?.email || '').trim().toLowerCase();
+
+        if (!email) {
+            if (leadId) {
+                skippedEvents.push({
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    task_id: task.id,
+                    lead_id: leadId,
+                    event_type: 'lead_contact_skipped',
+                    stage,
+                    outcome: 'no_email',
+                    message: 'Contacto omitido: lead sin email',
+                    meta: { reason: 'no_email' },
+                    created_at: attemptAt,
+                });
+            }
+            continue;
+        }
+
+        const domain = email.split('@')[1]?.trim() || '';
+        if (domain && blacklistedSet.has(domain)) {
+            console.log(`[CONTACT] 🚫 Skipping ${email} due to Blacklisted Domain: ${domain}`);
+            if (leadId) {
+                skippedEvents.push({
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    task_id: task.id,
+                    lead_id: leadId,
+                    event_type: 'lead_contact_blocked',
+                    stage,
+                    outcome: 'domain_blacklisted',
+                    message: `Contacto bloqueado: dominio excluido (${domain})`,
+                    meta: { reason: 'excluded_domain', domain },
+                    created_at: attemptAt,
+                });
+
+                // Make it non-eligible for future pipeline runs
+                await supabase
+                    .from('leads')
+                    .update({ status: 'do_not_contact' } as any)
+                    .eq('id', leadId);
+            }
+            continue;
+        }
+
+        leadsFiltered.push(l);
+    }
+
+    await safeInsertLeadEvents(supabase, skippedEvents);
 
     const leadsToContact = leadsFiltered.slice(0, limit - (contactsToday || 0));
 
+    if (leadsFiltered.length > leadsToContact.length) {
+        const deferred = leadsFiltered.slice(leadsToContact.length);
+        await safeInsertLeadEvents(
+            supabase,
+            deferred
+                .filter((l: any) => !!l?.id)
+                .map((l: any) => ({
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    task_id: task.id,
+                    lead_id: String(l.id),
+                    event_type: 'lead_contact_skipped',
+                    stage,
+                    outcome: 'deferred_by_quota',
+                    message: 'Contacto diferido por cuota diaria',
+                    meta: { dailyContactLimit: limit, contactsToday: contactsToday || 0 },
+                    created_at: attemptAt,
+                }))
+        );
+    }
+
     console.log(`[CONTACT] Contacting ${leadsToContact.length} leads`);
+
+    await safeHeartbeatTask(supabase, task.id, {
+        progress_current: 0,
+        progress_total: leadsToContact.length,
+        progress_label: `Contactando ${leadsToContact.length} lead(s)...`
+    });
+
+    await safeInsertLeadEvents(
+        supabase,
+        leadsToContact
+            .filter((l: any) => !!l?.id)
+            .map((l: any) => ({
+                organization_id: task.organization_id,
+                mission_id: task.mission_id,
+                task_id: task.id,
+                lead_id: String(l.id),
+                event_type: 'lead_contact_started',
+                stage,
+                outcome: 'started',
+                message: 'Contacto iniciado',
+                meta: { dryRun: Boolean(dryRun) },
+                created_at: attemptAt,
+            }))
+    );
 
     // Fetch user's email signature from profiles
     const { data: profile } = await supabase
@@ -1121,13 +1811,21 @@ Saludos,`;
     }
 
     // App URL (server-to-server)
-    const appUrl = APP_URL;
+    const appUrl = getAppUrl();
 
     console.log(`[CONTACT_INITIAL] Preparing to contact leads using Research Drafts (if available)`);
 
     let contactedCount = 0;
 
+    let contactIndex = 0;
     for (const lead of leadsToContact) {
+        contactIndex++;
+        await safeHeartbeatTask(supabase, task.id, {
+            progress_current: contactIndex,
+            progress_total: leadsToContact.length,
+            progress_label: `Contactando (${contactIndex}/${leadsToContact.length}): ${lead.fullName || lead.full_name || lead.name || lead.email || 'lead'}`
+        });
+
         try {
             // Safe access to research summary
             const researchData = lead.research;
@@ -1224,6 +1922,28 @@ Saludos,`;
                     last_update_at: sentAt,
                 } as any);
 
+                if (campaignRef && campaignSentRecords && lead?.id) {
+                    campaignSentRecords[String(lead.id)] = { lastStepIdx: 0, lastSentAt: sentAt };
+                    campaignDirty = true;
+                }
+
+                if (lead?.id) {
+                    await safeInsertLeadEvents(supabase, [
+                        {
+                            organization_id: task.organization_id,
+                            mission_id: task.mission_id,
+                            task_id: task.id,
+                            lead_id: String(lead.id),
+                            event_type: 'lead_contact_sent',
+                            stage,
+                            outcome: 'sent',
+                            message: 'Contacto enviado (dry run)',
+                            meta: { dryRun: true },
+                            created_at: attemptAt,
+                        }
+                    ]);
+                }
+
                 // Mark lead as contacted so it leaves the enriched queue
                 if (lead.id) {
                     const { error: leadUpdateErr } = await supabase
@@ -1248,7 +1968,8 @@ Saludos,`;
                     leadId: lead.id,
                     campaignId: null,
                     missionId: task.mission_id,
-                    userId: userId
+                    userId: userId,
+                    tracking: campaignRef?.settings?.tracking
                 })
             });
 
@@ -1286,6 +2007,11 @@ Saludos,`;
                     last_update_at: sentAt,
                 } as any);
 
+                if (campaignRef && campaignSentRecords && lead?.id) {
+                    campaignSentRecords[String(lead.id)] = { lastStepIdx: 0, lastSentAt: sentAt };
+                    campaignDirty = true;
+                }
+
                 if (lead.id) {
                     const { error: leadUpdateErr } = await supabase
                         .from('leads')
@@ -1293,21 +2019,115 @@ Saludos,`;
                         .eq('id', lead.id);
                     if (leadUpdateErr) console.error('[CONTACT] Failed to update lead status to contacted:', lead.id, leadUpdateErr);
                 }
+
+                if (lead?.id) {
+                    await safeInsertLeadEvents(supabase, [
+                        {
+                            organization_id: task.organization_id,
+                            mission_id: task.mission_id,
+                            task_id: task.id,
+                            lead_id: String(lead.id),
+                            event_type: 'lead_contact_sent',
+                            stage,
+                            outcome: 'sent',
+                            message: 'Contacto enviado',
+                            meta: { provider: resData.provider || 'unknown' },
+                            created_at: attemptAt,
+                        }
+                    ]);
+                }
             } else {
                 const errorText = await response.text();
                 console.error(`[CONTACT] API error: ${response.status} - ${errorText} `);
 
                 // Track error for reporting
                 lead.error = `API Error ${response.status}: ${errorText.substring(0, 100)} `;
+
+                const lower = String(errorText || '').toLowerCase();
+                const isUnsub = response.status === 409 || lower.includes('unsub');
+                const isBlockedDomain = response.status === 403 || lower.includes('domain blocked') || lower.includes('blocked');
+
+                if (lead?.id) {
+                    if (isUnsub || isBlockedDomain) {
+                        // Don't try again in the automation pipeline
+                        await supabase
+                            .from('leads')
+                            .update({ status: 'do_not_contact' } as any)
+                            .eq('id', lead.id);
+
+                        await safeInsertLeadEvents(supabase, [
+                            {
+                                organization_id: task.organization_id,
+                                mission_id: task.mission_id,
+                                task_id: task.id,
+                                lead_id: String(lead.id),
+                                event_type: 'lead_contact_blocked',
+                                stage,
+                                outcome: isUnsub ? 'unsubscribed' : 'domain_blocked',
+                                message: isUnsub ? 'Contacto bloqueado: destinatario dado de baja' : 'Contacto bloqueado: dominio excluido',
+                                meta: { status: response.status, error: errorText.slice(0, 800) },
+                                created_at: attemptAt,
+                            }
+                        ]);
+                    } else {
+                        await safeInsertLeadEvents(supabase, [
+                            {
+                                organization_id: task.organization_id,
+                                mission_id: task.mission_id,
+                                task_id: task.id,
+                                lead_id: String(lead.id),
+                                event_type: 'lead_contact_failed',
+                                stage,
+                                outcome: `api_${response.status}`,
+                                message: 'Fallo enviando contacto',
+                                meta: { status: response.status, error: errorText.slice(0, 800) },
+                                created_at: attemptAt,
+                            }
+                        ]);
+                    }
+                }
             }
         } catch (e: any) {
             console.error('[CONTACT] Failed to contact lead:', e);
             lead.error = `Exception: ${e.message} `;
+
+            if (lead?.id) {
+                await safeInsertLeadEvents(supabase, [
+                    {
+                        organization_id: task.organization_id,
+                        mission_id: task.mission_id,
+                        task_id: task.id,
+                        lead_id: String(lead.id),
+                        event_type: 'lead_contact_failed',
+                        stage,
+                        outcome: 'exception',
+                        message: 'Fallo enviando contacto (exception)',
+                        meta: { error: String(e?.message || e).slice(0, 800) },
+                        created_at: attemptAt,
+                    }
+                ]);
+            }
+        }
+    }
+
+    if (campaignRef && campaignDirty && campaignSentRecords) {
+        const { error: campErr } = await supabase
+            .from('campaigns')
+            .update({ sent_records: campaignSentRecords, updated_at: new Date().toISOString() })
+            .eq('id', campaignRef.id);
+        if (campErr) {
+            console.warn('[CONTACT] Failed to update campaign sent_records:', campErr);
         }
     }
 
     // Do NOT mark mission as completed immediately. 
     // The mission continues with the evaluation phase.
+
+    await safeHeartbeatTask(supabase, task.id, {
+        progress_current: leadsToContact.length,
+        progress_total: leadsToContact.length,
+        progress_label: `Contacto completado: ${contactedCount} enviado(s)`
+    });
 
     return {
         contactedCount,
@@ -1451,9 +2271,69 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         // 5. Get Active Missions
         const { data: missions } = await supabase
             .from('antonia_missions')
-            .select('title, status, daily_search_limit')
+            .select('id, title, status, daily_search_limit')
             .eq('organization_id', organizationId)
             .eq('status', 'active');
+
+        // 5.1 Snapshot of active agents (tasks)
+        let activeTasks: any[] = [];
+        try {
+            const { data: t } = await supabase
+                .from('antonia_tasks')
+                .select('mission_id, type, status, progress_label, progress_current, progress_total, heartbeat_at, created_at')
+                .eq('organization_id', organizationId)
+                .in('status', ['pending', 'processing'])
+                .order('created_at', { ascending: false })
+                .limit(100);
+            activeTasks = (t as any[]) || [];
+        } catch (e) {
+            console.warn('[REPORT][daily] Failed to load active tasks snapshot:', e);
+        }
+
+        // 5.2 Lead-event breakdown for full transparency
+        const perMission: Record<string, any> = {};
+        try {
+            const { data: evs } = await supabase
+                .from('antonia_lead_events')
+                .select('mission_id, event_type, outcome')
+                .eq('organization_id', organizationId)
+                .gte('created_at', `${today}T00:00:00Z`)
+                .limit(5000);
+
+            for (const e of (evs as any[]) || []) {
+                const mid = String(e.mission_id || '').trim();
+                if (!mid) continue;
+                if (!perMission[mid]) {
+                    perMission[mid] = {
+                        found: 0,
+                        enrichEmail: 0,
+                        enrichNoEmail: 0,
+                        enrichFailed: 0,
+                        investigated: 0,
+                        investigateFailed: 0,
+                        contactedSent: 0,
+                        contactedBlocked: 0,
+                        contactedFailed: 0,
+                    };
+                }
+
+                const type = String(e.event_type || '');
+                const outcome = String(e.outcome || '');
+                if (type === 'lead_found') perMission[mid].found++;
+                if (type === 'lead_enrich_completed') {
+                    if (outcome === 'email_found') perMission[mid].enrichEmail++;
+                    else if (outcome === 'no_email') perMission[mid].enrichNoEmail++;
+                }
+                if (type === 'lead_enrich_failed') perMission[mid].enrichFailed++;
+                if (type === 'lead_investigate_completed') perMission[mid].investigated++;
+                if (type === 'lead_investigate_failed') perMission[mid].investigateFailed++;
+                if (type === 'lead_contact_sent') perMission[mid].contactedSent++;
+                if (type === 'lead_contact_blocked') perMission[mid].contactedBlocked++;
+                if (type === 'lead_contact_failed') perMission[mid].contactedFailed++;
+            }
+        } catch (e) {
+            console.warn('[REPORT][daily] Failed to aggregate lead events:', e);
+        }
 
         // Summary Data Object
         summaryData = {
@@ -1463,8 +2343,53 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
             leadsEnriched: leadsEnriched,
             contacted: contacted || 0,
             replies: replies || 0,
-            activeMissions: missions?.length || 0
+            activeMissions: missions?.length || 0,
+            perMission
         };
+
+        const missionList = (missions || []) as any[];
+        const taskByMission: Record<string, any> = {};
+        for (const t of activeTasks) {
+            const mid = String(t.mission_id || '').trim();
+            if (!mid) continue;
+            // Prefer processing over pending
+            if (!taskByMission[mid]) taskByMission[mid] = t;
+            else if (taskByMission[mid].status !== 'processing' && t.status === 'processing') taskByMission[mid] = t;
+        }
+
+        const perMissionRowsHtml = missionList.length === 0
+            ? '<div style="text-align:center;color:#9ca3af;font-style:italic">No hay misiones activas</div>'
+            : missionList.map((m: any) => {
+                const mid = String(m.id || '').trim();
+                const s = perMission[mid] || {};
+                const t = taskByMission[mid];
+                const agent = t
+                    ? `${t.status === 'processing' ? 'Procesando' : 'En cola'}: ${t.progress_label || t.type}`
+                    : 'Sin ejecucion activa';
+                const prog = (t && typeof t.progress_current === 'number' && typeof t.progress_total === 'number')
+                    ? ` (${t.progress_current}/${t.progress_total})`
+                    : '';
+                return `
+                    <div class="mission-item" style="align-items:flex-start;gap:10px;">
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.title}</div>
+                            <div style="font-size:12px;color:#6b7280;margin-top:2px;">${agent}${prog}</div>
+                            <div style="font-size:12px;color:#374151;margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;">
+                                <span>Encontrados: <strong>${s.found || 0}</strong></span>
+                                <span>Email: <strong>${s.enrichEmail || 0}</strong></span>
+                                <span>Sin email: <strong>${s.enrichNoEmail || 0}</strong></span>
+                                <span>Investigados: <strong>${s.investigated || 0}</strong></span>
+                                <span>Enviados: <strong>${s.contactedSent || 0}</strong></span>
+                                ${(s.contactedBlocked || 0) > 0 ? `<span style="color:#b45309">Bloqueados: <strong>${s.contactedBlocked}</strong></span>` : ''}
+                                ${(s.contactedFailed || 0) > 0 ? `<span style="color:#b91c1c">Fallos: <strong>${s.contactedFailed}</strong></span>` : ''}
+                            </div>
+                        </div>
+                        <div>
+                            <span class="badge">ACTIVA</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
 
         // --- HTML TEMPLATE (DAILIY) ---
         htmlContent = `
@@ -1520,17 +2445,12 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
 
                 <div class="section">
                     <div class="section-title">📊 Misiones Activas (${summaryData.activeMissions})</div>
-                    ${missions?.map((m: any) => `
-                        <div class="mission-item">
-                            <span>${m.title}</span>
-                            <span class="badge">ACTIVA</span>
-                        </div>
-                    `).join('') || '<div style="text-align:center;color:#9ca3af;font-style:italic">No hay misiones activas</div>'}
+                    ${perMissionRowsHtml}
                 </div>
 
                 <div class="footer">
                     Generado automáticamente por Antonia AI<br>
-                    <a href="${APP_URL}" style="color:white;text-decoration:underline">Ir al Dashboard</a>
+                    <a href="${getAppUrl()}" style="color:white;text-decoration:underline">Ir al Dashboard</a>
                 </div>
             </div>
         </body>
@@ -1733,7 +2653,7 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
                 
                 <div class="footer">
                     Generado automáticamente por Antonia AI<br>
-                    <a href="${APP_URL}/missions/${missionId}" style="color:white;text-decoration:underline">Ver Misión</a>
+                    <a href="${getAppUrl()}/missions/${missionId}" style="color:white;text-decoration:underline">Ver Misión</a>
                 </div>
             </div>
         </body>
@@ -1764,6 +2684,13 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         // Contacted
         const { count: leadsContacted } = await supabase.from('contacted_leads').select('*', { count: 'exact', head: true }).eq('mission_id', missionId);
 
+        // Do-not-contact
+        const { count: blockedCount } = await supabase
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId)
+            .eq('status', 'do_not_contact');
+
         // Replies (Positive/Negative) via lead_responses or contacted_leads status
         const { count: replies } = await supabase.from('contacted_leads').select('*', { count: 'exact', head: true })
             .eq('mission_id', missionId)
@@ -1773,6 +2700,54 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         const enrichmentRate = leadsFound ? ((leadsEnriched || 0) / leadsFound * 100).toFixed(1) : '0';
         const contactRate = leadsFound ? ((leadsContacted || 0) / leadsFound * 100).toFixed(1) : '0';
         const responseRate = leadsContacted ? ((replies || 0) / leadsContacted * 100).toFixed(1) : '0';
+
+        // Lead-level audit from antonia_lead_events
+        const audit = {
+            found: 0,
+            enrichEmail: 0,
+            enrichNoEmail: 0,
+            enrichFailed: 0,
+            investigated: 0,
+            investigateFailed: 0,
+            contactedSent: 0,
+            contactedBlocked: 0,
+            contactedFailed: 0,
+        };
+        try {
+            const { data: evs } = await supabase
+                .from('antonia_lead_events')
+                .select('event_type, outcome')
+                .eq('mission_id', missionId)
+                .limit(5000);
+            for (const e of (evs as any[]) || []) {
+                const type = String(e.event_type || '');
+                const outcome = String(e.outcome || '');
+                if (type === 'lead_found') audit.found++;
+                if (type === 'lead_enrich_completed') {
+                    if (outcome === 'email_found') audit.enrichEmail++;
+                    else if (outcome === 'no_email') audit.enrichNoEmail++;
+                }
+                if (type === 'lead_enrich_failed') audit.enrichFailed++;
+                if (type === 'lead_investigate_completed') audit.investigated++;
+                if (type === 'lead_investigate_failed') audit.investigateFailed++;
+                if (type === 'lead_contact_sent') audit.contactedSent++;
+                if (type === 'lead_contact_blocked') audit.contactedBlocked++;
+                if (type === 'lead_contact_failed') audit.contactedFailed++;
+            }
+        } catch (e) {
+            console.warn('[REPORT][mission_historic] Failed to aggregate lead events:', e);
+        }
+
+        summaryData = {
+            missionId,
+            title: mission.title,
+            leadsFound: leadsFound || 0,
+            leadsEnriched: leadsEnriched || 0,
+            leadsContacted: leadsContacted || 0,
+            replies: replies || 0,
+            blocked: blockedCount || 0,
+            audit,
+        };
 
         // HTML Template
         htmlContent = `
@@ -2088,6 +3063,7 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
                 <p>La misión <strong>"${mission.title}"</strong> comenzó el <strong>${new Date(mission.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}</strong> y ha estado procesando prospectos de forma automática según los criterios definidos.</p>
                 <p><strong>Progreso:</strong> De ${leadsFound || 0} leads encontrados, se han enriquecido ${leadsEnriched || 0} (${enrichmentRate}%) y contactado ${leadsContacted || 0} (${contactRate}%). Se han recibido ${replies || 0} respuestas, lo que representa una tasa de respuesta del ${responseRate}%.</p>
                 <p><strong>Estado actual:</strong> <span class="status-badge status-${mission.status}">${mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : 'COMPLETADA'}</span></p>
+                <p style="margin-top:12px;"><strong>Auditoria por lead:</strong> encontrados ${audit.found}, email ${audit.enrichEmail}, sin email ${audit.enrichNoEmail}, investigados ${audit.investigated}, enviados ${audit.contactedSent}, bloqueados ${audit.contactedBlocked}${(blockedCount || 0) > 0 ? ` (do_not_contact: ${blockedCount})` : ''}.</p>
             </div>
         </div>
 
@@ -2163,7 +3139,7 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         // Update sent_to in report record
         await supabase.from('antonia_reports').update({ sent_to: targetEmails }).eq('id', report.id);
 
-        const appUrl = APP_URL;
+        const appUrl = getAppUrl();
         for (const to of targetEmails) {
             await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
@@ -2187,8 +3163,10 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
 
 async function executeLegacyContact(task: any, supabase: SupabaseClient) {
     const { leads, userId, campaignName } = task.payload;
-    const appUrl = APP_URL;
+    const appUrl = getAppUrl();
     let contactedCount = 0;
+    const attemptAt = new Date().toISOString();
+    const stage = 'contact';
 
     // Fetch Campaign
     const { data: campaign } = await supabase
@@ -2198,12 +3176,49 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
         .eq('name', campaignName)
         .maybeSingle();
 
-    const subject = campaign?.settings?.subject || 'Follow up';
-    const body = campaign?.settings?.body || 'Just checking in...';
+    const { data: steps } = campaign?.id
+        ? await supabase
+            .from('campaign_steps')
+            .select('order_index, subject_template, body_template')
+            .eq('campaign_id', campaign.id)
+            .order('order_index', { ascending: true })
+            .limit(1)
+        : { data: null } as any;
+
+    const subject = steps?.[0]?.subject_template || campaign?.settings?.subject || 'Follow up';
+    const body = steps?.[0]?.body_template || campaign?.settings?.body || 'Just checking in...';
+
+    let campaignSentRecords: Record<string, any> | null = campaign?.sent_records ? { ...(campaign.sent_records || {}) } : null;
+    let campaignDirty = false;
+
+    const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', userId)
+        .maybeSingle();
+    const senderName = profile?.full_name || 'Tu equipo';
 
     for (const lead of leads) {
         try {
             console.log(`[CONTACT_CAMPAIGN] Sending campaign email to ${lead.email} `);
+
+            if (lead?.id) {
+                await safeInsertLeadEvents(supabase, [
+                    {
+                        organization_id: task.organization_id,
+                        mission_id: task.mission_id,
+                        task_id: task.id,
+                        lead_id: String(lead.id),
+                        event_type: 'lead_contact_started',
+                        stage,
+                        outcome: 'started',
+                        message: 'Seguimiento iniciado (campana)',
+                        meta: { kind: 'followup', campaignId: campaign?.id || null },
+                        created_at: attemptAt,
+                    }
+                ]);
+            }
+
             const response = await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
                 headers: {
@@ -2212,13 +3227,22 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
                 },
                 body: JSON.stringify({
                     to: lead.email,
-                    subject: subject,
-                    body: body,
+                    subject: subject
+                        .replace('{{lead.name}}', lead.fullName || lead.full_name || lead.name || '')
+                        .replace('{{firstName}}', (lead.fullName || lead.full_name || lead.name || '').split(' ')[0] || '')
+                        .replace('{{company}}', lead.companyName || lead.company_name || lead.company || '')
+                        .replace('{{sender.name}}', senderName),
+                    body: body
+                        .replace('{{lead.name}}', lead.fullName || lead.full_name || lead.name || '')
+                        .replace('{{firstName}}', (lead.fullName || lead.full_name || lead.name || '').split(' ')[0] || '')
+                        .replace('{{company}}', lead.companyName || lead.company_name || lead.company || '')
+                        .replace('{{sender.name}}', senderName),
                     leadId: lead.id,
                     campaignId: campaign?.id,
                     missionId: task.mission_id,
                     userId: userId,
-                    metadata: { type: 'campaign_followup' }
+                    metadata: { type: 'campaign_followup' },
+                    tracking: (campaign as any)?.settings?.tracking
                 })
             });
             if (response.ok) {
@@ -2242,10 +3266,63 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
                             type: 'followup'
                         }
                     });
+
+                    if (campaign?.id && campaignSentRecords && lead?.id) {
+                        campaignSentRecords[String(lead.id)] = { lastStepIdx: 0, lastSentAt: new Date().toISOString() };
+                        campaignDirty = true;
+                    }
+
+                    if (lead?.id) {
+                        await supabase
+                            .from('leads')
+                            .update({ status: 'contacted' } as any)
+                            .eq('id', lead.id);
+
+                        await safeInsertLeadEvents(supabase, [
+                            {
+                                organization_id: task.organization_id,
+                                mission_id: task.mission_id,
+                                task_id: task.id,
+                                lead_id: String(lead.id),
+                                event_type: 'lead_contact_sent',
+                                stage,
+                                outcome: 'sent',
+                                message: 'Seguimiento enviado',
+                                meta: { kind: 'followup', provider: resData.provider || 'unknown', campaignId: campaign?.id || null },
+                                created_at: attemptAt,
+                            }
+                        ]);
+                    }
                 } catch (err) { console.error('Error recording contact', err); }
+            } else {
+                const errorText = await response.text().catch(() => '');
+                if (lead?.id) {
+                    await safeInsertLeadEvents(supabase, [
+                        {
+                            organization_id: task.organization_id,
+                            mission_id: task.mission_id,
+                            task_id: task.id,
+                            lead_id: String(lead.id),
+                            event_type: 'lead_contact_failed',
+                            stage,
+                            outcome: `api_${response.status}`,
+                            message: 'Fallo enviando seguimiento',
+                            meta: { status: response.status, error: errorText.slice(0, 800) },
+                            created_at: attemptAt,
+                        }
+                    ]);
+                }
             }
         } catch (e) { console.error(e); }
     }
+    if (campaign?.id && campaignDirty && campaignSentRecords) {
+        const { error: campErr } = await supabase
+            .from('campaigns')
+            .update({ sent_records: campaignSentRecords, updated_at: new Date().toISOString() })
+            .eq('id', campaign.id);
+        if (campErr) console.warn('[CONTACT_CAMPAIGN] Failed to update sent_records:', campErr);
+    }
+
     return { contactedCount };
 }
 
@@ -2432,11 +3509,17 @@ async function runAntoniaTick() {
                 status: 'pending',
                 scheduled_for: nowIso,
                 updated_at: nowIso,
-                error_message: '[auto-rescue] task stuck in processing (likely worker timeout)'
+                error_message: '[auto-rescue] task stuck in processing (no heartbeat / timeout)'
             })
             .eq('status', 'processing')
-            .not('processing_started_at', 'is', null)
-            .lt('processing_started_at', stuckBefore)
+            .or(
+                [
+                    // Prefer heartbeat when available
+                    `heartbeat_at.lt.${stuckBefore}`,
+                    // Backwards compatibility
+                    `and(heartbeat_at.is.null,processing_started_at.not.is.null,processing_started_at.lt.${stuckBefore})`
+                ].join(',')
+            )
             .select('id')
             .limit(25);
 
@@ -2465,20 +3548,58 @@ async function runAntoniaTick() {
 
     // --- 1. PROCESS PENDING TASKS ---
     const now = new Date().toISOString();
-    const { data: tasks, error } = await supabase
-        .from('antonia_tasks')
-        .update({
-            status: 'processing',
-            processing_started_at: now
-        })
-        .eq('status', 'pending')
-        .or(`scheduled_for.is.null,scheduled_for.lte.${now}`)
-        .select()
-        .limit(5);
+    const workerId = `firebase:${randomUUID()}`;
+    let tasks: any[] = [];
 
-    if (error) {
-        console.error('[AntoniaTick] Error fetching tasks', error);
-    } else if (tasks && tasks.length > 0) {
+    // Preferred: atomic claim via RPC (FOR UPDATE SKIP LOCKED)
+    try {
+        const { data, error } = await supabase.rpc('claim_antonia_tasks', {
+            p_limit: 5,
+            p_worker_id: workerId,
+            p_worker_source: 'firebase'
+        } as any);
+        if (error) throw error;
+        tasks = (data as any[]) || [];
+    } catch (e) {
+        console.warn('[AntoniaTick] claim_antonia_tasks failed, using fallback claim:', e);
+
+        // Fallback: select then claim one-by-one (best effort)
+        const { data: pending, error: selErr } = await supabase
+            .from('antonia_tasks')
+            .select('*')
+            .eq('status', 'pending')
+            .or(`scheduled_for.is.null,scheduled_for.lte.${now}`)
+            .order('created_at', { ascending: true })
+            .limit(5);
+
+        if (selErr) {
+            console.error('[AntoniaTick] Fallback select failed:', selErr);
+        } else {
+            const claimed: any[] = [];
+            for (const t of (pending || [])) {
+                const { data: row, error: claimErr } = await supabase
+                    .from('antonia_tasks')
+                    .update({
+                        status: 'processing',
+                        processing_started_at: now,
+                        heartbeat_at: now,
+                        worker_id: workerId,
+                        worker_source: 'firebase',
+                        updated_at: now,
+                    } as any)
+                    .eq('id', t.id)
+                    .eq('status', 'pending')
+                    .select('*')
+                    .maybeSingle();
+
+                if (claimErr) continue;
+                if (row) claimed.push(row);
+            }
+            tasks = claimed;
+        }
+    }
+
+    if (tasks && tasks.length > 0) {
         console.log(`[AntoniaTick] Processing ${tasks.length} tasks`);
         await Promise.all(tasks.map((t: any) => processTaskWithTimeout(t, supabase)));
     }

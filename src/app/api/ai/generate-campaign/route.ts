@@ -3,13 +3,28 @@ import { generateCampaignFlow } from '@/ai/flows/generate-campaign';
 
 export async function POST(req: NextRequest) {
     try {
-        const { goal, companyName, targetAudience, language } = await req.json();
+        const {
+            goal,
+            companyName,
+            targetAudience,
+            language,
+            jobTitle,
+            industry,
+            missionTitle,
+            campaignContext,
+            userName,
+        } = await req.json();
 
         const out = await generateCampaignFlow({
             goal,
             companyName,
             targetAudience,
-            language
+            language,
+            jobTitle,
+            industry,
+            missionTitle,
+            campaignContext,
+            userName,
         });
 
         return NextResponse.json(out);

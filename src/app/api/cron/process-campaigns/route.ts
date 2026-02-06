@@ -37,9 +37,25 @@ export async function GET(req: NextRequest) {
                 .from('campaigns')
                 .select('*')
                 .eq('user_id', userId)
-                .eq('status', 'ACTIVE');
+                .eq('status', 'active');
 
             if (!campaigns || campaigns.length === 0) continue;
+
+            const campaignIds = campaigns.map((c: any) => c.id).filter(Boolean);
+            const stepsByCampaign: Record<string, any[]> = {};
+
+            if (campaignIds.length > 0) {
+                const { data: stepsRows } = await supabase
+                    .from('campaign_steps')
+                    .select('*')
+                    .in('campaign_id', campaignIds)
+                    .order('order_index', { ascending: true });
+
+                (stepsRows || []).forEach((s: any) => {
+                    if (!stepsByCampaign[s.campaign_id]) stepsByCampaign[s.campaign_id] = [];
+                    stepsByCampaign[s.campaign_id].push(s);
+                });
+            }
 
             // Get user's contacted leads
             const { data: leads } = await supabase
@@ -49,31 +65,40 @@ export async function GET(req: NextRequest) {
 
             if (!leads || leads.length === 0) continue;
 
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('full_name')
+                .eq('id', userId)
+                .maybeSingle();
+            const senderName = profile?.full_name || 'Tu equipo';
+
             // Process campaigns
             for (const campaign of campaigns) {
-                // Parse steps (handle legacy array vs object)
-                let steps = [];
-                let excluded: string[] = [];
-                let sentRecords: Record<string, any> = {};
+                const steps = stepsByCampaign[campaign.id] || [];
+                const excluded: string[] = campaign.excluded_lead_ids || [];
+                const sentRecords: Record<string, any> = { ...(campaign.sent_records || {}) };
+                let campaignDirty = false;
 
-                if (Array.isArray(campaign.steps)) {
-                    steps = campaign.steps;
-                } else {
-                    steps = campaign.steps.steps || [];
-                    excluded = campaign.steps.excludedLeadIds || [];
-                    sentRecords = campaign.steps.sentRecords || {};
-                }
+                const tracking = campaign.settings?.tracking;
+                const trackingEnabled = Boolean(tracking?.enabled);
+                const trackLinks = trackingEnabled && (tracking?.linkTracking ?? true);
+                const trackPixel = trackingEnabled && (tracking?.pixel ?? true);
 
                 if (!steps.length) continue;
 
                 // Check eligibility
                 for (const lead of leads) {
+                    const leadKey = String(lead.lead_id || lead.id || '').trim();
+                    if (!leadKey) continue;
+
                     // Skip if excluded or replied
-                    if (excluded.includes(lead.lead_id)) continue;
-                    if (lead.status === 'replied') continue;
+                    if (excluded.includes(leadKey)) continue;
+                    if (lead.campaign_followup_allowed === false) continue;
+                    if (lead.status === 'replied' && lead.campaign_followup_allowed !== true) continue;
+                    if (!lead.email) continue;
 
                     // Determine next step
-                    const record = sentRecords[lead.lead_id];
+                    const record = sentRecords[leadKey];
                     let nextStepIdx = 0;
                     if (record) {
                         nextStepIdx = record.lastStepIdx + 1;
@@ -82,10 +107,10 @@ export async function GET(req: NextRequest) {
                     if (nextStepIdx >= steps.length) continue; // Finished
 
                     const step = steps[nextStepIdx];
-                    const offsetDays = step.offsetDays || 0;
+                    const offsetDays = Number(step.offset_days ?? step.offsetDays ?? 0);
 
                     // Check timing
-                    const lastAtStr = lead.last_follow_up_at || lead.sent_at;
+                    const lastAtStr = record?.lastSentAt || lead.last_follow_up_at || lead.sent_at;
                     if (!lastAtStr) continue;
 
                     const lastAt = new Date(lastAtStr);
@@ -139,28 +164,35 @@ export async function GET(req: NextRequest) {
                         const origin = req.nextUrl.origin;
 
                         // Render template (simple replacement)
-                        let subject = step.subject.replace('{{lead.name}}', lead.name || '').replace('{{company}}', lead.company || '');
-                        let body = step.bodyHtml.replace('{{lead.name}}', lead.name || '').replace('{{company}}', lead.company || '');
+                        const rawSubject = step.subject_template || '';
+                        const rawBody = step.body_template || '';
+                        let subject = rawSubject
+                            .replace('{{lead.name}}', lead.name || '')
+                            .replace('{{firstName}}', String(lead.name || '').split(' ')[0] || '')
+                            .replace('{{company}}', lead.company || '')
+                            .replace('{{sender.name}}', senderName);
+                        let body = rawBody
+                            .replace('{{lead.name}}', lead.name || '')
+                            .replace('{{firstName}}', String(lead.name || '').split(' ')[0] || '')
+                            .replace('{{company}}', lead.company || '')
+                            .replace('{{sender.name}}', senderName);
 
-                        // 1. Rewrite Links
-                        body = body.replace(/href=(["'])(http[^"']+)\1/gi, (match: string, quote: string, url: string) => {
-                            if (url.includes('/api/tracking/click')) return match;
-                            const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
-                            return `href=${quote}${trackingUrl}${quote}`;
-                        });
+                        if (trackLinks) {
+                            body = body.replace(/href=(["'])(http[^"']+)\1/gi, (match: string, quote: string, url: string) => {
+                                if (url.includes('/api/tracking/click')) return match;
+                                const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
+                                return `href=${quote}${trackingUrl}${quote}`;
+                            });
+                        }
 
-                        // 3. Inject Pixel
-                        if (step.usePixel) {
+                        if (trackPixel) {
                             let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-                            // Fallback to default placeholder logo for automated campaigns since we don't have access to localStorage
-                            // and organization logo is not yet in DB schema.
                             const defaultLogo = `${origin}/logo-placeholder.svg`;
                             pixelUrl += `&redirect=${encodeURIComponent(defaultLogo)}`;
 
-                            // Remove display:none
                             const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
                             body += `\n<br>${trackingPixel}`;
-                        }              // Use 'body' (the modified one) instead of raw template
+                        }
                         if (tokenProvider === 'google') {
                             await sendGmail(accessToken, lead.email, subject, body);
                         } else {
@@ -168,12 +200,8 @@ export async function GET(req: NextRequest) {
                         }
 
                         // Update records
-                        sentRecords[lead.lead_id] = { lastStepIdx: nextStepIdx, lastSentAt: new Date().toISOString() };
-
-                        // Update campaign
-                        const newStepsJson = Array.isArray(campaign.steps) ? { steps: campaign.steps, sentRecords, excludedLeadIds: excluded } : { ...campaign.steps, sentRecords };
-
-                        await supabase.from('campaigns').update({ steps: newStepsJson }).eq('id', campaign.id);
+                        sentRecords[leadKey] = { lastStepIdx: nextStepIdx, lastSentAt: new Date().toISOString() };
+                        campaignDirty = true;
 
                         // Update lead
                         await supabase.from('contacted_leads').update({
@@ -188,6 +216,13 @@ export async function GET(req: NextRequest) {
                         console.error(`Failed to send to ${lead.email}:`, e);
                         results.push({ lead: lead.email, status: 'failed', error: e });
                     }
+                }
+
+                if (campaignDirty) {
+                    await supabase
+                        .from('campaigns')
+                        .update({ sent_records: sentRecords, updated_at: new Date().toISOString() })
+                        .eq('id', campaign.id);
                 }
             }
         }

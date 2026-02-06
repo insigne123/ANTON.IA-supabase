@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Loader2, Database, Send, AlertCircle, RefreshCw, User, Briefcase } from 'lucide-react';
+import { Loader2, Database, Send, AlertCircle, RefreshCw, Briefcase, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
 interface MissionLead {
@@ -19,11 +19,14 @@ interface MissionLead {
 
 export function MissionQueues({ missionId }: { missionId: string }) {
     const [reserveLeads, setReserveLeads] = useState<MissionLead[]>([]);
-    const [queueLeads, setQueueLeads] = useState<MissionLead[]>([]);
+    const [readyLeads, setReadyLeads] = useState<MissionLead[]>([]);
+    const [noEmailLeads, setNoEmailLeads] = useState<MissionLead[]>([]);
+    const [contactedLeads, setContactedLeads] = useState<MissionLead[]>([]);
+    const [blockedLeads, setBlockedLeads] = useState<MissionLead[]>([]);
     const [loading, setLoading] = useState(true);
     const supabase = createClientComponentClient();
 
-    const fetchLeads = async () => {
+    const fetchLeads = useCallback(async () => {
         setLoading(true);
         try {
             // Fetch Reserve (Saved)
@@ -34,38 +37,60 @@ export function MissionQueues({ missionId }: { missionId: string }) {
                 .eq('status', 'saved')
                 .order('created_at', { ascending: false });
 
-            // Fetch Queue (Enriched/Ready)
-            // Assuming 'enriched' is the status for ready-to-contact leads
-            // But we must check if they are NOT in contacted_leads table to be sure they are "in queue"?
-            // Logic: The Cron picks 'enriched' leads. If they are already contacted they should be marked or logged. 
-            // In the codebase, 'contacted_leads' is a separate table.
-            // Start simple: leads with status 'enriched'.
-            const { data: enrichedData } = await supabase
+            // Leads enriched + email available (ready for investigate/contact)
+            const { data: enrichedReady } = await supabase
                 .from('leads')
                 .select('id, name, title, company, status, email, created_at')
                 .eq('mission_id', missionId)
                 .eq('status', 'enriched')
+                .not('email', 'is', null)
                 .order('created_at', { ascending: false });
 
-            // We also need to filter out those who might have been contacted already if 'status' doesn't update to 'contacted' on the lead itself.
-            // Based on previous files, 'contacted_leads' is inserted, but 'leads' table status update wasn't explicitly seen in the code snippets.
-            // However, usually the flow updates the lead status too. Let's assume 'enriched' means ready and waiting.
+            // Leads enriched but without email (not contactable)
+            const { data: enrichedNoEmail } = await supabase
+                .from('leads')
+                .select('id, name, title, company, status, email, created_at')
+                .eq('mission_id', missionId)
+                .eq('status', 'enriched')
+                .is('email', null)
+                .order('created_at', { ascending: false });
+
+            // Leads already contacted
+            const { data: contactedData } = await supabase
+                .from('leads')
+                .select('id, name, title, company, status, email, created_at')
+                .eq('mission_id', missionId)
+                .eq('status', 'contacted')
+                .order('created_at', { ascending: false })
+                .limit(200);
+
+            // Do-not-contact / blocked leads
+            const { data: blockedData } = await supabase
+                .from('leads')
+                .select('id, name, title, company, status, email, created_at')
+                .eq('mission_id', missionId)
+                .eq('status', 'do_not_contact')
+                .order('created_at', { ascending: false })
+                .limit(200);
 
             if (savedData) setReserveLeads(savedData);
-            if (enrichedData) setQueueLeads(enrichedData);
+            if (enrichedReady) setReadyLeads(enrichedReady);
+            if (enrichedNoEmail) setNoEmailLeads(enrichedNoEmail);
+            if (contactedData) setContactedLeads(contactedData);
+            if (blockedData) setBlockedLeads(blockedData);
 
         } catch (error) {
             console.error('Error fetching mission queues:', error);
         } finally {
             setLoading(false);
         }
-    };
+    }, [missionId, supabase]);
 
     useEffect(() => {
         fetchLeads();
 
         // Optional: Realtime subscription could go here
-    }, [missionId]);
+    }, [fetchLeads]);
 
     if (loading) {
         return <div className="p-8 flex justify-center"><Loader2 className="animate-spin text-primary" /></div>;
@@ -87,14 +112,26 @@ export function MissionQueues({ missionId }: { missionId: string }) {
 
             <Tabs defaultValue="reserve" className="flex-1 flex flex-col overflow-hidden">
                 <div className="px-4 pt-4">
-                    <TabsList className="grid w-full grid-cols-2">
+                    <TabsList className="grid w-full grid-cols-5">
                         <TabsTrigger value="reserve" className="flex gap-2">
                             <Database className="w-4 h-4" />
                             Reserva ({reserveLeads.length})
                         </TabsTrigger>
-                        <TabsTrigger value="queue" className="flex gap-2">
+                        <TabsTrigger value="ready" className="flex gap-2">
                             <Send className="w-4 h-4" />
-                            Por Contactar ({queueLeads.length})
+                            Listos ({readyLeads.length})
+                        </TabsTrigger>
+                        <TabsTrigger value="noemail" className="flex gap-2">
+                            <AlertCircle className="w-4 h-4" />
+                            Sin Email ({noEmailLeads.length})
+                        </TabsTrigger>
+                        <TabsTrigger value="contacted" className="flex gap-2">
+                            <CheckCircle2 className="w-4 h-4" />
+                            Contactados ({contactedLeads.length})
+                        </TabsTrigger>
+                        <TabsTrigger value="blocked" className="flex gap-2">
+                            <ShieldAlert className="w-4 h-4" />
+                            Bloqueados ({blockedLeads.length})
                         </TabsTrigger>
                     </TabsList>
                 </div>
@@ -107,11 +144,35 @@ export function MissionQueues({ missionId }: { missionId: string }) {
                     />
                 </TabsContent>
 
-                <TabsContent value="queue" className="flex-1 overflow-hidden p-0 m-0">
+                <TabsContent value="ready" className="flex-1 overflow-hidden p-0 m-0">
                     <QueueList
-                        leads={queueLeads}
-                        emptyMessage="No hay leads listos para contacto. Esperando enriquecimiento."
+                        leads={readyLeads}
+                        emptyMessage="No hay leads con email listos. Esperando enriquecimiento."
                         icon={<Send className="w-8 h-8 opacity-20" />}
+                    />
+                </TabsContent>
+
+                <TabsContent value="noemail" className="flex-1 overflow-hidden p-0 m-0">
+                    <QueueList
+                        leads={noEmailLeads}
+                        emptyMessage="No hay leads enriquecidos sin email."
+                        icon={<AlertCircle className="w-8 h-8 opacity-20" />}
+                    />
+                </TabsContent>
+
+                <TabsContent value="contacted" className="flex-1 overflow-hidden p-0 m-0">
+                    <QueueList
+                        leads={contactedLeads}
+                        emptyMessage="Aun no hay leads contactados en esta mision."
+                        icon={<CheckCircle2 className="w-8 h-8 opacity-20" />}
+                    />
+                </TabsContent>
+
+                <TabsContent value="blocked" className="flex-1 overflow-hidden p-0 m-0">
+                    <QueueList
+                        leads={blockedLeads}
+                        emptyMessage="No hay leads bloqueados (do-not-contact)."
+                        icon={<ShieldAlert className="w-8 h-8 opacity-20" />}
                     />
                 </TabsContent>
             </Tabs>
