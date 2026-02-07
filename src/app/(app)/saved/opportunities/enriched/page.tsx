@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
 import { BackBar } from '@/components/back-bar';
@@ -125,7 +125,7 @@ export default function EnrichedOpportunitiesPage() {
 
   // Normalización
   const norm = (s?: string | null) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const splitTerms = (value: string) => value.split(',').map(t => norm(t).trim()).filter(Boolean);
+  const splitTerms = useCallback((value: string) => value.split(',').map(t => norm(t).trim()).filter(Boolean), []);
 
   // Lógica Filtrado
   const filtered = useMemo(() => {
@@ -152,7 +152,7 @@ export default function EnrichedOpportunitiesPage() {
       checkContainsAny(e.companyName, incCompanies) && checkContainsAny(e.fullName, incLeads) && checkContainsAny(e.title, incTitles) &&
       checkExcludesAll(e.companyName, excCompanies) && checkExcludesAll(e.fullName, excLeads) && checkExcludesAll(e.title, excTitles)
     );
-  }, [enriched, applied]);
+  }, [enriched, applied, splitTerms]);
 
   // Paginación Efectiva
   useEffect(() => { setPage(1); }, [pageSize, applied]);

@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -79,14 +79,17 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
     if (!mounted) return;
     const list = styleProfilesStorage.list();
     setStyles(list);
-    if (!selectedStyleName && list.length) {
-      setSelectedStyleName(list[0].name);
-      setStyle(list[0]);
+    if (list.length) {
+      setSelectedStyleName(prev => {
+        if (prev) return prev;
+        setStyle(list[0]);
+        return list[0].name;
+      });
     }
   }, [mounted]);
 
   // ======= Render preview (local, sin depender del endpoint) =======
-  function recomputePreview(s: StyleProfile) {
+  const recomputePreview = useCallback((s: StyleProfile) => {
     // lead + reporte real si existe (si no, contexto vacío)
     const lead = sampleLeads.find(l => l.id === sampleLeadId) || null;
     const rep = lead
@@ -115,13 +118,13 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
       ws.push('Sugerencia: usa tokens como {{lead.firstName}} o [[company.name]].');
     }
     setWarnings(ws);
-  }
+  }, [sampleLeads, sampleLeadId]);
 
   // Recalcula preview cuando cambie estilo o lead de ejemplo
   useEffect(() => {
     if (!mounted) return;
     recomputePreview(style);
-  }, [style, sampleLeadId, mounted]);
+  }, [style, mounted, recomputePreview]);
 
   // ======= Chat turn =======
   async function runChatTurn(userText: string) {

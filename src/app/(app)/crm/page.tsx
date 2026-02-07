@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { KanbanBoard } from '@/components/crm/KanbanBoard';
 import { buildUnifiedRows } from '@/lib/unified-sheet-data';
@@ -27,7 +27,7 @@ export default function CRMPage() {
     const [focusMode, setFocusMode] = useState(false); // New Focus Mode state
     const [focusedStage, setFocusedStage] = useState<PipelineStage>('contacted'); // Default for Focus Mode
 
-    async function loadData() {
+    const loadData = useCallback(async () => {
         setLoading(true);
         try {
             const data = await buildUnifiedRows();
@@ -38,11 +38,11 @@ export default function CRMPage() {
         } finally {
             setLoading(false);
         }
-    }
+    }, [toast]);
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [loadData]);
 
     const handleLeadMove = async (leadId: string, newStage: PipelineStage) => {
         // 1. Optimistic Update

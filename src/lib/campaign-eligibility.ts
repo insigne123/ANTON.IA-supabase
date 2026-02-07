@@ -63,6 +63,7 @@ export async function computeEligibilityForCampaign(
 
     // If replied and no explicit allow, skip by default
     if (lead.status === 'replied' && lead.campaignFollowupAllowed !== true) continue;
+    if (lead.status === 'replied' && !lead.replyIntent) continue;
 
     // Si algún día quieres chequear externamente, debe ser una acción manual en UI,
     // no en este compute (para no disparar MSAL). Lo dejamos explícito:

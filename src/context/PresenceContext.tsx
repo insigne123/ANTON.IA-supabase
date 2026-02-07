@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { usePathname } from 'next/navigation';
@@ -26,6 +26,11 @@ export function PresenceProvider({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([]);
     const [orgId, setOrgId] = useState<string | null>(null);
+    const pathnameRef = useRef(pathname);
+
+    useEffect(() => {
+        pathnameRef.current = pathname;
+    }, [pathname]);
 
     // Fetch Org ID once
     useEffect(() => {
@@ -68,7 +73,7 @@ export function PresenceProvider({ children }: { children: React.ReactNode }) {
                         email: user.email!,
                         fullName: user.user_metadata?.full_name,
                         avatarUrl: user.user_metadata?.avatar_url,
-                        currentPath: pathname,
+                        currentPath: pathnameRef.current,
                         onlineAt: new Date().toISOString(),
                     });
                 }

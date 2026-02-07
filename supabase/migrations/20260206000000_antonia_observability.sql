@@ -562,7 +562,7 @@ begin
         and t.created_at >= (date_trunc('day', now() at time zone 'utc'))
     into v_searches_today;
 
-    v_limit := greatest(coalesce(r.daily_search_limit, 1), 1);
+    v_limit := least(5, greatest(coalesce(r.daily_search_limit, 1), 1));
     if v_searches_today >= v_limit then
       continue;
     end if;

@@ -1,7 +1,6 @@
-import { supabase } from '../supabase';
-import { antoniaService } from './antonia-service';
+import { createClient } from '@supabase/supabase-js';
 import { sendGmail, sendOutlook } from '../server-email-sender';
-import { tokenManager } from './token-manager';
+import { refreshGoogleToken, refreshMicrosoftToken } from '../server-auth-helpers';
 
 /**
  * Send system email using stored OAuth tokens
@@ -9,50 +8,81 @@ import { tokenManager } from './token-manager';
  */
 async function sendSystemEmail(to: string, subject: string, html: string, organizationId?: string) {
     try {
-        // Get the user ID from the email address
-        // Note: In a real implementation, you'd need to map email -> userId
-        // For now, we'll try to find a connected integration for any user
-        let query = supabase
-            .from('integration_tokens')
-            .select('user_id, provider, connected')
-            .eq('connected', true)
-            .order('updated_at', { ascending: false })
-            .limit(1);
-
-        if (organizationId) {
-            query = query.eq('organization_id', organizationId);
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (!supabaseUrl || !serviceKey) {
+            console.error('[SystemMail] Missing Supabase service credentials');
+            return;
         }
 
-        const { data: tokens, error } = await query.maybeSingle();
+        const supabase = createClient(supabaseUrl, serviceKey, {
+            auth: { persistSession: false, autoRefreshToken: false }
+        });
 
-        if (error || !tokens) {
-            console.error('[SystemMail] No connected integration found:', error);
-            // Fallback: just log the email
+        const pickTokens = async () => {
+            if (organizationId) {
+                const { data: members } = await supabase
+                    .from('organization_members')
+                    .select('user_id')
+                    .eq('organization_id', organizationId);
+                const memberIds = (members || []).map((m: any) => m.user_id).filter(Boolean);
+                if (memberIds.length > 0) {
+                    const { data: tokens } = await supabase
+                        .from('provider_tokens')
+                        .select('*')
+                        .in('user_id', memberIds)
+                        .order('updated_at', { ascending: false });
+                    if (tokens && tokens.length > 0) return tokens;
+                }
+            }
+
+            const { data: tokens } = await supabase
+                .from('provider_tokens')
+                .select('*')
+                .order('updated_at', { ascending: false })
+                .limit(5);
+            return tokens || [];
+        };
+
+        const tokens = await pickTokens();
+        if (!tokens || tokens.length === 0) {
+            console.error('[SystemMail] No provider_tokens found');
             console.log(`[SystemMail] Would send: To: ${to} | Subject: ${subject}`);
             return;
         }
 
-        const { user_id, provider } = tokens;
+        const preferred = tokens.find((t: any) => t.provider === 'google') || tokens[0];
+        const provider = preferred.provider as 'google' | 'outlook';
+        const refreshToken = preferred.refresh_token;
 
-        // Get fresh access token
-        const accessToken = await tokenManager.getFreshAccessToken(user_id, provider as 'google' | 'outlook');
+        let accessToken = '';
+        if (provider === 'google') {
+            const refreshed = await refreshGoogleToken(refreshToken, process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!, process.env.GOOGLE_CLIENT_SECRET!);
+            accessToken = refreshed.access_token;
+        } else {
+            const refreshed = await refreshMicrosoftToken(refreshToken, process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID!, process.env.AZURE_AD_CLIENT_SECRET!, process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID!);
+            accessToken = refreshed.access_token;
+            if (refreshed.refresh_token) {
+                await supabase
+                    .from('provider_tokens')
+                    .update({ refresh_token: refreshed.refresh_token, updated_at: new Date().toISOString() })
+                    .eq('user_id', preferred.user_id)
+                    .eq('provider', 'outlook');
+            }
+        }
 
         if (!accessToken) {
-            console.error('[SystemMail] Failed to get access token for provider:', provider);
+            console.error('[SystemMail] Failed to refresh access token');
             console.log(`[SystemMail] Would send: To: ${to} | Subject: ${subject}`);
             return;
         }
 
-        // Send email using the appropriate provider
         if (provider === 'google') {
             await sendGmail(accessToken, to, subject, html);
             console.log(`[SystemMail] ✅ Sent via Gmail to: ${to} | Subject: ${subject}`);
-        } else if (provider === 'outlook') {
+        } else {
             await sendOutlook(accessToken, to, subject, html);
             console.log(`[SystemMail] ✅ Sent via Outlook to: ${to} | Subject: ${subject}`);
-        } else {
-            console.warn(`[SystemMail] Unknown provider: ${provider}`);
-            console.log(`[SystemMail] Would send: To: ${to} | Subject: ${subject}`);
         }
     } catch (error) {
         console.error('[SystemMail] Error sending email:', error);
@@ -66,13 +96,26 @@ export const notificationService = {
      * Send Immediate Alert
      */
     sendAlert: async (organizationId: string, title: string, message: string) => {
-        const config = await antoniaService.getConfig(organizationId);
-        if (!config || !config.instantAlertsEnabled || !config.notificationEmail) {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (!supabaseUrl || !serviceKey) return;
+
+        const supabase = createClient(supabaseUrl, serviceKey, {
+            auth: { persistSession: false, autoRefreshToken: false }
+        });
+
+        const { data: config } = await supabase
+            .from('antonia_config')
+            .select('notification_email, instant_alerts_enabled')
+            .eq('organization_id', organizationId)
+            .maybeSingle();
+
+        if (!config || !config.instant_alerts_enabled || !config.notification_email) {
             return;
         }
 
         await sendSystemEmail(
-            config.notificationEmail,
+            config.notification_email,
             `[ANTONIA ALERT] ${title}`,
             `<p>${message}</p>`,
             organizationId // Pass org ID
@@ -85,9 +128,22 @@ export const notificationService = {
     sendDailyReport: async (organizationId: string) => {
         console.log(`[DailyReport] Starting report generation for org ${organizationId}`);
 
-        const config = await antoniaService.getConfig(organizationId);
-        if (!config || !config.dailyReportEnabled || !config.notificationEmail) {
-            console.log(`[DailyReport] Skipping report - dailyReportEnabled: ${config?.dailyReportEnabled}, notificationEmail: ${config?.notificationEmail}`);
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (!supabaseUrl || !serviceKey) return;
+
+        const supabase = createClient(supabaseUrl, serviceKey, {
+            auth: { persistSession: false, autoRefreshToken: false }
+        });
+
+        const { data: config } = await supabase
+            .from('antonia_config')
+            .select('*')
+            .eq('organization_id', organizationId)
+            .maybeSingle();
+
+        if (!config || !config.daily_report_enabled || !config.notification_email) {
+            console.log(`[DailyReport] Skipping report - dailyReportEnabled: ${config?.daily_report_enabled}, notificationEmail: ${config?.notification_email}`);
             return;
         }
 
@@ -150,9 +206,9 @@ export const notificationService = {
         console.log(`[DailyReport] Active missions: ${activeMissions || 0}`);
 
         // 6. Get daily limits from config
-        const searchLimit = config.dailySearchLimit || 3;
-        const enrichLimit = config.dailyEnrichLimit || 50;
-        const investigateLimit = config.dailyInvestigateLimit || 20;
+        const searchLimit = config.daily_search_limit || 3;
+        const enrichLimit = config.daily_enrich_limit || 50;
+        const investigateLimit = config.daily_investigate_limit || 20;
 
         // Calculate remaining capacity
         const searchRemaining = Math.max(0, searchLimit - searchRuns);
@@ -243,13 +299,13 @@ export const notificationService = {
         `;
 
         await sendSystemEmail(
-            config.notificationEmail,
+            config.notification_email,
             `[ANTONIA] Reporte Diario - ${new Date().toLocaleDateString('es-ES')}`,
             html,
             organizationId // Pass org ID
         );
 
-        console.log(`[DailyReport] Report sent successfully to ${config.notificationEmail}`);
+        console.log(`[DailyReport] Report sent successfully to ${config.notification_email}`);
         console.log(`[DailyReport] Summary - Searches: ${searchRuns}, Leads: ${leadsSearched}, Enriched: ${leadsEnriched}, Investigated: ${leadsInvestigated}, Contacted: ${leadsContacted || 0}`);
     }
 };

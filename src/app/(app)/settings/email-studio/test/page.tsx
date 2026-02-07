@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -42,11 +42,7 @@ export default function EmailTestPage() {
         if (user?.email) setFrom(user.email);
     }, [user]);
 
-    useEffect(() => {
-        refreshLogs();
-    }, [to]);
-
-    async function refreshLogs() {
+    const refreshLogs = useCallback(async () => {
         setRefreshing(true);
         try {
             const all = await contactedLeadsStorage.get();
@@ -57,7 +53,11 @@ export default function EmailTestPage() {
         } finally {
             setRefreshing(false);
         }
-    }
+    }, [to]);
+
+    useEffect(() => {
+        refreshLogs();
+    }, [refreshLogs]);
 
     // Helper to inject link tracking
     function rewriteLinksForTracking(html: string, trackingId: string): string {

@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -36,8 +36,8 @@ export default function ContactedPage() {
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
   const [suggestion, setSuggestion] = useState<string>('');
 
-  const refresh = async () => setItems(await contactedLeadsStorage.get());
-  useEffect(() => { refresh(); }, []);
+  const refresh = useCallback(async () => setItems(await contactedLeadsStorage.get()), []);
+  useEffect(() => { refresh(); }, [refresh]);
 
   const rows = useMemo(() => {
     // Mostrar los NO respondidos; orden por lastUpdateAt desc (fallback sentAt)
@@ -48,6 +48,19 @@ export default function ContactedPage() {
         const db = new Date(b.lastUpdateAt || b.sentAt).getTime();
         return db - da;
       });
+  }, [items]);
+
+  const replyStats = useMemo(() => {
+    const replied = items.filter(x => x.status === 'replied');
+    const actionRequired = replied.filter(x => x.replyIntent === 'meeting_request' || x.replyIntent === 'positive').length;
+    const stopped = replied.filter(x => x.replyIntent === 'negative' || x.replyIntent === 'unsubscribe').length;
+    const autoReply = replied.filter(x => x.replyIntent === 'auto_reply').length;
+    return {
+      totalReplied: replied.length,
+      actionRequired,
+      stopped,
+      autoReply,
+    };
   }, [items]);
 
   const handleViewEmail = async (item: ContactedLead) => {
@@ -363,6 +376,31 @@ export default function ContactedPage() {
       <div className="mb-4">
         <DailyQuotaProgress kinds={['contact']} compact />
       </div>
+      <Card className="mb-4">
+        <CardContent className="py-4">
+          <div className="grid gap-4 md:grid-cols-4">
+            <div>
+              <div className="text-xs text-muted-foreground">Respondidos</div>
+              <div className="text-2xl font-semibold">{replyStats.totalReplied}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Acción requerida</div>
+              <div className="text-2xl font-semibold text-emerald-600">{replyStats.actionRequired}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Detenidos</div>
+              <div className="text-2xl font-semibold text-red-500">{replyStats.stopped}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Auto-reply</div>
+              <div className="text-2xl font-semibold text-slate-500">{replyStats.autoReply}</div>
+            </div>
+          </div>
+          <div className="mt-3">
+            <Link href="/contacted/replied" className="text-sm underline text-primary">Ver respondidos y clasificaciones</Link>
+          </div>
+        </CardContent>
+      </Card>
       <div className="mb-3 flex items-center gap-2">
         <Button variant="secondary" onClick={verifyAllReplies} disabled={bulkRunning}>
           {bulkRunning ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verificando… {bulkProgress.done}/{bulkProgress.total}</> : 'Verificar respuestas (todos)'}

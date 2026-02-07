@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { classifyReply, extractReplyPreview } from '@/lib/reply-classifier';
+import { notificationService } from '@/lib/services/notification-service';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -111,6 +112,7 @@ export async function POST(req: Request) {
                     updateData.last_reply_text = replyContent ? String(replyContent).slice(0, 4000) : null;
 
                     try {
+                        const shouldNotify = !(contacted as any)?.reply_intent;
                         const classification = await classifyReply(replyContent || '');
                         updateData.reply_intent = classification.intent;
                         updateData.reply_sentiment = classification.sentiment;
@@ -134,6 +136,17 @@ export async function POST(req: Request) {
                                     organization_id: orgId,
                                     reason: `reply:${classification.intent}`,
                                 }, { onConflict: 'email,user_id,organization_id' } as any);
+                        }
+
+                        if (shouldNotify && orgId && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
+                            const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+                            const summary = classification.summary || preview || 'Respuesta positiva detectada';
+                            const leadEmail = (contacted as any)?.email || leadId;
+                            await notificationService.sendAlert(
+                                orgId,
+                                'Respuesta positiva detectada',
+                                `Lead ${leadEmail} respondió: ${summary}. Revisar: ${appUrl}/contacted/replied`
+                            );
                         }
                     } catch (err) {
                         updateData.reply_intent = 'unknown';

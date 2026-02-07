@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -41,7 +41,7 @@ export default function UnsubscribesPage() {
     const [newDomain, setNewDomain] = useState('');
     const [addingDomain, setAddingDomain] = useState(false);
 
-    async function loadData() {
+    const loadData = useCallback(async () => {
         setLoading(true);
         try {
             const [emails, domains] = await Promise.all([
@@ -56,11 +56,11 @@ export default function UnsubscribesPage() {
         } finally {
             setLoading(false);
         }
-    }
+    }, [toast]);
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [loadData]);
 
     // --- Actions: Emails ---
     async function removeEmail(id: string) {

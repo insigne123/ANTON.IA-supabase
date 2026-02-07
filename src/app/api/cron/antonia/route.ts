@@ -2,8 +2,6 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { notificationService } from '@/lib/services/notification-service';
 import { generateCampaignFlow } from '@/ai/flows/generate-campaign';
-import { tokenManager } from '@/lib/services/token-manager';
-import { sendGmail, sendOutlook } from '@/lib/server-email-sender';
 import * as uuid from 'uuid';
 
 // Initialize Supabase Admin Client
@@ -32,7 +30,10 @@ async function incrementUsage(supabase: any, organizationId: string, type: 'sear
     else if (type === 'search_run') col = 'search_runs'; // Track frequency for limits
     else if (type === 'enrich') col = 'leads_enriched';
     else if (type === 'investigate') col = 'leads_investigated';
-    else if (type === 'contact') col = 'leads_contacted'; // Track contacts
+    else if (type === 'contact') {
+        // antonia_daily_usage does not track contacts; no-op
+        return;
+    }
 
     const current = await getDailyUsage(supabase, organizationId);
 
@@ -534,28 +535,7 @@ async function executeContact(task: any, supabase: any) {
     let campaignSentRecords: Record<string, any> | null = campaign.sent_records ? { ...(campaign.sent_records || {}) } : null;
     let campaignDirty = false;
 
-    // 2. Determine Provider & Get Token
-    // We try to find a connected account for this user
-    const { data: tokens } = await supabase
-        .from('integration_tokens')
-        .select('user_id, provider, connected')
-        .eq('organization_id', task.organization_id) // Filter by Org
-        .eq('user_id', task.payload.userId) // Filter by User
-        .eq('connected', true)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-    if (!tokens) {
-        throw new Error(`No connected email integration found for user ${task.payload.userId} in org ${task.organization_id}`);
-    }
-
-    const { provider } = tokens;
-    const accessToken = await tokenManager.getFreshAccessToken(tokens.user_id, provider as 'google' | 'outlook');
-
-    if (!accessToken) {
-        throw new Error(`Failed to get access token for ${provider}`);
-    }
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'http://localhost:3000';
 
     const contactedLeads: any[] = [];
     const errors: any[] = [];
@@ -569,29 +549,75 @@ async function executeContact(task: any, supabase: any) {
 
         try {
             // Personalize email
+            const firstName = lead.fullName?.split(' ')[0] || 'Hola';
             const personalizedBody = bodyTemplate
-                .replace('{{firstName}}', lead.fullName?.split(' ')[0] || 'Hola')
-                .replace('{{company}}', lead.companyName || 'tu empresa'); // Basic replacement
+                .replace('{{firstName}}', firstName)
+                .replace('{{lead.name}}', lead.fullName || '')
+                .replace('{{company}}', lead.companyName || 'tu empresa');
 
-            // Send Email
-            if (provider === 'google') {
-                await sendGmail(accessToken, lead.email, subject, personalizedBody);
-            } else if (provider === 'outlook') {
-                await sendOutlook(accessToken, lead.email, subject, personalizedBody);
+            const personalizedSubject = subject
+                .replace('{{firstName}}', firstName)
+                .replace('{{lead.name}}', lead.fullName || '')
+                .replace('{{company}}', lead.companyName || 'tu empresa');
+
+            const response = await fetch(`${appUrl}/api/contact/send`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-user-id': task.payload.userId
+                },
+                body: JSON.stringify({
+                    to: lead.email,
+                    subject: personalizedSubject,
+                    body: personalizedBody,
+                    leadId: lead.id,
+                    campaignId: campaign?.id,
+                    missionId: task.mission_id,
+                    userId: task.payload.userId,
+                    isHtml: true,
+                    tracking: campaign?.settings?.tracking
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => '');
+                const lower = errorText.toLowerCase();
+                const isUnsub = response.status === 409 || lower.includes('unsub');
+                const isBlocked = response.status === 403 || lower.includes('domain');
+
+                if (isUnsub || isBlocked) {
+                    await supabase
+                        .from('contacted_leads')
+                        .update({
+                            campaign_followup_allowed: false,
+                            campaign_followup_reason: isUnsub ? 'unsubscribed' : 'domain_blocked',
+                            evaluation_status: isUnsub ? 'do_not_contact' : 'pending',
+                            last_update_at: new Date().toISOString(),
+                        } as any)
+                        .eq('lead_id', lead.id)
+                        .eq('mission_id', task.mission_id);
+                }
+
+                errors.push({ email: lead.email, error: `API ${response.status}: ${errorText.slice(0, 160)}` });
+                continue;
             }
+
+            const resData = await response.json();
+            const sentAt = new Date().toISOString();
 
             contactedLeads.push({
                 organization_id: task.organization_id,
                 lead_id: lead.id,
-                mission_id: task.mission_id, // Add missing field
+                mission_id: task.mission_id,
                 name: lead.fullName,
                 email: lead.email,
                 company: lead.companyName,
                 role: lead.title,
-                status: 'sent', // Mark as sent
-                provider: provider,
-                sent_at: new Date().toISOString(),
-                created_at: new Date().toISOString()
+                status: 'sent',
+                provider: resData.provider || 'unknown',
+                subject: personalizedSubject,
+                sent_at: sentAt,
+                created_at: sentAt
             });
 
             if (campaign?.id && campaignSentRecords && lead?.id) {

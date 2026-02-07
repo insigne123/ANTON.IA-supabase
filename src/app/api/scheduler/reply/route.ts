@@ -2,6 +2,7 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { classifyReply, extractReplyPreview } from '@/lib/reply-classifier';
+import { notificationService } from '@/lib/services/notification-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,6 +66,13 @@ async function updateLead(supabase: any, id: string, text: string) {
         .eq('id', id)
         .maybeSingle();
 
+    const evalStatus =
+        classification.intent === 'negative' || classification.intent === 'unsubscribe'
+            ? 'do_not_contact'
+            : (classification.intent === 'meeting_request' || classification.intent === 'positive')
+                ? 'action_required'
+                : 'pending';
+
     const { error } = await supabase
         .from('contacted_leads')
         .update({
@@ -79,6 +87,7 @@ async function updateLead(supabase: any, id: string, text: string) {
             campaign_followup_allowed: classification.shouldContinue,
             campaign_followup_reason: classification.reason || null,
             last_follow_up_at: new Date().toISOString(),
+            evaluation_status: evalStatus,
             last_update_at: new Date().toISOString()
         })
         .eq('id', id);
@@ -92,6 +101,16 @@ async function updateLead(supabase: any, id: string, text: string) {
                 organization_id: row.organization_id || null,
                 reason: `reply:${classification.intent}`,
             }, { onConflict: 'email,user_id,organization_id' } as any);
+    }
+
+    if (row?.organization_id && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+        const summary = classification.summary || preview || 'Respuesta positiva detectada';
+        await notificationService.sendAlert(
+            row.organization_id,
+            'Respuesta positiva detectada',
+            `Lead ${row.email || id} respondió: ${summary}. Revisar: ${appUrl}/contacted/replied`
+        );
     }
 
     if (error) {

@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, Legend } from 'recharts';
-import { Users, Send, MailOpen, MessageSquare, MousePointerClick } from 'lucide-react';
+import { Users, Send, MailOpen, MessageSquare, MousePointerClick, AlertTriangle, Ban } from 'lucide-react';
 import type { ContactedLead } from '@/lib/types';
 import type { Campaign } from '@/lib/services/campaigns-service';
 
@@ -22,6 +22,8 @@ export function CampaignAnalytics({ campaign, contactedLeads }: CampaignAnalytic
         let opened = 0;
         let replied = 0;
         let clicked = 0;
+        let actionRequired = 0;
+        let stopped = 0;
 
         // 2. Cross-reference with ContactedLead to get status
         // Optimization: Create a map for faster lookup if needed, but array find is okay for small sets
@@ -34,6 +36,13 @@ export function CampaignAnalytics({ campaign, contactedLeads }: CampaignAnalytic
                 if (lead.openedAt) opened++;
                 if (lead.repliedAt || lead.status === 'replied') replied++;
                 if (lead.clickedAt) clicked++;
+
+                if (lead.replyIntent === 'meeting_request' || lead.replyIntent === 'positive') {
+                    actionRequired++;
+                }
+                if (lead.replyIntent === 'negative' || lead.replyIntent === 'unsubscribe') {
+                    stopped++;
+                }
             }
         });
 
@@ -42,6 +51,8 @@ export function CampaignAnalytics({ campaign, contactedLeads }: CampaignAnalytic
             opened,
             replied,
             clicked,
+            actionRequired,
+            stopped,
             openRate: totalSent > 0 ? ((opened / totalSent) * 100).toFixed(1) : 0,
             replyRate: totalSent > 0 ? ((replied / totalSent) * 100).toFixed(1) : 0,
             clickRate: totalSent > 0 ? ((clicked / totalSent) * 100).toFixed(1) : 0,
@@ -110,6 +121,29 @@ export function CampaignAnalytics({ campaign, contactedLeads }: CampaignAnalytic
                     <CardContent>
                         <div className="text-2xl font-bold">{metrics.clicked}</div>
                         <p className="text-xs text-muted-foreground">{metrics.clickRate}% CTR</p>
+                    </CardContent>
+                </Card>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Acción requerida</CardTitle>
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold">{metrics.actionRequired}</div>
+                        <p className="text-xs text-muted-foreground">Respuestas positivas / reunión</p>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Detenidos</CardTitle>
+                        <Ban className="h-4 w-4 text-red-500" />
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold">{metrics.stopped}</div>
+                        <p className="text-xs text-muted-foreground">Negativas / unsubscribe</p>
                     </CardContent>
                 </Card>
             </div>

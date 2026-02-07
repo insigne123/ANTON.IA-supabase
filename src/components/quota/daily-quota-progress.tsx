@@ -115,7 +115,10 @@ export default function DailyQuotaProgress({ className, kinds, compact, title = 
   }, []); // sólo al montar
 
 
-  const rows = useMemo(() => toRows(ks), [tick, ks]);
+  const rows = useMemo(() => {
+    void tick;
+    return toRows(ks);
+  }, [tick, ks]);
 
   const content = (
     <div className={cn('space-y-3', compact && 'p-0')}>

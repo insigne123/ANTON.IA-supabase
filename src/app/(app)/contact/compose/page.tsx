@@ -1,7 +1,7 @@
 
 'use client';
 import { Suspense } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
@@ -133,10 +133,10 @@ function ComposeInner() {
   useEffect(() => {
     const list = styleProfilesStorage.list();
     setStyleProfiles(list);
-    if (list.length && !selectedStyleName) setSelectedStyleName(list[0].name);
+    setSelectedStyleName(prev => prev || (list[0]?.name || ''));
   }, []);
 
-  function buildDraftForLead(leadObj: AnyLead, opts?: { forceRegenerate?: boolean }) {
+  const buildDraftForLead = useCallback((leadObj: AnyLead, opts?: { forceRegenerate?: boolean }) => {
     const company = getCompanyProfile() || {};
     const sender = buildSenderInfo();
     const leadData = {
@@ -204,7 +204,7 @@ function ComposeInner() {
     // 3) Solo aseguramos el prefijo con el nombre en el ASUNTO (no tocamos el cuerpo estilo empresa).
     subj = ensureSubjectPrefix(subj, leadData.firstName);
     return { subject: subj, body: bod };
-  }
+  }, [draftSource, selectedStyleName, styleProfiles, sp]);
 
   const [usePixel, setUsePixel] = useState(true);
   const [useReadReceipt, setUseReadReceipt] = useState(false);
@@ -215,8 +215,7 @@ function ComposeInner() {
     const tuned = buildDraftForLead(lead);
     setSubject(tuned.subject);
     setBody(tuned.body);
-
-  }, [lead, sp, draftSource, selectedStyleName, styleProfiles.length]);
+  }, [lead, buildDraftForLead]);
 
   // Helper to inject link tracking
   function rewriteLinksForTracking(html: string, trackingId: string): string {
