@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -50,7 +50,7 @@ export default function UnifiedSheetPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [loading, setLoading] = useState(true);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const unifiedRows = await buildUnifiedRows();
@@ -60,12 +60,12 @@ export default function UnifiedSheetPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [toast]);
 
   useEffect(() => {
     setCols(unifiedSheetService.loadColumns());
     refresh();
-  }, []);
+  }, [refresh]);
 
   function toggleColVisibility(key: ColumnKey, v: boolean) {
     const next = cols.map(c => c.key === key ? { ...c, visible: v } : c);

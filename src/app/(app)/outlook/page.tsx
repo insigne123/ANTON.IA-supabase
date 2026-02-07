@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
@@ -10,11 +10,7 @@ export default function OutlookConnectPage() {
   const [loading, setLoading] = useState(true);
   const supabase = createClientComponentClient();
 
-  useEffect(() => {
-    checkConnection();
-  }, []);
-
-  async function checkConnection() {
+  const checkConnection = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -32,7 +28,11 @@ export default function OutlookConnectPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [supabase]);
+
+  useEffect(() => {
+    checkConnection();
+  }, [checkConnection]);
 
   const handleConnect = () => {
     const tenant = process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'common';

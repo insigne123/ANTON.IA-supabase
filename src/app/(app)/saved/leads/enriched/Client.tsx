@@ -1,6 +1,6 @@
 ﻿
 'use client';
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 
 import { useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import type { EnrichedLead, LeadResearchReport, StyleProfile } from '@/lib/types';
-import { upsertLeadReports, findReportForLead, leadResearchStorage, getLeadReports, findReportByRef } from '@/lib/lead-research-storage';
+import { upsertLeadReports, findReportForLead, leadResearchStorage, getLeadReports } from '@/lib/lead-research-storage';
 import { BackBar } from '@/components/back-bar';
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
@@ -257,10 +257,9 @@ export default function EnrichedLeadsClient() {
   const [nameFilter, setNameFilter] = useState('');
   const [titleFilter, setTitleFilter] = useState('');
 
-  useEffect(() => {
-    async function loadData() {
-      const e = await enrichedLeadsStorageGet();
-      const saved = await supabaseService.getLeads();
+  const loadData = useCallback(async () => {
+    const e = await enrichedLeadsStorageGet();
+    const saved = await supabaseService.getLeads();
 
       const patched = e.map((x) => {
         if (x.companyName && x.companyDomain) return x;
@@ -286,8 +285,10 @@ export default function EnrichedLeadsClient() {
 
       setEnriched(patched);
       setReports(getLeadReports());
-      setStyleProfiles(styleProfilesStorage.list());
-    }
+    setStyleProfiles(styleProfilesStorage.list());
+  }, []);
+
+  useEffect(() => {
     loadData();
 
     // Realtime Subscription
@@ -319,7 +320,7 @@ export default function EnrichedLeadsClient() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [loadData, toast]);
 
   // Listen for Auth Changes to reload data if session restores late
   useEffect(() => {
@@ -368,23 +369,27 @@ export default function EnrichedLeadsClient() {
   */
 
   // Referencia compuesta estable (id || email || linkedin || nombre|empresa)
-  function leadRefOf(e: EnrichedLead) {
+  const leadRefOf = useCallback((e: EnrichedLead) => {
     return e.id || e.email || e.linkedinUrl || `${e.fullName}|${e.companyName || ''}`;
-  }
+  }, []);
 
   /** Reporte (cualquier fuente: por ref, por dominio o por nombre). */
-  function hasReport(e: EnrichedLead) {
-    return !!findReportForLead({
-      leadId: leadRefOf(e),
-      companyDomain: e.companyDomain || null,
-      companyName: e.companyName || null,
-    })?.cross;
-  }
+  const hasReport = useCallback((e: EnrichedLead) => {
+    const ref = leadRefOf(e);
+    const byRef = reports.find(r => (r.meta?.leadRef || '') === ref);
+    if (byRef) return true;
+    const domain = e.companyDomain;
+    if (domain && reports.find(r => r.company.domain === domain)) return true;
+    const name = e.companyName;
+    if (name && reports.find(r => (r.company.name || '').toLowerCase() === name.toLowerCase())) return true;
+    return false;
+  }, [leadRefOf, reports]);
 
   /** Reporte estrictamente por referencia de lead (NO por dominio/nombre). */
-  function hasReportStrict(e: EnrichedLead) {
-    return !!findReportByRef(leadRefOf(e))?.cross;
-  }
+  const hasReportStrict = useCallback((e: EnrichedLead) => {
+    const ref = leadRefOf(e);
+    return !!reports.find(r => (r.meta?.leadRef || '') === ref);
+  }, [leadRefOf, reports]);
 
   // Helper to inject link tracking (duplicated from compose, should be util but ok for now)
   function rewriteLinksForTracking(html: string, trackingId: string): string {
@@ -397,20 +402,20 @@ export default function EnrichedLeadsClient() {
     });
   }
 
-  const canContact = (lead: EnrichedLead) => hasReport(lead) && !!lead.email;
+  const canContact = useCallback((lead: EnrichedLead) => hasReport(lead) && !!lead.email, [hasReport]);
 
   // Normaliza cadenas (quita acentos y pasa a minúsculas)
-  const norm = (s?: string | null) =>
+  const norm = useCallback((s?: string | null) =>
     (s || '')
       .toLowerCase()
       .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '');
+      .replace(/[\u0300-\u036f]/g, ''), []);
 
-  const splitTerms = (value: string) =>
+  const splitTerms = useCallback((value: string) =>
     value
       .split(',')
       .map(t => norm(t).trim())
-      .filter(Boolean);
+      .filter(Boolean), [norm]);
 
   // ---- Aplicación de filtros con soporte de múltiples términos (separados por coma) ----
   const filtered = useMemo(() => {
@@ -447,7 +452,7 @@ export default function EnrichedLeadsClient() {
       excludesAll(e.fullName, excLeads) &&
       excludesAll(e.title, excTitles)
     );
-  }, [enriched, applied]);
+  }, [enriched, applied, splitTerms, norm]);
 
   // Mantener número de página válido si cambia la cantidad total
   useEffect(() => {
@@ -468,29 +473,29 @@ export default function EnrichedLeadsClient() {
   // Elegibles totales (sobre la lista filtrada completa)
   const researchEligible = useMemo(
     () => filtered.filter(e => !!e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)).length,
-    [filtered, reports]
+    [filtered, leadRefOf, hasReportStrict]
   );
 
   // === Métricas para los "seleccionar todos" ===
   const researchEligiblePage = useMemo(
     // Elegible si: tiene email, NO está marcado investigado y NO tiene reporte por ref (otros leads no bloquean)
     () => pageLeads.filter(e => e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)).length,
-    [pageLeads, reports]
+    [pageLeads, leadRefOf, hasReportStrict]
   );
-  const contactEligiblePage = useMemo(() => pageLeads.filter(canContact).length, [pageLeads, reports]);
+  const contactEligiblePage = useMemo(() => pageLeads.filter(canContact).length, [pageLeads, canContact]);
 
   const allResearchChecked = useMemo(
     () => researchEligiblePage > 0 && pageLeads.filter(e => e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)).every(e => sel[e.id]),
-    [pageLeads, sel, researchEligiblePage]
+    [pageLeads, sel, researchEligiblePage, leadRefOf, hasReportStrict]
   );
   const allContactChecked = useMemo(
     () => contactEligiblePage > 0 && pageLeads.filter(canContact).every(l => selectedToContact.has(l.id)),
-    [pageLeads, selectedToContact, contactEligiblePage]
+    [pageLeads, selectedToContact, contactEligiblePage, canContact]
   );
 
   const anyInvestigated = useMemo(
     () => enriched.some(e => isResearched(leadRefOf(e)) || hasReport(e)),
-    [enriched, reports]
+    [enriched, leadRefOf, hasReport]
   );
 
   const toggleAllResearch = (checked: boolean) => {

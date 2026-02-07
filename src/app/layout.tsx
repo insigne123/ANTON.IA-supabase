@@ -8,6 +8,21 @@ import { ThemeProvider } from '@/components/providers/theme-provider';
 import { AuthProvider } from '@/context/AuthContext';
 import { PresenceProvider } from '@/context/PresenceContext';
 import { ExtensionInitializer } from '@/components/extension-initializer';
+import { Poppins, PT_Sans } from 'next/font/google';
+
+const poppins = Poppins({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-headline',
+  display: 'swap',
+});
+
+const ptSans = PT_Sans({
+  subsets: ['latin'],
+  weight: ['400', '700'],
+  variable: '--font-body',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'ANTON.IA - Lead Automation',
@@ -32,14 +47,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" suppressHydrationWarning>
-      <head>
-        <meta charSet="utf-8" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
-        <link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&display=swap" rel="stylesheet" />
-      </head>
-      <body className={cn('font-body antialiased min-h-screen bg-background text-foreground')} suppressHydrationWarning>
+      <body className={cn('font-body antialiased min-h-screen bg-background text-foreground', ptSans.variable, poppins.variable)} suppressHydrationWarning>
         <ThemeProvider attribute="class" defaultTheme="system">
           <AuthProvider>
             <PresenceProvider>

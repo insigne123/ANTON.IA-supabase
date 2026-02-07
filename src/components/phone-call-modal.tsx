@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -39,22 +39,6 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
         "Solicita presupuesto"
     ];
 
-    useEffect(() => {
-        if (open && lead) {
-            // Reset state
-            setScript(null);
-            setNotes('');
-            setCallResult('connected');
-            setCallDuration(0);
-            setIsTimerRunning(false);
-
-            // Auto-generate script if report exists
-            if (report) {
-                generateScript();
-            }
-        }
-    }, [open, lead, report]);
-
     // Call timer
     useEffect(() => {
         let interval: NodeJS.Timeout;
@@ -72,7 +56,7 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
-    async function generateScript() {
+    const generateScript = useCallback(async () => {
         if (!lead) return;
         setLoadingScript(true);
         try {
@@ -98,7 +82,23 @@ export function PhoneCallModal({ open, onOpenChange, lead, report, onLogCall }: 
         } finally {
             setLoadingScript(false);
         }
-    }
+    }, [lead, report, toast]);
+
+    useEffect(() => {
+        if (open && lead) {
+            // Reset state
+            setScript(null);
+            setNotes('');
+            setCallResult('connected');
+            setCallDuration(0);
+            setIsTimerRunning(false);
+
+            // Auto-generate script if report exists
+            if (report) {
+                generateScript();
+            }
+        }
+    }, [open, lead, report, generateScript]);
 
     const copyToClipboard = (text: string, label: string) => {
         navigator.clipboard.writeText(text);

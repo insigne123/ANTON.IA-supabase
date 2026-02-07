@@ -44,11 +44,13 @@ export const generateCampaignFlow = ai.defineFlow(
                 Sender Name: ${userName || '{{sender.name}}'}
                 Language: ${language || 'es'}
 
-                Write a 1-step campaign sequence for initial contact.
+                Write a 3-step campaign sequence for initial contact + 2 smart follow-ups.
                 
                 Requirements:
-                - Step name: Set to "Initial Contact"
-                - offsetDays: Set to 0 (this is the first contact)
+                - 3 steps only
+                - Step 1: name "Initial Contact", offsetDays: 0
+                - Step 2: name "Follow-up 1", offsetDays: 3
+                - Step 3: name "Follow-up 2", offsetDays: 7
                 - Subject: Catchy and relevant to the target persona
                 - Body: HTML format (use <p>, <br>, <strong>)
                 - Personalization: Use {{lead.name}} for lead name, {{company}} for lead company, {{sender.name}} for sender

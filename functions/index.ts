@@ -367,7 +367,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
 
     // 1) Global org-level execution limit (protect costs)
     const usage = await getDailyUsage(supabase, task.organization_id);
-    const globalLimit = taskConfig?.daily_search_limit || 3;
+    const globalLimit = Math.min(5, taskConfig?.daily_search_limit || 3);
     if ((usage.search_runs || 0) >= globalLimit) {
         return { skipped: true, reason: 'daily_limit_reached', scope: 'organization', used: usage.search_runs || 0, limit: globalLimit };
     }
@@ -380,7 +380,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
             .eq('id', task.mission_id)
             .maybeSingle();
 
-        const missionLimit = Math.max(1, Number(mission?.daily_search_limit || 1));
+        const missionLimit = Math.min(5, Math.max(1, Number(mission?.daily_search_limit || 1)));
         const d = new Date();
         const todayStartUtc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0)).toISOString();
         const { count: missionSearchesToday } = await supabase
@@ -749,7 +749,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
         .single();
 
     const usage = await getDailyUsage(supabase, task.organization_id);
-    const limit = mission?.daily_enrich_limit || 10;
+    const limit = Math.min(50, mission?.daily_enrich_limit || 10);
 
     console.log(`[ENRICH] 🔍 QUOTA CHECK: `, {
         organization_id: task.organization_id,
@@ -1072,7 +1072,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         .single();
 
     const usage = await getDailyUsage(supabase, task.organization_id);
-    const limit = mission?.daily_investigate_limit || 5;
+    const limit = Math.min(50, mission?.daily_investigate_limit || 5);
 
     console.log(`[INVESTIGATE] 🔍 QUOTA CHECK: `, {
         organization_id: task.organization_id,
@@ -1607,7 +1607,7 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
         .single();
 
     const usage = await getDailyUsage(supabase, task.organization_id);
-    const limit = mission?.daily_contact_limit || 3;
+    const limit = Math.min(50, mission?.daily_contact_limit || 3);
 
     // Count contacts sent today
     const today = new Date().toISOString().split('T')[0];

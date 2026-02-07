@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { activityLogService } from '@/lib/services/activity-log-service';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -19,15 +19,7 @@ export function ActivityHistory() {
     const [selectedUser, setSelectedUser] = useState<string>('all');
     const [selectedAction, setSelectedAction] = useState<string>('all');
 
-    useEffect(() => {
-        loadMembers();
-    }, []);
-
-    useEffect(() => {
-        loadActivities();
-    }, [selectedUser, selectedAction]);
-
-    const loadMembers = async () => {
+    const loadMembers = useCallback(async () => {
         // We need a way to get organization members. 
         // Assuming we can get them from a service or context.
         // For now, let's try to fetch unique users from the activities themselves if we can't get members easily,
@@ -56,9 +48,9 @@ export function ActivityHistory() {
         if (memberData) {
             setMembers(memberData.map((m: any) => ({ id: m.user_id, name: m.profiles?.full_name || 'Unknown' })));
         }
-    };
+    }, []);
 
-    const loadActivities = async () => {
+    const loadActivities = useCallback(async () => {
         setLoading(true);
         const filters: any = {};
         if (selectedUser !== 'all') filters.userId = selectedUser;
@@ -67,7 +59,15 @@ export function ActivityHistory() {
         const data = await activityLogService.getActivities(50, filters);
         setActivities(data);
         setLoading(false);
-    };
+    }, [selectedUser, selectedAction]);
+
+    useEffect(() => {
+        loadMembers();
+    }, [loadMembers]);
+
+    useEffect(() => {
+        loadActivities();
+    }, [loadActivities]);
 
     const actionTypes = [
         { value: 'all', label: 'Todas las acciones' },

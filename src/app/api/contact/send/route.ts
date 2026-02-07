@@ -13,21 +13,25 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
         const { to, subject, body: emailBody, userId: bodyUserId, isHtml } = body;
 
+        const debug = process.env.CONTACT_DEBUG === 'true';
+        const debugLog = (...args: any[]) => { if (debug) console.log(...args); };
+        const debugError = (...args: any[]) => { if (debug) console.error(...args); };
+
         // 1. Authenticate (support both x-user-id header and session)
         const headerUserId = req.headers.get('x-user-id');
         let userId = headerUserId || bodyUserId;
 
-        console.log(`[CONTACT_DEBUG] START Request`);
-        console.log(`[CONTACT_DEBUG] Header UserID: '${headerUserId}'`);
-        console.log(`[CONTACT_DEBUG] Body UserID: '${bodyUserId}'`);
-        console.log(`[CONTACT_DEBUG] Final UserID: '${userId}'`);
+        debugLog(`[CONTACT_DEBUG] START Request`);
+        debugLog(`[CONTACT_DEBUG] Header UserID: '${headerUserId}'`);
+        debugLog(`[CONTACT_DEBUG] Body UserID: '${bodyUserId}'`);
+        debugLog(`[CONTACT_DEBUG] Final UserID: '${userId}'`);
 
         let supabase;
 
         // CRITICAL FIX: If call comes from Cloud Functions (headerUserId exists), 
         // we must use SERVICE ROLE to bypass RLS, because there are no cookies.
         if (headerUserId && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-            console.log('[CONTACT_DEBUG] Using SERVICE ROLE client (Server-to-Server)');
+            debugLog('[CONTACT_DEBUG] Using SERVICE ROLE client (Server-to-Server)');
             supabase = createClient(
                 process.env.NEXT_PUBLIC_SUPABASE_URL!,
                 process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -39,38 +43,38 @@ export async function POST(req: NextRequest) {
                 }
             );
         } else {
-            console.log('[CONTACT_DEBUG] Using SESSION client (Browser/Cookie)');
+            debugLog('[CONTACT_DEBUG] Using SESSION client (Browser/Cookie)');
             supabase = createRouteHandlerClient({ cookies });
 
             // If no explicit userId, try to get from session
             if (!userId) {
                 const { data: { user } } = await supabase.auth.getUser();
                 userId = user?.id;
-                console.log(`[CONTACT_DEBUG] Session UserID lookup result: '${userId}'`);
+                debugLog(`[CONTACT_DEBUG] Session UserID lookup result: '${userId}'`);
             }
         }
 
         if (!userId) {
-            console.error('[CONTACT_DEBUG] Unauthorized - Missing user ID');
+            debugError('[CONTACT_DEBUG] Unauthorized - Missing user ID');
             return NextResponse.json({ error: 'Unauthorized - Missing user ID' }, { status: 401 });
         }
 
         // 2. Get User's Token (Check Google first, then Outlook)
-        console.log(`[CONTACT_DEBUG] Checking tokens for UserID: '${userId}' in provider_tokens table`);
+        debugLog(`[CONTACT_DEBUG] Checking tokens for UserID: '${userId}' in provider_tokens table`);
         let provider = 'google';
         let tokenData = await tokenService.getToken(supabase, userId, 'google');
 
         if (!tokenData?.refresh_token) {
-            console.log(`[CONTACT_DEBUG] No Google token found, checking Outlook...`);
+            debugLog(`[CONTACT_DEBUG] No Google token found, checking Outlook...`);
             provider = 'outlook';
             tokenData = await tokenService.getToken(supabase, userId, 'outlook');
         } else {
-            console.log(`[CONTACT_DEBUG] Found Google token`);
+            debugLog(`[CONTACT_DEBUG] Found Google token`);
         }
 
         if (!tokenData?.refresh_token) {
-            console.error(`[CONTACT_DEBUG] NO TOKEN FOUND for UserID: '${userId}'. Returning 400.`);
-            console.error(`[CONTACT_DEBUG] Potential causes: RLS blocking read (if not using service role), or user truly has no tokens.`);
+            debugError(`[CONTACT_DEBUG] NO TOKEN FOUND for UserID: '${userId}'. Returning 400.`);
+            debugError(`[CONTACT_DEBUG] Potential causes: RLS blocking read (if not using service role), or user truly has no tokens.`);
             return NextResponse.json({ error: 'No connected email provider found for user' }, { status: 400 });
         }
 
@@ -84,7 +88,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (!accessToken) {
-            console.error('[CONTACT_DEBUG] Failed to refresh access token');
+            debugError('[CONTACT_DEBUG] Failed to refresh access token');
             return NextResponse.json({ error: 'Failed to refresh access token calling provider' }, { status: 401 });
         }
 
@@ -128,12 +132,12 @@ export async function POST(req: NextRequest) {
                                 : { data: null } as any;
 
                             if (unsubUser || unsubOrg) {
-                                console.warn('[CONTACT_DEBUG] Recipient is unsubscribed:', toEmail);
+                                debugLog('[CONTACT_DEBUG] Recipient is unsubscribed:', toEmail);
                                 return NextResponse.json({ error: 'Recipient unsubscribed' }, { status: 409 });
                             }
                         }
                     } catch (e) {
-                        console.error('[CONTACT_DEBUG] Failed unsubscribe check:', e);
+                        debugError('[CONTACT_DEBUG] Failed unsubscribe check:', e);
                     }
 
                     // Block if org domain is excluded
@@ -149,12 +153,12 @@ export async function POST(req: NextRequest) {
                                 .maybeSingle();
 
                             if (blockedDomain) {
-                                console.warn('[CONTACT_DEBUG] Recipient domain is blocked:', domain);
+                                debugLog('[CONTACT_DEBUG] Recipient domain is blocked:', domain);
                                 return NextResponse.json({ error: `Domain blocked: ${domain}` }, { status: 403 });
                             }
                         }
                     } catch (e) {
-                        console.error('[CONTACT_DEBUG] Failed domain blacklist check:', e);
+                        debugError('[CONTACT_DEBUG] Failed domain blacklist check:', e);
                     }
 
                     const { data: config } = await supabase
@@ -219,7 +223,7 @@ export async function POST(req: NextRequest) {
                     }
                 }
             } catch (e) {
-                console.error('[CONTACT_DEBUG] Error checking tracking config:', e);
+                debugError('[CONTACT_DEBUG] Error checking tracking config:', e);
             }
         }
 
@@ -232,11 +236,11 @@ export async function POST(req: NextRequest) {
         }
 
         if (!result.success) {
-            console.error(`[CONTACT_DEBUG] Send failed: ${result.error}`);
+                debugError(`[CONTACT_DEBUG] Send failed: ${result.error}`);
             return NextResponse.json({ error: result.error }, { status: 500 });
         }
 
-        console.log(`[CONTACT_DEBUG] Email sent successfully via ${provider}`);
+        debugLog(`[CONTACT_DEBUG] Email sent successfully via ${provider}`);
         return NextResponse.json({ success: true, provider: provider === 'google' ? 'gmail' : 'outlook' });
 
     } catch (error: any) {

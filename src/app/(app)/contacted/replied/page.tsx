@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { useToast } from '@/hooks/use-toast';
 import { graphGetMessage } from '@/lib/outlook-graph-client';
@@ -97,6 +98,10 @@ export default function ContactedRepliedPage() {
                   <TableHead>Asunto</TableHead>
                   <TableHead>Respondido</TableHead>
                   <TableHead>Preview</TableHead>
+                  <TableHead>Clasificacion</TableHead>
+                  <TableHead>Campana</TableHead>
+                  <TableHead>Intencion</TableHead>
+                  <TableHead>Campana</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
@@ -113,6 +118,27 @@ export default function ContactedRepliedPage() {
                     <TableCell className="max-w-[360px] truncate">{it.subject}</TableCell>
                     <TableCell>{it.repliedAt ? new Date(it.repliedAt).toLocaleString() : '—'}</TableCell>
                     <TableCell className="max-w-[420px] truncate">{(it as any).replyPreview || '—'}</TableCell>
+                    <TableCell className="max-w-[260px] truncate">
+                      {(it as any).replySummary || it.replyPreview || '—'}
+                    </TableCell>
+                    <TableCell>
+                      {it.replyIntent ? (
+                        <Badge variant={it.replyIntent === 'meeting_request' || it.replyIntent === 'positive' ? 'default' : it.replyIntent === 'negative' || it.replyIntent === 'unsubscribe' ? 'destructive' : 'secondary'}>
+                          {it.replyIntent}
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary">sin clasificar</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {it.campaignFollowupAllowed === false ? (
+                        <Badge variant="destructive">Detenida</Badge>
+                      ) : it.campaignFollowupAllowed === true ? (
+                        <Badge variant="secondary">Continua</Badge>
+                      ) : (
+                        <Badge variant="outline">Sin decision</Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right space-x-2">
                       <Button size="sm" onClick={() => viewReply(it)}>Ver respuesta</Button>
                       <Button size="sm" variant="destructive" onClick={() => removeAll(it)}>
@@ -123,7 +149,7 @@ export default function ContactedRepliedPage() {
                 ))}
                 {rows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-10">
+                    <TableCell colSpan={8} className="text-center text-sm text-muted-foreground py-10">
                       Aún no hay respuestas. Vuelve a <Link className="underline" href="/contacted">Contactados</Link>.
                     </TableCell>
                   </TableRow>

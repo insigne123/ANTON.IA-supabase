@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { commentsService } from '@/lib/services/comments-service';
 import { Comment } from '@/lib/types';
@@ -27,7 +27,7 @@ export function CommentsSection({ entityType, entityId }: CommentsSectionProps) 
     const [sending, setSending] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
 
-    const fetchComments = async () => {
+    const fetchComments = useCallback(async () => {
         try {
             const data = await commentsService.getComments(entityType, entityId);
             setComments(data);
@@ -36,7 +36,7 @@ export function CommentsSection({ entityType, entityId }: CommentsSectionProps) 
         } finally {
             setLoading(false);
         }
-    };
+    }, [entityId, entityType]);
 
     useEffect(() => {
         fetchComments();
@@ -61,7 +61,7 @@ export function CommentsSection({ entityType, entityId }: CommentsSectionProps) 
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [entityId, entityType]);
+    }, [entityId, fetchComments]);
 
     useEffect(() => {
         // Scroll to bottom on new comments

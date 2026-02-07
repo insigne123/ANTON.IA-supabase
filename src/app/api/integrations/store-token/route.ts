@@ -22,26 +22,24 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
         }
 
-        // Store connection status in integration_tokens table
-        // Note: We're not storing actual tokens here since those are managed client-side
-        // This just marks that the user has connected the provider
-        const { error } = await supabase
-            .from('integration_tokens')
-            .upsert({
-                user_id: userId,
-                provider,
-                connected: true,
-                updated_at: new Date().toISOString()
-            }, {
-                onConflict: 'user_id,provider'
-            });
+        if (!['google', 'outlook'].includes(provider)) {
+            return NextResponse.json({ error: 'Invalid provider' }, { status: 400 });
+        }
+
+        // provider_tokens is the source of truth for connectivity
+        const { data, error } = await supabase
+            .from('provider_tokens')
+            .select('provider')
+            .eq('user_id', userId)
+            .eq('provider', provider)
+            .maybeSingle();
 
         if (error) {
             console.error('[store-token] Database error:', error);
             return NextResponse.json({ error: error.message }, { status: 500 });
         }
 
-        return NextResponse.json({ success: true });
+        return NextResponse.json({ success: !!data, connected: !!data });
     } catch (error: any) {
         console.error('[store-token] Unexpected error:', error);
         return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
@@ -59,8 +57,8 @@ export async function GET(request: Request) {
 
         // Get connection status for all providers
         const { data, error } = await supabase
-            .from('integration_tokens')
-            .select('provider, connected')
+            .from('provider_tokens')
+            .select('provider')
             .eq('user_id', user.id);
 
         if (error) {
@@ -75,12 +73,8 @@ export async function GET(request: Request) {
 
         if (data) {
             data.forEach((row: any) => {
-                if (row.provider === 'google' && row.connected) {
-                    connections.google = true;
-                }
-                if (row.provider === 'outlook' && row.connected) {
-                    connections.outlook = true;
-                }
+                if (row.provider === 'google') connections.google = true;
+                if (row.provider === 'outlook') connections.outlook = true;
             });
         }
 
