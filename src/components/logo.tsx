@@ -4,7 +4,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 type LogoProps = {
   size?: "sm" | "md" | "lg" | "xl" | "2xl";
@@ -21,17 +21,10 @@ const IMG_CLASS: Record<NonNullable<LogoProps["size"]>, string> = {
 };
 
 export default function Logo({ size = "md", showWordmark = true, className }: LogoProps) {
-  // 1) /logo.png -> 2) /icon.png -> 3) SVG placeholder
-  const [src, setSrc] = useState<string>("/logo.png");
-  const [fallbackTried, setFallbackTried] = useState(false);
-
-  useEffect(() => setSrc("/logo.png"), []);
+  const [src, setSrc] = useState<string>("/icon.png");
 
   const onError = () => {
-    if (!fallbackTried) {
-      setFallbackTried(true);
-      setSrc("/icon.png");
-    }
+    setSrc("/logo-placeholder.svg");
   };
 
   return (

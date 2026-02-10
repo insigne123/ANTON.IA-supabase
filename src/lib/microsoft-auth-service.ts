@@ -7,7 +7,7 @@ import {
   type Configuration,
 } from '@azure/msal-browser';
 
-const clientId = process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID!;
+const clientId = (process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID || '').trim();
 // Para organizaciones (AAD) por defecto. Si el cliente te da su tenant, usa el GUID aquí.
 const tenantId = process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'organizations';
 
@@ -74,12 +74,14 @@ class MicrosoftAuthService {
 
   /** MSAL v3: debe llamarse initialize() antes de usar */
   private async ensureInit() {
+    if (!clientId) return;
     const app = this.getApp();
     if (!this.initPromise) this.initPromise = app.initialize();
     await this.initPromise;
   }
 
   private hydrateAccount() {
+    if (!clientId) return null;
     if (this.account) return this.account;
     const accs = this.getApp().getAllAccounts();
     if (accs.length) this.account = accs[0];
@@ -88,6 +90,7 @@ class MicrosoftAuthService {
 
   /** Chequeo pasivo: NO inicia login ni abre popup */
   async isSignedIn(): Promise<boolean> {
+    if (!clientId) return false;
     await this.ensureInit();
     return this.getApp().getAllAccounts().length > 0;
   }
