@@ -4,9 +4,13 @@ import { notificationService } from '@/lib/services/notification-service';
 import { generateCampaignFlow } from '@/ai/flows/generate-campaign';
 import * as uuid from 'uuid';
 
-// Initialize Supabase Admin Client
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// [FIX #2] Initialize at runtime, not module-load (secrets may not be available at build time)
+function getSupabaseCredentials() {
+    return {
+        url: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        key: process.env.SUPABASE_SERVICE_ROLE_KEY!
+    };
+}
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
 
 async function getDailyUsage(supabase: any, organizationId: string) {
@@ -24,31 +28,42 @@ async function getDailyUsage(supabase: any, organizationId: string) {
 async function incrementUsage(supabase: any, organizationId: string, type: 'search' | 'enrich' | 'investigate' | 'search_run' | 'contact', count: number) {
     const today = new Date().toISOString().split('T')[0];
 
-    // Determine column to update
-    let col = '';
-    if (type === 'search') col = 'leads_searched'; // Keep tracking volume for stats
-    else if (type === 'search_run') col = 'search_runs'; // Track frequency for limits
-    else if (type === 'enrich') col = 'leads_enriched';
-    else if (type === 'investigate') col = 'leads_investigated';
-    else if (type === 'contact') {
-        // antonia_daily_usage does not track contacts; no-op
-        return;
+    // [FIX #1] contacts are not tracked in antonia_daily_usage
+    if (type === 'contact') return;
+
+    // [FIX #1] Use atomic RPC to prevent race conditions (same as Firebase worker)
+    const { error: rpcError } = await supabase.rpc('increment_daily_usage', {
+        p_organization_id: organizationId,
+        p_date: today,
+        p_leads_searched: type === 'search' ? count : 0,
+        p_search_runs: type === 'search_run' ? count : 0,
+        p_leads_enriched: type === 'enrich' ? count : 0,
+        p_leads_investigated: type === 'investigate' ? count : 0
+    });
+
+    if (rpcError) {
+        console.error('[incrementUsage] RPC failed, using fallback:', rpcError);
+        // Fallback to read-compute-write (non-atomic)
+        let col = '';
+        if (type === 'search') col = 'leads_searched';
+        else if (type === 'search_run') col = 'search_runs';
+        else if (type === 'enrich') col = 'leads_enriched';
+        else if (type === 'investigate') col = 'leads_investigated';
+
+        const current = await getDailyUsage(supabase, organizationId);
+        const newCount = (current[col] || 0) + count;
+
+        const { error } = await supabase
+            .from('antonia_daily_usage')
+            .upsert({
+                organization_id: organizationId,
+                date: today,
+                [col]: newCount,
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'organization_id,date' });
+
+        if (error) console.error('Error updating usage (fallback):', error);
     }
-
-    const current = await getDailyUsage(supabase, organizationId);
-
-    const newCount = (current[col] || 0) + count;
-
-    const { error } = await supabase
-        .from('antonia_daily_usage')
-        .upsert({
-            organization_id: organizationId,
-            date: today,
-            [col]: newCount,
-            updated_at: new Date().toISOString()
-        }, { onConflict: 'organization_id,date' });
-
-    if (error) console.error('Error updating usage:', error);
 }
 
 async function executeCampaignGeneration(task: any, supabase: any, config: any) {
@@ -197,7 +212,16 @@ async function executeSearch(task: any, supabase: any, config: any) {
             created_at: new Date().toISOString()
         }));
 
-        await supabase.from('leads').insert(leadsToInsert);
+        // [FIX #9] Use upsert to avoid duplicate leads from repeated searches
+        const { error: insertErr } = await supabase.from('leads').upsert(leadsToInsert, {
+            onConflict: 'apollo_id',
+            ignoreDuplicates: true
+        });
+        if (insertErr) {
+            // Fallback: apollo_id unique constraint may not exist, try regular insert
+            console.warn('[Search] Upsert failed, trying insert:', insertErr.message);
+            await supabase.from('leads').insert(leadsToInsert);
+        }
 
         // Track stats AND execution count
         await incrementUsage(supabase, task.organization_id, 'search', leads.length); // Volume for stats
@@ -385,16 +409,17 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
     // Leads table: { name, linkedin_url, company, ... }
 
     // We need to map DB columns to API expected format
+    // [FIX #4] Correct field mapping from DB columns to API format
     leadsToProcess = leadsToProcess.map((l: any) => ({
         id: l.id, // Keep ID to update later
         name: l.name,
         full_name: l.name,
         linkedin_url: l.linkedin_url,
-        company_name: l.company,
-        organization_website_url: l.company_website,
+        company_name: l.company || l.company_name,
+        organization_website_url: l.company_website || l.organization_website_url,
         title: l.title,
-        email: l.emailRaw || l.email,
-        apolloId: l.apollo_id // Map DB apollo_id
+        email: l.email, // [FIX #4] was l.emailRaw which doesn't exist
+        apolloId: l.apollo_id || l.apolloId // Map DB apollo_id
     }));
 
     if (leadsToProcess.length === 0) return { skipped: true, reason: 'no_leads_to_process' };
@@ -404,7 +429,7 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
         leads: leadsToProcess.map((l: any) => ({
             fullName: l.full_name || l.name,
             linkedinUrl: l.linkedin_url,
-            companyName: l.organization_name || l.company_name,
+            companyName: l.company_name, // [FIX #4] was l.organization_name which doesn't exist here
             companyDomain: l.organization_website_url,
             title: l.title,
             email: l.email,
@@ -510,6 +535,31 @@ async function executeContact(task: any, supabase: any) {
         throw new Error('No enriched leads provided for contact');
     }
 
+    // [FIX #8] Check daily contact limit before processing
+    const { data: contactConfig } = await supabase
+        .from('antonia_missions')
+        .select('daily_contact_limit')
+        .eq('id', task.mission_id)
+        .single();
+
+    const contactLimit = contactConfig?.daily_contact_limit || 3;
+    const today = new Date().toISOString().split('T')[0];
+
+    const { count: contactsToday } = await supabase
+        .from('contacted_leads')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', task.organization_id)
+        .gte('created_at', `${today}T00:00:00Z`);
+
+    if ((contactsToday || 0) >= contactLimit) {
+        console.log(`[Contact] Daily contact limit reached (${contactsToday}/${contactLimit}).`);
+        return { skipped: true, reason: 'daily_contact_limit_reached' };
+    }
+
+    // Cap enrichedLeads to remaining capacity
+    const remaining = contactLimit - (contactsToday || 0);
+    const leadsToContact = enrichedLeads.slice(0, remaining);
+
     const { data: campaigns } = await supabase
         .from('campaigns')
         .select('*')
@@ -541,7 +591,7 @@ async function executeContact(task: any, supabase: any) {
     const errors: any[] = [];
 
     // 3. Process each lead
-    for (const lead of enrichedLeads) {
+    for (const lead of leadsToContact) { // [FIX #8] use capped list
         if (!lead.email) {
             errors.push({ name: lead.fullName, error: 'No email' });
             continue;
@@ -606,6 +656,7 @@ async function executeContact(task: any, supabase: any) {
             const sentAt = new Date().toISOString();
 
             contactedLeads.push({
+                user_id: task.payload.userId, // [FIX #5] add user_id required by RLS
                 organization_id: task.organization_id,
                 lead_id: lead.id,
                 mission_id: task.mission_id,
@@ -736,6 +787,7 @@ async function processTask(task: any, supabase: any) {
         await supabase.from('antonia_tasks').update({
             status: 'completed',
             result: result,
+            error_message: null,
             updated_at: new Date().toISOString()
         }).eq('id', task.id);
 
@@ -805,14 +857,18 @@ async function processTask(task: any, supabase: any) {
 export async function GET(request: Request) {
     // [P1-SEC-002] Security Check
     const authHeader = request.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
+    const cronSecret = String(process.env.CRON_SECRET || '').trim();
+    const providedBearer = String(authHeader || '').replace(/^Bearer\s+/i, '').trim();
+    const providedCronSecret = String(request.headers.get('x-cron-secret') || '').trim();
 
     // Check for Bearer token or direct matching if configured that way
     // Usually Vercel Cron uses just the header, or custom provided header
-    if (authHeader !== `Bearer ${cronSecret}` && request.headers.get('x-cron-secret') !== cronSecret) {
+    if (!cronSecret || (providedBearer !== cronSecret && providedCronSecret !== cronSecret)) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // [FIX #2] Use runtime getter instead of module-level constants
+    const { url: supabaseUrl, key: supabaseServiceKey } = getSupabaseCredentials();
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // STEP 1: Schedule daily tasks for active missions (runs once per day check)
@@ -832,28 +888,44 @@ export async function GET(request: Request) {
 
     // STEP 1.5: Trigger Firebase primary worker if configured
     const tickUrl = process.env.ANTONIA_FIREBASE_TICK_URL;
-    const tickSecret = process.env.ANTONIA_FIREBASE_TICK_SECRET;
+    const tickSecret = String(process.env.ANTONIA_FIREBASE_TICK_SECRET || '').trim();
+    let firebaseForwardFailure: { status: number; bodyPreview: string } | null = null;
 
     if (tickUrl && tickSecret) {
         try {
+            // [FIX #10] Use POST instead of GET for Firebase trigger
             const r = await fetch(tickUrl, {
-                method: 'GET',
+                method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${tickSecret}`,
                     'x-cron-secret': tickSecret,
+                    'Content-Type': 'application/json',
                 },
+                body: JSON.stringify({ source: 'next-cron', ts: Date.now() }),
                 cache: 'no-store',
             });
 
             const text = await r.text().catch(() => '');
-            return NextResponse.json({
-                forwarded: true,
-                worker: 'firebase',
+            if (r.ok) {
+                return NextResponse.json({
+                    forwarded: true,
+                    worker: 'firebase',
+                    status: r.status,
+                    bodyPreview: text.slice(0, 400),
+                }, { status: 200 });
+            }
+
+            firebaseForwardFailure = {
                 status: r.status,
                 bodyPreview: text.slice(0, 400),
-            }, { status: 200 });
+            };
+            console.error('[Cron] Firebase worker responded with non-2xx status:', r.status, text.slice(0, 400));
         } catch (e: any) {
             console.error('[Cron] Failed to trigger Firebase worker:', e);
+            firebaseForwardFailure = {
+                status: 0,
+                bodyPreview: String(e?.message || 'unknown_error').slice(0, 400),
+            };
             // fall through to backup processing only if explicitly enabled
         }
     }
@@ -886,6 +958,15 @@ export async function GET(request: Request) {
     }
 
     if (!enableBackup) {
+        if (firebaseForwardFailure) {
+            return NextResponse.json({
+                error: 'Firebase worker forwarding failed and backup processing is disabled',
+                worker: 'firebase',
+                forwarded: false,
+                status: firebaseForwardFailure.status,
+                bodyPreview: firebaseForwardFailure.bodyPreview,
+            }, { status: 502 });
+        }
         return NextResponse.json({ message: 'Backup processing disabled (ANTONIA_NEXT_BACKUP_PROCESSING=false)' });
     }
 

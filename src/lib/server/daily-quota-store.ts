@@ -7,10 +7,21 @@ import { createClient } from '@supabase/supabase-js';
 // Let's assume we pass the supabase client or use a global admin one.
 // Since 'daily-quota-store' is server-side only, we can instantiate a service-role client.
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let supabaseAdminClient: ReturnType<typeof createClient> | null = null;
+
+function getSupabaseAdmin() {
+  if (supabaseAdminClient) return supabaseAdminClient;
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseServiceRoleKey) {
+    throw new Error('Missing Supabase admin credentials for quota store');
+  }
+
+  supabaseAdminClient = createClient(supabaseUrl, supabaseServiceRoleKey);
+  return supabaseAdminClient;
+}
 
 export type DailyQuotaResult = {
   allowed: boolean;
@@ -67,16 +78,20 @@ export async function checkAndConsumeDailyQuota(
 
   if (!organizationId) {
     // Resolve organization from user if not provided (slower)
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await getSupabaseAdmin()
       .from('organization_members')
       .select('organization_id')
       .eq('user_id', userId)
       .limit(1)
       .maybeSingle();
 
-    if (!data) throw new Error(`User ${userId} has no organization for quota`);
-    organizationId = data.organization_id;
+    const resolvedOrgId = (data as { organization_id?: string } | null)?.organization_id;
+    if (!resolvedOrgId) throw new Error(`User ${userId} has no organization for quota`);
+    organizationId = resolvedOrgId;
   }
+
+  if (!organizationId) throw new Error(`User ${userId} has no organization for quota`);
+  const orgId = organizationId;
 
   const date = todayKeyUTC();
 
@@ -97,10 +112,10 @@ export async function checkAndConsumeDailyQuota(
 
   if (resource === 'contact') {
     // Validar contra tabla real de contactos
-    const { count: currentCount, error } = await supabaseAdmin
+    const { count: currentCount, error } = await getSupabaseAdmin()
       .from('contacted_leads')
       .select('*', { count: 'exact', head: true })
-      .eq('organization_id', organizationId)
+      .eq('organization_id', orgId)
       .gte('created_at', `${date}T00:00:00Z`); // Start of today UTC
 
     const used = currentCount || 0;
@@ -122,7 +137,7 @@ export async function checkAndConsumeDailyQuota(
 
   // Prepare RPC params
   const rpcParams: any = {
-    p_organization_id: organizationId,
+    p_organization_id: orgId,
     p_date: date
   };
 
@@ -138,10 +153,10 @@ export async function checkAndConsumeDailyQuota(
     // OR rely on RPC to fail/return? The current RPC `increment_daily_usage` just increments, it doesn't check limit.
     // So we must READ first.
 
-    const { data: usage } = await supabaseAdmin
+    const { data: usage } = await getSupabaseAdmin()
       .from('antonia_daily_usage')
       .select(col)
-      .eq('organization_id', organizationId)
+      .eq('organization_id', orgId)
       .eq('date', date)
       .maybeSingle();
 
@@ -152,7 +167,7 @@ export async function checkAndConsumeDailyQuota(
     }
 
     // Execute Increment
-    const { error: rpcError } = await supabaseAdmin.rpc('increment_daily_usage', rpcParams);
+    const { error: rpcError } = await getSupabaseAdmin().rpc('increment_daily_usage', rpcParams);
 
     if (rpcError) {
       console.error('Quota RPC error:', rpcError);
@@ -176,23 +191,27 @@ export async function getDailyQuotaStatus(
   let organizationId = params.organizationId;
 
   if (!organizationId) {
-    const { data } = await supabaseAdmin
+    const { data } = await getSupabaseAdmin()
       .from('organization_members')
       .select('organization_id')
       .eq('user_id', userId)
       .limit(1)
       .maybeSingle();
-    if (!data) return { allowed: false, count: 0, limit, dayKey: todayKeyUTC(), resetAtISO: nextDayStartISOUTC() };
-    organizationId = data.organization_id;
+    const resolvedOrgId = (data as { organization_id?: string } | null)?.organization_id;
+    if (!resolvedOrgId) return { allowed: false, count: 0, limit, dayKey: todayKeyUTC(), resetAtISO: nextDayStartISOUTC() };
+    organizationId = resolvedOrgId;
   }
+
+  if (!organizationId) return { allowed: false, count: 0, limit, dayKey: todayKeyUTC(), resetAtISO: nextDayStartISOUTC() };
+  const orgId = organizationId;
 
   const date = todayKeyUTC();
 
   if (resource === 'contact') {
-    const { count: currentCount } = await supabaseAdmin
+    const { count: currentCount } = await getSupabaseAdmin()
       .from('contacted_leads')
       .select('*', { count: 'exact', head: true })
-      .eq('organization_id', organizationId)
+      .eq('organization_id', orgId)
       .gte('created_at', `${date}T00:00:00Z`);
     const used = currentCount || 0;
     return { allowed: used < limit, count: used, limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
@@ -203,10 +222,10 @@ export async function getDailyQuotaStatus(
 
   if (!col) return { allowed: false, count: 0, limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
 
-  const { data: usage } = await supabaseAdmin
+  const { data: usage } = await getSupabaseAdmin()
     .from('antonia_daily_usage')
     .select(col)
-    .eq('organization_id', organizationId)
+    .eq('organization_id', orgId)
     .eq('date', date)
     .maybeSingle();
 

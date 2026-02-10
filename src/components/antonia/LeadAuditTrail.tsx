@@ -187,13 +187,13 @@ export function LeadAuditTrail({ missionId }: { missionId: string }) {
 
         <div className="mt-3">
           <Tabs value={filter} onValueChange={(v) => setFilter(v as any)} className="w-full">
-            <TabsList className="grid w-full grid-cols-6 h-9">
-              <TabsTrigger value="all" className="text-xs">Todo</TabsTrigger>
-              <TabsTrigger value="search" className="text-xs">Busqueda</TabsTrigger>
-              <TabsTrigger value="enrich" className="text-xs">Enriq.</TabsTrigger>
-              <TabsTrigger value="investigate" className="text-xs">Invest.</TabsTrigger>
-              <TabsTrigger value="contact" className="text-xs">Contacto</TabsTrigger>
-              <TabsTrigger value="errors" className="text-xs flex items-center gap-1">
+            <TabsList className="w-full h-auto justify-start gap-1 overflow-x-auto rounded-xl p-1">
+              <TabsTrigger value="all" className="shrink-0 px-3 py-1.5 text-xs">Todo</TabsTrigger>
+              <TabsTrigger value="search" className="shrink-0 px-3 py-1.5 text-xs">Busqueda</TabsTrigger>
+              <TabsTrigger value="enrich" className="shrink-0 px-3 py-1.5 text-xs">Enriq.</TabsTrigger>
+              <TabsTrigger value="investigate" className="shrink-0 px-3 py-1.5 text-xs">Invest.</TabsTrigger>
+              <TabsTrigger value="contact" className="shrink-0 px-3 py-1.5 text-xs">Contacto</TabsTrigger>
+              <TabsTrigger value="errors" className="shrink-0 px-3 py-1.5 text-xs flex items-center gap-1">
                 <AlertTriangle className="h-3 w-3" />
                 Errores
               </TabsTrigger>
