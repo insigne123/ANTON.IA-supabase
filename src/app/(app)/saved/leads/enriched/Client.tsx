@@ -1872,8 +1872,9 @@ export default function EnrichedLeadsClient() {
       </Dialog>
 
       <Dialog open={openCompose} onOpenChange={setOpenCompose}>
-        <DialogContent className="max-w-4xl" onEscapeKeyDown={() => setOpenCompose(false)}>
+        <DialogContent className="max-w-4xl max-h-[92vh] overflow-hidden flex flex-col" onEscapeKeyDown={() => setOpenCompose(false)}>
           <DialogHeader><DialogTitle>Contactar {composeList.length} leads</DialogTitle></DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
           {/* Fuente del borrador + Perfil de estilo + Proveedor */}
           <div className="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
             <div className="col-span-1">
@@ -2057,7 +2058,7 @@ export default function EnrichedLeadsClient() {
             </div>
           </div>
 
-          <div className="max-h-[60vh] overflow-y-auto space-y-4 p-1">
+          <div className="space-y-4 p-1">
             {composeList.map(({ lead, subject, body }, i) => (
               <div key={lead.id} className="border rounded-lg p-3">
                 <div className="font-semibold text-sm">{lead.fullName} &lt;{lead.email}&gt;</div>
@@ -2167,7 +2168,8 @@ export default function EnrichedLeadsClient() {
               </div>
             ))}
           </div>
-          <div className="mt-4 flex items-center justify-between">
+          </div>
+          <div className="mt-3 pt-3 border-t flex items-center justify-between shrink-0">
             {sendingBulk
               ? <div className="text-xs">Enviando… {sendProgress.done}/{sendProgress.total}</div>
               : <div className="text-xs text-muted-foreground">

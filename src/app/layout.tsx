@@ -28,16 +28,11 @@ export const metadata: Metadata = {
   title: 'ANTON.IA - Lead Automation',
   description: 'AI-powered lead search, research, and outreach.',
   icons: {
-    icon: [
-      { url: '/favicon.ico' }, // fallback clásico
-      { url: '/icon-32.png', sizes: '32x32', type: 'image/png' },
-      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
-    ],
-    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
-    shortcut: ['/favicon.ico'],
+    icon: [{ url: '/icon.png', type: 'image/png' }],
+    apple: [{ url: '/icon.png', type: 'image/png' }],
+    shortcut: ['/icon.png'],
   },
-  manifest: '/manifest.json', // opcional si quieres PWA
+  manifest: '/manifest.webmanifest',
 };
 
 export default function RootLayout({
