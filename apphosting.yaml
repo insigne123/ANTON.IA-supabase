@@ -62,7 +62,7 @@ env:
 
   # Firebase Functions integration for ANTON.IA worker
   - variable: ANTONIA_FIREBASE_TICK_URL
-    value: https://us-central1-leadflowai-3yjcy.cloudfunctions.net/antoniaTickHttp
+    value: https://antoniatickhttp-2rxibeopja-uc.a.run.app
     availability: [RUNTIME]
 
   - variable: ANTONIA_FIREBASE_TICK_SECRET

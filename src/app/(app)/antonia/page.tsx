@@ -1322,7 +1322,7 @@ export default function AntoniaPage() {
                 </AlertDialogContent>
             </AlertDialog>
             <Sheet open={activitySheetOpen} onOpenChange={setActivitySheetOpen}>
-                <SheetContent side="right" className="w-[500px] sm:w-[600px] p-0 flex flex-col">
+                <SheetContent side="right" className="w-full sm:w-[600px] sm:max-w-[600px] p-0 flex flex-col">
                     <SheetHeader className="px-6 py-4 border-b">
                         <SheetTitle>Detalles: {selectedActivityMission?.title || 'Misión'}</SheetTitle>
                     </SheetHeader>

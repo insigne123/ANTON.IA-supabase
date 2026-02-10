@@ -112,26 +112,26 @@ export function MissionQueues({ missionId }: { missionId: string }) {
 
             <Tabs defaultValue="reserve" className="flex-1 flex flex-col overflow-hidden">
                 <div className="px-4 pt-4">
-                    <TabsList className="grid w-full grid-cols-5">
-                        <TabsTrigger value="reserve" className="flex gap-2">
-                            <Database className="w-4 h-4" />
-                            Reserva ({reserveLeads.length})
+                    <TabsList className="w-full h-auto justify-start gap-1 overflow-x-auto rounded-xl p-1">
+                        <TabsTrigger value="reserve" className="shrink-0 gap-2 px-3 py-2 text-xs sm:text-sm">
+                            <Database className="hidden h-4 w-4 sm:block" />
+                            <span className="whitespace-nowrap">Reserva ({reserveLeads.length})</span>
                         </TabsTrigger>
-                        <TabsTrigger value="ready" className="flex gap-2">
-                            <Send className="w-4 h-4" />
-                            Listos ({readyLeads.length})
+                        <TabsTrigger value="ready" className="shrink-0 gap-2 px-3 py-2 text-xs sm:text-sm">
+                            <Send className="hidden h-4 w-4 sm:block" />
+                            <span className="whitespace-nowrap">Listos ({readyLeads.length})</span>
                         </TabsTrigger>
-                        <TabsTrigger value="noemail" className="flex gap-2">
-                            <AlertCircle className="w-4 h-4" />
-                            Sin Email ({noEmailLeads.length})
+                        <TabsTrigger value="noemail" className="shrink-0 gap-2 px-3 py-2 text-xs sm:text-sm">
+                            <AlertCircle className="hidden h-4 w-4 sm:block" />
+                            <span className="whitespace-nowrap">Sin Email ({noEmailLeads.length})</span>
                         </TabsTrigger>
-                        <TabsTrigger value="contacted" className="flex gap-2">
-                            <CheckCircle2 className="w-4 h-4" />
-                            Contactados ({contactedLeads.length})
+                        <TabsTrigger value="contacted" className="shrink-0 gap-2 px-3 py-2 text-xs sm:text-sm">
+                            <CheckCircle2 className="hidden h-4 w-4 sm:block" />
+                            <span className="whitespace-nowrap">Contactados ({contactedLeads.length})</span>
                         </TabsTrigger>
-                        <TabsTrigger value="blocked" className="flex gap-2">
-                            <ShieldAlert className="w-4 h-4" />
-                            Bloqueados ({blockedLeads.length})
+                        <TabsTrigger value="blocked" className="shrink-0 gap-2 px-3 py-2 text-xs sm:text-sm">
+                            <ShieldAlert className="hidden h-4 w-4 sm:block" />
+                            <span className="whitespace-nowrap">Bloqueados ({blockedLeads.length})</span>
                         </TabsTrigger>
                     </TabsList>
                 </div>

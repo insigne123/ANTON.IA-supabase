@@ -217,11 +217,18 @@ export const antoniaService = {
      */
     updateMission: async (
         missionId: string,
-        updates: { status?: AntoniaMissionStatus; title?: string }
+        updates: { status?: AntoniaMissionStatus; title?: string; goalSummary?: string }
     ) => {
+        // [FIX #7] Explicit camelCase → snake_case mapping for DB columns
+        const dbUpdates: Record<string, any> = {};
+        if (updates.status !== undefined) dbUpdates.status = updates.status;
+        if (updates.title !== undefined) dbUpdates.title = updates.title;
+        if (updates.goalSummary !== undefined) dbUpdates.goal_summary = updates.goalSummary;
+        dbUpdates.updated_at = new Date().toISOString();
+
         const { data, error } = await supabase
             .from('antonia_missions')
-            .update(updates)
+            .update(dbUpdates)
             .eq('id', missionId)
             .select()
             .single();

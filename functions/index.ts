@@ -2675,14 +2675,16 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         // Fetch Metrics
         const { count: leadsFound } = await supabase.from('leads').select('*', { count: 'exact', head: true }).eq('mission_id', missionId);
 
-        // Count enriched leads from leads table with status='enriched'
-        const { count: leadsEnriched } = await supabase.from('leads')
-            .select('*', { count: 'exact', head: true })
-            .eq('mission_id', missionId)
-            .eq('status', 'enriched');
-
-        // Contacted
-        const { count: leadsContacted } = await supabase.from('contacted_leads').select('*', { count: 'exact', head: true }).eq('mission_id', missionId);
+        // Contacted (unique leads, not total sends)
+        const { data: contactedRows } = await supabase
+            .from('contacted_leads')
+            .select('lead_id')
+            .eq('mission_id', missionId);
+        const leadsContactedUniqueFromTable = new Set(
+            ((contactedRows as any[]) || [])
+                .map((r: any) => String(r?.lead_id || '').trim())
+                .filter(Boolean)
+        ).size;
 
         // Do-not-contact
         const { count: blockedCount } = await supabase
@@ -2691,15 +2693,24 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
             .eq('mission_id', missionId)
             .eq('status', 'do_not_contact');
 
+        // Leads that already advanced beyond "saved" in the funnel.
+        // This keeps the mission report coherent when historical event logs are partial.
+        const { count: leadsAdvancedInFunnel } = await supabase
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId)
+            .in('status', ['enriched', 'contacted', 'do_not_contact']);
+
+        const { count: leadsWithEmail } = await supabase
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId)
+            .not('email', 'is', null);
+
         // Replies (Positive/Negative) via lead_responses or contacted_leads status
         const { count: replies } = await supabase.from('contacted_leads').select('*', { count: 'exact', head: true })
             .eq('mission_id', missionId)
             .neq('evaluation_status', 'pending');
-
-        // Calculate conversion rates
-        const enrichmentRate = leadsFound ? ((leadsEnriched || 0) / leadsFound * 100).toFixed(1) : '0';
-        const contactRate = leadsFound ? ((leadsContacted || 0) / leadsFound * 100).toFixed(1) : '0';
-        const responseRate = leadsContacted ? ((replies || 0) / leadsContacted * 100).toFixed(1) : '0';
 
         // Lead-level audit from antonia_lead_events
         const audit = {
@@ -2713,24 +2724,31 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
             contactedBlocked: 0,
             contactedFailed: 0,
         };
+        const enrichedLeadIds = new Set<string>();
+        const contactedLeadIdsFromEvents = new Set<string>();
         try {
             const { data: evs } = await supabase
                 .from('antonia_lead_events')
-                .select('event_type, outcome')
+                .select('lead_id, event_type, outcome')
                 .eq('mission_id', missionId)
                 .limit(5000);
             for (const e of (evs as any[]) || []) {
                 const type = String(e.event_type || '');
                 const outcome = String(e.outcome || '');
+                const leadId = String(e.lead_id || '').trim();
                 if (type === 'lead_found') audit.found++;
                 if (type === 'lead_enrich_completed') {
                     if (outcome === 'email_found') audit.enrichEmail++;
                     else if (outcome === 'no_email') audit.enrichNoEmail++;
+                    if (leadId) enrichedLeadIds.add(leadId);
                 }
                 if (type === 'lead_enrich_failed') audit.enrichFailed++;
                 if (type === 'lead_investigate_completed') audit.investigated++;
                 if (type === 'lead_investigate_failed') audit.investigateFailed++;
-                if (type === 'lead_contact_sent') audit.contactedSent++;
+                if (type === 'lead_contact_sent') {
+                    audit.contactedSent++;
+                    if (leadId) contactedLeadIdsFromEvents.add(leadId);
+                }
                 if (type === 'lead_contact_blocked') audit.contactedBlocked++;
                 if (type === 'lead_contact_failed') audit.contactedFailed++;
             }
@@ -2738,13 +2756,37 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
             console.warn('[REPORT][mission_historic] Failed to aggregate lead events:', e);
         }
 
+        // Enriched = acumulado histórico (normalizado) para evitar inconsistencias
+        // cuando existen datos legacy sin eventos completos.
+        const leadsEnriched = Math.max(
+            enrichedLeadIds.size,
+            audit.enrichEmail + audit.enrichNoEmail,
+            leadsAdvancedInFunnel || 0,
+            leadsWithEmail || 0,
+            leadsContactedUniqueFromTable
+        );
+
+        // Contacted = leads únicos contactados
+        const leadsContacted = leadsContactedUniqueFromTable > 0
+            ? leadsContactedUniqueFromTable
+            : contactedLeadIdsFromEvents.size;
+
+        const totalFound = leadsFound || 0;
+        const totalReplies = replies || 0;
+        const toRate = (num: number, den: number) => (den > 0 ? Math.min(100, (num / den) * 100).toFixed(1) : '0');
+
+        // Calculate conversion rates
+        const enrichmentRate = toRate(leadsEnriched, totalFound);
+        const contactRate = toRate(leadsContacted, totalFound);
+        const responseRate = toRate(totalReplies, leadsContacted);
+
         summaryData = {
             missionId,
             title: mission.title,
-            leadsFound: leadsFound || 0,
+            leadsFound: totalFound,
             leadsEnriched: leadsEnriched || 0,
             leadsContacted: leadsContacted || 0,
-            replies: replies || 0,
+            replies: totalReplies,
             blocked: blockedCount || 0,
             audit,
         };
@@ -3328,10 +3370,11 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
 
 // Timeout wrapper to prevent tasks from hanging indefinitely
 async function processTaskWithTimeout(task: any, supabase: SupabaseClient) {
-    const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+    const TIMEOUT_MS = 8 * 60 * 1000; // 8 minutes
+    const timeoutLabel = `${Math.round(TIMEOUT_MS / 60000)} minutes`;
 
     const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Task execution timeout after 5 minutes')), TIMEOUT_MS)
+        setTimeout(() => reject(new Error(`Task execution timeout after ${timeoutLabel}`)), TIMEOUT_MS)
     );
 
     try {
@@ -3344,7 +3387,7 @@ async function processTaskWithTimeout(task: any, supabase: SupabaseClient) {
             console.error(`[Worker] Task ${task.id} timed out`);
             await supabase.from('antonia_tasks').update({
                 status: 'failed',
-                error_message: 'Task execution timeout after 5 minutes',
+                error_message: `Task execution timeout after ${timeoutLabel}`,
                 updated_at: new Date().toISOString()
             }).eq('id', task.id);
 
@@ -3352,7 +3395,7 @@ async function processTaskWithTimeout(task: any, supabase: SupabaseClient) {
                 mission_id: task.mission_id,
                 organization_id: task.organization_id,
                 level: 'error',
-                message: `Task ${task.type} timed out after 5 minutes`
+                message: `Task ${task.type} timed out after ${timeoutLabel}`
             });
         }
         throw e;
@@ -3412,6 +3455,7 @@ async function processTask(task: any, supabase: SupabaseClient) {
         await supabase.from('antonia_tasks').update({
             status: 'completed',
             result: result,
+            error_message: null,
             updated_at: new Date().toISOString()
         }).eq('id', task.id);
 
@@ -3676,13 +3720,14 @@ export const antoniaTick = functions.scheduler.onSchedule({
 export const antoniaTickHttp = functions.https.onRequest({
     timeoutSeconds: 540,
     memory: '1GiB',
+    invoker: 'public',
     secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ANTONIA_TICK_SECRET']
 } as any, async (req: any, res: any) => {
     try {
-        const secret = process.env.ANTONIA_TICK_SECRET;
+        const secret = String(process.env.ANTONIA_TICK_SECRET || '').trim();
         const authHeader = req.get('authorization') || '';
-        const bearer = authHeader.replace(/^Bearer\s+/i, '');
-        const headerSecret = req.get('x-cron-secret') || '';
+        const bearer = String(authHeader).replace(/^Bearer\s+/i, '').trim();
+        const headerSecret = String(req.get('x-cron-secret') || '').trim();
 
         if (!secret || (bearer !== secret && headerSecret !== secret)) {
             res.status(401).json({ error: 'Unauthorized' });
