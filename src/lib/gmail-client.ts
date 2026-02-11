@@ -14,8 +14,48 @@ export type GmailMessage = {
   subject?: string;
 };
 
+export type GmailMessageDetail = GmailMessage & {
+  html?: string;
+  text?: string;
+};
+
 function header(hs: any[], name: string): string | undefined {
   return (hs || []).find((x: any) => x?.name?.toLowerCase() === name.toLowerCase())?.value;
+}
+
+function decodeBase64Url(data?: string): string {
+  if (!data) return '';
+  try {
+    const normalized = data.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return '';
+  }
+}
+
+function extractBodies(payload: any): { html?: string; text?: string } {
+  let html = '';
+  let text = '';
+
+  const visit = (node: any) => {
+    if (!node) return;
+    const mime = String(node.mimeType || '').toLowerCase();
+    const bodyData = decodeBase64Url(node?.body?.data);
+
+    if (bodyData) {
+      if (!html && mime === 'text/html') html = bodyData;
+      if (!text && mime === 'text/plain') text = bodyData;
+    }
+
+    const parts = Array.isArray(node.parts) ? node.parts : [];
+    for (const part of parts) visit(part);
+  };
+
+  visit(payload);
+  return { html: html || undefined, text: text || undefined };
 }
 
 export const gmailClient = {
@@ -83,5 +123,31 @@ export const gmailClient = {
       });
     }
     return out;
+  },
+
+  async getMessageById(id: string): Promise<GmailMessageDetail | null> {
+    const token = await googleAuthService.getReadToken();
+    const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+
+    const msg = await res.json();
+    const hs = msg?.payload?.headers ?? [];
+    const bodies = extractBodies(msg?.payload);
+
+    return {
+      id: msg?.id,
+      threadId: msg?.threadId,
+      snippet: msg?.snippet,
+      internalDate: msg?.internalDate,
+      from: header(hs, 'From'),
+      to: header(hs, 'To'),
+      subject: header(hs, 'Subject'),
+      html: bodies.html,
+      text: bodies.text,
+    };
   },
 };

@@ -34,7 +34,13 @@ function mapRowToContactedLead(row: any): ContactedLead {
         readReceiptMessageId: row.read_receipt_message_id,
         deliveryReceiptMessageId: row.delivery_receipt_message_id,
         lastUpdateAt: row.last_update_at,
+        scheduledAt: row.scheduled_at,
+        linkedinThreadUrl: row.linkedin_thread_url,
+        linkedinMessageStatus: row.linkedin_message_status,
         replyPreview: row.reply_preview,
+        replyMessageId: row.reply_message_id,
+        replySubject: row.reply_subject,
+        replySnippet: row.reply_snippet,
         followUpCount: row.follow_up_count,
         lastFollowUpAt: row.last_follow_up_at,
         lastStepIdx: row.last_step_idx,
@@ -48,7 +54,7 @@ function mapRowToContactedLead(row: any): ContactedLead {
 }
 
 function mapContactedLeadToRow(item: ContactedLead, userId: string, organizationId: string | null) {
-    const id = item.id || uuidv4();
+  const id = item.id || uuidv4();
     return {
         id,
         user_id: userId,
@@ -69,8 +75,71 @@ function mapContactedLeadToRow(item: ContactedLead, userId: string, organization
         conversation_id: item.conversationId,
         internet_message_id: item.internetMessageId,
         thread_id: item.threadId,
+        scheduled_at: item.scheduledAt,
+        linkedin_thread_url: item.linkedinThreadUrl,
+        linkedin_message_status: item.linkedinMessageStatus,
         last_reply_text: item.lastReplyText,
+        reply_preview: item.replyPreview,
+        ...(item.replyMessageId ? { reply_message_id: item.replyMessageId } : {}),
+        ...(item.replySubject ? { reply_subject: item.replySubject } : {}),
+        ...(item.replySnippet ? { reply_snippet: item.replySnippet } : {}),
     };
+}
+
+function mapPatchToRow(patch: Partial<ContactedLead>) {
+    const updateData: any = {};
+
+    if (patch.status) updateData.status = patch.status;
+    if (patch.repliedAt) updateData.replied_at = patch.repliedAt;
+    if (patch.replyPreview) updateData.reply_preview = patch.replyPreview;
+    if (patch.lastReplyText) updateData.last_reply_text = patch.lastReplyText;
+    if (patch.replyMessageId) updateData.reply_message_id = patch.replyMessageId;
+    if (patch.replySubject) updateData.reply_subject = patch.replySubject;
+    if (patch.replySnippet) updateData.reply_snippet = patch.replySnippet;
+    if (patch.openedAt) updateData.opened_at = patch.openedAt;
+    if (patch.deliveredAt) updateData.delivered_at = patch.deliveredAt;
+    if (patch.readReceiptMessageId) updateData.read_receipt_message_id = patch.readReceiptMessageId;
+    if (patch.deliveryReceiptMessageId) updateData.delivery_receipt_message_id = patch.deliveryReceiptMessageId;
+    if (patch.followUpCount !== undefined) updateData.follow_up_count = patch.followUpCount;
+    if (patch.lastFollowUpAt) updateData.last_follow_up_at = patch.lastFollowUpAt;
+    if (patch.lastStepIdx !== undefined) updateData.last_step_idx = patch.lastStepIdx;
+    if (patch.replyIntent) updateData.reply_intent = patch.replyIntent;
+    if (patch.replySentiment) updateData.reply_sentiment = patch.replySentiment;
+    if (patch.replyConfidence !== undefined) updateData.reply_confidence = patch.replyConfidence;
+    if (patch.replySummary) updateData.reply_summary = patch.replySummary;
+    if (patch.campaignFollowupAllowed !== undefined) updateData.campaign_followup_allowed = patch.campaignFollowupAllowed;
+    if (patch.campaignFollowupReason) updateData.campaign_followup_reason = patch.campaignFollowupReason;
+    if (patch.clickedAt) updateData.clicked_at = patch.clickedAt;
+    if (patch.clickCount !== undefined) updateData.click_count = patch.clickCount;
+    if (patch.scheduledAt) updateData.scheduled_at = patch.scheduledAt;
+    if (patch.linkedinMessageStatus) updateData.linkedin_message_status = patch.linkedinMessageStatus;
+    if (patch.linkedinThreadUrl) updateData.linkedin_thread_url = patch.linkedinThreadUrl;
+
+    updateData.last_update_at = new Date().toISOString();
+    return updateData;
+}
+
+function stripReplyTraceColumns(updateData: any) {
+    if (!updateData || typeof updateData !== 'object') return updateData;
+    const copy = { ...updateData };
+    delete copy.reply_message_id;
+    delete copy.reply_subject;
+    delete copy.reply_snippet;
+    return copy;
+}
+
+function isReplyTraceColumnError(error: any) {
+    const text = String(error?.message || error?.details || '').toLowerCase();
+    return text.includes('reply_message_id') || text.includes('reply_subject') || text.includes('reply_snippet');
+}
+
+async function updateWithReplyTraceFallback(run: (data: any) => any, updateData: any) {
+    let { error } = await run(updateData);
+    if (error && isReplyTraceColumnError(error)) {
+        const { error: retryError } = await run(stripReplyTraceColumns(updateData));
+        error = retryError;
+    }
+    return { error };
 }
 
 export async function getContactedLeads(): Promise<ContactedLead[]> {
@@ -145,91 +214,45 @@ export const contactedLeadsStorage = {
     },
 
     upsertByThreadId: async (threadId: string, patch: Partial<ContactedLead>) => {
-        // We need to find the record first to get its ID, or update by thread_id
-        // Supabase update can filter by thread_id
-        const updateData: any = {};
-        if (patch.status) updateData.status = patch.status;
-        if (patch.repliedAt) updateData.replied_at = patch.repliedAt;
-        if (patch.replyPreview) updateData.reply_preview = patch.replyPreview;
-        if (patch.openedAt) updateData.opened_at = patch.openedAt;
-        if (patch.deliveredAt) updateData.delivered_at = patch.deliveredAt;
-        if (patch.readReceiptMessageId) updateData.read_receipt_message_id = patch.readReceiptMessageId;
-        if (patch.deliveryReceiptMessageId) updateData.delivery_receipt_message_id = patch.deliveryReceiptMessageId;
-        if (patch.followUpCount !== undefined) updateData.follow_up_count = patch.followUpCount;
-        if (patch.lastFollowUpAt) updateData.last_follow_up_at = patch.lastFollowUpAt;
-        if (patch.lastStepIdx !== undefined) updateData.last_step_idx = patch.lastStepIdx;
+        const updateData = mapPatchToRow(patch);
 
-        updateData.last_update_at = new Date().toISOString();
-
-        const { error } = await supabase
-            .from(TABLE)
-            .update(updateData)
-            .eq('thread_id', threadId);
+        const { error } = await updateWithReplyTraceFallback(
+            (data) => supabase.from(TABLE).update(data).eq('thread_id', threadId),
+            updateData
+        );
 
         if (error) console.error('Error updating by threadId:', error);
     },
 
     upsertByMessageId: async (messageId: string, patch: Partial<ContactedLead>) => {
-        const updateData: any = {};
-        // Map fields similar to above... 
-        // Ideally we should have a helper to map patch to row partial
-        if (patch.status) updateData.status = patch.status;
-        if (patch.repliedAt) updateData.replied_at = patch.repliedAt;
-        if (patch.replyPreview) updateData.reply_preview = patch.replyPreview;
-        if (patch.openedAt) updateData.opened_at = patch.openedAt;
-        if (patch.deliveredAt) updateData.delivered_at = patch.deliveredAt;
-        if (patch.readReceiptMessageId) updateData.read_receipt_message_id = patch.readReceiptMessageId;
-        if (patch.deliveryReceiptMessageId) updateData.delivery_receipt_message_id = patch.deliveryReceiptMessageId;
+        const updateData = mapPatchToRow(patch);
 
-        updateData.last_update_at = new Date().toISOString();
-
-        const { error } = await supabase
-            .from(TABLE)
-            .update(updateData)
-            .eq('message_id', messageId);
+        const { error } = await updateWithReplyTraceFallback(
+            (data) => supabase.from(TABLE).update(data).eq('message_id', messageId),
+            updateData
+        );
 
         if (error) console.error('Error updating by messageId:', error);
     },
 
     updateStatusByConversationId: async (conversationId: string, patch: Partial<ContactedLead>) => {
-        const updateData: any = {};
-        if (patch.status) updateData.status = patch.status;
-        if (patch.repliedAt) updateData.replied_at = patch.repliedAt;
-        if (patch.replyPreview) updateData.reply_preview = patch.replyPreview;
-        if (patch.openedAt) updateData.opened_at = patch.openedAt;
-        if (patch.deliveredAt) updateData.delivered_at = patch.deliveredAt;
-        if (patch.readReceiptMessageId) updateData.read_receipt_message_id = patch.readReceiptMessageId;
-        if (patch.deliveryReceiptMessageId) updateData.delivery_receipt_message_id = patch.deliveryReceiptMessageId;
+        const updateData = mapPatchToRow(patch);
 
-        updateData.last_update_at = new Date().toISOString();
-
-        const { error } = await supabase
-            .from(TABLE)
-            .update(updateData)
-            .eq('conversation_id', conversationId);
+        const { error } = await updateWithReplyTraceFallback(
+            (data) => supabase.from(TABLE).update(data).eq('conversation_id', conversationId),
+            updateData
+        );
 
         if (error) console.error('Error updating by conversationId:', error);
     },
 
     updateStatusByThreadId: async (threadId: string, patch: Partial<ContactedLead>) => {
-        // Reuse upsertByThreadId logic or call it
-        // But upsertByThreadId maps fields manually.
-        // Let's just call the same logic.
-        const updateData: any = {};
-        if (patch.status) updateData.status = patch.status;
-        if (patch.repliedAt) updateData.replied_at = patch.repliedAt;
-        if (patch.replyPreview) updateData.reply_preview = patch.replyPreview;
-        if (patch.openedAt) updateData.opened_at = patch.openedAt;
-        if (patch.deliveredAt) updateData.delivered_at = patch.deliveredAt;
-        if (patch.readReceiptMessageId) updateData.read_receipt_message_id = patch.readReceiptMessageId;
-        if (patch.deliveryReceiptMessageId) updateData.delivery_receipt_message_id = patch.deliveryReceiptMessageId;
+        const updateData = mapPatchToRow(patch);
 
-        updateData.last_update_at = new Date().toISOString();
-
-        const { error } = await supabase
-            .from(TABLE)
-            .update(updateData)
-            .eq('thread_id', threadId);
+        const { error } = await updateWithReplyTraceFallback(
+            (data) => supabase.from(TABLE).update(data).eq('thread_id', threadId),
+            updateData
+        );
 
         if (error) console.error('Error updating by threadId:', error);
     },

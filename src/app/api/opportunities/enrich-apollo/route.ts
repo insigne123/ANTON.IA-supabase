@@ -187,10 +187,20 @@ export async function POST(req: NextRequest) {
       // The new API handles both email and phone enrichment in a single call
       try {
         const externalUrl = (process.env.ENRICHMENT_SERVICE_URL || '').trim();
-        const secret = (process.env.ENRICHMENT_SERVICE_SECRET || '').trim();
+        const backendSecret = (
+          process.env.BACKEND_ENRICH_SECRET ||
+          process.env.ENRICHMENT_SERVICE_SECRET ||
+          process.env.API_SECRET_KEY ||
+          ''
+        ).trim();
 
         if (!externalUrl) {
           log('[ERROR] ENRICHMENT_SERVICE_URL not configured. Skipping enrichment.');
+          continue;
+        }
+
+        if (!backendSecret) {
+          log('[ERROR] BACKEND_ENRICH_SECRET/ENRICHMENT_SERVICE_SECRET not configured. Skipping enrichment.');
           continue;
         }
 
@@ -200,8 +210,8 @@ export async function POST(req: NextRequest) {
         const lastName = parts.length > 1 ? parts.slice(1).join(' ') : '';
 
         const enrichmentPayload: any = {
-          record_id: l.apolloId || enrichedId, // Use Apollo ID if available regarding guide
-          table_name: 'people_search_leads', // Force table name for external service compatibility
+          record_id: enrichedId,
+          table_name: 'enriched_leads',
           lead: {
             first_name: firstName,
             last_name: lastName,
@@ -212,17 +222,22 @@ export async function POST(req: NextRequest) {
 
         // Add optional fields if available
         if (foundApolloId) {
+          enrichmentPayload.lead.id = foundApolloId;
           enrichmentPayload.lead.apollo_id = foundApolloId;
+        } else {
+          log('[WARN] Missing Apollo person id for enrichment lead:', enrichedId);
         }
 
         log('[enrich-consolidated] Calling new enrichment API:', externalUrl);
         log('[enrich-consolidated] Payload:', JSON.stringify(enrichmentPayload));
 
         // Call the new consolidated enrichment API
-        const enrichUrl = `${externalUrl}?secret_key=${secret}`;
-        const enrichRes = await fetch(enrichUrl, {
+        const enrichRes = await fetch(externalUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-secret-key': backendSecret,
+          },
           body: JSON.stringify(enrichmentPayload)
         });
 

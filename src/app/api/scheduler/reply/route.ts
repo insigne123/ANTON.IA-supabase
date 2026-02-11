@@ -6,6 +6,17 @@ import { notificationService } from '@/lib/services/notification-service';
 
 export const dynamic = 'force-dynamic';
 
+function stripReplyTraceFields(updateData: any) {
+    const copy = { ...updateData };
+    delete copy.reply_snippet;
+    return copy;
+}
+
+function hasReplyTraceColumnError(error: any) {
+    const text = String(error?.message || error?.details || '').toLowerCase();
+    return text.includes('reply_snippet');
+}
+
 export async function POST(request: Request) {
     const supabase = createRouteHandlerClient({ cookies });
     const body = await request.json();
@@ -73,13 +84,14 @@ async function updateLead(supabase: any, id: string, text: string) {
                 ? 'action_required'
                 : 'pending';
 
-    const { error } = await supabase
+    let { error } = await supabase
         .from('contacted_leads')
         .update({
             status: 'replied',
             linkedin_message_status: 'replied',
             last_reply_text: text,
             reply_preview: preview || null,
+            reply_snippet: preview || null,
             reply_intent: classification.intent,
             reply_sentiment: classification.sentiment,
             reply_confidence: classification.confidence,
@@ -91,6 +103,28 @@ async function updateLead(supabase: any, id: string, text: string) {
             last_update_at: new Date().toISOString()
         })
         .eq('id', id);
+
+    if (error && hasReplyTraceColumnError(error)) {
+        const { error: retryError } = await supabase
+            .from('contacted_leads')
+            .update(stripReplyTraceFields({
+                status: 'replied',
+                linkedin_message_status: 'replied',
+                last_reply_text: text,
+                reply_preview: preview || null,
+                reply_intent: classification.intent,
+                reply_sentiment: classification.sentiment,
+                reply_confidence: classification.confidence,
+                reply_summary: classification.summary || null,
+                campaign_followup_allowed: classification.shouldContinue,
+                campaign_followup_reason: classification.reason || null,
+                last_follow_up_at: new Date().toISOString(),
+                evaluation_status: evalStatus,
+                last_update_at: new Date().toISOString()
+            }))
+            .eq('id', id);
+        error = retryError;
+    }
 
     if ((classification.intent === 'unsubscribe' || classification.intent === 'negative') && row?.email) {
         await supabase
