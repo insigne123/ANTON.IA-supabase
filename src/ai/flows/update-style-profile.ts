@@ -3,6 +3,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import type { StyleProfile } from '@/lib/types';
+import { generateStructured } from '@/ai/openai-json';
 
 // Esquema de entrada para el flujo
 const UpdateStyleInputSchema = z.object({
@@ -51,14 +52,10 @@ Devuelve UNICAMENTE un objeto JSON con esta estructura:
 }
 `;
 
-        const { output } = await ai.generate({
+        const output = await generateStructured({
             prompt,
-            model: 'googleai/gemini-1.5-pro',
-            config: { temperature: 0.5 },
-            output: {
-                format: 'json',
-                schema: UpdateStyleOutputSchema,
-            },
+            schema: UpdateStyleOutputSchema,
+            temperature: 0.5,
         });
 
         if (!output) {

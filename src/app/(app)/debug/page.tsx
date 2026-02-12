@@ -14,12 +14,12 @@ export default function DebugPage() {
   const [auto, setAuto] = useState(true);
 
   async function load() {
-    const r = await fetch('/api/_debug/logs', { cache: 'no-store' });
+    const r = await fetch('/api/debug/logs', { cache: 'no-store' });
     const j = await r.json();
     setLogs(j.logs || []);
   }
   async function clear() {
-    await fetch('/api/_debug/logs', { method: 'DELETE' });
+    await fetch('/api/debug/logs', { method: 'DELETE' });
     await load();
   }
 

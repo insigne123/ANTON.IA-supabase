@@ -1,0 +1,690 @@
+{
+  "generatedAt": "2026-02-12T18:27:45.120Z",
+  "baseUrl": "http://127.0.0.1:9013",
+  "discoveredHandlers": 47,
+  "passed": 47,
+  "failed": 0,
+  "skipped": 0,
+  "allowHighRisk": false,
+  "failures": [],
+  "results": [
+    {
+      "method": "POST",
+      "endpoint": "/api/ai/enhance-report",
+      "key": "POST /api/ai/enhance-report",
+      "file": "src/app/api/ai/enhance-report/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 1674,
+      "responsePreview": "{\"summary\":\"Reporte normalizado\"}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/ai/generate-campaign",
+      "key": "POST /api/ai/generate-campaign",
+      "file": "src/app/api/ai/generate-campaign/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 8536,
+      "responsePreview": "{\"steps\":[{\"name\":\"Email 1: Introducción y Desafío\",\"offsetDays\":0,\"subject\":\"¿Operaciones eficientes en {{company}}? Podríamos ayudar.\",\"bodyHtml\":\"<p>Estimado/a {{lead.name}},</p><br><p>Soy {{sender.name}} de ANTON.IA,",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/ai/generate-phone-script",
+      "key": "POST /api/ai/generate-phone-script",
+      "file": "src/app/api/ai/generate-phone-script/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 5065,
+      "responsePreview": "{\"opening\":\"Hola Juan, ¿cómo estás? Vi en tu perfil de LinkedIn que lideras operaciones y la mejora continua en tu empresa. Justamente, quería conversar contigo sobre cómo ANTON.IA está ayudando a empresas en Chile a opt",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/ai/health",
+      "key": "GET /api/ai/health",
+      "file": "src/app/api/ai/health/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 25,
+      "responsePreview": "{\"ok\":true,\"genkit\":\"not-in-config\",\"ts\":1770920834714}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/ai/outreach-from-report",
+      "key": "POST /api/ai/outreach-from-report",
+      "file": "src/app/api/ai/outreach-from-report/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 2304,
+      "responsePreview": "{\"subject\":\"Automatización de prospección para [Empresa Objetivo]\",\"body\":\"Hola Maria Gonzalez,\\n\\nEspero que estés muy bien. Te contacto desde ANTON.IA, donde ayudamos a empresas como la tuya a optimizar sus procesos de",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/antonia/quota",
+      "key": "GET /api/antonia/quota",
+      "file": "src/app/api/antonia/quota/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 583,
+      "responsePreview": "{\"error\":\"Unauthorized\",\"details\":{\"__isAuthError\":true,\"name\":\"AuthSessionMissingError\",\"status\":400}}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/antonia/trigger",
+      "key": "POST /api/antonia/trigger",
+      "file": "src/app/api/antonia/trigger/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": "<500",
+      "durationMs": 228,
+      "responsePreview": "{\"error\":\"missionId required\"}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/auth/callback",
+      "key": "GET /api/auth/callback",
+      "file": "src/app/api/auth/callback/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 307,
+      "expected": [
+        302,
+        307
+      ],
+      "durationMs": 252,
+      "responsePreview": "",
+      "location": "http://localhost:9013/"
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/auth/callback/azure",
+      "key": "GET /api/auth/callback/azure",
+      "file": "src/app/api/auth/callback/azure/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 307,
+      "expected": [
+        302,
+        307
+      ],
+      "durationMs": 213,
+      "responsePreview": "",
+      "location": "https://studio--leadflowai-3yjcy.us-central1.hosted.app/outlook?error=no_code"
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/auth/callback/google",
+      "key": "GET /api/auth/callback/google",
+      "file": "src/app/api/auth/callback/google/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 307,
+      "expected": [
+        302,
+        307
+      ],
+      "durationMs": 256,
+      "responsePreview": "",
+      "location": "https://studio--leadflowai-3yjcy.us-central1.hosted.app/gmail?error=no_code"
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/contact/bulk-send",
+      "key": "POST /api/contact/bulk-send",
+      "file": "src/app/api/contact/bulk-send/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 503,
+      "expected": [
+        503
+      ],
+      "durationMs": 200,
+      "responsePreview": "{\"error\":\"Endpoint temporarily disabled due to build issues\"}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/contact/send",
+      "key": "POST /api/contact/send",
+      "file": "src/app/api/contact/send/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 357,
+      "responsePreview": "{\"error\":\"Unauthorized - Missing user ID\"}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/cron/antonia",
+      "key": "GET /api/cron/antonia",
+      "file": "src/app/api/cron/antonia/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 626,
+      "responsePreview": "{\"dryRun\":true,\"authorized\":true,\"activeMissions\":1,\"pendingTasks\":0,\"firebaseForwardConfigured\":false,\"backupProcessingEnabled\":false}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/cron/process-campaigns",
+      "key": "GET /api/cron/process-campaigns",
+      "file": "src/app/api/cron/process-campaigns/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 1627,
+      "responsePreview": "{\"dryRun\":true,\"processed\":430,\"summary\":{\"sent\":0,\"failed\":0,\"eligibleDryRun\":430,\"blockedUnsubscribed\":0,\"blockedDomain\":42},\"resultCount\":430,\"results\":[]}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/debug/apify-token",
+      "key": "GET /api/debug/apify-token",
+      "file": "src/app/api/debug/apify-token/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 1192,
+      "responsePreview": "{\"ok\":true,\"info\":{\"username\":\"plush_zinnia\",\"userId\":\"ZBYXUS5azWYsj4bQW\",\"email\":\"nicolas.yarur.g@yago.cl\"}}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/debug/logs",
+      "key": "GET /api/debug/logs",
+      "file": "src/app/api/debug/logs/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 304,
+      "responsePreview": "{\"logs\":[]}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/debug/logs",
+      "key": "POST /api/debug/logs",
+      "file": "src/app/api/debug/logs/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 14,
+      "responsePreview": "{\"ok\":true}",
+      "location": ""
+    },
+    {
+      "method": "DELETE",
+      "endpoint": "/api/debug/logs",
+      "key": "DELETE /api/debug/logs",
+      "file": "src/app/api/debug/logs/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 15,
+      "responsePreview": "{\"ok\":true}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/email/bulk-edit",
+      "key": "POST /api/email/bulk-edit",
+      "file": "src/app/api/email/bulk-edit/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 2286,
+      "responsePreview": "{\"drafts\":[{\"subject\":\"Colaboracion para Empresa X\",\"body\":\"Hola {{lead.firstName}}, me gustaria conversar contigo directamente. ¿Tienes 15 minutos para una llamada esta semana?\",\"lead\":{\"id\":\"lead-1\",\"fullName\":\"Camila ",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/email/render",
+      "key": "POST /api/email/render",
+      "file": "src/app/api/email/render/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 437,
+      "responsePreview": "{\"subject\":\"ANTON.IA × Empresa X\",\"body\":\"Hola Camila Torres,\\n\\nNoté Seguimiento manual en Empresa X. En ANTON.IA ayudamos con Automatizacion y Mejoramos conversion.\\n\\n¿Te parece una llamada breve esta semana para expl",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/email/style/chat",
+      "key": "POST /api/email/style/chat",
+      "file": "src/app/api/email/style/chat/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 3998,
+      "responsePreview": "{\"styleProfile\":{\"scope\":\"leads\",\"name\":\"Estilo conversacional\",\"tone\":\"consultative\",\"length\":\"short\",\"structure\":[\"hook\",\"value\",\"cta\"],\"do\":[\"mantener claridad\",\"evitar jerga\",\"ir al grano\"],\"dont\":[\"promesas absoluta",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/gmail/send",
+      "key": "POST /api/gmail/send",
+      "file": "src/app/api/gmail/send/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 461,
+      "responsePreview": "{\"error\":\"Unauthorized (No Session)\"}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/integrations/store-token",
+      "key": "GET /api/integrations/store-token",
+      "file": "src/app/api/integrations/store-token/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 443,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/integrations/store-token",
+      "key": "POST /api/integrations/store-token",
+      "file": "src/app/api/integrations/store-token/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 123,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/leads/apify",
+      "key": "POST /api/leads/apify",
+      "file": "src/app/api/leads/apify/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": "<500",
+      "durationMs": 418,
+      "responsePreview": "{\"error\":\"industry_required\"}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/leads/apify/status",
+      "key": "GET /api/leads/apify/status",
+      "file": "src/app/api/leads/apify/status/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "durationMs": 509,
+      "responsePreview": "{\"error\":\"runId is required\"}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/leads/enrich-email",
+      "key": "POST /api/leads/enrich-email",
+      "file": "src/app/api/leads/enrich-email/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": "<500",
+      "durationMs": 474,
+      "responsePreview": "{\"success\":false,\"error\":\"Name and company are required\"}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/leads/search",
+      "key": "POST /api/leads/search",
+      "file": "src/app/api/leads/search/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "durationMs": 572,
+      "responsePreview": "{\"error\":\"INVALID_REQUEST_BODY\",\"details\":{\"formErrors\":[\"Expected array, received object\"],\"fieldErrors\":{}}}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/opportunities/enrich-apollo",
+      "key": "POST /api/opportunities/enrich-apollo",
+      "file": "src/app/api/opportunities/enrich-apollo/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 414,
+      "responsePreview": "{\"error\":\"missing user id\"}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/opportunities/leads-apollo",
+      "key": "POST /api/opportunities/leads-apollo",
+      "file": "src/app/api/opportunities/leads-apollo/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 548,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/opportunities/orgs-apollo",
+      "key": "POST /api/opportunities/orgs-apollo",
+      "file": "src/app/api/opportunities/orgs-apollo/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": "<500",
+      "durationMs": 352,
+      "responsePreview": "{\"error\":\"companyName requerido\"}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/opportunities/search",
+      "key": "POST /api/opportunities/search",
+      "file": "src/app/api/opportunities/search/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 747,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/opportunities/status",
+      "key": "GET /api/opportunities/status",
+      "file": "src/app/api/opportunities/status/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "durationMs": 498,
+      "responsePreview": "{\"error\":{\"type\":\"invalid-input\",\"message\":\"Falta \\\"runId\\\".\"}}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/outlook/send",
+      "key": "POST /api/outlook/send",
+      "file": "src/app/api/outlook/send/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "durationMs": 511,
+      "responsePreview": "{\"error\":\"missing user id\"}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/providers/send",
+      "key": "POST /api/providers/send",
+      "file": "src/app/api/providers/send/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 733,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/quota/status",
+      "key": "GET /api/quota/status",
+      "file": "src/app/api/quota/status/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 773,
+      "responsePreview": "{\"userId\":\"smoke-test-user\",\"statuses\":[{\"resource\":\"leadSearch\",\"allowed\":false,\"count\":0,\"limit\":50,\"dayKey\":\"2026-02-12\",\"resetAtISO\":\"2026-02-13T00:00:00.000Z\"},{\"resource\":\"research\",\"allowed\":false,\"count\":0,\"limit",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/replies/classify",
+      "key": "POST /api/replies/classify",
+      "file": "src/app/api/replies/classify/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 1023,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/research/n8n",
+      "key": "GET /api/research/n8n",
+      "file": "src/app/api/research/n8n/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": "<500",
+      "durationMs": 816,
+      "responsePreview": "{\"ok\":true,\"hasUrl\":true}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/research/n8n",
+      "key": "POST /api/research/n8n",
+      "file": "src/app/api/research/n8n/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "durationMs": 179,
+      "responsePreview": "{\"error\":\"Payload incompleto: requiere id/email/linkedin o nombre+empresa\"}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/scheduler/complete",
+      "key": "POST /api/scheduler/complete",
+      "file": "src/app/api/scheduler/complete/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "durationMs": 744,
+      "responsePreview": "{\"error\":\"Missing id or status\"}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/scheduler/poll",
+      "key": "GET /api/scheduler/poll",
+      "file": "src/app/api/scheduler/poll/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": "<500",
+      "durationMs": 859,
+      "responsePreview": "{\"tasks\":[]}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/scheduler/reply",
+      "key": "POST /api/scheduler/reply",
+      "file": "src/app/api/scheduler/reply/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 779,
+      "responsePreview": "{\"message\":\"Lead not found for reply\",\"matched\":false}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/tracking/click",
+      "key": "GET /api/tracking/click",
+      "file": "src/app/api/tracking/click/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 307,
+      "expected": [
+        302,
+        307
+      ],
+      "durationMs": 617,
+      "responsePreview": "",
+      "location": "https://example.com/"
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/tracking/open",
+      "key": "GET /api/tracking/open",
+      "file": "src/app/api/tracking/open/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "durationMs": 587,
+      "responsePreview": "GIF89a\u0001\u0000\u0001\u0000�\u0000\u0000\u0000\u0000\u0000���!�\u0004\u0001\u0000\u0000\u0000\u0000,\u0000\u0000\u0000\u0000\u0001\u0000\u0001\u0000\u0000\u0002\u0001D\u0000;",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/tracking/unsubscribe",
+      "key": "POST /api/tracking/unsubscribe",
+      "file": "src/app/api/tracking/unsubscribe/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "durationMs": 882,
+      "responsePreview": "{\"error\":\"Invalid request parameters\"}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/tracking/webhook",
+      "key": "POST /api/tracking/webhook",
+      "file": "src/app/api/tracking/webhook/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": [
+        200,
+        401
+      ],
+      "durationMs": 735,
+      "responsePreview": "{\"success\":true}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/webhooks/apollo",
+      "key": "POST /api/webhooks/apollo",
+      "file": "src/app/api/webhooks/apollo/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "durationMs": 711,
+      "responsePreview": "{\"error\":\"Missing enriched_lead_id param\"}",
+      "location": ""
+    }
+  ]
+}

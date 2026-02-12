@@ -1,5 +1,6 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { generateStructured } from '@/ai/openai-json';
 
 const outputSchema = z.object({
   intent: z.enum(['meeting_request', 'positive', 'negative', 'unsubscribe', 'auto_reply', 'neutral', 'unknown']),
@@ -47,14 +48,10 @@ Reply:
 ${text}
 `;
 
-    const { output } = await ai.generate({
+    const output = await generateStructured({
       prompt,
-      model: 'googleai/gemini-1.5-pro',
-      config: { temperature: 0.2 },
-      output: {
-        format: 'json',
-        schema: outputSchema,
-      },
+      schema: outputSchema,
+      temperature: 0.2,
     });
 
     if (!output) {

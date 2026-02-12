@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "node --loader ./scripts/ts-test-loader.mjs --test"
+    "test": "node scripts/run-node-tests.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^3.17.0",

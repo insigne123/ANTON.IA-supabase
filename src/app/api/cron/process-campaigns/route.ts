@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
     try {
+        const dryRunParam = String(req.nextUrl.searchParams.get('dryRun') || '').toLowerCase();
+        const dryRun = dryRunParam === '1' || dryRunParam === 'true' || dryRunParam === 'yes';
+        const includeDetailsParam = String(req.nextUrl.searchParams.get('includeDetails') || '').toLowerCase();
+        const includeDetails = includeDetailsParam === '1' || includeDetailsParam === 'true' || includeDetailsParam === 'yes';
+
         // 1. Init Supabase Admin
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
         const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -25,7 +30,14 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ message: 'No tokens found' });
         }
 
-        const results = [];
+        const results: any[] = [];
+        const summary = {
+            sent: 0,
+            failed: 0,
+            eligibleDryRun: 0,
+            blockedUnsubscribed: 0,
+            blockedDomain: 0,
+        };
         const unsubCache = new Map<string, Set<string>>();
         const domainCache = new Map<string, Set<string>>();
 
@@ -169,27 +181,33 @@ export async function GET(req: NextRequest) {
                     const blockedDomains = await getBlockedDomains(campaign.organization_id);
 
                     if (email && unsubscribed.has(email)) {
-                        await supabase
-                            .from('contacted_leads')
-                            .update({
-                                campaign_followup_allowed: false,
-                                campaign_followup_reason: 'unsubscribed',
-                                evaluation_status: 'do_not_contact',
-                                last_update_at: new Date().toISOString(),
-                            } as any)
-                            .eq('id', lead.id);
+                        summary.blockedUnsubscribed += 1;
+                        if (!dryRun) {
+                            await supabase
+                                .from('contacted_leads')
+                                .update({
+                                    campaign_followup_allowed: false,
+                                    campaign_followup_reason: 'unsubscribed',
+                                    evaluation_status: 'do_not_contact',
+                                    last_update_at: new Date().toISOString(),
+                                } as any)
+                                .eq('id', lead.id);
+                        }
                         continue;
                     }
 
                     if (domain && blockedDomains.has(domain)) {
-                        await supabase
-                            .from('contacted_leads')
-                            .update({
-                                campaign_followup_allowed: false,
-                                campaign_followup_reason: 'domain_blocked',
-                                last_update_at: new Date().toISOString(),
-                            } as any)
-                            .eq('id', lead.id);
+                        summary.blockedDomain += 1;
+                        if (!dryRun) {
+                            await supabase
+                                .from('contacted_leads')
+                                .update({
+                                    campaign_followup_allowed: false,
+                                    campaign_followup_reason: 'domain_blocked',
+                                    last_update_at: new Date().toISOString(),
+                                } as any)
+                                .eq('id', lead.id);
+                        }
                         continue;
                     }
 
@@ -222,6 +240,18 @@ export async function GET(req: NextRequest) {
                     // contacted_leads.provider can be 'gmail'|'outlook' (UI) or legacy 'google'|'outlook'
                     const leadProvider = lead.provider;
                     const tokenProvider = leadProvider === 'gmail' ? 'google' : leadProvider;
+
+                    if (dryRun) {
+                        summary.eligibleDryRun += 1;
+                        results.push({
+                            lead: lead.email,
+                            status: 'eligible_dry_run',
+                            campaignId: campaign.id,
+                            step: nextStepIdx,
+                            provider: tokenProvider,
+                        });
+                        continue;
+                    }
 
                     if (tokenProvider !== 'google' && tokenProvider !== 'outlook') {
                         console.log(`Unsupported provider for follow-up: ${leadProvider}`);
@@ -310,10 +340,12 @@ export async function GET(req: NextRequest) {
                             follow_up_count: (lead.follow_up_count || 0) + 1
                         }).eq('id', lead.id);
 
+                        summary.sent += 1;
                         results.push({ lead: lead.email, status: 'sent' });
 
                     } catch (e) {
                         console.error(`Failed to send to ${lead.email}:`, e);
+                        summary.failed += 1;
                         results.push({ lead: lead.email, status: 'failed', error: e });
                     }
                 }
@@ -327,7 +359,13 @@ export async function GET(req: NextRequest) {
             }
         }
 
-        return NextResponse.json({ processed: results.length, results });
+        return NextResponse.json({
+            dryRun,
+            processed: results.length,
+            summary,
+            resultCount: results.length,
+            results: includeDetails ? results.slice(0, 200) : [],
+        });
 
     } catch (e: any) {
         console.error('Cron error:', e);

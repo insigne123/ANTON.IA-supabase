@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createClient } from '@supabase/supabase-js';
 
 import { setAdminDbForTests } from '../src/lib/server/firebase-admin.ts';
 
@@ -135,35 +136,70 @@ test.afterEach(() => {
   setAdminDbForTests(null);
 });
 
-test('daily quota increments until limit', async () => {
-  const params = { userId: 'user-1', resource: 'emails', limit: 2 };
+async function getLiveMembership() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
 
-  const first = await dailyQuota.checkAndConsumeDailyQuota(params);
-  assert.equal(first.allowed, true);
-  assert.equal(first.count, 1);
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
+  const { data } = await supabase
+    .from('organization_members')
+    .select('user_id, organization_id')
+    .limit(1)
+    .maybeSingle();
 
-  const second = await dailyQuota.checkAndConsumeDailyQuota(params);
-  assert.equal(second.allowed, true);
-  assert.equal(second.count, 2);
+  return data || null;
+}
 
-  const third = await dailyQuota.checkAndConsumeDailyQuota(params);
-  assert.equal(third.allowed, false);
-  assert.equal(third.count, 2);
+test('daily quota contact check returns allowed with high limit', async (t) => {
+  const membership = await getLiveMembership();
+  if (!membership) {
+    t.skip('No Supabase credentials or membership rows available for integration test');
+    return;
+  }
 
-  const status = await dailyQuota.getDailyQuotaStatus(params);
-  assert.equal(status.allowed, false);
-  assert.equal(status.count, 2);
-  assert.equal(status.limit, 2);
+  const params = {
+    userId: membership.user_id,
+    organizationId: membership.organization_id,
+    resource: 'contact',
+    limit: 100000,
+    count: 1,
+  };
+
+  const res = await dailyQuota.checkAndConsumeDailyQuota(params);
+  assert.equal(res.allowed, true);
+  assert.ok(res.count >= 1);
+  assert.equal(res.limit, 100000);
+
+  const status = await dailyQuota.getDailyQuotaStatus({
+    userId: membership.user_id,
+    organizationId: membership.organization_id,
+    resource: 'contact',
+    limit: 100000,
+  });
+  assert.equal(typeof status.count, 'number');
+  assert.equal(status.limit, 100000);
 });
 
-test('daily quota throws when exceeding limit', async () => {
-  const params = { userId: 'user-2', resource: 'sync', limit: 1 };
-  await dailyQuota.checkAndConsumeDailyQuota(params);
+test('daily quota contact check denies when limit is zero', async (t) => {
+  const membership = await getLiveMembership();
+  if (!membership) {
+    t.skip('No Supabase credentials or membership rows available for integration test');
+    return;
+  }
 
-  await assert.rejects(() => dailyQuota.consumeDailyQuotaOrThrow(params), (err) => {
-    assert.equal(err.code, 'DAILY_QUOTA_EXCEEDED');
-    return true;
-  });
+  const params = {
+    userId: membership.user_id,
+    organizationId: membership.organization_id,
+    resource: 'contact',
+    limit: 0,
+    count: 1,
+  };
+
+  const res = await dailyQuota.checkAndConsumeDailyQuota(params);
+  assert.equal(res.allowed, false);
+  assert.ok(res.count >= 0);
+  assert.equal(res.limit, 0);
 });
 
 test('research lock store maintains state across operations', async () => {

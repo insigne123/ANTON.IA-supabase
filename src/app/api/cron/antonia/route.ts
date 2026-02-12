@@ -867,9 +867,34 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const url = new URL(request.url);
+    const dryRunParam = String(url.searchParams.get('dryRun') || '').toLowerCase();
+    const dryRun = dryRunParam === '1' || dryRunParam === 'true' || dryRunParam === 'yes';
+
     // [FIX #2] Use runtime getter instead of module-level constants
     const { url: supabaseUrl, key: supabaseServiceKey } = getSupabaseCredentials();
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    if (dryRun) {
+        const { count: pendingTasks } = await supabase
+            .from('antonia_tasks')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'pending');
+
+        const { count: activeMissions } = await supabase
+            .from('antonia_missions')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'active');
+
+        return NextResponse.json({
+            dryRun: true,
+            authorized: true,
+            activeMissions: activeMissions || 0,
+            pendingTasks: pendingTasks || 0,
+            firebaseForwardConfigured: Boolean(process.env.ANTONIA_FIREBASE_TICK_URL && process.env.ANTONIA_FIREBASE_TICK_SECRET),
+            backupProcessingEnabled: String(process.env.ANTONIA_NEXT_BACKUP_PROCESSING || 'false') === 'true',
+        });
+    }
 
     // STEP 1: Schedule daily tasks for active missions (runs once per day check)
     try {

@@ -2,6 +2,7 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { generateStructured } from '@/ai/openai-json';
 import {
   EmailLength,
   EmailScope,
@@ -84,14 +85,10 @@ Objetivo:
 Devuelve SOLO JSON válido: { "subject": "...", "body": "..." }
 `;
 
-    const { output } = await ai.generate({
+    const output = await generateStructured({
       prompt,
-      model: 'googleai/gemini-1.5-pro',
-      config: { temperature: 0.4 },
-      output: {
-        format: 'json',
-        schema: z.object({ subject: z.string(), body: z.string() }),
-      },
+      schema: z.object({ subject: z.string(), body: z.string() }),
+      temperature: 0.4,
     });
 
     let out: any = output;

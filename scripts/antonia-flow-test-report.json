@@ -1,0 +1,61 @@
+{
+  "generatedAt": "2026-02-12T18:25:52.939Z",
+  "passed": 9,
+  "failed": 0,
+  "results": [
+    {
+      "name": "generateCampaignFlow",
+      "ok": true,
+      "durationMs": 12330,
+      "preview": "{\"steps\":4}"
+    },
+    {
+      "name": "classifyReplyFlow",
+      "ok": true,
+      "durationMs": 51570,
+      "preview": "{\"intent\":\"meeting_request\",\"shouldContinue\":false}"
+    },
+    {
+      "name": "generatePhoneScript",
+      "ok": true,
+      "durationMs": 3501,
+      "preview": "{\"hasOpening\":true,\"hasPitch\":true}"
+    },
+    {
+      "name": "updateStyleProfile",
+      "ok": true,
+      "durationMs": 1063,
+      "preview": "{\"hasExplanation\":true}"
+    },
+    {
+      "name": "renderEmailTemplate",
+      "ok": true,
+      "durationMs": 1695,
+      "preview": "{\"hasSubject\":true,\"hasBody\":true}"
+    },
+    {
+      "name": "enhanceCompanyReport",
+      "ok": true,
+      "durationMs": 21,
+      "preview": "{\"passthrough\":true}"
+    },
+    {
+      "name": "generateOutreachFromReport",
+      "ok": true,
+      "durationMs": 2392,
+      "preview": "{\"hasSubject\":true,\"hasBody\":true}"
+    },
+    {
+      "name": "generateCompanyProfile",
+      "ok": true,
+      "durationMs": 2857,
+      "preview": "{\"sector\":\"Tecnología de la Información y Servicios (IT)\",\"hasWebsite\":true}"
+    },
+    {
+      "name": "replyClassifierHelper",
+      "ok": true,
+      "durationMs": 1563,
+      "preview": "{\"intent\":\"unsubscribe\",\"shouldContinue\":false}"
+    }
+  ]
+}
