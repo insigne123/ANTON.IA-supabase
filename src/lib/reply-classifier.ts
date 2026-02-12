@@ -1,4 +1,5 @@
 import { classifyReplyFlow } from '@/ai/flows/classify-reply';
+import { isHardNegativeReply } from '@/lib/reply-intent-rules';
 
 export type ReplyClassification = {
   intent: 'meeting_request' | 'positive' | 'negative' | 'unsubscribe' | 'auto_reply' | 'neutral' | 'unknown';
@@ -31,7 +32,7 @@ function heuristicClassify(text: string): ReplyClassification {
     return { intent: 'meeting_request', sentiment: 'positive', shouldContinue: false, confidence: 0.75, summary: 'Asked to schedule a meeting', reason: 'meeting_request' };
   }
 
-  const isNegative = /no estoy interesado|no me interesa|no gracias|no, gracias|no deseo|no quiero|no por ahora|no seguimos|no continuar|no contactarme|not interested|do not contact/i.test(t);
+  const isNegative = isHardNegativeReply(t);
   if (isNegative) {
     return { intent: 'negative', sentiment: 'negative', shouldContinue: false, confidence: 0.7, summary: 'Not interested', reason: 'negative' };
   }
@@ -57,7 +58,21 @@ export async function classifyReply(raw: string): Promise<ReplyClassification> {
 
   try {
     const out = await classifyReplyFlow({ text: cleaned, language: 'es' });
-    return out as ReplyClassification;
+    const ai = out as ReplyClassification;
+
+    // Guard-rail: si la respuesta trae rechazo explícito, nunca continuar.
+    if (isHardNegativeReply(cleaned) && ai.intent !== 'unsubscribe' && ai.intent !== 'negative') {
+      return {
+        intent: 'negative',
+        sentiment: 'negative',
+        shouldContinue: false,
+        confidence: Math.max(0.85, Number(ai.confidence || 0)),
+        summary: 'Not interested',
+        reason: 'hard_negative_override',
+      };
+    }
+
+    return ai;
   } catch (e) {
     return heuristicClassify(cleaned);
   }

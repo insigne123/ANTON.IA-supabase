@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { graphFindReadReceipts, graphFindReplies, graphGetMessage } from '@/lib/outlook-graph-client';
+import { graphFindReadReceipts, graphFindReplies } from '@/lib/outlook-graph-client';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger
@@ -22,6 +22,7 @@ import Link from 'next/link';
 import { openSentMessageFor } from '@/lib/open-sent-message';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
 import { gmailClient } from '@/lib/gmail-client';
+import { resolveReplyContent } from '@/lib/reply-content-resolver';
 
 export default function ContactedPage() {
   const { toast } = useToast();
@@ -35,6 +36,14 @@ export default function ContactedPage() {
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
   const [suggestion, setSuggestion] = useState<string>('');
+
+  const escapeHtml = (value: string) =>
+    String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
 
   const refresh = useCallback(async () => setItems(await contactedLeadsStorage.get()), []);
   useEffect(() => { refresh(); }, [refresh]);
@@ -83,6 +92,14 @@ export default function ContactedPage() {
     const resultado = subjectParts[0] || item.subject;
     const notas = subjectParts.slice(1).join(' - ') || 'Sin notas adicionales';
 
+    const safeName = escapeHtml(item.name || '');
+    const safeEmail = escapeHtml(item.email || '');
+    const safeCompany = escapeHtml(item.company || 'No especificada');
+    const safeRole = escapeHtml(item.role || 'Cargo no especificado');
+    const safeResult = escapeHtml(resultado || 'Sin resultado');
+    const safeNotes = escapeHtml(notas || 'Sin notas adicionales');
+    const safeDate = escapeHtml(new Date(item.sentAt).toLocaleString('es-CL', { dateStyle: 'full', timeStyle: 'short' }));
+
     setViewBodyHtml(`
       <div style="padding: 0; font-family: system-ui, -apple-system, sans-serif;">
         <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 24px; border-radius: 12px 12px 0 0; color: white; margin: -20px -20px 20px -20px;">
@@ -92,20 +109,20 @@ export default function ContactedPage() {
             </svg>
             <h2 style="margin: 0; font-size: 24px; font-weight: 600;">Detalles de la Llamada</h2>
           </div>
-          <p style="margin: 0; opacity: 0.9; font-size: 14px;">${new Date(item.sentAt).toLocaleString('es-CL', { dateStyle: 'full', timeStyle: 'short' })}</p>
+          <p style="margin: 0; opacity: 0.9; font-size: 14px;">${safeDate}</p>
         </div>
         
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
           <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border-left: 3px solid #3b82f6;">
             <div style="font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Lead</div>
-            <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">${item.name}</div>
-            <div style="font-size: 14px; color: #64748b;">${item.email}</div>
+            <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">${safeName}</div>
+            <div style="font-size: 14px; color: #64748b;">${safeEmail}</div>
           </div>
           
           <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border-left: 3px solid #8b5cf6;">
             <div style="font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Empresa</div>
-            <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">${item.company || 'No especificada'}</div>
-            <div style="font-size: 14px; color: #64748b;">${item.role || 'Cargo no especificado'}</div>
+            <div style="font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 4px;">${safeCompany}</div>
+            <div style="font-size: 14px; color: #64748b;">${safeRole}</div>
           </div>
         </div>
         
@@ -116,7 +133,7 @@ export default function ContactedPage() {
             </svg>
             <div style="font-size: 14px; font-weight: 600; color: white; opacity: 0.9;">RESULTADO DE LA LLAMADA</div>
           </div>
-          <div style="font-size: 18px; font-weight: 700; color: white; letter-spacing: 0.3px;">${resultado}</div>
+          <div style="font-size: 18px; font-weight: 700; color: white; letter-spacing: 0.3px;">${safeResult}</div>
         </div>
         
         <div style="background: white; border: 2px solid #e2e8f0; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
@@ -130,7 +147,7 @@ export default function ContactedPage() {
             </svg>
             <div style="font-size: 14px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.5px;">Notas de la Llamada</div>
           </div>
-          <div style="white-space: pre-wrap; line-height: 1.7; color: #1e293b; font-size: 15px; padding: 12px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6;">${notas}</div>
+          <div style="white-space: pre-wrap; line-height: 1.7; color: #1e293b; font-size: 15px; padding: 12px; background: #f8fafc; border-radius: 8px; border-left: 4px solid #3b82f6;">${safeNotes}</div>
         </div>
       </div>
     `);
@@ -163,6 +180,31 @@ export default function ContactedPage() {
     }
   }
 
+  async function persistReplyDetected(it: ContactedLead, best: any, repliedAtIso: string) {
+    const replyText = (best as any).snippet || (best as any).bodyPreview || '';
+    const patch: Partial<ContactedLead> = {
+      status: 'replied',
+      replyPreview: replyText,
+      lastReplyText: replyText,
+      replyMessageId: (best as any).id,
+      replySubject: (best as any).subject,
+      replySnippet: replyText,
+      repliedAt: repliedAtIso,
+    };
+
+    if (it.messageId) {
+      await contactedLeadsStorage.upsertByMessageId(it.messageId, patch as any);
+      return;
+    }
+    if (it.provider === 'gmail' && it.threadId) {
+      await contactedLeadsStorage.upsertByThreadId(it.threadId, patch as any);
+      return;
+    }
+    if (it.provider === 'outlook' && it.conversationId) {
+      await contactedLeadsStorage.updateStatusByConversationId(it.conversationId, patch as any);
+    }
+  }
+
   async function handleVerifyReply(it: ContactedLead) {
     if (!it.conversationId && !it.threadId) {
       toast({ variant: 'destructive', title: 'No disponible', description: 'Este envío no tiene ID de conversación/hilo.' });
@@ -192,13 +234,7 @@ export default function ContactedPage() {
             ? new Date((best as any).receivedDateTime)
             : new Date();
 
-        await contactedLeadsStorage.upsertByMessageId(it.messageId!, {
-          status: 'replied',
-          replyMessageId: best.id,
-          replySubject: best.subject,
-          replyPreview: (best as any).snippet || (best as any).bodyPreview || '',
-          repliedAt: repliedAtDate.toISOString(),
-        });
+        await persistReplyDetected(it, best, repliedAtDate.toISOString());
         // Classify reply to decide campaign follow-up
         try {
           await fetch('/api/replies/classify', {
@@ -220,30 +256,12 @@ export default function ContactedPage() {
   }
 
   async function handleViewReply(it: ContactedLead) {
-    // 1. Check for LinkedIn Reply
-    if (it.provider === 'linkedin' && it.status === 'replied') {
-      const replyText = it.lastReplyText || it.replyPreview || '(Sin contenido de respuesta capturado)';
-      setViewSubject('Respuesta de LinkedIn');
-      setViewBodyHtml(`<p>${replyText}</p>`);
-      setViewWebLink(it.linkedinThreadUrl || '#');
-      setViewOpen(true);
-      return;
-    }
-
-    // 2. Existing checks for Email
-    const replyId = (it as any).replyMessageId as string | undefined;
-    if (!replyId) {
-      toast({ variant: 'destructive', title: 'Sin respuesta', description: 'Primero verifica si hay respuesta.' });
-      return;
-    }
     setViewLoading(true);
     try {
-      // Aquí necesitaríamos una lógica similar a la de handleVerifyReply para saber si llamar a graph o a gmail
-      // Por ahora, asumimos que si hay replyMessageId, es de Outlook.
-      const data = await graphGetMessage(replyId);
-      setViewSubject(data?.subject || '(respuesta)');
-      setViewBodyHtml(data?.body?.content || '<p>(Sin contenido)</p>');
-      setViewWebLink(data?.webLink);
+      const resolved = await resolveReplyContent(it);
+      setViewSubject(resolved.subject || '(respuesta)');
+      setViewBodyHtml(resolved.html || '<p>(Sin contenido)</p>');
+      setViewWebLink(resolved.webLink);
       setViewOpen(true);
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error abriendo respuesta', description: e?.message || 'No se pudo cargar la respuesta' });
@@ -305,13 +323,7 @@ export default function ContactedPage() {
               ? new Date((best as any).receivedDateTime)
               : new Date();
 
-          await contactedLeadsStorage.upsertByMessageId(it.messageId!, {
-            status: 'replied',
-            replyMessageId: best.id,
-            replySubject: best.subject,
-            replyPreview: (best as any).snippet || (best as any).bodyPreview || '',
-            repliedAt: repliedAtDate.toISOString(),
-          } as any);
+          await persistReplyDetected(it, best, repliedAtDate.toISOString());
           try {
             await fetch('/api/replies/classify', {
               method: 'POST',
@@ -526,13 +538,15 @@ export default function ContactedPage() {
       </Card>
 
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-        <DialogContent className="max-w-3xl overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[88vh] overflow-hidden flex flex-col">
           <DialogHeader><DialogTitle>{viewSubject}</DialogTitle></DialogHeader>
           {viewLoading ? (
             <div className="p-6 text-sm text-muted-foreground">Cargando…</div>
           ) : (
             <>
-              <div className="prose prose-sm max-w-none mb-4" dangerouslySetInnerHTML={{ __html: viewBodyHtml }} />
+              <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                <div className="prose prose-sm max-w-none mb-4" dangerouslySetInnerHTML={{ __html: viewBodyHtml }} />
+              </div>
               <div className="flex gap-2 mt-4">
                 {viewWebLink && (
                   <a href={viewWebLink} target="_blank" rel="noopener noreferrer" className="underline text-sm btn btn-outline">

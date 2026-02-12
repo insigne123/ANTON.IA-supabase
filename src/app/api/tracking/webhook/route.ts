@@ -6,6 +6,19 @@ import { notificationService } from '@/lib/services/notification-service';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+function stripReplyTraceFields(updateData: any) {
+    const copy = { ...updateData };
+    delete copy.reply_message_id;
+    delete copy.reply_subject;
+    delete copy.reply_snippet;
+    return copy;
+}
+
+function hasReplyTraceColumnError(error: any) {
+    const text = String(error?.message || error?.details || '').toLowerCase();
+    return text.includes('reply_message_id') || text.includes('reply_subject') || text.includes('reply_snippet');
+}
+
 export async function POST(req: Request) {
     try {
         // Optional shared-secret protection (recommended in production)
@@ -105,10 +118,13 @@ export async function POST(req: Request) {
                     updateData.replied_at = timestamp;
                     updateData.status = 'replied';
                     updateData.last_follow_up_at = timestamp;
+                    updateData.reply_message_id = messageId || null;
+                    updateData.reply_subject = event.subject || event.headers?.subject || null;
 
                     const replyContent = event.text || event.html || '';
                     const preview = extractReplyPreview(replyContent);
                     updateData.reply_preview = preview || null;
+                    updateData.reply_snippet = preview || null;
                     updateData.last_reply_text = replyContent ? String(replyContent).slice(0, 4000) : null;
 
                     try {
@@ -159,10 +175,22 @@ export async function POST(req: Request) {
                 }
 
                 if ((contacted as any)?.id) {
-                    await supabase
+                    let { error: updateError } = await supabase
                         .from('contacted_leads')
                         .update(updateData)
                         .eq('id', (contacted as any).id);
+
+                    if (updateError && hasReplyTraceColumnError(updateError)) {
+                        const { error: retryError } = await supabase
+                            .from('contacted_leads')
+                            .update(stripReplyTraceFields(updateData))
+                            .eq('id', (contacted as any).id);
+                        updateError = retryError;
+                    }
+
+                    if (updateError) {
+                        console.error('[Tracking] Error updating contacted_leads:', updateError);
+                    }
                 }
             }
         }

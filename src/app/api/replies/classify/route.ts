@@ -7,6 +7,17 @@ import { notificationService } from '@/lib/services/notification-service';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+function stripReplyTraceFields(updateData: any) {
+  const copy = { ...updateData };
+  delete copy.reply_snippet;
+  return copy;
+}
+
+function hasReplyTraceColumnError(error: any) {
+  const text = String(error?.message || error?.details || '').toLowerCase();
+  return text.includes('reply_snippet');
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies });
@@ -42,6 +53,7 @@ export async function POST(req: NextRequest) {
 
     const updateData: any = {
       reply_preview: preview || null,
+      reply_snippet: preview || null,
       last_reply_text: String(text || '').slice(0, 4000) || null,
       reply_intent: classification.intent,
       reply_sentiment: classification.sentiment,
@@ -53,10 +65,22 @@ export async function POST(req: NextRequest) {
       last_update_at: new Date().toISOString(),
     };
 
-    await supabase
+    let { error: updateError } = await supabase
       .from('contacted_leads')
       .update(updateData)
       .eq('id', contactedId);
+
+    if (updateError && hasReplyTraceColumnError(updateError)) {
+      const { error: retryError } = await supabase
+        .from('contacted_leads')
+        .update(stripReplyTraceFields(updateData))
+        .eq('id', contactedId);
+      updateError = retryError;
+    }
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message || 'Failed to update classification' }, { status: 500 });
+    }
 
     if ((classification.intent === 'unsubscribe' || classification.intent === 'negative') && row.email) {
       await supabase

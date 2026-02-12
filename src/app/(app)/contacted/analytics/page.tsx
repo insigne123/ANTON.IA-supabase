@@ -12,6 +12,13 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Loader2, TrendingUp, TrendingDown, Users, Mail, MousePointerClick, MessageSquare } from 'lucide-react';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658'];
+const PROVIDER_COLORS: Record<string, string> = {
+    'Email (Gmail)': '#ea4335',
+    'Email (Outlook)': '#0078d4',
+    'LinkedIn': '#0a66c2',
+    'Telefono': '#22c55e',
+    'Otro': '#94a3b8',
+};
 
 function classifyLevel(role?: string) {
     if (!role) return 'Desconocido';
@@ -103,8 +110,13 @@ export default function ContactedAnalyticsPage() {
             const ind = item.industry || 'Desconocido';
             industries[ind] = (industries[ind] || 0) + 1;
 
-            // Provider
-            const prov = item.provider === 'linkedin' ? 'LinkedIn' : 'Email';
+            // Provider / channel split
+            const prov =
+                item.provider === 'gmail' ? 'Email (Gmail)' :
+                    item.provider === 'outlook' ? 'Email (Outlook)' :
+                        item.provider === 'linkedin' ? 'LinkedIn' :
+                            item.provider === 'phone' ? 'Telefono' :
+                                'Otro';
             providers[prov] = (providers[prov] || 0) + 1;
         });
 
@@ -183,7 +195,7 @@ export default function ContactedAnalyticsPage() {
                 <Card className="col-span-3">
                     <CardHeader>
                         <CardTitle>Canal de Contacto</CardTitle>
-                        <CardDescription>Email vs LinkedIn</CardDescription>
+                        <CardDescription>Distribucion por canal (Gmail, Outlook, LinkedIn, Telefono).</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <ResponsiveContainer width="100%" height={350}>
@@ -198,7 +210,10 @@ export default function ContactedAnalyticsPage() {
                                     dataKey="value"
                                 >
                                     {byStructure.providers.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={index === 0 ? '#0077b5' : '#ea4335'} />
+                                        <Cell
+                                            key={`cell-${index}`}
+                                            fill={PROVIDER_COLORS[entry.name] || COLORS[index % COLORS.length]}
+                                        />
                                     ))}
                                 </Pie>
                                 <Tooltip />

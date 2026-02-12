@@ -78,30 +78,6 @@ env:
     secret: SUPABASE_SERVICE_ROLE_KEY
     availability: [RUNTIME]
 
-  - variable: N8N_RESEARCH_WEBHOOK_URL
-    secret: N8N_RESEARCH_WEBHOOK_URL
-    availability: [RUNTIME]
-
-  - variable: N8N_API_KEY
-    secret: N8N_API_KEY
-    availability: [RUNTIME]
-
-  - variable: ANYMAIL_FINDER_API_KEY
-    secret: ANYMAIL_FINDER_API_KEY
-    availability: [RUNTIME]
-
-  - variable: ENRICHMENT_SERVICE_URL
-    secret: ENRICHMENT_SERVICE_URL
-    availability: [RUNTIME]
-
-  - variable: ENRICHMENT_SERVICE_SECRET
-    secret: ENRICHMENT_SERVICE_SECRET
-    availability: [RUNTIME]
-
-  - variable: QUOTA_FALLBACK_SECRET
-    secret: QUOTA_FALLBACK_SECRET
-    availability: [RUNTIME]
-
   # === ANTON.IA Agent Variables ===
   # App URL for internal API calls
   - variable: NEXT_PUBLIC_APP_URL
