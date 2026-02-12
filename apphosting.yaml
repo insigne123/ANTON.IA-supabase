@@ -30,6 +30,10 @@ env:
     secret: APIFY_TOKEN
     availability: [RUNTIME]
 
+  - variable: APOLLO_API_KEY
+    secret: APOLLO_API_KEY
+    availability: [RUNTIME]
+
   - variable: APIFY_APOLLO_ACTOR_ID
     value: code_crafter/apollo-io-scraper
     availability: [RUNTIME]
@@ -37,6 +41,26 @@ env:
   - variable: NEXT_PUBLIC_GOOGLE_CLIENT_ID
     value: 1083965020353-50m4ibu3c1f56qc00c5j128bfv0mlk91.apps.googleusercontent.com
     availability: [BUILD, RUNTIME]
+
+  - variable: NEXT_PUBLIC_BASE_URL
+    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app
+    availability: [BUILD, RUNTIME]
+
+  - variable: NEXT_PUBLIC_AZURE_AD_CLIENT_ID
+    value: 3826e4b9-f46e-48b7-aa7c-f06e11bd9686
+    availability: [BUILD, RUNTIME]
+
+  - variable: NEXT_PUBLIC_AZURE_AD_TENANT_ID
+    value: common
+    availability: [BUILD, RUNTIME]
+
+  - variable: NEXT_PUBLIC_AZURE_AD_REDIRECT_URI
+    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app/outlook
+    availability: [BUILD, RUNTIME]
+
+  - variable: AZURE_AD_CLIENT_SECRET
+    secret: AZURE_AD_CLIENT_SECRET
+    availability: [RUNTIME]
 
   - variable: GOOGLE_CLIENT_SECRET
     secret: GOOGLE_CLIENT_SECRET
@@ -52,6 +76,30 @@ env:
 
   - variable: SUPABASE_SERVICE_ROLE_KEY
     secret: SUPABASE_SERVICE_ROLE_KEY
+    availability: [RUNTIME]
+
+  - variable: N8N_RESEARCH_WEBHOOK_URL
+    secret: N8N_RESEARCH_WEBHOOK_URL
+    availability: [RUNTIME]
+
+  - variable: N8N_API_KEY
+    secret: N8N_API_KEY
+    availability: [RUNTIME]
+
+  - variable: ANYMAIL_FINDER_API_KEY
+    secret: ANYMAIL_FINDER_API_KEY
+    availability: [RUNTIME]
+
+  - variable: ENRICHMENT_SERVICE_URL
+    secret: ENRICHMENT_SERVICE_URL
+    availability: [RUNTIME]
+
+  - variable: ENRICHMENT_SERVICE_SECRET
+    secret: ENRICHMENT_SERVICE_SECRET
+    availability: [RUNTIME]
+
+  - variable: QUOTA_FALLBACK_SECRET
+    secret: QUOTA_FALLBACK_SECRET
     availability: [RUNTIME]
 
   # === ANTON.IA Agent Variables ===
