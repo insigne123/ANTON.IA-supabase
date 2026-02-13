@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkAndConsumeDailyQuota } from '@/lib/server/daily-quota-store';
+import { sanitizeHeaderText } from '@/lib/email-header-utils';
 
 export async function POST(req: Request) {
   try {
@@ -32,14 +33,15 @@ export async function POST(req: Request) {
     const token = auth.slice(7);
 
     const { to, subject, body, isHtml = false, attachments = [] } = await req.json();
+    const safeSubject = sanitizeHeaderText(subject || '');
 
-    if (!to || !subject || !body) {
+    if (!to || !safeSubject || !body) {
       return NextResponse.json({ error: 'to, subject y body son requeridos' }, { status: 400 });
     }
 
     const graphBody = {
       message: {
-        subject,
+        subject: safeSubject,
         body: { contentType: isHtml ? 'HTML' : 'Text', content: body },
         toRecipients: [{ emailAddress: { address: to } }],
         // opcional

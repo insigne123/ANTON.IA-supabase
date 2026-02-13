@@ -67,9 +67,51 @@ interface AntoniaTask {
     progress_total?: number | null;
     progress_label?: string | null;
     heartbeat_at?: string | null;
+    processing_started_at?: string | null;
+    scheduled_for?: string | null;
     worker_source?: string | null;
     created_at: string;
     updated_at: string;
+}
+
+const EXACT_DATETIME_FORMATTER = new Intl.DateTimeFormat('es-AR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+});
+
+function formatExactDateTime(input?: string | null) {
+    if (!input) return '-';
+    const d = new Date(input);
+    if (Number.isNaN(d.getTime())) return '-';
+    return EXACT_DATETIME_FORMATTER.format(d);
+}
+
+function formatTaskDuration(task: AntoniaTask) {
+    const start = task.processing_started_at || task.created_at;
+    const startDate = new Date(start);
+    if (Number.isNaN(startDate.getTime())) return null;
+
+    const endDate = task.status === 'processing' ? new Date() : new Date(task.updated_at);
+    if (Number.isNaN(endDate.getTime())) return null;
+
+    const diffMs = Math.max(0, endDate.getTime() - startDate.getTime());
+    const totalSeconds = Math.floor(diffMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${seconds}s`;
+    }
+    if (minutes > 0) {
+        return `${minutes}m ${seconds}s`;
+    }
+    return `${seconds}s`;
 }
 
 export function AgentActivityFeed({ missionId }: { missionId: string }) {
@@ -215,11 +257,33 @@ export function AgentActivityFeed({ missionId }: { missionId: string }) {
 
     const renderTaskDetails = (task: AntoniaTask) => {
         const { result, type } = task;
+        const taskDuration = formatTaskDuration(task);
 
         return (
             <div className="space-y-4 pt-2">
                 {/* Runtime details */}
                 <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    <Badge variant="outline" className="h-5">
+                        creado {formatExactDateTime(task.created_at)}
+                    </Badge>
+                    {task.processing_started_at && (
+                        <Badge variant="outline" className="h-5">
+                            inicio {formatExactDateTime(task.processing_started_at)}
+                        </Badge>
+                    )}
+                    <Badge variant="outline" className="h-5">
+                        actualizado {formatExactDateTime(task.updated_at)}
+                    </Badge>
+                    {taskDuration && (
+                        <Badge variant="outline" className="h-5">
+                            duracion {taskDuration}
+                        </Badge>
+                    )}
+                    {task.scheduled_for && (
+                        <Badge variant="outline" className="h-5">
+                            programado {formatExactDateTime(task.scheduled_for)}
+                        </Badge>
+                    )}
                     {task.worker_source && (
                         <Badge variant="secondary" className="h-5">worker: {task.worker_source}</Badge>
                     )}
@@ -341,7 +405,7 @@ export function AgentActivityFeed({ missionId }: { missionId: string }) {
                             Monitor de Actividad
                         </h3>
                         <p className="text-sm text-muted-foreground ml-8">
-                            {tasks.length} operaciones registradas
+                            {tasks.length} operaciones registradas (hora local exacta)
                         </p>
                     </div>
                 </div>
@@ -388,9 +452,14 @@ export function AgentActivityFeed({ missionId }: { missionId: string }) {
                                         <Badge variant="outline" className="font-mono text-[10px] tracking-wider uppercase h-5">
                                             {getTaskLabel(task.type)}
                                         </Badge>
-                                        <span className="text-xs text-muted-foreground">
-                                            {formatDistanceToNow(new Date(task.created_at), { addSuffix: true, locale: es })}
-                                        </span>
+                                        <div className="flex flex-col leading-tight">
+                                            <span className="text-xs text-muted-foreground">
+                                                {formatDistanceToNow(new Date(task.created_at), { addSuffix: true, locale: es })}
+                                            </span>
+                                            <span className="text-[10px] text-muted-foreground/80">
+                                                {formatExactDateTime(task.created_at)}
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
 

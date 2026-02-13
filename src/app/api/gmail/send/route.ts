@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
+import { sanitizeHeaderText } from '@/lib/email-header-utils';
 
 type SendReq = {
   to: string;
@@ -23,9 +24,10 @@ function encodeBase64Url(input: string | Uint8Array) {
 
 // RFC 2047 para headers con UTF-8
 function encodeHeaderRFC2047(value: string) {
+  const clean = sanitizeHeaderText(value);
   // si solo ASCII, devolver tal cual
-  if (/^[\x00-\x7F]*$/.test(value)) return value;
-  const b64 = Buffer.from(value, 'utf8').toString('base64');
+  if (/^[\x00-\x7F]*$/.test(clean)) return clean;
+  const b64 = Buffer.from(clean, 'utf8').toString('base64');
   return `=?UTF-8?B?${b64}?=`;
 }
 

@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { tokenService } from '@/lib/services/token-service';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
+import { encodeHeaderRFC2047, sanitizeHeaderText } from '@/lib/email-header-utils';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -298,16 +299,17 @@ async function refreshOutlookToken(refreshToken: string) {
 async function sendGmail(accessToken: string, to: string, subject: string, body: string, isHtml: boolean = false) {
     // Construct raw email
     const contentType = isHtml ? 'text/html' : 'text/plain';
+    const safeSubject = encodeHeaderRFC2047(subject);
     const str = [
         `To: ${to}`,
-        `Subject: ${subject}`,
+        `Subject: ${safeSubject}`,
         `Content-Type: ${contentType}; charset=utf-8`,
         'MIME-Version: 1.0',
         '',
         body
-    ].join('\n');
+    ].join('\r\n');
 
-    const raw = Buffer.from(str).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const raw = Buffer.from(str, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
     const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
         method: 'POST',
@@ -326,6 +328,7 @@ async function sendGmail(accessToken: string, to: string, subject: string, body:
 }
 
 async function sendOutlook(accessToken: string, to: string, subject: string, body: string, isHtml: boolean = false) {
+    const safeSubject = sanitizeHeaderText(subject);
     const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
         method: 'POST',
         headers: {
@@ -334,7 +337,7 @@ async function sendOutlook(accessToken: string, to: string, subject: string, bod
         },
         body: JSON.stringify({
             message: {
-                subject: subject,
+                subject: safeSubject,
                 body: {
                     contentType: isHtml ? 'HTML' : 'Text',
                     content: body

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-12T18:27:45.120Z",
+  "generatedAt": "2026-02-13T15:34:49.817Z",
   "baseUrl": "http://127.0.0.1:9013",
   "discoveredHandlers": 47,
   "passed": 47,
@@ -19,7 +19,7 @@
       "expected": [
         200
       ],
-      "durationMs": 1674,
+      "durationMs": 4427,
       "responsePreview": "{\"summary\":\"Reporte normalizado\"}",
       "location": ""
     },
@@ -34,8 +34,8 @@
       "expected": [
         200
       ],
-      "durationMs": 8536,
-      "responsePreview": "{\"steps\":[{\"name\":\"Email 1: Introducción y Desafío\",\"offsetDays\":0,\"subject\":\"¿Operaciones eficientes en {{company}}? Podríamos ayudar.\",\"bodyHtml\":\"<p>Estimado/a {{lead.name}},</p><br><p>Soy {{sender.name}} de ANTON.IA,",
+      "durationMs": 8971,
+      "responsePreview": "{\"steps\":[{\"name\":\"Presentación de ANTON.IA\",\"offsetDays\":0,\"subject\":\"Optimizando Operaciones: ¿Es posible? 🤔\",\"bodyHtml\":\"<p>Estimado/a {{lead.name}},</p><br><p>Mi nombre es {{sender.name}} de ANTON.IA. Entendemos los",
       "location": ""
     },
     {
@@ -49,8 +49,8 @@
       "expected": [
         200
       ],
-      "durationMs": 5065,
-      "responsePreview": "{\"opening\":\"Hola Juan, ¿cómo estás? Vi en tu perfil de LinkedIn que lideras operaciones y la mejora continua en tu empresa. Justamente, quería conversar contigo sobre cómo ANTON.IA está ayudando a empresas en Chile a opt",
+      "durationMs": 5394,
+      "responsePreview": "{\"opening\":\"Hola Juan, ¿cómo estás? Soy [Tu nombre] de ANTON.IA. Vi en tu perfil de LinkedIn que lideras operaciones y la mejora continua en [Empresa]. Entiendo que eso a menudo implica lidiar con procesos manuales que c",
       "location": ""
     },
     {
@@ -64,8 +64,8 @@
       "expected": [
         200
       ],
-      "durationMs": 25,
-      "responsePreview": "{\"ok\":true,\"genkit\":\"not-in-config\",\"ts\":1770920834714}",
+      "durationMs": 60,
+      "responsePreview": "{\"ok\":true,\"genkit\":\"not-in-config\",\"ts\":1770996844270}",
       "location": ""
     },
     {
@@ -79,8 +79,8 @@
       "expected": [
         200
       ],
-      "durationMs": 2304,
-      "responsePreview": "{\"subject\":\"Automatización de prospección para [Empresa Objetivo]\",\"body\":\"Hola Maria Gonzalez,\\n\\nEspero que estés muy bien. Te contacto desde ANTON.IA, donde ayudamos a empresas como la tuya a optimizar sus procesos de",
+      "durationMs": 2809,
+      "responsePreview": "{\"subject\":\"Automatización de prospección para Maria Gonzalez\",\"body\":\"Hola Maria,\\n\\nEspero que estés muy bien. Te contacto de ANTON.IA, una empresa especializada en automatización de prospección.\\n\\nEntendemos que, com",
       "location": ""
     },
     {
@@ -92,7 +92,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 583,
+      "durationMs": 1187,
       "responsePreview": "{\"error\":\"Unauthorized\",\"details\":{\"__isAuthError\":true,\"name\":\"AuthSessionMissingError\",\"status\":400}}",
       "location": ""
     },
@@ -105,7 +105,7 @@
       "skipped": false,
       "status": 400,
       "expected": "<500",
-      "durationMs": 228,
+      "durationMs": 469,
       "responsePreview": "{\"error\":\"missionId required\"}",
       "location": ""
     },
@@ -121,7 +121,7 @@
         302,
         307
       ],
-      "durationMs": 252,
+      "durationMs": 423,
       "responsePreview": "",
       "location": "http://localhost:9013/"
     },
@@ -137,7 +137,7 @@
         302,
         307
       ],
-      "durationMs": 213,
+      "durationMs": 427,
       "responsePreview": "",
       "location": "https://studio--leadflowai-3yjcy.us-central1.hosted.app/outlook?error=no_code"
     },
@@ -153,7 +153,7 @@
         302,
         307
       ],
-      "durationMs": 256,
+      "durationMs": 393,
       "responsePreview": "",
       "location": "https://studio--leadflowai-3yjcy.us-central1.hosted.app/gmail?error=no_code"
     },
@@ -168,7 +168,7 @@
       "expected": [
         503
       ],
-      "durationMs": 200,
+      "durationMs": 317,
       "responsePreview": "{\"error\":\"Endpoint temporarily disabled due to build issues\"}",
       "location": ""
     },
@@ -181,7 +181,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 357,
+      "durationMs": 841,
       "responsePreview": "{\"error\":\"Unauthorized - Missing user ID\"}",
       "location": ""
     },
@@ -196,7 +196,7 @@
       "expected": [
         200
       ],
-      "durationMs": 626,
+      "durationMs": 1248,
       "responsePreview": "{\"dryRun\":true,\"authorized\":true,\"activeMissions\":1,\"pendingTasks\":0,\"firebaseForwardConfigured\":false,\"backupProcessingEnabled\":false}",
       "location": ""
     },
@@ -211,8 +211,8 @@
       "expected": [
         200
       ],
-      "durationMs": 1627,
-      "responsePreview": "{\"dryRun\":true,\"processed\":430,\"summary\":{\"sent\":0,\"failed\":0,\"eligibleDryRun\":430,\"blockedUnsubscribed\":0,\"blockedDomain\":42},\"resultCount\":430,\"results\":[]}",
+      "durationMs": 1942,
+      "responsePreview": "{\"dryRun\":true,\"processed\":462,\"summary\":{\"sent\":0,\"failed\":0,\"eligibleDryRun\":462,\"blockedUnsubscribed\":0,\"blockedDomain\":42},\"resultCount\":462,\"results\":[]}",
       "location": ""
     },
     {
@@ -226,7 +226,7 @@
       "expected": [
         200
       ],
-      "durationMs": 1192,
+      "durationMs": 1872,
       "responsePreview": "{\"ok\":true,\"info\":{\"username\":\"plush_zinnia\",\"userId\":\"ZBYXUS5azWYsj4bQW\",\"email\":\"nicolas.yarur.g@yago.cl\"}}",
       "location": ""
     },
@@ -241,7 +241,7 @@
       "expected": [
         200
       ],
-      "durationMs": 304,
+      "durationMs": 567,
       "responsePreview": "{\"logs\":[]}",
       "location": ""
     },
@@ -256,7 +256,7 @@
       "expected": [
         200
       ],
-      "durationMs": 14,
+      "durationMs": 31,
       "responsePreview": "{\"ok\":true}",
       "location": ""
     },
@@ -271,7 +271,7 @@
       "expected": [
         200
       ],
-      "durationMs": 15,
+      "durationMs": 34,
       "responsePreview": "{\"ok\":true}",
       "location": ""
     },
@@ -286,8 +286,8 @@
       "expected": [
         200
       ],
-      "durationMs": 2286,
-      "responsePreview": "{\"drafts\":[{\"subject\":\"Colaboracion para Empresa X\",\"body\":\"Hola {{lead.firstName}}, me gustaria conversar contigo directamente. ¿Tienes 15 minutos para una llamada esta semana?\",\"lead\":{\"id\":\"lead-1\",\"fullName\":\"Camila ",
+      "durationMs": 2903,
+      "responsePreview": "{\"drafts\":[{\"subject\":\"Colaboración para Empresa X\",\"body\":\"Hola {{lead.firstName}},\\n\\nMe gustaría conversar contigo directamente sobre cómo podemos colaborar. ¿Tienes 15 minutos disponibles para una llamada esta semana",
       "location": ""
     },
     {
@@ -301,7 +301,7 @@
       "expected": [
         200
       ],
-      "durationMs": 437,
+      "durationMs": 1077,
       "responsePreview": "{\"subject\":\"ANTON.IA × Empresa X\",\"body\":\"Hola Camila Torres,\\n\\nNoté Seguimiento manual en Empresa X. En ANTON.IA ayudamos con Automatizacion y Mejoramos conversion.\\n\\n¿Te parece una llamada breve esta semana para expl",
       "location": ""
     },
@@ -316,8 +316,8 @@
       "expected": [
         200
       ],
-      "durationMs": 3998,
-      "responsePreview": "{\"styleProfile\":{\"scope\":\"leads\",\"name\":\"Estilo conversacional\",\"tone\":\"consultative\",\"length\":\"short\",\"structure\":[\"hook\",\"value\",\"cta\"],\"do\":[\"mantener claridad\",\"evitar jerga\",\"ir al grano\"],\"dont\":[\"promesas absoluta",
+      "durationMs": 5582,
+      "responsePreview": "{\"styleProfile\":{\"scope\":\"leads\",\"name\":\"Estilo conversacional\",\"tone\":\"executive\",\"length\":\"short\",\"structure\":[\"problem\",\"solution\",\"cta\"],\"do\":[\"mantener claridad\",\"evitar jerga\",\"ser directo\"],\"dont\":[\"promesas absol",
       "location": ""
     },
     {
@@ -329,7 +329,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 461,
+      "durationMs": 1096,
       "responsePreview": "{\"error\":\"Unauthorized (No Session)\"}",
       "location": ""
     },
@@ -342,7 +342,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 443,
+      "durationMs": 684,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -355,7 +355,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 123,
+      "durationMs": 137,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -368,7 +368,7 @@
       "skipped": false,
       "status": 400,
       "expected": "<500",
-      "durationMs": 418,
+      "durationMs": 622,
       "responsePreview": "{\"error\":\"industry_required\"}",
       "location": ""
     },
@@ -383,7 +383,7 @@
       "expected": [
         400
       ],
-      "durationMs": 509,
+      "durationMs": 560,
       "responsePreview": "{\"error\":\"runId is required\"}",
       "location": ""
     },
@@ -396,7 +396,7 @@
       "skipped": false,
       "status": 400,
       "expected": "<500",
-      "durationMs": 474,
+      "durationMs": 583,
       "responsePreview": "{\"success\":false,\"error\":\"Name and company are required\"}",
       "location": ""
     },
@@ -411,7 +411,7 @@
       "expected": [
         400
       ],
-      "durationMs": 572,
+      "durationMs": 859,
       "responsePreview": "{\"error\":\"INVALID_REQUEST_BODY\",\"details\":{\"formErrors\":[\"Expected array, received object\"],\"fieldErrors\":{}}}",
       "location": ""
     },
@@ -424,7 +424,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 414,
+      "durationMs": 880,
       "responsePreview": "{\"error\":\"missing user id\"}",
       "location": ""
     },
@@ -437,7 +437,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 548,
+      "durationMs": 764,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -450,7 +450,7 @@
       "skipped": false,
       "status": 400,
       "expected": "<500",
-      "durationMs": 352,
+      "durationMs": 643,
       "responsePreview": "{\"error\":\"companyName requerido\"}",
       "location": ""
     },
@@ -463,7 +463,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 747,
+      "durationMs": 1534,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -478,7 +478,7 @@
       "expected": [
         400
       ],
-      "durationMs": 498,
+      "durationMs": 1473,
       "responsePreview": "{\"error\":{\"type\":\"invalid-input\",\"message\":\"Falta \\\"runId\\\".\"}}",
       "location": ""
     },
@@ -493,7 +493,7 @@
       "expected": [
         400
       ],
-      "durationMs": 511,
+      "durationMs": 725,
       "responsePreview": "{\"error\":\"missing user id\"}",
       "location": ""
     },
@@ -506,7 +506,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 733,
+      "durationMs": 1044,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -521,8 +521,8 @@
       "expected": [
         200
       ],
-      "durationMs": 773,
-      "responsePreview": "{\"userId\":\"smoke-test-user\",\"statuses\":[{\"resource\":\"leadSearch\",\"allowed\":false,\"count\":0,\"limit\":50,\"dayKey\":\"2026-02-12\",\"resetAtISO\":\"2026-02-13T00:00:00.000Z\"},{\"resource\":\"research\",\"allowed\":false,\"count\":0,\"limit",
+      "durationMs": 901,
+      "responsePreview": "{\"userId\":\"smoke-test-user\",\"statuses\":[{\"resource\":\"leadSearch\",\"allowed\":false,\"count\":0,\"limit\":50,\"dayKey\":\"2026-02-13\",\"resetAtISO\":\"2026-02-14T00:00:00.000Z\"},{\"resource\":\"research\",\"allowed\":false,\"count\":0,\"limit",
       "location": ""
     },
     {
@@ -534,7 +534,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 1023,
+      "durationMs": 1385,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -547,7 +547,7 @@
       "skipped": false,
       "status": 200,
       "expected": "<500",
-      "durationMs": 816,
+      "durationMs": 1315,
       "responsePreview": "{\"ok\":true,\"hasUrl\":true}",
       "location": ""
     },
@@ -562,7 +562,7 @@
       "expected": [
         400
       ],
-      "durationMs": 179,
+      "durationMs": 182,
       "responsePreview": "{\"error\":\"Payload incompleto: requiere id/email/linkedin o nombre+empresa\"}",
       "location": ""
     },
@@ -577,7 +577,7 @@
       "expected": [
         400
       ],
-      "durationMs": 744,
+      "durationMs": 1006,
       "responsePreview": "{\"error\":\"Missing id or status\"}",
       "location": ""
     },
@@ -590,7 +590,7 @@
       "skipped": false,
       "status": 200,
       "expected": "<500",
-      "durationMs": 859,
+      "durationMs": 1111,
       "responsePreview": "{\"tasks\":[]}",
       "location": ""
     },
@@ -605,7 +605,7 @@
       "expected": [
         200
       ],
-      "durationMs": 779,
+      "durationMs": 971,
       "responsePreview": "{\"message\":\"Lead not found for reply\",\"matched\":false}",
       "location": ""
     },
@@ -621,7 +621,7 @@
         302,
         307
       ],
-      "durationMs": 617,
+      "durationMs": 1090,
       "responsePreview": "",
       "location": "https://example.com/"
     },
@@ -636,7 +636,7 @@
       "expected": [
         200
       ],
-      "durationMs": 587,
+      "durationMs": 958,
       "responsePreview": "GIF89a\u0001\u0000\u0001\u0000�\u0000\u0000\u0000\u0000\u0000���!�\u0004\u0001\u0000\u0000\u0000\u0000,\u0000\u0000\u0000\u0000\u0001\u0000\u0001\u0000\u0000\u0002\u0001D\u0000;",
       "location": ""
     },
@@ -651,7 +651,7 @@
       "expected": [
         400
       ],
-      "durationMs": 882,
+      "durationMs": 1004,
       "responsePreview": "{\"error\":\"Invalid request parameters\"}",
       "location": ""
     },
@@ -667,7 +667,7 @@
         200,
         401
       ],
-      "durationMs": 735,
+      "durationMs": 942,
       "responsePreview": "{\"success\":true}",
       "location": ""
     },
@@ -682,7 +682,7 @@
       "expected": [
         400
       ],
-      "durationMs": 711,
+      "durationMs": 942,
       "responsePreview": "{\"error\":\"Missing enriched_lead_id param\"}",
       "location": ""
     }

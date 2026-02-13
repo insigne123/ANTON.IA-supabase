@@ -17,6 +17,23 @@ interface MissionLead {
     created_at: string;
 }
 
+const EXACT_DATETIME_FORMATTER = new Intl.DateTimeFormat('es-AR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+});
+
+function formatExactDateTime(input?: string | null) {
+    if (!input) return '-';
+    const d = new Date(input);
+    if (Number.isNaN(d.getTime())) return '-';
+    return EXACT_DATETIME_FORMATTER.format(d);
+}
+
 export function MissionQueues({ missionId }: { missionId: string }) {
     const [reserveLeads, setReserveLeads] = useState<MissionLead[]>([]);
     const [readyLeads, setReadyLeads] = useState<MissionLead[]>([]);
@@ -204,7 +221,7 @@ function QueueList({ leads, emptyMessage, icon }: { leads: MissionLead[], emptyM
                             <div className="flex justify-between items-start">
                                 <p className="font-medium text-sm truncate">{lead.name}</p>
                                 <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                                    {new Date(lead.created_at).toLocaleDateString()}
+                                    {formatExactDateTime(lead.created_at)}
                                 </span>
                             </div>
                             <div className="flex items-center gap-1 text-xs text-muted-foreground truncate">

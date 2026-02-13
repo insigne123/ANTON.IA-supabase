@@ -1,7 +1,9 @@
 
+import { encodeHeaderRFC2047, sanitizeHeaderText } from '@/lib/email-header-utils';
+
 export async function sendGmail(accessToken: string, to: string, subject: string, htmlBody: string) {
     // Construct raw email
-    const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
+    const utf8Subject = encodeHeaderRFC2047(subject);
     const messageParts = [
         `To: ${to}`,
         'Content-Type: text/html; charset=utf-8',
@@ -10,8 +12,8 @@ export async function sendGmail(accessToken: string, to: string, subject: string
         '',
         htmlBody,
     ];
-    const message = messageParts.join('\n');
-    const encodedMessage = Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const message = messageParts.join('\r\n');
+    const encodedMessage = Buffer.from(message, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
     const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
         method: 'POST',
@@ -32,6 +34,7 @@ export async function sendGmail(accessToken: string, to: string, subject: string
 }
 
 export async function sendOutlook(accessToken: string, to: string, subject: string, htmlBody: string) {
+    const safeSubject = sanitizeHeaderText(subject);
     const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
         method: 'POST',
         headers: {
@@ -40,7 +43,7 @@ export async function sendOutlook(accessToken: string, to: string, subject: stri
         },
         body: JSON.stringify({
             message: {
-                subject: subject,
+                subject: safeSubject,
                 body: {
                     contentType: 'HTML',
                     content: htmlBody,

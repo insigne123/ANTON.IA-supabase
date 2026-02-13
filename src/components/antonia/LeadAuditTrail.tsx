@@ -10,6 +10,23 @@ import { Loader2, Search, Sparkles, Brain, Mail, AlertTriangle, Clock, Filter } 
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 
+const EXACT_DATETIME_FORMATTER = new Intl.DateTimeFormat('es-AR', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
+function formatExactDateTime(input?: string | null) {
+  if (!input) return '-';
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return '-';
+  return EXACT_DATETIME_FORMATTER.format(d);
+}
+
 type LeadRow = {
   id: string;
   name: string;
@@ -250,8 +267,9 @@ export function LeadAuditTrail({ missionId }: { missionId: string }) {
                         <div className="text-sm">
                           {e.message || e.event_type}
                         </div>
-                        <div className="text-xs text-muted-foreground shrink-0">
-                          {formatDistanceToNow(new Date(e.created_at), { addSuffix: true, locale: es })}
+                        <div className="text-right text-xs text-muted-foreground shrink-0 leading-tight">
+                          <div>{formatDistanceToNow(new Date(e.created_at), { addSuffix: true, locale: es })}</div>
+                          <div className="text-[10px] text-muted-foreground/80">{formatExactDateTime(e.created_at)}</div>
                         </div>
                       </div>
                       {e.meta && (typeof e.meta === 'object') && (
