@@ -718,31 +718,238 @@ async function executeContact(task: any, supabase: any) {
 
 async function executeReport(task: any, supabase: any, config: any) {
     if (task.payload.reportType === 'mission_historic') {
-        // Mission Report logic (Basic Implementation)
-        // For now, we can reuse notificationService.sendAlert or implement a specific one
-        // Let's rely on notificationService to send a custom HTML email
-        const { missionId, userId } = task.payload;
-        const { data: leads } = await supabase.from('contacted_leads').select('*').eq('mission_id', missionId);
-
-        const sent = leads?.length || 0;
-        const opened = leads?.filter((l: any) => l.opened_at).length || 0;
-        const replied = leads?.filter((l: any) => l.replied_at).length || 0;
-
-        const html = `<h1>Reporte de Misión</h1><p>Enviados: ${sent}</p><p>Abiertos: ${opened}</p><p>Respuestas: ${replied}</p>`;
-
-        // Get user email to send to
-        const { data: user } = await supabase.auth.admin.getUserById(userId);
-        if (user?.user?.email) {
-            await notificationService.sendAlert(task.organization_id, 'Reporte de Misión', html); // Reuse alert for now
-            return { sent: true, recipient: user.user.email };
+        const missionId = task.payload?.missionId || task.mission_id;
+        if (!missionId) {
+            return { skipped: true, reason: 'missing_mission_id' };
         }
-        return { skipped: true, reason: 'user_not_found' };
+
+        const { data: mission } = await supabase
+            .from('antonia_missions')
+            .select('*')
+            .eq('id', missionId)
+            .maybeSingle();
+
+        if (!mission) {
+            return { skipped: true, reason: 'mission_not_found' };
+        }
+
+        const { count: leadsFound } = await supabase
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId);
+
+        const { data: contactedRows } = await supabase
+            .from('contacted_leads')
+            .select('lead_id')
+            .eq('mission_id', missionId);
+
+        const leadsContacted = new Set(
+            ((contactedRows as any[]) || [])
+                .map((r: any) => String(r?.lead_id || '').trim())
+                .filter(Boolean)
+        ).size;
+
+        const { count: blockedCount } = await supabase
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId)
+            .eq('status', 'do_not_contact');
+
+        const { count: leadsAdvancedInFunnel } = await supabase
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId)
+            .in('status', ['enriched', 'contacted', 'do_not_contact']);
+
+        const { count: leadsWithEmail } = await supabase
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId)
+            .not('email', 'is', null);
+
+        const { count: replies } = await supabase
+            .from('contacted_leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId)
+            .not('replied_at', 'is', null);
+
+        const audit = {
+            found: 0,
+            enrichEmail: 0,
+            enrichNoEmail: 0,
+            enrichFailed: 0,
+            investigated: 0,
+            investigateFailed: 0,
+            contactedSent: 0,
+            contactedBlocked: 0,
+            contactedFailed: 0,
+        };
+
+        const enrichedLeadIds = new Set<string>();
+        try {
+            const { data: evs } = await supabase
+                .from('antonia_lead_events')
+                .select('lead_id, event_type, outcome')
+                .eq('mission_id', missionId)
+                .limit(5000);
+
+            for (const e of (evs as any[]) || []) {
+                const type = String(e.event_type || '');
+                const outcome = String(e.outcome || '');
+                const leadId = String(e.lead_id || '').trim();
+
+                if (type === 'lead_found') audit.found++;
+                if (type === 'lead_enrich_completed') {
+                    if (outcome === 'email_found') audit.enrichEmail++;
+                    else if (outcome === 'no_email') audit.enrichNoEmail++;
+                    if (leadId) enrichedLeadIds.add(leadId);
+                }
+                if (type === 'lead_enrich_failed') audit.enrichFailed++;
+                if (type === 'lead_investigate_completed') audit.investigated++;
+                if (type === 'lead_investigate_failed') audit.investigateFailed++;
+                if (type === 'lead_contact_sent') audit.contactedSent++;
+                if (type === 'lead_contact_blocked') audit.contactedBlocked++;
+                if (type === 'lead_contact_failed') audit.contactedFailed++;
+            }
+        } catch (e) {
+            console.warn('[executeReport] mission audit fallback:', e);
+        }
+
+        const leadsEnriched = Math.max(
+            enrichedLeadIds.size,
+            audit.enrichEmail + audit.enrichNoEmail,
+            leadsAdvancedInFunnel || 0,
+            leadsWithEmail || 0,
+            leadsContacted
+        );
+
+        const totalFound = leadsFound || 0;
+        const totalReplies = replies || 0;
+        const toRate = (num: number, den: number) => (den > 0 ? Math.min(100, (num / den) * 100).toFixed(1) : '0');
+        const enrichmentRate = toRate(leadsEnriched, totalFound);
+        const contactRate = toRate(leadsContacted, totalFound);
+        const responseRate = toRate(totalReplies, leadsContacted);
+
+        const summaryData = {
+            missionId,
+            title: mission.title,
+            leadsFound: totalFound,
+            leadsEnriched,
+            leadsContacted,
+            investigated: audit.investigated,
+            replies: totalReplies,
+            blocked: blockedCount || 0,
+            audit,
+        };
+
+        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { margin: 0; padding: 20px; background: #eef2f7; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; color: #0f172a; }
+    .container { max-width: 780px; margin: 0 auto; background: #fff; border: 1px solid #dbe3ef; border-radius: 14px; overflow: hidden; }
+    .header { padding: 30px; background: linear-gradient(135deg, #0f4c81 0%, #0a7fa4 100%); color: #fff; }
+    .header h1 { margin: 0; font-size: 30px; }
+    .header p { margin: 8px 0 0 0; font-size: 15px; opacity: 0.95; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 18px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; text-align: center; }
+    .card .v { font-size: 30px; font-weight: 800; color: #0f4c81; line-height: 1; }
+    .card .l { margin-top: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px; color: #475569; font-weight: 700; }
+    .section { padding: 22px; }
+    .section h2 { margin: 0 0 12px 0; font-size: 17px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+    .rates { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .rate { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px; padding: 12px; text-align: center; }
+    .rate .v { font-size: 28px; font-weight: 800; color: #c2410c; }
+    .rate .l { font-size: 11px; color: #9a3412; text-transform: uppercase; letter-spacing: 0.6px; font-weight: 700; }
+    .audit { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+    .audit-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; }
+    .audit-item .k { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; }
+    .audit-item .n { margin-top: 6px; font-size: 22px; font-weight: 800; color: #334155; line-height: 1; }
+    .footer { background: #0f172a; color: #cbd5e1; text-align: center; font-size: 12px; padding: 18px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Reporte de Misión</h1>
+      <p>${mission.title}</p>
+    </div>
+
+    <div class="cards">
+      <div class="card"><div class="v">${totalFound}</div><div class="l">Leads Encontrados</div></div>
+      <div class="card"><div class="v">${leadsEnriched}</div><div class="l">Leads Enriquecidos</div></div>
+      <div class="card"><div class="v">${audit.investigated || 0}</div><div class="l">Leads Investigados</div></div>
+      <div class="card"><div class="v">${leadsContacted}</div><div class="l">Leads Contactados</div></div>
+      <div class="card"><div class="v">${totalReplies}</div><div class="l">Respuestas</div></div>
+      <div class="card"><div class="v">${blockedCount || 0}</div><div class="l">Bloqueados</div></div>
+    </div>
+
+    <div class="section">
+      <h2>Tasas de Conversión</h2>
+      <div class="rates">
+        <div class="rate"><div class="v">${enrichmentRate}%</div><div class="l">Enriquecimiento</div></div>
+        <div class="rate"><div class="v">${contactRate}%</div><div class="l">Contacto</div></div>
+        <div class="rate"><div class="v">${responseRate}%</div><div class="l">Respuesta</div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Auditoría por Etapa</h2>
+      <div class="audit">
+        <div class="audit-item"><div class="k">Found</div><div class="n">${audit.found || 0}</div></div>
+        <div class="audit-item"><div class="k">Email Encontrado</div><div class="n">${audit.enrichEmail || 0}</div></div>
+        <div class="audit-item"><div class="k">Sin Email</div><div class="n">${audit.enrichNoEmail || 0}</div></div>
+        <div class="audit-item"><div class="k">Investigados</div><div class="n">${audit.investigated || 0}</div></div>
+        <div class="audit-item"><div class="k">Contactados</div><div class="n">${audit.contactedSent || 0}</div></div>
+        <div class="audit-item"><div class="k">Bloqueados/Fallidos</div><div class="n">${(audit.contactedBlocked || 0) + (audit.contactedFailed || 0)}</div></div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Generado automáticamente por ANTONIA · ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+    </div>
+  </div>
+</body>
+</html>
+        `;
+
+        const { data: reportRow } = await supabase
+            .from('antonia_reports')
+            .insert({
+                organization_id: task.organization_id,
+                mission_id: missionId,
+                type: 'mission_historic',
+                content: html,
+                summary_data: summaryData,
+                sent_to: [],
+                created_at: new Date().toISOString(),
+            })
+            .select('id')
+            .single();
+
+        const subject = `Reporte de Misión: ${mission.title}`;
+        const sendResult = await notificationService.sendReportEmail(task.organization_id, subject, html);
+
+        if (reportRow?.id && sendResult?.recipients?.length) {
+            await supabase
+                .from('antonia_reports')
+                .update({ sent_to: sendResult.recipients })
+                .eq('id', reportRow.id);
+        }
+
+        return {
+            reportId: reportRow?.id || null,
+            sent: Boolean(sendResult?.sent),
+            recipients: sendResult?.recipients || [],
+            summary: summaryData,
+        };
 
     } else {
         // Daily Report Task (Default)
         // Delegate to notification service
-        await notificationService.sendDailyReport(task.organization_id);
-        return { reportGenerated: true };
+        const result = await notificationService.sendDailyReport(task.organization_id);
+        return { reportGenerated: true, ...result };
     }
 }
 

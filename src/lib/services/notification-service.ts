@@ -2,6 +2,24 @@ import { createClient } from '@supabase/supabase-js';
 import { sendGmail, sendOutlook } from '../server-email-sender';
 import { refreshGoogleToken, refreshMicrosoftToken } from '../server-auth-helpers';
 
+function parseRecipients(raw?: string | null): string[] {
+    if (!raw) return [];
+    const parts = String(raw)
+        .split(/[,;\n\r\t ]+/)
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean);
+
+    const unique = new Set<string>();
+    const out: string[] = [];
+    for (const p of parts) {
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p)) continue;
+        if (unique.has(p)) continue;
+        unique.add(p);
+        out.push(p);
+    }
+    return out;
+}
+
 /**
  * Send system email using stored OAuth tokens
  * This function is designed to be called from server-side contexts (workers, cron jobs)
@@ -123,6 +141,37 @@ export const notificationService = {
     },
 
     /**
+     * Send report HTML to configured recipients
+     */
+    sendReportEmail: async (organizationId: string, subject: string, html: string) => {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (!supabaseUrl || !serviceKey) return { sent: false, recipients: [] as string[] };
+
+        const supabase = createClient(supabaseUrl, serviceKey, {
+            auth: { persistSession: false, autoRefreshToken: false }
+        });
+
+        const { data: config } = await supabase
+            .from('antonia_config')
+            .select('notification_email')
+            .eq('organization_id', organizationId)
+            .maybeSingle();
+
+        const recipients = parseRecipients(config?.notification_email);
+        if (recipients.length === 0) {
+            console.warn(`[ReportMail] No recipients configured for org ${organizationId}`);
+            return { sent: false, recipients: [] as string[] };
+        }
+
+        for (const to of recipients) {
+            await sendSystemEmail(to, subject, html, organizationId);
+        }
+
+        return { sent: true, recipients };
+    },
+
+    /**
      * Generate and Send Daily Report
      */
     sendDailyReport: async (organizationId: string) => {
@@ -130,7 +179,7 @@ export const notificationService = {
 
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
         const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-        if (!supabaseUrl || !serviceKey) return;
+        if (!supabaseUrl || !serviceKey) return { skipped: true, reason: 'missing_credentials' };
 
         const supabase = createClient(supabaseUrl, serviceKey, {
             auth: { persistSession: false, autoRefreshToken: false }
@@ -142,170 +191,275 @@ export const notificationService = {
             .eq('organization_id', organizationId)
             .maybeSingle();
 
-        if (!config || !config.daily_report_enabled || !config.notification_email) {
-            console.log(`[DailyReport] Skipping report - dailyReportEnabled: ${config?.daily_report_enabled}, notificationEmail: ${config?.notification_email}`);
-            return;
+        if (!config || !config.daily_report_enabled) {
+            console.log(`[DailyReport] Skipping report - dailyReportEnabled: ${config?.daily_report_enabled}`);
+            return { skipped: true, reason: 'daily_disabled' };
         }
 
-        // Gather stats for the last 24h
-        const yesterday = new Date(Date.now() - 86400000).toISOString();
-        const yesterdayDate = yesterday.split('T')[0];
+        const rangeEnd = new Date();
+        const rangeStart = new Date(rangeEnd.getTime() - 24 * 60 * 60 * 1000);
+        const rangeStartIso = rangeStart.toISOString();
+        const rangeEndIso = rangeEnd.toISOString();
+        const rangeStartDate = rangeStartIso.split('T')[0];
+        const rangeEndDate = rangeEndIso.split('T')[0];
+        const rangeLabel = `${rangeStart.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })} ${rangeStart.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} - ${rangeEnd.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })} ${rangeEnd.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
 
-        // 1. Get daily usage metrics
-        const { data: usage } = await supabase
+        const { data: usageRows } = await supabase
             .from('antonia_daily_usage')
-            .select('*')
+            .select('leads_searched, leads_enriched, leads_investigated, search_runs, date')
             .eq('organization_id', organizationId)
-            .eq('date', yesterdayDate)
-            .single();
+            .gte('date', rangeStartDate)
+            .lte('date', rangeEndDate);
 
-        const leadsSearched = usage?.leads_searched || 0;
-        const leadsEnriched = usage?.leads_enriched || 0;
-        const leadsInvestigated = usage?.leads_investigated || 0;
-        const searchRuns = usage?.search_runs || 0;
+        const usageTotals = ((usageRows as any[]) || []).reduce((acc: any, row: any) => {
+            acc.leadsSearched += Number(row?.leads_searched || 0);
+            acc.leadsEnriched += Number(row?.leads_enriched || 0);
+            acc.leadsInvestigated += Number(row?.leads_investigated || 0);
+            acc.searchRuns += Number(row?.search_runs || 0);
+            return acc;
+        }, { leadsSearched: 0, leadsEnriched: 0, leadsInvestigated: 0, searchRuns: 0 });
 
-        console.log(`[DailyReport] Daily usage metrics for ${yesterdayDate}:`, {
-            leadsSearched,
-            leadsEnriched,
-            leadsInvestigated,
-            searchRuns
-        });
-
-        // 2. Count tasks completed
         const { count: tasksCompleted } = await supabase
             .from('antonia_tasks')
             .select('*', { count: 'exact', head: true })
             .eq('organization_id', organizationId)
             .eq('status', 'completed')
-            .gte('updated_at', yesterday);
+            .gte('updated_at', rangeStartIso)
+            .lt('updated_at', rangeEndIso);
 
-        // 3. Count failed tasks
         const { count: tasksFailed } = await supabase
             .from('antonia_tasks')
             .select('*', { count: 'exact', head: true })
             .eq('organization_id', organizationId)
             .eq('status', 'failed')
-            .gte('updated_at', yesterday);
+            .gte('updated_at', rangeStartIso)
+            .lt('updated_at', rangeEndIso);
 
-        // 4. Count active missions
-        const { count: activeMissions } = await supabase
+        const { data: missions } = await supabase
             .from('antonia_missions')
-            .select('*', { count: 'exact', head: true })
+            .select('id, title')
             .eq('organization_id', organizationId)
             .eq('status', 'active');
 
-        // 5. Count contacted leads (emails queued/sent)
-        const { count: leadsContacted } = await supabase
+        const { count: leadsContactedByTable } = await supabase
             .from('contacted_leads')
             .select('*', { count: 'exact', head: true })
             .eq('organization_id', organizationId)
-            .gte('created_at', yesterday);
+            .gte('created_at', rangeStartIso)
+            .lt('created_at', rangeEndIso);
 
-        console.log(`[DailyReport] Contacted leads count: ${leadsContacted || 0}`);
-        console.log(`[DailyReport] Tasks - Completed: ${tasksCompleted || 0}, Failed: ${tasksFailed || 0}`);
-        console.log(`[DailyReport] Active missions: ${activeMissions || 0}`);
+        let replies = 0;
+        try {
+            const { count } = await supabase
+                .from('lead_responses')
+                .select('*', { count: 'exact', head: true })
+                .eq('organization_id', organizationId)
+                .eq('type', 'reply')
+                .gte('created_at', rangeStartIso)
+                .lt('created_at', rangeEndIso);
+            replies = count || 0;
+        } catch {
+            replies = 0;
+        }
 
-        // 6. Get daily limits from config
-        const searchLimit = config.daily_search_limit || 3;
-        const enrichLimit = config.daily_enrich_limit || 50;
-        const investigateLimit = config.daily_investigate_limit || 20;
+        if (replies === 0) {
+            const { count: fallbackReplies } = await supabase
+                .from('contacted_leads')
+                .select('*', { count: 'exact', head: true })
+                .eq('organization_id', organizationId)
+                .not('replied_at', 'is', null)
+                .gte('replied_at', rangeStartIso)
+                .lt('replied_at', rangeEndIso);
+            replies = fallbackReplies || 0;
+        }
 
-        // Calculate remaining capacity
-        const searchRemaining = Math.max(0, searchLimit - searchRuns);
-        const enrichRemaining = Math.max(0, enrichLimit - leadsEnriched);
-        const investigateRemaining = Math.max(0, investigateLimit - leadsInvestigated);
+        const perMission: Record<string, any> = {};
+        const totalsFromEvents = {
+            found: 0,
+            enrichEmail: 0,
+            enrichNoEmail: 0,
+            enrichFailed: 0,
+            investigated: 0,
+            investigateFailed: 0,
+            contactedSent: 0,
+            contactedBlocked: 0,
+            contactedFailed: 0,
+        };
+
+        const { data: evs } = await supabase
+            .from('antonia_lead_events')
+            .select('mission_id, event_type, outcome')
+            .eq('organization_id', organizationId)
+            .gte('created_at', rangeStartIso)
+            .lt('created_at', rangeEndIso)
+            .limit(10000);
+
+        for (const e of (evs as any[]) || []) {
+            const mid = String(e.mission_id || '').trim();
+            if (!mid) continue;
+            if (!perMission[mid]) {
+                perMission[mid] = {
+                    found: 0,
+                    enrichEmail: 0,
+                    enrichNoEmail: 0,
+                    enrichFailed: 0,
+                    investigated: 0,
+                    investigateFailed: 0,
+                    contactedSent: 0,
+                    contactedBlocked: 0,
+                    contactedFailed: 0,
+                };
+            }
+
+            const type = String(e.event_type || '');
+            const outcome = String(e.outcome || '');
+
+            if (type === 'lead_found') {
+                perMission[mid].found++;
+                totalsFromEvents.found++;
+            }
+            if (type === 'lead_enrich_completed') {
+                if (outcome === 'email_found') {
+                    perMission[mid].enrichEmail++;
+                    totalsFromEvents.enrichEmail++;
+                } else if (outcome === 'no_email') {
+                    perMission[mid].enrichNoEmail++;
+                    totalsFromEvents.enrichNoEmail++;
+                }
+            }
+            if (type === 'lead_enrich_failed') {
+                perMission[mid].enrichFailed++;
+                totalsFromEvents.enrichFailed++;
+            }
+            if (type === 'lead_investigate_completed') {
+                perMission[mid].investigated++;
+                totalsFromEvents.investigated++;
+            }
+            if (type === 'lead_investigate_failed') {
+                perMission[mid].investigateFailed++;
+                totalsFromEvents.investigateFailed++;
+            }
+            if (type === 'lead_contact_sent') {
+                perMission[mid].contactedSent++;
+                totalsFromEvents.contactedSent++;
+            }
+            if (type === 'lead_contact_blocked') {
+                perMission[mid].contactedBlocked++;
+                totalsFromEvents.contactedBlocked++;
+            }
+            if (type === 'lead_contact_failed') {
+                perMission[mid].contactedFailed++;
+                totalsFromEvents.contactedFailed++;
+            }
+        }
+
+        const searchRuns = usageTotals.searchRuns;
+        const leadsFound = Math.max(usageTotals.leadsSearched, totalsFromEvents.found);
+        const leadsEnriched = Math.max(usageTotals.leadsEnriched, totalsFromEvents.enrichEmail + totalsFromEvents.enrichNoEmail);
+        const leadsInvestigated = Math.max(usageTotals.leadsInvestigated, totalsFromEvents.investigated);
+        const leadsContacted = Math.max(leadsContactedByTable || 0, totalsFromEvents.contactedSent);
+
+        const missionRows = (missions || []).map((m: any) => {
+            const s = perMission[String(m.id)] || {};
+            return `<tr>
+                <td style="padding:10px;border-bottom:1px solid #e2e8f0;font-weight:600;">${m.title}</td>
+                <td style="padding:10px;border-bottom:1px solid #e2e8f0;text-align:right;">${s.found || 0}</td>
+                <td style="padding:10px;border-bottom:1px solid #e2e8f0;text-align:right;">${(s.enrichEmail || 0) + (s.enrichNoEmail || 0)}</td>
+                <td style="padding:10px;border-bottom:1px solid #e2e8f0;text-align:right;">${s.investigated || 0}</td>
+                <td style="padding:10px;border-bottom:1px solid #e2e8f0;text-align:right;">${s.contactedSent || 0}</td>
+            </tr>`;
+        }).join('');
 
         const html = `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h1 style="color: #2563eb;">📊 Reporte Diario de ANTONIA</h1>
-                <p style="color: #64748b;">Aquí está el resumen de actividad de las últimas 24 horas:</p>
-                
-                <h2 style="color: #334155; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">Actividad de Leads</h2>
-                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-                    <tr style="background-color: #f8fafc;">
-                        <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>Búsquedas Ejecutadas</strong></td>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0; text-align: right;">${searchRuns}</td>
-                    </tr>
-                    <tr>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>Leads Encontrados</strong></td>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0; text-align: right;">${leadsSearched}</td>
-                    </tr>
-                    <tr style="background-color: #f8fafc;">
-                        <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>Leads Enriquecidos</strong></td>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0; text-align: right;">${leadsEnriched}</td>
-                    </tr>
-                    <tr>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>Investigaciones Profundas</strong></td>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0; text-align: right;">${leadsInvestigated}</td>
-                    </tr>
-                    <tr style="background-color: #f8fafc;">
-                        <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>Leads Contactados</strong></td>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0; text-align: right;">${leadsContacted || 0}</td>
-                    </tr>
-                </table>
-
-                <h2 style="color: #334155; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">Estado del Sistema</h2>
-                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-                    <tr style="background-color: #f8fafc;">
-                        <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>Misiones Activas</strong></td>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0; text-align: right;">${activeMissions || 0}</td>
-                    </tr>
-                    <tr>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>Tareas Completadas</strong></td>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0; text-align: right;">${tasksCompleted || 0}</td>
-                    </tr>
-                    ${tasksFailed && tasksFailed > 0 ? `
-                    <tr style="background-color: #fef2f2;">
-                        <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>⚠️ Tareas Fallidas</strong></td>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0; text-align: right; color: #dc2626;">${tasksFailed}</td>
-                    </tr>
-                    ` : ''}
-                </table>
-
-                <h2 style="color: #334155; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">Capacidad Restante Hoy</h2>
-                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-                    <tr style="background-color: #f8fafc;">
-                        <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>Búsquedas</strong></td>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0; text-align: right;">${searchRemaining} de ${searchLimit}</td>
-                    </tr>
-                    <tr>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>Enriquecimientos</strong></td>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0; text-align: right;">${enrichRemaining} de ${enrichLimit}</td>
-                    </tr>
-                    <tr style="background-color: #f8fafc;">
-                        <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>Investigaciones</strong></td>
-                        <td style="padding: 12px; border: 1px solid #e2e8f0; text-align: right;">${investigateRemaining} de ${investigateLimit}</td>
-                    </tr>
-                </table>
-
-                <div style="margin-top: 30px; padding: 20px; background-color: #f0f9ff; border-left: 4px solid #2563eb; border-radius: 4px;">
-                    <p style="margin: 0; color: #1e40af;">
-                        <strong>💡 Consejo:</strong> ${tasksFailed && tasksFailed > 0
-                ? 'Revisa las tareas fallidas en el panel de control para resolver cualquier problema.'
-                : 'Todo funcionando correctamente. ¡Sigue así!'}
-                    </p>
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; max-width: 760px; margin: 0 auto; background: #ffffff; border: 1px solid #dbe3ef; border-radius: 14px; overflow: hidden;">
+                <div style="padding: 28px; background: linear-gradient(135deg, #0f4c81 0%, #0a7fa4 100%); color: #fff;">
+                    <h1 style="margin:0;font-size:28px;">ANTONIA · Reporte Diario</h1>
+                    <p style="margin:8px 0 0 0;font-size:13px;opacity:0.92;"><strong>Ventana:</strong> ${rangeLabel}</p>
                 </div>
 
-                <p style="text-align: center; margin-top: 30px;">
-                    <a href="https://app.antonia.ai/antonia" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">
-                        Ir a Mission Control
-                    </a>
-                </p>
+                <div style="padding:18px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+                    ${[
+                ['Búsquedas', searchRuns],
+                ['Leads Encontrados', leadsFound],
+                ['Leads Enriquecidos', leadsEnriched],
+                ['Leads Investigados', leadsInvestigated],
+                ['Leads Contactados', leadsContacted],
+                ['Respuestas', replies],
+            ].map(([label, value]) => `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;text-align:center;"><div style="font-size:30px;font-weight:800;color:#0f4c81;line-height:1;">${value}</div><div style="margin-top:8px;font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:.7px;font-weight:700;">${label}</div></div>`).join('')}
+                </div>
 
-                <p style="text-align: center; color: #94a3b8; font-size: 12px; margin-top: 20px;">
-                    Este es un reporte automático de ANTONIA. Para desactivarlo, ve a Configuración.
-                </p>
+                <div style="padding:22px;">
+                    <h2 style="margin:0 0 14px 0;font-size:17px;color:#0f172a;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">Misiones activas (${missions?.length || 0})</h2>
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                        <thead>
+                            <tr style="background:#f8fafc;color:#334155;text-transform:uppercase;font-size:11px;letter-spacing:.4px;">
+                                <th style="padding:10px;text-align:left;border-bottom:1px solid #e2e8f0;">Misión</th>
+                                <th style="padding:10px;text-align:right;border-bottom:1px solid #e2e8f0;">Found</th>
+                                <th style="padding:10px;text-align:right;border-bottom:1px solid #e2e8f0;">Enriq.</th>
+                                <th style="padding:10px;text-align:right;border-bottom:1px solid #e2e8f0;">Invest.</th>
+                                <th style="padding:10px;text-align:right;border-bottom:1px solid #e2e8f0;">Contact.</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${missionRows || '<tr><td colspan="5" style="padding:12px;color:#64748b;text-align:center;">Sin actividad por misión en esta ventana.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="padding:0 22px 22px 22px;">
+                    <h2 style="margin:0 0 14px 0;font-size:17px;color:#0f172a;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">Salud del sistema</h2>
+                    <p style="margin:0;color:#334155;font-size:14px;">Tareas completadas: <strong>${tasksCompleted || 0}</strong> · Tareas fallidas: <strong style="color:${(tasksFailed || 0) > 0 ? '#b91c1c' : '#166534'}">${tasksFailed || 0}</strong></p>
+                </div>
+
+                <div style="background:#0f172a;color:#cbd5e1;text-align:center;font-size:12px;padding:18px;">Reporte automático de ANTONIA · <a href="https://app.antonia.ai/antonia" style="color:#fff;">Ir a Mission Control</a></div>
             </div>
         `;
 
-        await sendSystemEmail(
-            config.notification_email,
-            `[ANTONIA] Reporte Diario - ${new Date().toLocaleDateString('es-ES')}`,
-            html,
-            organizationId // Pass org ID
-        );
+        const summaryData = {
+            windowStart: rangeStartIso,
+            windowEnd: rangeEndIso,
+            searchRuns,
+            leadsFound,
+            leadsEnriched,
+            leadsInvestigated,
+            contacted: leadsContacted,
+            replies,
+            activeMissions: missions?.length || 0,
+            tasksCompleted: tasksCompleted || 0,
+            tasksFailed: tasksFailed || 0,
+            perMission,
+        };
 
-        console.log(`[DailyReport] Report sent successfully to ${config.notification_email}`);
-        console.log(`[DailyReport] Summary - Searches: ${searchRuns}, Leads: ${leadsSearched}, Enriched: ${leadsEnriched}, Investigated: ${leadsInvestigated}, Contacted: ${leadsContacted || 0}`);
+        const { data: reportRow } = await supabase
+            .from('antonia_reports')
+            .insert({
+                organization_id: organizationId,
+                mission_id: null,
+                type: 'daily',
+                content: html,
+                summary_data: summaryData,
+                sent_to: [],
+                created_at: new Date().toISOString(),
+            })
+            .select('id')
+            .single();
+
+        const subject = `[ANTONIA] Reporte Diario · ${rangeStart.toLocaleDateString('es-AR')} - ${rangeEnd.toLocaleDateString('es-AR')}`;
+        const sendResult = await notificationService.sendReportEmail(organizationId, subject, html);
+
+        if (reportRow?.id && sendResult?.recipients?.length) {
+            await supabase
+                .from('antonia_reports')
+                .update({ sent_to: sendResult.recipients })
+                .eq('id', reportRow.id);
+        }
+
+        console.log(`[DailyReport] Summary - Searches: ${searchRuns}, Leads: ${leadsFound}, Enriched: ${leadsEnriched}, Investigated: ${leadsInvestigated}, Contacted: ${leadsContacted}`);
+        return {
+            reportId: reportRow?.id || null,
+            sent: Boolean(sendResult?.sent),
+            recipients: sendResult?.recipients || [],
+            summary: summaryData,
+        };
     }
 };

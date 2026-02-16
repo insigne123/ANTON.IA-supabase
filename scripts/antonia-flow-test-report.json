@@ -1,60 +1,60 @@
 {
-  "generatedAt": "2026-02-13T15:36:54.571Z",
+  "generatedAt": "2026-02-16T23:35:23.390Z",
   "passed": 9,
   "failed": 0,
   "results": [
     {
       "name": "generateCampaignFlow",
       "ok": true,
-      "durationMs": 11406,
-      "preview": "{\"steps\":4}"
+      "durationMs": 15830,
+      "preview": "{\"steps\":5}"
     },
     {
       "name": "classifyReplyFlow",
       "ok": true,
-      "durationMs": 48826,
+      "durationMs": 49344,
       "preview": "{\"intent\":\"meeting_request\",\"shouldContinue\":false}"
     },
     {
       "name": "generatePhoneScript",
       "ok": true,
-      "durationMs": 3422,
+      "durationMs": 3253,
       "preview": "{\"hasOpening\":true,\"hasPitch\":true}"
     },
     {
       "name": "updateStyleProfile",
       "ok": true,
-      "durationMs": 1480,
+      "durationMs": 2523,
       "preview": "{\"hasExplanation\":true}"
     },
     {
       "name": "renderEmailTemplate",
       "ok": true,
-      "durationMs": 1928,
+      "durationMs": 1855,
       "preview": "{\"hasSubject\":true,\"hasBody\":true}"
     },
     {
       "name": "enhanceCompanyReport",
       "ok": true,
-      "durationMs": 16,
+      "durationMs": 25,
       "preview": "{\"passthrough\":true}"
     },
     {
       "name": "generateOutreachFromReport",
       "ok": true,
-      "durationMs": 2287,
+      "durationMs": 2226,
       "preview": "{\"hasSubject\":true,\"hasBody\":true}"
     },
     {
       "name": "generateCompanyProfile",
       "ok": true,
-      "durationMs": 2734,
-      "preview": "{\"sector\":\"Tecnología de la información y servicios\",\"hasWebsite\":true}"
+      "durationMs": 2852,
+      "preview": "{\"sector\":\"Tecnología, Servicios de consultoría en TI y desarrollo de software\",\"hasWebsite\":true}"
     },
     {
       "name": "replyClassifierHelper",
       "ok": true,
-      "durationMs": 45079,
+      "durationMs": 38404,
       "preview": "{\"intent\":\"unsubscribe\",\"shouldContinue\":false}"
     }
   ]

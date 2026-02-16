@@ -2237,45 +2237,93 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
     let summaryData: any = {}; // Initialize with proper type
 
     if (reportType === 'daily') {
-        const today = new Date().toISOString().split('T')[0];
-        subject = `Reporte Diario Antonia AI - ${today}`;
+        const rangeEnd = new Date();
+        const rangeStart = new Date(rangeEnd.getTime() - 24 * 60 * 60 * 1000);
+        const rangeStartIso = rangeStart.toISOString();
+        const rangeEndIso = rangeEnd.toISOString();
+        const rangeStartDate = rangeStartIso.split('T')[0];
+        const rangeEndDate = rangeEndIso.split('T')[0];
+        const rangeLabel = `${rangeStart.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })} ${rangeStart.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })} - ${rangeEnd.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })} ${rangeEnd.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
 
-        // 1. Fetch Daily Activity for Org
-        // We look at antonia_daily_usage table
-        const { data: usage } = await supabase
+        subject = `Reporte Diario Antonia AI · ${rangeStart.toLocaleDateString('es-AR')} - ${rangeEnd.toLocaleDateString('es-AR')}`;
+
+        // 1) Usage totals (covers quota-controlled counters)
+        const { data: usageRows } = await supabase
             .from('antonia_daily_usage')
-            .select('*')
+            .select('leads_searched, leads_enriched, leads_investigated, search_runs, date')
             .eq('organization_id', organizationId)
-            .eq('date', today)
-            .maybeSingle();
+            .gte('date', rangeStartDate)
+            .lte('date', rangeEndDate);
 
-        // 2. Use antonia_daily_usage as primary source (most accurate)
-        // This table is updated atomically by the Cloud Function
-        const leadsSearched = usage?.leads_searched || 0;
-        const leadsEnriched = usage?.leads_enriched || 0;
-        const searchRuns = usage?.search_runs || 0;
+        const usageTotals = ((usageRows as any[]) || []).reduce(
+            (acc: any, row: any) => {
+                acc.leadsSearched += Number(row?.leads_searched || 0);
+                acc.leadsEnriched += Number(row?.leads_enriched || 0);
+                acc.leadsInvestigated += Number(row?.leads_investigated || 0);
+                acc.searchRuns += Number(row?.search_runs || 0);
+                return acc;
+            },
+            { leadsSearched: 0, leadsEnriched: 0, leadsInvestigated: 0, searchRuns: 0 }
+        );
 
-        // 3. Count contacted leads today
-        const { count: contacted } = await supabase.from('contacted_leads')
+        // 2) Tasks health in window
+        const { count: tasksCompleted } = await supabase
+            .from('antonia_tasks')
             .select('*', { count: 'exact', head: true })
             .eq('organization_id', organizationId)
-            .gte('created_at', `${today}T00:00:00Z`);
+            .eq('status', 'completed')
+            .gte('updated_at', rangeStartIso)
+            .lt('updated_at', rangeEndIso);
 
-        // 4. Count responses today
-        const { count: replies } = await supabase.from('lead_responses')
+        const { count: tasksFailed } = await supabase
+            .from('antonia_tasks')
             .select('*', { count: 'exact', head: true })
             .eq('organization_id', organizationId)
-            .gte('created_at', `${today}T00:00:00Z`)
-            .eq('type', 'reply');
+            .eq('status', 'failed')
+            .gte('updated_at', rangeStartIso)
+            .lt('updated_at', rangeEndIso);
 
-        // 5. Get Active Missions
+        // 3) Active missions snapshot
         const { data: missions } = await supabase
             .from('antonia_missions')
             .select('id, title, status, daily_search_limit')
             .eq('organization_id', organizationId)
             .eq('status', 'active');
 
-        // 5.1 Snapshot of active agents (tasks)
+        // 4) Contact/reply counters in window
+        const { count: contactedByTable } = await supabase
+            .from('contacted_leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+            .gte('created_at', rangeStartIso)
+            .lt('created_at', rangeEndIso);
+
+        let repliesByTable = 0;
+        try {
+            const { count } = await supabase
+                .from('lead_responses')
+                .select('*', { count: 'exact', head: true })
+                .eq('organization_id', organizationId)
+                .eq('type', 'reply')
+                .gte('created_at', rangeStartIso)
+                .lt('created_at', rangeEndIso);
+            repliesByTable = count || 0;
+        } catch {
+            repliesByTable = 0;
+        }
+
+        if (repliesByTable === 0) {
+            const { count: fallbackReplies } = await supabase
+                .from('contacted_leads')
+                .select('*', { count: 'exact', head: true })
+                .eq('organization_id', organizationId)
+                .not('replied_at', 'is', null)
+                .gte('replied_at', rangeStartIso)
+                .lt('replied_at', rangeEndIso);
+            repliesByTable = fallbackReplies || 0;
+        }
+
+        // 5) Snapshot of active agents (tasks)
         let activeTasks: any[] = [];
         try {
             const { data: t } = await supabase
@@ -2290,15 +2338,28 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
             console.warn('[REPORT][daily] Failed to load active tasks snapshot:', e);
         }
 
-        // 5.2 Lead-event breakdown for full transparency
+        // 6) Lead-event breakdown (most explicit source for contacted/investigated)
         const perMission: Record<string, any> = {};
+        const totalsFromEvents = {
+            found: 0,
+            enrichEmail: 0,
+            enrichNoEmail: 0,
+            enrichFailed: 0,
+            investigated: 0,
+            investigateFailed: 0,
+            contactedSent: 0,
+            contactedBlocked: 0,
+            contactedFailed: 0,
+        };
+
         try {
             const { data: evs } = await supabase
                 .from('antonia_lead_events')
                 .select('mission_id, event_type, outcome')
                 .eq('organization_id', organizationId)
-                .gte('created_at', `${today}T00:00:00Z`)
-                .limit(5000);
+                .gte('created_at', rangeStartIso)
+                .lt('created_at', rangeEndIso)
+                .limit(10000);
 
             for (const e of (evs as any[]) || []) {
                 const mid = String(e.mission_id || '').trim();
@@ -2319,32 +2380,69 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
 
                 const type = String(e.event_type || '');
                 const outcome = String(e.outcome || '');
-                if (type === 'lead_found') perMission[mid].found++;
-                if (type === 'lead_enrich_completed') {
-                    if (outcome === 'email_found') perMission[mid].enrichEmail++;
-                    else if (outcome === 'no_email') perMission[mid].enrichNoEmail++;
+
+                if (type === 'lead_found') {
+                    perMission[mid].found++;
+                    totalsFromEvents.found++;
                 }
-                if (type === 'lead_enrich_failed') perMission[mid].enrichFailed++;
-                if (type === 'lead_investigate_completed') perMission[mid].investigated++;
-                if (type === 'lead_investigate_failed') perMission[mid].investigateFailed++;
-                if (type === 'lead_contact_sent') perMission[mid].contactedSent++;
-                if (type === 'lead_contact_blocked') perMission[mid].contactedBlocked++;
-                if (type === 'lead_contact_failed') perMission[mid].contactedFailed++;
+                if (type === 'lead_enrich_completed') {
+                    if (outcome === 'email_found') {
+                        perMission[mid].enrichEmail++;
+                        totalsFromEvents.enrichEmail++;
+                    } else if (outcome === 'no_email') {
+                        perMission[mid].enrichNoEmail++;
+                        totalsFromEvents.enrichNoEmail++;
+                    }
+                }
+                if (type === 'lead_enrich_failed') {
+                    perMission[mid].enrichFailed++;
+                    totalsFromEvents.enrichFailed++;
+                }
+                if (type === 'lead_investigate_completed') {
+                    perMission[mid].investigated++;
+                    totalsFromEvents.investigated++;
+                }
+                if (type === 'lead_investigate_failed') {
+                    perMission[mid].investigateFailed++;
+                    totalsFromEvents.investigateFailed++;
+                }
+                if (type === 'lead_contact_sent') {
+                    perMission[mid].contactedSent++;
+                    totalsFromEvents.contactedSent++;
+                }
+                if (type === 'lead_contact_blocked') {
+                    perMission[mid].contactedBlocked++;
+                    totalsFromEvents.contactedBlocked++;
+                }
+                if (type === 'lead_contact_failed') {
+                    perMission[mid].contactedFailed++;
+                    totalsFromEvents.contactedFailed++;
+                }
             }
         } catch (e) {
             console.warn('[REPORT][daily] Failed to aggregate lead events:', e);
         }
 
-        // Summary Data Object
+        const searchRuns = Math.max(usageTotals.searchRuns, 0);
+        const leadsFound = Math.max(usageTotals.leadsSearched, totalsFromEvents.found);
+        const leadsEnriched = Math.max(usageTotals.leadsEnriched, totalsFromEvents.enrichEmail + totalsFromEvents.enrichNoEmail);
+        const leadsInvestigated = Math.max(usageTotals.leadsInvestigated, totalsFromEvents.investigated);
+        const contacted = Math.max(contactedByTable || 0, totalsFromEvents.contactedSent);
+        const replies = repliesByTable || 0;
+
         summaryData = {
-            date: today,
-            searchRuns: searchRuns,
-            leadsFound: leadsSearched,
-            leadsEnriched: leadsEnriched,
-            contacted: contacted || 0,
-            replies: replies || 0,
+            windowStart: rangeStartIso,
+            windowEnd: rangeEndIso,
+            searchRuns,
+            leadsFound,
+            leadsEnriched,
+            leadsInvestigated,
+            contacted,
+            replies,
             activeMissions: missions?.length || 0,
-            perMission
+            tasksCompleted: tasksCompleted || 0,
+            tasksFailed: tasksFailed || 0,
+            perMission,
         };
 
         const missionList = (missions || []) as any[];
@@ -2352,105 +2450,116 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         for (const t of activeTasks) {
             const mid = String(t.mission_id || '').trim();
             if (!mid) continue;
-            // Prefer processing over pending
             if (!taskByMission[mid]) taskByMission[mid] = t;
             else if (taskByMission[mid].status !== 'processing' && t.status === 'processing') taskByMission[mid] = t;
         }
 
         const perMissionRowsHtml = missionList.length === 0
-            ? '<div style="text-align:center;color:#9ca3af;font-style:italic">No hay misiones activas</div>'
+            ? '<div style="text-align:center;color:#64748b;font-style:italic;padding:18px 0;">No hay misiones activas.</div>'
             : missionList.map((m: any) => {
                 const mid = String(m.id || '').trim();
                 const s = perMission[mid] || {};
                 const t = taskByMission[mid];
                 const agent = t
-                    ? `${t.status === 'processing' ? 'Procesando' : 'En cola'}: ${t.progress_label || t.type}`
-                    : 'Sin ejecucion activa';
+                    ? `${t.status === 'processing' ? 'Procesando' : 'En cola'} · ${t.progress_label || t.type}`
+                    : 'Sin ejecución activa';
                 const prog = (t && typeof t.progress_current === 'number' && typeof t.progress_total === 'number')
                     ? ` (${t.progress_current}/${t.progress_total})`
                     : '';
                 return `
-                    <div class="mission-item" style="align-items:flex-start;gap:10px;">
-                        <div style="flex:1;min-width:0;">
-                            <div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.title}</div>
-                            <div style="font-size:12px;color:#6b7280;margin-top:2px;">${agent}${prog}</div>
-                            <div style="font-size:12px;color:#374151;margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;">
-                                <span>Encontrados: <strong>${s.found || 0}</strong></span>
-                                <span>Email: <strong>${s.enrichEmail || 0}</strong></span>
-                                <span>Sin email: <strong>${s.enrichNoEmail || 0}</strong></span>
-                                <span>Investigados: <strong>${s.investigated || 0}</strong></span>
-                                <span>Enviados: <strong>${s.contactedSent || 0}</strong></span>
-                                ${(s.contactedBlocked || 0) > 0 ? `<span style="color:#b45309">Bloqueados: <strong>${s.contactedBlocked}</strong></span>` : ''}
-                                ${(s.contactedFailed || 0) > 0 ? `<span style="color:#b91c1c">Fallos: <strong>${s.contactedFailed}</strong></span>` : ''}
-                            </div>
+                    <div class="mission-row">
+                        <div class="mission-title-wrap">
+                            <div class="mission-title">${m.title}</div>
+                            <div class="mission-agent">${agent}${prog}</div>
                         </div>
-                        <div>
-                            <span class="badge">ACTIVA</span>
+                        <div class="mission-metrics">
+                            <span>Encontrados <strong>${s.found || 0}</strong></span>
+                            <span>Enriq. <strong>${(s.enrichEmail || 0) + (s.enrichNoEmail || 0)}</strong></span>
+                            <span>Invest. <strong>${s.investigated || 0}</strong></span>
+                            <span>Contact. <strong>${s.contactedSent || 0}</strong></span>
+                            ${(s.contactedBlocked || 0) > 0 ? `<span class="warn">Bloq. <strong>${s.contactedBlocked}</strong></span>` : ''}
+                            ${(s.contactedFailed || 0) > 0 ? `<span class="danger">Fallos <strong>${s.contactedFailed}</strong></span>` : ''}
                         </div>
                     </div>
                 `;
             }).join('');
 
-        // --- HTML TEMPLATE (DAILIY) ---
+        const failureNote = (tasksFailed || 0) > 0
+            ? `<div class="alert danger">Se detectaron <strong>${tasksFailed}</strong> tarea(s) fallida(s) en la ventana analizada.</div>`
+            : `<div class="alert ok">No se registraron fallos en tareas durante la ventana analizada.</div>`;
+
         htmlContent = `
         <!DOCTYPE html>
         <html>
         <head>
             <style>
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f3f4f6; padding: 20px; color: #1f2937; }
-                .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-                .header { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 30px; text-align: center; color: white; }
-                .header h1 { margin: 0; font-size: 24px; font-weight: 700; }
-                .date { opacity: 0.9; margin-top: 5px; font-size: 14px; }
-                .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; padding: 20px; }
-                .card { background: #f9fafb; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #e5e7eb; }
-                .value { font-size: 28px; font-weight: 800; color: #4f46e5; }
-                .label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-top: 5px; }
-                .section { padding: 0 20px 20px; }
-                .section-title { font-size: 16px; font-weight: 700; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #e5e7eb; display: flex; align-items: center; gap: 8px; }
-                .mission-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f8fafc; border-radius: 6px; margin-bottom: 8px; font-size: 14px; }
-                .badge { background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; }
-                .footer { background: #1f2937; color: #9ca3af; padding: 20px; text-align: center; font-size: 12px; }
+                body { margin: 0; padding: 22px; background: #eef2f7; color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+                .container { max-width: 760px; margin: 0 auto; background: #ffffff; border: 1px solid #dbe3ef; border-radius: 14px; overflow: hidden; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08); }
+                .header { padding: 30px 28px; background: linear-gradient(135deg, #0f4c81 0%, #0a7fa4 100%); color: #ffffff; }
+                .header h1 { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.2px; }
+                .header p { margin: 8px 0 0 0; font-size: 13px; opacity: 0.92; }
+                .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 18px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+                .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; text-align: center; }
+                .card .v { font-size: 30px; font-weight: 800; color: #0f4c81; line-height: 1; }
+                .card .l { margin-top: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px; color: #475569; font-weight: 700; }
+                .section { padding: 22px; }
+                .section h2 { margin: 0 0 14px 0; font-size: 17px; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+                .mission-row { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 10px; background: #fcfdff; }
+                .mission-title { font-weight: 700; font-size: 14px; color: #0f172a; }
+                .mission-agent { margin-top: 4px; font-size: 12px; color: #475569; }
+                .mission-metrics { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: #1e293b; }
+                .mission-metrics strong { color: #0f4c81; }
+                .mission-metrics .warn { color: #92400e; }
+                .mission-metrics .danger { color: #b91c1c; }
+                .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+                .meta-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; background: #ffffff; }
+                .meta-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; font-weight: 700; color: #475569; }
+                .meta-value { margin-top: 4px; font-size: 24px; font-weight: 800; color: #0f4c81; }
+                .alert { margin-top: 12px; border-radius: 10px; padding: 12px; font-size: 13px; }
+                .alert.ok { background: #ecfdf5; border: 1px solid #bbf7d0; color: #166534; }
+                .alert.danger { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+                .footer { background: #0f172a; color: #cbd5e1; text-align: center; font-size: 12px; padding: 18px; }
+                .footer a { color: #f8fafc; }
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>Reporte Diario</h1>
-                    <div class="date">${new Date().toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                    <h1>ANTONIA · Reporte Diario</h1>
+                    <p><strong>Ventana analizada:</strong> ${rangeLabel}</p>
                 </div>
-                
-                <div class="grid">
-                    <div class="card">
-                        <div class="value">${summaryData.searchRuns}</div>
-                        <div class="label">Búsquedas Ejecutadas</div>
-                    </div>
-                    <div class="card">
-                        <div class="value">${summaryData.leadsFound}</div>
-                        <div class="label">Leads Encontrados</div>
-                    </div>
-                    <div class="card">
-                        <div class="value">${summaryData.leadsEnriched}</div>
-                        <div class="label">Leads Enriquecidos</div>
-                    </div>
-                    <div class="card">
-                        <div class="value">${summaryData.contacted}</div>
-                        <div class="label">Contactados</div>
-                    </div>
-                    <div class="card">
-                        <div class="value">${summaryData.replies}</div>
-                        <div class="label">Respuestas</div>
-                    </div>
+
+                <div class="cards">
+                    <div class="card"><div class="v">${searchRuns}</div><div class="l">Búsquedas</div></div>
+                    <div class="card"><div class="v">${leadsFound}</div><div class="l">Leads Encontrados</div></div>
+                    <div class="card"><div class="v">${leadsEnriched}</div><div class="l">Leads Enriquecidos</div></div>
+                    <div class="card"><div class="v">${leadsInvestigated}</div><div class="l">Leads Investigados</div></div>
+                    <div class="card"><div class="v">${contacted}</div><div class="l">Leads Contactados</div></div>
+                    <div class="card"><div class="v">${replies}</div><div class="l">Respuestas</div></div>
                 </div>
 
                 <div class="section">
-                    <div class="section-title">📊 Misiones Activas (${summaryData.activeMissions})</div>
+                    <h2>Misiones Activas (${summaryData.activeMissions})</h2>
                     ${perMissionRowsHtml}
                 </div>
 
+                <div class="section">
+                    <h2>Salud del Sistema</h2>
+                    <div class="meta-grid">
+                        <div class="meta-card">
+                            <div class="meta-title">Tareas Completadas</div>
+                            <div class="meta-value">${tasksCompleted || 0}</div>
+                        </div>
+                        <div class="meta-card">
+                            <div class="meta-title">Tareas Fallidas</div>
+                            <div class="meta-value">${tasksFailed || 0}</div>
+                        </div>
+                    </div>
+                    ${failureNote}
+                </div>
+
                 <div class="footer">
-                    Generado automáticamente por Antonia AI<br>
-                    <a href="${getAppUrl()}" style="color:white;text-decoration:underline">Ir al Dashboard</a>
+                    Generado automáticamente por Antonia AI · <a href="${getAppUrl()}">Ir al Dashboard</a>
                 </div>
             </div>
         </body>
@@ -2992,6 +3101,32 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
             line-height: 1.8;
             margin-bottom: 12px;
         }
+        .audit-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .audit-item {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 12px;
+        }
+        .audit-item .k {
+            font-size: 11px;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 700;
+        }
+        .audit-item .n {
+            margin-top: 6px;
+            font-size: 24px;
+            font-weight: 800;
+            color: #334155;
+            line-height: 1;
+        }
         .status-badge {
             display: inline-block;
             padding: 6px 16px;
@@ -3074,10 +3209,24 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
                     </div>
                 </div>
                 <div class="stat-card">
+                    <div class="stat-value">${audit.investigated || 0}</div>
+                    <div class="stat-label">Investigados</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${toRate(audit.investigated || 0, leadsEnriched || 0)}%;"></div>
+                    </div>
+                </div>
+                <div class="stat-card">
                     <div class="stat-value">${replies || 0}</div>
                     <div class="stat-label">Respuestas</div>
                     <div class="progress-bar">
                         <div class="progress-fill" style="width: ${responseRate}%;"></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${blockedCount || 0}</div>
+                    <div class="stat-label">Bloqueados</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${toRate(blockedCount || 0, leadsFound || 0)}%;"></div>
                     </div>
                 </div>
             </div>
@@ -3104,8 +3253,18 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
                 <h3>📋 Resumen Ejecutivo</h3>
                 <p>La misión <strong>"${mission.title}"</strong> comenzó el <strong>${new Date(mission.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}</strong> y ha estado procesando prospectos de forma automática según los criterios definidos.</p>
                 <p><strong>Progreso:</strong> De ${leadsFound || 0} leads encontrados, se han enriquecido ${leadsEnriched || 0} (${enrichmentRate}%) y contactado ${leadsContacted || 0} (${contactRate}%). Se han recibido ${replies || 0} respuestas, lo que representa una tasa de respuesta del ${responseRate}%.</p>
+                <p><strong>Investigación:</strong> Se investigaron ${audit.investigated || 0} leads y se registraron ${audit.investigateFailed || 0} fallos en investigación.</p>
                 <p><strong>Estado actual:</strong> <span class="status-badge status-${mission.status}">${mission.status === 'active' ? 'ACTIVA' : mission.status === 'paused' ? 'PAUSADA' : 'COMPLETADA'}</span></p>
                 <p style="margin-top:12px;"><strong>Auditoria por lead:</strong> encontrados ${audit.found}, email ${audit.enrichEmail}, sin email ${audit.enrichNoEmail}, investigados ${audit.investigated}, enviados ${audit.contactedSent}, bloqueados ${audit.contactedBlocked}${(blockedCount || 0) > 0 ? ` (do_not_contact: ${blockedCount})` : ''}.</p>
+
+                <div class="audit-grid">
+                    <div class="audit-item"><div class="k">Encontrados</div><div class="n">${audit.found || 0}</div></div>
+                    <div class="audit-item"><div class="k">Email Encontrado</div><div class="n">${audit.enrichEmail || 0}</div></div>
+                    <div class="audit-item"><div class="k">Sin Email</div><div class="n">${audit.enrichNoEmail || 0}</div></div>
+                    <div class="audit-item"><div class="k">Investigados</div><div class="n">${audit.investigated || 0}</div></div>
+                    <div class="audit-item"><div class="k">Enviados</div><div class="n">${audit.contactedSent || 0}</div></div>
+                    <div class="audit-item"><div class="k">Bloqueados</div><div class="n">${audit.contactedBlocked || 0}</div></div>
+                </div>
             </div>
         </div>
 
