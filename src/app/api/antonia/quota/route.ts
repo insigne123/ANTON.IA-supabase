@@ -15,17 +15,19 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized', details: authError }, { status: 401 });
         }
 
-        // Get user's organization
-        const { data: membership, error: memberError } = await supabase
+        // Get user's organization (avoid maybeSingle to tolerate multi-org memberships)
+        const { data: memberships, error: memberError } = await supabase
             .from('organization_members')
             .select('organization_id')
             .eq('user_id', user.id)
-            .maybeSingle();
+            .limit(1);
 
         if (memberError) {
             console.error('[QuotaAPI] Membership Error:', memberError);
             return NextResponse.json({ error: 'Membership query failed', details: memberError }, { status: 500 });
         }
+
+        const membership = memberships?.[0] || null;
 
         if (!membership) {
             return NextResponse.json({ error: 'No organization found' }, { status: 404 });
