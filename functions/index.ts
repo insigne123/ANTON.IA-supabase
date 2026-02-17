@@ -38,6 +38,32 @@ type LeadEventInsert = {
     created_at?: string;
 };
 
+let supportsHeartbeatColumn: boolean | null = null;
+
+function isMissingHeartbeatColumnError(error: any): boolean {
+    const message = String(error?.message || error || '').toLowerCase();
+    const details = String(error?.details || '').toLowerCase();
+    const hint = String(error?.hint || '').toLowerCase();
+    const combined = `${message} ${details} ${hint}`;
+
+    if (!combined.includes('heartbeat_at')) return false;
+    return (
+        combined.includes('does not exist') ||
+        combined.includes('not found in the schema cache') ||
+        combined.includes('schema cache') ||
+        combined.includes('column')
+    );
+}
+
+function handleHeartbeatColumnError(error: any, context: string): boolean {
+    if (!isMissingHeartbeatColumnError(error)) return false;
+    if (supportsHeartbeatColumn !== false) {
+        supportsHeartbeatColumn = false;
+        console.warn(`[heartbeat_at] Column unavailable in ${context}. Falling back to legacy behavior.`);
+    }
+    return true;
+}
+
 async function safeInsertLeadEvents(supabase: SupabaseClient, events: LeadEventInsert[]) {
     if (!events || events.length === 0) return;
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -62,9 +88,11 @@ async function safeHeartbeatTask(
     const nowIso = new Date().toISOString();
     try {
         const payload: any = {
-            heartbeat_at: nowIso,
             updated_at: nowIso,
         };
+        if (supportsHeartbeatColumn !== false) {
+            payload.heartbeat_at = nowIso;
+        }
         if (patch) {
             if (patch.progress_current !== undefined) payload.progress_current = patch.progress_current;
             if (patch.progress_total !== undefined) payload.progress_total = patch.progress_total;
@@ -72,6 +100,13 @@ async function safeHeartbeatTask(
         }
         const { error } = await supabase.from('antonia_tasks').update(payload).eq('id', taskId);
         if (error) {
+            if (payload.heartbeat_at && handleHeartbeatColumnError(error, 'safeHeartbeatTask')) {
+                delete payload.heartbeat_at;
+                const { error: retryError } = await supabase.from('antonia_tasks').update(payload).eq('id', taskId);
+                if (!retryError) return;
+                console.warn('[antonia_tasks] heartbeat fallback update failed:', retryError.message || retryError);
+                return;
+            }
             // Don't fail the task for observability failures.
             console.warn('[antonia_tasks] heartbeat update failed:', error.message || error);
         }
@@ -2326,13 +2361,32 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         // 5) Snapshot of active agents (tasks)
         let activeTasks: any[] = [];
         try {
-            const { data: t } = await supabase
+            const modernSelect = 'mission_id, type, status, progress_label, progress_current, progress_total, heartbeat_at, created_at';
+            const legacySelect = 'mission_id, type, status, progress_label, progress_current, progress_total, created_at';
+
+            let { data: t, error: tErr } = await supabase
                 .from('antonia_tasks')
-                .select('mission_id, type, status, progress_label, progress_current, progress_total, heartbeat_at, created_at')
+                .select((supportsHeartbeatColumn === false ? legacySelect : modernSelect) as any)
                 .eq('organization_id', organizationId)
                 .in('status', ['pending', 'processing'])
                 .order('created_at', { ascending: false })
                 .limit(100);
+
+            if (tErr && handleHeartbeatColumnError(tErr, 'daily-report activeTasks')) {
+                const retry = await supabase
+                    .from('antonia_tasks')
+                    .select(legacySelect as any)
+                    .eq('organization_id', organizationId)
+                    .in('status', ['pending', 'processing'])
+                    .order('created_at', { ascending: false })
+                    .limit(100);
+                t = retry.data;
+                tErr = retry.error;
+            }
+
+            if (tErr) {
+                console.warn('[REPORT][daily] Failed to load active tasks snapshot query:', tErr);
+            }
             activeTasks = (t as any[]) || [];
         } catch (e) {
             console.warn('[REPORT][daily] Failed to load active tasks snapshot:', e);
@@ -3706,25 +3760,58 @@ async function runAntoniaTick() {
         const nowIso = new Date().toISOString();
         const stuckBefore = new Date(Date.now() - 15 * 60 * 1000).toISOString();
 
-        const { data: rescued, error: rescueErr } = await supabase
-            .from('antonia_tasks')
-            .update({
-                status: 'pending',
-                scheduled_for: nowIso,
-                updated_at: nowIso,
-                error_message: '[auto-rescue] task stuck in processing (no heartbeat / timeout)'
-            })
-            .eq('status', 'processing')
-            .or(
-                [
-                    // Prefer heartbeat when available
-                    `heartbeat_at.lt.${stuckBefore}`,
-                    // Backwards compatibility
-                    `and(heartbeat_at.is.null,processing_started_at.not.is.null,processing_started_at.lt.${stuckBefore})`
-                ].join(',')
-            )
-            .select('id')
-            .limit(25);
+        const rescuePayload = {
+            status: 'pending',
+            scheduled_for: nowIso,
+            updated_at: nowIso,
+            error_message: '[auto-rescue] task stuck in processing (no heartbeat / timeout)'
+        };
+
+        let rescued: any[] | null = null;
+        let rescueErr: any = null;
+
+        if (supportsHeartbeatColumn === false) {
+            const legacyRescue = await supabase
+                .from('antonia_tasks')
+                .update(rescuePayload)
+                .eq('status', 'processing')
+                .not('processing_started_at', 'is', null)
+                .lt('processing_started_at', stuckBefore)
+                .select('id')
+                .limit(25);
+            rescued = legacyRescue.data;
+            rescueErr = legacyRescue.error;
+        } else {
+            const modernRescue = await supabase
+                .from('antonia_tasks')
+                .update(rescuePayload)
+                .eq('status', 'processing')
+                .or(
+                    [
+                        // Prefer heartbeat when available
+                        `heartbeat_at.lt.${stuckBefore}`,
+                        // Backwards compatibility
+                        `and(heartbeat_at.is.null,processing_started_at.not.is.null,processing_started_at.lt.${stuckBefore})`
+                    ].join(',')
+                )
+                .select('id')
+                .limit(25);
+            rescued = modernRescue.data;
+            rescueErr = modernRescue.error;
+
+            if (rescueErr && handleHeartbeatColumnError(rescueErr, 'runAntoniaTick rescue')) {
+                const legacyRescue = await supabase
+                    .from('antonia_tasks')
+                    .update(rescuePayload)
+                    .eq('status', 'processing')
+                    .not('processing_started_at', 'is', null)
+                    .lt('processing_started_at', stuckBefore)
+                    .select('id')
+                    .limit(25);
+                rescued = legacyRescue.data;
+                rescueErr = legacyRescue.error;
+            }
+        }
 
         if (rescueErr) {
             console.error('[AntoniaTick] Rescue error:', rescueErr);
@@ -3785,7 +3872,6 @@ async function runAntoniaTick() {
                     .update({
                         status: 'processing',
                         processing_started_at: now,
-                        heartbeat_at: now,
                         worker_id: workerId,
                         worker_source: 'firebase',
                         updated_at: now,
@@ -3794,6 +3880,25 @@ async function runAntoniaTick() {
                     .eq('status', 'pending')
                     .select('*')
                     .maybeSingle();
+
+                if (claimErr && supportsHeartbeatColumn !== false && handleHeartbeatColumnError(claimErr, 'fallback claim')) {
+                    const retry = await supabase
+                        .from('antonia_tasks')
+                        .update({
+                            status: 'processing',
+                            processing_started_at: now,
+                            worker_id: workerId,
+                            worker_source: 'firebase',
+                            updated_at: now,
+                        } as any)
+                        .eq('id', t.id)
+                        .eq('status', 'pending')
+                        .select('*')
+                        .maybeSingle();
+                    if (retry.error) continue;
+                    if (retry.data) claimed.push(retry.data);
+                    continue;
+                }
 
                 if (claimErr) continue;
                 if (row) claimed.push(row);

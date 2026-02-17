@@ -34,7 +34,8 @@ import {
     Edit2,
     FileText,
     BarChart,
-    X
+    X,
+    WandSparkles,
 } from 'lucide-react';
 import { QuotaUsageCard } from '@/components/antonia/QuotaUsageCard';
 import { AgentActivityFeed } from '@/components/antonia/AgentActivityFeed';
@@ -44,6 +45,7 @@ import { ReportViewer } from '@/components/antonia/ReportViewer';
 import { MissionQueues } from '@/components/antonia/MissionQueues';
 import { LeadAuditTrail } from '@/components/antonia/LeadAuditTrail';
 import { ActiveAgentsPanel } from '@/components/antonia/ActiveAgentsPanel';
+import { MissionTunerDialog } from '@/components/antonia/MissionTunerDialog';
 
 import {
     Sheet,
@@ -110,6 +112,8 @@ export default function AntoniaPage() {
     const [isCreating, setIsCreating] = useState(false);
     const [activitySheetOpen, setActivitySheetOpen] = useState(false);
     const [selectedActivityMission, setSelectedActivityMission] = useState<AntoniaMission | null>(null);
+    const [missionTunerOpen, setMissionTunerOpen] = useState(false);
+    const [selectedTuneMission, setSelectedTuneMission] = useState<AntoniaMission | null>(null);
 
     // Reports State
     const [reports, setReports] = useState<any[]>([]);
@@ -436,6 +440,21 @@ export default function AntoniaPage() {
     const handleViewReport = (report: any) => {
         setSelectedReport(report);
         setViewerOpen(true);
+    };
+
+    const handleMissionUpdatedFromTuner = (updatedMission: any) => {
+        if (!updatedMission?.id) return;
+        setMissions((prev) => prev.map((m) => {
+            if (m.id !== updatedMission.id) return m;
+            return {
+                ...m,
+                title: updatedMission.title ?? m.title,
+                goalSummary: updatedMission.goalSummary ?? m.goalSummary,
+                params: updatedMission.params ?? m.params,
+                status: (updatedMission.status as any) ?? m.status,
+                updatedAt: updatedMission.updatedAt ?? m.updatedAt,
+            } as AntoniaMission;
+        }));
     };
 
 
@@ -1070,6 +1089,17 @@ export default function AntoniaPage() {
                                                 <FileText className="w-3 h-3 mr-2" /> Reporte Histórico
                                             </Button>
                                             <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="w-full col-span-2"
+                                                onClick={() => {
+                                                    setSelectedTuneMission(mission);
+                                                    setMissionTunerOpen(true);
+                                                }}
+                                            >
+                                                <WandSparkles className="w-3 h-3 mr-2 text-emerald-500" /> Ajustar misión con IA
+                                            </Button>
+                                            <Button
                                                 variant="secondary"
                                                 size="sm"
                                                 className="w-full col-span-2"
@@ -1363,6 +1393,13 @@ export default function AntoniaPage() {
                 isOpen={viewerOpen}
                 onClose={() => setViewerOpen(false)}
                 report={selectedReport}
+            />
+
+            <MissionTunerDialog
+                open={missionTunerOpen}
+                onOpenChange={setMissionTunerOpen}
+                mission={selectedTuneMission}
+                onMissionUpdated={handleMissionUpdatedFromTuner}
             />
         </div >
     );
