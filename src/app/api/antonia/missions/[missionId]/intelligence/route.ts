@@ -148,8 +148,14 @@ function buildRecommendations(metrics: any, mission: any) {
   };
 }
 
-async function getMissionForUser(authClient: any, missionId: string, userId: string) {
-  const { data: mission, error } = await authClient
+function getBearerToken(req: NextRequest): string {
+  const authHeader = req.headers.get('authorization') || req.headers.get('Authorization') || '';
+  if (!authHeader.toLowerCase().startsWith('bearer ')) return '';
+  return authHeader.slice(7).trim();
+}
+
+async function getMissionForUser(admin: any, missionId: string, userId: string) {
+  const { data: mission, error } = await admin
     .from('antonia_missions')
     .select('*')
     .eq('id', missionId)
@@ -157,7 +163,9 @@ async function getMissionForUser(authClient: any, missionId: string, userId: str
 
   if (error || !mission) return null;
 
-  const { data: membership } = await authClient
+  if (mission.user_id === userId) return mission;
+
+  const { data: membership } = await admin
     .from('organization_members')
     .select('id')
     .eq('organization_id', mission.organization_id)
@@ -259,24 +267,36 @@ async function computeMissionMetrics(admin: any, mission: any) {
   return metrics;
 }
 
-export async function GET(_req: NextRequest, context: { params: Promise<{ missionId: string }> }) {
+async function resolveRequestUser(authClient: any, req: NextRequest) {
+  const bearer = getBearerToken(req);
+
+  let authResult = await authClient.auth.getUser();
+
+  if ((!authResult?.data?.user || authResult?.error) && bearer) {
+    authResult = await authClient.auth.getUser(bearer);
+  }
+
+  return authResult;
+}
+
+export async function GET(req: NextRequest, context: { params: Promise<{ missionId: string }> }) {
   try {
     const { missionId } = await context.params;
     const authClient = createRouteHandlerClient({ cookies });
-    const { data: { user }, error: authErr } = await authClient.auth.getUser();
+    const { data: { user }, error: authErr } = await resolveRequestUser(authClient, req);
 
     if (authErr || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const mission = await getMissionForUser(authClient, missionId, user.id);
-    if (!mission) {
-      return NextResponse.json({ error: 'Mission not found' }, { status: 404 });
-    }
-
     const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
       auth: { persistSession: false },
     });
+
+    const mission = await getMissionForUser(admin, missionId, user.id);
+    if (!mission) {
+      return NextResponse.json({ error: 'Mission not found' }, { status: 404 });
+    }
 
     const metrics = await computeMissionMetrics(admin, mission);
     const intelligence = buildRecommendations(metrics, mission);
@@ -296,13 +316,17 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ missi
   try {
     const { missionId } = await context.params;
     const authClient = createRouteHandlerClient({ cookies });
-    const { data: { user }, error: authErr } = await authClient.auth.getUser();
+    const { data: { user }, error: authErr } = await resolveRequestUser(authClient, req);
 
     if (authErr || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const mission = await getMissionForUser(authClient, missionId, user.id);
+    const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+      auth: { persistSession: false },
+    });
+
+    const mission = await getMissionForUser(admin, missionId, user.id);
     if (!mission) {
       return NextResponse.json({ error: 'Mission not found' }, { status: 404 });
     }
@@ -360,10 +384,6 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ missi
     nextParams.dailyEnrichLimit = dailyEnrichLimit;
     nextParams.dailyInvestigateLimit = dailyInvestigateLimit;
     nextParams.dailyContactLimit = dailyContactLimit;
-
-    const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
-      auth: { persistSession: false },
-    });
 
     const missionPatch: any = {
       params: nextParams,
