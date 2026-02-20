@@ -4,6 +4,7 @@ import { v4 as uuid } from 'uuid';
 import { fetchWithLog } from '@/lib/debug';
 import { checkAndConsumeDailyQuota, getDailyQuotaStatus } from '@/lib/server/daily-quota-store';
 import crypto from 'crypto';
+import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -64,6 +65,9 @@ type EnrichInput = {
 export async function POST(req: NextRequest) {
   const userId = req.headers.get('x-user-id')?.trim() || '';
   if (!userId) return NextResponse.json({ error: 'missing user id' }, { status: 401 });
+  if (!isTrustedInternalRequest(req)) {
+    return NextResponse.json({ error: 'unauthorized internal request' }, { status: 401 });
+  }
 
   try {
     const body = await req.json() as EnrichInput & { tableName?: string };

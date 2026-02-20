@@ -13,6 +13,15 @@ function getSupabaseCredentials() {
 }
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
 
+function withInternalApiSecret(headers: Record<string, string>): Record<string, string> {
+    const secret = String(process.env.INTERNAL_API_SECRET || '').trim();
+    if (!secret) return headers;
+    return {
+        ...headers,
+        'x-internal-api-secret': secret,
+    };
+}
+
 async function getDailyUsage(supabase: any, organizationId: string) {
     const today = new Date().toISOString().split('T')[0];
     const { data } = await supabase
@@ -445,10 +454,10 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
 
     const response = await fetch(enrichUrl, {
         method: 'POST',
-        headers: {
+        headers: withInternalApiSecret({
             'Content-Type': 'application/json',
             'x-user-id': userId
-        },
+        }),
         body: JSON.stringify(enrichPayload)
     });
 
@@ -612,10 +621,10 @@ async function executeContact(task: any, supabase: any) {
 
             const response = await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
-                headers: {
+                headers: withInternalApiSecret({
                     'Content-Type': 'application/json',
                     'x-user-id': task.payload.userId
-                },
+                }),
                 body: JSON.stringify({
                     to: lead.email,
                     subject: personalizedSubject,

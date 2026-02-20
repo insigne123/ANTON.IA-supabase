@@ -23,8 +23,12 @@ Para las funciones que consumen Firestore en el backend asegúrate de exportar u
 - `NEXT_PUBLIC_AZURE_AD_CLIENT_ID`, `NEXT_PUBLIC_AZURE_AD_TENANT_ID`, `NEXT_PUBLIC_AZURE_AD_REDIRECT_URI`
 - `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, `NEXT_PUBLIC_BASE_URL`
 - `NEXT_PUBLIC_SEARCH_POLL_INTERVAL_MS`, `NEXT_PUBLIC_SEARCH_MAX_POLL_MINUTES`, `NEXT_PUBLIC_SEARCH_PAGE_SIZE`
+- `INTERNAL_API_SECRET` (protege llamadas server-to-server con `x-user-id`; usar el mismo valor en Next y Firebase Functions)
+- `OPENCLAW_ORG_ID`, `OPENCLAW_API_KEY` (o `OPENCLAW_API_KEYS`), `OPENCLAW_TOKEN_SECRET`, `OPENCLAW_TOKEN_TTL_SECONDS`, `OPENCLAW_SCOPES`
 
 Consulta `.env.example` para un inventario completo con valores de referencia.
+
+Para el onboarding de OpenClaw (single org), revisa `docs/openclaw-credentials-and-setup.md`.
 
 ## Pruebas manuales
 Los siguientes escenarios se ejecutan tras cada despliegue mayor. Se documentan aquí los pasos y observaciones necesarias; si el entorno no está disponible (por ejemplo, en este contenedor) marca el resultado como bloqueado e indica la causa.

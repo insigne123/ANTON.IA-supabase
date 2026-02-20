@@ -11,7 +11,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/run-node-tests.mjs"
+    "test": "node scripts/run-node-tests.mjs",
+    "smoke:openclaw": "node scripts/openclaw-smoke.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^3.17.0",

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDailyQuotaStatus } from '@/lib/server/daily-quota-store';
+import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
 
 type R = 'leadSearch' | 'research' | 'contact';
 
@@ -13,6 +14,9 @@ export async function GET(req: NextRequest) {
   const userId = req.headers.get('x-user-id')?.trim() || '';
   if (!userId) {
     return NextResponse.json({ error: 'missing user id' }, { status: 400 });
+  }
+  if (!isTrustedInternalRequest(req)) {
+    return NextResponse.json({ error: 'unauthorized internal request' }, { status: 401 });
   }
 
   try {

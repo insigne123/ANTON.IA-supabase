@@ -7,6 +7,13 @@ const supabaseUrl = config.supabase?.url || process.env.SUPABASE_URL!;
 const supabaseServiceKey = config.supabase?.service_key || process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const appUrl = config.app?.url || process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
+const internalApiSecret = config.internal?.api_secret || process.env.INTERNAL_API_SECRET || '';
+
+function withInternalApiSecret(headers: Record<string, string>): Record<string, string> {
+    const secret = String(internalApiSecret || '').trim();
+    if (!secret) return headers;
+    return { ...headers, 'x-internal-api-secret': secret };
+}
 
 // Helper functions
 async function getDailyUsage(supabase: any, organizationId: string) {
@@ -315,10 +322,10 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
     const enrichUrl = `${appUrl}/api/opportunities/enrich-apollo`;
     const response = await fetch(enrichUrl, {
         method: 'POST',
-        headers: {
+        headers: withInternalApiSecret({
             'Content-Type': 'application/json',
             'x-user-id': userId
-        },
+        }),
         body: JSON.stringify({
             leads: leadsToProcess.map((l: any) => ({
                 fullName: l.full_name || l.name,

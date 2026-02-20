@@ -8,6 +8,7 @@ import {
   type LeadsSearchParams
 } from "@/lib/schemas/leads";
 import { normalizeFromN8N } from "@/lib/normalizers/n8n";
+import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -99,6 +100,13 @@ export async function POST(req: NextRequest) {
 
   // 1. Authenticate: Support both session cookies and x-user-id header (for Cloud Functions)
   const userIdFromHeader = req.headers.get('x-user-id')?.trim() || '';
+
+  if (userIdFromHeader && !isTrustedInternalRequest(req)) {
+    return NextResponse.json(
+      { error: "UNAUTHORIZED_INTERNAL_REQUEST", message: "Invalid internal API secret" },
+      { status: 401 }
+    );
+  }
 
   let userId: string;
 

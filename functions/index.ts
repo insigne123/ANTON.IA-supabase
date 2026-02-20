@@ -25,6 +25,15 @@ function getLeadSearchUrl(): string {
     return process.env.ANTONIA_LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
 }
 
+function withInternalApiSecret(headers: Record<string, string>): Record<string, string> {
+    const secret = String(process.env.INTERNAL_API_SECRET || '').trim();
+    if (!secret) return headers;
+    return {
+        ...headers,
+        'x-internal-api-secret': secret,
+    };
+}
+
 type LeadEventInsert = {
     organization_id: string;
     mission_id?: string | null;
@@ -463,10 +472,10 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
     try {
         const response = await fetch(internalUrl, {
             method: 'POST',
-            headers: {
+            headers: withInternalApiSecret({
                 'Content-Type': 'application/json',
                 'x-user-id': userId,
-            },
+            }),
             body: JSON.stringify(internalBody)
         });
 
@@ -920,10 +929,10 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
     try {
         const response = await fetch(`${appUrl}/api/opportunities/enrich-apollo`, {
             method: 'POST',
-            headers: {
+            headers: withInternalApiSecret({
                 'Content-Type': 'application/json',
                 'x-user-id': userId
-            },
+            }),
                 body: JSON.stringify({
                     leads: leadsFormatted,
                     revealEmail: true,
@@ -1314,10 +1323,10 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
             const response = await fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
-                headers: {
+                headers: withInternalApiSecret({
                     'Content-Type': 'application/json',
                     'x-user-id': userId
-                },
+                }),
                 body: JSON.stringify(n8nPayload)
             });
 
@@ -1992,10 +2001,10 @@ Saludos,`;
 
             const response = await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
-                headers: {
+                headers: withInternalApiSecret({
                     'Content-Type': 'application/json',
                     'x-user-id': userId
-                },
+                }),
                 body: JSON.stringify({
                     to: lead.email,
                     subject: personalizedSubject,
@@ -3398,7 +3407,7 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         for (const to of targetEmails) {
             await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+                headers: withInternalApiSecret({ 'Content-Type': 'application/json', 'x-user-id': userId }),
                 body: JSON.stringify({
                     to,
                     subject,
@@ -3476,10 +3485,10 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
 
             const response = await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
-                headers: {
+                headers: withInternalApiSecret({
                     'Content-Type': 'application/json',
                     'x-user-id': userId
-                },
+                }),
                 body: JSON.stringify({
                     to: lead.email,
                     subject: subject

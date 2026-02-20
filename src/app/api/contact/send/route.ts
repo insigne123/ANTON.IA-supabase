@@ -5,6 +5,7 @@ import { cookies } from 'next/headers';
 import { tokenService } from '@/lib/services/token-service';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { encodeHeaderRFC2047, sanitizeHeaderText } from '@/lib/email-header-utils';
+import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -21,6 +22,10 @@ export async function POST(req: NextRequest) {
         // 1. Authenticate (support both x-user-id header and session)
         const headerUserId = req.headers.get('x-user-id');
         let userId = headerUserId || bodyUserId;
+
+        if (headerUserId && !isTrustedInternalRequest(req)) {
+            return NextResponse.json({ error: 'Unauthorized internal request' }, { status: 401 });
+        }
 
         debugLog(`[CONTACT_DEBUG] START Request`);
         debugLog(`[CONTACT_DEBUG] Header UserID: '${headerUserId}'`);
