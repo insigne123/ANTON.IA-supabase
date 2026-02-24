@@ -137,6 +137,186 @@ async function getDailyUsage(supabase: SupabaseClient, organizationId: string) {
     return data || { leads_searched: 0, leads_enriched: 0, leads_investigated: 0, search_runs: 0 };
 }
 
+function getNextUtcDayStartIso() {
+    const now = new Date();
+    const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 5));
+    return next.toISOString();
+}
+
+const BUSINESS_HOURS_START = 8;
+const BUSINESS_HOURS_END = 18;
+const DEFAULT_LEAD_TIMEZONE = 'America/Santiago';
+
+const LEAD_TIMEZONE_RULES: Array<{ timeZone: string; tokens: string[] }> = [
+    { timeZone: 'America/Argentina/Buenos_Aires', tokens: ['argentina', 'buenos aires', 'cordoba', 'rosario', 'mendoza'] },
+    { timeZone: 'America/Santiago', tokens: ['chile', 'santiago', 'valparaiso'] },
+    { timeZone: 'America/Bogota', tokens: ['colombia', 'bogota', 'medellin', 'cali'] },
+    { timeZone: 'America/Lima', tokens: ['peru', 'lima'] },
+    { timeZone: 'America/Mexico_City', tokens: ['mexico', 'mexico city', 'cdmx', 'guadalajara', 'monterrey'] },
+    { timeZone: 'America/Sao_Paulo', tokens: ['brasil', 'brazil', 'sao paulo', 'rio de janeiro'] },
+    { timeZone: 'America/Montevideo', tokens: ['uruguay', 'montevideo'] },
+    { timeZone: 'America/Asuncion', tokens: ['paraguay', 'asuncion'] },
+    { timeZone: 'America/La_Paz', tokens: ['bolivia', 'la paz'] },
+    { timeZone: 'America/Guayaquil', tokens: ['ecuador', 'quito', 'guayaquil'] },
+    { timeZone: 'America/Caracas', tokens: ['venezuela', 'caracas'] },
+    { timeZone: 'America/Panama', tokens: ['panama'] },
+    { timeZone: 'America/Costa_Rica', tokens: ['costa rica'] },
+    { timeZone: 'America/Guatemala', tokens: ['guatemala'] },
+    { timeZone: 'America/Tegucigalpa', tokens: ['honduras', 'tegucigalpa'] },
+    { timeZone: 'America/El_Salvador', tokens: ['el salvador', 'san salvador'] },
+    { timeZone: 'America/Managua', tokens: ['nicaragua', 'managua'] },
+    { timeZone: 'America/Santo_Domingo', tokens: ['dominican republic', 'republica dominicana', 'santo domingo'] },
+    { timeZone: 'America/Puerto_Rico', tokens: ['puerto rico', 'san juan'] },
+    { timeZone: 'America/Havana', tokens: ['cuba', 'havana'] },
+    { timeZone: 'Europe/Madrid', tokens: ['spain', 'espana', 'madrid', 'barcelona', 'valencia'] },
+    { timeZone: 'America/Los_Angeles', tokens: ['los angeles', 'california', 'san francisco', 'seattle', 'las vegas'] },
+    { timeZone: 'America/Denver', tokens: ['denver', 'phoenix', 'arizona', 'colorado'] },
+    { timeZone: 'America/Chicago', tokens: ['chicago', 'houston', 'dallas', 'texas'] },
+    { timeZone: 'America/New_York', tokens: ['new york', 'miami', 'florida', 'boston', 'washington', 'united states', 'estados unidos', 'usa'] },
+];
+
+type ZonedParts = {
+    year: number;
+    month: number;
+    day: number;
+    hour: number;
+    minute: number;
+    second: number;
+};
+
+function normalizeLocationForTimezone(value: string) {
+    return value
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9,\.\-\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function resolveLeadTimeZone(rawLocation?: string | null) {
+    const normalized = normalizeLocationForTimezone(String(rawLocation || ''));
+
+    if (!normalized) {
+        return { timeZone: DEFAULT_LEAD_TIMEZONE, matchedBy: 'fallback-empty' };
+    }
+
+    for (const rule of LEAD_TIMEZONE_RULES) {
+        for (const token of rule.tokens) {
+            if (normalized.includes(token)) {
+                return { timeZone: rule.timeZone, matchedBy: token };
+            }
+        }
+    }
+
+    return { timeZone: DEFAULT_LEAD_TIMEZONE, matchedBy: 'fallback-default' };
+}
+
+function getZonedParts(date: Date, timeZone: string): ZonedParts {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        hour12: false,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    }).formatToParts(date);
+
+    const out: Record<string, number> = {};
+    for (const p of parts) {
+        if (p.type === 'year' || p.type === 'month' || p.type === 'day' || p.type === 'hour' || p.type === 'minute' || p.type === 'second') {
+            out[p.type] = Number(p.value);
+        }
+    }
+
+    return {
+        year: out.year || date.getUTCFullYear(),
+        month: out.month || (date.getUTCMonth() + 1),
+        day: out.day || date.getUTCDate(),
+        hour: out.hour || 0,
+        minute: out.minute || 0,
+        second: out.second || 0,
+    };
+}
+
+function getTimeZoneOffsetMinutes(date: Date, timeZone: string): number {
+    const zoned = getZonedParts(date, timeZone);
+    const asUtc = Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute, zoned.second);
+    return Math.round((asUtc - date.getTime()) / 60000);
+}
+
+function toUtcIsoFromLocalDateTime(timeZone: string, year: number, month: number, day: number, hour: number, minute: number): string {
+    const localAsUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0);
+
+    let offset = getTimeZoneOffsetMinutes(new Date(localAsUtcMs), timeZone);
+    let targetMs = localAsUtcMs - (offset * 60000);
+
+    const offsetAfter = getTimeZoneOffsetMinutes(new Date(targetMs), timeZone);
+    if (offsetAfter !== offset) {
+        offset = offsetAfter;
+        targetMs = localAsUtcMs - (offset * 60000);
+    }
+
+    return new Date(targetMs).toISOString();
+}
+
+function addDaysToYmd(year: number, month: number, day: number, days: number) {
+    const d = new Date(Date.UTC(year, month - 1, day + days));
+    return {
+        year: d.getUTCFullYear(),
+        month: d.getUTCMonth() + 1,
+        day: d.getUTCDate(),
+    };
+}
+
+function pad2(n: number) {
+    return String(n).padStart(2, '0');
+}
+
+function formatZonedDateTime(parts: ZonedParts) {
+    return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)} ${pad2(parts.hour)}:${pad2(parts.minute)}`;
+}
+
+function computeLeadContactSchedule(lead: any, now: Date = new Date()) {
+    const location = String(lead?.location || lead?.country || lead?.city || '').trim();
+    const tz = resolveLeadTimeZone(location);
+    const localNow = getZonedParts(now, tz.timeZone);
+
+    if (localNow.hour >= BUSINESS_HOURS_START && localNow.hour < BUSINESS_HOURS_END) {
+        return {
+            scheduledFor: now.toISOString(),
+            location: location || 'unknown',
+            timeZone: tz.timeZone,
+            matchedBy: tz.matchedBy,
+            localNow,
+            reason: 'within_business_hours',
+        };
+    }
+
+    const scheduleTomorrow = localNow.hour >= BUSINESS_HOURS_END;
+    const targetDate = addDaysToYmd(localNow.year, localNow.month, localNow.day, scheduleTomorrow ? 1 : 0);
+    const targetMinute = Math.floor(Math.random() * 20);
+
+    return {
+        scheduledFor: toUtcIsoFromLocalDateTime(
+            tz.timeZone,
+            targetDate.year,
+            targetDate.month,
+            targetDate.day,
+            BUSINESS_HOURS_START,
+            targetMinute
+        ),
+        location: location || 'unknown',
+        timeZone: tz.timeZone,
+        matchedBy: tz.matchedBy,
+        localNow,
+        reason: scheduleTomorrow ? 'after_business_hours' : 'before_business_hours',
+    };
+}
+
 async function incrementUsage(
     supabase: SupabaseClient,
     organizationId: string,
@@ -805,8 +985,9 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
     });
 
     if ((usage.leads_enriched || 0) >= limit) {
-        console.log(`[ENRICH] ⚠️ Daily limit reached(${usage.leads_enriched} / ${limit})`);
-        return { skipped: true, reason: 'daily_limit_reached' };
+        const retryAt = getNextUtcDayStartIso();
+        console.log(`[ENRICH] ⚠️ Daily limit reached(${usage.leads_enriched} / ${limit}). Re-scheduling for ${retryAt}`);
+        return { skipped: true, reason: 'daily_limit_reached', retryAt };
     }
 
     let { leads, enrichmentLevel, campaignName } = task.payload;
@@ -1128,8 +1309,9 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     });
 
     if ((usage.leads_investigated || 0) >= limit) {
-        console.log(`[INVESTIGATE] ⚠️ Daily limit reached(${usage.leads_investigated} / ${limit})`);
-        return { skipped: true, reason: 'daily_limit_reached' };
+        const retryAt = getNextUtcDayStartIso();
+        console.log(`[INVESTIGATE] ⚠️ Daily limit reached(${usage.leads_investigated} / ${limit}). Re-scheduling for ${retryAt}`);
+        return { skipped: true, reason: 'daily_limit_reached', retryAt };
     }
 
     let { leads, campaignName } = task.payload;
@@ -1538,73 +1720,13 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
     // Chain to CONTACT if we have investigated leads
     if (investigatedLeads.length > 0) {
-
-        // --- SMART BUSINESS HOURS SCHEDULING ---
-        // Send emails between 8 AM - 6 PM in the lead's local timezone
-        const now = new Date();
-        const currentUtcHour = now.getUTCHours();
-        const currentUtcMinute = now.getUTCMinutes();
-
-        const businessHoursStart = 8;  // 8 AM
-        const businessHoursEnd = 18;   // 6 PM
-
-        const timezoneOffsets: Record<string, number> = {
-            'Chile': -3, 'Colombia': -5, 'Mexico': -6, 'Peru': -5, 'Argentina': -3, 'Spain': 1, 'España': 1
-        };
-
-        const locationStr = String(leads[0]?.location || (leads[0] as any)?.country || 'Chile');
-        // Use last segment as best guess for country/timezone key (e.g. "Santiago, Chile" -> "Chile")
-        const location = locationStr.split(',').map(s => s.trim()).filter(Boolean).pop() || 'Chile';
-        const utcOffset = timezoneOffsets[location] || -3;
-
-        // Calculate current local time in lead's timezone
-        let currentLocalHour = currentUtcHour + utcOffset;
-        let currentLocalMinute = currentUtcMinute;
-
-        // Handle day overflow/underflow
-        let dayOffset = 0;
-        if (currentLocalHour >= 24) {
-            currentLocalHour -= 24;
-            dayOffset = 1;
-        } else if (currentLocalHour < 0) {
-            currentLocalHour += 24;
-            dayOffset = -1;
-        }
-
-        let scheduleDate = new Date(now);
-        let targetLocalHour: number;
-        let targetLocalMinute: number;
-
-        // Determine when to send
-        if (currentLocalHour >= businessHoursStart && currentLocalHour < businessHoursEnd) {
-            // We're in business hours - send immediately (or within a few minutes for natural spacing)
-            targetLocalHour = currentLocalHour;
-            targetLocalMinute = currentLocalMinute + Math.floor(Math.random() * 5); // 0-5 min delay
-            console.log(`[SCHEDULING] Within business hours(${currentLocalHour}: ${currentLocalMinute}), sending immediately`);
-        } else if (currentLocalHour < businessHoursStart) {
-            // Before business hours today - schedule for 8 AM today
-            targetLocalHour = businessHoursStart;
-            targetLocalMinute = Math.floor(Math.random() * 30); // Random 0-30 min after 8 AM
-            console.log(`[SCHEDULING] Before business hours, scheduling for 8 AM today`);
-        } else {
-            // After business hours - schedule for 8 AM tomorrow
-            targetLocalHour = businessHoursStart;
-            targetLocalMinute = Math.floor(Math.random() * 30);
-            dayOffset += 1;
-            console.log(`[SCHEDULING] After business hours, scheduling for 8 AM tomorrow`);
-        }
-
-        // Apply day offset
-        scheduleDate.setDate(scheduleDate.getDate() + dayOffset);
-
-        // Convert target local time to UTC
-        const targetUtcHour = targetLocalHour - utcOffset;
-        scheduleDate.setUTCHours(targetUtcHour, targetLocalMinute, 0, 0);
-
         for (const lead of investigatedLeads) {
-            const scheduledFor = scheduleDate.toISOString();
-
-            console.log(`[SCHEDULING] Contact for ${lead.email} in ${location}(UTC${utcOffset >= 0 ? '+' : ''}${utcOffset}) at ${scheduledFor} `);
+            const schedule = computeLeadContactSchedule(lead);
+            console.log(
+                `[SCHEDULING] Contact for ${lead.email || lead.id} in "${schedule.location}" ` +
+                `(${schedule.timeZone}, match:${schedule.matchedBy}, localNow:${formatZonedDateTime(schedule.localNow)}) ` +
+                `at ${schedule.scheduledFor} [${schedule.reason}]`
+            );
 
             await supabase.from('antonia_tasks').insert({
                 mission_id: task.mission_id,
@@ -1617,7 +1739,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                     campaignName: campaignName,
                     dryRun: task.payload.dryRun // Pass dryRun flag
                 },
-                scheduled_for: scheduledFor,
+                scheduled_for: schedule.scheduledFor,
                 created_at: new Date().toISOString()
             });
         }
@@ -1662,8 +1784,9 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
         .gte('created_at', `${today}T00:00:00Z`);
 
     if ((contactsToday || 0) >= limit) {
-        console.log(`[CONTACT] Daily limit reached(${contactsToday} / ${limit})`);
-        return { skipped: true, reason: 'daily_limit_reached' };
+        const retryAt = getNextUtcDayStartIso();
+        console.log(`[CONTACT] Daily limit reached(${contactsToday} / ${limit}). Re-scheduling for ${retryAt}`);
+        return { skipped: true, reason: 'daily_limit_reached', retryAt };
     }
 
     const { leads, campaignName, dryRun } = task.payload;
@@ -3672,6 +3795,34 @@ async function processTask(task: any, supabase: SupabaseClient) {
                 break;
             default:
                 throw new Error(`Unknown task type: ${task.type}. Valid types are: GENERATE_CAMPAIGN, SEARCH, ENRICH, INVESTIGATE, EVALUATE, CONTACT, CONTACT_INITIAL, CONTACT_CAMPAIGN, GENERATE_REPORT`);
+        }
+
+        const isDailyLimitDeferred =
+            Boolean((result as any)?.skipped) &&
+            String((result as any)?.reason || '') === 'daily_limit_reached' &&
+            typeof (result as any)?.retryAt === 'string' &&
+            String((result as any)?.retryAt || '').trim().length > 0;
+
+        if (isDailyLimitDeferred) {
+            const retryAt = String((result as any).retryAt);
+            await supabase.from('antonia_tasks').update({
+                status: 'pending',
+                scheduled_for: retryAt,
+                processing_started_at: null,
+                result: result,
+                error_message: null,
+                updated_at: new Date().toISOString()
+            }).eq('id', task.id);
+
+            await supabase.from('antonia_logs').insert({
+                mission_id: task.mission_id,
+                organization_id: task.organization_id,
+                level: 'warning',
+                message: `Task ${task.type} deferred until ${retryAt} by daily quota.`,
+                details: result
+            });
+
+            return;
         }
 
         await supabase.from('antonia_tasks').update({
