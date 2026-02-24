@@ -72,6 +72,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as EnrichInput & { tableName?: string };
     const { leads, revealEmail = true, revealPhone = false } = body;
+    const shouldRevealEmail = Boolean(revealEmail);
+    const shouldRevealPhone = Boolean(revealPhone);
     const tableName = resolveTableName(body.tableName) || 'enriched_opportunities';
     if (body.tableName && !resolveTableName(body.tableName)) {
       return NextResponse.json({ error: `invalid tableName: ${String(body.tableName)}` }, { status: 400 });
@@ -85,7 +87,12 @@ export async function POST(req: NextRequest) {
       serverLogs.push(msg);
     };
 
-    console.log('[enrich-hybrid] Start', { count: leads.length, revealEmail, revealPhone });
+    console.log('[enrich-hybrid] Start', {
+      count: leads.length,
+      revealEmail: shouldRevealEmail,
+      revealPhone: shouldRevealPhone,
+      enrichmentLevel: shouldRevealPhone ? 'deep' : 'basic',
+    });
 
     // Quota Check
     const apiKey = process.env.APOLLO_API_KEY;
@@ -162,7 +169,7 @@ export async function POST(req: NextRequest) {
           created_at: new Date().toISOString(),
           phone_numbers: [],
           primary_phone: null,
-          enrichment_status: revealPhone ? 'pending_phone' : 'completed',
+          enrichment_status: shouldRevealPhone ? 'pending_phone' : 'completed',
           data: {
             sourceOpportunityId: l.sourceOpportunityId,
             companyDomain: cleanDomain(l.companyDomain),
@@ -182,7 +189,7 @@ export async function POST(req: NextRequest) {
         }
       } else {
         // If retrying phone, mark pending again
-        if (revealPhone) {
+        if (shouldRevealPhone) {
           await getSupabaseAdmin().from(tableName).update({ enrichment_status: 'pending_phone' }).eq('id', enrichedId);
         }
       }
@@ -221,7 +228,19 @@ export async function POST(req: NextRequest) {
             last_name: lastName,
             organization_name: l.companyName,
             organization_domain: cleanDomain(l.companyDomain)
-          }
+          },
+          reveal_email: shouldRevealEmail,
+          reveal_phone: shouldRevealPhone,
+          revealEmail: shouldRevealEmail,
+          revealPhone: shouldRevealPhone,
+          enrichment_level: shouldRevealPhone ? 'deep' : 'basic',
+          requested_data: {
+            email: shouldRevealEmail,
+            phone: shouldRevealPhone,
+          },
+          requested_fields: shouldRevealPhone
+            ? (shouldRevealEmail ? ['email', 'phone'] : ['phone'])
+            : (shouldRevealEmail ? ['email'] : []),
         };
 
         // Add optional fields if available
@@ -253,6 +272,11 @@ export async function POST(req: NextRequest) {
 
           if (enrichData.success && enrichData.extracted_data) {
             const extracted = enrichData.extracted_data;
+            const normalizedPhoneNumbers = shouldRevealPhone ? (extracted.phone_numbers || []) : [];
+            const normalizedPrimaryPhone = shouldRevealPhone ? (extracted.primary_phone || null) : null;
+            const normalizedEnrichmentStatus = shouldRevealPhone
+              ? (extracted.enrichment_status || 'pending_phone')
+              : 'completed';
 
             // Map the response to our database structure
             const updateData: any = {
@@ -282,11 +306,11 @@ export async function POST(req: NextRequest) {
               organization_size: extracted.organization_size,
 
               // Phone data
-              phone_numbers: extracted.phone_numbers || [],
-              primary_phone: extracted.primary_phone,
+              phone_numbers: normalizedPhoneNumbers,
+              primary_phone: normalizedPrimaryPhone,
 
               // Status and metadata
-              enrichment_status: extracted.enrichment_status || 'completed',
+              enrichment_status: normalizedEnrichmentStatus,
               updated_at: new Date().toISOString(),
 
               // Preserve existing data and add new fields
@@ -294,7 +318,10 @@ export async function POST(req: NextRequest) {
                 sourceOpportunityId: l.sourceOpportunityId,
                 companyDomain: extracted.organization_domain || cleanDomain(l.companyDomain),
                 emailStatus: extracted.email_status,
-                apolloId: foundApolloId
+                apolloId: foundApolloId,
+                requestedEnrichmentLevel: shouldRevealPhone ? 'deep' : 'basic',
+                requestedRevealPhone: shouldRevealPhone,
+                requestedRevealEmail: shouldRevealEmail,
               }
             };
 
@@ -321,13 +348,13 @@ export async function POST(req: NextRequest) {
               companyDomain: extracted.organization_domain,
               industry: extracted.organization_industry,
               location: extracted.country ? `${extracted.city || ''}, ${extracted.state || ''}, ${extracted.country}`.replace(/^,\s*|,\s*,/g, ',').trim() : (extracted.city || ''),
-              phoneNumbers: extracted.phone_numbers,
-              primaryPhone: extracted.primary_phone,
+              phoneNumbers: normalizedPhoneNumbers,
+              primaryPhone: normalizedPrimaryPhone,
               seniority: extracted.seniority,
               departments: extracted.departments,
               headline: extracted.headline,
               photoUrl: extracted.photo_url,
-              enrichmentStatus: extracted.enrichment_status || updateData.enrichment_status
+              enrichmentStatus: normalizedEnrichmentStatus || updateData.enrichment_status
             };
           } else {
             log('[WARNING] Enrichment API returned no data');
@@ -347,7 +374,7 @@ export async function POST(req: NextRequest) {
       const outLinkedin = (emailResult?.linkedinUrl || l.linkedinUrl || '').trim();
       const outStatus =
         emailResult?.enrichmentStatus ||
-        (revealPhone
+        (shouldRevealPhone
           ? ((outPrimaryPhone || (Array.isArray(outPhoneNumbers) && outPhoneNumbers.length)) ? 'completed' : 'pending_phone')
           : 'completed');
 
