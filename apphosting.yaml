@@ -28,11 +28,9 @@ env:
   # === Existing Variables ===
   - variable: APIFY_TOKEN
     secret: APIFY_TOKEN
-    availability: [RUNTIME]
 
   - variable: APOLLO_API_KEY
     secret: APOLLO_API_KEY
-    availability: [RUNTIME]
 
   # === Lead providers (Apollo/PDL trial) ===
   - variable: LEADS_PROVIDER_DEFAULT
@@ -47,13 +45,8 @@ env:
     value: "false"
     availability: [RUNTIME]
 
-  - variable: PDL_ALLOWED_ORG_IDS
-    value: ""
-    availability: [RUNTIME]
-
   - variable: PDL_API_KEY
     secret: PDL_API_KEY
-    availability: [RUNTIME]
 
   - variable: PDL_BASE_URL
     value: https://api.peopledatalabs.com/v5
@@ -113,11 +106,9 @@ env:
 
   - variable: AZURE_AD_CLIENT_SECRET
     secret: AZURE_AD_CLIENT_SECRET
-    availability: [RUNTIME]
 
   - variable: GOOGLE_CLIENT_SECRET
     secret: GOOGLE_CLIENT_SECRET
-    availability: [RUNTIME]
 
   - variable: NEXT_PUBLIC_SUPABASE_URL
     value: https://yfdelflsheurzaicwayi.supabase.co
@@ -129,7 +120,6 @@ env:
 
   - variable: SUPABASE_SERVICE_ROLE_KEY
     secret: SUPABASE_SERVICE_ROLE_KEY
-    availability: [RUNTIME]
 
   # === ANTON.IA Agent Variables ===
   # App URL for internal API calls
@@ -144,14 +134,11 @@ env:
 
   - variable: ANTONIA_FIREBASE_TICK_SECRET
     secret: ANTONIA_TICK_SECRET
-    availability: [RUNTIME]
 
   # Cron endpoint protection
   - variable: CRON_SECRET
     secret: ANTONIA_TICK_SECRET
-    availability: [RUNTIME]
 
   # Tracking webhook protection (optional but recommended)
   - variable: TRACKING_WEBHOOK_SECRET
     secret: TRACKING_WEBHOOK_SECRET
-    availability: [RUNTIME]
