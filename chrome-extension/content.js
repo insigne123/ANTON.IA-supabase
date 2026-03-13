@@ -145,10 +145,18 @@ async function runDMFlow(profileUrl, message) {
     await delay(1500);
     await closeBlockingDialog();
 
+    const profileRoot = getPrimaryProfileRoot();
+    const hadMessageButton = !!findMessageButton(profileRoot || document);
+
     console.log('[Anton.IA Content] Strategy 1: Attempting Direct Message...');
     const directMessageResult = await tryDirectMessage(message);
     if (directMessageResult) {
         return directMessageResult;
+    }
+
+    if (hadMessageButton) {
+        console.warn('[Anton.IA Content] Message button exists but composer did not open. Skipping connect fallback.', getStateSnapshot());
+        return { success: false, error: 'Could not open LinkedIn message composer' };
     }
 
     console.log('[Anton.IA Content] Strategy 2: Attempting Connect + Note...');
@@ -423,15 +431,37 @@ function getProfileActionRoots() {
     }
 
     if (!roots.length) {
-        const main = document.querySelector('main');
-        if (main && isElementVisible(main)) roots.push(main);
+        const messageBtn = findActionElement(MESSAGE_BUTTON_TEXTS, {
+            root: document,
+            excludeTexts: ['message ads', 'messaging'],
+        });
+        const connectBtn = findActionElement(CONNECT_BUTTON_TEXTS, {
+            root: document,
+            excludeTexts: ['connected', 'connections', 'pending', 'message', 'mensaje'],
+        });
+        const moreBtn = findActionElement(MORE_BUTTON_TEXTS, {
+            root: document,
+            excludeTexts: ['more relevant', 'more filters'],
+        });
+
+        for (const button of [messageBtn, connectBtn, moreBtn]) {
+            const container = getActionContainerForButton(button);
+            if (container && !roots.includes(container)) roots.push(container);
+        }
     }
 
     return roots;
 }
 
 function getPrimaryProfileRoot() {
-    return getProfileActionRoots()[0] || document;
+    return getProfileActionRoots()[0] || null;
+}
+
+function getActionContainerForButton(button) {
+    if (!(button instanceof HTMLElement)) return null;
+    return button.closest('.pv-top-card-v2-ctas, .pv-top-card-profile-actions, .top-card-layout__actions, .profile-topcard-person-entity__actions, .artdeco-card')
+        || button.parentElement
+        || null;
 }
 
 function getActionCandidates(root, options) {
@@ -472,6 +502,12 @@ function findActionElement(texts, options) {
         if (String(node.className || '').includes('artdeco-button--primary')) score += 10;
         if (node.closest('.pv-top-card-v2-ctas, .pv-top-card-profile-actions, .top-card-layout__actions')) score += 20;
         if (node.closest('.artdeco-dropdown__content-inner')) score += 4;
+        if (node.closest('main')) score += 6;
+        if (node.closest('aside')) score -= 60;
+
+        const rect = node.getBoundingClientRect();
+        if (rect.top < window.innerHeight * 0.55) score += 8;
+        if (rect.left < window.innerWidth * 0.75) score += 6;
 
         if (score > bestScore) {
             best = node;
@@ -639,6 +675,7 @@ function findPendingIndicator(root) {
         });
 
         for (const node of candidates) {
+            if (node.closest('aside')) continue;
             if (isPendingButton(node)) return node;
         }
     }

@@ -4,6 +4,7 @@ import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 import {
   N8NRequestBodySchema,
+  LinkedInProfileSearchRequestSchema,
   LeadsResponseSchema,
   type LeadsSearchParams
 } from "@/lib/schemas/leads";
@@ -39,6 +40,76 @@ const PDL_DATA_INCLUDE = [
   'job_company_size',
   'job_company_industry',
 ];
+
+function splitFullName(fullName?: string | null) {
+  const parts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
+  return {
+    firstName: parts[0] || '',
+    lastName: parts.slice(1).join(' '),
+  };
+}
+
+function mapFlexibleLead(raw: any, index: number) {
+  const fullName = String(raw?.full_name || raw?.name || '').trim();
+  const split = splitFullName(fullName);
+  const organization = raw?.organization && typeof raw.organization === 'object'
+    ? raw.organization
+    : undefined;
+
+  const email =
+    raw?.email ||
+    raw?.work_email ||
+    raw?.recommended_personal_email ||
+    raw?.personal_email ||
+    raw?.primary_email ||
+    undefined;
+
+  return {
+    id:
+      String(raw?.id || raw?.person_id || raw?.apollo_id || '').trim() ||
+      String(raw?.linkedin_url || raw?.linkedinUrl || raw?.linkedin_profile_url || '').trim() ||
+      String(email || '').trim() ||
+      `lead-${index + 1}`,
+    first_name: String(raw?.first_name || split.firstName || '').trim() || undefined,
+    last_name: String(raw?.last_name || split.lastName || '').trim() || undefined,
+    email: String(email || '').trim() || undefined,
+    title: String(raw?.title || raw?.job_title || raw?.headline || '').trim() || undefined,
+    organization: {
+      id: String(organization?.id || raw?.organization_id || '').trim() || undefined,
+      name: String(organization?.name || raw?.organization_name || raw?.job_company_name || '').trim() || undefined,
+      domain: cleanDomain(
+        organization?.primary_domain ||
+        organization?.domain ||
+        raw?.organization_domain ||
+        raw?.job_company_website ||
+        raw?.website_url,
+      ),
+    },
+    linkedin_url:
+      String(raw?.linkedin_url || raw?.linkedinUrl || raw?.linkedin_profile_url || '').trim() || undefined,
+    photo_url:
+      String(raw?.photo_url || raw?.photoUrl || raw?.profile_photo_url || raw?.image_url || '').trim() || undefined,
+    email_status: String(raw?.email_status || (email ? 'verified' : 'unknown')).trim() || undefined,
+  };
+}
+
+function normalizeLeadSearchResponse(json: unknown) {
+  try {
+    return normalizeFromN8N(json);
+  } catch {
+    const payload = Array.isArray(json) ? (json[0] ?? {}) : (json ?? {});
+    const rawLeads = Array.isArray((payload as any)?.leads)
+      ? (payload as any).leads
+      : Array.isArray((payload as any)?.people)
+        ? (payload as any).people
+        : [];
+
+    return LeadsResponseSchema.parse({
+      count: Number((payload as any)?.leads_count ?? (payload as any)?.count ?? rawLeads.length ?? 0),
+      leads: rawLeads.map((lead: any, index: number) => mapFlexibleLead(lead, index)),
+    });
+  }
+}
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
   const ctrl = new AbortController();
@@ -88,12 +159,20 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
         throw new Error(`SERVICE_BAD_JSON:${raw.slice(0, 300)}`);
       }
 
-      // Assume response format is compatible or needs normalization.
-      // Trying to use existing normalizer to be safe, assuming the new service returns something similar to existing n8n/apify structure
-      // If it fails validation, we might need to adjust.
-      // For now, let's normalize it.
-      const normalized = normalizeFromN8N(json);
-      LeadsResponseSchema.parse(normalized);
+      const normalized = normalizeLeadSearchResponse(json);
+
+      if (payload?.search_mode === 'linkedin_profile' && normalized.count > 1) {
+        return NextResponse.json(
+          {
+            error: 'PROFILE_SEARCH_BACKEND_MISMATCH',
+            message: 'El backend devolvio multiples resultados para una busqueda de perfil unico.',
+            search_mode: 'linkedin_profile',
+            leads_count: normalized.count,
+            ...(meta || {}),
+          },
+          { status: 502 },
+        );
+      }
 
       return NextResponse.json({ ...normalized, ...(meta || {}) }, { status: 200 });
     } catch (e) {
@@ -187,135 +266,173 @@ async function callPdlLeadSearch(currentParams: LeadsSearchParams[number], meta?
 }
 
 export async function POST(req: NextRequest) {
-  // 1. Authenticate: Support both session cookies and x-user-id header (for Cloud Functions)
-  const userIdFromHeader = req.headers.get('x-user-id')?.trim() || '';
+  try {
+    // 1. Authenticate: Support both session cookies and x-user-id header (for Cloud Functions)
+    const userIdFromHeader = req.headers.get('x-user-id')?.trim() || '';
 
-  if (userIdFromHeader && !isTrustedInternalRequest(req)) {
-    return NextResponse.json(
-      { error: "UNAUTHORIZED_INTERNAL_REQUEST", message: "Invalid internal API secret" },
-      { status: 401 }
-    );
-  }
-
-  let userId: string;
-
-  if (userIdFromHeader) {
-    // Server-to-server call from Cloud Functions
-    userId = userIdFromHeader;
-  } else {
-    // Regular user session
-    const supabase = createRouteHandlerClient({ cookies });
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "UNAUTHORIZED", message: "User must be logged in" }, { status: 401 });
+    if (userIdFromHeader && !isTrustedInternalRequest(req)) {
+      return NextResponse.json(
+        { error: "UNAUTHORIZED_INTERNAL_REQUEST", message: "Invalid internal API secret" },
+        { status: 401 }
+      );
     }
 
-    userId = user.id;
-  }
+    let userId: string;
 
-  let body: unknown = null;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "BAD_JSON" }, { status: 400 });
-  }
+    if (userIdFromHeader) {
+      userId = userIdFromHeader;
+    } else {
+      const cookieStore = await cookies();
+      const supabase = createRouteHandlerClient({ cookies: async () => cookieStore });
+      const { data: { user } } = await supabase.auth.getUser();
 
-  // 2. Parse existing schema (array)
-  const parsed = N8NRequestBodySchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "INVALID_REQUEST_BODY", details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
+      if (!user) {
+        return NextResponse.json({ error: "UNAUTHORIZED", message: "User must be logged in" }, { status: 401 });
+      }
 
-  const currentParams = parsed.data[0]; // Take the first item
-  const requestedProvider = Array.isArray(body)
-    ? String((body?.[0] as any)?.provider || '').trim().toLowerCase()
-    : '';
-  const organizationId = await resolveOrganizationIdForUser(userId);
-  const providerDecision = resolveLeadProvider({
-    requestedProvider,
-    organizationId,
-    defaultProviderEnv: 'LEADS_PROVIDER_DEFAULT',
-    fallbackDefaultProvider: 'apollo',
-  });
+      userId = user.id;
+    }
 
-  let fallbackApplied = false;
-  let fallbackReason: string | undefined;
+    let body: unknown = null;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "BAD_JSON" }, { status: 400 });
+    }
+
+    if (!Array.isArray(body)) {
+      const profileParsed = LinkedInProfileSearchRequestSchema.safeParse(body);
+      if (profileParsed.success) {
+        const profileReq = profileParsed.data;
+        const linkedinUrl = String(
+          profileReq.linkedin_url || profileReq.linkedin_profile_url || profileReq.linkedinUrl || ''
+        ).trim();
+
+        const profilePayload = {
+          user_id: userId,
+          search_mode: 'linkedin_profile',
+          linkedin_url: linkedinUrl,
+          reveal_email: profileReq.reveal_email ?? profileReq.revealEmail ?? true,
+          reveal_phone: profileReq.reveal_phone ?? profileReq.revealPhone ?? true,
+        };
+
+        const response = await callLeadSearchService(profilePayload, {
+          providerRequested: 'apollo',
+          providerUsed: 'apollo',
+          providerDefault: 'apollo',
+          search_mode: 'linkedin_profile',
+          requested_reveal: {
+            email: profilePayload.reveal_email,
+            phone: profilePayload.reveal_phone,
+          },
+        });
+        response.headers.set('x-provider-used', 'apollo');
+        response.headers.set('x-search-mode', 'linkedin_profile');
+        return response;
+      }
+
+      return NextResponse.json(
+        { error: "INVALID_REQUEST_BODY", details: profileParsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const parsed = N8NRequestBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "INVALID_REQUEST_BODY", details: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const currentParams = parsed.data[0];
+    const requestedProvider = Array.isArray(body)
+      ? String((body?.[0] as any)?.provider || '').trim().toLowerCase()
+      : '';
+    const organizationId = await resolveOrganizationIdForUser(userId);
+    const providerDecision = resolveLeadProvider({
+      requestedProvider,
+      organizationId,
+      defaultProviderEnv: 'LEADS_PROVIDER_DEFAULT',
+      fallbackDefaultProvider: 'apollo',
+    });
+
+    let fallbackApplied = false;
+    let fallbackReason: string | undefined;
 
     if (providerDecision.provider === 'pdl') {
-    try {
-      const response = await callPdlLeadSearch(currentParams, {
-        providerRequested: providerDecision.requestedProvider,
-        providerUsed: 'pdl',
-        providerDefault: providerDecision.defaultProvider,
-        providerForcedReason: providerDecision.forcedApolloReason,
-        fallbackApplied: false,
-      });
-      response.headers.set('x-provider-used', 'pdl');
-      return response;
-    } catch (error: any) {
-      if (!isPdlFallbackEnabled()) {
-        return NextResponse.json(
-          {
-            error: 'PDL_SEARCH_ERROR',
-            message: error?.message || 'PDL search failed',
-            providerRequested: providerDecision.requestedProvider,
-            providerUsed: 'pdl',
-            fallbackApplied: false,
-          },
-          { status: 502 },
-        );
+      try {
+        const response = await callPdlLeadSearch(currentParams, {
+          providerRequested: providerDecision.requestedProvider,
+          providerUsed: 'pdl',
+          providerDefault: providerDecision.defaultProvider,
+          providerForcedReason: providerDecision.forcedApolloReason,
+          fallbackApplied: false,
+        });
+        response.headers.set('x-provider-used', 'pdl');
+        return response;
+      } catch (error: any) {
+        if (!isPdlFallbackEnabled()) {
+          return NextResponse.json(
+            {
+              error: 'PDL_SEARCH_ERROR',
+              message: error?.message || 'PDL search failed',
+              providerRequested: providerDecision.requestedProvider,
+              providerUsed: 'pdl',
+              fallbackApplied: false,
+            },
+            { status: 502 },
+          );
+        }
+        fallbackApplied = true;
+        fallbackReason = error?.message || 'pdl_search_failed';
       }
-      fallbackApplied = true;
-      fallbackReason = error?.message || 'pdl_search_failed';
     }
+
+    if (USE_APIFY) {
+      const url = new URL(req.url);
+      url.pathname = "/api/leads/apify";
+      return NextResponse.redirect(url, 307);
+    }
+
+    console.log("Current Params from request:", currentParams);
+    console.log("Authenticated User ID:", userId);
+
+    const newPayload = {
+      user_id: userId || undefined,
+      industry_keywords: currentParams.industry_keywords,
+      company_location: currentParams.company_location,
+      titles: Array.isArray(currentParams.titles)
+        ? currentParams.titles
+        : (typeof currentParams.titles === 'string' && currentParams.titles.length > 0 ? [currentParams.titles] : []),
+      employee_range: currentParams.employee_ranges,
+      max_results: 100,
+    };
+
+    if (!newPayload.titles) newPayload.titles = [];
+
+    console.log("Outgoing Payload to Service:", JSON.stringify(newPayload, null, 2));
+
+    const response = await callLeadSearchService(newPayload, {
+      providerRequested: providerDecision.requestedProvider,
+      providerUsed: 'apollo',
+      providerDefault: providerDecision.defaultProvider,
+      providerForcedReason: providerDecision.forcedApolloReason,
+      fallbackApplied,
+      fallbackReason,
+    });
+    response.headers.set('x-provider-used', 'apollo');
+    return response;
+  } catch (error: any) {
+    console.error('[leads/search] Unhandled route error:', error);
+    return NextResponse.json(
+      {
+        error: 'LEADS_SEARCH_ROUTE_ERROR',
+        message: error?.message || 'Unknown route error',
+      },
+      { status: 500 },
+    );
   }
-
-  if (USE_APIFY) {
-    const url = new URL(req.url);
-    url.pathname = "/api/leads/apify";
-    return NextResponse.redirect(url, 307);
-  }
-
-  // 3. Construct new payload
-  console.log("Current Params from request:", currentParams);
-  console.log("Authenticated User ID:", userId);
-
-  const newPayload = {
-    // Strict payload based on specific service requirements
-    user_id: userId || undefined,
-
-    industry_keywords: currentParams.industry_keywords,
-    company_location: currentParams.company_location,
-
-    // API requires 'titles' as array. Schema default is empty string, we convert to empty array or single-item array.
-    titles: Array.isArray(currentParams.titles)
-      ? currentParams.titles
-      : (typeof currentParams.titles === 'string' && currentParams.titles.length > 0 ? [currentParams.titles] : []),
-
-    // Service uses "employee_range" (singular) but accepts the array values from "employee_ranges"
-    employee_range: currentParams.employee_ranges,
-
-    max_results: 100,
-  };
-
-  if (!newPayload.titles) newPayload.titles = [];
-
-  console.log("Outgoing Payload to Service:", JSON.stringify(newPayload, null, 2));
-
-  const response = await callLeadSearchService(newPayload, {
-    providerRequested: providerDecision.requestedProvider,
-    providerUsed: 'apollo',
-    providerDefault: providerDecision.defaultProvider,
-    providerForcedReason: providerDecision.forcedApolloReason,
-    fallbackApplied,
-    fallbackReason,
-  });
-  response.headers.set('x-provider-used', 'apollo');
-  return response;
 }
 
 function cleanDomain(urlLike?: string | null): string | undefined {

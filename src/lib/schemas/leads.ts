@@ -1,6 +1,7 @@
 
 // src/lib/schemas/leads.ts
 import { z } from "zod";
+import { normalizeLinkedinProfileUrl } from "@/lib/linkedin-url";
 
 const ZStrNullish = z.string().nullish(); // acepta string | null | undefined
 
@@ -55,6 +56,31 @@ export const N8NRequestItemSchema = z.object({
 
 export const N8NRequestBodySchema = z.array(N8NRequestItemSchema).min(1);
 
+const linkedinUrlField = z.string().trim()
+  .transform((value) => normalizeLinkedinProfileUrl(value))
+  .refine((value) => !!value, "linkedin_url invalida")
+  .optional();
+
+export const LinkedInProfileSearchRequestSchema = z.object({
+  user_id: z.string().trim().optional(),
+  search_mode: z.enum(["linkedin_profile", "linkedin", "profile"]).optional().default("linkedin_profile"),
+  linkedin_url: linkedinUrlField,
+  linkedin_profile_url: linkedinUrlField,
+  linkedinUrl: linkedinUrlField,
+  reveal_email: z.boolean().optional(),
+  revealEmail: z.boolean().optional(),
+  reveal_phone: z.boolean().optional(),
+  revealPhone: z.boolean().optional(),
+}).superRefine((value, ctx) => {
+  if (!value.linkedin_url && !value.linkedin_profile_url && !value.linkedinUrl) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "linkedin_url es obligatoria",
+      path: ["linkedin_url"],
+    });
+  }
+});
+
 // --- N8N ---
 const N8NWebhookLeadSchema = z.object({
   id: z.string(),
@@ -90,3 +116,4 @@ export const N8NWebhookResponseSchema = z.union([
 export type Lead = z.infer<typeof LeadSchema>;
 export type LeadsResponse = z.infer<typeof LeadsResponseSchema>;
 export type LeadsSearchParams = z.infer<typeof N8NRequestBodySchema>;
+export type LinkedInProfileSearchRequest = z.infer<typeof LinkedInProfileSearchRequestSchema>;

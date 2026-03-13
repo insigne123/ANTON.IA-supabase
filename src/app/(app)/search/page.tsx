@@ -22,7 +22,7 @@ import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import * as Quota from '@/lib/quota-client';
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from '@/lib/search-config';
-import { searchLeads, type LeadsSearchParams } from '@/lib/leads-client';
+import { searchLeads, searchLinkedInProfileLead, type LeadsSearchParams } from '@/lib/leads-client';
 import type { Lead } from '@/lib/schemas/leads';
 import {
   DropdownMenu,
@@ -34,6 +34,7 @@ import { APOLLO_SENIORITIES } from '@/lib/apollo-taxonomies';
 import { savedSearchesService } from '@/lib/services/saved-searches-service';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
+import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 
 function MultiCheckDropdown({
   label,
@@ -154,6 +155,18 @@ function mapLeadToEnriched(l: UILaed) {
   };
 }
 
+const DEFAULT_FILTERS = {
+  searchMode: 'filters' as 'filters' | 'linkedin_profile',
+  industry: '',
+  location: '',
+  title: '',
+  sizeRange: '',
+  seniorities: [] as string[],
+  linkedinUrl: '',
+  revealEmail: true,
+  revealPhone: true,
+};
+
 
 export default function SearchPage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -203,13 +216,7 @@ export default function SearchPage() {
     setSavedSearches(data);
   };
 
-  const [filters, setFilters] = useState({
-    industry: '',
-    location: '',
-    title: '',
-    sizeRange: '',
-    seniorities: [] as string[],
-  });
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
 
   const handleFilterChange = (field: keyof typeof filters, value: any) => {
     setFilters(prev => ({ ...prev, [field]: value }));
@@ -285,35 +292,53 @@ export default function SearchPage() {
     abortRef.current = new AbortController();
 
     try {
-      const industryKeywords = [filters.industry.trim()].filter(Boolean);
-      const locations = filters.location.split(',').map(s => s.trim()).filter(Boolean);
-      const sizeRanges = filters.sizeRange.split(',').map(s => s.trim()).filter(Boolean);
+      let result;
 
-      if (!industryKeywords.length) {
-        throw new Error('El campo "Industria" es obligatorio.');
-      }
-      if (!locations.length) {
-        throw new Error('Debes indicar al menos un país/ubicación.');
-      }
-      if (!sizeRanges.length) {
-        throw new Error('Debes seleccionar al menos un tamaño de empresa.');
-      }
-      incClientQuota('leadSearch');
+      if (filters.searchMode === 'linkedin_profile') {
+        const linkedinUrl = normalizeLinkedinProfileUrl(filters.linkedinUrl);
+        if (!linkedinUrl) {
+          throw new Error('La URL de LinkedIn no es valida.');
+        }
 
-      const payload: LeadsSearchParams = [{
-        industry_keywords: industryKeywords,
-        company_location: locations,
-        employee_ranges: sizeRanges,
-        titles: filters.title.trim(),
-        seniorities: filters.seniorities,
-        per_page_orgs: 100,
-        per_page_people: 100,
-        max_org_pages: 3,
-        max_people_pages_per_chunk: 2,
-        enrich: true,
-        max_results: 500,
-      }];
-      const result = await searchLeads(payload, abortRef.current.signal);
+        incClientQuota('leadSearch');
+        result = await searchLinkedInProfileLead({
+          search_mode: 'linkedin_profile',
+          linkedin_url: linkedinUrl,
+          reveal_email: filters.revealEmail,
+          reveal_phone: filters.revealPhone,
+        }, abortRef.current.signal);
+      } else {
+        const industryKeywords = [filters.industry.trim()].filter(Boolean);
+        const locations = filters.location.split(',').map(s => s.trim()).filter(Boolean);
+        const sizeRanges = filters.sizeRange.split(',').map(s => s.trim()).filter(Boolean);
+
+        if (!industryKeywords.length) {
+          throw new Error('El campo "Industria" es obligatorio.');
+        }
+        if (!locations.length) {
+          throw new Error('Debes indicar al menos un país/ubicación.');
+        }
+        if (!sizeRanges.length) {
+          throw new Error('Debes seleccionar al menos un tamaño de empresa.');
+        }
+
+        incClientQuota('leadSearch');
+        const payload: LeadsSearchParams = [{
+          industry_keywords: industryKeywords,
+          company_location: locations,
+          employee_ranges: sizeRanges,
+          titles: filters.title.trim(),
+          seniorities: filters.seniorities,
+          per_page_orgs: 100,
+          per_page_people: 100,
+          max_org_pages: 3,
+          max_people_pages_per_chunk: 2,
+          enrich: true,
+          max_results: 500,
+        }];
+        result = await searchLeads(payload, abortRef.current.signal);
+      }
+
       setLeads(result.leads.map(normalizeLeadForUI));
     } catch (error: any) {
       if (error.name !== 'AbortError') {
@@ -334,7 +359,7 @@ export default function SearchPage() {
   };
 
   const handleClear = () => {
-    setFilters({ industry: '', location: '', title: '', sizeRange: '', seniorities: [] });
+    setFilters(DEFAULT_FILTERS);
     setLeads([]);
     setSelectedLeads(new Set());
     setError('');
@@ -389,7 +414,7 @@ export default function SearchPage() {
   };
 
   const handleLoadSearch = (search: SavedSearch) => {
-    setFilters(search.criteria);
+    setFilters({ ...DEFAULT_FILTERS, ...(search.criteria || {}) });
     toast({ title: 'Filtros cargados', description: `Se han aplicado los filtros de "${search.name}".` });
   };
 
@@ -450,46 +475,92 @@ export default function SearchPage() {
       <Card className="mb-8">
         <CardHeader>
           <CardTitle>Filtros de Búsqueda</CardTitle>
-          <CardDescription>Define los parámetros para encontrar los leads que necesitas.</CardDescription>
+          <CardDescription>
+            {filters.searchMode === 'linkedin_profile'
+              ? 'Busca una persona puntual usando la URL de su perfil de LinkedIn.'
+              : 'Define los parámetros para encontrar los leads que necesitas.'}
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <Label htmlFor="industry">Industria (texto libre) *</Label>
-              <Input id="industry" placeholder="Ej: Human Resources, Retail" value={filters.industry} onChange={(e) => handleFilterChange('industry', e.target.value)} required />
-              <small className="text-muted-foreground">Obligatorio.</small>
-            </div>
-            <div>
-              <Label htmlFor="location">Ubicación (País) *</Label>
-              <Input id="location" placeholder="Ej: Chile, United States (separado por comas)" value={filters.location} onChange={(e) => handleFilterChange('location', e.target.value)} required />
-              <small className="text-muted-foreground">Al menos uno. Puedes listar varios.</small>
-            </div>
-            <div>
-              <Label htmlFor="sizeRange">Tamaño de empresa *</Label>
-              <Select value={filters.sizeRange} onValueChange={(v) => handleFilterChange('sizeRange', v)}>
-                <SelectTrigger id="sizeRange"><SelectValue placeholder="Seleccionar tamaño" /></SelectTrigger>
-                <SelectContent>{companySizes.map(s => <SelectItem key={s} value={s}>{s.replace('+', ' o más')}</SelectItem>)}</SelectContent>
+          <div className="grid grid-cols-1 gap-6">
+            <div className="max-w-sm">
+              <Label htmlFor="searchMode">Modo de búsqueda</Label>
+              <Select value={filters.searchMode} onValueChange={(v: 'filters' | 'linkedin_profile') => handleFilterChange('searchMode', v)}>
+                <SelectTrigger id="searchMode"><SelectValue placeholder="Seleccionar modo" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="filters">Búsqueda por filtros</SelectItem>
+                  <SelectItem value="linkedin_profile">Perfil de LinkedIn</SelectItem>
+                </SelectContent>
               </Select>
-              <small className="text-muted-foreground">Al menos uno.</small>
             </div>
-            <div>
-              <Label htmlFor="title">Cargo/Posición</Label>
-              <Input id="title" placeholder="Ej: Marketing Director" value={filters.title} onChange={(e) => handleFilterChange('title', e.target.value)} />
-            </div>
-            <div className="md:col-span-2 lg:col-span-4">
-              <MultiCheckDropdown
-                label="Management level"
-                options={APOLLO_SENIORITIES}
-                value={filters.seniorities}
-                onChange={(next) => handleFilterChange('seniorities', next)}
-                placeholder="Seleccionar niveles"
-              />
-            </div>
+
+            {filters.searchMode === 'linkedin_profile' ? (
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                <div className="md:col-span-2">
+                  <Label htmlFor="linkedinUrl">URL del perfil de LinkedIn *</Label>
+                  <Input
+                    id="linkedinUrl"
+                    placeholder="Ej: https://www.linkedin.com/in/usuario"
+                    value={filters.linkedinUrl}
+                    onChange={(e) => handleFilterChange('linkedinUrl', e.target.value)}
+                  />
+                  <small className="text-muted-foreground">Consulta una sola persona por URL usando el endpoint interno de perfil.</small>
+                </div>
+                <div className="flex items-center justify-between rounded-md border p-4">
+                  <div>
+                    <Label htmlFor="revealEmail">Revelar email</Label>
+                    <p className="text-sm text-muted-foreground">Solicita email si el proveedor logra encontrarlo.</p>
+                  </div>
+                  <Switch id="revealEmail" checked={filters.revealEmail} onCheckedChange={(v) => handleFilterChange('revealEmail', v)} />
+                </div>
+                <div className="flex items-center justify-between rounded-md border p-4">
+                  <div>
+                    <Label htmlFor="revealPhone">Revelar teléfono</Label>
+                    <p className="text-sm text-muted-foreground">Solicita teléfono si el proveedor logra encontrarlo.</p>
+                  </div>
+                  <Switch id="revealPhone" checked={filters.revealPhone} onCheckedChange={(v) => handleFilterChange('revealPhone', v)} />
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <Label htmlFor="industry">Industria (texto libre) *</Label>
+                  <Input id="industry" placeholder="Ej: Human Resources, Retail" value={filters.industry} onChange={(e) => handleFilterChange('industry', e.target.value)} required />
+                  <small className="text-muted-foreground">Obligatorio.</small>
+                </div>
+                <div>
+                  <Label htmlFor="location">Ubicación (País) *</Label>
+                  <Input id="location" placeholder="Ej: Chile, United States (separado por comas)" value={filters.location} onChange={(e) => handleFilterChange('location', e.target.value)} required />
+                  <small className="text-muted-foreground">Al menos uno. Puedes listar varios.</small>
+                </div>
+                <div>
+                  <Label htmlFor="sizeRange">Tamaño de empresa *</Label>
+                  <Select value={filters.sizeRange} onValueChange={(v) => handleFilterChange('sizeRange', v)}>
+                    <SelectTrigger id="sizeRange"><SelectValue placeholder="Seleccionar tamaño" /></SelectTrigger>
+                    <SelectContent>{companySizes.map(s => <SelectItem key={s} value={s}>{s.replace('+', ' o más')}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <small className="text-muted-foreground">Al menos uno.</small>
+                </div>
+                <div>
+                  <Label htmlFor="title">Cargo/Posición</Label>
+                  <Input id="title" placeholder="Ej: Marketing Director" value={filters.title} onChange={(e) => handleFilterChange('title', e.target.value)} />
+                </div>
+                <div className="md:col-span-2 lg:col-span-4">
+                  <MultiCheckDropdown
+                    label="Management level"
+                    options={APOLLO_SENIORITIES}
+                    value={filters.seniorities}
+                    onChange={(next) => handleFilterChange('seniorities', next)}
+                    placeholder="Seleccionar niveles"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="mt-6 flex justify-end gap-2">
             <Button variant="outline" onClick={handleClear}><X className="mr-2" />Limpiar</Button>
-            <Button onClick={handleSearch} disabled={isLoading}><Search className="mr-2" />{isLoading ? 'Buscando...' : 'Buscar Leads'}</Button>
+            <Button onClick={handleSearch} disabled={isLoading}><Search className="mr-2" />{isLoading ? 'Buscando...' : (filters.searchMode === 'linkedin_profile' ? 'Buscar Perfil' : 'Buscar Leads')}</Button>
             {isLoading && (
               <Button variant="outline" onClick={handleAbort}>Cancelar</Button>
             )}
