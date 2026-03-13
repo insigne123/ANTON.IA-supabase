@@ -34,6 +34,59 @@ env:
     secret: APOLLO_API_KEY
     availability: [RUNTIME]
 
+  # === Lead providers (Apollo/PDL trial) ===
+  - variable: LEADS_PROVIDER_DEFAULT
+    value: apollo
+    availability: [RUNTIME]
+
+  - variable: ENRICHMENT_PROVIDER_DEFAULT
+    value: apollo
+    availability: [RUNTIME]
+
+  - variable: PDL_TRIAL_ENABLED
+    value: "false"
+    availability: [RUNTIME]
+
+  - variable: PDL_ALLOWED_ORG_IDS
+    value: ""
+    availability: [RUNTIME]
+
+  - variable: PDL_API_KEY
+    secret: PDL_API_KEY
+    availability: [RUNTIME]
+
+  - variable: PDL_BASE_URL
+    value: https://api.peopledatalabs.com/v5
+    availability: [RUNTIME]
+
+  - variable: PDL_TIMEOUT_MS
+    value: "30000"
+    availability: [RUNTIME]
+
+  - variable: PDL_SEARCH_PAGE_SIZE
+    value: "100"
+    availability: [RUNTIME]
+
+  - variable: PDL_SEARCH_MAX_PAGES
+    value: "10"
+    availability: [RUNTIME]
+
+  - variable: PDL_MAX_RESULTS
+    value: "200"
+    availability: [RUNTIME]
+
+  - variable: PDL_ENRICH_MIN_LIKELIHOOD
+    value: "2"
+    availability: [RUNTIME]
+
+  - variable: PDL_FALLBACK_TO_APOLLO
+    value: "true"
+    availability: [RUNTIME]
+
+  - variable: LEADS_DISABLE_EXTERNAL_FALLBACK
+    value: "false"
+    availability: [RUNTIME]
+
   - variable: APIFY_APOLLO_ACTOR_ID
     value: code_crafter/apollo-io-scraper
     availability: [RUNTIME]

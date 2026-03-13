@@ -14,6 +14,8 @@ interface MissionLead {
     company: string;
     status: string;
     email: string | null;
+    score?: number | null;
+    score_tier?: 'hot' | 'warm' | 'cool' | 'cold' | null;
     created_at: string;
 }
 
@@ -49,7 +51,7 @@ export function MissionQueues({ missionId }: { missionId: string }) {
             // Fetch Reserve (Saved)
             const { data: savedData } = await supabase
                 .from('leads')
-                .select('id, name, title, company, status, email, created_at')
+                .select('id, name, title, company, status, email, score, score_tier, created_at')
                 .eq('mission_id', missionId)
                 .eq('status', 'saved')
                 .order('created_at', { ascending: false });
@@ -57,7 +59,7 @@ export function MissionQueues({ missionId }: { missionId: string }) {
             // Leads enriched + email available (ready for investigate/contact)
             const { data: enrichedReady } = await supabase
                 .from('leads')
-                .select('id, name, title, company, status, email, created_at')
+                .select('id, name, title, company, status, email, score, score_tier, created_at')
                 .eq('mission_id', missionId)
                 .eq('status', 'enriched')
                 .not('email', 'is', null)
@@ -66,7 +68,7 @@ export function MissionQueues({ missionId }: { missionId: string }) {
             // Leads enriched but without email (not contactable)
             const { data: enrichedNoEmail } = await supabase
                 .from('leads')
-                .select('id, name, title, company, status, email, created_at')
+                .select('id, name, title, company, status, email, score, score_tier, created_at')
                 .eq('mission_id', missionId)
                 .eq('status', 'enriched')
                 .is('email', null)
@@ -75,7 +77,7 @@ export function MissionQueues({ missionId }: { missionId: string }) {
             // Leads already contacted
             const { data: contactedData } = await supabase
                 .from('leads')
-                .select('id, name, title, company, status, email, created_at')
+                .select('id, name, title, company, status, email, score, score_tier, created_at')
                 .eq('mission_id', missionId)
                 .eq('status', 'contacted')
                 .order('created_at', { ascending: false })
@@ -84,7 +86,7 @@ export function MissionQueues({ missionId }: { missionId: string }) {
             // Do-not-contact / blocked leads
             const { data: blockedData } = await supabase
                 .from('leads')
-                .select('id, name, title, company, status, email, created_at')
+                .select('id, name, title, company, status, email, score, score_tier, created_at')
                 .eq('mission_id', missionId)
                 .eq('status', 'do_not_contact')
                 .order('created_at', { ascending: false })
@@ -220,9 +222,16 @@ function QueueList({ leads, emptyMessage, icon }: { leads: MissionLead[], emptyM
                         <div className="flex-1 min-w-0">
                             <div className="flex justify-between items-start">
                                 <p className="font-medium text-sm truncate">{lead.name}</p>
-                                <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                                    {formatExactDateTime(lead.created_at)}
-                                </span>
+                                <div className="flex items-center gap-2 pl-2">
+                                    {lead.score_tier && (
+                                        <Badge variant={lead.score_tier === 'hot' ? 'default' : lead.score_tier === 'warm' ? 'secondary' : 'outline'} className="text-[10px] h-5">
+                                            {String(lead.score_tier).toUpperCase()} {lead.score ?? '-'}
+                                        </Badge>
+                                    )}
+                                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                                        {formatExactDateTime(lead.created_at)}
+                                    </span>
+                                </div>
                             </div>
                             <div className="flex items-center gap-1 text-xs text-muted-foreground truncate">
                                 <Briefcase className="w-3 h-3" />

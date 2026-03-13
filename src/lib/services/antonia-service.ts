@@ -35,6 +35,15 @@ export const antoniaService = {
             dailyEnrichLimit: data.daily_enrich_limit,
             dailyInvestigateLimit: data.daily_investigate_limit,
             trackingEnabled: data.tracking_enabled,
+            autopilotEnabled: data.autopilot_enabled,
+            autopilotMode: data.autopilot_mode,
+            approvalMode: data.approval_mode,
+            minAutoSendScore: data.min_auto_send_score,
+            minReviewScore: data.min_review_score,
+            bookingLink: data.booking_link,
+            meetingInstructions: data.meeting_instructions,
+            pauseOnNegativeReply: data.pause_on_negative_reply,
+            pauseOnFailureSpike: data.pause_on_failure_spike,
             createdAt: data.created_at,
             updatedAt: data.updated_at
         };
@@ -54,6 +63,15 @@ export const antoniaService = {
             daily_enrich_limit: config.dailyEnrichLimit ?? 50,
             daily_investigate_limit: config.dailyInvestigateLimit ?? 20,
             tracking_enabled: config.trackingEnabled,
+            autopilot_enabled: config.autopilotEnabled ?? false,
+            autopilot_mode: config.autopilotMode ?? 'manual_assist',
+            approval_mode: config.approvalMode ?? 'low_score_only',
+            min_auto_send_score: config.minAutoSendScore ?? 70,
+            min_review_score: config.minReviewScore ?? 45,
+            booking_link: config.bookingLink ?? null,
+            meeting_instructions: config.meetingInstructions ?? null,
+            pause_on_negative_reply: config.pauseOnNegativeReply ?? true,
+            pause_on_failure_spike: config.pauseOnFailureSpike ?? true,
             updated_at: new Date().toISOString()
         };
 
@@ -75,6 +93,15 @@ export const antoniaService = {
             dailyEnrichLimit: data.daily_enrich_limit,
             dailyInvestigateLimit: data.daily_investigate_limit,
             trackingEnabled: data.tracking_enabled,
+            autopilotEnabled: data.autopilot_enabled,
+            autopilotMode: data.autopilot_mode,
+            approvalMode: data.approval_mode,
+            minAutoSendScore: data.min_auto_send_score,
+            minReviewScore: data.min_review_score,
+            bookingLink: data.booking_link,
+            meetingInstructions: data.meeting_instructions,
+            pauseOnNegativeReply: data.pause_on_negative_reply,
+            pauseOnFailureSpike: data.pause_on_failure_spike,
             createdAt: data.created_at,
             updatedAt: data.updated_at
         };

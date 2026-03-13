@@ -108,6 +108,12 @@ function mapSavedLead(l: any, customMap: Record<string, CustomData>): UnifiedRow
       stage: custom?.stage ?? null,
       owner: custom?.owner ?? null,
       notes: custom?.notes ?? null,
+      nextAction: custom?.nextAction ?? null,
+      nextActionType: custom?.nextActionType ?? null,
+      nextActionDueAt: custom?.nextActionDueAt ?? null,
+      autopilotStatus: custom?.autopilotStatus ?? null,
+      lastAutopilotEvent: custom?.lastAutopilotEvent ?? null,
+      meetingLink: custom?.meetingLink ?? null,
       hasEmail: !!email,
     };
   } catch (err) {
@@ -147,6 +153,12 @@ function mapEnrichedLead(e: any, customMap: Record<string, CustomData>): Unified
       stage: custom?.stage ?? null,
       owner: custom?.owner ?? null,
       notes: custom?.notes ?? null,
+      nextAction: custom?.nextAction ?? null,
+      nextActionType: custom?.nextActionType ?? null,
+      nextActionDueAt: custom?.nextActionDueAt ?? null,
+      autopilotStatus: custom?.autopilotStatus ?? null,
+      lastAutopilotEvent: custom?.lastAutopilotEvent ?? null,
+      meetingLink: custom?.meetingLink ?? null,
       hasEmail: !!email,
     };
   } catch (err) {
@@ -176,6 +188,12 @@ function mapOpportunity(o: any, customMap: Record<string, CustomData>): UnifiedR
       stage: custom?.stage ?? null,
       owner: custom?.owner ?? null,
       notes: custom?.notes ?? null,
+      nextAction: custom?.nextAction ?? null,
+      nextActionType: custom?.nextActionType ?? null,
+      nextActionDueAt: custom?.nextActionDueAt ?? null,
+      autopilotStatus: custom?.autopilotStatus ?? null,
+      lastAutopilotEvent: custom?.lastAutopilotEvent ?? null,
+      meetingLink: custom?.meetingLink ?? null,
       hasEmail: false,
     };
   } catch (err) {
@@ -206,6 +224,12 @@ function mapContacted(c: any, customMap: Record<string, CustomData>): UnifiedRow
       stage: custom?.stage ?? null,
       owner: custom?.owner ?? null,
       notes: custom?.notes ?? null,
+      nextAction: custom?.nextAction ?? null,
+      nextActionType: custom?.nextActionType ?? null,
+      nextActionDueAt: custom?.nextActionDueAt ?? null,
+      autopilotStatus: custom?.autopilotStatus ?? null,
+      lastAutopilotEvent: custom?.lastAutopilotEvent ?? null,
+      meetingLink: custom?.meetingLink ?? null,
       hasEmail: !!email,
     };
   } catch (err) {

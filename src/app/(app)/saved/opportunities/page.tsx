@@ -17,14 +17,11 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useRouter } from 'next/navigation';
 import { toCsv, downloadCsv } from '@/lib/csv';
 import { Download } from 'lucide-react';
-import { getClientId } from '@/lib/client-id';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
-import { useAuth } from '@/context/AuthContext';
 
 export default function SavedOpportunitiesPage() {
     const { toast } = useToast();
     const router = useRouter();
-    const { user } = useAuth();
     const [opps, setOpps] = useState<JobOpportunity[]>([]);
 
     const [leadTitles, setLeadTitles] = useState('Head of Talent, HR Manager, Recruiting Lead');
@@ -177,12 +174,6 @@ export default function SavedOpportunitiesPage() {
             const domain = chosenOrg?.primary_domain ||
                 (chosenOrg?.website_url ? new URL(chosenOrg.website_url).hostname : undefined);
 
-            const clientId = getClientId?.() ?? '';
-            // Use real user ID if available
-            const finalUserId = user?.id || clientId;
-
-            if (!finalUserId) throw new Error('Falta ID de usuario (refresca la página)');
-
             const payload = {
                 leads: chosen.map(l => ({
                     fullName: l.fullName,
@@ -201,7 +192,7 @@ export default function SavedOpportunitiesPage() {
 
             const r = await fetch('/api/opportunities/enrich-apollo', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-user-id': finalUserId },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
             const j = await r.json();

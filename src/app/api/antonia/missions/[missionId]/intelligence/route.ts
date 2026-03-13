@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
+import { buildMissionGoalSummary, computeMissionGoalProgress, normalizeMissionGoal } from '@/lib/antonia-mission-goals';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -47,14 +48,60 @@ function buildMissionSnapshot(mission: any) {
       dailyInvestigateLimit: Number(mission.daily_investigate_limit || params.dailyInvestigateLimit || 5),
       dailyContactLimit: Number(mission.daily_contact_limit || params.dailyContactLimit || 3),
     },
+    goal: normalizeMissionGoal(params),
+    computedGoalSummary: buildMissionGoalSummary(params),
     updatedAt: mission.updated_at,
     createdAt: mission.created_at,
   };
 }
 
-function buildRecommendations(metrics: any, mission: any) {
+function buildAllocatorPlan(metrics: any, mission: any, goalProgress: any) {
+  const current = {
+    dailySearchLimit: Number(mission.daily_search_limit || mission.params?.dailySearchLimit || 1),
+    dailyEnrichLimit: Number(mission.daily_enrich_limit || mission.params?.dailyEnrichLimit || 10),
+    dailyInvestigateLimit: Number(mission.daily_investigate_limit || mission.params?.dailyInvestigateLimit || 5),
+    dailyContactLimit: Number(mission.daily_contact_limit || mission.params?.dailyContactLimit || 3),
+  };
+
+  const recommended = { ...current };
+  const reasons: string[] = [];
+
+  if (metrics.queueEnrichedWithEmail > current.dailyContactLimit * 2) {
+    recommended.dailyContactLimit = Math.min(50, Math.max(current.dailyContactLimit, Math.ceil(metrics.queueEnrichedWithEmail / 2)));
+    reasons.push('hay backlog de leads listos para contacto');
+  }
+
+  if (metrics.searchRuns24h > 0 && metrics.found24h <= metrics.searchRuns24h) {
+    recommended.dailySearchLimit = Math.min(5, current.dailySearchLimit + 1);
+    reasons.push('la busqueda esta encontrando poco volumen');
+  }
+
+  const enrichTotal = metrics.enrichEmail24h + metrics.enrichNoEmail24h;
+  if (enrichTotal >= 4 && metrics.enrichNoEmail24h / Math.max(1, enrichTotal) >= 0.4) {
+    recommended.dailyInvestigateLimit = Math.min(50, Math.max(current.dailyInvestigateLimit, current.dailyEnrichLimit));
+    reasons.push('muchos leads enriquecidos siguen sin email');
+  }
+
+  if (goalProgress.status === 'at_risk') {
+    recommended.dailyEnrichLimit = Math.min(50, Math.max(recommended.dailyEnrichLimit, current.dailyEnrichLimit + 5));
+    recommended.dailyContactLimit = Math.min(50, Math.max(recommended.dailyContactLimit, current.dailyContactLimit + 3));
+    reasons.push('la mision va atras respecto a su meta comercial');
+  }
+
+  return {
+    current,
+    recommended,
+    changed: Object.keys(current).some((key) => (current as any)[key] !== (recommended as any)[key]),
+    rationale: reasons.length > 0
+      ? `Allocator recomendado porque ${reasons.join(', ')}.`
+      : 'Allocator balanceado: no hay ajustes urgentes sugeridos.',
+  };
+}
+
+function buildRecommendations(metrics: any, mission: any, goalProgress: any) {
   const recs: Array<{ id: string; title: string; why: string; confidence: number; patch: any }> = [];
   const patch: any = {};
+  const goal = normalizeMissionGoal(mission.params || {});
 
   const current = {
     search: Number(mission.daily_search_limit || mission.params?.dailySearchLimit || 1),
@@ -139,6 +186,37 @@ function buildRecommendations(metrics: any, mission: any) {
     }
   }
 
+  if (goalProgress.status === 'at_risk') {
+    const nextPatch = {
+      dailyContactLimit: Math.min(50, Math.max(current.contact + 3, current.contact)),
+      dailyEnrichLimit: Math.min(50, Math.max(current.enrich + 5, current.enrich)),
+    };
+    recs.push({
+      id: 'recover-goal-pace',
+      title: 'Recuperar ritmo hacia la meta',
+      why: `La mision logro ${goalProgress.achieved}/${goalProgress.target} ${goalProgress.label.toLowerCase()} objetivo.`,
+      confidence: 0.73,
+      patch: nextPatch,
+    });
+    Object.assign(patch, nextPatch);
+  }
+
+  if (!String(mission.params?.valueProposition || '').trim()) {
+    const nextPatch = {
+      valueProposition: goal.targetOutcome === 'pipeline'
+        ? 'Ayudamos a generar pipeline calificado con outreach y seguimiento automatizado.'
+        : 'Ayudamos a conseguir conversaciones calificadas con outreach automatizado y seguimiento constante.',
+    };
+    recs.push({
+      id: 'clarify-value-proposition',
+      title: 'Definir propuesta de valor',
+      why: 'La mision no tiene propuesta de valor explicita; eso reduce calidad de campana y scoring.',
+      confidence: 0.66,
+      patch: nextPatch,
+    });
+    if (!patch.valueProposition) patch.valueProposition = nextPatch.valueProposition;
+  }
+
   return {
     recommendations: recs,
     suggestedPatch: patch,
@@ -196,12 +274,20 @@ async function computeMissionMetrics(admin: any, mission: any) {
     contactSent24h: 0,
     contactFailed24h: 0,
     contactBlocked24h: 0,
+    positiveReplies24h: 0,
+    meetingRequests24h: 0,
     searchRuns24h: 0,
     queueSaved: 0,
     queueEnrichedWithEmail: 0,
     queueDoNotContact: 0,
     orgContactsToday: 0,
     missionContactsToday: 0,
+    contactsTotal: 0,
+    opensTotal: 0,
+    repliesTotal: 0,
+    positiveRepliesTotal: 0,
+    meetingRequestsTotal: 0,
+    pipelineValueProxy: 0,
   };
 
   for (const e of (eventRows || [])) {
@@ -217,6 +303,22 @@ async function computeMissionMetrics(admin: any, mission: any) {
     if (type === 'lead_contact_failed') metrics.contactFailed24h += 1;
     if (type === 'lead_contact_blocked') metrics.contactBlocked24h += 1;
   }
+
+  const { count: positiveReplies24h } = await admin
+    .from('contacted_leads')
+    .select('*', { count: 'exact', head: true })
+    .eq('mission_id', mission.id)
+    .in('reply_intent', ['positive', 'meeting_request'])
+    .gte('replied_at', last24h);
+  metrics.positiveReplies24h = positiveReplies24h || 0;
+
+  const { count: meetingRequests24h } = await admin
+    .from('contacted_leads')
+    .select('*', { count: 'exact', head: true })
+    .eq('mission_id', mission.id)
+    .eq('reply_intent', 'meeting_request')
+    .gte('replied_at', last24h);
+  metrics.meetingRequests24h = meetingRequests24h || 0;
 
   const { count: searchRuns24h } = await admin
     .from('antonia_tasks')
@@ -264,6 +366,40 @@ async function computeMissionMetrics(admin: any, mission: any) {
     .gte('created_at', todayStart);
   metrics.missionContactsToday = missionContactsToday || 0;
 
+  const [{ count: contactsTotal }, { count: opensTotal }, { count: repliesTotal }, { count: positiveRepliesTotal }, { count: meetingRequestsTotal }] = await Promise.all([
+    admin
+      .from('contacted_leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('mission_id', mission.id),
+    admin
+      .from('contacted_leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('mission_id', mission.id)
+      .not('opened_at', 'is', null),
+    admin
+      .from('contacted_leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('mission_id', mission.id)
+      .not('replied_at', 'is', null),
+    admin
+      .from('contacted_leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('mission_id', mission.id)
+      .in('reply_intent', ['positive', 'meeting_request']),
+    admin
+      .from('contacted_leads')
+      .select('*', { count: 'exact', head: true })
+      .eq('mission_id', mission.id)
+      .eq('reply_intent', 'meeting_request'),
+  ]);
+
+  metrics.contactsTotal = contactsTotal || 0;
+  metrics.opensTotal = opensTotal || 0;
+  metrics.repliesTotal = repliesTotal || 0;
+  metrics.positiveRepliesTotal = positiveRepliesTotal || 0;
+  metrics.meetingRequestsTotal = meetingRequestsTotal || 0;
+  metrics.pipelineValueProxy = (metrics.meetingRequestsTotal * 2500) + (metrics.positiveRepliesTotal * 750);
+
   return metrics;
 }
 
@@ -299,11 +435,19 @@ export async function GET(req: NextRequest, context: { params: Promise<{ mission
     }
 
     const metrics = await computeMissionMetrics(admin, mission);
-    const intelligence = buildRecommendations(metrics, mission);
+    const goalProgress = computeMissionGoalProgress(mission.params || {}, {
+      meetings: metrics.meetingRequestsTotal,
+      positiveReplies: metrics.positiveRepliesTotal,
+      pipelineValue: metrics.pipelineValueProxy,
+    });
+    const allocatorPlan = buildAllocatorPlan(metrics, mission, goalProgress);
+    const intelligence = buildRecommendations(metrics, mission, goalProgress);
 
     return NextResponse.json({
       mission: buildMissionSnapshot(mission),
       metrics,
+      goalProgress,
+      allocatorPlan,
       ...intelligence,
     });
   } catch (e: any) {
@@ -344,6 +488,13 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ missi
       companySize: Object.prototype.hasOwnProperty.call(updates, 'companySize') ? normalizeText(updates.companySize) : normalizeText(currentParams.companySize),
       campaignName: Object.prototype.hasOwnProperty.call(updates, 'campaignName') ? normalizeText(updates.campaignName) : normalizeText(currentParams.campaignName),
       campaignContext: Object.prototype.hasOwnProperty.call(updates, 'campaignContext') ? normalizeText(updates.campaignContext) : normalizeText(currentParams.campaignContext),
+      targetOutcome: Object.prototype.hasOwnProperty.call(updates, 'targetOutcome') ? normalizeText(updates.targetOutcome) : normalizeText(currentParams.targetOutcome),
+      targetMeetings: clamp(Object.prototype.hasOwnProperty.call(updates, 'targetMeetings') ? updates.targetMeetings : currentParams.targetMeetings, 1, 500, 5),
+      targetPositiveReplies: clamp(Object.prototype.hasOwnProperty.call(updates, 'targetPositiveReplies') ? updates.targetPositiveReplies : currentParams.targetPositiveReplies, 1, 1000, 12),
+      targetPipelineValue: clamp(Object.prototype.hasOwnProperty.call(updates, 'targetPipelineValue') ? updates.targetPipelineValue : currentParams.targetPipelineValue, 1, 1000000000, 10000),
+      targetTimelineDays: clamp(Object.prototype.hasOwnProperty.call(updates, 'targetTimelineDays') ? updates.targetTimelineDays : currentParams.targetTimelineDays, 1, 365, 30),
+      idealCustomerProfile: Object.prototype.hasOwnProperty.call(updates, 'idealCustomerProfile') ? normalizeText(updates.idealCustomerProfile) : normalizeText(currentParams.idealCustomerProfile),
+      valueProposition: Object.prototype.hasOwnProperty.call(updates, 'valueProposition') ? normalizeText(updates.valueProposition) : normalizeText(currentParams.valueProposition),
       enrichmentLevel: Object.prototype.hasOwnProperty.call(updates, 'enrichmentLevel')
         ? (String(updates.enrichmentLevel) === 'deep' ? 'deep' : 'basic')
         : (String(currentParams.enrichmentLevel) === 'deep' ? 'deep' : 'basic'),
@@ -401,6 +552,8 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ missi
 
     if (Object.prototype.hasOwnProperty.call(updates, 'goalSummary')) {
       missionPatch.goal_summary = normalizeText(updates.goalSummary);
+    } else {
+      missionPatch.goal_summary = buildMissionGoalSummary(nextParams);
     }
 
     const { data: updatedMission, error: updateMissionErr } = await admin
@@ -424,18 +577,25 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ missi
     let patchedPendingTasks = 0;
     for (const t of (pendingTasks || [])) {
       const payload = { ...(t.payload || {}) };
-      const commonPatch = {
-        jobTitle: nextParams.jobTitle,
-        location: nextParams.location,
-        industry: nextParams.industry,
-        keywords: nextParams.keywords,
-        companySize: nextParams.companySize,
-        seniorities: nextParams.seniorities,
-        enrichmentLevel: nextParams.enrichmentLevel,
-        campaignName: nextParams.campaignName,
-        campaignContext: nextParams.campaignContext,
-        missionTitle: updatedMission.title,
-      };
+        const commonPatch = {
+          jobTitle: nextParams.jobTitle,
+          location: nextParams.location,
+          industry: nextParams.industry,
+          keywords: nextParams.keywords,
+          companySize: nextParams.companySize,
+          seniorities: nextParams.seniorities,
+          targetOutcome: nextParams.targetOutcome,
+          targetMeetings: nextParams.targetMeetings,
+          targetPositiveReplies: nextParams.targetPositiveReplies,
+          targetPipelineValue: nextParams.targetPipelineValue,
+          targetTimelineDays: nextParams.targetTimelineDays,
+          idealCustomerProfile: nextParams.idealCustomerProfile,
+          valueProposition: nextParams.valueProposition,
+          enrichmentLevel: nextParams.enrichmentLevel,
+          campaignName: nextParams.campaignName,
+          campaignContext: nextParams.campaignContext,
+          missionTitle: updatedMission.title,
+        };
 
       let nextPayload = payload;
       if (t.type === 'SEARCH' || t.type === 'GENERATE_CAMPAIGN') {
@@ -485,13 +645,21 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ missi
     });
 
     const metrics = await computeMissionMetrics(admin, updatedMission);
-    const intelligence = buildRecommendations(metrics, updatedMission);
+    const goalProgress = computeMissionGoalProgress(updatedMission.params || {}, {
+      meetings: metrics.meetingRequestsTotal,
+      positiveReplies: metrics.positiveRepliesTotal,
+      pipelineValue: metrics.pipelineValueProxy,
+    });
+    const allocatorPlan = buildAllocatorPlan(metrics, updatedMission, goalProgress);
+    const intelligence = buildRecommendations(metrics, updatedMission, goalProgress);
 
     return NextResponse.json({
       ok: true,
       patchedPendingTasks,
       mission: buildMissionSnapshot(updatedMission),
       metrics,
+      goalProgress,
+      allocatorPlan,
       ...intelligence,
     });
   } catch (e: any) {

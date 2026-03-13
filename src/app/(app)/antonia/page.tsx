@@ -8,6 +8,7 @@ import { AntoniaMission, AntoniaConfig, Campaign } from '@/lib/types';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -46,6 +47,12 @@ import { MissionQueues } from '@/components/antonia/MissionQueues';
 import { LeadAuditTrail } from '@/components/antonia/LeadAuditTrail';
 import { ActiveAgentsPanel } from '@/components/antonia/ActiveAgentsPanel';
 import { MissionTunerDialog } from '@/components/antonia/MissionTunerDialog';
+import { AutopilotControlCenter } from '@/components/antonia/AutopilotControlCenter';
+import { AutopilotExceptionsPanel } from '@/components/antonia/AutopilotExceptionsPanel';
+import { AutopilotNextActionsPanel } from '@/components/antonia/AutopilotNextActionsPanel';
+import { AutopilotPlaybookBenchmarksPanel } from '@/components/antonia/AutopilotPlaybookBenchmarksPanel';
+import { AutopilotExecutiveReportPanel } from '@/components/antonia/AutopilotExecutiveReportPanel';
+import { AntoniaPlaybookPicker } from '@/components/antonia/AntoniaPlaybookPicker';
 
 import {
     Sheet,
@@ -73,11 +80,14 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { companySizes } from '@/lib/data';
 import { APOLLO_SENIORITIES } from '@/lib/apollo-taxonomies';
+import { ANTONIA_OUTSOURCING_PLAYBOOKS, type AntoniaPlaybook } from '@/lib/antonia-playbooks';
+import { buildMissionGoalSummary, shortMissionGoalLabel } from '@/lib/antonia-mission-goals';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
 
 export default function AntoniaPage() {
+    const [activeTab, setActiveTab] = useState('builder');
     const [missions, setMissions] = useState<AntoniaMission[]>([]);
     const [loading, setLoading] = useState(true);
     const [config, setConfig] = useState<AntoniaConfig | null>(null);
@@ -85,6 +95,7 @@ export default function AntoniaPage() {
     const [userId, setUserId] = useState<string | null>(null);
     const [existingCampaigns, setExistingCampaigns] = useState<Campaign[]>([]);
     const [campaignSearch, setCampaignSearch] = useState('');
+    const [selectedPlaybookId, setSelectedPlaybookId] = useState<string | null>(null);
 
     // Wizard State
     const [step, setStep] = useState(1);
@@ -96,9 +107,18 @@ export default function AntoniaPage() {
         companySize: '',
         seniorities: [] as string[],
         missionName: '',
+        targetOutcome: 'meetings' as 'meetings' | 'positive_replies' | 'pipeline',
+        targetMeetings: 5,
+        targetPositiveReplies: 12,
+        targetPipelineValue: 10000,
+        targetTimelineDays: 30,
+        idealCustomerProfile: '',
+        valueProposition: '',
         enrichmentLevel: 'basic' as 'basic' | 'deep',
         campaignName: '',
         campaignContext: '',
+        playbookId: '',
+        playbookName: '',
         autoGenerateCampaign: false,
         dailySearchLimit: 1,
         dailyEnrichLimit: 10,
@@ -294,7 +314,7 @@ export default function AntoniaPage() {
 
         try {
             const title = wizardData.missionName || `Buscar ${wizardData.jobTitle} en ${wizardData.location}`;
-            const summary = `Buscar ${wizardData.jobTitle}s en ${wizardData.industry} (${wizardData.location}). Enriquecer con nivel ${wizardData.enrichmentLevel}. Campaña: ${wizardData.campaignName || 'Ninguna'}.`;
+            const summary = buildMissionGoalSummary(wizardData);
 
             console.log('[ANTONIA] Creating mission with title:', title);
 
@@ -341,9 +361,18 @@ export default function AntoniaPage() {
                 companySize: '',
                 seniorities: [],
                 missionName: '',
+                targetOutcome: 'meetings',
+                targetMeetings: 5,
+                targetPositiveReplies: 12,
+                targetPipelineValue: 10000,
+                targetTimelineDays: 30,
+                idealCustomerProfile: '',
+                valueProposition: '',
                 enrichmentLevel: 'basic',
                 campaignName: '',
                 campaignContext: '',
+                playbookId: '',
+                playbookName: '',
                 autoGenerateCampaign: false,
                 dailySearchLimit: 1,
                 dailyEnrichLimit: 10,
@@ -457,6 +486,23 @@ export default function AntoniaPage() {
         }));
     };
 
+    const applyPlaybook = (playbook: AntoniaPlaybook) => {
+        setSelectedPlaybookId(playbook.id);
+        setWizardData((prev) => ({
+            ...prev,
+            ...playbook.defaults,
+            playbookId: playbook.id,
+            playbookName: playbook.name,
+            campaignName: playbook.defaults.autoGenerateCampaign ? '' : prev.campaignName,
+        }));
+        setStep(1);
+        setActiveTab('builder');
+        toast({
+            title: 'Playbook aplicado',
+            description: `${playbook.name} cargo la mision con defaults de outsourcing.`,
+        });
+    };
+
 
 
 
@@ -472,6 +518,16 @@ export default function AntoniaPage() {
                 dailySearchLimit: 3,
                 dailyEnrichLimit: 50,
                 dailyInvestigateLimit: 20,
+                trackingEnabled: false,
+                autopilotEnabled: false,
+                autopilotMode: 'manual_assist',
+                approvalMode: 'low_score_only',
+                minAutoSendScore: 70,
+                minReviewScore: 45,
+                bookingLink: '',
+                meetingInstructions: '',
+                pauseOnNegativeReply: true,
+                pauseOnFailureSpike: true,
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             };
@@ -529,10 +585,11 @@ export default function AntoniaPage() {
                 description="Tu asistente de prospección automatizada. Define misiones y ANTONIA se encarga del resto."
             />
 
-            <Tabs defaultValue="builder" className="w-full">
-                <TabsList className="grid w-full max-w-3xl grid-cols-5">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <TabsList className="grid w-full max-w-4xl grid-cols-6">
                     <TabsTrigger value="builder">Crear Misión</TabsTrigger>
                     <TabsTrigger value="active">Activas ({missions.length})</TabsTrigger>
+                    <TabsTrigger value="autopilot">Autopilot</TabsTrigger>
                     <TabsTrigger value="reportes" className="flex items-center gap-2">
                         <FileText className="w-4 h-4" /> Reportes
                     </TabsTrigger>
@@ -550,6 +607,12 @@ export default function AntoniaPage() {
                     <QuotaUsageCard />
 
                     {orgId && <ActiveAgentsPanel organizationId={orgId} />}
+
+                    <AntoniaPlaybookPicker
+                        playbooks={ANTONIA_OUTSOURCING_PLAYBOOKS}
+                        selectedId={selectedPlaybookId}
+                        onApply={applyPlaybook}
+                    />
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* Left: Helper */}
@@ -687,6 +750,62 @@ export default function AntoniaPage() {
                                             </DropdownMenu>
                                             <p className="text-xs text-muted-foreground">Opcional: C-Level, VP, Director, Manager, etc.</p>
                                         </div>
+
+                                        <div className="space-y-4 border p-4 rounded-lg bg-secondary/10">
+                                            <div>
+                                                <Label className="text-base font-semibold">Objetivo comercial</Label>
+                                                <p className="text-xs text-muted-foreground mt-1">Define que resultado debe perseguir ANTONIA, no solo a quien buscar.</p>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-2">
+                                                    <Label>Outcome principal</Label>
+                                                    <Select value={wizardData.targetOutcome} onValueChange={(v) => setWizardData({ ...wizardData, targetOutcome: v as 'meetings' | 'positive_replies' | 'pipeline' })}>
+                                                        <SelectTrigger>
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="meetings">Reuniones</SelectItem>
+                                                            <SelectItem value="positive_replies">Replies positivas</SelectItem>
+                                                            <SelectItem value="pipeline">Pipeline</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label>Ventana objetivo (dias)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        min="1"
+                                                        max="365"
+                                                        value={wizardData.targetTimelineDays}
+                                                        onChange={(e) => setWizardData({ ...wizardData, targetTimelineDays: parseInt(e.target.value) || 30 })}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-2">
+                                                    <Label>{wizardData.targetOutcome === 'positive_replies' ? 'Replies objetivo' : 'Reuniones objetivo'}</Label>
+                                                    <Input
+                                                        type="number"
+                                                        min="1"
+                                                        max="500"
+                                                        value={wizardData.targetOutcome === 'positive_replies' ? wizardData.targetPositiveReplies : wizardData.targetMeetings}
+                                                        onChange={(e) => setWizardData({
+                                                            ...wizardData,
+                                                            [wizardData.targetOutcome === 'positive_replies' ? 'targetPositiveReplies' : 'targetMeetings']: parseInt(e.target.value) || (wizardData.targetOutcome === 'positive_replies' ? 12 : 5)
+                                                        })}
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label>Meta de pipeline (opcional)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        min="1"
+                                                        value={wizardData.targetPipelineValue}
+                                                        onChange={(e) => setWizardData({ ...wizardData, targetPipelineValue: parseInt(e.target.value) || 10000 })}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
 
@@ -700,6 +819,26 @@ export default function AntoniaPage() {
                                                 value={wizardData.missionName || ''}
                                                 onChange={(e) => setWizardData({ ...wizardData, missionName: e.target.value })}
                                             />
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                            <div className="space-y-2">
+                                                <Label>ICP / cuenta ideal</Label>
+                                                <Textarea
+                                                    rows={3}
+                                                    placeholder="Ej: retailers con multiples sucursales, alta rotacion y picos de contratacion"
+                                                    value={wizardData.idealCustomerProfile}
+                                                    onChange={(e) => setWizardData({ ...wizardData, idealCustomerProfile: e.target.value })}
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Propuesta de valor</Label>
+                                                <Textarea
+                                                    rows={3}
+                                                    placeholder="Ej: cubrir dotacion mas rapido y bajar carga operativa con outsourcing flexible"
+                                                    value={wizardData.valueProposition}
+                                                    onChange={(e) => setWizardData({ ...wizardData, valueProposition: e.target.value })}
+                                                />
+                                            </div>
                                         </div>
                                         <div className="space-y-2">
                                             <Label>Nivel de Enriquecimiento</Label>
@@ -928,9 +1067,19 @@ export default function AntoniaPage() {
                                                 <span className="font-medium">{wizardData.jobTitle} en {wizardData.industry}</span>
                                             </div>
                                             <div className="flex justify-between">
+                                                <span className="text-muted-foreground">Meta:</span>
+                                                <span className="font-medium">{shortMissionGoalLabel(wizardData)}</span>
+                                            </div>
+                                            <div className="flex justify-between">
                                                 <span className="text-muted-foreground">Ubicación:</span>
                                                 <span className="font-medium">{wizardData.location}</span>
                                             </div>
+                                            {wizardData.valueProposition && (
+                                                <div className="flex justify-between gap-4">
+                                                    <span className="text-muted-foreground">Valor:</span>
+                                                    <span className="font-medium text-right">{wizardData.valueProposition}</span>
+                                                </div>
+                                            )}
                                             {wizardData.keywords && (
                                                 <div className="flex justify-between">
                                                     <span className="text-muted-foreground">Filtros:</span>
@@ -1050,6 +1199,13 @@ export default function AntoniaPage() {
                                             {mission.goalSummary}
                                         </p>
 
+                                        {mission.params?.targetOutcome && (
+                                            <div className="mb-3 flex flex-wrap gap-2">
+                                                <Badge variant="outline">{shortMissionGoalLabel(mission.params)}</Badge>
+                                                {mission.params?.playbookName && <Badge variant="secondary">{mission.params.playbookName}</Badge>}
+                                            </div>
+                                        )}
+
                                         {/* Mission Parameters */}
                                         <div className="mb-4 p-3 bg-secondary/20 rounded-lg border text-xs space-y-1">
                                             <div className="flex justify-between">
@@ -1119,6 +1275,16 @@ export default function AntoniaPage() {
                             ))
                         )}
                     </div>
+                </TabsContent>
+
+                <TabsContent value="autopilot" className="space-y-6">
+                    <QuotaUsageCard />
+                    {orgId && <ActiveAgentsPanel organizationId={orgId} />}
+                    <AutopilotExecutiveReportPanel />
+                    <AutopilotNextActionsPanel onOpenTab={setActiveTab} />
+                    <AutopilotControlCenter config={config} onUpdateConfig={handleUpdateConfig} />
+                    <AutopilotPlaybookBenchmarksPanel />
+                    <AutopilotExceptionsPanel />
                 </TabsContent>
 
                 <TabsContent value="reportes" className="space-y-6">
@@ -1230,6 +1396,130 @@ export default function AntoniaPage() {
                                                 </TableBody>
                                             </Table>
                                         </div>
+                                    </div>
+                                </div>
+                             </div>
+
+                             <Separator />
+
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-medium">Autopilot y Guardrails</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="flex items-center justify-between rounded-lg border p-4">
+                                        <div>
+                                            <Label htmlFor="autopilot-master">Autopilot</Label>
+                                            <p className="text-sm text-muted-foreground">Permite a ANTONIA operar con reglas automáticas.</p>
+                                        </div>
+                                        <Switch
+                                            id="autopilot-master"
+                                            checked={!!config?.autopilotEnabled}
+                                            onCheckedChange={(c) => handleUpdateConfig('autopilotEnabled', c)}
+                                        />
+                                    </div>
+                                    <div className="space-y-2 rounded-lg border p-4">
+                                        <Label>Modo operativo</Label>
+                                        <Select
+                                            value={config?.autopilotMode || 'manual_assist'}
+                                            onValueChange={(value) => handleUpdateConfig('autopilotMode', value)}
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="manual_assist">Manual Assist</SelectItem>
+                                                <SelectItem value="semi_auto">Semi Auto</SelectItem>
+                                                <SelectItem value="full_auto">Full Auto</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="space-y-2 rounded-lg border p-4">
+                                        <Label>Política de aprobación</Label>
+                                        <Select
+                                            value={config?.approvalMode || 'low_score_only'}
+                                            onValueChange={(value) => handleUpdateConfig('approvalMode', value)}
+                                        >
+                                            <SelectTrigger>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all_contacts">Aprobar todos</SelectItem>
+                                                <SelectItem value="low_score_only">Solo score bajo</SelectItem>
+                                                <SelectItem value="high_risk_only">Solo alto riesgo</SelectItem>
+                                                <SelectItem value="disabled">Sin aprobación</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="rounded-lg border p-4">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-2">
+                                                <Label htmlFor="auto-send-score">Score auto-send</Label>
+                                                <Input
+                                                    key={`auto-send-score-${config?.minAutoSendScore ?? 70}`}
+                                                    id="auto-send-score"
+                                                    type="number"
+                                                    min="0"
+                                                    max="100"
+                                                    defaultValue={config?.minAutoSendScore ?? 70}
+                                                    onBlur={(e) => handleUpdateConfig('minAutoSendScore', Number(e.target.value || 0))}
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="review-score">Score review</Label>
+                                                <Input
+                                                    key={`review-score-${config?.minReviewScore ?? 45}`}
+                                                    id="review-score"
+                                                    type="number"
+                                                    min="0"
+                                                    max="100"
+                                                    defaultValue={config?.minReviewScore ?? 45}
+                                                    onBlur={(e) => handleUpdateConfig('minReviewScore', Number(e.target.value || 0))}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center justify-between rounded-lg border p-4">
+                                        <div>
+                                            <Label htmlFor="pause-negative-reply">Pausar por reply negativo</Label>
+                                            <p className="text-sm text-muted-foreground">Evita seguir empujando secuencias en cuentas sensibles.</p>
+                                        </div>
+                                        <Switch
+                                            id="pause-negative-reply"
+                                            checked={!!config?.pauseOnNegativeReply}
+                                            onCheckedChange={(c) => handleUpdateConfig('pauseOnNegativeReply', c)}
+                                        />
+                                    </div>
+                                    <div className="flex items-center justify-between rounded-lg border p-4">
+                                        <div>
+                                            <Label htmlFor="pause-failure-spike">Pausar por fallos</Label>
+                                            <p className="text-sm text-muted-foreground">Detiene contacto si la entrega o el canal empiezan a fallar.</p>
+                                        </div>
+                                        <Switch
+                                            id="pause-failure-spike"
+                                            checked={!!config?.pauseOnFailureSpike}
+                                            onCheckedChange={(c) => handleUpdateConfig('pauseOnFailureSpike', c)}
+                                        />
+                                    </div>
+                                    <div className="space-y-2 rounded-lg border p-4 md:col-span-2">
+                                        <Label htmlFor="booking-link-settings">Booking link</Label>
+                                        <Input
+                                            key={`booking-link-settings-${config?.bookingLink ?? ''}`}
+                                            id="booking-link-settings"
+                                            defaultValue={config?.bookingLink ?? ''}
+                                            placeholder="https://calendly.com/tu-equipo/demo"
+                                            onBlur={(e: React.FocusEvent<HTMLInputElement>) => handleUpdateConfig('bookingLink', e.target.value)}
+                                        />
+                                        <p className="text-xs text-muted-foreground">Link que ANTONIA sugerira cuando detecte interes o pedido de reunion.</p>
+                                    </div>
+                                    <div className="space-y-2 rounded-lg border p-4 md:col-span-2">
+                                        <Label htmlFor="meeting-instructions-settings">Notas para handoff a reunion</Label>
+                                        <Textarea
+                                            key={`meeting-instructions-settings-${config?.meetingInstructions ?? ''}`}
+                                            id="meeting-instructions-settings"
+                                            defaultValue={config?.meetingInstructions ?? ''}
+                                            placeholder="Ej: ofrece una llamada de 20 min, menciona capacidad de staffing y pide confirmar asistentes."
+                                            onBlur={(e: React.FocusEvent<HTMLTextAreaElement>) => handleUpdateConfig('meetingInstructions', e.target.value)}
+                                            className="min-h-[100px]"
+                                        />
                                     </div>
                                 </div>
                             </div>

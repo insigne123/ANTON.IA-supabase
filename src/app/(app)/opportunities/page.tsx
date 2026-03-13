@@ -13,11 +13,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { savedOpportunitiesStorage } from '@/lib/services/opportunities-service';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import * as Quota from '@/lib/quota-client';
-import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { parseJsonResponse } from '@/lib/http/safe-json';
 
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
-import { getClientId } from '@/lib/client-id';
 import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
 
 type SearchForm = {
@@ -206,11 +204,9 @@ export default function OpportunitiesPage() {
         ? personLocations.split(',').map(s => s.trim()).filter(Boolean)
         : undefined;
 
-      const ident = (microsoftAuthService as any)?.getUserIdentity?.();
-      const userId = ident?.email || ident?.id || 'anonymous';
       const res = await fetch('/api/opportunities/leads-apollo', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           // Adapt payload for leads-apollo
           companyNames: companies.map(c => c.companyName),
@@ -262,7 +258,6 @@ export default function OpportunitiesPage() {
 
     setEnriching(true);
     try {
-      const clientId = getClientId?.() || (microsoftAuthService as any)?.getUserIdentity?.()?.email || 'anonymous';
       const payloadLeads = chosen.map((l, i) => ({
         fullName: l.fullName,
         linkedinUrl: l.linkedinUrl || undefined,
@@ -279,7 +274,6 @@ export default function OpportunitiesPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-id': clientId,
           'x-quota-ticket': getQuotaTicket() || '',
         },
         body: JSON.stringify({ leads: payloadLeads }),
@@ -291,7 +285,7 @@ export default function OpportunitiesPage() {
       }
       const j = parsed.data ?? {};
       if (!parsed.ok) {
-        if (parsed.status === 401) throw new Error('No autenticado (x-user-id)');
+        if (parsed.status === 401) throw new Error('No autenticado');
         if (parsed.status === 429) throw new Error(j?.error || 'Límite diario superado');
         const snippet = j?.error || j?.message || parsed.text || 'Error interno';
         throw new Error(`HTTP ${parsed.status}: ${String(snippet).slice(0, 200)}`);

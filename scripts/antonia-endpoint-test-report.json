@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-02-17T17:55:28.360Z",
+  "generatedAt": "2026-03-12T16:22:04.968Z",
   "baseUrl": "http://127.0.0.1:9013",
-  "discoveredHandlers": 49,
-  "passed": 49,
+  "discoveredHandlers": 79,
+  "passed": 79,
   "failed": 0,
   "skipped": 0,
   "allowHighRisk": false,
@@ -19,7 +19,7 @@
       "expected": [
         200
       ],
-      "durationMs": 5780,
+      "durationMs": 16922,
       "responsePreview": "{\"summary\":\"Reporte normalizado\"}",
       "location": ""
     },
@@ -34,8 +34,8 @@
       "expected": [
         200
       ],
-      "durationMs": 10341,
-      "responsePreview": "{\"steps\":[{\"name\":\"Presentación e Identificación de Desafíos\",\"offsetDays\":0,\"subject\":\"¿Operaciones más eficientes en {{company}}? 🤔\",\"bodyHtml\":\"<p>Estimado/a {{lead.name}},</p><br><p>Soy {{sender.name}} de ANTON.IA. ",
+      "durationMs": 10460,
+      "responsePreview": "{\"steps\":[{\"name\":\"Presentación de ANTON.IA\",\"offsetDays\":0,\"subject\":\"Optimizando Operaciones: Una Solución a su Medida\",\"bodyHtml\":\"<p>Estimado/a {{lead.name}},</p><br><p>Mi nombre es {{sender.name}} de ANTON.IA. Nos e",
       "location": ""
     },
     {
@@ -49,8 +49,8 @@
       "expected": [
         200
       ],
-      "durationMs": 5404,
-      "responsePreview": "{\"opening\":\"Hola Juan, soy [Tu Nombre] de ANTON.IA. Entiendo que como Gerente de Operaciones en Chile, estás constantemente buscando optimizar procesos. Me gustaría conversar brevemente sobre cómo la automatización podrí",
+      "durationMs": 4579,
+      "responsePreview": "{\"opening\":\"Hola Juan, ¿cómo estás? Vi en tu perfil de LinkedIn que lideras operaciones y te enfocas en la mejora continua. Justamente quería conversar contigo porque...\",\"pitch\":\"En ANTON.IA, ayudamos a empresas como la",
       "location": ""
     },
     {
@@ -64,8 +64,8 @@
       "expected": [
         200
       ],
-      "durationMs": 80,
-      "responsePreview": "{\"ok\":true,\"genkit\":\"not-in-config\",\"ts\":1771350844397}",
+      "durationMs": 104,
+      "responsePreview": "{\"ok\":true,\"genkit\":\"not-in-config\",\"ts\":1773332352517}",
       "location": ""
     },
     {
@@ -79,8 +79,60 @@
       "expected": [
         200
       ],
-      "durationMs": 3188,
-      "responsePreview": "{\"subject\":\"Automatiza tu prospección y obtén más respuestas\",\"body\":\"Hola María,\\n\\nSoy [Tu Nombre] de ANTON.IA, y te contacto porque sé que, como CMO, siempre estás buscando formas de optimizar tus estrategias.\\n\\nCons",
+      "durationMs": 3720,
+      "responsePreview": "{\"subject\":\"Automatización de prospección para [Empresa Objetivo]\",\"body\":\"Hola Maria Gonzalez,\\n\\nEspero que esta correo te encuentre bien. Soy [Tu Nombre] de ANTON.IA, y me dedico a ayudar a empresas como la tuya a opt",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/antonia/autopilot/overview",
+      "key": "GET /api/antonia/autopilot/overview",
+      "file": "src/app/api/antonia/autopilot/overview/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 3543,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/antonia/exceptions",
+      "key": "GET /api/antonia/exceptions",
+      "file": "src/app/api/antonia/exceptions/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 2298,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
+      "location": ""
+    },
+    {
+      "method": "PATCH",
+      "endpoint": "/api/antonia/exceptions",
+      "key": "PATCH /api/antonia/exceptions",
+      "file": "src/app/api/antonia/exceptions/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 369,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/antonia/executive-report",
+      "key": "GET /api/antonia/executive-report",
+      "file": "src/app/api/antonia/executive-report/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 3551,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
     {
@@ -92,7 +144,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 6156,
+      "durationMs": 10489,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -105,7 +157,33 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 525,
+      "durationMs": 389,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/antonia/next-actions",
+      "key": "GET /api/antonia/next-actions",
+      "file": "src/app/api/antonia/next-actions/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 1194,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/antonia/playbook-benchmarks",
+      "key": "GET /api/antonia/playbook-benchmarks",
+      "file": "src/app/api/antonia/playbook-benchmarks/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 2067,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -118,7 +196,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 2033,
+      "durationMs": 2514,
       "responsePreview": "{\"error\":\"Unauthorized\",\"details\":{\"__isAuthError\":true,\"name\":\"AuthSessionMissingError\",\"status\":400}}",
       "location": ""
     },
@@ -131,7 +209,7 @@
       "skipped": false,
       "status": 400,
       "expected": "<500",
-      "durationMs": 532,
+      "durationMs": 982,
       "responsePreview": "{\"error\":\"missionId required\"}",
       "location": ""
     },
@@ -147,7 +225,7 @@
         302,
         307
       ],
-      "durationMs": 423,
+      "durationMs": 990,
       "responsePreview": "",
       "location": "http://localhost:9013/"
     },
@@ -163,7 +241,7 @@
         302,
         307
       ],
-      "durationMs": 586,
+      "durationMs": 1187,
       "responsePreview": "",
       "location": "https://studio--leadflowai-3yjcy.us-central1.hosted.app/outlook?error=no_code"
     },
@@ -179,7 +257,7 @@
         302,
         307
       ],
-      "durationMs": 487,
+      "durationMs": 1621,
       "responsePreview": "",
       "location": "https://studio--leadflowai-3yjcy.us-central1.hosted.app/gmail?error=no_code"
     },
@@ -194,7 +272,7 @@
       "expected": [
         503
       ],
-      "durationMs": 544,
+      "durationMs": 1172,
       "responsePreview": "{\"error\":\"Endpoint temporarily disabled due to build issues\"}",
       "location": ""
     },
@@ -207,7 +285,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 1061,
+      "durationMs": 1804,
       "responsePreview": "{\"error\":\"Unauthorized - Missing user ID\"}",
       "location": ""
     },
@@ -222,8 +300,8 @@
       "expected": [
         200
       ],
-      "durationMs": 1296,
-      "responsePreview": "{\"dryRun\":true,\"authorized\":true,\"activeMissions\":1,\"pendingTasks\":0,\"firebaseForwardConfigured\":false,\"backupProcessingEnabled\":false}",
+      "durationMs": 3207,
+      "responsePreview": "{\"dryRun\":true,\"authorized\":true,\"activeMissions\":1,\"pendingTasks\":0,\"skipFirebaseForward\":false,\"forceBackupProcessing\":false,\"firebaseForwardConfigured\":false,\"backupProcessingEnabled\":false}",
       "location": ""
     },
     {
@@ -237,8 +315,8 @@
       "expected": [
         200
       ],
-      "durationMs": 2474,
-      "responsePreview": "{\"dryRun\":true,\"processed\":622,\"summary\":{\"sent\":0,\"failed\":0,\"eligibleDryRun\":622,\"blockedUnsubscribed\":0,\"blockedDomain\":42},\"resultCount\":622,\"results\":[]}",
+      "durationMs": 3110,
+      "responsePreview": "{\"dryRun\":true,\"processed\":858,\"summary\":{\"sent\":0,\"failed\":0,\"eligibleDryRun\":858,\"blockedUnsubscribed\":4,\"blockedDomain\":42},\"resultCount\":858,\"results\":[]}",
       "location": ""
     },
     {
@@ -252,7 +330,7 @@
       "expected": [
         200
       ],
-      "durationMs": 1669,
+      "durationMs": 2357,
       "responsePreview": "{\"ok\":true,\"info\":{\"username\":\"plush_zinnia\",\"userId\":\"ZBYXUS5azWYsj4bQW\",\"email\":\"nicolas.yarur.g@yago.cl\"}}",
       "location": ""
     },
@@ -267,7 +345,7 @@
       "expected": [
         200
       ],
-      "durationMs": 924,
+      "durationMs": 1297,
       "responsePreview": "{\"logs\":[]}",
       "location": ""
     },
@@ -282,7 +360,7 @@
       "expected": [
         200
       ],
-      "durationMs": 39,
+      "durationMs": 48,
       "responsePreview": "{\"ok\":true}",
       "location": ""
     },
@@ -297,7 +375,7 @@
       "expected": [
         200
       ],
-      "durationMs": 41,
+      "durationMs": 51,
       "responsePreview": "{\"ok\":true}",
       "location": ""
     },
@@ -312,8 +390,8 @@
       "expected": [
         200
       ],
-      "durationMs": 3427,
-      "responsePreview": "{\"drafts\":[{\"subject\":\"Colaboración para Empresa X\",\"body\":\"Hola {{lead.firstName}}, en lugar de rodeos, ¿te parece si agendamos 15 minutos para conversar sobre cómo podemos colaborar? Puedes reservar un espacio en mi ca",
+      "durationMs": 3675,
+      "responsePreview": "{\"drafts\":[{\"subject\":\"Colaboracion para Empresa X\",\"body\":\"Hola {{lead.firstName}}, me gustaría conversar contigo directamente sobre cómo podemos colaborar. ¿Tienes 15 minutos disponibles para una llamada esta semana?\",",
       "location": ""
     },
     {
@@ -327,7 +405,7 @@
       "expected": [
         200
       ],
-      "durationMs": 713,
+      "durationMs": 1751,
       "responsePreview": "{\"subject\":\"ANTON.IA × Empresa X\",\"body\":\"Hola Camila Torres,\\n\\nNoté Seguimiento manual en Empresa X. En ANTON.IA ayudamos con Automatizacion y Mejoramos conversion.\\n\\n¿Te parece una llamada breve esta semana para expl",
       "location": ""
     },
@@ -342,8 +420,8 @@
       "expected": [
         200
       ],
-      "durationMs": 4870,
-      "responsePreview": "{\"styleProfile\":{\"scope\":\"leads\",\"name\":\"Estilo conversacional\",\"tone\":\"executive\",\"length\":\"short\",\"structure\":[\"hook\",\"value\",\"cta\"],\"do\":[\"mantener claridad\",\"evitar jerga\",\"ir al grano\"],\"dont\":[\"promesas absolutas\",",
+      "durationMs": 6783,
+      "responsePreview": "{\"styleProfile\":{\"scope\":\"leads\",\"name\":\"Estilo conversacional\",\"tone\":\"consultative\",\"length\":\"short\",\"structure\":[\"hook\",\"value\",\"cta\"],\"do\":[\"mantener claridad\",\"evitar jerga\",\"ir al grano\"],\"dont\":[\"promesas absoluta",
       "location": ""
     },
     {
@@ -355,7 +433,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 2819,
+      "durationMs": 1107,
       "responsePreview": "{\"error\":\"Unauthorized (No Session)\"}",
       "location": ""
     },
@@ -368,7 +446,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 2339,
+      "durationMs": 1691,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -381,7 +459,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 535,
+      "durationMs": 190,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -394,7 +472,7 @@
       "skipped": false,
       "status": 400,
       "expected": "<500",
-      "durationMs": 1617,
+      "durationMs": 1003,
       "responsePreview": "{\"error\":\"industry_required\"}",
       "location": ""
     },
@@ -409,7 +487,7 @@
       "expected": [
         400
       ],
-      "durationMs": 1875,
+      "durationMs": 860,
       "responsePreview": "{\"error\":\"runId is required\"}",
       "location": ""
     },
@@ -422,7 +500,7 @@
       "skipped": false,
       "status": 400,
       "expected": "<500",
-      "durationMs": 1460,
+      "durationMs": 1115,
       "responsePreview": "{\"success\":false,\"error\":\"Name and company are required\"}",
       "location": ""
     },
@@ -435,10 +513,323 @@
       "skipped": false,
       "status": 400,
       "expected": [
-        400
+        400,
+        401
       ],
-      "durationMs": 1781,
+      "durationMs": 1720,
       "responsePreview": "{\"error\":\"INVALID_REQUEST_BODY\",\"details\":{\"formErrors\":[\"Expected array, received object\"],\"fieldErrors\":{}}}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/openclaw/v1/antonia/missions",
+      "key": "GET /api/openclaw/v1/antonia/missions",
+      "file": "src/app/api/openclaw/v1/antonia/missions/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 1651,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/openclaw/v1/antonia/missions/[missionId]/trigger",
+      "key": "POST /api/openclaw/v1/antonia/missions/[missionId]/trigger",
+      "file": "src/app/api/openclaw/v1/antonia/missions/[missionId]/trigger/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 3682,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/openclaw/v1/antonia/tasks",
+      "key": "GET /api/openclaw/v1/antonia/tasks",
+      "file": "src/app/api/openclaw/v1/antonia/tasks/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 2024,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/openclaw/v1/antonia/tasks/[taskId]/cancel",
+      "key": "POST /api/openclaw/v1/antonia/tasks/[taskId]/cancel",
+      "file": "src/app/api/openclaw/v1/antonia/tasks/[taskId]/cancel/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 4714,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/openclaw/v1/antonia/tasks/[taskId]/retry",
+      "key": "POST /api/openclaw/v1/antonia/tasks/[taskId]/retry",
+      "file": "src/app/api/openclaw/v1/antonia/tasks/[taskId]/retry/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 4035,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/openclaw/v1/antonia/tasks/rescue-stuck",
+      "key": "POST /api/openclaw/v1/antonia/tasks/rescue-stuck",
+      "file": "src/app/api/openclaw/v1/antonia/tasks/rescue-stuck/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 2191,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/openclaw/v1/auth/exchange",
+      "key": "POST /api/openclaw/v1/auth/exchange",
+      "file": "src/app/api/openclaw/v1/auth/exchange/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 400,
+      "expected": "<500",
+      "durationMs": 2685,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_API_KEY_MISSING\",\"message\":\"Missing API key\"}}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/openclaw/v1/blocked-domains",
+      "key": "GET /api/openclaw/v1/blocked-domains",
+      "file": "src/app/api/openclaw/v1/blocked-domains/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 3094,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/openclaw/v1/blocked-domains",
+      "key": "POST /api/openclaw/v1/blocked-domains",
+      "file": "src/app/api/openclaw/v1/blocked-domains/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 78,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "DELETE",
+      "endpoint": "/api/openclaw/v1/blocked-domains/[id]",
+      "key": "DELETE /api/openclaw/v1/blocked-domains/[id]",
+      "file": "src/app/api/openclaw/v1/blocked-domains/[id]/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 4376,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/openclaw/v1/campaigns",
+      "key": "GET /api/openclaw/v1/campaigns",
+      "file": "src/app/api/openclaw/v1/campaigns/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 2274,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "PATCH",
+      "endpoint": "/api/openclaw/v1/campaigns/[campaignId]",
+      "key": "PATCH /api/openclaw/v1/campaigns/[campaignId]",
+      "file": "src/app/api/openclaw/v1/campaigns/[campaignId]/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 3863,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/openclaw/v1/campaigns/run",
+      "key": "POST /api/openclaw/v1/campaigns/run",
+      "file": "src/app/api/openclaw/v1/campaigns/run/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 1287,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/openclaw/v1/contacted-leads",
+      "key": "GET /api/openclaw/v1/contacted-leads",
+      "file": "src/app/api/openclaw/v1/contacted-leads/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 1550,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "PATCH",
+      "endpoint": "/api/openclaw/v1/contacted-leads/[id]",
+      "key": "PATCH /api/openclaw/v1/contacted-leads/[id]",
+      "file": "src/app/api/openclaw/v1/contacted-leads/[id]/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 3294,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/openclaw/v1/health",
+      "key": "GET /api/openclaw/v1/health",
+      "file": "src/app/api/openclaw/v1/health/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 200,
+      "expected": "<500",
+      "durationMs": 1632,
+      "responsePreview": "{\"ok\":true,\"data\":{\"service\":\"openclaw-control-api\",\"status\":\"healthy\",\"timestamp\":\"2026-03-12T16:21:02.825Z\"}}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/openclaw/v1/leads",
+      "key": "GET /api/openclaw/v1/leads",
+      "file": "src/app/api/openclaw/v1/leads/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 1946,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "PATCH",
+      "endpoint": "/api/openclaw/v1/leads/[leadId]",
+      "key": "PATCH /api/openclaw/v1/leads/[leadId]",
+      "file": "src/app/api/openclaw/v1/leads/[leadId]/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 3562,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/openclaw/v1/overview",
+      "key": "GET /api/openclaw/v1/overview",
+      "file": "src/app/api/openclaw/v1/overview/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 2643,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/openclaw/v1/quotas",
+      "key": "GET /api/openclaw/v1/quotas",
+      "file": "src/app/api/openclaw/v1/quotas/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 3355,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/openclaw/v1/unsubscribes",
+      "key": "GET /api/openclaw/v1/unsubscribes",
+      "file": "src/app/api/openclaw/v1/unsubscribes/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 2267,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "POST",
+      "endpoint": "/api/openclaw/v1/unsubscribes",
+      "key": "POST /api/openclaw/v1/unsubscribes",
+      "file": "src/app/api/openclaw/v1/unsubscribes/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 62,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "DELETE",
+      "endpoint": "/api/openclaw/v1/unsubscribes/[id]",
+      "key": "DELETE /api/openclaw/v1/unsubscribes/[id]",
+      "file": "src/app/api/openclaw/v1/unsubscribes/[id]/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 3700,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
+      "location": ""
+    },
+    {
+      "method": "GET",
+      "endpoint": "/api/openclaw/v1/whoami",
+      "key": "GET /api/openclaw/v1/whoami",
+      "file": "src/app/api/openclaw/v1/whoami/route.ts",
+      "ok": true,
+      "skipped": false,
+      "status": 401,
+      "expected": "<500",
+      "durationMs": 1415,
+      "responsePreview": "{\"ok\":false,\"error\":{\"code\":\"OPENCLAW_BEARER_MISSING\",\"message\":\"Missing bearer token\"}}",
       "location": ""
     },
     {
@@ -450,8 +841,8 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 2017,
-      "responsePreview": "{\"error\":\"missing user id\"}",
+      "durationMs": 2165,
+      "responsePreview": "{\"error\":\"unauthorized\"}",
       "location": ""
     },
     {
@@ -463,7 +854,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 2103,
+      "durationMs": 2027,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -474,10 +865,10 @@
       "file": "src/app/api/opportunities/orgs-apollo/route.ts",
       "ok": true,
       "skipped": false,
-      "status": 400,
+      "status": 401,
       "expected": "<500",
-      "durationMs": 1577,
-      "responsePreview": "{\"error\":\"companyName requerido\"}",
+      "durationMs": 1837,
+      "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
     {
@@ -489,7 +880,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 2792,
+      "durationMs": 1815,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -504,7 +895,7 @@
       "expected": [
         400
       ],
-      "durationMs": 1774,
+      "durationMs": 1652,
       "responsePreview": "{\"error\":{\"type\":\"invalid-input\",\"message\":\"Falta \\\"runId\\\".\"}}",
       "location": ""
     },
@@ -519,7 +910,7 @@
       "expected": [
         400
       ],
-      "durationMs": 1299,
+      "durationMs": 1064,
       "responsePreview": "{\"error\":\"missing user id\"}",
       "location": ""
     },
@@ -532,7 +923,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 1846,
+      "durationMs": 1491,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -547,8 +938,8 @@
       "expected": [
         200
       ],
-      "durationMs": 1769,
-      "responsePreview": "{\"userId\":\"smoke-test-user\",\"statuses\":[{\"resource\":\"leadSearch\",\"allowed\":false,\"count\":0,\"limit\":50,\"dayKey\":\"2026-02-17\",\"resetAtISO\":\"2026-02-18T00:00:00.000Z\"},{\"resource\":\"research\",\"allowed\":false,\"count\":0,\"limit",
+      "durationMs": 1666,
+      "responsePreview": "{\"userId\":\"smoke-test-user\",\"statuses\":[{\"resource\":\"leadSearch\",\"allowed\":false,\"count\":0,\"limit\":50,\"dayKey\":\"2026-03-12\",\"resetAtISO\":\"2026-03-13T00:00:00.000Z\"},{\"resource\":\"enrich\",\"allowed\":false,\"count\":0,\"limit\":",
       "location": ""
     },
     {
@@ -560,7 +951,7 @@
       "skipped": false,
       "status": 401,
       "expected": "<500",
-      "durationMs": 2096,
+      "durationMs": 2277,
       "responsePreview": "{\"error\":\"Unauthorized\"}",
       "location": ""
     },
@@ -573,7 +964,7 @@
       "skipped": false,
       "status": 200,
       "expected": "<500",
-      "durationMs": 5247,
+      "durationMs": 1347,
       "responsePreview": "{\"ok\":true,\"hasUrl\":true}",
       "location": ""
     },
@@ -588,7 +979,7 @@
       "expected": [
         400
       ],
-      "durationMs": 248,
+      "durationMs": 287,
       "responsePreview": "{\"error\":\"Payload incompleto: requiere id/email/linkedin o nombre+empresa\"}",
       "location": ""
     },
@@ -603,7 +994,7 @@
       "expected": [
         400
       ],
-      "durationMs": 4220,
+      "durationMs": 1486,
       "responsePreview": "{\"error\":\"Missing id or status\"}",
       "location": ""
     },
@@ -616,7 +1007,7 @@
       "skipped": false,
       "status": 200,
       "expected": "<500",
-      "durationMs": 1856,
+      "durationMs": 2246,
       "responsePreview": "{\"tasks\":[]}",
       "location": ""
     },
@@ -631,7 +1022,7 @@
       "expected": [
         200
       ],
-      "durationMs": 1487,
+      "durationMs": 6491,
       "responsePreview": "{\"message\":\"Lead not found for reply\",\"matched\":false}",
       "location": ""
     },
@@ -647,7 +1038,7 @@
         302,
         307
       ],
-      "durationMs": 2154,
+      "durationMs": 2993,
       "responsePreview": "",
       "location": "https://example.com/"
     },
@@ -662,7 +1053,7 @@
       "expected": [
         200
       ],
-      "durationMs": 2268,
+      "durationMs": 2684,
       "responsePreview": "GIF89a\u0001\u0000\u0001\u0000�\u0000\u0000\u0000\u0000\u0000���!�\u0004\u0001\u0000\u0000\u0000\u0000,\u0000\u0000\u0000\u0000\u0001\u0000\u0001\u0000\u0000\u0002\u0001D\u0000;",
       "location": ""
     },
@@ -677,7 +1068,7 @@
       "expected": [
         400
       ],
-      "durationMs": 1875,
+      "durationMs": 3967,
       "responsePreview": "{\"error\":\"Invalid request parameters\"}",
       "location": ""
     },
@@ -693,7 +1084,7 @@
         200,
         401
       ],
-      "durationMs": 2435,
+      "durationMs": 3432,
       "responsePreview": "{\"success\":true}",
       "location": ""
     },
@@ -708,7 +1099,7 @@
       "expected": [
         400
       ],
-      "durationMs": 1463,
+      "durationMs": 2254,
       "responsePreview": "{\"error\":\"Missing enriched_lead_id param\"}",
       "location": ""
     }

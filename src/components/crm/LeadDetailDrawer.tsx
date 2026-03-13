@@ -116,10 +116,30 @@ export function LeadDetailDrawer({ lead, open, onOpenChange }: Props) {
                                     </a>
                                 )}
                                 <Badge variant="secondary">{lead.stage || 'Inbox'}</Badge>
+                                {lead.autopilotStatus && <Badge variant="outline">{lead.autopilotStatus}</Badge>}
                             </div>
                         </div>
                     </div>
                 </SheetHeader>
+
+                {(lead.nextAction || lead.nextActionDueAt || lead.meetingLink) && (
+                    <div className="bg-amber-50 border border-amber-100 rounded-lg p-4 mb-6">
+                        <h4 className="text-sm font-semibold text-amber-900 mb-1">Autopilot CRM Action</h4>
+                        {lead.nextAction && <p className="text-sm text-amber-800">{lead.nextAction}</p>}
+                        {lead.nextActionDueAt && (
+                            <p className="text-xs text-amber-700 mt-2">
+                                Vence: {new Date(lead.nextActionDueAt).toLocaleString()}
+                            </p>
+                        )}
+                        {lead.meetingLink && (
+                            <a href={lead.meetingLink} target="_blank" rel="noreferrer" className="inline-flex mt-3">
+                                <Button size="sm" variant="outline" className="h-8 text-xs">
+                                    <Calendar className="h-3 w-3 mr-1" /> Abrir booking link
+                                </Button>
+                            </a>
+                        )}
+                    </div>
+                )}
 
                 {/* AI Next Best Action - Dynamic */}
                 <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-6">

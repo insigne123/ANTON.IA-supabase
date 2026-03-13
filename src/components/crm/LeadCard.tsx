@@ -57,6 +57,21 @@ export function LeadCard({ lead, onClick }: Props) {
                         {lead.linkedinUrl && <Linkedin className="h-3 w-3" />}
                     </div>
 
+                    {(lead.autopilotStatus || lead.nextAction) && (
+                        <div className="space-y-1 pt-1">
+                            {lead.autopilotStatus && (
+                                <Badge variant="secondary" className="text-[10px] h-5">
+                                    {lead.autopilotStatus}
+                                </Badge>
+                            )}
+                            {lead.nextAction && (
+                                <p className="text-[10px] text-muted-foreground line-clamp-2">
+                                    {lead.nextAction}
+                                </p>
+                            )}
+                        </div>
+                    )}
+
                     {/* Last Activity Preview could go here */}
                 </CardContent>
             </Card>

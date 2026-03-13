@@ -2,6 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { notificationService } from '@/lib/services/notification-service';
 import { generateCampaignFlow } from '@/ai/flows/generate-campaign';
+import { decideAutopilotContactAction, scoreLeadForMission } from '@/lib/antonia-autopilot';
+import { syncLeadAutopilotToCrm } from '@/lib/server/crm-autopilot';
+import { createAntoniaException } from '@/lib/server/antonia-exceptions';
 import * as uuid from 'uuid';
 
 // [FIX #2] Initialize at runtime, not module-load (secrets may not be available at build time)
@@ -345,42 +348,101 @@ async function executeSearch(task: any, supabase: any, config: any) {
     // Execute Search - NO LIMIT on results (save everything found)
     console.log(`[Worker] Searching: ${jobTitle} in ${location}`);
 
-    const searchPayload = {
-        jobTitles: jobTitle ? [jobTitle] : [],
-        locations: location ? [location] : [],
-        industries: industry ? [industry] : [],
-        keywords: keywords || '',
-        limit: 100 // Fetch maximum results per search
-    };
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'http://localhost:3000';
+    const internalUrl = `${appUrl}/api/leads/search`;
 
-    const response = await fetch(LEAD_SEARCH_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(searchPayload)
-    });
+    const employeeRanges = String(task.payload.companySize || '').trim()
+        ? [String(task.payload.companySize).trim()]
+        : ['1-10', '11-50', '51-200', '201-500', '501-1000', '1001-5000', '5001+'];
 
-    if (!response.ok) {
-        throw new Error(`Search API failed: ${response.statusText}`);
+    const internalBody = [
+        {
+            industry_keywords: [String(industry || '').trim()].filter(Boolean),
+            company_location: [String(location || '').trim()].filter(Boolean),
+            employee_ranges: employeeRanges,
+            titles: String(jobTitle || '').trim(),
+            seniorities: Array.isArray(task.payload?.seniorities) ? task.payload.seniorities : [],
+            max_results: 100,
+        }
+    ];
+
+    let data: any;
+    try {
+        const response = await fetch(internalUrl, {
+            method: 'POST',
+            headers: withInternalApiSecret({
+                'Content-Type': 'application/json',
+                'x-user-id': String(task.payload.userId || ''),
+            }),
+            body: JSON.stringify(internalBody),
+        });
+
+        if (!response.ok) {
+            const txt = await response.text().catch(() => '');
+            throw new Error(`internal_search_failed:${response.status}:${txt.slice(0, 300)}`);
+        }
+        data = await response.json();
+    } catch (internalErr: any) {
+        console.warn('[Search] Internal /api/leads/search failed. Falling back to external URL.', internalErr?.message || internalErr);
+
+        const searchPayload = {
+            user_id: task.payload.userId,
+            titles: jobTitle ? [jobTitle] : [],
+            company_location: location ? [location] : [],
+            industry_keywords: industry ? [industry] : [],
+            employee_range: String(task.payload.companySize || '').trim() ? [String(task.payload.companySize).trim()] : employeeRanges,
+            max_results: 100
+        };
+
+        const response = await fetch(LEAD_SEARCH_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(searchPayload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Search API failed: ${response.statusText}`);
+        }
+
+        data = await response.json();
     }
 
-    const data = await response.json();
-    const leads = data.results || [];
+    const leads = Array.isArray(data?.leads)
+        ? data.leads
+        : (Array.isArray(data?.results) ? data.results : []);
 
     if (leads.length > 0) {
         // Insert with 'saved' status - ALL leads found
-        const leadsToInsert = leads.map((lead: any) => ({
-            user_id: task.payload.userId,
-            organization_id: task.organization_id,
-            name: lead.full_name || lead.name || '',
-            title: lead.title || '',
-            company: lead.organization_name || lead.company_name || '',
-            email: lead.email || null,
-            linkedin_url: lead.linkedin_url || null,
-            status: 'saved',
-            mission_id: task.mission_id, // Link to mission
-            apollo_id: lead.id, // Save Apollo ID
-            created_at: new Date().toISOString()
-        }));
+        const leadsToInsert = leads.map((lead: any) => {
+            const normalizedLead = {
+                name: lead.full_name || lead.fullName || `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || lead.name || '',
+                title: lead.title || '',
+                company: lead.organization?.name || lead.organization_name || lead.company_name || lead.company || '',
+                email: lead.email || null,
+                linkedin_url: lead.linkedin_url || lead.linkedinUrl || null,
+                industry: lead.industry || lead.organization_industry || lead.organization?.industry || null,
+                location: lead.location || lead.country || lead.city || lead.organization_location_country || null,
+            };
+            const score = scoreLeadForMission(normalizedLead, task.payload);
+
+            return {
+                user_id: task.payload.userId,
+                organization_id: task.organization_id,
+                name: normalizedLead.name,
+                title: normalizedLead.title,
+                company: normalizedLead.company,
+                email: normalizedLead.email,
+                linkedin_url: normalizedLead.linkedin_url,
+                status: 'saved',
+                mission_id: task.mission_id,
+                apollo_id: lead.apollo_id || lead.apolloId || lead.id || null,
+                score: score.score,
+                score_tier: score.tier,
+                score_reason: score.reason,
+                last_scored_at: new Date().toISOString(),
+                created_at: new Date().toISOString()
+            };
+        });
 
         // [FIX #9] Use upsert to avoid duplicate leads from repeated searches
         const { error: insertErr } = await supabase.from('leads').upsert(leadsToInsert, {
@@ -707,14 +769,68 @@ async function executeContact(task: any, supabase: any) {
     }
 
     // [FIX #8] Check daily contact limit before processing
-    const { data: contactConfig } = await supabase
+    const { data: missionConfig } = await supabase
         .from('antonia_missions')
-        .select('daily_contact_limit')
+        .select('daily_contact_limit, title, params')
         .eq('id', task.mission_id)
         .single();
 
-    const contactLimit = contactConfig?.daily_contact_limit || 3;
+    const { data: orgConfig } = await supabase
+        .from('antonia_config')
+        .select('autopilot_enabled, autopilot_mode, approval_mode, min_auto_send_score, min_review_score, pause_on_negative_reply, pause_on_failure_spike')
+        .eq('organization_id', task.organization_id)
+        .maybeSingle();
+
+    const autopilotConfig = mapAutopilotConfigRow(orgConfig);
+
+    const contactLimit = missionConfig?.daily_contact_limit || 3;
     const today = new Date().toISOString().split('T')[0];
+
+    if (autopilotConfig.autopilotEnabled && autopilotConfig.pauseOnFailureSpike) {
+        const { count: recentFailures } = await supabase
+            .from('antonia_exceptions')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', task.organization_id)
+            .eq('category', 'send_failed')
+            .gte('created_at', `${today}T00:00:00Z`);
+
+        if ((recentFailures || 0) >= 5) {
+            await createAntoniaException(supabase, {
+                organizationId: task.organization_id,
+                missionId: task.mission_id,
+                taskId: task.id,
+                category: 'failure_spike_paused',
+                severity: 'critical',
+                title: 'Autopilot pausado por fallos repetidos',
+                description: `Se detectaron ${recentFailures} fallos de envio hoy. Revisa la cola antes de reanudar.`,
+                dedupeKey: `org_${task.organization_id}_failure_spike_${today}`,
+                payload: { recentFailures, today },
+            });
+            return { skipped: true, reason: 'failure_spike_paused' };
+        }
+
+        const deliverability = await evaluateMissionDeliverability(supabase, task.mission_id, task.organization_id);
+        if (deliverability.contacts >= 10 && deliverability.failureRate >= 0.35) {
+            await supabase
+                .from('antonia_missions')
+                .update({ status: 'paused', updated_at: new Date().toISOString() })
+                .eq('id', task.mission_id)
+                .eq('status', 'active');
+
+            await createAntoniaException(supabase, {
+                organizationId: task.organization_id,
+                missionId: task.mission_id,
+                taskId: task.id,
+                category: 'deliverability_watchdog',
+                severity: 'critical',
+                title: 'Mision pausada por deliverability watchdog',
+                description: `ANTONIA detecto una tasa de falla/compliance de ${(deliverability.failureRate * 100).toFixed(0)}% en los ultimos 7 dias.`,
+                dedupeKey: `deliverability_watchdog_${task.mission_id}`,
+                payload: deliverability,
+            });
+            return { skipped: true, reason: 'deliverability_watchdog_paused' };
+        }
+    }
 
     const { count: contactsToday } = await supabase
         .from('contacted_leads')
@@ -731,6 +847,16 @@ async function executeContact(task: any, supabase: any) {
     // Cap enrichedLeads to remaining capacity
     const remaining = contactLimit - (contactsToday || 0);
     const leadsToContact = enrichedLeads.slice(0, remaining);
+
+    const leadIds = leadsToContact.map((lead: any) => lead?.id).filter(Boolean);
+    const { data: leadRows } = leadIds.length > 0
+        ? await supabase
+            .from('leads')
+            .select('id, name, title, company, email, linkedin_url, score, score_tier, score_reason')
+            .in('id', leadIds)
+        : { data: [] };
+
+    const leadMap = new Map<string, any>(((leadRows as any[]) || []).map((lead: any) => [String(lead.id), lead]));
 
     const { data: campaigns } = await supabase
         .from('campaigns')
@@ -764,15 +890,125 @@ async function executeContact(task: any, supabase: any) {
 
     // 3. Process each lead
     for (const lead of leadsToContact) { // [FIX #8] use capped list
-        if (!lead.email) {
-            errors.push({ name: lead.fullName, error: 'No email' });
+        const leadDb = lead?.id ? leadMap.get(String(lead.id)) : null;
+        const leadContext = {
+            ...lead,
+            ...(leadDb || {}),
+            id: lead?.id || leadDb?.id,
+            fullName: lead?.fullName || lead?.full_name || lead?.name || leadDb?.name || '',
+            name: lead?.name || leadDb?.name || lead?.fullName || '',
+            companyName: lead?.companyName || lead?.company || leadDb?.company || '',
+            company: lead?.company || lead?.companyName || leadDb?.company || '',
+            title: lead?.title || leadDb?.title || '',
+            email: lead?.email || leadDb?.email || null,
+            linkedin_url: lead?.linkedin_url || lead?.linkedinUrl || leadDb?.linkedin_url || null,
+            score: leadDb?.score ?? lead?.score ?? 0,
+            scoreTier: leadDb?.score_tier || lead?.scoreTier || 'cold',
+            scoreReason: leadDb?.score_reason || lead?.scoreReason || null,
+        };
+
+        if (!leadContext.email) {
+            await createAntoniaException(supabase, {
+                organizationId: task.organization_id,
+                missionId: task.mission_id,
+                taskId: task.id,
+                leadId: leadContext.id || null,
+                category: 'missing_email',
+                severity: 'medium',
+                title: 'Lead listo sin email verificable',
+                description: `${leadContext.fullName || leadContext.name || 'Lead'} no puede entrar al autopilot porque no tiene email.`,
+                dedupeKey: `missing_email_${task.mission_id}_${leadContext.id || leadContext.email || 'unknown'}`,
+                payload: { lead: leadContext, campaignName, userId: task.payload.userId },
+            });
+            await syncLeadAutopilotToCrm(supabase, {
+                organizationId: task.organization_id,
+                leadId: leadContext.id || null,
+                stage: 'qualified',
+                notes: 'Lead sin email verificable para autopilot',
+                nextAction: 'Intentar nueva fuente de enriquecimiento o revisar manualmente',
+                nextActionType: 'missing_email_research',
+                nextActionDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                autopilotStatus: 'missing_email',
+                lastAutopilotEvent: 'missing_email',
+            });
+            errors.push({ name: leadContext.fullName || leadContext.name, error: 'No email' });
             continue;
         }
 
-        const schedule = computeLeadContactSchedule(lead);
+        const autopilotDecision = decideAutopilotContactAction({
+            config: autopilotConfig,
+            lead: leadContext,
+        });
+
+        if (autopilotDecision.action === 'review') {
+            await createAntoniaException(supabase, {
+                organizationId: task.organization_id,
+                missionId: task.mission_id,
+                taskId: task.id,
+                leadId: leadContext.id || null,
+                category: 'approval_required',
+                severity: autopilotDecision.severity,
+                title: 'Lead requiere aprobacion antes de contacto',
+                description: autopilotDecision.reason,
+                dedupeKey: `approval_${task.mission_id}_${leadContext.id || leadContext.email}`,
+                payload: {
+                    missionTitle: missionConfig?.title || null,
+                    campaignName,
+                    userId: task.payload.userId,
+                    lead: leadContext,
+                    decision: autopilotDecision,
+                    contactTaskPayload: {
+                        userId: task.payload.userId,
+                        campaignName,
+                        enrichedLeads: [leadContext],
+                    },
+                },
+            });
+            await syncLeadAutopilotToCrm(supabase, {
+                organizationId: task.organization_id,
+                leadId: leadContext.id || null,
+                stage: 'qualified',
+                notes: autopilotDecision.reason,
+                nextAction: 'Revisar mensaje y aprobar contacto',
+                nextActionType: 'approval_required',
+                nextActionDueAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+                autopilotStatus: 'awaiting_approval',
+                lastAutopilotEvent: 'approval_required',
+            });
+            continue;
+        }
+
+        if (autopilotDecision.action === 'skip') {
+            await createAntoniaException(supabase, {
+                organizationId: task.organization_id,
+                missionId: task.mission_id,
+                taskId: task.id,
+                leadId: leadContext.id || null,
+                category: 'low_score_skip',
+                severity: autopilotDecision.severity,
+                title: 'Lead omitido por guardrails de autopilot',
+                description: autopilotDecision.reason,
+                dedupeKey: `skip_${task.mission_id}_${leadContext.id || leadContext.email}`,
+                payload: { lead: leadContext, decision: autopilotDecision, campaignName },
+            });
+            await syncLeadAutopilotToCrm(supabase, {
+                organizationId: task.organization_id,
+                leadId: leadContext.id || null,
+                stage: 'inbox',
+                notes: autopilotDecision.reason,
+                nextAction: 'Ampliar investigacion o descartar',
+                nextActionType: 'low_score_skip',
+                nextActionDueAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+                autopilotStatus: 'skipped_by_guardrails',
+                lastAutopilotEvent: 'low_score_skip',
+            });
+            continue;
+        }
+
+        const schedule = computeLeadContactSchedule(leadContext);
         if (new Date(schedule.scheduledFor).getTime() > Date.now()) {
             console.log(
-                `[Contact] Deferring ${lead.email} to ${schedule.scheduledFor} ` +
+                `[Contact] Deferring ${leadContext.email} to ${schedule.scheduledFor} ` +
                 `(${schedule.timeZone}, match:${schedule.matchedBy}, location:"${schedule.location}", reason:${schedule.reason})`
             );
 
@@ -783,10 +1019,11 @@ async function executeContact(task: any, supabase: any) {
                 status: 'pending',
                 payload: {
                     userId: task.payload.userId,
-                    enrichedLeads: [lead],
+                    enrichedLeads: [leadContext],
                     campaignName: campaignName
                 },
                 scheduled_for: schedule.scheduledFor,
+                idempotency_key: `schedule_contact_${task.id}_${leadContext.id || leadContext.email}_${schedule.scheduledFor}`,
                 created_at: new Date().toISOString()
             });
 
@@ -795,16 +1032,16 @@ async function executeContact(task: any, supabase: any) {
 
         try {
             // Personalize email
-            const firstName = lead.fullName?.split(' ')[0] || 'Hola';
+            const firstName = leadContext.fullName?.split(' ')[0] || 'Hola';
             const personalizedBody = bodyTemplate
                 .replace('{{firstName}}', firstName)
-                .replace('{{lead.name}}', lead.fullName || '')
-                .replace('{{company}}', lead.companyName || 'tu empresa');
+                .replace('{{lead.name}}', leadContext.fullName || '')
+                .replace('{{company}}', leadContext.companyName || 'tu empresa');
 
             const personalizedSubject = subject
                 .replace('{{firstName}}', firstName)
-                .replace('{{lead.name}}', lead.fullName || '')
-                .replace('{{company}}', lead.companyName || 'tu empresa');
+                .replace('{{lead.name}}', leadContext.fullName || '')
+                .replace('{{company}}', leadContext.companyName || 'tu empresa');
 
             const response = await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
@@ -813,10 +1050,10 @@ async function executeContact(task: any, supabase: any) {
                     'x-user-id': task.payload.userId
                 }),
                 body: JSON.stringify({
-                    to: lead.email,
+                    to: leadContext.email,
                     subject: personalizedSubject,
                     body: personalizedBody,
-                    leadId: lead.id,
+                    leadId: leadContext.id,
                     campaignId: campaign?.id,
                     missionId: task.mission_id,
                     userId: task.payload.userId,
@@ -832,6 +1069,31 @@ async function executeContact(task: any, supabase: any) {
                 const isBlocked = response.status === 403 || lower.includes('domain');
 
                 if (isUnsub || isBlocked) {
+                    await createAntoniaException(supabase, {
+                        organizationId: task.organization_id,
+                        missionId: task.mission_id,
+                        taskId: task.id,
+                        leadId: leadContext.id || null,
+                        category: 'compliance_block',
+                        severity: 'high',
+                        title: isUnsub ? 'Contacto frenado por unsubscribe' : 'Contacto frenado por dominio bloqueado',
+                        description: `ANTONIA detuvo el contacto a ${leadContext.email}.`,
+                        dedupeKey: `compliance_${task.mission_id}_${leadContext.id || leadContext.email}_${isUnsub ? 'unsub' : 'blocked'}`,
+                        payload: { lead: leadContext, campaignName, responseStatus: response.status },
+                    });
+
+                    await syncLeadAutopilotToCrm(supabase, {
+                        organizationId: task.organization_id,
+                        leadId: leadContext.id || null,
+                        stage: 'closed_lost',
+                        notes: isUnsub ? 'Lead marco unsubscribe' : 'Dominio bloqueado por compliance',
+                        nextAction: 'Excluir del flujo y revisar reputacion/canal',
+                        nextActionType: 'compliance_review',
+                        nextActionDueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+                        autopilotStatus: isUnsub ? 'unsubscribed' : 'domain_blocked',
+                        lastAutopilotEvent: isUnsub ? 'unsubscribe' : 'domain_blocked',
+                    });
+
                     await supabase
                         .from('contacted_leads')
                         .update({
@@ -840,11 +1102,42 @@ async function executeContact(task: any, supabase: any) {
                             evaluation_status: isUnsub ? 'do_not_contact' : 'pending',
                             last_update_at: new Date().toISOString(),
                         } as any)
-                        .eq('lead_id', lead.id)
+                        .eq('lead_id', leadContext.id)
                         .eq('mission_id', task.mission_id);
+
+                    await supabase
+                        .from('leads')
+                        .update({ status: 'do_not_contact', updated_at: new Date().toISOString() })
+                        .eq('id', leadContext.id);
                 }
 
-                errors.push({ email: lead.email, error: `API ${response.status}: ${errorText.slice(0, 160)}` });
+                if (!isUnsub && !isBlocked) {
+                    await createAntoniaException(supabase, {
+                        organizationId: task.organization_id,
+                        missionId: task.mission_id,
+                        taskId: task.id,
+                        leadId: leadContext.id || null,
+                        category: 'send_failed',
+                        severity: 'medium',
+                        title: 'Fallo enviando contacto',
+                        description: `API ${response.status}: ${errorText.slice(0, 160)}`,
+                        dedupeKey: `send_fail_${task.id}_${leadContext.id || leadContext.email}_${response.status}`,
+                        payload: { lead: leadContext, campaignName, responseStatus: response.status, errorText: errorText.slice(0, 500) },
+                    });
+                    await syncLeadAutopilotToCrm(supabase, {
+                        organizationId: task.organization_id,
+                        leadId: leadContext.id || null,
+                        stage: 'qualified',
+                        notes: `Fallo de envio: API ${response.status}`,
+                        nextAction: 'Revisar canal, provider o plantilla antes de reintentar',
+                        nextActionType: 'send_failure_review',
+                        nextActionDueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+                        autopilotStatus: 'send_failed',
+                        lastAutopilotEvent: 'send_failed',
+                    });
+                }
+
+                errors.push({ email: leadContext.email, error: `API ${response.status}: ${errorText.slice(0, 160)}` });
                 continue;
             }
 
@@ -854,12 +1147,12 @@ async function executeContact(task: any, supabase: any) {
             contactedLeads.push({
                 user_id: task.payload.userId, // [FIX #5] add user_id required by RLS
                 organization_id: task.organization_id,
-                lead_id: lead.id,
+                lead_id: leadContext.id,
                 mission_id: task.mission_id,
-                name: lead.fullName,
-                email: lead.email,
-                company: lead.companyName,
-                role: lead.title,
+                name: leadContext.fullName,
+                email: leadContext.email,
+                company: leadContext.companyName,
+                role: leadContext.title,
                 status: 'sent',
                 provider: resData.provider || 'unknown',
                 subject: personalizedSubject,
@@ -867,14 +1160,49 @@ async function executeContact(task: any, supabase: any) {
                 created_at: sentAt
             });
 
-            if (campaign?.id && campaignSentRecords && lead?.id) {
-                campaignSentRecords[String(lead.id)] = { lastStepIdx: 0, lastSentAt: new Date().toISOString() };
+            if (campaign?.id && campaignSentRecords && leadContext?.id) {
+                campaignSentRecords[String(leadContext.id)] = { lastStepIdx: 0, lastSentAt: new Date().toISOString() };
                 campaignDirty = true;
             }
 
+            await syncLeadAutopilotToCrm(supabase, {
+                organizationId: task.organization_id,
+                leadId: leadContext.id || null,
+                stage: 'contacted',
+                notes: `Primer contacto enviado via ${resData.provider || 'unknown'}`,
+                nextAction: 'Esperar senales de apertura o respuesta para decidir follow-up',
+                nextActionType: 'wait_for_reply',
+                nextActionDueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+                autopilotStatus: 'contacted',
+                lastAutopilotEvent: 'contact_sent',
+            });
+
         } catch (err: any) {
-            console.error(`[Contact] Failed to send to ${lead.email}:`, err);
-            errors.push({ email: lead.email, error: err.message });
+            console.error(`[Contact] Failed to send to ${leadContext.email}:`, err);
+            await createAntoniaException(supabase, {
+                organizationId: task.organization_id,
+                missionId: task.mission_id,
+                taskId: task.id,
+                leadId: leadContext.id || null,
+                category: 'send_failed',
+                severity: 'medium',
+                title: 'Fallo inesperado enviando contacto',
+                description: err.message || 'Unexpected send failure',
+                dedupeKey: `send_fail_${task.id}_${leadContext.id || leadContext.email}_unexpected`,
+                payload: { lead: leadContext, campaignName, error: err.message || String(err) },
+            });
+            await syncLeadAutopilotToCrm(supabase, {
+                organizationId: task.organization_id,
+                leadId: leadContext.id || null,
+                stage: 'qualified',
+                notes: err.message || 'Unexpected send failure',
+                nextAction: 'Revisar error y reintentar contacto',
+                nextActionType: 'send_failure_review',
+                nextActionDueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+                autopilotStatus: 'send_failed',
+                lastAutopilotEvent: 'send_failed',
+            });
+            errors.push({ email: leadContext.email, error: err.message });
             // Optionally insert as failed contact?
         }
     }
@@ -1149,6 +1477,55 @@ async function executeReport(task: any, supabase: any, config: any) {
     }
 }
 
+function mapAutopilotConfigRow(row: any) {
+    return {
+        autopilotEnabled: Boolean(row?.autopilot_enabled ?? false),
+        autopilotMode: row?.autopilot_mode || 'manual_assist',
+        approvalMode: row?.approval_mode || 'low_score_only',
+        minAutoSendScore: Number(row?.min_auto_send_score || 70),
+        minReviewScore: Number(row?.min_review_score || 45),
+        pauseOnNegativeReply: Boolean(row?.pause_on_negative_reply ?? true),
+        pauseOnFailureSpike: Boolean(row?.pause_on_failure_spike ?? true),
+    };
+}
+
+async function evaluateMissionDeliverability(supabase: any, missionId: string, organizationId: string) {
+    const last7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const [contactsRes, sendFailedRes, complianceRes] = await Promise.all([
+        supabase
+            .from('contacted_leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('mission_id', missionId)
+            .gte('created_at', last7d),
+        supabase
+            .from('antonia_exceptions')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+            .eq('mission_id', missionId)
+            .eq('category', 'send_failed')
+            .gte('created_at', last7d),
+        supabase
+            .from('antonia_exceptions')
+            .select('*', { count: 'exact', head: true })
+            .eq('organization_id', organizationId)
+            .eq('mission_id', missionId)
+            .eq('category', 'compliance_block')
+            .gte('created_at', last7d),
+    ]);
+
+    const contacts = Number(contactsRes.count || 0);
+    const sendFailed = Number(sendFailedRes.count || 0);
+    const complianceBlocks = Number(complianceRes.count || 0);
+    const failureRate = contacts > 0 ? (sendFailed + complianceBlocks) / contacts : 0;
+
+    return {
+        contacts,
+        sendFailed,
+        complianceBlocks,
+        failureRate,
+    };
+}
+
 async function processTask(task: any, supabase: any) {
     console.log(`[Worker] Processing task ${task.id} (${task.type})`);
 
@@ -1301,6 +1678,10 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const dryRunParam = String(url.searchParams.get('dryRun') || '').toLowerCase();
     const dryRun = dryRunParam === '1' || dryRunParam === 'true' || dryRunParam === 'yes';
+    const skipFirebaseForwardParam = String(url.searchParams.get('skipFirebaseForward') || '').toLowerCase();
+    const forceBackupParam = String(url.searchParams.get('forceBackupProcessing') || '').toLowerCase();
+    const skipFirebaseForward = skipFirebaseForwardParam === '1' || skipFirebaseForwardParam === 'true' || skipFirebaseForwardParam === 'yes';
+    const forceBackupProcessing = forceBackupParam === '1' || forceBackupParam === 'true' || forceBackupParam === 'yes';
 
     // [FIX #2] Use runtime getter instead of module-level constants
     const { url: supabaseUrl, key: supabaseServiceKey } = getSupabaseCredentials();
@@ -1322,6 +1703,8 @@ export async function GET(request: Request) {
             authorized: true,
             activeMissions: activeMissions || 0,
             pendingTasks: pendingTasks || 0,
+            skipFirebaseForward,
+            forceBackupProcessing,
             firebaseForwardConfigured: Boolean(process.env.ANTONIA_FIREBASE_TICK_URL && process.env.ANTONIA_FIREBASE_TICK_SECRET),
             backupProcessingEnabled: String(process.env.ANTONIA_NEXT_BACKUP_PROCESSING || 'false') === 'true',
         });
@@ -1347,7 +1730,7 @@ export async function GET(request: Request) {
     const tickSecret = String(process.env.ANTONIA_FIREBASE_TICK_SECRET || '').trim();
     let firebaseForwardFailure: { status: number; bodyPreview: string } | null = null;
 
-    if (tickUrl && tickSecret) {
+    if (!skipFirebaseForward && tickUrl && tickSecret) {
         try {
             // [FIX #10] Use POST instead of GET for Firebase trigger
             const r = await fetch(tickUrl, {
@@ -1389,7 +1772,7 @@ export async function GET(request: Request) {
     // STEP 2: Process pending tasks (Backup Worker)
     // Default: disabled. Enable only if you intentionally want Vercel/Next to pick tasks when Firebase is down.
     // This avoids two workers producing divergent behavior.
-    const enableBackup = String(process.env.ANTONIA_NEXT_BACKUP_PROCESSING || 'false') === 'true';
+    const enableBackup = forceBackupProcessing || String(process.env.ANTONIA_NEXT_BACKUP_PROCESSING || 'false') === 'true';
 
     const now = new Date().toISOString();
     const allowTypes = ['GENERATE_CAMPAIGN', 'SEARCH', 'ENRICH', 'CONTACT', 'REPORT', 'GENERATE_REPORT'];

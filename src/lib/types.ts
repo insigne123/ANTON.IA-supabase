@@ -65,6 +65,10 @@ export interface Lead {
   country?: string | null;
   city?: string | null;
   apolloId?: string;
+  score?: number;
+  scoreTier?: 'hot' | 'warm' | 'cool' | 'cold';
+  scoreReason?: string | null;
+  lastScoredAt?: string;
 }
 
 export type SavedLead = Lead;
@@ -515,6 +519,15 @@ export interface AntoniaConfig {
   dailyEnrichLimit?: number;
   dailyInvestigateLimit?: number;
   trackingEnabled?: boolean;
+  autopilotEnabled?: boolean;
+  autopilotMode?: 'manual_assist' | 'semi_auto' | 'full_auto';
+  approvalMode?: 'all_contacts' | 'low_score_only' | 'high_risk_only' | 'disabled';
+  minAutoSendScore?: number;
+  minReviewScore?: number;
+  bookingLink?: string;
+  meetingInstructions?: string;
+  pauseOnNegativeReply?: boolean;
+  pauseOnFailureSpike?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -562,6 +575,25 @@ export interface AntoniaTask {
   workerSource?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AntoniaException {
+  id: string;
+  organizationId: string;
+  missionId?: string | null;
+  taskId?: string | null;
+  leadId?: string | null;
+  category: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  status: 'open' | 'approved' | 'resolved' | 'dismissed';
+  title: string;
+  description?: string | null;
+  dedupeKey?: string | null;
+  payload?: any;
+  resolutionNote?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string | null;
 }
 
 export type AntoniaLogLevel = 'info' | 'success' | 'warning' | 'error';

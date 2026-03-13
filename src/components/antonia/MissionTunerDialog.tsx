@@ -24,6 +24,20 @@ type IntelligenceResponse = {
   metrics: Record<string, number>;
   reasoning: string;
   suggestedPatch: any;
+  goalProgress?: {
+    label: string;
+    target: number;
+    achieved: number;
+    gap: number;
+    progressPct: number;
+    status: 'achieved' | 'on_track' | 'at_risk';
+  };
+  allocatorPlan?: {
+    current: Record<string, number>;
+    recommended: Record<string, number>;
+    changed: boolean;
+    rationale: string;
+  };
   recommendations: Array<{
     id: string;
     title: string;
@@ -42,6 +56,13 @@ type FormState = {
   keywords: string;
   companySize: string;
   senioritiesText: string;
+  targetOutcome: 'meetings' | 'positive_replies' | 'pipeline';
+  targetMeetings: number;
+  targetPositiveReplies: number;
+  targetPipelineValue: number;
+  targetTimelineDays: number;
+  idealCustomerProfile: string;
+  valueProposition: string;
   enrichmentLevel: 'basic' | 'deep';
   campaignName: string;
   campaignContext: string;
@@ -62,6 +83,13 @@ function fromMission(mission: MissionLike | null): FormState {
     keywords: p.keywords || '',
     companySize: p.companySize || '',
     senioritiesText: Array.isArray(p.seniorities) ? p.seniorities.join(', ') : '',
+    targetOutcome: p.targetOutcome === 'positive_replies' || p.targetOutcome === 'pipeline' ? p.targetOutcome : 'meetings',
+    targetMeetings: Number(p.targetMeetings || 5),
+    targetPositiveReplies: Number(p.targetPositiveReplies || 12),
+    targetPipelineValue: Number(p.targetPipelineValue || 10000),
+    targetTimelineDays: Number(p.targetTimelineDays || 30),
+    idealCustomerProfile: p.idealCustomerProfile || '',
+    valueProposition: p.valueProposition || '',
     enrichmentLevel: p.enrichmentLevel === 'deep' ? 'deep' : 'basic',
     campaignName: p.campaignName || '',
     campaignContext: p.campaignContext || '',
@@ -167,6 +195,13 @@ export function MissionTunerDialog({
         keywords: form.keywords,
         companySize: form.companySize,
         seniorities,
+        targetOutcome: form.targetOutcome,
+        targetMeetings: Number(form.targetMeetings),
+        targetPositiveReplies: Number(form.targetPositiveReplies),
+        targetPipelineValue: Number(form.targetPipelineValue),
+        targetTimelineDays: Number(form.targetTimelineDays),
+        idealCustomerProfile: form.idealCustomerProfile,
+        valueProposition: form.valueProposition,
         enrichmentLevel: form.enrichmentLevel,
         campaignName: form.campaignName,
         campaignContext: form.campaignContext,
@@ -268,12 +303,43 @@ export function MissionTunerDialog({
                 <Input value={form.keywords} onChange={(e) => setForm((p) => ({ ...p, keywords: e.target.value }))} />
               </div>
               <div className="space-y-2">
+                <Label>Outcome principal</Label>
+                <Select value={form.targetOutcome} onValueChange={(v) => setForm((p) => ({ ...p, targetOutcome: v as 'meetings' | 'positive_replies' | 'pipeline' }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="meetings">Meetings</SelectItem>
+                    <SelectItem value="positive_replies">Positive replies</SelectItem>
+                    <SelectItem value="pipeline">Pipeline</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Timeline objetivo</Label>
+                <Input type="number" min={1} max={365} value={form.targetTimelineDays} onChange={(e) => setForm((p) => ({ ...p, targetTimelineDays: Number(e.target.value || 30) }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Meetings target</Label>
+                <Input type="number" min={1} max={500} value={form.targetMeetings} onChange={(e) => setForm((p) => ({ ...p, targetMeetings: Number(e.target.value || 5) }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Replies target</Label>
+                <Input type="number" min={1} max={1000} value={form.targetPositiveReplies} onChange={(e) => setForm((p) => ({ ...p, targetPositiveReplies: Number(e.target.value || 12) }))} />
+              </div>
+              <div className="space-y-2">
                 <Label>Tamaño empresa</Label>
                 <Input value={form.companySize} onChange={(e) => setForm((p) => ({ ...p, companySize: e.target.value }))} />
               </div>
               <div className="space-y-2">
                 <Label>Seniorities (coma)</Label>
                 <Input value={form.senioritiesText} onChange={(e) => setForm((p) => ({ ...p, senioritiesText: e.target.value }))} />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>ICP ideal</Label>
+                <Textarea rows={3} value={form.idealCustomerProfile} onChange={(e) => setForm((p) => ({ ...p, idealCustomerProfile: e.target.value }))} />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Propuesta de valor</Label>
+                <Textarea rows={3} value={form.valueProposition} onChange={(e) => setForm((p) => ({ ...p, valueProposition: e.target.value }))} />
               </div>
 
               <div className="space-y-2">
@@ -334,6 +400,37 @@ export function MissionTunerDialog({
                 <div className="font-semibold">{metrics.orgContactsToday ?? 0}</div>
               </div>
             </div>
+
+            {(intel?.goalProgress || intel?.allocatorPlan) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {intel?.goalProgress && (
+                  <div className="p-3 rounded border bg-muted/20 text-sm space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">Progreso de meta</span>
+                      <Badge variant={intel.goalProgress.status === 'achieved' ? 'default' : intel.goalProgress.status === 'on_track' ? 'secondary' : 'outline'}>
+                        {intel.goalProgress.status}
+                      </Badge>
+                    </div>
+                    <div className="text-muted-foreground">
+                      {intel.goalProgress.achieved}/{intel.goalProgress.target} {intel.goalProgress.label.toLowerCase()}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Gap: {intel.goalProgress.gap} · Avance: {intel.goalProgress.progressPct}%</div>
+                  </div>
+                )}
+                {intel?.allocatorPlan && (
+                  <div className="p-3 rounded border bg-muted/20 text-sm space-y-2">
+                    <div className="font-medium">Allocator recomendado</div>
+                    <div className="text-xs text-muted-foreground">{intel.allocatorPlan.rationale}</div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>Search: {intel.allocatorPlan.current.dailySearchLimit} → {intel.allocatorPlan.recommended.dailySearchLimit}</div>
+                      <div>Enrich: {intel.allocatorPlan.current.dailyEnrichLimit} → {intel.allocatorPlan.recommended.dailyEnrichLimit}</div>
+                      <div>Investigate: {intel.allocatorPlan.current.dailyInvestigateLimit} → {intel.allocatorPlan.recommended.dailyInvestigateLimit}</div>
+                      <div>Contact: {intel.allocatorPlan.current.dailyContactLimit} → {intel.allocatorPlan.recommended.dailyContactLimit}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancelar</Button>

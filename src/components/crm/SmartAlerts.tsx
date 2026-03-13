@@ -48,6 +48,22 @@ export function SmartAlerts({ leads, onAlertClick }: Props) {
             });
         }
 
+        const urgentAutopilot = leads.filter(l =>
+            (l.autopilotStatus === 'positive_reply' || l.autopilotStatus === 'meeting_requested') &&
+            l.nextActionDueAt &&
+            new Date(l.nextActionDueAt).getTime() <= Date.now()
+        );
+
+        if (urgentAutopilot.length > 0) {
+            list.push({
+                id: 'urgent-autopilot',
+                type: 'warning',
+                message: `${urgentAutopilot.length} lead(s) calientes esperan respuesta inmediata.`,
+                action: 'Ir a interesados',
+                targetStage: 'engaged'
+            });
+        }
+
         return list;
     }, [leads]);
 

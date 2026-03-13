@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 // NOTE: Keep defaults for backwards compatibility, but prefer env vars in production.
 const DEFAULT_APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
 const DEFAULT_LEAD_SEARCH_URL = 'https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search';
+const DISABLE_EXTERNAL_SEARCH_FALLBACK = String(process.env.LEADS_DISABLE_EXTERNAL_FALLBACK || 'false').toLowerCase() === 'true';
 
 function getAppUrl(): string {
     return (
@@ -665,6 +666,9 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
         }
         data = await response.json();
     } catch (e) {
+        if (DISABLE_EXTERNAL_SEARCH_FALLBACK) {
+            throw e;
+        }
         // Backward compatible fallback: hit the external service directly
         const fallbackUrl = getLeadSearchUrl();
         console.warn('[SEARCH] Internal search failed. Falling back to external URL:', String(e));

@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { buildSuggestedMeetingReply } from '@/lib/antonia-autopilot';
 import { classifyReply, extractReplyPreview } from '@/lib/reply-classifier';
 import { notificationService } from '@/lib/services/notification-service';
+import { syncLeadAutopilotToCrm } from '@/lib/server/crm-autopilot';
+import { createAntoniaException } from '@/lib/server/antonia-exceptions';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -154,7 +157,30 @@ export async function POST(req: Request) {
                                 }, { onConflict: 'email,user_id,organization_id' } as any);
                         }
 
+                        const leadSummary = {
+                            id: leadId,
+                            name: (contacted as any)?.name || null,
+                            fullName: (contacted as any)?.name || null,
+                            email: (contacted as any)?.email || email || null,
+                            company: (contacted as any)?.company || null,
+                            companyName: (contacted as any)?.company || null,
+                            title: (contacted as any)?.role || null,
+                        };
+
                         if (shouldNotify && orgId && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
+                            const { data: autopilotConfig } = await supabase
+                                .from('antonia_config')
+                                .select('booking_link, meeting_instructions')
+                                .eq('organization_id', orgId)
+                                .maybeSingle();
+
+                            const suggestedReply = buildSuggestedMeetingReply({
+                                leadName: leadSummary.fullName,
+                                companyName: leadSummary.companyName,
+                                bookingLink: autopilotConfig?.booking_link,
+                                meetingInstructions: autopilotConfig?.meeting_instructions,
+                            });
+
                             const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
                             const summary = classification.summary || preview || 'Respuesta positiva detectada';
                             const leadEmail = (contacted as any)?.email || leadId;
@@ -163,6 +189,78 @@ export async function POST(req: Request) {
                                 'Respuesta positiva detectada',
                                 `Lead ${leadEmail} respondió: ${summary}. Revisar: ${appUrl}/contacted/replied`
                             );
+
+                            await createAntoniaException(supabase, {
+                                organizationId: orgId,
+                                missionId,
+                                leadId,
+                                category: 'positive_reply',
+                                severity: classification.intent === 'meeting_request' ? 'critical' : 'high',
+                                title: classification.intent === 'meeting_request' ? 'Lead solicitó reunión' : 'Lead con respuesta positiva',
+                                description: summary,
+                                dedupeKey: `positive_reply_${leadId}`,
+                                payload: {
+                                    lead: leadSummary,
+                                    classification,
+                                    preview,
+                                    suggestedReply,
+                                },
+                            });
+
+                            await syncLeadAutopilotToCrm(supabase, {
+                                organizationId: orgId,
+                                leadId,
+                                stage: classification.intent === 'meeting_request' ? 'meeting' : 'engaged',
+                                notes: summary,
+                                nextAction: classification.intent === 'meeting_request'
+                                    ? 'Confirmar reunion y preparar contexto comercial'
+                                    : 'Responder rapido y proponer horario de reunion',
+                                nextActionType: classification.intent === 'meeting_request' ? 'meeting_handoff' : 'hot_reply_followup',
+                                nextActionDueAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+                                autopilotStatus: classification.intent === 'meeting_request' ? 'meeting_requested' : 'positive_reply',
+                                lastAutopilotEvent: classification.intent,
+                                meetingLink: autopilotConfig?.booking_link || null,
+                            });
+                        }
+
+                        if (orgId && missionId && (classification.intent === 'unsubscribe' || classification.intent === 'negative')) {
+                            const { data: orgConfig } = await supabase
+                                .from('antonia_config')
+                                .select('pause_on_negative_reply')
+                                .eq('organization_id', orgId)
+                                .maybeSingle();
+
+                            await createAntoniaException(supabase, {
+                                organizationId: orgId,
+                                missionId,
+                                leadId,
+                                category: 'negative_reply_guardrail',
+                                severity: 'high',
+                                title: 'Reply negativo detectado',
+                                description: classification.summary || preview || 'ANTONIA detuvo seguimiento por señal negativa.',
+                                dedupeKey: `negative_reply_${leadId}`,
+                                payload: { lead: leadSummary, classification, preview },
+                            });
+
+                            await syncLeadAutopilotToCrm(supabase, {
+                                organizationId: orgId,
+                                leadId,
+                                stage: 'closed_lost',
+                                notes: classification.summary || preview || 'Respuesta negativa detectada',
+                                nextAction: 'Detener secuencia y revisar motivo de rechazo',
+                                nextActionType: 'negative_reply_review',
+                                nextActionDueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+                                autopilotStatus: 'negative_reply',
+                                lastAutopilotEvent: classification.intent,
+                            });
+
+                            if (orgConfig?.pause_on_negative_reply) {
+                                await supabase
+                                    .from('antonia_missions')
+                                    .update({ status: 'paused', updated_at: new Date().toISOString() })
+                                    .eq('id', missionId)
+                                    .eq('status', 'active');
+                            }
                         }
                     } catch (err) {
                         updateData.reply_intent = 'unknown';

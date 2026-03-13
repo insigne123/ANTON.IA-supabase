@@ -1,22 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
 import { getDailyQuotaStatus } from '@/lib/server/daily-quota-store';
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
 
-type R = 'leadSearch' | 'research' | 'contact';
+type R = 'leadSearch' | 'enrich' | 'research' | 'contact';
 
-const RESOURCES: R[] = ['leadSearch', 'research', 'contact'];
-const LIMITS: Record<R, number> = { leadSearch: 50, research: 50, contact: 50 };
+const RESOURCES: R[] = ['leadSearch', 'enrich', 'research', 'contact'];
+const LIMITS: Record<R, number> = { leadSearch: 50, enrich: 50, research: 50, contact: 50 };
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
-  const userId = req.headers.get('x-user-id')?.trim() || '';
-  if (!userId) {
-    return NextResponse.json({ error: 'missing user id' }, { status: 400 });
-  }
-  if (!isTrustedInternalRequest(req)) {
-    return NextResponse.json({ error: 'unauthorized internal request' }, { status: 401 });
+  const userIdFromHeader = req.headers.get('x-user-id')?.trim() || '';
+
+  let userId = userIdFromHeader;
+
+  if (userIdFromHeader) {
+    if (!isTrustedInternalRequest(req)) {
+      return NextResponse.json({ error: 'unauthorized internal request' }, { status: 401 });
+    }
+  } else {
+    const supabase = createRouteHandlerClient({ cookies });
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
+    userId = user.id;
   }
 
   try {

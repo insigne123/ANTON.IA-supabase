@@ -6,8 +6,10 @@ const config = functions.config();
 const supabaseUrl = config.supabase?.url || process.env.SUPABASE_URL!;
 const supabaseServiceKey = config.supabase?.service_key || process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const appUrl = config.app?.url || process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+const cronSecret = config.cron?.secret || process.env.CRON_SECRET || '';
 const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
 const internalApiSecret = config.internal?.api_secret || process.env.INTERNAL_API_SECRET || '';
+const workerIngressSecret = config.worker?.tick_secret || process.env.ANTONIA_FIREBASE_TICK_SECRET || '';
 
 function withInternalApiSecret(headers: Record<string, string>): Record<string, string> {
     const secret = String(internalApiSecret || '').trim();
@@ -60,6 +62,36 @@ export const antoniaWorker = functions
         console.log('[ANTONIA Worker] Starting execution...');
 
         try {
+            const providedBearer = String(req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+            const providedSecret = String(req.get('x-cron-secret') || '').trim();
+            if (workerIngressSecret && providedBearer !== workerIngressSecret && providedSecret !== workerIngressSecret) {
+                res.status(401).json({ error: 'Unauthorized' });
+                return;
+            }
+
+            if (appUrl && cronSecret) {
+                const delegateUrl = `${String(appUrl).replace(/\/$/, '')}/api/cron/antonia?skipFirebaseForward=1&forceBackupProcessing=1`;
+                try {
+                    const delegated = await fetch(delegateUrl, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${cronSecret}`,
+                            'x-cron-secret': cronSecret,
+                            'x-antonia-source': 'firebase-worker-delegate',
+                            'cache-control': 'no-store',
+                        },
+                    });
+                    const bodyText = await delegated.text().catch(() => '');
+                    if (delegated.ok) {
+                        res.status(200).send(bodyText || JSON.stringify({ delegated: true }));
+                        return;
+                    }
+                    console.error('[ANTONIA Worker] Delegate failed, using legacy fallback:', delegated.status, bodyText.slice(0, 300));
+                } catch (delegateError) {
+                    console.error('[ANTONIA Worker] Delegate request failed, using legacy fallback:', delegateError);
+                }
+            }
+
             const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
             // Fetch pending tasks

@@ -15,7 +15,6 @@ import { toCsv, downloadCsv } from '@/lib/csv';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
 import * as Quota from '@/lib/quota-client';
-import { getClientId } from '@/lib/client-id';
 import { getQuotaTicket, setQuotaTicket } from '@/lib/quota-ticket';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -201,7 +200,6 @@ export default function SavedLeadsPage() {
 
     setEnriching(true);
     try {
-      const finalUserId = user?.id || getClientId();
       const payloadLeads = chosen.map(l => ({
         fullName: l.name,
         linkedinUrl: l.linkedinUrl || undefined,
@@ -216,7 +214,6 @@ export default function SavedLeadsPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-id': finalUserId,
           'x-quota-ticket': getQuotaTicket() || '',
         },
         body: JSON.stringify({ leads: payloadLeads, revealEmail, revealPhone, tableName: 'enriched_leads' }),

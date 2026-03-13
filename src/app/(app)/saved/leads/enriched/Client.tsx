@@ -129,8 +129,6 @@ export default function EnrichedLeadsClient() {
     if (!leadsToEnrich.length) return;
     setEnriching(true);
     try {
-      const userId = await getUserIdOrFail();
-
       // Map to minimal payload
       const payloadLeads = leadsToEnrich.map(l => ({
         fullName: l.fullName,
@@ -144,7 +142,7 @@ export default function EnrichedLeadsClient() {
 
       const res = await fetch('/api/opportunities/enrich-apollo', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           leads: payloadLeads,
           revealEmail: opts.revealEmail,
@@ -530,8 +528,7 @@ export default function EnrichedLeadsClient() {
 
   const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-  /** Obtiene/crea sesión MSAL y devuelve email/uid para cabecera X-User-Id. */
-  /** Obtiene ID de usuario autenticado de Supabase para headers. */
+  /** Obtiene el ID del usuario autenticado en Supabase para acciones del cliente. */
   async function getUserIdOrFail(): Promise<string> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user?.id) {

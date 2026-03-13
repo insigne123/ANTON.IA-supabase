@@ -10,6 +10,7 @@ const PORT = Number(process.env.ANTONIA_TEST_PORT || 9013);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const ALLOW_HIGH_RISK = String(process.env.ALLOW_HIGH_RISK || '').toLowerCase() === 'true';
 const CRON_SECRET = String(process.env.CRON_SECRET || '').trim();
+const INTERNAL_API_SECRET = String(process.env.INTERNAL_API_SECRET || '').trim();
 
 const METHOD_ORDER = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 const HIGH_RISK = new Set(['GET /api/cron/process-campaigns']);
@@ -49,7 +50,8 @@ const REQUEST_OVERRIDES = {
   },
   'GET /api/cron/process-campaigns': {
     query: { dryRun: true },
-    expected: [200],
+    headers: CRON_SECRET ? { 'x-cron-secret': CRON_SECRET } : {},
+    expected: CRON_SECRET ? [200] : [401],
   },
   'GET /api/debug/apify-token': {
     expected: [200],
@@ -64,13 +66,19 @@ const REQUEST_OVERRIDES = {
     expected: [400],
   },
   'GET /api/quota/status': {
-    headers: { 'x-user-id': 'smoke-test-user' },
+    headers: {
+      'x-user-id': 'smoke-test-user',
+      ...(INTERNAL_API_SECRET ? { 'x-internal-api-secret': INTERNAL_API_SECRET } : {}),
+    },
     expected: [200],
   },
   'POST /api/leads/search': {
-    headers: { 'x-user-id': 'smoke-test-user' },
+    headers: {
+      'x-user-id': 'smoke-test-user',
+      ...(INTERNAL_API_SECRET ? { 'x-internal-api-secret': INTERNAL_API_SECRET } : {}),
+    },
     body: {},
-    expected: [400],
+    expected: [400, 401],
   },
   'POST /api/research/n8n': {
     body: {},

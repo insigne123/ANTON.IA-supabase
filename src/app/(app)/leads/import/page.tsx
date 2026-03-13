@@ -7,14 +7,11 @@ import { CsvUploader } from '@/components/csv-importer/csv-uploader';
 import { ColumnMapper } from '@/components/csv-importer/column-mapper';
 import { DataReviewGrid } from '@/components/csv-importer/data-review-grid';
 import { ColumnMapping, CsvLeadInput } from '@/lib/csv-import-utils';
-import { savedOpportunitiesStorage } from '@/lib/saved-opportunities-storage'; // Usaremos esto o leads-service directamente
+import type { EnrichedLead } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-// NOTA: Dependiendo de dónde se guarden los leads, podríamos necesitar una función específica en un servicio.
-// Asumiremos que los guardamos como "Saved Opportunities" o "Enriched Leads"? 
-// El usuario dijo "importar leads a la base". Lo más seguro es guardarlos como leads enriquecidos (aunque vengan de CSV).
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 
 type Step = 'upload' | 'map' | 'review';
@@ -43,29 +40,21 @@ export default function ImportLeadsPage() {
     const handleSubmit = async (cleanedData: CsvLeadInput[]) => {
         setIsSubmitting(true);
         try {
-            // Mapear CsvLeadInput a la estructura de EnrichedLead (o Lead general)
-            // Como 'EnrichedLead' requiere campos obligatorios que quizás no tengan,
-            // llenaremos con defaults.
-            const leadsToSave = cleanedData.map(d => ({
+            const now = new Date().toISOString();
+            const leadsToSave: EnrichedLead[] = cleanedData.map((d) => ({
+                id: crypto.randomUUID(),
                 fullName: d.name,
-                email: d.email,
+                email: d.email || undefined,
                 title: d.title || undefined,
                 companyName: d.company || undefined,
                 linkedinUrl: d.linkedinUrl || undefined,
-                location: d.location || undefined,
-                // Datos técnicos requeridos por el tipo EnrichedLead
+                city: d.location || undefined,
                 sourceOpportunityId: undefined,
-                createdAt: new Date().toISOString(),
-                // Podemos marcar origen 'csv' si el modelo lo permite, o poner source='manual'
-                emailStatus: 'verified', // Asumimos verificado si el usuario lo sube? O 'unknown'.
+                createdAt: now,
+                emailStatus: d.email ? 'verified' : 'unknown',
+                enrichmentStatus: 'completed',
             }));
 
-            // Usamos addDedup de enrichedLeadsStorage para ser consistentes con la app
-            // Ajuste: enrichedLeadsStorage espera EnrichedOppLead. 
-            // Verificamos tipos en un momento. 
-            // Si falla, crearemos una función ad-hoc.
-
-            // @ts-ignore - Simplificación temporal hasta validar compatibilidad exacta de tipos
             await enrichedLeadsStorage.addDedup(leadsToSave);
 
             toast({
@@ -73,7 +62,7 @@ export default function ImportLeadsPage() {
                 description: `Se han importado ${leadsToSave.length} leads correctamente.`,
             });
 
-            router.push('/saved/opportunities/enriched'); // Redirigir a la lista de leads
+            router.push('/saved/leads/enriched');
         } catch (e: any) {
             toast({
                 variant: 'destructive',

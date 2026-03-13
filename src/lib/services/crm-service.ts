@@ -37,6 +37,12 @@ export const crmService = {
                     stage: custom.stage || 'inbox',
                     owner: custom.owner,
                     notes: custom.notes,
+                    nextAction: custom.nextAction,
+                    nextActionType: custom.nextActionType,
+                    nextActionDueAt: custom.nextActionDueAt,
+                    autopilotStatus: custom.autopilotStatus,
+                    lastAutopilotEvent: custom.lastAutopilotEvent,
+                    meetingLink: custom.meetingLink,
                     updatedAt: l.created_at
                 });
             });
@@ -58,6 +64,12 @@ export const crmService = {
                     stage: custom.stage || 'inbox',
                     owner: custom.owner,
                     notes: custom.notes,
+                    nextAction: custom.nextAction,
+                    nextActionType: custom.nextActionType,
+                    nextActionDueAt: custom.nextActionDueAt,
+                    autopilotStatus: custom.autopilotStatus,
+                    lastAutopilotEvent: custom.lastAutopilotEvent,
+                    meetingLink: custom.meetingLink,
                     updatedAt: l.created_at
                 });
             });
@@ -79,6 +91,12 @@ export const crmService = {
                     stage: custom.stage || 'inbox',
                     owner: custom.owner,
                     notes: custom.notes,
+                    nextAction: custom.nextAction,
+                    nextActionType: custom.nextActionType,
+                    nextActionDueAt: custom.nextActionDueAt,
+                    autopilotStatus: custom.autopilotStatus,
+                    lastAutopilotEvent: custom.lastAutopilotEvent,
+                    meetingLink: custom.meetingLink,
                     updatedAt: l.created_at
                 });
             });

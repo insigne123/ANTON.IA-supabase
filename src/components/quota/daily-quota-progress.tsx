@@ -9,7 +9,6 @@ import { QUOTA_KINDS, type QuotaKind, getClientQuota, getClientLimit, onQuotaCha
 import { cn } from '@/lib/utils';
 import { FlaskConical, Search, Users, Sparkles } from 'lucide-react';
 import { incClientQuota } from '@/lib/quota-client'; // sólo para emitir evento tras set local
-import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 
 type Props = {
   className?: string;
@@ -81,14 +80,11 @@ export default function DailyQuotaProgress({ className, kinds, compact, title = 
   // Sync con servidor: lee /api/quota/status y actualiza el espejo local para los recursos visibles
   useEffect(() => {
     if (!syncServer) return;
-    const userId = microsoftAuthService.getUserIdentity()?.email || '';
-    if (!userId) return;
     const abort = new AbortController();
     (async () => {
       try {
         const res = await fetch('/api/quota/status', {
           method: 'GET',
-          headers: { 'x-user-id': userId },
           cache: 'no-store',
           signal: abort.signal,
         });

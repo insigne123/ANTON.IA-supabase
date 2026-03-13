@@ -164,7 +164,7 @@ function renderActionContent(activity: any) {
     const { action, details, entity_type, entity_id } = activity;
 
     const getLink = () => {
-        if (entity_type === 'campaign' && entity_id) return `/campaigns/${entity_id}`;
+        if (entity_type === 'campaign' && entity_id) return '/campaigns';
         if (entity_type === 'lead') return `/saved/leads`;
         if (entity_type === 'member' || entity_type === 'organization') return `/settings/organization`;
         return null;

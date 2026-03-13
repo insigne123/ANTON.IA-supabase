@@ -33,6 +33,12 @@ export interface UnifiedRow {
   stage?: import('./crm-types').PipelineStage | string | null;
   owner?: string | null;
   notes?: string | null;
+  nextAction?: string | null;
+  nextActionType?: string | null;
+  nextActionDueAt?: string | null;
+  autopilotStatus?: string | null;
+  lastAutopilotEvent?: string | null;
+  meetingLink?: string | null;
 }
 
 export type ColumnKey =

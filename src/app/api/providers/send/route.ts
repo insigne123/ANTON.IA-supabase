@@ -5,6 +5,7 @@ import { tokenService } from '@/lib/services/token-service';
 import { refreshGoogleToken, refreshMicrosoftToken } from '@/lib/server-auth-helpers';
 import { sendGmail, sendOutlook } from '@/lib/server-email-sender';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
+import { normalizeConnectedEmailProvider } from '@/lib/email-provider';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,10 +18,15 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const { provider, to, subject, htmlBody, organizationId: bodyOrgId } = await req.json();
+        const { provider: rawProvider, to, subject, htmlBody, organizationId: bodyOrgId } = await req.json();
+        const provider = normalizeConnectedEmailProvider(rawProvider);
 
-        if (!provider || !to || !subject || !htmlBody) {
+        if (!rawProvider || !to || !subject || !htmlBody) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+        }
+
+        if (!provider) {
+            return NextResponse.json({ error: `Unsupported provider: ${String(rawProvider)}` }, { status: 400 });
         }
 
         // --- Unsubscribe / Blacklist Check --- //
