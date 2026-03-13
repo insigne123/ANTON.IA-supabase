@@ -45,9 +45,6 @@ env:
     value: "false"
     availability: [RUNTIME]
 
-  - variable: PDL_API_KEY
-    secret: PDL_API_KEY
-
   - variable: PDL_BASE_URL
     value: https://api.peopledatalabs.com/v5
     availability: [RUNTIME]
