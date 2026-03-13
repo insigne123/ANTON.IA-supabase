@@ -858,6 +858,18 @@ export default function EnrichedLeadsClient() {
     setOpenLinkedin(true);
   }
 
+  function isLinkedinPendingInviteError(error?: string) {
+    const text = String(error || '').toLowerCase();
+    return text.includes('connection request already pending') || text.includes('already pending');
+  }
+
+  function getLinkedinPendingInviteMessage() {
+    return {
+      title: 'Invitacion ya pendiente',
+      description: 'Este perfil ya tiene una solicitud de conexion pendiente en LinkedIn. No es un problema de Premium ni de la extension.',
+    };
+  }
+
   async function handleBulkLinkedin() {
     // 1. Get selected leads with LinkedIn URLs
     const leadsToProcess = enriched.filter(l => selectedToContact.has(l.id) && l.linkedinUrl);
@@ -897,6 +909,7 @@ export default function EnrichedLeadsClient() {
     let processedCount = 0;
     let successCount = 0;
     let failCount = 0;
+    let skippedCount = 0;
 
     for (const lead of leadsToProcess) {
       // Check stop flag
@@ -956,13 +969,23 @@ export default function EnrichedLeadsClient() {
             return next;
           });
         } else {
-          failCount++;
-          console.error('[Bulk LinkedIn] Failed for:', lead.fullName, res.error);
-          toast({
-            title: `Error: ${lead.fullName}`,
-            description: res.error || 'No se pudo enviar el mensaje',
-            variant: 'destructive'
-          });
+          if (isLinkedinPendingInviteError(res.error)) {
+            skippedCount++;
+            const info = getLinkedinPendingInviteMessage();
+            console.warn('[Bulk LinkedIn] Invite already pending for:', lead.fullName);
+            toast({
+              title: `${info.title}: ${lead.fullName}`,
+              description: info.description,
+            });
+          } else {
+            failCount++;
+            console.error('[Bulk LinkedIn] Failed for:', lead.fullName, res.error);
+            toast({
+              title: `Error: ${lead.fullName}`,
+              description: res.error || 'No se pudo enviar el mensaje',
+              variant: 'destructive'
+            });
+          }
         }
 
       } catch (err) {
@@ -990,7 +1013,7 @@ export default function EnrichedLeadsClient() {
 
     toast({
       title: 'Proceso finalizado',
-      description: `Procesados: ${processedCount} | Exitosos: ${successCount} | Fallidos: ${failCount}`
+      description: `Procesados: ${processedCount} | Exitosos: ${successCount} | Omitidos: ${skippedCount} | Fallidos: ${failCount}`
     });
   }
 
@@ -1081,7 +1104,13 @@ export default function EnrichedLeadsClient() {
         // await removeEnrichedLeadById(linkedinLead.id);
       } else {
         console.error('Extension returned error:', res.error);
-        toast({ variant: 'destructive', title: 'Error en Envío', description: res.error });
+        if (isLinkedinPendingInviteError(res.error)) {
+          const info = getLinkedinPendingInviteMessage();
+          toast({ title: info.title, description: info.description });
+          setOpenLinkedin(false);
+        } else {
+          toast({ variant: 'destructive', title: 'Error en Envio', description: res.error });
+        }
       }
 
     } catch (e: any) {

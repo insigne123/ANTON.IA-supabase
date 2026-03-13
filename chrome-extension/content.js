@@ -6,6 +6,7 @@ const MORE_BUTTON_TEXTS = ['more', 'mas'];
 const ADD_NOTE_TEXTS = ['add a note', 'anadir una nota', 'agregar una nota', 'personalize', 'personalizar'];
 const SEND_BUTTON_TEXTS = ['send', 'enviar', 'done', 'listo', 'connect', 'conectar'];
 const DISMISS_BUTTON_TEXTS = ['dismiss', 'cerrar', 'close', 'cancel', 'cancelar', 'no thanks', 'no, gracias', 'got it'];
+const PENDING_BUTTON_TEXTS = ['pending', 'pendiente', 'invitation sent', 'invitacion enviada', 'request sent', 'solicitud enviada'];
 const FLOW_WAIT_MS = 12000;
 const FLOW_POLL_MS = 350;
 
@@ -155,7 +156,8 @@ async function runDMFlow(profileUrl, message) {
 }
 
 async function tryDirectMessage(message) {
-    const msgBtn = findMessageButton();
+    const profileRoot = getPrimaryProfileRoot();
+    const msgBtn = findMessageButton(profileRoot);
     if (!msgBtn) {
         console.log('[Anton.IA Content] No Message button found.');
         return null;
@@ -176,7 +178,7 @@ async function tryDirectMessage(message) {
         }
 
         return { kind: 'idle' };
-    }, 10000, FLOW_POLL_MS);
+    }, 14000, FLOW_POLL_MS);
 
     if (state.kind === 'editor') {
         console.log('[Anton.IA Content] Message editor detected.');
@@ -198,7 +200,17 @@ async function tryDirectMessage(message) {
 
 async function sendMessageInEditor(editor, message) {
     setElementText(editor, message);
-    await delay(700);
+    await delay(900);
+
+    if (!textLooksApplied(editor, message)) {
+        console.warn('[Anton.IA Content] Message text did not stick on first attempt. Retrying insertion.');
+        setElementText(editor, message);
+        await delay(700);
+    }
+
+    if (!textLooksApplied(editor, message)) {
+        throw new Error('Message editor did not accept the text');
+    }
 
     const sendBtn = findSendButton(editor.closest('form') || editor.closest('.msg-overlay-conversation-bubble') || document);
     if (!sendBtn) {
@@ -208,7 +220,7 @@ async function sendMessageInEditor(editor, message) {
 
     if (isElementDisabled(sendBtn)) {
         console.error('[Anton.IA Content] Send button is disabled.', describeElement(sendBtn));
-        throw new Error('Send button is disabled (message may not have been inserted)');
+        throw new Error('Send button is disabled after writing the message');
     }
 
     console.log('[Anton.IA Content] Clicking Send button:', describeElement(sendBtn));
@@ -219,18 +231,14 @@ async function sendMessageInEditor(editor, message) {
 }
 
 async function handleConnectFlow(message) {
-    if (findPendingIndicator()) {
-        console.log('[Anton.IA Content] Connection request already pending.');
-        return { success: false, error: 'Connection request already pending' };
-    }
-
     await closeBlockingDialog();
 
-    let connectBtn = findConnectButton();
+    const profileRoot = getPrimaryProfileRoot();
+    let connectBtn = findConnectButton(profileRoot);
 
     if (!connectBtn) {
         console.log('[Anton.IA Content] Connect button not visible. Checking More menu...');
-        const moreBtn = findMoreButton();
+        const moreBtn = findMoreButton(profileRoot);
         if (moreBtn) {
             console.log('[Anton.IA Content] Opening More menu:', describeElement(moreBtn));
             safeClick(moreBtn);
@@ -243,17 +251,22 @@ async function handleConnectFlow(message) {
         throw new Error('Could not find Connect button on this profile');
     }
 
+    if (isPendingButton(connectBtn)) {
+        console.log('[Anton.IA Content] Connection request already pending on action button.');
+        return { success: false, error: 'Connection request already pending' };
+    }
+
     console.log('[Anton.IA Content] Clicking Connect button:', describeElement(connectBtn));
     safeClick(connectBtn);
 
-    let state = await waitForState(getConnectState, FLOW_WAIT_MS, FLOW_POLL_MS);
+    let state = await waitForState(() => getConnectState({ profileRoot }), FLOW_WAIT_MS, FLOW_POLL_MS);
     if (state.kind === 'idle') {
         console.warn('[Anton.IA Content] No recognizable state after first Connect click. Retrying once.', getStateSnapshot());
         await delay(900);
-        const retryBtn = findConnectButton();
+        const retryBtn = findConnectButton(profileRoot) || findConnectButton(document);
         if (retryBtn) {
             safeClick(retryBtn);
-            state = await waitForState(getConnectState, 8000, FLOW_POLL_MS);
+            state = await waitForState(() => getConnectState({ profileRoot }), 8000, FLOW_POLL_MS);
         }
     }
 
@@ -272,14 +285,14 @@ async function handleConnectFlow(message) {
     if (state.kind === 'note-prompt') {
         console.log('[Anton.IA Content] Add note prompt detected. Clicking Add note.');
         safeClick(state.addNoteBtn);
-        state = await waitForState(getConnectState, 6000, 250);
+        state = await waitForState(() => getConnectState({ profileRoot }), 6000, 250);
     }
 
     if (state.kind === 'send-prompt') {
         console.log('[Anton.IA Content] Connect dialog has direct send action. Submitting without note.');
         safeClick(state.sendBtn);
         await delay(1200);
-        if (findPendingIndicator() || findSuccessToast()) {
+        if (findPendingIndicator(profileRoot) || findSuccessToast()) {
             return { success: true, status: 'Connection request sent' };
         }
         return { success: true, status: 'Connection request submitted' };
@@ -290,15 +303,24 @@ async function handleConnectFlow(message) {
         setElementText(state.editor, message);
         await delay(700);
 
+        if (!textLooksApplied(state.editor, message)) {
+            setElementText(state.editor, message);
+            await delay(600);
+        }
+
         const sendBtn = findSendButton(state.dialog || document);
         if (!sendBtn) {
             throw new Error('Could not find Send button in LinkedIn connect dialog');
         }
 
+        if (isElementDisabled(sendBtn)) {
+            throw new Error('Connect dialog send button stayed disabled');
+        }
+
         safeClick(sendBtn);
         await delay(1200);
 
-        if (findPendingIndicator() || findSuccessToast()) {
+        if (findPendingIndicator(profileRoot) || findSuccessToast()) {
             return { success: true, status: 'Connection request sent with note' };
         }
         return { success: true, status: 'Connection request submitted with note' };
@@ -308,12 +330,18 @@ async function handleConnectFlow(message) {
     throw new Error('Connect click did not produce a recognizable LinkedIn state');
 }
 
-function getConnectState() {
-    const pending = findPendingIndicator();
+function getConnectState(context = {}) {
+    const pending = findPendingIndicator(context.profileRoot);
     if (pending) return { kind: 'pending', pending };
 
     const toast = findSuccessToast();
     if (toast) return { kind: 'quick-success', toast };
+
+    if (context.profileRoot) {
+        const connectButton = findConnectButton(context.profileRoot);
+        const messageButton = findMessageButton(context.profileRoot);
+        if (!connectButton && messageButton) return { kind: 'quick-success', messageButton };
+    }
 
     const dialog = getDialogRoot();
     const editor = findNoteEditor(dialog || document);
@@ -377,6 +405,35 @@ async function waitForState(reader, timeoutMs, intervalMs) {
     return lastState;
 }
 
+function getProfileActionRoots() {
+    const selectors = [
+        '.pv-top-card-v2-ctas',
+        '.pv-top-card-profile-actions',
+        '.top-card-layout__actions',
+        '.profile-topcard-person-entity__actions',
+        '.pv-top-card',
+    ];
+
+    const roots = [];
+    for (const selector of selectors) {
+        const matches = Array.from(document.querySelectorAll(selector)).filter(isElementVisible);
+        for (const match of matches) {
+            if (!roots.includes(match)) roots.push(match);
+        }
+    }
+
+    if (!roots.length) {
+        const main = document.querySelector('main');
+        if (main && isElementVisible(main)) roots.push(main);
+    }
+
+    return roots;
+}
+
+function getPrimaryProfileRoot() {
+    return getProfileActionRoots()[0] || document;
+}
+
 function getActionCandidates(root, options) {
     const scope = root || document;
     const selectors = options && options.selectors
@@ -387,7 +444,8 @@ function getActionCandidates(root, options) {
         .map((node) => resolveClickableTarget(node))
         .filter(Boolean);
 
-    return nodes.filter((node, index) => nodes.indexOf(node) === index)
+    return nodes
+        .filter((node, index) => nodes.indexOf(node) === index)
         .filter((node) => isElementVisible(node))
         .filter((node) => (options && options.includeDisabled) || !isElementDisabled(node));
 }
@@ -412,6 +470,7 @@ function findActionElement(texts, options) {
 
         if (!score) continue;
         if (String(node.className || '').includes('artdeco-button--primary')) score += 10;
+        if (node.closest('.pv-top-card-v2-ctas, .pv-top-card-profile-actions, .top-card-layout__actions')) score += 20;
         if (node.closest('.artdeco-dropdown__content-inner')) score += 4;
 
         if (score > bestScore) {
@@ -482,8 +541,13 @@ function describeElement(node) {
 
 function getMessageEditor() {
     const selectors = [
+        'textarea[name="message"]',
+        'textarea[aria-label*="message" i]',
+        'textarea[placeholder*="message" i]',
         'div.msg-form__contenteditable[contenteditable="true"]',
         'div[role="textbox"][contenteditable="true"]',
+        '[contenteditable="true"][aria-label*="message" i]',
+        '[contenteditable="true"][data-placeholder*="message" i]',
         '.msg-form__msg-content-container [contenteditable="true"]',
         '.msg-overlay-conversation-bubble [contenteditable="true"]',
     ];
@@ -513,6 +577,7 @@ function findNoteEditor(root) {
         '.artdeco-modal textarea',
         '[role="dialog"] textarea',
         '.artdeco-modal [contenteditable="true"][role="textbox"]',
+        '[role="dialog"] [contenteditable="true"]',
     ];
 
     for (const selector of selectors) {
@@ -522,23 +587,31 @@ function findNoteEditor(root) {
     return null;
 }
 
-function findMessageButton() {
+function findMessageButton(root) {
     return findActionElement(MESSAGE_BUTTON_TEXTS, {
+        root: root || getPrimaryProfileRoot() || document,
         excludeTexts: ['message ads', 'messaging'],
-    });
+    }) || (!root ? findActionElement(MESSAGE_BUTTON_TEXTS, {
+        excludeTexts: ['message ads', 'messaging'],
+    }) : null);
 }
 
 function findConnectButton(root) {
     return findActionElement(CONNECT_BUTTON_TEXTS, {
-        root,
+        root: root || getPrimaryProfileRoot() || document,
         excludeTexts: ['connected', 'connections', 'pending', 'message', 'mensaje'],
-    });
+    }) || (!root ? findActionElement(CONNECT_BUTTON_TEXTS, {
+        excludeTexts: ['connected', 'connections', 'pending', 'message', 'mensaje'],
+    }) : null);
 }
 
-function findMoreButton() {
+function findMoreButton(root) {
     return findActionElement(MORE_BUTTON_TEXTS, {
+        root: root || getPrimaryProfileRoot() || document,
         excludeTexts: ['more relevant', 'more filters'],
-    });
+    }) || (!root ? findActionElement(MORE_BUTTON_TEXTS, {
+        excludeTexts: ['more relevant', 'more filters'],
+    }) : null);
 }
 
 function findSendButton(root) {
@@ -556,11 +629,21 @@ function findSendButton(root) {
     });
 }
 
-function findPendingIndicator() {
-    return findActionElement(['pending', 'pendiente'], {
-        includeDisabled: true,
-        selectors: ['button', '[role="button"]', 'span'],
-    });
+function findPendingIndicator(root) {
+    const roots = root ? [root] : getProfileActionRoots();
+
+    for (const scope of roots) {
+        const candidates = getActionCandidates(scope, {
+            includeDisabled: true,
+            selectors: ['button', '[role="button"]', 'a[role="button"]', 'span'],
+        });
+
+        for (const node of candidates) {
+            if (isPendingButton(node)) return node;
+        }
+    }
+
+    return null;
 }
 
 function findSuccessToast() {
@@ -623,6 +706,16 @@ function isInvitationLimitText(text) {
     ].some((token) => text.includes(token));
 }
 
+function isPendingButton(node) {
+    if (!(node instanceof HTMLElement)) return false;
+    const label = normalizeText(getElementLabel(node));
+    if (!label) return false;
+
+    return PENDING_BUTTON_TEXTS.some((token) => {
+        return label === token || label.startsWith(`${token} `) || label.includes(` ${token}`);
+    });
+}
+
 function setElementText(node, value) {
     const text = String(value || '').trim();
     if (!(node instanceof HTMLElement) || !text) return;
@@ -630,23 +723,56 @@ function setElementText(node, value) {
     node.focus({ preventScroll: true });
 
     if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) {
-        node.value = '';
+        const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(node), 'value');
+        const nativeSetter = descriptor && descriptor.set ? descriptor.set.bind(node) : null;
+
+        if (nativeSetter) {
+            nativeSetter('');
+        } else {
+            node.value = '';
+        }
         node.dispatchEvent(new Event('input', { bubbles: true }));
-        node.value = text;
+
+        if (nativeSetter) {
+            nativeSetter(text);
+        } else {
+            node.value = text;
+        }
         node.dispatchEvent(new Event('input', { bubbles: true }));
         node.dispatchEvent(new Event('change', { bubbles: true }));
+        node.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
         return;
+    }
+
+    const selection = window.getSelection();
+    if (selection) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        selection.removeAllRanges();
+        selection.addRange(range);
     }
 
     document.execCommand('selectAll', false, null);
     document.execCommand('delete', false, null);
+    node.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, data: text, inputType: 'insertText' }));
     const inserted = document.execCommand('insertText', false, text);
 
-    if (!inserted || !normalizeText(node.innerText || '').includes(normalizeText(text.slice(0, 12)))) {
-        node.textContent = text;
-        node.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
-        node.dispatchEvent(new Event('change', { bubbles: true }));
+    if (!inserted || !textLooksApplied(node, text)) {
+        node.textContent = '';
+        node.appendChild(document.createTextNode(text));
     }
+
+    node.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
+    node.dispatchEvent(new Event('change', { bubbles: true }));
+    node.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+}
+
+function textLooksApplied(node, text) {
+    const current = node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement
+        ? node.value
+        : (node.innerText || node.textContent || '');
+    const expected = normalizeText(String(text || '').slice(0, 18));
+    return !!expected && normalizeText(current).includes(expected);
 }
 
 function getStateSnapshot() {
@@ -655,7 +781,7 @@ function getStateSnapshot() {
         url: location.href,
         hasMessageEditor: !!getMessageEditor(),
         hasNoteEditor: !!findNoteEditor(dialog || document),
-        hasPending: !!findPendingIndicator(),
+        hasPending: !!findPendingIndicator(getPrimaryProfileRoot()),
         dialogText: dialog ? normalizeText(dialog.innerText || '').slice(0, 180) : '',
         visibleButtons: getActionCandidates(document, { includeDisabled: true })
             .slice(0, 10)
