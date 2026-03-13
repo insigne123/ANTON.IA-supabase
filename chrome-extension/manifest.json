@@ -11,6 +11,9 @@
     "host_permissions": [
         "https://www.linkedin.com/*",
         "http://localhost:3000/*",
+        "http://127.0.0.1:3000/*",
+        "http://localhost:9003/*",
+        "http://127.0.0.1:9003/*",
         "https://*.vercel.app/*",
         "https://*.hosted.app/*",
         "https://*.us-central1.hosted.app/*",
@@ -31,6 +34,9 @@
         {
             "matches": [
                 "http://localhost:3000/*",
+                "http://127.0.0.1:3000/*",
+                "http://localhost:9003/*",
+                "http://127.0.0.1:9003/*",
                 "https://*.vercel.app/*",
                 "https://*.hosted.app/*",
                 "https://*.us-central1.hosted.app/*",
@@ -54,6 +60,9 @@
     "externally_connectable": {
         "matches": [
             "http://localhost:3000/*",
+            "http://127.0.0.1:3000/*",
+            "http://localhost:9003/*",
+            "http://127.0.0.1:9003/*",
             "https://*.vercel.app/*",
             "https://*.hosted.app/*",
             "https://*.us-central1.hosted.app/*",

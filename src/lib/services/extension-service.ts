@@ -5,6 +5,7 @@ export const extensionService = {
     _listenerInitialized: false,
     _lastReplyKey: null as null | string,
     _lastReplyAtMs: 0,
+    _requestSeq: 0,
 
     initListener() {
         if (typeof window === 'undefined') return;
@@ -15,7 +16,7 @@ export const extensionService = {
             if (event.source !== window) return;
             if (event.data.type === 'ANTON_EXTENSION_READY') {
                 this.isInstalled = true;
-                console.log('[App] ✅ Extension detected via ANTON_EXTENSION_READY message!');
+                console.log('[App] Extension detected via ANTON_EXTENSION_READY message!');
             }
 
             if (event.data.type === 'ANTON_REPLY_DETECTED') {
@@ -26,65 +27,73 @@ export const extensionService = {
             }
         });
 
-        // Proactive check
-        // We send a ping, if extension is there, it might respond (handled by listener above if we add a PONG)
-        // For now, rely on the content script's initial broadcast or 'data-' attribute.
         if (document.body.getAttribute('data-anton-extension-installed')) {
             this.isInstalled = true;
-            console.log('[App] ✅ Extension detected via data-anton-extension-installed attribute!');
+            console.log('[App] Extension detected via data-anton-extension-installed attribute!');
         }
 
-        // Log status after initialization
         setTimeout(() => {
             console.log('[App] Extension Service Status:', {
                 isInstalled: this.isInstalled,
                 hasDataAttribute: !!document.body.getAttribute('data-anton-extension-installed'),
-                currentUrl: window.location.href
+                currentUrl: window.location.href,
             });
         }, 1000);
     },
 
     async sendLinkedinDM(profileUrl: string, message: string): Promise<{ success: boolean; error?: string }> {
         if (!this.isInstalled) {
-            console.error('[App] ❌ Cannot send LinkedIn DM: Extension not installed');
+            console.error('[App] Cannot send LinkedIn DM: Extension not installed');
             return { success: false, error: 'Extension not installed' };
         }
 
-        console.log('[App] 📤 Sending LinkedIn DM request:', { profileUrl, messageLength: message.length });
+        const requestId = `linkedin-${Date.now()}-${++this._requestSeq}`;
+        const timeoutMs = 60000;
+
+        console.log('[App] Sending LinkedIn DM request:', { requestId, profileUrl, messageLength: message.length });
 
         return new Promise((resolve) => {
+            let settled = false;
+
             const handler = (event: MessageEvent) => {
                 if (event.source !== window) return;
-                if (event.data.type === 'EXTENSION_Response') {
-                    // We might need an ID to match request/response if concurrent, but for now simple 1-1
-                    window.removeEventListener('message', handler);
-                    console.log('[App] 📥 Received extension response:', event.data.payload);
+                if (event.data.type !== 'EXTENSION_Response') return;
 
-                    if (event.data.payload.success) {
-                        resolve({ success: true });
-                    } else {
-                        resolve({ success: false, error: event.data.payload.error });
-                    }
+                const payload = event.data.payload || {};
+                if (payload.requestId && payload.requestId !== requestId) return;
+                if (settled) return;
+
+                settled = true;
+                window.clearTimeout(timeoutId);
+                window.removeEventListener('message', handler);
+                console.log('[App] Received extension response:', payload);
+
+                if (payload.success) {
+                    resolve({ success: true });
+                } else {
+                    resolve({ success: false, error: payload.error || 'Unknown extension error' });
                 }
             };
 
             window.addEventListener('message', handler);
 
+            const timeoutId = window.setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                window.removeEventListener('message', handler);
+                console.error('[App] Timeout waiting for extension response', { requestId, timeoutMs });
+                resolve({ success: false, error: `Timeout waiting for extension (${Math.round(timeoutMs / 1000)}s)` });
+            }, timeoutMs);
+
             window.postMessage({
                 type: 'ANTON_TO_EXTENSION',
                 payload: {
                     action: 'SEND_DM',
+                    requestId,
                     profileUrl,
-                    message
-                }
+                    message,
+                },
             }, '*');
-
-            // Timeout safety
-            setTimeout(() => {
-                window.removeEventListener('message', handler);
-                console.error('[App] ⏱️ Timeout waiting for extension response');
-                resolve({ success: false, error: 'Timeout waiting for extension (30s)' });
-            }, 30000);
         });
     },
 
@@ -105,7 +114,7 @@ export const extensionService = {
             const res = await fetch('/api/scheduler/reply', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ linkedinThreadUrl, replyText, profileUrl })
+                body: JSON.stringify({ linkedinThreadUrl, replyText, profileUrl }),
             });
 
             if (!res.ok) {
@@ -115,17 +124,14 @@ export const extensionService = {
             }
 
             const data = await res.json().catch(() => ({}));
-            console.log('[App] ✅ Reply event saved:', data);
+            console.log('[App] Reply event saved:', data);
         } catch (e) {
             console.error('[App] Network error saving reply:', e);
         }
-    }
+    },
 };
 
-// Start listening immediately
 if (typeof window !== 'undefined') {
     extensionService.initListener();
-
-    // Make it globally accessible for debugging
     (window as any).extensionService = extensionService;
 }

@@ -3,6 +3,17 @@ console.log('[Anton.IA Background] Service Worker Started!');
 
 // Store pending DM requests
 const pendingRequests = new Map();
+const APP_TAB_URLS = [
+    'http://localhost:3000/*',
+    'http://127.0.0.1:3000/*',
+    'http://localhost:9003/*',
+    'http://127.0.0.1:9003/*',
+    'https://*.vercel.app/*',
+    'https://*.hosted.app/*',
+    'https://*.us-central1.hosted.app/*',
+    'https://studio--leadflowai-3yjcy.us-central1.hosted.app/*'
+];
+const CONTENT_SCRIPT_TIMEOUT_MS = 55000;
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log('[Anton.IA Background] Received message:', request);
@@ -32,7 +43,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.log('[Anton.IA Background] Received DM result:', request.result);
         const callback = pendingRequests.get(request.requestId);
         if (callback) {
-            callback(request.result);
+            callback({
+                requestId: request.requestId,
+                ...(request.result || {})
+            });
             pendingRequests.delete(request.requestId);
         }
         return false;
@@ -48,13 +62,7 @@ async function relayReplyDetected(payload) {
 
     // Find any open Anton.IA app tab(s)
     const appTabs = await chrome.tabs.query({
-        url: [
-            'http://localhost:3000/*',
-            'https://*.vercel.app/*',
-            'https://*.hosted.app/*',
-            'https://*.us-central1.hosted.app/*',
-            'https://studio--leadflowai-3yjcy.us-central1.hosted.app/*'
-        ]
+        url: APP_TAB_URLS
     });
 
     if (!appTabs || appTabs.length === 0) {
@@ -84,7 +92,12 @@ async function handleSendDM(payload, sendResponse) {
 
     try {
         const targetUrl = payload.profileUrl;
-        const requestId = Date.now().toString(); // Unique ID for this request
+        const requestId = payload.requestId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+        if (!targetUrl) {
+            sendResponse({ requestId, success: false, error: 'Missing LinkedIn profile URL' });
+            return;
+        }
 
         // Helper: Wait for tab to be completely ready
         const waitForTabLoad = (tabId) => {
@@ -177,7 +190,7 @@ async function handleSendDM(payload, sendResponse) {
                                 }, 1000);
                             }).catch(err => {
                                 console.error('Injection failed', err);
-                                sendResponse({ success: false, error: 'Failed to connect to LinkedIn tab' });
+                                sendResponse({ requestId, success: false, error: 'Failed to connect to LinkedIn tab' });
                                 pendingRequests.delete(requestId);
                             });
                         }
@@ -194,14 +207,15 @@ async function handleSendDM(payload, sendResponse) {
         setTimeout(() => {
             if (pendingRequests.has(requestId)) {
                 console.error('[Anton.IA Background] Timeout for request:', requestId);
-                sendResponse({ success: false, error: 'Timeout waiting for content script logic' });
+                sendResponse({ requestId, success: false, error: 'Timeout waiting for content script logic' });
                 pendingRequests.delete(requestId);
             }
-        }, 45000); // Increased to 45s for navigation
+        }, CONTENT_SCRIPT_TIMEOUT_MS);
 
     } catch (error) {
         console.error('[Anton.IA Background] Exception:', error);
         sendResponse({
+            requestId: payload.requestId || null,
             success: false,
             error: error.message
         });

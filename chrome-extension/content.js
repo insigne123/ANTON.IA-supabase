@@ -1,57 +1,60 @@
-// Anton.IA LinkedIn Automator
 console.log('Anton.IA LinkedIn Script Active');
+
+const MESSAGE_BUTTON_TEXTS = ['message', 'mensaje', 'send message', 'enviar mensaje'];
+const CONNECT_BUTTON_TEXTS = ['connect', 'conectar'];
+const MORE_BUTTON_TEXTS = ['more', 'mas'];
+const ADD_NOTE_TEXTS = ['add a note', 'anadir una nota', 'agregar una nota', 'personalize', 'personalizar'];
+const SEND_BUTTON_TEXTS = ['send', 'enviar', 'done', 'listo', 'connect', 'conectar'];
+const DISMISS_BUTTON_TEXTS = ['dismiss', 'cerrar', 'close', 'cancel', 'cancelar', 'no thanks', 'no, gracias', 'got it'];
+const FLOW_WAIT_MS = 12000;
+const FLOW_POLL_MS = 350;
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log('[Anton.IA Content] Received message:', request.action);
 
     if (request.action === 'PING') {
         sendResponse({ status: 'ready' });
-        return false; // synchronous
+        return false;
     }
 
     if (request.action === 'EXECUTE_DM_FLOW') {
         const requestId = request.requestId;
 
-        // Acknowledge receipt immediately so the channel closes cleanly
         console.log('[Anton.IA Content] Acknowledging receipt for request:', requestId);
-        sendResponse({ received: true });
+        sendResponse({ received: true, requestId });
 
-        // Execute async logic detached from the message channel
         runDMFlow(request.profileUrl, request.message)
-            .then(result => {
+            .then((result) => {
                 console.log('[Anton.IA Content] Sending success result back to background:', result);
                 chrome.runtime.sendMessage({
                     action: 'DM_RESULT',
-                    requestId: requestId,
-                    result: result
+                    requestId,
+                    result,
                 });
             })
-            .catch(error => {
+            .catch((error) => {
                 console.error('[Anton.IA Content] Sending error result back to background:', error);
                 chrome.runtime.sendMessage({
                     action: 'DM_RESULT',
-                    requestId: requestId,
-                    result: { success: false, error: error.message }
+                    requestId,
+                    result: { success: false, error: error.message },
                 });
             });
 
-        return false; // Close channel immediately
+        return false;
     }
 
     return false;
 });
 
-// --- LISTENER LOGIC (Phase 3) ---
-// Monitor chat for new incoming messages
-
 let lastProcessedMessage = null;
+let replyObserver = null;
+let observedChatContainer = null;
 
-// Run observer when on messaging page
 if (location.href.includes('messaging')) {
     startReplyObserver();
 }
 
-// Also watch for URL changes (SPA)
 let lastUrl = location.href;
 new MutationObserver(() => {
     const url = location.href;
@@ -65,56 +68,45 @@ new MutationObserver(() => {
 }).observe(document, { subtree: true, childList: true });
 
 function startReplyObserver() {
-    // We observe the message list container
-    // Class names change, so we look for generic "list" roles or specific partial classes
     const chatContainer = document.querySelector('.msg-s-message-list-container');
 
     if (!chatContainer) {
-        // Retry/Wait
         setTimeout(startReplyObserver, 2000);
         return;
     }
 
+    if (observedChatContainer === chatContainer && replyObserver) {
+        return;
+    }
+
+    if (replyObserver) {
+        replyObserver.disconnect();
+    }
+
     console.log('Anton.IA: Observer attached to chat container');
 
-    const callback = (mutationsList) => {
-        // Check for new nodes
+    observedChatContainer = chatContainer;
+    replyObserver = new MutationObserver((mutationsList) => {
         for (const mutation of mutationsList) {
             if (mutation.type === 'childList') {
                 checkLastMessage();
             }
         }
-    };
+    });
 
-    const observer = new MutationObserver(callback);
-    observer.observe(chatContainer, { childList: true, subtree: true });
-
-    // Check initial state too
+    replyObserver.observe(chatContainer, { childList: true, subtree: true });
     checkLastMessage();
 }
 
 function checkLastMessage() {
-    // Find all message bubbles
-    // Selector strategy: 'msg-s-event-listitem' is the wrapper.
     const items = document.querySelectorAll('.msg-s-event-listitem');
     if (items.length === 0) return;
 
     const lastItem = items[items.length - 1];
-
-    // Check if it's NOT from me
-    // Usually 'msg-s-message-group--is-mine' or similar exists on the GROUP.
-    // The list items are inside groups.
-    // We need to check if the message is INCOMING.
-    // Heuristic: Check for Profile Link/Image of the OTHER person.
-
-    // LinkedIn DOM structure varies.
-    // Robust check: Does it have 'msg-s-event-listitem--other'? (Sometimes used)
-
     const isMine = lastItem.innerHTML.includes('msg-s-message-group--is-mine') ||
         lastItem.closest('.msg-s-message-group--is-mine');
 
     if (!isMine) {
-        // It's from them!
         const textElement = lastItem.querySelector('.msg-s-event-listitem__body');
         const text = textElement ? textElement.innerText : '';
 
@@ -122,395 +114,551 @@ function checkLastMessage() {
             console.log('Anton.IA: Reply Detected!', text.substring(0, 20) + '...');
             lastProcessedMessage = text;
 
-            // Send to Background
             chrome.runtime.sendMessage({
                 action: 'REPLY_DETECTED',
                 replyText: text,
                 linkedinThreadUrl: location.href,
-                profileUrl: extractProfileFromThread()
+                profileUrl: extractProfileFromThread(),
             });
         }
     }
 }
 
 function extractProfileFromThread() {
-    // Try to find the profile link in the header
     const headerLink = document.querySelector('.msg-thread-section__sender a.msg-thread-section__sender-link');
     return headerLink ? headerLink.href : null;
 }
 
-
-// --- EXISTING SEND LOGIC ---
-
-/*
 async function runDMFlow(profileUrl, message) {
     console.log('[Anton.IA Content] Starting runDMFlow...');
 
-    // 1. Check if we are on the right profile
-    const normalizePath = (urlStr) => {
-        try {
-            // Basic fix for protocol-less URLs or partials if needed, though profileUrl should be full
-            if (!urlStr.startsWith('http')) urlStr = 'https://' + urlStr;
-            const u = new URL(urlStr);
-            return u.pathname.toLowerCase().replace(/\/$/, '');
-        } catch (e) {
-            console.error('URL parse error:', e);
-            // Fallback to simple string cleaning
-            return urlStr.toLowerCase().split('?')[0].replace(/\/$/, '');
-        }
-    };
-
-    const currentPath = normalizePath(window.location.href);
-    const targetPath = normalizePath(profileUrl);
-
-    console.log('[Anton.IA Content] URL Check:', {
-        currentUrl: window.location.href,
-        targetUrl: profileUrl,
-        currentPath,
-        targetPath
-    });
-
-    // Check if paths match (robust check)
-    // We check if currentPath includes targetPath to handle cases where LinkedIn appends IDs
-    if (!currentPath.includes(targetPath)) {
-        console.log('[Anton.IA Content] URL mismatch. Redirecting...');
+    if (!isOnRequestedProfile(profileUrl)) {
+        console.log('[Anton.IA Content] URL/Path mismatch. Redirecting...', {
+            current: normalizePath(window.location.href),
+            target: normalizePath(profileUrl),
+        });
         window.location.href = profileUrl;
-        return { success: false, error: `Redirecting to profile... (Expected: ${targetPath}, Got: ${currentPath})` };
+        return { success: false, error: 'Redirecting to profile...' };
     }
 
-    // 2. Find "Message" button
-    console.log('[Anton.IA Content] Step 2: Finding Message button...');
-    await delay(2000);
+    await delay(1500);
+    await closeBlockingDialog();
+
+    console.log('[Anton.IA Content] Strategy 1: Attempting Direct Message...');
+    const directMessageResult = await tryDirectMessage(message);
+    if (directMessageResult) {
+        return directMessageResult;
+    }
+
+    console.log('[Anton.IA Content] Strategy 2: Attempting Connect + Note...');
+    return handleConnectFlow(message);
+}
+
+async function tryDirectMessage(message) {
     const msgBtn = findMessageButton();
     if (!msgBtn) {
-        console.error('[Anton.IA Content] Message button NOT found');
-        throw new Error('Could not find Message button');
+        console.log('[Anton.IA Content] No Message button found.');
+        return null;
     }
 
-    console.log('[Anton.IA Content] Clicking Message Button...');
-    msgBtn.click();
+    console.log('[Anton.IA Content] Clicking Message button:', describeElement(msgBtn));
+    safeClick(msgBtn);
 
-    // 3. Wait for chat overlay
-    console.log('[Anton.IA Content] Step 3: Waiting for chat overlay...');
-    await delay(3000); // Increased wait
+    const state = await waitForState(() => {
+        const editor = getMessageEditor();
+        if (editor) return { kind: 'editor', editor };
 
-    // Try multiple selectors for the message editor (LinkedIn changes these frequently)
-    console.log('[Anton.IA Content] Searching for editor...');
-    const editor = document.querySelector('div[role="textbox"][contenteditable="true"]') ||
-        document.querySelector('.msg-form__contenteditable') ||
-        document.querySelector('[data-artdeco-is-focused="true"]') ||
-        document.querySelector('.msg-form__msg-content-container [contenteditable="true"]');
-
-    if (!editor) {
-        console.error('[Anton.IA Content] Chat editor not found. Dumping body for debug (truncated)...');
-        // console.log(document.body.innerHTML.substring(0, 500));
-        throw new Error('Chat editor not found - LinkedIn UI may have changed');
-    }
-
-    console.log('[Anton.IA Content] Found editor:', editor.className);
-
-    // 4. Type message
-    console.log('[Anton.IA Content] Step 4: Typing message...');
-    editor.focus();
-    document.execCommand('selectAll', false, null);
-    document.execCommand('delete', false, null);
-    document.execCommand('insertText', false, message);
-
-    // Verify text insertion
-    if (!editor.innerText.includes(message.substring(0, 10))) {
-        console.warn('[Anton.IA Content] execCommand might have failed, trying fallback...');
-        editor.innerText = message;
-    }
-
-    // 5. Click Send
-    console.log('[Anton.IA Content] Step 5: Finding Send button...');
-    await delay(1000);
-
-    const sendBtn = document.querySelector('button.msg-form__send-button') ||
-        document.querySelector('button[type="submit"]') ||
-        Array.from(document.querySelectorAll('button')).find(b =>
-            (b.innerText.toLowerCase().includes('send') ||
-                b.innerText.toLowerCase().includes('enviar')) &&
-            !b.disabled // Important check
-        );
-
-    if (sendBtn) {
-        console.log('[Anton.IA Content] Clicking Send Button...');
-        sendBtn.click();
-        console.log('[Anton.IA Content] Sent!');
-    } else {
-        console.error('[Anton.IA Content] Send button not found or disabled.');
-        throw new Error('Send button not found or disabled');
-    }
-
-    return { success: true, status: 'Message sent successfully' };
-}
-
-function findMessageButton() {
-    // Strategy: Find button with text "Message" or "Mensaje"
-    const buttons = Array.from(document.querySelectorAll('button'));
-    const messageBtn = buttons.find(b => {
-        const text = b.innerText.toLowerCase();
-        return text.includes('message') || text.includes('mensaje') || text.includes('enviar mensaje');
-    });
-
-    if (!messageBtn) {
-        console.error('[Anton.IA] Message button not found. Available buttons:',
-            buttons.slice(0, 5).map(b => b.innerText.substring(0, 20)));
-    }
-
-    return messageBtn;
-}
-*/
-
-async function runDMFlow(profileUrl, message) {
-    console.log('[Anton.IA Content] Starting runDMFlow...');
-
-    // 1. Check URL
-    const normalizePath = (urlStr) => {
-        try {
-            if (!urlStr.startsWith('http')) urlStr = 'https://' + urlStr;
-            const u = new URL(urlStr);
-            return u.pathname.toLowerCase().replace(/\/$/, '');
-        } catch (e) {
-            return urlStr.toLowerCase().split('?')[0].replace(/\/$/, '');
+        const dialog = getDialogRoot();
+        if (dialog) {
+            const text = normalizeText(dialog.innerText || '');
+            if (isUpsellText(text)) return { kind: 'upsell', dialog, text };
+            return { kind: 'dialog', dialog, text };
         }
-    };
 
-    const currentPath = normalizePath(window.location.href);
-    const targetPath = normalizePath(profileUrl);
+        return { kind: 'idle' };
+    }, 10000, FLOW_POLL_MS);
 
-    if (!currentPath.includes(targetPath)) {
-        console.log('[Anton.IA Content] URL/Path mismatch. Redirecting...');
-        window.location.href = profileUrl;
-        return { success: false, error: `Redirecting to profile...` };
+    if (state.kind === 'editor') {
+        console.log('[Anton.IA Content] Message editor detected.');
+        return sendMessageInEditor(state.editor, message);
     }
 
-    // --- STRATEGY 1: DIRECT MESSAGE ---
-    console.log('[Anton.IA Content] Strategy 1: Attempting Direct Message...');
-    try {
-        await delay(2000);
-        const msgBtn = findButtonByText(['message', 'mensaje', 'enviar mensaje']);
-
-        if (msgBtn) {
-            console.log('[Anton.IA Content] Clicked Message Button');
-            msgBtn.click();
-
-            // Wait for editor
-            await delay(3000);
-            const editor = document.querySelector('div[role="textbox"][contenteditable="true"]') ||
-                document.querySelector('.msg-form__contenteditable') ||
-                document.querySelector('[data-artdeco-is-focused="true"]');
-
-            if (editor) {
-                console.log('[Anton.IA Content] Editor found. Sending DM...');
-                return await sendMessageInEditor(editor, message);
-            } else {
-                console.warn('[Anton.IA Content] Message button clicked but no editor found (Premium/InMail?). Trying fallback...');
-
-                // CRITICAL: Close the Premium/Upsell modal if it appeared!
-                console.log('[Anton.IA Content] Looking for modal to dismiss...');
-                const dismissal = document.querySelector('button[aria-label="Dismiss"]') ||
-                    document.querySelector('button[aria-label="Cerrar"]') ||
-                    document.querySelector('.artdeco-modal__dismiss') ||
-                    Array.from(document.querySelectorAll('button')).find(b => b.innerText === 'No thanks' || b.innerText === 'No, gracias');
-
-                if (dismissal) {
-                    console.log('[Anton.IA Content] Closing Premium modal...');
-                    dismissal.click();
-                    await delay(1000); // Wait for animation
-                } else {
-                    console.log('[Anton.IA Content] No dismissal button found (maybe no modal or different selector).');
-                }
-            }
-        } else {
-            console.log('[Anton.IA Content] No Message button found.');
-        }
-    } catch (e) {
-        console.warn('[Anton.IA Content] DM Strategy failed:', e);
+    if (state.kind === 'upsell' || state.kind === 'dialog') {
+        console.warn('[Anton.IA Content] Message flow opened a blocking dialog. Falling back to Connect flow.', {
+            kind: state.kind,
+            text: (state.text || '').slice(0, 160),
+        });
+        await closeBlockingDialog();
+        return null;
     }
 
-    // --- STRATEGY 2: CONNECT + NOTE ---
-    console.log('[Anton.IA Content] Strategy 2: Attempting Connect + Note...');
-    return await handleConnectFlow(message);
+    console.warn('[Anton.IA Content] Message flow did not produce an editor. Falling back.', getStateSnapshot());
+    return null;
 }
 
-// --- HELPER: Send Message in Editor ---
 async function sendMessageInEditor(editor, message) {
-    editor.focus();
-    document.execCommand('selectAll', false, null);
-    document.execCommand('delete', false, null);
-    document.execCommand('insertText', false, message);
+    setElementText(editor, message);
+    await delay(700);
 
-    // Verify insertion
-    if (!editor.innerText.includes(message.substring(0, 5))) {
-        editor.innerText = message;
+    const sendBtn = findSendButton(editor.closest('form') || editor.closest('.msg-overlay-conversation-bubble') || document);
+    if (!sendBtn) {
+        console.error('[Anton.IA Content] Send button not found in DM editor.', getStateSnapshot());
+        throw new Error('Send button not found in DM editor');
     }
 
-    await delay(1000);
-
-    // Improved Send Button Strategy:
-    // 1. Look for the specific "Send" button class (usually the blue circle/pill)
-    // 2. Look for type="submit" (standard forms)
-    // 3. Fallback to text search (aria-label or innerText)
-    const sendBtn = document.querySelector('.msg-form__send-button') ||
-        document.querySelector('button[type="submit"]') ||
-        document.querySelector('.msg-form__footer button.artdeco-button--primary') ||
-        findButtonByText(['send', 'enviar', 'enviar mensaje']);
-
-    if (sendBtn) {
-        console.log('[Anton.IA Content] Found Send button:', sendBtn.className || sendBtn.innerText || 'Unknown');
-
-        // Ensure it's not disabled
-        if (sendBtn.disabled) {
-            console.error('[Anton.IA Content] Send button found but DISABLED.');
-            throw new Error('Send button is disabled (maybe message is empty?)');
-        }
-
-        sendBtn.click();
-        console.log('[Anton.IA Content] DM Sent!');
-        return { success: true, status: 'Message sent via DM' };
+    if (isElementDisabled(sendBtn)) {
+        console.error('[Anton.IA Content] Send button is disabled.', describeElement(sendBtn));
+        throw new Error('Send button is disabled (message may not have been inserted)');
     }
 
-    console.error('[Anton.IA Content] Send button NOT found. Visible buttons:',
-        Array.from(document.querySelectorAll('button')).map(b => b.innerText || b.getAttribute('aria-label')).slice(0, 10));
+    console.log('[Anton.IA Content] Clicking Send button:', describeElement(sendBtn));
+    safeClick(sendBtn);
+    await delay(1200);
 
-    throw new Error('Send button not found in DM editor');
+    return { success: true, status: 'Message sent via DM' };
 }
 
-// --- HELPER: Connect Flow ---
 async function handleConnectFlow(message) {
-    // 1. Find Connect Button
-    let connectBtn = findButtonByText(['connect', 'conectar']);
-
-    // Check if we are already connected or pending
-    const pendingBtn = findButtonByText(['pending', 'pendiente']);
-    if (pendingBtn) {
-        console.log('[Anton.IA Content] Connection request already pending or connected.');
+    if (findPendingIndicator()) {
+        console.log('[Anton.IA Content] Connection request already pending.');
         return { success: false, error: 'Connection request already pending' };
     }
 
-    // Look in "More" menu if not found
+    await closeBlockingDialog();
+
+    let connectBtn = findConnectButton();
+
     if (!connectBtn) {
-        console.log('[Anton.IA Content] Connect button not visible. Checking "More"...');
-        const moreBtn = findButtonByText(['more', 'más']);
+        console.log('[Anton.IA Content] Connect button not visible. Checking More menu...');
+        const moreBtn = findMoreButton();
         if (moreBtn) {
-            moreBtn.click();
-            await delay(1000);
-
-            const dropdownItems = Array.from(document.querySelectorAll('.artdeco-dropdown__content-inner span, .artdeco-dropdown__content-inner div'));
-            const connectItem = dropdownItems.find(el => {
-                const tx = el.innerText.toLowerCase();
-                return tx === 'connect' || tx === 'conectar';
-            });
-
-            if (connectItem) {
-                console.log('[Anton.IA Content] Found Connect in dropdown');
-                connectItem.click();
-                connectBtn = true; // Mark as found
-            } else {
-                // Close dropdown if not found to avoid obscuring things
-                moreBtn.click();
-            }
+            console.log('[Anton.IA Content] Opening More menu:', describeElement(moreBtn));
+            safeClick(moreBtn);
+            await delay(900);
+            connectBtn = findConnectButton(document);
         }
     }
 
     if (!connectBtn) {
-        throw new Error('Could not find Connect button (even in More menu)');
+        throw new Error('Could not find Connect button on this profile');
     }
 
-    if (connectBtn instanceof HTMLElement) connectBtn.click();
+    console.log('[Anton.IA Content] Clicking Connect button:', describeElement(connectBtn));
+    safeClick(connectBtn);
 
-    // 2. Wait for Modal (Add a note)
-    console.log('[Anton.IA Content] Waiting for Connect modal to appear...');
-    await delay(2000);
-
-    const modal = document.querySelector('.artdeco-modal');
-
-    // CASE A: Modal Appeared -> Add Note
-    if (modal) {
-        console.log('[Anton.IA Content] Modal appeared. Looking for "Add a note"...');
-
-        // 3. Find "Add a note" button
-        const addNoteTexts = ['add a note', 'añadir una nota', 'agregar una nota', 'personalize', 'personalizar'];
-        const addNoteBtn = findButtonByText(addNoteTexts);
-
-        if (addNoteBtn) {
-            console.log('[Anton.IA Content] Clicking "Add a note"...');
-            addNoteBtn.click();
-
-            await delay(1000);
-            const noteEditor = document.querySelector('textarea[name="message"]') ||
-                document.querySelector('#custom-message');
-
-            if (noteEditor) {
-                console.log('[Anton.IA Content] Typing note...');
-                noteEditor.value = message;
-                noteEditor.dispatchEvent(new Event('input', { bubbles: true }));
-
-                await delay(1000);
-                const sendInviteTexts = ['send', 'enviar', 'done', 'listo', 'connect', 'conectar'];
-                const sendInviteBtn = findButtonByText(sendInviteTexts);
-
-                if (sendInviteBtn) {
-                    console.log('[Anton.IA Content] Sending Invitation...');
-                    sendInviteBtn.click();
-                    return { success: true, status: 'Connection request sent with note' };
-                } else {
-                    console.error('[Anton.IA Content] Send/Done button in note modal not found');
-                }
-            } else {
-                console.error('[Anton.IA Content] Note textarea not found');
-            }
-        } else {
-            console.warn('[Anton.IA Content] "Add a note" button not found within modal.');
-            // Check if it's the "How do you do know this person?" modal or "You've reached the limit"
-            const modalText = modal.innerText.toLowerCase();
-
-            if (modalText.includes('limit') || modalText.includes('límite')) {
-                throw new Error('Weekly invitation limit reached');
-            }
-
-            // If we can't add a note, maybe just send it?
-            const sendWithoutNoteBtn = findButtonByText(['send', 'enviar', 'connect', 'conectar', 'done', 'listo']);
-            if (sendWithoutNoteBtn) {
-                console.log('[Anton.IA Content] Sending without note (Note button missing)...');
-                sendWithoutNoteBtn.click();
-                return { success: true, status: 'Connection request sent (No note option)' };
-            }
+    let state = await waitForState(getConnectState, FLOW_WAIT_MS, FLOW_POLL_MS);
+    if (state.kind === 'idle') {
+        console.warn('[Anton.IA Content] No recognizable state after first Connect click. Retrying once.', getStateSnapshot());
+        await delay(900);
+        const retryBtn = findConnectButton();
+        if (retryBtn) {
+            safeClick(retryBtn);
+            state = await waitForState(getConnectState, 8000, FLOW_POLL_MS);
         }
     }
-    // CASE B: No Modal -> Check if it was a "Quick Connect"
-    else {
-        console.log('[Anton.IA Content] No modal appeared. Checking if request was sent instantly...');
 
-        // Look for "Pending" status
-        const pendingBtn = findButtonByText(['pending', 'pendiente']);
-        const successToast = document.querySelector('.artdeco-toast');
-
-        if (pendingBtn || successToast) {
-            console.log('[Anton.IA Content] Request appears to have been sent instantly!');
-            return { success: true, status: 'Connection request sent (Quick Connect)' };
-        }
-
-        console.error('[Anton.IA Content] No modal and no "Pending" status found.');
-        throw new Error('Click appeared to fail: No modal and not pending.');
+    if (state.kind === 'quick-success') {
+        return { success: true, status: 'Connection request sent (Quick Connect)' };
     }
 
-    throw new Error('Failed to send Connection Request (Unknown final state)');
+    if (state.kind === 'pending') {
+        return { success: false, error: 'Connection request already pending' };
+    }
+
+    if (state.kind === 'limit') {
+        throw new Error('Weekly invitation limit reached');
+    }
+
+    if (state.kind === 'note-prompt') {
+        console.log('[Anton.IA Content] Add note prompt detected. Clicking Add note.');
+        safeClick(state.addNoteBtn);
+        state = await waitForState(getConnectState, 6000, 250);
+    }
+
+    if (state.kind === 'send-prompt') {
+        console.log('[Anton.IA Content] Connect dialog has direct send action. Submitting without note.');
+        safeClick(state.sendBtn);
+        await delay(1200);
+        if (findPendingIndicator() || findSuccessToast()) {
+            return { success: true, status: 'Connection request sent' };
+        }
+        return { success: true, status: 'Connection request submitted' };
+    }
+
+    if (state.kind === 'note-editor') {
+        console.log('[Anton.IA Content] Note editor detected. Typing custom note.');
+        setElementText(state.editor, message);
+        await delay(700);
+
+        const sendBtn = findSendButton(state.dialog || document);
+        if (!sendBtn) {
+            throw new Error('Could not find Send button in LinkedIn connect dialog');
+        }
+
+        safeClick(sendBtn);
+        await delay(1200);
+
+        if (findPendingIndicator() || findSuccessToast()) {
+            return { success: true, status: 'Connection request sent with note' };
+        }
+        return { success: true, status: 'Connection request submitted with note' };
+    }
+
+    console.error('[Anton.IA Content] Connect flow ended in an unknown state.', getStateSnapshot());
+    throw new Error('Connect click did not produce a recognizable LinkedIn state');
 }
 
-function findButtonByText(texts) {
-    const buttons = Array.from(document.querySelectorAll('button, a.artdeco-button')); // Include links styled as buttons
-    return buttons.find(b => {
-        // Check text
-        const t = b.innerText.toLowerCase();
-        // Check accessibility label
-        const l = (b.getAttribute('aria-label') || '').toLowerCase();
-        return texts.some(txt => t.includes(txt) || l.includes(txt));
-    });
+function getConnectState() {
+    const pending = findPendingIndicator();
+    if (pending) return { kind: 'pending', pending };
+
+    const toast = findSuccessToast();
+    if (toast) return { kind: 'quick-success', toast };
+
+    const dialog = getDialogRoot();
+    const editor = findNoteEditor(dialog || document);
+    if (editor) return { kind: 'note-editor', editor, dialog };
+
+    if (!dialog) return { kind: 'idle' };
+
+    const dialogText = normalizeText(dialog.innerText || '');
+    if (isInvitationLimitText(dialogText)) return { kind: 'limit', dialog, dialogText };
+
+    const addNoteBtn = findActionElement(ADD_NOTE_TEXTS, { root: dialog });
+    if (addNoteBtn) return { kind: 'note-prompt', dialog, addNoteBtn, dialogText };
+
+    const sendBtn = findSendButton(dialog);
+    if (sendBtn) return { kind: 'send-prompt', dialog, sendBtn, dialogText };
+
+    return { kind: 'dialog', dialog, dialogText };
+}
+
+function isOnRequestedProfile(profileUrl) {
+    const currentPath = normalizePath(window.location.href);
+    const targetPath = normalizePath(profileUrl);
+    return currentPath.includes(targetPath) || targetPath.includes(currentPath);
+}
+
+function normalizePath(urlStr) {
+    try {
+        const value = String(urlStr || '').startsWith('http') ? String(urlStr || '') : `https://${String(urlStr || '')}`;
+        const url = new URL(value);
+        return url.pathname.toLowerCase().replace(/\/$/, '');
+    } catch {
+        return String(urlStr || '').toLowerCase().split('?')[0].replace(/\/$/, '');
+    }
+}
+
+function normalizeText(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
 }
 
 function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForState(reader, timeoutMs, intervalMs) {
+    const startedAt = Date.now();
+    let lastState = { kind: 'idle' };
+
+    while (Date.now() - startedAt < timeoutMs) {
+        lastState = reader() || { kind: 'idle' };
+        if (lastState.kind !== 'idle') {
+            return lastState;
+        }
+        await delay(intervalMs);
+    }
+
+    return lastState;
+}
+
+function getActionCandidates(root, options) {
+    const scope = root || document;
+    const selectors = options && options.selectors
+        ? options.selectors
+        : ['button', 'a[role="button"]', 'a.artdeco-button', 'div[role="button"]', 'li[role="menuitem"]'];
+
+    const nodes = Array.from(scope.querySelectorAll(selectors.join(',')))
+        .map((node) => resolveClickableTarget(node))
+        .filter(Boolean);
+
+    return nodes.filter((node, index) => nodes.indexOf(node) === index)
+        .filter((node) => isElementVisible(node))
+        .filter((node) => (options && options.includeDisabled) || !isElementDisabled(node));
+}
+
+function findActionElement(texts, options) {
+    const normalizedTexts = texts.map(normalizeText).filter(Boolean);
+    const excluded = (options && options.excludeTexts ? options.excludeTexts : []).map(normalizeText);
+    const candidates = getActionCandidates(options && options.root, options);
+    let best = null;
+    let bestScore = 0;
+
+    for (const node of candidates) {
+        const label = normalizeText(getElementLabel(node));
+        if (!label) continue;
+        if (excluded.some((token) => token && label.includes(token))) continue;
+
+        let score = 0;
+        for (const token of normalizedTexts) {
+            const currentScore = scoreActionLabel(label, token);
+            if (currentScore > score) score = currentScore;
+        }
+
+        if (!score) continue;
+        if (String(node.className || '').includes('artdeco-button--primary')) score += 10;
+        if (node.closest('.artdeco-dropdown__content-inner')) score += 4;
+
+        if (score > bestScore) {
+            best = node;
+            bestScore = score;
+        }
+    }
+
+    return best;
+}
+
+function scoreActionLabel(label, token) {
+    if (!label || !token) return 0;
+    if (label === token) return 150;
+
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const wordMatch = new RegExp(`(^|\\b)${escaped}(\\b|$)`).test(label);
+    if (wordMatch) return 120;
+    if (label.includes(token)) return 90;
+    return 0;
+}
+
+function getElementLabel(node) {
+    return node.innerText || node.getAttribute('aria-label') || node.textContent || '';
+}
+
+function resolveClickableTarget(node) {
+    if (!(node instanceof Element)) return null;
+    return node.closest('button, a[role="button"], a.artdeco-button, div[role="button"], li[role="menuitem"]') || node;
+}
+
+function isElementVisible(node) {
+    if (!(node instanceof HTMLElement)) return false;
+    const style = window.getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+}
+
+function isElementDisabled(node) {
+    if (!(node instanceof HTMLElement)) return true;
+    if (node.hasAttribute('disabled')) return true;
+    if (node.getAttribute('aria-disabled') === 'true') return true;
+    return false;
+}
+
+function safeClick(node) {
+    if (!(node instanceof HTMLElement)) return false;
+    node.scrollIntoView({ block: 'center', inline: 'center' });
+    node.focus({ preventScroll: true });
+    try {
+        node.click();
+    } catch {
+        node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    }
+    return true;
+}
+
+function describeElement(node) {
+    if (!(node instanceof HTMLElement)) return 'unknown-element';
+    return {
+        tag: node.tagName.toLowerCase(),
+        text: getElementLabel(node).trim().slice(0, 80),
+        ariaLabel: (node.getAttribute('aria-label') || '').trim().slice(0, 80),
+        className: String(node.className || '').trim().slice(0, 120),
+    };
+}
+
+function getMessageEditor() {
+    const selectors = [
+        'div.msg-form__contenteditable[contenteditable="true"]',
+        'div[role="textbox"][contenteditable="true"]',
+        '.msg-form__msg-content-container [contenteditable="true"]',
+        '.msg-overlay-conversation-bubble [contenteditable="true"]',
+    ];
+
+    for (const selector of selectors) {
+        const element = Array.from(document.querySelectorAll(selector)).find(isElementVisible);
+        if (element) return element;
+    }
+
+    return null;
+}
+
+function getDialogRoot() {
+    const selectors = ['.artdeco-modal', '.artdeco-modal__content', '[role="dialog"]'];
+    for (const selector of selectors) {
+        const element = Array.from(document.querySelectorAll(selector)).find(isElementVisible);
+        if (element) return element;
+    }
+    return null;
+}
+
+function findNoteEditor(root) {
+    const scope = root || document;
+    const selectors = [
+        'textarea[name="message"]',
+        '#custom-message',
+        '.artdeco-modal textarea',
+        '[role="dialog"] textarea',
+        '.artdeco-modal [contenteditable="true"][role="textbox"]',
+    ];
+
+    for (const selector of selectors) {
+        const element = Array.from(scope.querySelectorAll(selector)).find(isElementVisible);
+        if (element) return element;
+    }
+    return null;
+}
+
+function findMessageButton() {
+    return findActionElement(MESSAGE_BUTTON_TEXTS, {
+        excludeTexts: ['message ads', 'messaging'],
+    });
+}
+
+function findConnectButton(root) {
+    return findActionElement(CONNECT_BUTTON_TEXTS, {
+        root,
+        excludeTexts: ['connected', 'connections', 'pending', 'message', 'mensaje'],
+    });
+}
+
+function findMoreButton() {
+    return findActionElement(MORE_BUTTON_TEXTS, {
+        excludeTexts: ['more relevant', 'more filters'],
+    });
+}
+
+function findSendButton(root) {
+    return findActionElement(SEND_BUTTON_TEXTS, {
+        root,
+        excludeTexts: DISMISS_BUTTON_TEXTS,
+        selectors: [
+            'button.msg-form__send-button',
+            'button[type="submit"]',
+            '.msg-form__footer button',
+            '.artdeco-modal button',
+            '[role="dialog"] button',
+            'button',
+        ],
+    });
+}
+
+function findPendingIndicator() {
+    return findActionElement(['pending', 'pendiente'], {
+        includeDisabled: true,
+        selectors: ['button', '[role="button"]', 'span'],
+    });
+}
+
+function findSuccessToast() {
+    const toast = Array.from(document.querySelectorAll('.artdeco-toast-item, .artdeco-toast, [role="alert"]')).find(isElementVisible);
+    if (!toast) return null;
+
+    const text = normalizeText(toast.innerText || '');
+    if (!text) return toast;
+
+    const successHints = ['sent', 'enviado', 'pending', 'pendiente', 'invitation', 'invitacion', 'request'];
+    return successHints.some((hint) => text.includes(hint)) ? toast : null;
+}
+
+function findDismissButton() {
+    const dialog = getDialogRoot();
+    const scopedDismiss = findActionElement(DISMISS_BUTTON_TEXTS, {
+        root: dialog || document,
+        selectors: ['button', '[role="button"]', 'a[role="button"]'],
+        includeDisabled: true,
+    });
+    if (scopedDismiss) return scopedDismiss;
+
+    const hardSelectors = [
+        'button[aria-label="Dismiss"]',
+        'button[aria-label="Close"]',
+        'button[aria-label="Cerrar"]',
+        '.artdeco-modal__dismiss',
+    ];
+
+    for (const selector of hardSelectors) {
+        const element = Array.from(document.querySelectorAll(selector)).find(isElementVisible);
+        if (element) return element;
+    }
+
+    return null;
+}
+
+async function closeBlockingDialog() {
+    const dismissBtn = findDismissButton();
+    if (!dismissBtn) return false;
+
+    console.log('[Anton.IA Content] Closing blocking dialog:', describeElement(dismissBtn));
+    safeClick(dismissBtn);
+    await delay(700);
+    return true;
+}
+
+function isUpsellText(text) {
+    return ['premium', 'inmail', 'sales navigator', 'try premium', 'prueba premium', 'unlock'].some((token) => text.includes(token));
+}
+
+function isInvitationLimitText(text) {
+    return [
+        'weekly invitation limit',
+        'invitation limit',
+        'reach the invitation limit',
+        'reach your invitation limit',
+        'limite de invitaciones',
+        'llegaste al limite',
+    ].some((token) => text.includes(token));
+}
+
+function setElementText(node, value) {
+    const text = String(value || '').trim();
+    if (!(node instanceof HTMLElement) || !text) return;
+
+    node.focus({ preventScroll: true });
+
+    if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) {
+        node.value = '';
+        node.dispatchEvent(new Event('input', { bubbles: true }));
+        node.value = text;
+        node.dispatchEvent(new Event('input', { bubbles: true }));
+        node.dispatchEvent(new Event('change', { bubbles: true }));
+        return;
+    }
+
+    document.execCommand('selectAll', false, null);
+    document.execCommand('delete', false, null);
+    const inserted = document.execCommand('insertText', false, text);
+
+    if (!inserted || !normalizeText(node.innerText || '').includes(normalizeText(text.slice(0, 12)))) {
+        node.textContent = text;
+        node.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
+        node.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+}
+
+function getStateSnapshot() {
+    const dialog = getDialogRoot();
+    return {
+        url: location.href,
+        hasMessageEditor: !!getMessageEditor(),
+        hasNoteEditor: !!findNoteEditor(dialog || document),
+        hasPending: !!findPendingIndicator(),
+        dialogText: dialog ? normalizeText(dialog.innerText || '').slice(0, 180) : '',
+        visibleButtons: getActionCandidates(document, { includeDisabled: true })
+            .slice(0, 10)
+            .map((node) => describeElement(node)),
+    };
 }

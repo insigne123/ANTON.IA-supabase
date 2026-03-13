@@ -7,6 +7,7 @@ window.addEventListener('message', function (event) {
 
     if (event.data.type && event.data.type === 'ANTON_TO_EXTENSION') {
         console.log('[Anton.IA Ext] Received message from web app:', event.data.payload?.action);
+        const requestId = event.data.payload?.requestId || null;
 
         // Forward to Background Script
         chrome.runtime.sendMessage(event.data.payload, (response) => {
@@ -14,7 +15,7 @@ window.addEventListener('message', function (event) {
                 console.error('[Anton.IA Ext] Runtime error:', chrome.runtime.lastError.message);
                 window.postMessage({
                     type: 'EXTENSION_Response',
-                    payload: { success: false, error: chrome.runtime.lastError.message }
+                    payload: { requestId, success: false, error: chrome.runtime.lastError.message }
                 }, '*');
                 return;
             }
@@ -23,7 +24,10 @@ window.addEventListener('message', function (event) {
             // Send response back to Web App
             window.postMessage({
                 type: 'EXTENSION_Response',
-                payload: response
+                payload: {
+                    requestId,
+                    ...(response || {})
+                }
             }, '*');
         });
     }
