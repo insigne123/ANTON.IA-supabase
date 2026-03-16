@@ -125,14 +125,16 @@ export async function POST(req: NextRequest) {
 
     const admin = getSupabaseAdminClient();
 
-    const { data: membership } = await admin
+    const { data: memberships } = await admin
       .from('organization_members')
       .select('organization_id')
-      .eq('user_id', ctx.userId)
-      .limit(1)
-      .maybeSingle();
+      .eq('user_id', ctx.userId);
 
-    const orgId = membership?.organization_id || null;
+    const orgIds = Array.from(new Set(
+      ((memberships || []) as Array<{ organization_id?: string | null }>)
+        .map((row) => String(row.organization_id || '').trim())
+        .filter(Boolean)
+    ));
 
     let pendingQuery = admin
       .from('enriched_leads')
@@ -144,8 +146,8 @@ export async function POST(req: NextRequest) {
       pendingQuery = pendingQuery.in('id', requestedIds);
     }
 
-    if (orgId) {
-      pendingQuery = pendingQuery.or(`organization_id.eq.${orgId},organization_id.is.null`);
+    if (orgIds.length > 0) {
+      pendingQuery = pendingQuery.or(`user_id.eq.${ctx.userId},organization_id.in.(${orgIds.join(',')}),organization_id.is.null`);
     } else {
       pendingQuery = pendingQuery.eq('user_id', ctx.userId);
     }
