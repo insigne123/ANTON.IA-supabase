@@ -16,6 +16,7 @@ function normalizeEmailKey(email?: string | null) {
 function mapRowToEnrichedLead(row: any): EnrichedLead {
     return {
         id: row.id,
+        apolloId: row.apollo_id || row.data?.apolloId,
         organizationId: row.organization_id,
         sourceOpportunityId: row.data?.sourceOpportunityId,
         fullName: row.full_name,
@@ -112,6 +113,7 @@ function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string, organizationId
 
         // Legacy data field for backwards compatibility
         data: {
+            apolloId: lead.apolloId,
             sourceOpportunityId: lead.sourceOpportunityId,
             emailStatus: lead.emailStatus,
             companyDomain: lead.companyDomain,

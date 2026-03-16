@@ -249,6 +249,7 @@ export default function EnrichedLeadsClient() {
   // --- PAGINACIÓN ---
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState<number>(1);
+  const pendingPhoneSyncRef = useRef(false);
 
   // --- FILTROS ---
   const [companyFilter, setCompanyFilter] = useState('');
@@ -286,6 +287,37 @@ export default function EnrichedLeadsClient() {
     setStyleProfiles(styleProfilesStorage.list());
   }, []);
 
+  const syncPendingPhoneLeads = useCallback(async (ids?: string[]) => {
+    const targetIds = (ids || enriched.filter((lead) => lead.enrichmentStatus === 'pending_phone').map((lead) => lead.id))
+      .filter(Boolean)
+      .slice(0, 50);
+
+    if (targetIds.length === 0 || pendingPhoneSyncRef.current) return;
+    pendingPhoneSyncRef.current = true;
+
+    try {
+      const res = await fetch('/api/enriched-leads/phone-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: targetIds }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.warn('[phone-sync] request failed:', data);
+        return;
+      }
+
+      if ((data?.updated || 0) > 0 || (data?.completedWithoutPhone || 0) > 0) {
+        await loadData();
+      }
+    } catch (error) {
+      console.warn('[phone-sync] unexpected error:', error);
+    } finally {
+      pendingPhoneSyncRef.current = false;
+    }
+  }, [enriched, loadData]);
+
   useEffect(() => {
     loadData();
 
@@ -299,14 +331,24 @@ export default function EnrichedLeadsClient() {
           if (payload.eventType === 'UPDATE') {
             const newData = payload.new as any; // typed as any to access custom cols if needed
             const oldData = payload.old as any;
+            const newPhones = Array.isArray(newData.phone_numbers) ? newData.phone_numbers : [];
+            const phoneFound = Boolean(newData.primary_phone) || newPhones.length > 0;
 
             // Detect Status Change: Pending -> Completed
             if (newData.enrichment_status === 'completed' && oldData.enrichment_status === 'pending_phone') {
-              toast({
-                title: '¡Teléfono encontrado!',
-                description: `N8N completó la búsqueda para ${newData.full_name || 'un lead'}.`,
-                duration: 5000,
-              });
+              if (phoneFound) {
+                toast({
+                  title: '¡Teléfono encontrado!',
+                  description: `Se actualizó el contacto para ${newData.full_name || 'un lead'}.`,
+                  duration: 5000,
+                });
+              } else {
+                toast({
+                  title: 'Búsqueda de teléfono finalizada',
+                  description: `No se encontró teléfono para ${newData.full_name || 'este lead'}.`,
+                  duration: 4500,
+                });
+              }
             }
           }
           // Reload data
@@ -321,6 +363,35 @@ export default function EnrichedLeadsClient() {
   }, [loadData, toast]);
 
   // Listen for Auth Changes to reload data if session restores late
+  useEffect(() => {
+    const pendingIds = enriched
+      .filter((lead) => lead.enrichmentStatus === 'pending_phone')
+      .map((lead) => lead.id)
+      .filter(Boolean);
+
+    if (pendingIds.length === 0) return;
+
+    syncPendingPhoneLeads(pendingIds);
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        syncPendingPhoneLeads(pendingIds);
+      }
+    }, 15000);
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        syncPendingPhoneLeads(pendingIds);
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [enriched, syncPendingPhoneLeads]);
+
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' || (event === 'INITIAL_SESSION' && session)) {
