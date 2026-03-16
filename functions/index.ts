@@ -7,6 +7,7 @@
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
+import { buildAntoniaDailyDashboardHtml, type AntoniaDailyMissionRow } from './report-email';
 
 // NOTE: Keep defaults for backwards compatibility, but prefer env vars in production.
 const DEFAULT_APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
@@ -2643,118 +2644,57 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
             if (!taskByMission[mid]) taskByMission[mid] = t;
             else if (taskByMission[mid].status !== 'processing' && t.status === 'processing') taskByMission[mid] = t;
         }
-
-        const perMissionRowsHtml = missionList.length === 0
-            ? '<div style="text-align:center;color:#64748b;font-style:italic;padding:18px 0;">No hay misiones activas.</div>'
-            : missionList.map((m: any) => {
+        const missionRows: AntoniaDailyMissionRow[] = missionList
+            .filter((m: any) => {
+                const mid = String(m.id || '').trim();
+                const s = perMission[mid] || {};
+                const hasStats = Object.values(s).some((value: any) => Number(value || 0) > 0);
+                const hasTask = Boolean(taskByMission[mid]);
+                return m.status === 'active' || hasStats || hasTask;
+            })
+            .map((m: any) => {
                 const mid = String(m.id || '').trim();
                 const s = perMission[mid] || {};
                 const t = taskByMission[mid];
                 const agent = t
                     ? `${t.status === 'processing' ? 'Procesando' : 'En cola'} · ${t.progress_label || t.type}`
-                    : 'Sin ejecución activa';
+                    : 'Sin ejecucion activa';
                 const prog = (t && typeof t.progress_current === 'number' && typeof t.progress_total === 'number')
                     ? ` (${t.progress_current}/${t.progress_total})`
                     : '';
-                return `
-                    <div class="mission-row">
-                        <div class="mission-title-wrap">
-                            <div class="mission-title">${m.title}</div>
-                            <div class="mission-agent">${agent}${prog}</div>
-                        </div>
-                        <div class="mission-metrics">
-                            <span>Encontrados <strong>${s.found || 0}</strong></span>
-                            <span>Enriq. <strong>${(s.enrichEmail || 0) + (s.enrichNoEmail || 0)}</strong></span>
-                            <span>Invest. <strong>${s.investigated || 0}</strong></span>
-                            <span>Contact. <strong>${s.contactedSent || 0}</strong></span>
-                            ${(s.contactedBlocked || 0) > 0 ? `<span class="warn">Bloq. <strong>${s.contactedBlocked}</strong></span>` : ''}
-                            ${(s.contactedFailed || 0) > 0 ? `<span class="danger">Fallos <strong>${s.contactedFailed}</strong></span>` : ''}
-                        </div>
-                    </div>
-                `;
-            }).join('');
 
-        const failureNote = (tasksFailed || 0) > 0
-            ? `<div class="alert danger">Se detectaron <strong>${tasksFailed}</strong> tarea(s) fallida(s) en la ventana analizada.</div>`
-            : `<div class="alert ok">No se registraron fallos en tareas durante la ventana analizada.</div>`;
+                return {
+                    title: String(m.title || 'Mision sin titulo'),
+                    status: m.status || null,
+                    agentLabel: `${agent}${prog}`,
+                    found: Number(s.found || 0),
+                    enriched: Number((s.enrichEmail || 0) + (s.enrichNoEmail || 0)),
+                    investigated: Number(s.investigated || 0),
+                    contacted: Number(s.contactedSent || 0),
+                    blocked: Number(s.contactedBlocked || 0),
+                    failed: Number((s.contactedFailed || 0) + (s.enrichFailed || 0) + (s.investigateFailed || 0)),
+                };
+            });
 
-        htmlContent = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body { margin: 0; padding: 22px; background: #eef2f7; color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
-                .container { max-width: 760px; margin: 0 auto; background: #ffffff; border: 1px solid #dbe3ef; border-radius: 14px; overflow: hidden; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08); }
-                .header { padding: 30px 28px; background: linear-gradient(135deg, #0f4c81 0%, #0a7fa4 100%); color: #ffffff; }
-                .header h1 { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.2px; }
-                .header p { margin: 8px 0 0 0; font-size: 13px; opacity: 0.92; }
-                .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 18px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
-                .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; text-align: center; }
-                .card .v { font-size: 30px; font-weight: 800; color: #0f4c81; line-height: 1; }
-                .card .l { margin-top: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px; color: #475569; font-weight: 700; }
-                .section { padding: 22px; }
-                .section h2 { margin: 0 0 14px 0; font-size: 17px; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
-                .mission-row { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; margin-bottom: 10px; background: #fcfdff; }
-                .mission-title { font-weight: 700; font-size: 14px; color: #0f172a; }
-                .mission-agent { margin-top: 4px; font-size: 12px; color: #475569; }
-                .mission-metrics { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: #1e293b; }
-                .mission-metrics strong { color: #0f4c81; }
-                .mission-metrics .warn { color: #92400e; }
-                .mission-metrics .danger { color: #b91c1c; }
-                .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-                .meta-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; background: #ffffff; }
-                .meta-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; font-weight: 700; color: #475569; }
-                .meta-value { margin-top: 4px; font-size: 24px; font-weight: 800; color: #0f4c81; }
-                .alert { margin-top: 12px; border-radius: 10px; padding: 12px; font-size: 13px; }
-                .alert.ok { background: #ecfdf5; border: 1px solid #bbf7d0; color: #166534; }
-                .alert.danger { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
-                .footer { background: #0f172a; color: #cbd5e1; text-align: center; font-size: 12px; padding: 18px; }
-                .footer a { color: #f8fafc; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>ANTONIA · Reporte Diario</h1>
-                    <p><strong>Ventana analizada:</strong> ${rangeLabel}</p>
-                </div>
+        htmlContent = buildAntoniaDailyDashboardHtml({
+            rangeLabel,
+            generatedAtLabel: new Date().toLocaleDateString('es-AR', {
+                day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
+            }),
+            dashboardUrl: `${getAppUrl()}/antonia`,
+            searchRuns,
+            leadsFound,
+            leadsEnriched,
+            leadsInvestigated,
+            leadsContacted: contacted,
+            replies,
+            activeMissions: missionList.filter((m: any) => m.status === 'active').length,
+            tasksCompleted: tasksCompleted || 0,
+            tasksFailed: tasksFailed || 0,
+            missions: missionRows,
+        });
 
-                <div class="cards">
-                    <div class="card"><div class="v">${searchRuns}</div><div class="l">Búsquedas</div></div>
-                    <div class="card"><div class="v">${leadsFound}</div><div class="l">Leads Encontrados</div></div>
-                    <div class="card"><div class="v">${leadsEnriched}</div><div class="l">Leads Enriquecidos</div></div>
-                    <div class="card"><div class="v">${leadsInvestigated}</div><div class="l">Leads Investigados</div></div>
-                    <div class="card"><div class="v">${contacted}</div><div class="l">Leads Contactados</div></div>
-                    <div class="card"><div class="v">${replies}</div><div class="l">Respuestas</div></div>
-                </div>
-
-                <div class="section">
-                    <h2>Misiones Activas (${summaryData.activeMissions})</h2>
-                    ${perMissionRowsHtml}
-                </div>
-
-                <div class="section">
-                    <h2>Salud del Sistema</h2>
-                    <div class="meta-grid">
-                        <div class="meta-card">
-                            <div class="meta-title">Tareas Completadas</div>
-                            <div class="meta-value">${tasksCompleted || 0}</div>
-                        </div>
-                        <div class="meta-card">
-                            <div class="meta-title">Tareas Fallidas</div>
-                            <div class="meta-value">${tasksFailed || 0}</div>
-                        </div>
-                    </div>
-                    ${failureNote}
-                </div>
-
-                <div class="footer">
-                    Generado automáticamente por Antonia AI · <a href="${getAppUrl()}">Ir al Dashboard</a>
-                </div>
-            </div>
-        </body>
-        </html>
-        `;
+        summaryData.missionRows = missionRows;
 
     } else if (reportType === 'weekly') {
         const weekStart = new Date();

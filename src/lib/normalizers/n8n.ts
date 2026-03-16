@@ -37,6 +37,10 @@ export function normalizeFromN8N(json: unknown) {
       linkedin_url: l.linkedin_url ?? "",
       photo_url: l.photo_url ?? "",
       email_status: l.email_status ?? "",
+      apollo_id: (l as any).apollo_id ?? (l as any).apolloId ?? undefined,
+      primary_phone: (l as any).primary_phone ?? (l as any).primaryPhone ?? undefined,
+      phone_numbers: (l as any).phone_numbers ?? (l as any).phoneNumbers ?? undefined,
+      enrichment_status: (l as any).enrichment_status ?? (l as any).enrichmentStatus ?? undefined,
     })),
   });
 

@@ -1,8 +1,9 @@
 // src/app/api/leads/search/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
+import { normalizeDomainList } from "@/lib/domain";
 import {
+  CompanyNameSearchRequestSchema,
   N8NRequestBodySchema,
   LinkedInProfileSearchRequestSchema,
   LeadsResponseSchema,
@@ -19,8 +20,8 @@ export const fetchCache = 'force-no-store';
 export const runtime = 'nodejs';
 
 const USE_APIFY = String(process.env.USE_APIFY || "false") === "true";
-// New Endpoint URL
-const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
+const DEFAULT_LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
+const LEAD_SEARCH_URL = process.env.ANTONIA_LEAD_SEARCH_URL || process.env.LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
 const TIMEOUT_MS = Number(process.env.LEADS_N8N_TIMEOUT_MS ?? 60000);
 const MAX_RETRIES = Number(process.env.LEADS_N8N_MAX_RETRIES ?? 0);
 const PDL_DATA_INCLUDE = [
@@ -84,12 +85,24 @@ function mapFlexibleLead(raw: any, index: number) {
         raw?.job_company_website ||
         raw?.website_url,
       ),
+      industry: String(organization?.industry || raw?.organization_industry || raw?.job_company_industry || '').trim() || undefined,
+      website_url: String(organization?.website_url || raw?.organization_website_url || raw?.job_company_website || raw?.website_url || '').trim() || undefined,
+      linkedin_url: String(organization?.linkedin_url || raw?.organization_linkedin_url || '').trim() || undefined,
     },
     linkedin_url:
       String(raw?.linkedin_url || raw?.linkedinUrl || raw?.linkedin_profile_url || '').trim() || undefined,
     photo_url:
       String(raw?.photo_url || raw?.photoUrl || raw?.profile_photo_url || raw?.image_url || '').trim() || undefined,
     email_status: String(raw?.email_status || (email ? 'verified' : 'unknown')).trim() || undefined,
+    apollo_id: String(raw?.apollo_id || raw?.apolloId || raw?.id || raw?.person_id || '').trim() || undefined,
+    primary_phone:
+      String(raw?.primary_phone || raw?.primaryPhone || raw?.mobile_phone || raw?.work_phone || '').trim() || undefined,
+    phone_numbers: Array.isArray(raw?.phone_numbers)
+      ? raw.phone_numbers
+      : Array.isArray(raw?.phoneNumbers)
+        ? raw.phoneNumbers
+        : undefined,
+    enrichment_status: String(raw?.enrichment_status || raw?.enrichmentStatus || '').trim() || undefined,
   };
 }
 
@@ -109,6 +122,35 @@ function normalizeLeadSearchResponse(json: unknown) {
       leads: rawLeads.map((lead: any, index: number) => mapFlexibleLead(lead, index)),
     });
   }
+}
+
+function pickLeadSearchMeta(json: unknown) {
+  const payload = Array.isArray(json) ? (json[0] ?? {}) : (json ?? {});
+  if (!payload || typeof payload !== 'object') return {};
+
+  const source = payload as Record<string, any>;
+  return {
+    batch_run_id: source.batch_run_id,
+    search_mode: source.search_mode,
+    company_name: source.company_name,
+    leads_count: source.leads_count,
+    requested_reveal: source.requested_reveal,
+    applied_reveal: source.applied_reveal,
+    effective_reveal: source.effective_reveal,
+    phone_enrichment: source.phone_enrichment,
+    provider_warnings: Array.isArray(source.provider_warnings) ? source.provider_warnings : undefined,
+    warning: source.warning,
+    requires_organization_selection: source.requires_organization_selection,
+    organization_candidates: Array.isArray(source.organization_candidates) ? source.organization_candidates : undefined,
+    selected_organization: source.selected_organization,
+    includes_similar_titles: source.includes_similar_titles,
+    debug_logs: Array.isArray(source.debug_logs) ? source.debug_logs : undefined,
+  };
+}
+
+function isApolloPhoneRevealWebhookError(message?: string | null) {
+  const text = String(message || '').toLowerCase();
+  return text.includes('webhook_url') && text.includes('reveal_phone_number');
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
@@ -160,6 +202,7 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
       }
 
       const normalized = normalizeLeadSearchResponse(json);
+      const responseMeta = pickLeadSearchMeta(json);
 
       if (payload?.search_mode === 'linkedin_profile' && normalized.count > 1) {
         return NextResponse.json(
@@ -168,13 +211,14 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
             message: 'El backend devolvio multiples resultados para una busqueda de perfil unico.',
             search_mode: 'linkedin_profile',
             leads_count: normalized.count,
+            ...responseMeta,
             ...(meta || {}),
           },
           { status: 502 },
         );
       }
 
-      return NextResponse.json({ ...normalized, ...(meta || {}) }, { status: 200 });
+      return NextResponse.json({ ...normalized, ...responseMeta, ...(meta || {}) }, { status: 200 });
     } catch (e) {
       lastErr = e;
       if (attempt === MAX_RETRIES) break;
@@ -282,8 +326,7 @@ export async function POST(req: NextRequest) {
     if (userIdFromHeader) {
       userId = userIdFromHeader;
     } else {
-      const cookieStore = await cookies();
-      const supabase = createRouteHandlerClient({ cookies: async () => cookieStore });
+      const supabase = createRouteHandlerClient({ cookies: (() => req.cookies) as any });
       const { data: { user } } = await supabase.auth.getUser();
 
       if (!user) {
@@ -308,31 +351,127 @@ export async function POST(req: NextRequest) {
           profileReq.linkedin_url || profileReq.linkedin_profile_url || profileReq.linkedinUrl || ''
         ).trim();
 
-        const profilePayload = {
-          user_id: userId,
-          search_mode: 'linkedin_profile',
-          linkedin_url: linkedinUrl,
-          reveal_email: profileReq.reveal_email ?? profileReq.revealEmail ?? true,
+      const profilePayload = {
+        user_id: userId,
+        search_mode: 'linkedin_profile',
+        linkedin_url: linkedinUrl,
+        reveal_email: profileReq.reveal_email ?? profileReq.revealEmail ?? true,
           reveal_phone: profileReq.reveal_phone ?? profileReq.revealPhone ?? true,
         };
 
-        const response = await callLeadSearchService(profilePayload, {
+      const response = await callLeadSearchService(profilePayload, {
+        providerRequested: 'apollo',
+        providerUsed: 'apollo',
+        providerDefault: 'apollo',
+        search_mode: 'linkedin_profile',
+          requested_reveal: {
+            email: profilePayload.reveal_email,
+          phone: profilePayload.reveal_phone,
+        },
+      });
+
+      if (profilePayload.reveal_phone) {
+        const errorPayload = await response.clone().json().catch(() => null);
+        const errorMessage = String(errorPayload?.message || errorPayload?.details || errorPayload?.error || '');
+
+        if (response.status === 502 && isApolloPhoneRevealWebhookError(errorMessage)) {
+          const fallbackResponse = await callLeadSearchService(
+            {
+              ...profilePayload,
+              reveal_phone: false,
+            },
+            {
+              providerRequested: 'apollo',
+              providerUsed: 'apollo',
+              providerDefault: 'apollo',
+              search_mode: 'linkedin_profile',
+              requested_reveal: {
+                email: profilePayload.reveal_email,
+                phone: profilePayload.reveal_phone,
+              },
+              effective_reveal: {
+                email: profilePayload.reveal_email,
+                phone: false,
+              },
+              applied_reveal: {
+                email: profilePayload.reveal_email,
+                phone: false,
+              },
+              phone_enrichment: {
+                requested: true,
+                queued: false,
+                status: 'skipped',
+                message: 'La busqueda encontro el perfil, pero el telefono se omitio porque Apollo exige webhook_url para reveal_phone_number.',
+                webhook_url: null,
+                provider_status: 400,
+                provider_details: errorMessage,
+              },
+              provider_warnings: [
+                'La busqueda se reintento sin telefono porque Apollo exige webhook_url para reveal_phone_number.',
+              ],
+              phone_reveal_fallback_applied: true,
+              phone_reveal_fallback_reason: 'apollo_requires_webhook_url',
+              warning: 'La busqueda se reintento sin telefono porque Apollo exige webhook_url para reveal_phone_number.',
+            },
+          );
+          fallbackResponse.headers.set('x-provider-used', 'apollo');
+          fallbackResponse.headers.set('x-search-mode', 'linkedin_profile');
+          return fallbackResponse;
+        }
+      }
+
+      response.headers.set('x-provider-used', 'apollo');
+      response.headers.set('x-search-mode', 'linkedin_profile');
+      return response;
+      }
+
+      const companyParsed = CompanyNameSearchRequestSchema.safeParse(body);
+      if (companyParsed.success) {
+        const companyReq = companyParsed.data;
+        const organizationDomains = normalizeDomainList([
+          ...(companyReq.organization_domains || []),
+          ...(companyReq.organizationDomains || []),
+          ...(companyReq.organization_domain_list || []),
+          ...(companyReq.organizationDomainList || []),
+          companyReq.organization_domain,
+          companyReq.organizationDomain,
+          companyReq.company_domain,
+          companyReq.companyDomain,
+          companyReq.selected_organization_domain,
+        ]);
+        const companyPayload = {
+          user_id: userId,
+          search_mode: 'company_name',
+          company_name: String(companyReq.company_name || '').trim() || undefined,
+          seniorities: companyReq.seniorities || [],
+          titles: Array.isArray(companyReq.titles) ? companyReq.titles : [],
+          max_results: companyReq.max_results,
+          organization_domains: organizationDomains.length ? organizationDomains : undefined,
+          selected_organization_id: String(companyReq.selected_organization_id || '').trim() || undefined,
+          selected_organization_name: String(companyReq.selected_organization_name || '').trim() || undefined,
+          selected_organization_domain: normalizeDomainList([companyReq.selected_organization_domain])[0] || undefined,
+        };
+
+        const response = await callLeadSearchService(companyPayload, {
           providerRequested: 'apollo',
           providerUsed: 'apollo',
           providerDefault: 'apollo',
-          search_mode: 'linkedin_profile',
-          requested_reveal: {
-            email: profilePayload.reveal_email,
-            phone: profilePayload.reveal_phone,
-          },
+          search_mode: 'company_name',
+          company_name: companyPayload.company_name || companyPayload.selected_organization_name,
         });
         response.headers.set('x-provider-used', 'apollo');
-        response.headers.set('x-search-mode', 'linkedin_profile');
+        response.headers.set('x-search-mode', 'company_name');
         return response;
       }
 
       return NextResponse.json(
-        { error: "INVALID_REQUEST_BODY", details: profileParsed.error.flatten() },
+        {
+          error: "INVALID_REQUEST_BODY",
+          details: {
+            profile: profileParsed.error.flatten(),
+            company_name: companyParsed.error.flatten(),
+          },
+        },
         { status: 400 }
       );
     }

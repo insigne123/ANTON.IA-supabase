@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { sendGmail, sendOutlook } from '../server-email-sender';
 import { refreshGoogleToken, refreshMicrosoftToken } from '../server-auth-helpers';
+import { buildAntoniaDailyDashboardHtml, type AntoniaDailyMissionRow } from './antonia-report-email';
 
 function parseRecipients(raw?: string | null): string[] {
     if (!raw) return [];
@@ -18,6 +19,11 @@ function parseRecipients(raw?: string | null): string[] {
         out.push(p);
     }
     return out;
+}
+
+function getDashboardUrl() {
+    const base = String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'https://app.antonia.ai').trim().replace(/\/$/, '');
+    return `${base}/antonia`;
 }
 
 /**
@@ -237,9 +243,16 @@ export const notificationService = {
 
         const { data: missions } = await supabase
             .from('antonia_missions')
-            .select('id, title')
+            .select('id, title, status')
+            .eq('organization_id', organizationId);
+
+        const { data: activeTasks } = await supabase
+            .from('antonia_tasks')
+            .select('mission_id, type, status, progress_label, progress_current, progress_total, created_at')
             .eq('organization_id', organizationId)
-            .eq('status', 'active');
+            .in('status', ['pending', 'processing'])
+            .order('created_at', { ascending: false })
+            .limit(100);
 
         const { count: leadsContactedByTable } = await supabase
             .from('contacted_leads')
@@ -359,61 +372,71 @@ export const notificationService = {
         const leadsInvestigated = Math.max(usageTotals.leadsInvestigated, totalsFromEvents.investigated);
         const leadsContacted = Math.max(leadsContactedByTable || 0, totalsFromEvents.contactedSent);
 
-        const missionRows = (missions || []).map((m: any) => {
-            const s = perMission[String(m.id)] || {};
-            return `<tr>
-                <td style="padding:10px;border-bottom:1px solid #e2e8f0;font-weight:600;">${m.title}</td>
-                <td style="padding:10px;border-bottom:1px solid #e2e8f0;text-align:right;">${s.found || 0}</td>
-                <td style="padding:10px;border-bottom:1px solid #e2e8f0;text-align:right;">${(s.enrichEmail || 0) + (s.enrichNoEmail || 0)}</td>
-                <td style="padding:10px;border-bottom:1px solid #e2e8f0;text-align:right;">${s.investigated || 0}</td>
-                <td style="padding:10px;border-bottom:1px solid #e2e8f0;text-align:right;">${s.contactedSent || 0}</td>
-            </tr>`;
-        }).join('');
+        const taskByMission: Record<string, any> = {};
+        for (const task of (activeTasks as any[]) || []) {
+            const missionId = String(task?.mission_id || '').trim();
+            if (!missionId) continue;
+            if (!taskByMission[missionId]) taskByMission[missionId] = task;
+            else if (taskByMission[missionId].status !== 'processing' && task.status === 'processing') taskByMission[missionId] = task;
+        }
 
-        const html = `
-            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; max-width: 760px; margin: 0 auto; background: #ffffff; border: 1px solid #dbe3ef; border-radius: 14px; overflow: hidden;">
-                <div style="padding: 28px; background: linear-gradient(135deg, #0f4c81 0%, #0a7fa4 100%); color: #fff;">
-                    <h1 style="margin:0;font-size:28px;">ANTONIA · Reporte Diario</h1>
-                    <p style="margin:8px 0 0 0;font-size:13px;opacity:0.92;"><strong>Ventana:</strong> ${rangeLabel}</p>
-                </div>
+        const missionMap = new Map<string, any>();
+        for (const mission of (missions as any[]) || []) {
+            missionMap.set(String(mission.id), mission);
+        }
 
-                <div style="padding:18px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
-                    ${[
-                ['Búsquedas', searchRuns],
-                ['Leads Encontrados', leadsFound],
-                ['Leads Enriquecidos', leadsEnriched],
-                ['Leads Investigados', leadsInvestigated],
-                ['Leads Contactados', leadsContacted],
-                ['Respuestas', replies],
-            ].map(([label, value]) => `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;text-align:center;"><div style="font-size:30px;font-weight:800;color:#0f4c81;line-height:1;">${value}</div><div style="margin-top:8px;font-size:11px;color:#475569;text-transform:uppercase;letter-spacing:.7px;font-weight:700;">${label}</div></div>`).join('')}
-                </div>
+        const visibleMissionIds = new Set<string>();
+        for (const mission of (missions as any[]) || []) {
+            const missionId = String(mission.id || '').trim();
+            const stats = perMission[missionId];
+            const hasStats = Boolean(stats && Object.values(stats).some((value) => Number(value || 0) > 0));
+            const hasTask = Boolean(taskByMission[missionId]);
+            if (mission.status === 'active' || hasStats || hasTask) visibleMissionIds.add(missionId);
+        }
+        Object.keys(perMission).forEach((missionId) => visibleMissionIds.add(missionId));
+        Object.keys(taskByMission).forEach((missionId) => visibleMissionIds.add(missionId));
 
-                <div style="padding:22px;">
-                    <h2 style="margin:0 0 14px 0;font-size:17px;color:#0f172a;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">Misiones activas (${missions?.length || 0})</h2>
-                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
-                        <thead>
-                            <tr style="background:#f8fafc;color:#334155;text-transform:uppercase;font-size:11px;letter-spacing:.4px;">
-                                <th style="padding:10px;text-align:left;border-bottom:1px solid #e2e8f0;">Misión</th>
-                                <th style="padding:10px;text-align:right;border-bottom:1px solid #e2e8f0;">Found</th>
-                                <th style="padding:10px;text-align:right;border-bottom:1px solid #e2e8f0;">Enriq.</th>
-                                <th style="padding:10px;text-align:right;border-bottom:1px solid #e2e8f0;">Invest.</th>
-                                <th style="padding:10px;text-align:right;border-bottom:1px solid #e2e8f0;">Contact.</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${missionRows || '<tr><td colspan="5" style="padding:12px;color:#64748b;text-align:center;">Sin actividad por misión en esta ventana.</td></tr>'}
-                        </tbody>
-                    </table>
-                </div>
+        const missionRows: AntoniaDailyMissionRow[] = Array.from(visibleMissionIds)
+            .map((missionId) => {
+                const mission = missionMap.get(missionId) || { id: missionId, title: `Mision ${missionId.slice(0, 8)}`, status: null };
+                const stats = perMission[missionId] || {};
+                const task = taskByMission[missionId];
+                const progressLabel = task?.progress_label || task?.type || 'Sin ejecucion activa';
+                const progressSuffix = (task && typeof task.progress_current === 'number' && typeof task.progress_total === 'number')
+                    ? ` (${task.progress_current}/${task.progress_total})`
+                    : '';
 
-                <div style="padding:0 22px 22px 22px;">
-                    <h2 style="margin:0 0 14px 0;font-size:17px;color:#0f172a;border-bottom:2px solid #e2e8f0;padding-bottom:8px;">Salud del sistema</h2>
-                    <p style="margin:0;color:#334155;font-size:14px;">Tareas completadas: <strong>${tasksCompleted || 0}</strong> · Tareas fallidas: <strong style="color:${(tasksFailed || 0) > 0 ? '#b91c1c' : '#166534'}">${tasksFailed || 0}</strong></p>
-                </div>
+                return {
+                    title: String(mission.title || 'Mision sin titulo'),
+                    status: mission.status || null,
+                    agentLabel: task ? `${task.status === 'processing' ? 'Procesando' : 'En cola'} · ${progressLabel}${progressSuffix}` : 'Sin ejecucion activa',
+                    found: Number(stats.found || 0),
+                    enriched: Number((stats.enrichEmail || 0) + (stats.enrichNoEmail || 0)),
+                    investigated: Number(stats.investigated || 0),
+                    contacted: Number(stats.contactedSent || 0),
+                    blocked: Number(stats.contactedBlocked || 0),
+                    failed: Number((stats.contactedFailed || 0) + (stats.enrichFailed || 0) + (stats.investigateFailed || 0)),
+                };
+            })
+            .sort((a, b) => (b.contacted * 3 + b.enriched * 2 + b.found) - (a.contacted * 3 + a.enriched * 2 + a.found));
 
-                <div style="background:#0f172a;color:#cbd5e1;text-align:center;font-size:12px;padding:18px;">Reporte automático de ANTONIA · <a href="https://app.antonia.ai/antonia" style="color:#fff;">Ir a Mission Control</a></div>
-            </div>
-        `;
+        const html = buildAntoniaDailyDashboardHtml({
+            rangeLabel,
+            generatedAtLabel: new Date().toLocaleDateString('es-AR', {
+                day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
+            }),
+            dashboardUrl: getDashboardUrl(),
+            searchRuns,
+            leadsFound,
+            leadsEnriched,
+            leadsInvestigated,
+            leadsContacted,
+            replies,
+            activeMissions: ((missions as any[]) || []).filter((mission: any) => mission?.status === 'active').length,
+            tasksCompleted: tasksCompleted || 0,
+            tasksFailed: tasksFailed || 0,
+            missions: missionRows,
+        });
 
         const summaryData = {
             windowStart: rangeStartIso,
@@ -424,10 +447,11 @@ export const notificationService = {
             leadsInvestigated,
             contacted: leadsContacted,
             replies,
-            activeMissions: missions?.length || 0,
+            activeMissions: ((missions as any[]) || []).filter((mission: any) => mission?.status === 'active').length,
             tasksCompleted: tasksCompleted || 0,
             tasksFailed: tasksFailed || 0,
             perMission,
+            missionRows,
         };
 
         const { data: reportRow } = await supabase

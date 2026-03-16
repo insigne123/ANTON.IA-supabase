@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { PageHeader } from '@/components/page-header';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,7 +15,7 @@ import { Pagination, PaginationContent, PaginationItem, PaginationLink, Paginati
 import { companySizes } from '@/lib/data';
 import type { Lead as UILaed, SavedSearch } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Search, Save, X, Frown, ChevronDown, Loader2, Bookmark, BookmarkPlus, Trash2 } from 'lucide-react';
+import { Search, Save, X, Frown, ChevronDown, Loader2, Bookmark, BookmarkPlus, Trash2, Info, AlertCircle, Building2, CheckCircle2 } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
 import { supabaseService } from '@/lib/supabase-service';
@@ -22,8 +23,14 @@ import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import * as Quota from '@/lib/quota-client';
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from '@/lib/search-config';
-import { searchLeads, searchLinkedInProfileLead, type LeadsSearchParams } from '@/lib/leads-client';
-import type { Lead } from '@/lib/schemas/leads';
+import {
+  searchCompanyNameLeads,
+  searchLeads,
+  searchLinkedInProfileLead,
+  type CompanySearchOrganization,
+  type LeadsSearchParams,
+} from '@/lib/leads-client';
+import type { Lead, LeadSearchResponse } from '@/lib/schemas/leads';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -34,6 +41,7 @@ import { APOLLO_SENIORITIES } from '@/lib/apollo-taxonomies';
 import { savedSearchesService } from '@/lib/services/saved-searches-service';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
+import { splitDomainInput } from '@/lib/domain';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 
 function MultiCheckDropdown({
@@ -87,7 +95,7 @@ function MultiCheckDropdown({
   );
 }
 
-function normalizeLeadForUI(raw: Lead): UILaed {
+function normalizeLeadForUI(raw: Lead, options?: { phoneStatus?: 'not_requested' | 'queued' | 'skipped' | 'failed' | undefined }): UILaed {
   const name =
     `${raw.first_name || ''} ${raw.last_name || ''}`.trim() || '—';
 
@@ -106,6 +114,12 @@ function normalizeLeadForUI(raw: Lead): UILaed {
   const companyWebsite = raw.organization?.domain ? `https://${raw.organization.domain}` : null;
   const companyLinkedin = null;
   const linkedinUrl = raw.linkedin_url || null;
+  const phoneNumbers = Array.isArray(raw.phone_numbers) ? raw.phone_numbers : undefined;
+  const fallbackPhone = phoneNumbers?.find((phone) => phone?.sanitized_number)?.sanitized_number || null;
+  const primaryPhone = raw.primary_phone || fallbackPhone || null;
+  const enrichmentStatus =
+    raw.enrichment_status ||
+    ((options?.phoneStatus === 'queued' && !primaryPhone) ? 'pending_phone' : undefined);
 
   return {
     id: raw.id,
@@ -119,6 +133,10 @@ function normalizeLeadForUI(raw: Lead): UILaed {
     companyWebsite,
     companyLinkedin,
     linkedinUrl,
+    apolloId: raw.apollo_id || undefined,
+    phoneNumbers: phoneNumbers || null,
+    primaryPhone,
+    enrichmentStatus,
     country: null,
     city: null,
     status: 'saved',
@@ -136,9 +154,24 @@ const displayDomain = (url?: string) => {
   }
 };
 
+function normalizePhoneNumbersForEnriched(phoneNumbers?: UILaed['phoneNumbers']) {
+  if (!Array.isArray(phoneNumbers) || phoneNumbers.length === 0) return null;
+
+  return phoneNumbers
+    .map((phone) => ({
+      raw_number: String(phone?.raw_number || phone?.sanitized_number || '').trim(),
+      sanitized_number: String(phone?.sanitized_number || phone?.raw_number || '').trim(),
+      type: String(phone?.type || '').trim(),
+      position: String(phone?.position || '').trim(),
+      status: String(phone?.status || '').trim(),
+    }))
+    .filter((phone) => phone.raw_number || phone.sanitized_number);
+}
+
 function mapLeadToEnriched(l: UILaed) {
   return {
     id: l.id,
+    apolloId: l.apolloId,
     sourceOpportunityId: undefined,
     fullName: l.name,
     title: l.title,
@@ -152,20 +185,35 @@ function mapLeadToEnriched(l: UILaed) {
     country: l.country || undefined,
     city: l.city || undefined,
     industry: l.industry || undefined,
+    phoneNumbers: normalizePhoneNumbersForEnriched(l.phoneNumbers),
+    primaryPhone: l.primaryPhone || null,
+    enrichmentStatus: l.enrichmentStatus,
   };
 }
 
+function splitTitlesInput(value?: string) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 const DEFAULT_FILTERS = {
-  searchMode: 'filters' as 'filters' | 'linkedin_profile',
+  searchMode: 'filters' as 'filters' | 'linkedin_profile' | 'company_name',
   industry: '',
   location: '',
   title: '',
   sizeRange: '',
   seniorities: [] as string[],
+  companyName: '',
+  companyDomains: '',
+  maxResults: 25,
   linkedinUrl: '',
   revealEmail: true,
-  revealPhone: true,
+  revealPhone: false,
 };
+
+type SearchMode = typeof DEFAULT_FILTERS.searchMode;
 
 
 export default function SearchPage() {
@@ -219,10 +267,28 @@ export default function SearchPage() {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
 
   const handleFilterChange = (field: keyof typeof filters, value: any) => {
+    if (field === 'searchMode' || field === 'linkedinUrl' || field === 'revealEmail' || field === 'revealPhone') {
+      setProfileSearchNotice(null);
+      setLastProfilePhoneStatus(null);
+    }
+    if (field === 'searchMode' || field === 'companyName' || field === 'companyDomains' || field === 'title' || field === 'seniorities' || field === 'maxResults') {
+      setCompanyCandidates([]);
+      setSelectedOrganization(null);
+      setCompanySelectionPending(false);
+    }
     setFilters(prev => ({ ...prev, [field]: value }));
   };
 
   const [isSaving, setIsSaving] = useState(false);
+  const [profileSearchNotice, setProfileSearchNotice] = useState<null | {
+    tone: 'info' | 'warning';
+    title: string;
+    description: string;
+  }>(null);
+  const [lastProfilePhoneStatus, setLastProfilePhoneStatus] = useState<'not_requested' | 'queued' | 'skipped' | 'failed' | null>(null);
+  const [companyCandidates, setCompanyCandidates] = useState<CompanySearchOrganization[]>([]);
+  const [selectedOrganization, setSelectedOrganization] = useState<CompanySearchOrganization | null>(null);
+  const [companySelectionPending, setCompanySelectionPending] = useState(false);
 
   const handleSaveSelectedLeads = async () => {
     const selected = leads.filter(lead => selectedLeads.has(lead.id));
@@ -254,11 +320,19 @@ export default function SearchPage() {
       const all = await supabaseService.getLeads();
       setSavedIds(new Set(all.map(l => l.id)));
 
+      const savedToEnrichedOnly = enrichedAdded > 0 && resSv.addedCount === 0;
+      const phonePendingNote =
+        filters.searchMode === 'linkedin_profile' &&
+        lastProfilePhoneStatus === 'queued' &&
+        withEmail.length > 0
+          ? ' El telefono aun esta en proceso y puede no reflejarse todavia en Leads Enriquecidos.'
+          : '';
+
       toast({
-        title: 'Guardado',
-        description:
-          `A Enriquecidos: ${enrichedAdded} · ` +
-          `A Guardados: ${resSv.addedCount} (dup: ${resSv.duplicateCount})`,
+        title: savedToEnrichedOnly ? 'Guardado en Leads Enriquecidos' : 'Guardado completado',
+        description: savedToEnrichedOnly
+          ? `Se guardo ${enrichedAdded} lead${enrichedAdded === 1 ? '' : 's'} en Leads Enriquecidos.${phonePendingNote}`
+          : `En Leads Enriquecidos: ${enrichedAdded} · En Guardados: ${resSv.addedCount} · Duplicados: ${resSv.duplicateCount}.${phonePendingNote}`,
       });
 
       setSelectedLeads(new Set());
@@ -270,7 +344,74 @@ export default function SearchPage() {
     }
   };
 
-  const handleSearch = async () => {
+  const applySearchResult = (result: LeadSearchResponse, mode: SearchMode) => {
+    if (mode === 'company_name') {
+      const candidates = Array.isArray(result.organization_candidates) ? result.organization_candidates : [];
+      const requiresSelection = Boolean(result.requires_organization_selection && candidates.length > 0);
+
+      if (requiresSelection) {
+        setCompanyCandidates(candidates);
+        setSelectedOrganization(null);
+        setCompanySelectionPending(true);
+        setLeads([]);
+        toast({
+          title: 'Selecciona la empresa correcta',
+          description: 'Encontramos varias coincidencias. Elige la organización que quieres usar para continuar.',
+        });
+        return;
+      }
+
+      setCompanyCandidates([]);
+      setCompanySelectionPending(false);
+      setSelectedOrganization(result.selected_organization || (candidates.length === 1 ? candidates[0] : null));
+      setProfileSearchNotice(null);
+      setLastProfilePhoneStatus(null);
+      setLeads(result.leads.map((raw) => normalizeLeadForUI(raw)));
+      return;
+    }
+
+    setCompanyCandidates([]);
+    setCompanySelectionPending(false);
+    setSelectedOrganization(null);
+
+    const phoneStatus = mode === 'linkedin_profile'
+      ? (result.phone_enrichment?.status || null)
+      : null;
+    setLastProfilePhoneStatus(phoneStatus);
+    setLeads(result.leads.map((raw) => normalizeLeadForUI(raw, { phoneStatus: phoneStatus || undefined })));
+
+    if (mode === 'linkedin_profile') {
+      const warnings = Array.isArray(result.provider_warnings) ? result.provider_warnings.filter(Boolean) : [];
+
+      if (phoneStatus === 'queued') {
+        setProfileSearchNotice({
+          tone: 'info',
+          title: 'Telefono en proceso',
+          description: result.phone_enrichment?.message || 'El telefono se esta enriqueciendo y se actualizara en breve.',
+        });
+      } else if (phoneStatus === 'skipped' || phoneStatus === 'failed') {
+        setProfileSearchNotice({
+          tone: 'warning',
+          title: 'Telefono no disponible por ahora',
+          description: result.phone_enrichment?.message || warnings[0] || 'La busqueda encontro el perfil, pero el telefono no pudo enriquecerse en este momento.',
+        });
+      } else if (warnings.length > 0) {
+        setProfileSearchNotice({
+          tone: 'warning',
+          title: 'Advertencia del proveedor',
+          description: warnings[0],
+        });
+      }
+    }
+  };
+
+  const executeSearch = async ({
+    countQuota = true,
+    selectedOrg = null,
+  }: {
+    countQuota?: boolean;
+    selectedOrg?: CompanySearchOrganization | null;
+  } = {}) => {
     if (submittingRef.current) return;
     submittingRef.current = true;
 
@@ -278,7 +419,7 @@ export default function SearchPage() {
     const incClientQuota = typeof (Quota as any).incClientQuota === 'function' ? (Quota as any).incClientQuota : (_k: any) => { };
     const getClientLimit = typeof (Quota as any).getClientLimit === 'function' ? (Quota as any).getClientLimit : (_k: any) => 50;
 
-    if (!canUseClientQuota('leadSearch')) {
+    if (countQuota && !canUseClientQuota('leadSearch')) {
       toast({ variant: 'destructive', title: 'Límite diario alcanzado', description: `Has llegado a ${getClientLimit('leadSearch')} búsquedas hoy.` });
       submittingRef.current = false;
       return;
@@ -288,11 +429,13 @@ export default function SearchPage() {
     setSelectedLeads(new Set());
     setPageIndex(0);
     setError('');
+    setProfileSearchNotice(null);
+    setLastProfilePhoneStatus(null);
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
     try {
-      let result;
+      let result: LeadSearchResponse;
 
       if (filters.searchMode === 'linkedin_profile') {
         const linkedinUrl = normalizeLinkedinProfileUrl(filters.linkedinUrl);
@@ -300,12 +443,33 @@ export default function SearchPage() {
           throw new Error('La URL de LinkedIn no es valida.');
         }
 
-        incClientQuota('leadSearch');
+        if (countQuota) incClientQuota('leadSearch');
         result = await searchLinkedInProfileLead({
           search_mode: 'linkedin_profile',
           linkedin_url: linkedinUrl,
           reveal_email: filters.revealEmail,
           reveal_phone: filters.revealPhone,
+        }, abortRef.current.signal);
+      } else if (filters.searchMode === 'company_name') {
+        const companyName = filters.companyName.trim();
+        const organization = selectedOrg || selectedOrganization;
+        const organizationDomains = splitDomainInput(filters.companyDomains);
+
+        if (!companyName && !organization) {
+          throw new Error('Debes indicar un nombre de empresa.');
+        }
+
+        if (countQuota) incClientQuota('leadSearch');
+        result = await searchCompanyNameLeads({
+          search_mode: 'company_name',
+          company_name: companyName || organization?.name,
+          organization_domains: organizationDomains,
+          seniorities: filters.seniorities,
+          titles: splitTitlesInput(filters.title),
+          max_results: Math.max(1, Number(filters.maxResults) || 25),
+          selected_organization_id: organization?.id,
+          selected_organization_name: organization?.name,
+          selected_organization_domain: organization?.primary_domain || undefined,
         }, abortRef.current.signal);
       } else {
         const industryKeywords = [filters.industry.trim()].filter(Boolean);
@@ -322,7 +486,7 @@ export default function SearchPage() {
           throw new Error('Debes seleccionar al menos un tamaño de empresa.');
         }
 
-        incClientQuota('leadSearch');
+        if (countQuota) incClientQuota('leadSearch');
         const payload: LeadsSearchParams = [{
           industry_keywords: industryKeywords,
           company_location: locations,
@@ -339,17 +503,27 @@ export default function SearchPage() {
         result = await searchLeads(payload, abortRef.current.signal);
       }
 
-      setLeads(result.leads.map(normalizeLeadForUI));
+      applySearchResult(result, filters.searchMode);
     } catch (error: any) {
       if (error.name !== 'AbortError') {
         setError(error.message || 'Error desconocido');
-        toast({ variant: "destructive", title: "Error en la Búsqueda", description: error.message || "No se pudieron obtener los leads." });
+        toast({ variant: 'destructive', title: 'Error en la Búsqueda', description: error.message || 'No se pudieron obtener los leads.' });
       }
       setLeads([]);
+      setLastProfilePhoneStatus(null);
     } finally {
       setIsLoading(false);
       submittingRef.current = false;
     }
+  };
+
+  const handleSelectOrganization = async (organization: CompanySearchOrganization) => {
+    setSelectedOrganization(organization);
+    await executeSearch({ countQuota: false, selectedOrg: organization });
+  };
+
+  const handleSearch = async () => {
+    await executeSearch();
   };
 
   const handleAbort = () => {
@@ -363,6 +537,11 @@ export default function SearchPage() {
     setLeads([]);
     setSelectedLeads(new Set());
     setError('');
+    setProfileSearchNotice(null);
+    setLastProfilePhoneStatus(null);
+    setCompanyCandidates([]);
+    setSelectedOrganization(null);
+    setCompanySelectionPending(false);
   };
 
   const isPageAllSelected = useMemo(() => {
@@ -415,6 +594,11 @@ export default function SearchPage() {
 
   const handleLoadSearch = (search: SavedSearch) => {
     setFilters({ ...DEFAULT_FILTERS, ...(search.criteria || {}) });
+    setProfileSearchNotice(null);
+    setLastProfilePhoneStatus(null);
+    setCompanyCandidates([]);
+    setSelectedOrganization(null);
+    setCompanySelectionPending(false);
     toast({ title: 'Filtros cargados', description: `Se han aplicado los filtros de "${search.name}".` });
   };
 
@@ -478,18 +662,21 @@ export default function SearchPage() {
           <CardDescription>
             {filters.searchMode === 'linkedin_profile'
               ? 'Busca una persona puntual usando la URL de su perfil de LinkedIn.'
-              : 'Define los parámetros para encontrar los leads que necesitas.'}
+              : filters.searchMode === 'company_name'
+                ? 'Busca contactos dentro de una empresa específica y, si hay ambigüedad, elige la organización correcta.'
+                : 'Define los parámetros para encontrar los leads que necesitas.'}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-6">
             <div className="max-w-sm">
               <Label htmlFor="searchMode">Modo de búsqueda</Label>
-              <Select value={filters.searchMode} onValueChange={(v: 'filters' | 'linkedin_profile') => handleFilterChange('searchMode', v)}>
+              <Select value={filters.searchMode} onValueChange={(v: SearchMode) => handleFilterChange('searchMode', v)}>
                 <SelectTrigger id="searchMode"><SelectValue placeholder="Seleccionar modo" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="filters">Búsqueda por filtros</SelectItem>
                   <SelectItem value="linkedin_profile">Perfil de LinkedIn</SelectItem>
+                  <SelectItem value="company_name">Empresa por nombre</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -520,6 +707,74 @@ export default function SearchPage() {
                   </div>
                   <Switch id="revealPhone" checked={filters.revealPhone} onCheckedChange={(v) => handleFilterChange('revealPhone', v)} />
                 </div>
+              </div>
+            ) : filters.searchMode === 'company_name' ? (
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                <div className="md:col-span-2">
+                  <Label htmlFor="companyName">Empresa *</Label>
+                  <Input
+                    id="companyName"
+                    placeholder="Ej: Microsoft"
+                    value={filters.companyName}
+                    onChange={(e) => handleFilterChange('companyName', e.target.value)}
+                  />
+                  <small className="text-muted-foreground">El backend intentará encontrar la organización correcta por nombre.</small>
+                </div>
+                <div className="md:col-span-2">
+                  <Label htmlFor="companyDomains">Dominio de la empresa</Label>
+                  <Input
+                    id="companyDomains"
+                    placeholder="Ej: grupoexpro.com, grupoexpro.cl"
+                    value={filters.companyDomains}
+                    onChange={(e) => handleFilterChange('companyDomains', e.target.value)}
+                  />
+                  <small className="text-muted-foreground">Opcional. Ayuda a resolver empresas ambiguas con mucha más precisión.</small>
+                </div>
+                <div>
+                  <Label htmlFor="companyTitles">Cargos</Label>
+                  <Input
+                    id="companyTitles"
+                    placeholder="Ej: VP Marketing, Marketing Director"
+                    value={filters.title}
+                    onChange={(e) => handleFilterChange('title', e.target.value)}
+                  />
+                  <small className="text-muted-foreground">Puedes separar varios cargos por coma.</small>
+                </div>
+                <div>
+                  <Label htmlFor="maxResults">Máximo de resultados</Label>
+                  <Input
+                    id="maxResults"
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={String(filters.maxResults)}
+                    onChange={(e) => handleFilterChange('maxResults', Math.max(1, Number(e.target.value) || 25))}
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <MultiCheckDropdown
+                    label="Management level"
+                    options={APOLLO_SENIORITIES}
+                    value={filters.seniorities}
+                    onChange={(next) => handleFilterChange('seniorities', next)}
+                    placeholder="Seleccionar niveles"
+                  />
+                </div>
+
+                {selectedOrganization ? (
+                  <div className="md:col-span-2 rounded-md border border-emerald-200 bg-emerald-50/60 p-4">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
+                      <div className="space-y-1 text-sm">
+                        <div className="font-medium text-emerald-900">Empresa seleccionada</div>
+                        <div className="text-emerald-800">
+                          {selectedOrganization.name}
+                          {selectedOrganization.primary_domain ? ` · ${selectedOrganization.primary_domain}` : ''}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
@@ -560,11 +815,49 @@ export default function SearchPage() {
 
           <div className="mt-6 flex justify-end gap-2">
             <Button variant="outline" onClick={handleClear}><X className="mr-2" />Limpiar</Button>
-            <Button onClick={handleSearch} disabled={isLoading}><Search className="mr-2" />{isLoading ? 'Buscando...' : (filters.searchMode === 'linkedin_profile' ? 'Buscar Perfil' : 'Buscar Leads')}</Button>
+            <Button onClick={handleSearch} disabled={isLoading}><Search className="mr-2" />{isLoading ? 'Buscando...' : (filters.searchMode === 'linkedin_profile' ? 'Buscar Perfil' : filters.searchMode === 'company_name' ? 'Buscar Empresa' : 'Buscar Leads')}</Button>
             {isLoading && (
               <Button variant="outline" onClick={handleAbort}>Cancelar</Button>
             )}
           </div>
+
+          {profileSearchNotice ? (
+            <Alert className="mt-4" variant={profileSearchNotice.tone === 'warning' ? 'destructive' : 'default'}>
+              {profileSearchNotice.tone === 'warning' ? <AlertCircle className="h-4 w-4" /> : <Info className="h-4 w-4" />}
+              <AlertTitle>{profileSearchNotice.title}</AlertTitle>
+              <AlertDescription>{profileSearchNotice.description}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {filters.searchMode === 'company_name' && companySelectionPending && companyCandidates.length > 0 ? (
+            <div className="mt-4 rounded-md border p-4">
+              <div className="mb-3 flex items-start gap-3">
+                <Building2 className="mt-0.5 h-4 w-4 text-blue-600" />
+                <div>
+                  <div className="font-medium">Selecciona la empresa correcta</div>
+                  <p className="text-sm text-muted-foreground">Encontramos varias coincidencias para "{filters.companyName}". Elige una para continuar la búsqueda sin volver a consumir cuota.</p>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {companyCandidates.map((candidate) => (
+                  <button
+                    key={candidate.id}
+                    type="button"
+                    onClick={() => handleSelectOrganization(candidate)}
+                    className="rounded-md border bg-background p-4 text-left transition hover:border-blue-400 hover:bg-muted/40"
+                  >
+                    <div className="font-medium">{candidate.name}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">
+                      {candidate.primary_domain || candidate.website_url || 'Sin dominio visible'}
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {[candidate.city, candidate.state, candidate.country].filter(Boolean).join(', ') || 'Ubicación no disponible'}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -573,7 +866,11 @@ export default function SearchPage() {
           <div>
             <CardTitle>Resultados de la Búsqueda</CardTitle>
             <CardDescription>
-              {leads.length > 0 ? `Mostrando ${pagedLeads.length} de ${leads.length} leads.` : 'No se han encontrado leads.'}
+              {leads.length > 0
+                ? `Mostrando ${pagedLeads.length} de ${leads.length} leads.`
+                : companySelectionPending
+                  ? 'Selecciona una organización para continuar con la búsqueda.'
+                  : 'No se han encontrado leads.'}
             </CardDescription>
           </div>
           <Button
@@ -646,7 +943,11 @@ export default function SearchPage() {
                       {!isLoading && (
                         <div className="flex flex-col items-center gap-2">
                           <Frown className="h-8 w-8 text-muted-foreground" />
-                          <p className="text-muted-foreground">Realiza una búsqueda para ver los resultados.</p>
+                          <p className="text-muted-foreground">
+                            {companySelectionPending
+                              ? 'Selecciona una organización sugerida para ver los resultados.'
+                              : 'Realiza una búsqueda para ver los resultados.'}
+                          </p>
                         </div>
                       )}
                     </TableCell>

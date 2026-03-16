@@ -65,6 +65,15 @@ export interface Lead {
   country?: string | null;
   city?: string | null;
   apolloId?: string;
+  phoneNumbers?: Array<{
+    raw_number?: string | null;
+    sanitized_number?: string | null;
+    type?: string | null;
+    position?: string | null;
+    status?: string | null;
+  }> | null;
+  primaryPhone?: string | null;
+  enrichmentStatus?: 'completed' | 'pending_phone' | 'failed' | string;
   score?: number;
   scoreTier?: 'hot' | 'warm' | 'cool' | 'cold';
   scoreReason?: string | null;

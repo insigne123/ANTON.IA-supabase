@@ -14,7 +14,8 @@ function getSupabaseCredentials() {
         key: process.env.SUPABASE_SERVICE_ROLE_KEY!
     };
 }
-const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
+const DEFAULT_LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
+const LEAD_SEARCH_URL = process.env.ANTONIA_LEAD_SEARCH_URL || process.env.LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
 
 function withInternalApiSecret(headers: Record<string, string>): Record<string, string> {
     const secret = String(process.env.INTERNAL_API_SECRET || '').trim();

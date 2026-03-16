@@ -7,7 +7,8 @@ const supabaseUrl = config.supabase?.url || process.env.SUPABASE_URL!;
 const supabaseServiceKey = config.supabase?.service_key || process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const appUrl = config.app?.url || process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
 const cronSecret = config.cron?.secret || process.env.CRON_SECRET || '';
-const LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
+const DEFAULT_LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
+const LEAD_SEARCH_URL = process.env.ANTONIA_LEAD_SEARCH_URL || process.env.LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
 const internalApiSecret = config.internal?.api_secret || process.env.INTERNAL_API_SECRET || '';
 const workerIngressSecret = config.worker?.tick_secret || process.env.ANTONIA_FIREBASE_TICK_SECRET || '';
 
