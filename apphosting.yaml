@@ -87,6 +87,14 @@ env:
     value: https://studio--leadflowai-3yjcy.us-central1.hosted.app
     availability: [BUILD, RUNTIME]
 
+  - variable: CANONICAL_APP_URL
+    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app
+    availability: [BUILD, RUNTIME]
+
+  - variable: BACKEND_HOSTED_APP_URL
+    value: https://studio--studio-6624658482-61b7b.us-central1.hosted.app
+    availability: [BUILD, RUNTIME]
+
   - variable: NEXT_PUBLIC_AZURE_AD_CLIENT_ID
     value: 3826e4b9-f46e-48b7-aa7c-f06e11bd9686
     availability: [BUILD, RUNTIME]

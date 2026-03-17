@@ -11,7 +11,7 @@ import {
 } from "@/lib/schemas/leads";
 import { normalizeFromN8N } from "@/lib/normalizers/n8n";
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
-import { pickPdlEmail, searchPeopleWithPDL } from '@/lib/providers/pdl';
+import { enrichPersonWithPDL, pickPdlEmail, pickPdlPhones, searchCompaniesWithPDL, searchPeopleWithPDL } from '@/lib/providers/pdl';
 import { isPdlFallbackEnabled, resolveLeadProvider, resolveOrganizationIdForUser } from '@/lib/server/provider-routing';
 
 export const dynamic = 'force-dynamic';
@@ -40,6 +40,9 @@ const PDL_DATA_INCLUDE = [
   'job_company_website',
   'job_company_size',
   'job_company_industry',
+  'mobile_phone',
+  'work_phone',
+  'phone_numbers',
 ];
 
 function splitFullName(fullName?: string | null) {
@@ -309,6 +312,255 @@ async function callPdlLeadSearch(currentParams: LeadsSearchParams[number], meta?
   return NextResponse.json({ ...normalized, ...(meta || {}) }, { status: 200 });
 }
 
+function buildRevealFlags(email: boolean, phone: boolean) {
+  return { email, phone };
+}
+
+function mapPdlPersonToLead(person: any, index: number, options?: { revealEmail?: boolean; revealPhone?: boolean }) {
+  const revealEmail = Boolean(options?.revealEmail);
+  const revealPhone = Boolean(options?.revealPhone);
+  const email = revealEmail ? pickPdlEmail(person) : undefined;
+  const phoneData = revealPhone ? pickPdlPhones(person) : { primaryPhone: null, phoneNumbers: undefined };
+  const fullName =
+    String(person?.full_name || '').trim() ||
+    `${String(person?.first_name || '').trim()} ${String(person?.last_name || '').trim()}`.trim() ||
+    'Unknown';
+
+  return {
+    id:
+      String(person?.id || '').trim() ||
+      String(person?.linkedin_url || '').trim() ||
+      String(email || '').trim() ||
+      `lead-${index + 1}`,
+    first_name: String(person?.first_name || '').trim() || splitFullName(fullName).firstName || undefined,
+    last_name: String(person?.last_name || '').trim() || splitFullName(fullName).lastName || undefined,
+    email: email || undefined,
+    title: String(person?.job_title || '').trim() || undefined,
+    organization: {
+      name: String(person?.job_company_name || '').trim() || undefined,
+      domain: cleanDomain(person?.job_company_website),
+      industry: String(person?.job_company_industry || '').trim() || undefined,
+      website_url: String(person?.job_company_website || '').trim() || undefined,
+    },
+    linkedin_url: String(person?.linkedin_url || '').trim() || undefined,
+    photo_url: String(person?.image_url || '').trim() || undefined,
+    email_status: email ? 'verified' : 'unknown',
+    primary_phone: phoneData.primaryPhone || undefined,
+    phone_numbers: phoneData.phoneNumbers,
+  };
+}
+
+async function callPdlProfileSearch(
+  params: {
+    linkedinUrl: string;
+    revealEmail: boolean;
+    revealPhone: boolean;
+  },
+  meta?: Record<string, unknown>
+) {
+  const requestedReveal = buildRevealFlags(params.revealEmail, params.revealPhone);
+  const result = await enrichPersonWithPDL({
+    linkedinUrl: params.linkedinUrl,
+    dataInclude: PDL_DATA_INCLUDE,
+  });
+
+  if (!result.matched || !result.person) {
+    return NextResponse.json(
+      {
+        count: 0,
+        leads: [],
+        requested_reveal: requestedReveal,
+        applied_reveal: requestedReveal,
+        effective_reveal: buildRevealFlags(false, false),
+        ...(meta || {}),
+      },
+      { status: 200 },
+    );
+  }
+
+  const lead = mapPdlPersonToLead(result.person, 0, {
+    revealEmail: params.revealEmail,
+    revealPhone: params.revealPhone,
+  });
+
+  const phoneNumbers = Array.isArray(lead.phone_numbers) ? lead.phone_numbers : [];
+  const phoneFound = params.revealPhone && phoneNumbers.length > 0;
+  const emailFound = params.revealEmail && Boolean(lead.email);
+  const responseBody: Record<string, unknown> = {
+    count: 1,
+    leads: [lead],
+    requested_reveal: requestedReveal,
+    applied_reveal: requestedReveal,
+    effective_reveal: buildRevealFlags(emailFound, phoneFound),
+    ...(meta || {}),
+  };
+
+  if (params.revealPhone && !phoneFound) {
+    responseBody.phone_enrichment = {
+      requested: true,
+      queued: false,
+      status: 'skipped',
+      message: 'No se encontro telefono para este perfil en la fuente disponible.',
+      webhook_url: null,
+      provider_status: typeof result.status === 'number' ? result.status : null,
+      provider_details: 'pdl_phone_not_found',
+    };
+    responseBody.provider_warnings = [
+      'La busqueda encontro el perfil, pero no habia telefono disponible en la fuente configurada.',
+    ];
+  }
+
+  return NextResponse.json(responseBody, { status: 200 });
+}
+
+async function searchPdlOrganizationCandidates(companyName: string, size = 8) {
+  const safeName = normalizeName(companyName);
+  if (!safeName) return [];
+
+  const result = await searchCompaniesWithPDL({
+    sql: `SELECT * FROM company WHERE ${containsClause('name', safeName)}`,
+    size: Math.max(1, Math.min(25, size)),
+    dataInclude: ['id', 'name', 'website', 'linkedin_url'],
+  });
+
+  const target = normalizeName(companyName);
+  const companies = Array.isArray(result.data) ? result.data : [];
+  return companies
+    .map((company: any) => {
+      const domain = cleanDomain(company?.website) || undefined;
+      return {
+        id: String(company?.id || '').trim() || domain || normalizeName(company?.name || '') || `org-${Math.random().toString(36).slice(2, 8)}`,
+        name: String(company?.name || '').trim() || 'Unknown',
+        primary_domain: domain,
+        website_url: String(company?.website || '').trim() || (domain ? `https://${domain}` : undefined),
+        linkedin_url: String(company?.linkedin_url || '').trim() || undefined,
+        match_score: similarityScore(target, normalizeName(company?.name || '')),
+      };
+    })
+    .sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
+}
+
+async function callPdlCompanyNameSearch(
+  params: {
+    companyName?: string;
+    titles?: string[];
+    maxResults?: number;
+    organizationDomains?: string[];
+    selectedOrganizationId?: string;
+    selectedOrganizationName?: string;
+    selectedOrganizationDomain?: string;
+  },
+  meta?: Record<string, unknown>
+) {
+  const companyName = String(params.companyName || params.selectedOrganizationName || '').trim();
+  const selectedOrganizationId = String(params.selectedOrganizationId || '').trim();
+  const selectedOrganizationName = String(params.selectedOrganizationName || '').trim();
+  const selectedOrganizationDomain = cleanDomain(params.selectedOrganizationDomain);
+  const normalizedTitles = (params.titles || []).map((value) => String(value).trim()).filter(Boolean).slice(0, 8);
+  const maxResults = Math.max(1, Math.min(Number(params.maxResults || 25) || 25, 200));
+  const organizationDomains = normalizeDomainList([
+    ...(params.organizationDomains || []),
+    selectedOrganizationDomain || undefined,
+  ]);
+
+  let selectedOrganization: any | undefined;
+  let candidateOrganizations: any[] = [];
+
+  if (companyName) {
+    candidateOrganizations = await searchPdlOrganizationCandidates(companyName, 8);
+  }
+
+  if (candidateOrganizations.length > 0) {
+    selectedOrganization = candidateOrganizations.find((candidate) => {
+      if (selectedOrganizationId && candidate.id === selectedOrganizationId) return true;
+      if (selectedOrganizationDomain && candidate.primary_domain === selectedOrganizationDomain) return true;
+      if (selectedOrganizationName && normalizeName(candidate.name) === normalizeName(selectedOrganizationName)) return true;
+      return false;
+    });
+  }
+
+  if (!selectedOrganization && !organizationDomains.length && candidateOrganizations.length > 1) {
+    return NextResponse.json(
+      {
+        count: 0,
+        leads: [],
+        company_name: companyName,
+        requires_organization_selection: true,
+        organization_candidates: candidateOrganizations,
+        ...(meta || {}),
+      },
+      { status: 200 },
+    );
+  }
+
+  if (!selectedOrganization && candidateOrganizations.length === 1) {
+    selectedOrganization = candidateOrganizations[0];
+  }
+
+  const finalDomains = normalizeDomainList([
+    ...organizationDomains,
+    selectedOrganization?.primary_domain,
+  ]);
+
+  const clauses: string[] = [];
+  if (finalDomains.length > 0) {
+    clauses.push(`(${finalDomains.map((domain) => containsClause('job_company_website', domain)).join(' OR ')})`);
+  } else if (companyName) {
+    clauses.push(`(${containsClause('job_company_name', companyName)})`);
+  }
+
+  if (normalizedTitles.length > 0) {
+    clauses.push(`(${normalizedTitles.map((title) => containsClause('job_title', title)).join(' OR ')})`);
+  }
+
+  clauses.push('(full_name IS NOT NULL)');
+  const sql = `SELECT * FROM person WHERE ${clauses.join(' AND ')}`;
+
+  const leads: any[] = [];
+  const seenIds = new Set<string>();
+  let page = 1;
+  let scrollToken: string | undefined;
+  const perPage = Math.max(1, Math.min(100, Math.min(maxResults, 50)));
+
+  while (leads.length < maxResults && page <= 10) {
+    const remaining = maxResults - leads.length;
+    const size = Math.max(1, Math.min(perPage, remaining));
+    const result = await searchPeopleWithPDL({
+      sql,
+      size,
+      scrollToken,
+      dataInclude: PDL_DATA_INCLUDE,
+    });
+
+    const people = Array.isArray(result.data) ? result.data : [];
+    if (people.length === 0) break;
+
+    for (let i = 0; i < people.length; i++) {
+      if (leads.length >= maxResults) break;
+      const lead = mapPdlPersonToLead(people[i], leads.length, { revealEmail: true, revealPhone: false });
+      const dedupeKey = String(lead.id || lead.linkedin_url || `${lead.first_name}-${lead.last_name}-${lead.organization?.domain || lead.organization?.name || ''}`).toLowerCase();
+      if (dedupeKey && seenIds.has(dedupeKey)) continue;
+      if (dedupeKey) seenIds.add(dedupeKey);
+      leads.push(lead);
+    }
+
+    if (!result.scrollToken || people.length < size) break;
+    scrollToken = result.scrollToken;
+    page++;
+  }
+
+  return NextResponse.json(
+    {
+      count: leads.length,
+      leads,
+      company_name: companyName || selectedOrganization?.name,
+      selected_organization: selectedOrganization,
+      ...(meta || {}),
+    },
+    { status: 200 },
+  );
+}
+
 export async function POST(req: NextRequest) {
   try {
     // 1. Authenticate: Support both session cookies and x-user-id header (for Cloud Functions)
@@ -344,12 +596,20 @@ export async function POST(req: NextRequest) {
     }
 
     if (!Array.isArray(body)) {
+      const requestedProvider = String((body as any)?.provider || '').trim().toLowerCase();
+      const organizationId = await resolveOrganizationIdForUser(userId);
       const profileParsed = LinkedInProfileSearchRequestSchema.safeParse(body);
       if (profileParsed.success) {
         const profileReq = profileParsed.data;
         const linkedinUrl = String(
           profileReq.linkedin_url || profileReq.linkedin_profile_url || profileReq.linkedinUrl || ''
         ).trim();
+        const providerDecision = resolveLeadProvider({
+          requestedProvider,
+          organizationId,
+          defaultProviderEnv: 'LEADS_PROVIDER_DEFAULT',
+          fallbackDefaultProvider: 'apollo',
+        });
 
       const profilePayload = {
         user_id: userId,
@@ -359,15 +619,39 @@ export async function POST(req: NextRequest) {
           reveal_phone: profileReq.reveal_phone ?? profileReq.revealPhone ?? true,
         };
 
-      const response = await callLeadSearchService(profilePayload, {
-        providerRequested: 'apollo',
-        providerUsed: 'apollo',
-        providerDefault: 'apollo',
+      const profileMeta = {
+        providerRequested: providerDecision.requestedProvider,
+        providerDefault: providerDecision.defaultProvider,
+        providerForcedReason: providerDecision.forcedApolloReason,
         search_mode: 'linkedin_profile',
-          requested_reveal: {
-            email: profilePayload.reveal_email,
+        requested_reveal: {
+          email: profilePayload.reveal_email,
           phone: profilePayload.reveal_phone,
         },
+      };
+
+      if (providerDecision.provider === 'pdl') {
+        const response = await callPdlProfileSearch(
+          {
+            linkedinUrl,
+            revealEmail: Boolean(profilePayload.reveal_email),
+            revealPhone: Boolean(profilePayload.reveal_phone),
+          },
+          {
+            ...profileMeta,
+            providerUsed: 'pdl',
+            fallbackApplied: false,
+          },
+        );
+        response.headers.set('x-provider-used', 'pdl');
+        response.headers.set('x-search-mode', 'linkedin_profile');
+        return response;
+      }
+
+      const response = await callLeadSearchService(profilePayload, {
+        ...profileMeta,
+        providerUsed: 'apollo',
+        fallbackApplied: false,
       });
 
       if (profilePayload.reveal_phone) {
@@ -381,14 +665,8 @@ export async function POST(req: NextRequest) {
               reveal_phone: false,
             },
             {
-              providerRequested: 'apollo',
+              ...profileMeta,
               providerUsed: 'apollo',
-              providerDefault: 'apollo',
-              search_mode: 'linkedin_profile',
-              requested_reveal: {
-                email: profilePayload.reveal_email,
-                phone: profilePayload.reveal_phone,
-              },
               effective_reveal: {
                 email: profilePayload.reveal_email,
                 phone: false,
@@ -412,12 +690,34 @@ export async function POST(req: NextRequest) {
               phone_reveal_fallback_applied: true,
               phone_reveal_fallback_reason: 'apollo_requires_webhook_url',
               warning: 'La busqueda se reintento sin telefono porque Apollo exige webhook_url para reveal_phone_number.',
+              fallbackApplied: false,
             },
           );
           fallbackResponse.headers.set('x-provider-used', 'apollo');
           fallbackResponse.headers.set('x-search-mode', 'linkedin_profile');
           return fallbackResponse;
         }
+      }
+
+      if (!response.ok && providerDecision.pdlEligible && isPdlFallbackEnabled()) {
+        const errorPayload = await response.clone().json().catch(() => null);
+        const errorMessage = String(errorPayload?.message || errorPayload?.details || errorPayload?.error || '').trim();
+        const fallbackResponse = await callPdlProfileSearch(
+          {
+            linkedinUrl,
+            revealEmail: Boolean(profilePayload.reveal_email),
+            revealPhone: Boolean(profilePayload.reveal_phone),
+          },
+          {
+            ...profileMeta,
+            providerUsed: 'pdl',
+            fallbackApplied: true,
+            fallbackReason: errorMessage || `apollo_profile_search_failed_${response.status}`,
+          },
+        );
+        fallbackResponse.headers.set('x-provider-used', 'pdl');
+        fallbackResponse.headers.set('x-search-mode', 'linkedin_profile');
+        return fallbackResponse;
       }
 
       response.headers.set('x-provider-used', 'apollo');
@@ -451,14 +751,73 @@ export async function POST(req: NextRequest) {
           selected_organization_name: String(companyReq.selected_organization_name || '').trim() || undefined,
           selected_organization_domain: normalizeDomainList([companyReq.selected_organization_domain])[0] || undefined,
         };
-
-        const response = await callLeadSearchService(companyPayload, {
-          providerRequested: 'apollo',
-          providerUsed: 'apollo',
-          providerDefault: 'apollo',
+        const providerDecision = resolveLeadProvider({
+          requestedProvider,
+          organizationId,
+          defaultProviderEnv: 'LEADS_PROVIDER_DEFAULT',
+          fallbackDefaultProvider: 'apollo',
+        });
+        const companyMeta = {
+          providerRequested: providerDecision.requestedProvider,
+          providerDefault: providerDecision.defaultProvider,
+          providerForcedReason: providerDecision.forcedApolloReason,
           search_mode: 'company_name',
           company_name: companyPayload.company_name || companyPayload.selected_organization_name,
+        };
+
+        if (providerDecision.provider === 'pdl') {
+          const pdlResponse = await callPdlCompanyNameSearch(
+            {
+              companyName: companyPayload.company_name,
+              titles: Array.isArray(companyPayload.titles) ? companyPayload.titles : [],
+              maxResults: companyPayload.max_results,
+              organizationDomains,
+              selectedOrganizationId: companyPayload.selected_organization_id,
+              selectedOrganizationName: companyPayload.selected_organization_name,
+              selectedOrganizationDomain: companyPayload.selected_organization_domain,
+            },
+            {
+              ...companyMeta,
+              providerUsed: 'pdl',
+              fallbackApplied: false,
+            },
+          );
+          pdlResponse.headers.set('x-provider-used', 'pdl');
+          pdlResponse.headers.set('x-search-mode', 'company_name');
+          return pdlResponse;
+        }
+
+        const response = await callLeadSearchService(companyPayload, {
+          ...companyMeta,
+          providerUsed: 'apollo',
+          fallbackApplied: false,
         });
+
+        if (!response.ok && providerDecision.pdlEligible && isPdlFallbackEnabled()) {
+          const errorPayload = await response.clone().json().catch(() => null);
+          const errorMessage = String(errorPayload?.message || errorPayload?.details || errorPayload?.error || '').trim();
+          const fallbackResponse = await callPdlCompanyNameSearch(
+            {
+              companyName: companyPayload.company_name,
+              titles: Array.isArray(companyPayload.titles) ? companyPayload.titles : [],
+              maxResults: companyPayload.max_results,
+              organizationDomains,
+              selectedOrganizationId: companyPayload.selected_organization_id,
+              selectedOrganizationName: companyPayload.selected_organization_name,
+              selectedOrganizationDomain: companyPayload.selected_organization_domain,
+            },
+            {
+              ...companyMeta,
+              providerUsed: 'pdl',
+              fallbackApplied: true,
+              fallbackReason: errorMessage || `apollo_company_search_failed_${response.status}`,
+            },
+          );
+          fallbackResponse.headers.set('x-provider-used', 'pdl');
+          fallbackResponse.headers.set('x-search-mode', 'company_name');
+          return fallbackResponse;
+        }
+
         response.headers.set('x-provider-used', 'apollo');
         response.headers.set('x-search-mode', 'company_name');
         return response;
@@ -585,6 +944,29 @@ function cleanDomain(urlLike?: string | null): string | undefined {
     const host = raw.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.+$/, '');
     return host.startsWith('www.') ? host.slice(4) : host;
   }
+}
+
+function normalizeName(value: string) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\b(grupo|the)\b/g, ' ')
+    .replace(/\b(s\.?a\.?|s\.?p\.?a\.?|ltda|llc|inc|corp(oration)?|company|co|gmbh|srl|s\.?l\.?|plc|ag|sa de cv)\b/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function similarityScore(a: string, b: string) {
+  if (!a || !b) return 0;
+  const setA = new Set(a.split(' ').filter(Boolean));
+  const setB = new Set(b.split(' ').filter(Boolean));
+  const intersection = Array.from(setA).filter((token) => setB.has(token)).length;
+  const union = new Set([...setA, ...setB]).size;
+  let score = union ? intersection / union : 0;
+  if (b.startsWith(a) || a.startsWith(b)) score += 0.25;
+  if (a.includes(b) || b.includes(a)) score += 0.15;
+  return Math.min(score, 1);
 }
 
 function buildPdlSearchSql(params: LeadsSearchParams[number]) {
