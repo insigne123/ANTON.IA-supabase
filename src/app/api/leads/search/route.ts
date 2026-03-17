@@ -13,6 +13,8 @@ import { normalizeFromN8N } from "@/lib/normalizers/n8n";
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
 import { enrichPersonWithPDL, pickPdlEmail, pickPdlPhones, searchCompaniesWithPDL, searchPeopleWithPDL } from '@/lib/providers/pdl';
 import { isPdlFallbackEnabled, resolveLeadProvider, resolveOrganizationIdForUser } from '@/lib/server/provider-routing';
+import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -20,6 +22,8 @@ export const fetchCache = 'force-no-store';
 export const runtime = 'nodejs';
 
 const APOLLO_BASE = 'https://api.apollo.io/api/v1';
+const LINKEDIN_PROFILE_TABLE_NAME = 'people_search_leads';
+const DEFAULT_APOLLO_WEBHOOK_BASE_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
 const USE_APIFY = String(process.env.USE_APIFY || "false") === "true";
 const DEFAULT_LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
 const LEAD_SEARCH_URL = process.env.ANTONIA_LEAD_SEARCH_URL || process.env.LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
@@ -247,7 +251,308 @@ function mapApolloProfileLead(person: any, index: number, options?: { revealEmai
     apollo_id: String(person?.id || '').trim() || undefined,
     primary_phone: phones.primaryPhone,
     phone_numbers: phones.phoneNumbers,
+    enrichment_status: String(person?.enrichment_status || '').trim() || undefined,
   };
+}
+
+type PhoneEnrichmentQueueResult = {
+  queued: boolean;
+  status: 'queued' | 'skipped' | 'failed';
+  message: string;
+  webhookUrl: string | null;
+  providerStatus: number | null;
+  providerDetails: string | null;
+};
+
+function getApolloOrganizationName(person: any) {
+  const direct = String(person?.organization?.name || '').trim();
+  if (direct) return direct;
+
+  if (Array.isArray(person?.employment_history)) {
+    const current = person.employment_history.find((item: any) => item?.current);
+    const currentName = String(current?.organization_name || '').trim();
+    if (currentName) return currentName;
+    const firstName = String(person.employment_history[0]?.organization_name || '').trim();
+    if (firstName) return firstName;
+  }
+
+  return '';
+}
+
+function getApolloOrganizationWebsite(person: any) {
+  const direct = String(person?.organization?.website_url || person?.organization?.primary_domain || '').trim();
+  if (direct) {
+    return direct.startsWith('http') ? direct : `https://${direct}`;
+  }
+
+  const employmentWebsite = String(person?.employment_history?.[0]?.organization_website || '').trim();
+  if (employmentWebsite) {
+    return employmentWebsite.startsWith('http') ? employmentWebsite : `https://${employmentWebsite}`;
+  }
+
+  return null;
+}
+
+function isValidPublicHttpsUrl(url: URL) {
+  if (url.protocol !== 'https:') return false;
+  const hostname = url.hostname.toLowerCase();
+  if (!hostname) return false;
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') return false;
+  if (hostname.endsWith('.local')) return false;
+  return true;
+}
+
+function resolveRequestOrigin(req: NextRequest) {
+  const candidates = [
+    (() => {
+      try {
+        return new URL(req.url).origin;
+      } catch {
+        return '';
+      }
+    })(),
+    req.headers.get('origin') || '',
+    (() => {
+      const referer = req.headers.get('referer') || '';
+      if (!referer) return '';
+      try {
+        return new URL(referer).origin;
+      } catch {
+        return '';
+      }
+    })(),
+    (() => {
+      const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || '';
+      const proto = req.headers.get('x-forwarded-proto') || 'https';
+      return host ? `${proto}://${host}` : '';
+    })(),
+  ];
+
+  for (const candidate of candidates) {
+    const trimmed = String(candidate || '').trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = new URL(trimmed);
+      if (isValidPublicHttpsUrl(parsed)) return parsed.origin;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function resolveLinkedInProfileWebhookUrl(
+  recordId: string,
+  revealEmail: boolean,
+  requestOrigin?: string | null,
+) {
+  const candidates = [
+    process.env.APOLLO_LINKEDIN_PROFILE_WEBHOOK_URL,
+    process.env.LINKEDIN_PROFILE_WEBHOOK_URL,
+    process.env.APOLLO_PROFILE_WEBHOOK_URL,
+    process.env.APOLLO_WEBHOOK_URL,
+    process.env.APOLLO_WEBHOOK_BASE_URL,
+    process.env.LEAD_SEARCH_WEBHOOK_BASE_URL,
+    process.env.APP_URL,
+    process.env.CANONICAL_APP_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.NEXT_PUBLIC_BASE_URL,
+    requestOrigin,
+    DEFAULT_APOLLO_WEBHOOK_BASE_URL,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+
+    try {
+      let parsed = new URL(trimmed);
+      if (!parsed.pathname.toLowerCase().endsWith('/api/apollo-webhook')) {
+        parsed = new URL('/api/apollo-webhook', parsed);
+      }
+      if (!isValidPublicHttpsUrl(parsed)) continue;
+      parsed.searchParams.set('record_id', recordId);
+      parsed.searchParams.set('table_name', LINKEDIN_PROFILE_TABLE_NAME);
+      parsed.searchParams.set('reveal_email', String(revealEmail));
+      parsed.searchParams.set('reveal_phone', 'true');
+      return parsed.toString();
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function buildPeopleSearchLeadRow(person: any, options: {
+  linkedinUrl: string;
+  organizationId?: string | null;
+  batchRunId?: string | null;
+  enrichmentStatus?: string | null;
+  revealEmail?: boolean;
+}) {
+  const lead = mapApolloProfileLead(person, 0, {
+    revealEmail: Boolean(options.revealEmail),
+    revealPhone: true,
+  });
+  const organizationName = getApolloOrganizationName(person) || lead.organization?.name || null;
+  const organizationWebsite = getApolloOrganizationWebsite(person);
+  const normalizedLinkedin = normalizeLinkedinProfileUrl(lead.linkedin_url || options.linkedinUrl) || null;
+  const now = new Date().toISOString();
+
+  return {
+    id: String(person?.id || '').trim(),
+    linkedin_url: normalizedLinkedin,
+    email: lead.email || null,
+    name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || String(person?.name || '').trim() || null,
+    org_name: organizationName,
+    title: lead.title || null,
+    organization_website: organizationWebsite,
+    page: 1,
+    batch_run_id: options.batchRunId || null,
+    created_at: now,
+    organization_id: options.organizationId || null,
+    industry: lead.organization?.industry || null,
+    photo_url: lead.photo_url || null,
+    email_status: lead.email_status || null,
+    first_name: lead.first_name || null,
+    last_name: lead.last_name || null,
+    organization_name: organizationName,
+    updated_at: now,
+    city: String(person?.city || '').trim() || null,
+    state: String(person?.state || '').trim() || null,
+    country: String(person?.country || '').trim() || null,
+    headline: String(person?.headline || '').trim() || null,
+    seniority: String(person?.seniority || '').trim() || null,
+    departments: Array.isArray(person?.departments) ? person.departments : null,
+    phone_numbers: Array.isArray(lead.phone_numbers) ? lead.phone_numbers : [],
+    primary_phone: lead.primary_phone || null,
+    enrichment_status: options.enrichmentStatus || 'completed',
+    organization_domain: lead.organization?.domain || cleanDomain(organizationWebsite) || null,
+    organization_industry: lead.organization?.industry || null,
+    organization_size: typeof person?.organization?.estimated_num_employees === 'number'
+      ? person.organization.estimated_num_employees
+      : null,
+  };
+}
+
+async function saveLinkedInProfileLead(person: any, options: {
+  linkedinUrl: string;
+  organizationId?: string | null;
+  batchRunId?: string | null;
+  enrichmentStatus?: string | null;
+  revealEmail?: boolean;
+}) {
+  const recordId = String(person?.id || '').trim();
+  if (!recordId) {
+    throw new Error('Apollo profile match missing id');
+  }
+
+  const admin = getSupabaseAdminClient();
+  const row = buildPeopleSearchLeadRow(person, options);
+  const { error } = await admin
+    .from(LINKEDIN_PROFILE_TABLE_NAME)
+    .upsert(row, { onConflict: 'id' });
+
+  if (error) throw error;
+  return row;
+}
+
+async function markLeadAsPendingPhoneEnrichment(recordId: string) {
+  const admin = getSupabaseAdminClient();
+  const { error } = await admin
+    .from(LINKEDIN_PROFILE_TABLE_NAME)
+    .update({
+      enrichment_status: 'pending_phone',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', recordId);
+
+  if (error) throw error;
+}
+
+async function queueLinkedInPhoneEnrichment(
+  apiKey: string,
+  apolloPersonId: string,
+  revealEmail: boolean,
+  requestOrigin?: string | null,
+): Promise<PhoneEnrichmentQueueResult> {
+  const webhookUrl = resolveLinkedInProfileWebhookUrl(apolloPersonId, revealEmail, requestOrigin);
+  if (!webhookUrl) {
+    return {
+      queued: false,
+      status: 'skipped',
+      message: 'No se pudo construir un webhook publico HTTPS para pedir el telefono a Apollo.',
+      webhookUrl: null,
+      providerStatus: null,
+      providerDetails: 'missing_public_webhook_url',
+    };
+  }
+
+  const params = new URLSearchParams();
+  params.set('id', apolloPersonId);
+  params.set('reveal_personal_emails', String(revealEmail));
+  params.set('reveal_phone_number', 'true');
+  params.set('webhook_url', webhookUrl);
+
+  try {
+    const response = await fetchWithTimeout(
+      `${APOLLO_BASE}/people/match?${params.toString()}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+          'Accept': 'application/json',
+          'X-Api-Key': apiKey,
+        },
+        body: '{}',
+      },
+      TIMEOUT_MS,
+    );
+
+    const raw = await response.text();
+    let json: any = null;
+    if (raw?.trim()) {
+      try {
+        json = JSON.parse(raw);
+      } catch {
+        json = null;
+      }
+    }
+
+    if (!response.ok) {
+      const message = String(json?.error || json?.message || raw || `APOLLO_PHONE_QUEUE_HTTP_${response.status}`).trim();
+      return {
+        queued: false,
+        status: 'failed',
+        message: message || 'Apollo no pudo encolar el telefono.',
+        webhookUrl,
+        providerStatus: response.status,
+        providerDetails: message || null,
+      };
+    }
+
+    return {
+      queued: true,
+      status: 'queued',
+      message: 'El telefono se esta enriqueciendo y se actualizara en breve por webhook.',
+      webhookUrl,
+      providerStatus: response.status,
+      providerDetails: null,
+    };
+  } catch (error: any) {
+    return {
+      queued: false,
+      status: 'failed',
+      message: error?.message || 'Apollo no pudo encolar el telefono.',
+      webhookUrl,
+      providerStatus: null,
+      providerDetails: error?.message || null,
+    };
+  }
 }
 
 async function callApolloProfileSearch(
@@ -255,6 +560,8 @@ async function callApolloProfileSearch(
     linkedinUrl: string;
     revealEmail: boolean;
     revealPhone: boolean;
+    organizationId?: string | null;
+    requestOrigin?: string | null;
   },
   meta?: Record<string, unknown>
 ) {
@@ -286,7 +593,7 @@ async function callApolloProfileSearch(
         body: JSON.stringify({
           linkedin_url: params.linkedinUrl,
           reveal_personal_emails: params.revealEmail,
-          reveal_phone_number: params.revealPhone,
+          reveal_phone_number: false,
         }),
       },
       TIMEOUT_MS,
@@ -330,12 +637,72 @@ async function callApolloProfileSearch(
       );
     }
 
+    const providerWarnings: string[] = [];
+    let queueResult: PhoneEnrichmentQueueResult | null = null;
+
+    try {
+      await saveLinkedInProfileLead(person, {
+        linkedinUrl: params.linkedinUrl,
+        organizationId: params.organizationId,
+        enrichmentStatus: 'completed',
+        revealEmail: params.revealEmail,
+      });
+    } catch (saveError: any) {
+      providerWarnings.push(`No se pudo preparar el registro de seguimiento para telefono: ${saveError?.message || 'error desconocido'}`);
+    }
+
+    if (params.revealPhone) {
+      const apolloPersonId = String(person?.id || '').trim();
+      if (!apolloPersonId) {
+        queueResult = {
+          queued: false,
+          status: 'failed',
+          message: 'Apollo encontro el perfil, pero no devolvio un identificador valido para pedir el telefono.',
+          webhookUrl: null,
+          providerStatus: null,
+          providerDetails: 'missing_apollo_person_id',
+        };
+      } else if (providerWarnings.length > 0) {
+        queueResult = {
+          queued: false,
+          status: 'failed',
+          message: 'No se pudo preparar el registro interno para recibir el telefono de Apollo.',
+          webhookUrl: null,
+          providerStatus: null,
+          providerDetails: 'failed_to_prepare_tracking_row',
+        };
+      } else {
+        queueResult = await queueLinkedInPhoneEnrichment(
+          apiKey,
+          apolloPersonId,
+          params.revealEmail,
+          params.requestOrigin,
+        );
+
+        if (queueResult.queued) {
+          try {
+            await markLeadAsPendingPhoneEnrichment(apolloPersonId);
+          } catch (markError: any) {
+            queueResult = {
+              queued: false,
+              status: 'failed',
+              message: 'Apollo acepto la cola del telefono, pero no se pudo marcar el registro como pendiente.',
+              webhookUrl: queueResult.webhookUrl,
+              providerStatus: queueResult.providerStatus,
+              providerDetails: markError?.message || 'failed_to_mark_pending_phone',
+            };
+          }
+        }
+      }
+    }
+
     const lead = mapApolloProfileLead(person, 0, {
       revealEmail: params.revealEmail,
-      revealPhone: params.revealPhone,
+      revealPhone: false,
     });
-    const phoneNumbers = Array.isArray(lead.phone_numbers) ? lead.phone_numbers : [];
-    const phoneFound = Boolean(lead.primary_phone) || phoneNumbers.length > 0;
+    if (queueResult?.queued) {
+      lead.enrichment_status = 'pending_phone';
+    }
     const emailFound = Boolean(lead.email);
 
     const responseBody: Record<string, unknown> = {
@@ -343,23 +710,24 @@ async function callApolloProfileSearch(
       leads: [lead],
       requested_reveal: requestedReveal,
       applied_reveal: requestedReveal,
-      effective_reveal: buildRevealFlags(params.revealEmail ? emailFound : false, params.revealPhone ? phoneFound : false),
+      effective_reveal: buildRevealFlags(params.revealEmail ? emailFound : false, false),
       ...(meta || {}),
     };
 
-    if (params.revealPhone && !phoneFound) {
+    if (queueResult) {
       responseBody.phone_enrichment = {
         requested: true,
-        queued: false,
-        status: 'skipped',
-        message: 'La busqueda encontro el perfil, pero no habia telefono disponible en Apollo para este lead.',
-        webhook_url: null,
-        provider_status: typeof response.status === 'number' ? response.status : null,
-        provider_details: 'apollo_phone_not_found',
+        queued: queueResult.queued,
+        status: queueResult.status,
+        message: queueResult.message,
+        webhook_url: queueResult.webhookUrl,
+        provider_status: queueResult.providerStatus,
+        provider_details: queueResult.providerDetails,
       };
-      responseBody.provider_warnings = [
-        'La busqueda encontro el perfil, pero Apollo no devolvio telefono para este lead.',
-      ];
+    }
+
+    if (providerWarnings.length > 0) {
+      responseBody.provider_warnings = providerWarnings;
     }
 
     return NextResponse.json(responseBody, { status: 200 });
@@ -818,6 +1186,7 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(body)) {
       const requestedProvider = String((body as any)?.provider || '').trim().toLowerCase();
       const organizationId = await resolveOrganizationIdForUser(userId);
+      const requestOrigin = resolveRequestOrigin(req);
       const profileParsed = LinkedInProfileSearchRequestSchema.safeParse(body);
       if (profileParsed.success) {
         const profileReq = profileParsed.data;
@@ -873,6 +1242,8 @@ export async function POST(req: NextRequest) {
           linkedinUrl,
           revealEmail: Boolean(profilePayload.reveal_email),
           revealPhone: Boolean(profilePayload.reveal_phone),
+          organizationId,
+          requestOrigin,
         },
         {
         ...profileMeta,
@@ -891,6 +1262,8 @@ export async function POST(req: NextRequest) {
               linkedinUrl,
               revealEmail: Boolean(profilePayload.reveal_email),
               revealPhone: false,
+              organizationId,
+              requestOrigin,
             },
             {
               ...profileMeta,
