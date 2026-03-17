@@ -5,10 +5,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { QUOTA_KINDS, type QuotaKind, getClientQuota, getClientLimit, onQuotaChange } from '@/lib/quota-client';
+import { QUOTA_KINDS, type QuotaKind, getClientQuota, getClientLimit, onQuotaChange, setClientQuota } from '@/lib/quota-client';
 import { cn } from '@/lib/utils';
 import { FlaskConical, Search, Users, Sparkles } from 'lucide-react';
-import { incClientQuota } from '@/lib/quota-client'; // sólo para emitir evento tras set local
 
 type Props = {
   className?: string;
@@ -91,16 +90,14 @@ export default function DailyQuotaProgress({ className, kinds, compact, title = 
         if (!res.ok) return;
         const data = await res.json();
         const statuses: Array<{ resource: string; count: number; limit: number; dayKey: string }> = data?.statuses || [];
-        // Para cada recurso visible, si el servidor trae un count > espejo, “subimos” el espejo local
-        // usando incClientQuota repetidamente (emite eventos y mantiene formato).
+        // Refleja exactamente lo que ve el servidor para evitar que queden contadores viejos en localStorage.
         const map = new Map(statuses.map(s => [s.resource, s]));
         for (const k of ks) {
           const s = map.get(k);
           if (!s) continue;
           const local = getClientQuota()[k] || 0;
-          if (s.count > local) {
-            // sube hasta igualar server (normalmente será 0→n o +1)
-            for (let i = local; i < s.count; i++) incClientQuota(k);
+          if (s.count !== local) {
+            setClientQuota(k, s.count);
           }
         }
       } catch { /* ignore */ }

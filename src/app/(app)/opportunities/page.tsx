@@ -192,8 +192,7 @@ export default function OpportunitiesPage() {
         ? (Quota as any).getClientLimit
         : (_k: any) => 50;
     if (!canUseClientQuota('leadSearch')) {
-      toast({ variant: 'destructive', title: 'Límite diario alcanzado', description: `Has llegado a ${getClientLimit('leadSearch')} búsquedas hoy.` });
-      return;
+      toast({ title: 'Sincronizando cuota', description: `Tu navegador marcaba ${getClientLimit('leadSearch')} búsquedas hoy, pero voy a validar con el servidor.` });
     }
     setLoadingLeads(true);
     setLeads([]);
@@ -252,8 +251,7 @@ export default function OpportunitiesPage() {
       const used = (Quota.getClientQuota?.() as any)?.enrich ?? 0;
       const limit = Quota.getClientLimit?.('enrich') ?? 50;
       const remaining = Math.max(0, limit - used);
-      toast({ variant: 'destructive', title: 'Cupo insuficiente', description: `Selecionaste ${chosen.length}, queda ${remaining}.` });
-      return;
+      toast({ title: 'Sincronizando cuota', description: `El navegador marcaba ${used}/${limit}. Intento igual y el servidor confirma el cupo real. Quedaba local estimado: ${remaining}.` });
     }
 
     setEnriching(true);

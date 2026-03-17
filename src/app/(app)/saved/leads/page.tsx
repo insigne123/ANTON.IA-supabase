@@ -191,11 +191,9 @@ export default function SavedLeadsPage() {
       const limit = Quota.getClientLimit('enrich');
       const remaining = Math.max(0, limit - (used || 0));
       toast({
-        variant: 'destructive',
-        title: 'Cupo insuficiente',
-        description: `Requieres ${totalCost} cupos pero solo quedan ${remaining}.`,
+        title: 'Sincronizando cuota',
+        description: `El navegador marcaba ${used}/${limit}. Intento igual y el servidor confirma el cupo real. Quedaba local estimado: ${remaining}.`,
       });
-      return;
     }
 
     setEnriching(true);

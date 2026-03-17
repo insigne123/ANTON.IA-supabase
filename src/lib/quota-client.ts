@@ -31,6 +31,10 @@ function emitQuotaChange(kind: QuotaKind, state: QuotaState) {
   window.dispatchEvent(new CustomEvent('quota:changed', { detail }));
 }
 
+function persistQuota(state: QuotaState) {
+  localStorage.setItem(storageKey(), JSON.stringify(state));
+}
+
 export function getClientQuota(): QuotaState {
   try {
     const raw = localStorage.getItem(storageKey());
@@ -56,12 +60,18 @@ export function canUseClientQuota(kind: QuotaKind, amount = 1) {
 /** Incrementa la cuota local en `amount` (por defecto 1). */
 export function incClientQuota(kind: QuotaKind, amount = 1) {
   if (amount <= 0) return;
-  const key = storageKey();
   const state = getClientQuota();
   const used = Number(state[kind] || 0);
   const next = used + amount;
   state[kind] = next;
-  localStorage.setItem(key, JSON.stringify(state));
+  persistQuota(state);
+  emitQuotaChange(kind, state);
+}
+
+export function setClientQuota(kind: QuotaKind, amount: number) {
+  const state = getClientQuota();
+  state[kind] = Math.max(0, Math.trunc(Number.isFinite(amount) ? amount : 0));
+  persistQuota(state);
   emitQuotaChange(kind, state);
 }
 

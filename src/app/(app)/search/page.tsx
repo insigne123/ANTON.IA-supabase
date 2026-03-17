@@ -420,9 +420,7 @@ export default function SearchPage() {
     const getClientLimit = typeof (Quota as any).getClientLimit === 'function' ? (Quota as any).getClientLimit : (_k: any) => 50;
 
     if (countQuota && !canUseClientQuota('leadSearch')) {
-      toast({ variant: 'destructive', title: 'Límite diario alcanzado', description: `Has llegado a ${getClientLimit('leadSearch')} búsquedas hoy.` });
-      submittingRef.current = false;
-      return;
+      toast({ title: 'Sincronizando cuota', description: `Tu navegador marcaba ${getClientLimit('leadSearch')} búsquedas hoy, pero voy a validar con el servidor.` });
     }
 
     setIsLoading(true);
