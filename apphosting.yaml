@@ -84,7 +84,7 @@ env:
     availability: [BUILD, RUNTIME]
 
   - variable: NEXT_PUBLIC_BASE_URL
-    value: https://studio--studio-6624658482-61b7b.us-central1.hosted.app
+    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app
     availability: [BUILD, RUNTIME]
 
   - variable: NEXT_PUBLIC_AZURE_AD_CLIENT_ID
@@ -96,7 +96,7 @@ env:
     availability: [BUILD, RUNTIME]
 
   - variable: NEXT_PUBLIC_AZURE_AD_REDIRECT_URI
-    value: https://studio--studio-6624658482-61b7b.us-central1.hosted.app/outlook
+    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app/outlook
     availability: [BUILD, RUNTIME]
 
   - variable: AZURE_AD_CLIENT_SECRET
@@ -148,6 +148,10 @@ env:
     value: "240000"
     availability: [RUNTIME]
 
+  - variable: ANTONIA_LEAD_RESEARCH_URL
+    value: https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-research
+    availability: [RUNTIME]
+
   - variable: LEAD_RESEARCH_WORKER_SECRET
     secret: LEAD_RESEARCH_WORKER_SECRET
     availability: [RUNTIME]
@@ -155,7 +159,7 @@ env:
   # === ANTON.IA Agent Variables ===
   # App URL for internal API calls
   - variable: NEXT_PUBLIC_APP_URL
-    value: https://studio--studio-6624658482-61b7b.us-central1.hosted.app
+    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app
     availability: [BUILD, RUNTIME]
 
   # Firebase Functions integration for ANTON.IA worker
