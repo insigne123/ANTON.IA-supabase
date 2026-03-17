@@ -26,10 +26,6 @@ runConfig:
 
 env:
   # === Existing Variables ===
-  - variable: APIFY_TOKEN
-    secret: APIFY_TOKEN
-    availability: [RUNTIME]
-
   - variable: APOLLO_API_KEY
     secret: APOLLO_API_KEY
     availability: [RUNTIME]
