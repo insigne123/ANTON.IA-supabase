@@ -19,6 +19,7 @@ export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 export const runtime = 'nodejs';
 
+const APOLLO_BASE = 'https://api.apollo.io/api/v1';
 const USE_APIFY = String(process.env.USE_APIFY || "false") === "true";
 const DEFAULT_LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
 const LEAD_SEARCH_URL = process.env.ANTONIA_LEAD_SEARCH_URL || process.env.LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
@@ -154,6 +155,225 @@ function pickLeadSearchMeta(json: unknown) {
 function isApolloPhoneRevealWebhookError(message?: string | null) {
   const text = String(message || '').toLowerCase();
   return text.includes('webhook_url') && text.includes('reveal_phone_number');
+}
+
+function hasApolloProfileMatch(person: any) {
+  if (!person || typeof person !== 'object') return false;
+  return Boolean(
+    String(person.id || '').trim() ||
+    String(person.linkedin_url || '').trim() ||
+    String(person.name || '').trim() ||
+    String(person.first_name || '').trim() ||
+    String(person.last_name || '').trim()
+  );
+}
+
+function pickApolloProfileEmail(person: any, revealEmail: boolean) {
+  if (!revealEmail) return undefined;
+  const primary = String(person?.email || '').trim();
+  if (primary) return primary;
+  if (Array.isArray(person?.personal_emails)) {
+    const personal = person.personal_emails
+      .map((value: unknown) => String(value || '').trim())
+      .find(Boolean);
+    if (personal) return personal;
+  }
+  return undefined;
+}
+
+function pickApolloProfilePhones(person: any, revealPhone: boolean) {
+  if (!revealPhone) {
+    return { primaryPhone: undefined as string | undefined, phoneNumbers: undefined as any[] | undefined };
+  }
+
+  const items: any[] = [];
+  const push = (value: unknown, type: string) => {
+    const normalized = String(value || '').trim();
+    if (!normalized) return;
+    items.push({
+      raw_number: normalized,
+      sanitized_number: normalized,
+      type,
+      position: 'current',
+      status: 'unknown',
+    });
+  };
+
+  push(person?.phone_number, 'phone');
+  push(person?.mobile_phone, 'mobile');
+  push(person?.work_phone, 'work');
+
+  const unique = new Map<string, any>();
+  for (const item of items) {
+    const key = String(item.sanitized_number || '').trim();
+    if (!key || unique.has(key)) continue;
+    unique.set(key, item);
+  }
+
+  const phoneNumbers = Array.from(unique.values());
+  return {
+    primaryPhone: phoneNumbers[0]?.sanitized_number || undefined,
+    phoneNumbers: phoneNumbers.length > 0 ? phoneNumbers : undefined,
+  };
+}
+
+function mapApolloProfileLead(person: any, index: number, options?: { revealEmail?: boolean; revealPhone?: boolean }) {
+  const revealEmail = Boolean(options?.revealEmail);
+  const revealPhone = Boolean(options?.revealPhone);
+  const email = pickApolloProfileEmail(person, revealEmail);
+  const phones = pickApolloProfilePhones(person, revealPhone);
+
+  return {
+    id:
+      String(person?.id || '').trim() ||
+      String(person?.linkedin_url || '').trim() ||
+      String(email || '').trim() ||
+      `lead-${index + 1}`,
+    first_name: String(person?.first_name || '').trim() || undefined,
+    last_name: String(person?.last_name || '').trim() || undefined,
+    email: email || undefined,
+    title: String(person?.title || person?.headline || '').trim() || undefined,
+    organization: {
+      id: String(person?.organization?.id || person?.organization_id || '').trim() || undefined,
+      name: String(person?.organization?.name || '').trim() || undefined,
+      domain: cleanDomain(person?.organization?.primary_domain || person?.organization?.website_url),
+      industry: String(person?.organization?.industry || '').trim() || undefined,
+      website_url: String(person?.organization?.website_url || '').trim() || undefined,
+      linkedin_url: String(person?.organization?.linkedin_url || '').trim() || undefined,
+    },
+    linkedin_url: String(person?.linkedin_url || '').trim() || undefined,
+    photo_url: String(person?.photo_url || '').trim() || undefined,
+    email_status: String(person?.email_status || (email ? 'verified' : 'unknown')).trim() || undefined,
+    apollo_id: String(person?.id || '').trim() || undefined,
+    primary_phone: phones.primaryPhone,
+    phone_numbers: phones.phoneNumbers,
+  };
+}
+
+async function callApolloProfileSearch(
+  params: {
+    linkedinUrl: string;
+    revealEmail: boolean;
+    revealPhone: boolean;
+  },
+  meta?: Record<string, unknown>
+) {
+  const apiKey = String(process.env.APOLLO_API_KEY || '').trim();
+  if (!apiKey) {
+    return NextResponse.json(
+      {
+        error: 'APOLLO_API_KEY_MISSING',
+        message: 'APOLLO_API_KEY missing',
+        ...(meta || {}),
+      },
+      { status: 502 },
+    );
+  }
+
+  const requestedReveal = buildRevealFlags(params.revealEmail, params.revealPhone);
+
+  try {
+    const response = await fetchWithTimeout(
+      `${APOLLO_BASE}/people/match`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-Api-Key': apiKey,
+          'Cache-Control': 'no-cache',
+        },
+        body: JSON.stringify({
+          linkedin_url: params.linkedinUrl,
+          reveal_personal_emails: params.revealEmail,
+          reveal_phone_number: params.revealPhone,
+        }),
+      },
+      TIMEOUT_MS,
+    );
+
+    const raw = await response.text();
+    let json: any = null;
+    if (raw?.trim()) {
+      try {
+        json = JSON.parse(raw);
+      } catch {
+        json = null;
+      }
+    }
+
+    if (!response.ok) {
+      const message = String(json?.error || json?.message || raw || `APOLLO_PROFILE_HTTP_${response.status}`).trim();
+      return NextResponse.json(
+        {
+          error: 'APOLLO_PROFILE_SEARCH_ERROR',
+          message,
+          requested_reveal: requestedReveal,
+          ...(meta || {}),
+        },
+        { status: 502 },
+      );
+    }
+
+    const person = json?.person;
+    if (!hasApolloProfileMatch(person)) {
+      return NextResponse.json(
+        {
+          count: 0,
+          leads: [],
+          requested_reveal: requestedReveal,
+          applied_reveal: requestedReveal,
+          effective_reveal: buildRevealFlags(false, false),
+          ...(meta || {}),
+        },
+        { status: 200 },
+      );
+    }
+
+    const lead = mapApolloProfileLead(person, 0, {
+      revealEmail: params.revealEmail,
+      revealPhone: params.revealPhone,
+    });
+    const phoneNumbers = Array.isArray(lead.phone_numbers) ? lead.phone_numbers : [];
+    const phoneFound = Boolean(lead.primary_phone) || phoneNumbers.length > 0;
+    const emailFound = Boolean(lead.email);
+
+    const responseBody: Record<string, unknown> = {
+      count: 1,
+      leads: [lead],
+      requested_reveal: requestedReveal,
+      applied_reveal: requestedReveal,
+      effective_reveal: buildRevealFlags(params.revealEmail ? emailFound : false, params.revealPhone ? phoneFound : false),
+      ...(meta || {}),
+    };
+
+    if (params.revealPhone && !phoneFound) {
+      responseBody.phone_enrichment = {
+        requested: true,
+        queued: false,
+        status: 'skipped',
+        message: 'La busqueda encontro el perfil, pero no habia telefono disponible en Apollo para este lead.',
+        webhook_url: null,
+        provider_status: typeof response.status === 'number' ? response.status : null,
+        provider_details: 'apollo_phone_not_found',
+      };
+      responseBody.provider_warnings = [
+        'La busqueda encontro el perfil, pero Apollo no devolvio telefono para este lead.',
+      ];
+    }
+
+    return NextResponse.json(responseBody, { status: 200 });
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        error: 'APOLLO_PROFILE_SEARCH_ERROR',
+        message: error?.message || 'Unknown Apollo profile search error',
+        requested_reveal: requestedReveal,
+        ...(meta || {}),
+      },
+      { status: 502 },
+    );
+  }
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
@@ -648,21 +868,29 @@ export async function POST(req: NextRequest) {
         return response;
       }
 
-      const response = await callLeadSearchService(profilePayload, {
+      const response = await callApolloProfileSearch(
+        {
+          linkedinUrl,
+          revealEmail: Boolean(profilePayload.reveal_email),
+          revealPhone: Boolean(profilePayload.reveal_phone),
+        },
+        {
         ...profileMeta,
         providerUsed: 'apollo',
         fallbackApplied: false,
-      });
+        },
+      );
 
       if (profilePayload.reveal_phone) {
         const errorPayload = await response.clone().json().catch(() => null);
         const errorMessage = String(errorPayload?.message || errorPayload?.details || errorPayload?.error || '');
 
         if (response.status === 502 && isApolloPhoneRevealWebhookError(errorMessage)) {
-          const fallbackResponse = await callLeadSearchService(
+          const fallbackResponse = await callApolloProfileSearch(
             {
-              ...profilePayload,
-              reveal_phone: false,
+              linkedinUrl,
+              revealEmail: Boolean(profilePayload.reveal_email),
+              revealPhone: false,
             },
             {
               ...profileMeta,
