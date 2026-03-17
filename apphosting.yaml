@@ -28,9 +28,11 @@ env:
   # === Existing Variables ===
   - variable: APIFY_TOKEN
     secret: APIFY_TOKEN
+    availability: [RUNTIME]
 
   - variable: APOLLO_API_KEY
     secret: APOLLO_API_KEY
+    availability: [RUNTIME]
 
   # === Lead providers (Apollo/PDL trial) ===
   - variable: LEADS_PROVIDER_DEFAULT
@@ -86,7 +88,7 @@ env:
     availability: [BUILD, RUNTIME]
 
   - variable: NEXT_PUBLIC_BASE_URL
-    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app
+    value: https://studio--studio-6624658482-61b7b.us-central1.hosted.app
     availability: [BUILD, RUNTIME]
 
   - variable: NEXT_PUBLIC_AZURE_AD_CLIENT_ID
@@ -98,14 +100,16 @@ env:
     availability: [BUILD, RUNTIME]
 
   - variable: NEXT_PUBLIC_AZURE_AD_REDIRECT_URI
-    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app/outlook
+    value: https://studio--studio-6624658482-61b7b.us-central1.hosted.app/outlook
     availability: [BUILD, RUNTIME]
 
   - variable: AZURE_AD_CLIENT_SECRET
     secret: AZURE_AD_CLIENT_SECRET
+    availability: [RUNTIME]
 
   - variable: GOOGLE_CLIENT_SECRET
     secret: GOOGLE_CLIENT_SECRET
+    availability: [RUNTIME]
 
   - variable: NEXT_PUBLIC_SUPABASE_URL
     value: https://yfdelflsheurzaicwayi.supabase.co
@@ -117,6 +121,7 @@ env:
 
   - variable: SUPABASE_SERVICE_ROLE_KEY
     secret: SUPABASE_SERVICE_ROLE_KEY
+    availability: [RUNTIME]
 
   # === Lead Research / Vane (server-only) ===
   - variable: VANE_BASE_URL
@@ -141,6 +146,7 @@ env:
 
   - variable: VANE_AUTH_HEADER_VALUE
     secret: VANE_AUTH_HEADER_VALUE
+    availability: [RUNTIME]
 
   - variable: VANE_TIMEOUT_MS
     value: "240000"
@@ -148,11 +154,12 @@ env:
 
   - variable: LEAD_RESEARCH_WORKER_SECRET
     secret: LEAD_RESEARCH_WORKER_SECRET
+    availability: [RUNTIME]
 
   # === ANTON.IA Agent Variables ===
   # App URL for internal API calls
   - variable: NEXT_PUBLIC_APP_URL
-    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app
+    value: https://studio--studio-6624658482-61b7b.us-central1.hosted.app
     availability: [BUILD, RUNTIME]
 
   # Firebase Functions integration for ANTON.IA worker
@@ -162,11 +169,14 @@ env:
 
   - variable: ANTONIA_FIREBASE_TICK_SECRET
     secret: ANTONIA_TICK_SECRET
+    availability: [RUNTIME]
 
   # Cron endpoint protection
   - variable: CRON_SECRET
     secret: ANTONIA_TICK_SECRET
+    availability: [RUNTIME]
 
   # Tracking webhook protection (optional but recommended)
   - variable: TRACKING_WEBHOOK_SECRET
     secret: TRACKING_WEBHOOK_SECRET
+    availability: [RUNTIME]
