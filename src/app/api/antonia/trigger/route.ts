@@ -35,6 +35,10 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Mission not found' }, { status: 404 });
         }
 
+        if (mission.status !== 'active') {
+            return NextResponse.json({ error: 'Mission is not active' }, { status: 409 });
+        }
+
         // Check for Auto Campaign Strategy
         const isAutoCampaign = mission.params.autoGenerateCampaign;
         const initialTaskType = isAutoCampaign ? 'GENERATE_CAMPAIGN' : 'SEARCH';

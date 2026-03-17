@@ -262,6 +262,36 @@ export const antoniaService = {
 
         if (error) throw error;
 
+        if (updates.status === 'paused') {
+            const now = new Date().toISOString();
+            await supabase
+                .from('antonia_tasks')
+                .update({
+                    status: 'completed',
+                    result: {
+                        skipped: true,
+                        reason: 'mission_paused',
+                        source: 'manual_pause',
+                    },
+                    error_message: null,
+                    updated_at: now,
+                } as any)
+                .eq('mission_id', missionId)
+                .eq('status', 'pending')
+                .in('type', ['GENERATE_CAMPAIGN', 'SEARCH', 'ENRICH', 'INVESTIGATE', 'CONTACT', 'CONTACT_INITIAL', 'CONTACT_CAMPAIGN']);
+
+            await supabase.from('antonia_logs').insert({
+                mission_id: missionId,
+                organization_id: data.organization_id,
+                level: 'warning',
+                message: 'Misión pausada manualmente. Se omitieron tareas pendientes de prospección y contacto.',
+                details: {
+                    source: 'manual_pause',
+                },
+                created_at: now,
+            } as any);
+        }
+
         return {
             id: data.id,
             organizationId: data.organization_id,

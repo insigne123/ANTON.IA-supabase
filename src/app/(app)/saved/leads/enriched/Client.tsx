@@ -15,13 +15,13 @@ import { BackBar } from '@/components/back-bar';
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage, updateEnrichedLead } from '@/lib/services/enriched-leads-service';
-import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin, Phone } from 'lucide-react';
+import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin, Phone, BrainCircuit, Clock3, Sparkles, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { extensionService } from '@/lib/services/extension-service';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { supabaseService } from '@/lib/supabase-service';
 import { getCompanyProfile } from '@/lib/data';
 import { supabase } from '@/lib/supabase';
-import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
+import { adaptLeadResearchResponseToReport, buildLeadResearchPayloadFromLead, getLeadResearchWarnings, hasMeaningfulLeadResearch } from '@/lib/lead-research';
 import { sendEmail } from '@/lib/outlook-email-service';
 import { sendGmailEmail } from '@/lib/gmail-email-service';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -50,10 +50,39 @@ import { es } from 'date-fns/locale';
 import { CalendarIcon } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
 
 
 const extractDomainFromEmail = (email?: string | null) =>
   email && email.includes('@') ? email.split('@')[1].toLowerCase() : undefined;
+
+type ResearchLifecycleStatus = 'idle' | 'preparing' | 'queued' | 'in_progress' | 'completed' | 'partial' | 'insufficient_data' | 'failed';
+
+const RESEARCH_STANDARD_ESTIMATE_MS = 55000;
+
+function getResearchStageCopy(status: ResearchLifecycleStatus, elapsedMs: number) {
+  if (status === 'queued') return 'En cola para iniciar investigacion';
+  if (status === 'completed') return 'Investigacion completada';
+  if (status === 'partial') return 'Investigacion parcial lista';
+  if (status === 'insufficient_data') return 'Informacion limitada, armando resumen';
+  if (status === 'failed') return 'La investigacion encontro un error';
+
+  if (elapsedMs < 6000) return 'Preparando contexto del lead';
+  if (elapsedMs < 18000) return 'Analizando empresa, sitio y posicionamiento';
+  if (elapsedMs < 32000) return 'Buscando señales y contexto reciente';
+  if (elapsedMs < 46000) return 'Construyendo angulos, pains y oportunidades';
+  return 'Redactando borradores y guion de llamada';
+}
+
+function getResearchProgressValue(status: ResearchLifecycleStatus, elapsedMs: number) {
+  if (status === 'completed' || status === 'partial') return 100;
+  if (status === 'failed') return 100;
+  if (status === 'insufficient_data') return 92;
+  if (status === 'queued') return 8;
+
+  const ratio = Math.min(elapsedMs / RESEARCH_STANDARD_ESTIMATE_MS, 0.95);
+  return Math.max(6, Math.round(ratio * 100));
+}
 
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
 
@@ -95,6 +124,24 @@ export default function EnrichedLeadsClient() {
   const [seqRunning, setSeqRunning] = useState(false);
   const [seqDone, setSeqDone] = useState(0);
   const [seqTotal, setSeqTotal] = useState(0);
+  const [researchUi, setResearchUi] = useState<{
+    leadName: string;
+    index: number;
+    total: number;
+    startedAt: number;
+    status: ResearchLifecycleStatus;
+    reportId?: string | null;
+    warning?: string | null;
+  }>({
+    leadName: '',
+    index: 0,
+    total: 0,
+    startedAt: 0,
+    status: 'idle',
+    reportId: null,
+    warning: null,
+  });
+  const [researchPulseMs, setResearchPulseMs] = useState(0);
 
   const [selectedToContact, setSelectedToContact] = useState<Set<string>>(new Set());
   const [openCompose, setOpenCompose] = useState(false);
@@ -317,6 +364,18 @@ export default function EnrichedLeadsClient() {
       pendingPhoneSyncRef.current = false;
     }
   }, [enriched, loadData]);
+
+  useEffect(() => {
+    if (!seqRunning || !researchUi.startedAt) {
+      setResearchPulseMs(0);
+      return;
+    }
+
+    const tick = () => setResearchPulseMs(Date.now() - researchUi.startedAt);
+    tick();
+    const intervalId = window.setInterval(tick, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [seqRunning, researchUi.startedAt]);
 
   useEffect(() => {
     loadData();
@@ -610,127 +669,122 @@ export default function EnrichedLeadsClient() {
     return user.id;
   }
 
-  async function runOneInvestigation(e: EnrichedLead, userId: string) {
+  async function runOneInvestigation(e: EnrichedLead, userId: string, index: number, total: number) {
     const leadRef = leadRefOf(e);
-
-    // Usa tu builder (ya arma targetCompany/lead/userCompanyProfile)
-    const base = buildN8nPayloadFromLead(e) as any;
-
-    // Normaliza y asegura meta.leadRef dentro de companies[0]
-    const item = base?.companies?.[0]
-      ? { ...base.companies[0] }
-      : {
-        leadRef,
-        targetCompany: {
-          name: e.companyName || null,
-          domain: e.companyDomain || null,
-          linkedin: (e as any).companyLinkedinUrl || null,
-          country: (e as any).country || null,
-          industry: (e as any).industry || null,
-          website: e.companyDomain ? `https://${e.companyDomain}` : null,
-        },
-        lead: {
-          id: e.id,
-          fullName: e.fullName,
-          title: e.title,
-          email: e.email,
-          linkedinUrl: e.linkedinUrl,
-        },
-      };
-
-    if (!item.meta) item.meta = {};
-    if (!item.meta.leadRef) item.meta.leadRef = leadRef;
-    if (!item.leadRef) item.leadRef = leadRef;
-
-    // Obtener perfil real de la empresa desde Supabase
     const realProfile = await profileService.getCurrentProfile();
-    // Mapear campos de profiles -> n8n structure
-    const extended = realProfile?.signatures?.['profile_extended'] || {};
-    const effectiveCompanyProfile = {
-      name: realProfile?.company_name || realProfile?.full_name || 'Mi Empresa',
-      sector: extended.sector || '',
-      description: extended.description || '',
-      services: extended.services || '',
-      valueProposition: extended.valueProposition || '',
-      website: realProfile?.company_domain || '',
-    };
+    const payload = buildLeadResearchPayloadFromLead({
+      lead: e,
+      userId,
+      userName: realProfile?.full_name,
+      userJobTitle: realProfile?.job_title,
+      sellerProfile: realProfile,
+    });
 
-    const payload = {
-      companies: [item],
-      userCompanyProfile: effectiveCompanyProfile,
-    };
+    setResearchUi({
+      leadName: e.fullName,
+      index,
+      total,
+      startedAt: Date.now(),
+      status: 'preparing',
+      reportId: null,
+      warning: null,
+    });
 
-    // Enviamos el shape ANIDADO que n8n espera + trazabilidad
-    const res = await fetch('/api/research/n8n', {
+    const startRes = await fetch('/api/lead-research', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-User-Id': userId,
         'X-App-Env': 'LeadFlowAI',
       },
       cache: 'no-store',
       body: JSON.stringify(payload),
     });
 
-    let data: any = null;
-    let text = '';
-    try { data = await res.json(); } catch { text = await res.text().catch(() => ''); }
+    let initial: any = null;
+    let raw = '';
+    try {
+      initial = await startRes.json();
+    } catch {
+      raw = await startRes.text().catch(() => '');
+    }
 
-    if (!res.ok) {
-      const msg = data?.error
-        || (text?.startsWith('<') ? 'El backend devolvió HTML (error interno). Revisa /api/research/n8n.' : (text || 'n8n error'));
+    if (!startRes.ok) {
+      const msg = initial?.message || initial?.error || raw || 'lead-research error';
       throw new Error(msg);
+    }
+
+    let final = initial;
+    const reportId = String(initial?.report_id || '').trim() || null;
+    const warnings = getLeadResearchWarnings(initial);
+    setResearchUi((prev) => ({
+      ...prev,
+      status: (String(initial?.status || 'in_progress') as ResearchLifecycleStatus),
+      reportId,
+      warning: warnings[0] || null,
+    }));
+
+    if (reportId && ['queued', 'in_progress'].includes(String(initial?.status || ''))) {
+      for (let attempt = 0; attempt < 18; attempt++) {
+        await sleep(4000);
+        const pollRes = await fetch(`/api/lead-research/${encodeURIComponent(reportId)}`, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        });
+
+        let polled: any = null;
+        try {
+          polled = await pollRes.json();
+        } catch {
+          polled = null;
+        }
+
+        if (!pollRes.ok) {
+          throw new Error(polled?.message || polled?.error || `lead-research poll error ${pollRes.status}`);
+        }
+
+        final = polled;
+        const nextWarnings = getLeadResearchWarnings(polled);
+        setResearchUi((prev) => ({
+          ...prev,
+          status: (String(polled?.status || 'in_progress') as ResearchLifecycleStatus),
+          warning: nextWarnings[0] || prev.warning || null,
+        }));
+
+        if (['completed', 'partial', 'insufficient_data', 'failed'].includes(String(polled?.status || ''))) {
+          break;
+        }
+      }
     }
 
     // Espejo local de cuota
     Quota.incClientQuota('research');
 
-    // Normalización de reports (cross/meta.leadRef), igual que en Oportunidades
-    // Check for phone enrichment data from N8N
-    if (data?.phoneNumbers || data?.primaryPhone) {
-      // Update Supabase
-      await updateEnrichedLead(e.id, {
-        phoneNumbers: data.phoneNumbers,
-        primaryPhone: data.primaryPhone || (data.phoneNumbers?.[0]?.sanitized_number)
-      });
+    const report = adaptLeadResearchResponseToReport(final, leadRef);
+    upsertLeadReports([report]);
+    setReports(getLeadReports());
 
-      // Update local state
-      setEnriched(prev => prev.map(item => {
-        if (item.id === e.id) {
-          return {
-            ...item,
-            phoneNumbers: data.phoneNumbers,
-            primaryPhone: data.primaryPhone || (data.phoneNumbers?.[0]?.sanitized_number)
-          };
-        }
-        return item;
-      }));
+    setResearchUi((prev) => ({
+      ...prev,
+      status: (String(final?.status || 'completed') as ResearchLifecycleStatus),
+      warning: getLeadResearchWarnings(final)[0] || prev.warning || null,
+    }));
 
-      toast({ title: '¡Teléfono encontrado!', description: `Se enriqueció el lead con ${data.phoneNumbers?.length || 1} número(s).` });
-    } else {
-      console.log('[runOneInvestigation] No phone data in N8N response. Keys:', Object.keys(data || {}));
-      // Opcional: avisar que no llegó teléfono, para depuración
-      // toast({ variant: 'outline', title: 'Sin teléfono', description: 'La investigación no retornó datos de contacto telefónico.' });
+    if (hasMeaningfulLeadResearch(report) && ['completed', 'partial'].includes(String(final?.status || ''))) {
+      markResearched([leadRef]);
     }
 
-    if (Array.isArray(data?.reports) && data.reports.length) {
-      const normalized = data.reports.map((r: any) => {
-        const out: any = { ...r };
-        if (!out.cross) out.cross = out.report || out.data || null;
-        if (!out.meta) out.meta = {};
-        if (!out.meta.leadRef) out.meta.leadRef = leadRef;
-        return out;
+    if (String(final?.status || '') === 'insufficient_data') {
+      toast({
+        variant: 'destructive',
+        title: `Investigacion limitada para ${e.fullName}`,
+        description: 'El backend no encontro suficiente informacion util para generar un reporte comercial fuerte.',
       });
-
-      upsertLeadReports(normalized);
-      setReports(getLeadReports());
-
-      const refs = normalized.map((r: any) => r?.meta?.leadRef).filter(Boolean);
-      if (refs.length) markResearched(refs); else markResearched([leadRef]);
-    }
-
-    if (Array.isArray(data?.skipped) && data.skipped.length) {
-      markResearched(data.skipped);
+    } else if (getLeadResearchWarnings(final).length > 0) {
+      toast({
+        title: `Investigacion completada con advertencias`,
+        description: getLeadResearchWarnings(final)[0],
+      });
     }
   }
 
@@ -740,14 +794,14 @@ export default function EnrichedLeadsClient() {
     const selected = enriched.filter(e => selectedLeadsForResearch.includes(e.id));
     if (selected.length === 0) return;
 
-    // ðŸ”Ž Preflight: verifica que el backend tenga N8N_WEBHOOK_URL configurado
+    // Preflight: verifica que el proxy al motor de research este disponible
     try {
-      const health = await fetch('/api/research/n8n', { method: 'GET', cache: 'no-store' }).then(r => r.json());
-      if (!health?.hasUrl) {
+      const health = await fetch('/api/lead-research', { method: 'GET', cache: 'no-store' }).then(r => r.json());
+      if (!health?.endpoint) {
         toast({
           variant: 'destructive',
-          title: 'Backend sin N8N_WEBHOOK_URL',
-          description: 'Configura el secreto N8N_WEBHOOK_URL en App Hosting y vuelve a publicar.',
+          title: 'Backend sin lead research configurado',
+          description: 'Configura el endpoint de /api/lead-research en App Hosting y vuelve a publicar.',
         });
         return;
       }
@@ -768,13 +822,14 @@ export default function EnrichedLeadsClient() {
         console.warn('[research] identity error', err);
         toast({
           variant: 'destructive',
-          title: 'Conecta Outlook',
-          description: 'Inicia sesión en Outlook para continuar con la investigación.',
+          title: 'Sesion no disponible',
+          description: 'Recarga la pagina para continuar con la investigación.',
         });
         throw new Error('missing user id');
       });
 
-      for (const e of selected) {
+      for (let idx = 0; idx < selected.length; idx++) {
+        const e = selected[idx];
         // NO bloqueamos por dominio/nombre: solo si ya existe reporte para ESTE leadRef
         if (hasReportStrict(e)) {
           setSeqDone(prev => prev + 1);
@@ -784,7 +839,7 @@ export default function EnrichedLeadsClient() {
         let lastErr: any = null;
         for (let attempt = 1; attempt <= 2; attempt++) {
           try {
-            await runOneInvestigation(e, userId);
+            await runOneInvestigation(e, userId, idx + 1, selected.length);
             lastErr = null;
             break;
           } catch (err: any) {
@@ -798,10 +853,18 @@ export default function EnrichedLeadsClient() {
         }
         if (lastErr) {
           console.error(`Investigación falló para ${e.companyName}:`, lastErr?.message);
+          setResearchUi(prev => ({
+            ...prev,
+            leadName: e.fullName,
+            index: idx + 1,
+            total: selected.length,
+            status: 'failed',
+            warning: lastErr?.message || null,
+          }));
           toast({
             variant: "destructive",
             title: `Investigación falló para ${e.companyName}`,
-            description: lastErr?.message || "Error desconocido. Revisa la consola o el webhook de n8n."
+            description: lastErr?.message || 'Error desconocido en el motor de investigación.'
           });
         }
         setSeqDone(prev => prev + 1);
@@ -809,11 +872,13 @@ export default function EnrichedLeadsClient() {
       }
     } finally {
       setSeqRunning(false);
+      setResearchUi(prev => ({ ...prev, status: prev.status === 'failed' ? 'failed' : 'idle' }));
+      setResearchPulseMs(0);
       // Refresh credits
       organizationService.getCredits().then(res => {
         if (res) setSocialCredits(res.credits);
       });
-      toast({ title: 'Investigación completa', description: `Procesados ${selected.length} leads.` });
+      toast({ title: 'Investigación completa', description: `Procesados ${selected.length} leads con el motor nuevo.` });
     }
   }
   function clearInvestigationFor(lead: EnrichedLead) {
@@ -1358,7 +1423,7 @@ export default function EnrichedLeadsClient() {
   async function generateEmailFromReportFor(e: EnrichedLead) {
     const report = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
     if (!report?.cross?.emailDraft) {
-      toast({ title: 'Sin borrador de IA', description: 'Investiga con n8n y asegúrate de que el flujo genere un borrador de correo.' });
+      toast({ title: 'Sin borrador de IA', description: 'Investiga con el motor nuevo y asegúrate de que el reporte incluya outreach pack.' });
       if (report) openReportFor(e);
       return;
     }
@@ -1379,7 +1444,7 @@ export default function EnrichedLeadsClient() {
   function openReportFor(e: EnrichedLead) {
     const rep = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain || null, companyName: e.companyName || null });
     if (!rep?.cross) {
-      toast({ title: 'Sin reporte', description: 'Investiga con n8n antes de ver el reporte cruzado.' });
+      toast({ title: 'Sin reporte', description: 'Investiga con el motor nuevo antes de abrir el reporte.' });
       return;
     }
     setReportToView(rep);
@@ -1468,7 +1533,7 @@ export default function EnrichedLeadsClient() {
     <div className="space-y-6">
       <PageHeader
         title="Leads enriquecidos"
-        description="Selecciona, investiga con n8n y luego contacta."
+        description="Selecciona leads, investiga con el motor nuevo y luego contacta con mejor contexto comercial."
       />
       <BackBar fallbackHref="/saved/leads" className="mb-2" />
 
@@ -1558,7 +1623,7 @@ export default function EnrichedLeadsClient() {
               onClick={() => investigateOneByOne()}
               disabled={seqRunning || researchCount === 0}
             >
-              {seqRunning ? 'Investigando...' : `Investigar (n8n) (${researchCount})`}
+              {seqRunning ? 'Investigando...' : `Investigar (Vane) (${researchCount})`}
             </Button>
             {/* NUEVO: exportaciones */}
             <Button
@@ -1645,15 +1710,59 @@ export default function EnrichedLeadsClient() {
           )}
 
           {seqRunning && (
-            <div className="mb-4 border rounded p-3 text-sm text-muted-foreground">
-              Progreso: {seqDone}/{seqTotal}
+            <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/70 p-4">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-medium text-blue-900">
+                    <BrainCircuit className="h-4 w-4" />
+                    Investigacion en progreso
+                  </div>
+                  <div className="text-lg font-semibold text-slate-900">
+                    {researchUi.leadName ? `Analizando a ${researchUi.leadName}` : 'Preparando investigacion'}
+                  </div>
+                  <div className="text-sm text-slate-600">
+                    {getResearchStageCopy(researchUi.status, researchPulseMs)} · Lead {Math.max(researchUi.index, seqDone + 1)}/{seqTotal}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 border border-blue-100">
+                      <Clock3 className="h-3.5 w-3.5" />
+                      Estimado 45-60s por lead
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 border border-blue-100">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      ETA actual ~{Math.max(0, Math.ceil((RESEARCH_STANDARD_ESTIMATE_MS - Math.min(researchPulseMs, RESEARCH_STANDARD_ESTIMATE_MS)) / 1000))}s
+                    </span>
+                    {researchUi.reportId ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 border border-blue-100">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Reporte #{researchUi.reportId.slice(0, 8)}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="w-full max-w-xl space-y-2">
+                  <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-slate-600">
+                    <span>{researchUi.status === 'queued' ? 'En cola' : researchUi.status === 'in_progress' ? 'Procesando' : 'Investigando'}</span>
+                    <span>{getResearchProgressValue(researchUi.status, researchPulseMs)}%</span>
+                  </div>
+                  <Progress value={getResearchProgressValue(researchUi.status, researchPulseMs)} className="h-2.5 bg-blue-100" />
+                  {researchUi.warning ? (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-none" />
+                      <span>{researchUi.warning}</span>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-500">Mantén esta pestaña abierta. El progreso se actualizará automáticamente mientras se construye el reporte.</div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
           <div className="rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-12 text-center" title="Marcar para INVESTIGAR con n8n">
+                  <TableHead className="w-12 text-center" title="Marcar para investigar con el motor nuevo">
                     <div className="flex flex-col items-center gap-1">
                       <span className="text-[10px] uppercase text-muted-foreground">Inv.</span>
                       <Checkbox
@@ -1899,6 +2008,24 @@ export default function EnrichedLeadsClient() {
 
                 {reportToView.cross.overview && <p>{reportToView.cross.overview}</p>}
 
+                {(() => {
+                  const reportSignals = reportToView.signals || [];
+                  return reportSignals.length > 0 ? (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Señales recientes</h4>
+                    <ul className="space-y-2">
+                      {reportSignals.map((signal, i) => (
+                        <li key={i} className="rounded-md border bg-muted/40 p-3">
+                          <div className="font-medium">{signal.title}</div>
+                          <div className="text-xs text-muted-foreground mt-1">{signal.type}{signal.when ? ` · ${signal.when}` : ''}</div>
+                          {signal.url ? <a className="underline text-xs mt-1 inline-block" href={signal.url} target="_blank">Abrir fuente</a> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                  ) : null;
+                })()}
+
                 {reportToView.cross.pains?.length > 0 && (
                   <section>
                     <h4 className="text-xs font-semibold uppercase text-muted-foreground">Pains</h4>
@@ -1952,6 +2079,41 @@ export default function EnrichedLeadsClient() {
                   </section>
                 )}
 
+                {reportToView.raw?.buyer_intelligence && (
+                  <section className="border rounded p-3 bg-emerald-50/60">
+                    <div className="text-xs font-semibold uppercase text-emerald-700 mb-2">Buyer intelligence</div>
+                    <div className="grid gap-2 md:grid-cols-2 text-sm">
+                      <div><strong>Fit score:</strong> {reportToView.raw.buyer_intelligence.fit_score ?? '—'}</div>
+                      <div><strong>Ángulo recomendado:</strong> {reportToView.raw.buyer_intelligence.recommended_angle || '—'}</div>
+                      <div><strong>Canal recomendado:</strong> {reportToView.raw.buyer_intelligence.recommended_channel || '—'}</div>
+                      <div><strong>CTA sugerido:</strong> {reportToView.raw.buyer_intelligence.recommended_cta || '—'}</div>
+                    </div>
+                    {Array.isArray(reportToView.raw.buyer_intelligence.fit_reasons) && reportToView.raw.buyer_intelligence.fit_reasons.length > 0 ? (
+                      <ul className="list-disc pl-5 mt-3">
+                        {reportToView.raw.buyer_intelligence.fit_reasons.map((reason: string, i: number) => <li key={i}>{reason}</li>)}
+                      </ul>
+                    ) : null}
+                  </section>
+                )}
+
+                {reportToView.raw?.outreach_pack?.call_script && (
+                  <section className="border rounded p-3 bg-amber-50/50">
+                    <div className="text-xs font-semibold uppercase text-amber-800 mb-2">Guion de llamada</div>
+                    <div className="space-y-2 text-sm">
+                      {reportToView.raw.outreach_pack.call_script.opening ? <p><strong>Apertura:</strong> {reportToView.raw.outreach_pack.call_script.opening}</p> : null}
+                      {Array.isArray(reportToView.raw.outreach_pack.call_script.discovery_questions) && reportToView.raw.outreach_pack.call_script.discovery_questions.length > 0 ? (
+                        <div>
+                          <strong>Preguntas de descubrimiento:</strong>
+                          <ul className="list-disc pl-5 mt-1">
+                            {reportToView.raw.outreach_pack.call_script.discovery_questions.map((q: string, i: number) => <li key={i}>{q}</li>)}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {reportToView.raw.outreach_pack.call_script.cta ? <p><strong>Cierre sugerido:</strong> {reportToView.raw.outreach_pack.call_script.cta}</p> : null}
+                    </div>
+                  </section>
+                )}
+
                 {reportToView.cross.sources?.length ? (
                   <section>
                     <h4 className="text-xs font-semibold uppercase text-muted-foreground">Fuentes</h4>
@@ -1979,7 +2141,7 @@ export default function EnrichedLeadsClient() {
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => setDraftSource('investigation')} />
-                  Investigación (n8n)
+                  Investigación (motor nuevo)
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="radio" name="draft-source" value="style" checked={draftSource === 'style'} onChange={() => {

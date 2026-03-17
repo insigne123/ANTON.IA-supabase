@@ -118,6 +118,37 @@ env:
   - variable: SUPABASE_SERVICE_ROLE_KEY
     secret: SUPABASE_SERVICE_ROLE_KEY
 
+  # === Lead Research / Vane (server-only) ===
+  - variable: VANE_BASE_URL
+    value: https://alan-flexible-boards-payments.trycloudflare.com
+    availability: [RUNTIME]
+
+  - variable: VANE_PROVIDER_NAME
+    value: OpenAI
+    availability: [RUNTIME]
+
+  - variable: VANE_CHAT_MODEL_KEY
+    value: gpt-4o-mini
+    availability: [RUNTIME]
+
+  - variable: VANE_EMBEDDING_MODEL_KEY
+    value: text-embedding-3-small
+    availability: [RUNTIME]
+
+  - variable: VANE_AUTH_HEADER_NAME
+    value: x-vane-auth
+    availability: [RUNTIME]
+
+  - variable: VANE_AUTH_HEADER_VALUE
+    secret: VANE_AUTH_HEADER_VALUE
+
+  - variable: VANE_TIMEOUT_MS
+    value: "240000"
+    availability: [RUNTIME]
+
+  - variable: LEAD_RESEARCH_WORKER_SECRET
+    secret: LEAD_RESEARCH_WORKER_SECRET
+
   # === ANTON.IA Agent Variables ===
   # App URL for internal API calls
   - variable: NEXT_PUBLIC_APP_URL

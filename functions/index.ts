@@ -12,6 +12,7 @@ import { buildAntoniaDailyDashboardHtml, type AntoniaDailyMissionRow } from './r
 // NOTE: Keep defaults for backwards compatibility, but prefer env vars in production.
 const DEFAULT_APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
 const DEFAULT_LEAD_SEARCH_URL = 'https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search';
+const DEFAULT_LEAD_RESEARCH_URL = 'https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-research';
 const DISABLE_EXTERNAL_SEARCH_FALLBACK = String(process.env.LEADS_DISABLE_EXTERNAL_FALLBACK || 'false').toLowerCase() === 'true';
 
 function getAppUrl(): string {
@@ -25,6 +26,196 @@ function getAppUrl(): string {
 
 function getLeadSearchUrl(): string {
     return process.env.ANTONIA_LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
+}
+
+function getLeadResearchUrl(): string {
+    return process.env.ANTONIA_LEAD_RESEARCH_URL || process.env.LEAD_RESEARCH_URL || DEFAULT_LEAD_RESEARCH_URL;
+}
+
+function cleanDomain(value?: string | null): string {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+        const url = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+        return url.hostname.toLowerCase().replace(/^www\./, '');
+    } catch {
+        return raw.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+    }
+}
+
+function guessCompanyNameFromDomain(domain?: string | null): string {
+    const host = cleanDomain(domain);
+    const root = host.split('.')[0] || '';
+    return root
+        .replace(/[-_]+/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .trim();
+}
+
+function sanitizeCompanyName(value?: string | null, domain?: string | null, email?: string | null): string {
+    const raw = String(value || '').trim();
+    let company = raw;
+
+    if (!company) {
+        const fromDomain = cleanDomain(domain || (email && email.includes('@') ? email.split('@')[1] : ''));
+        return guessCompanyNameFromDomain(fromDomain) || 'tu empresa';
+    }
+
+    company = company.replace(/\bcontact\s*:\s*[^\s]+/gi, '').trim();
+    if (company.includes(' - ') && (company.includes('@') || company.length > 80)) {
+        company = company.split(' - ')[0].trim();
+    }
+    company = company.replace(/\s+/g, ' ').trim().replace(/[\-–:;,]+$/g, '').trim();
+
+    if (!company) {
+        const fromDomain = cleanDomain(domain || (email && email.includes('@') ? email.split('@')[1] : ''));
+        return guessCompanyNameFromDomain(fromDomain) || 'tu empresa';
+    }
+
+    return company;
+}
+
+function safeFirstName(value?: string | null): string {
+    const first = String(value || '').trim().split(/\s+/)[0] || '';
+    return first || 'hola';
+}
+
+function asStringArray(value: any): string[] {
+    if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
+    if (typeof value === 'string') {
+        return value.split(/[\n,;]+/).map((item) => item.trim()).filter(Boolean);
+    }
+    return [];
+}
+
+function truncateText(value?: string | null, max = 220): string {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (text.length <= max) return text;
+    return `${text.slice(0, max - 1).trim()}…`;
+}
+
+function normalizeResearchData(raw: any, lead: any) {
+    if (!raw || typeof raw !== 'object') return null;
+
+    const cross = raw?.existing_compat?.cross || raw?.cross || null;
+    const enhanced = raw?.existing_compat?.enhanced || raw?.enhanced || null;
+    const overview = String(raw?.company_context?.overview || raw?.website_summary?.overview || raw?.overview || cross?.overview || '').trim();
+    const pains = asStringArray(raw?.company_context?.pain_hypotheses?.map((item: any) => item?.detail || item?.title) || raw?.pains || cross?.pains || enhanced?.pains);
+    const opportunities = asStringArray(raw?.company_context?.opportunity_hypotheses?.map((item: any) => item?.detail || item?.title) || raw?.opportunities || cross?.opportunities || enhanced?.opportunities);
+    const talkTracks = asStringArray(raw?.outreach_pack?.talk_tracks || raw?.talkTracks || cross?.talkTracks || enhanced?.talkTracks);
+    const subjectLines = asStringArray(raw?.outreach_pack?.subject_lines || raw?.subjectLines || cross?.subjectLines || enhanced?.subjectLines);
+    const emailDraft = raw?.outreach_pack?.email_drafts?.medium
+        || raw?.outreach_pack?.email_drafts?.short
+        || raw?.outreach_pack?.email_drafts?.challenger
+        || raw?.emailDraft
+        || cross?.emailDraft
+        || enhanced?.emailDraft
+        || null;
+    const signals = Array.isArray(raw?.signals) ? raw.signals : [];
+    const iceBreaker = raw?.lead_context?.ice_breakers?.[0]?.text || raw?.lead_context?.iceBreaker || cross?.leadContext?.iceBreaker || null;
+    const recentActivity = raw?.lead_context?.recent_activity_summary || cross?.leadContext?.recentActivitySummary || null;
+    const profileSummary = raw?.lead_context?.profile_summary || raw?.lead_context?.role_summary || cross?.leadContext?.profileSummary || null;
+    const warnings = asStringArray(raw?.warnings || raw?.provider_warnings);
+    const sources = Array.isArray(raw?.sources)
+        ? raw.sources.map((source: any) => ({ title: source?.title || source?.name || undefined, url: source?.url })).filter((source: any) => !!source.url)
+        : (Array.isArray(cross?.sources) ? cross.sources : []);
+    const firstSignal = signals[0];
+    const summary = truncateText(
+        firstSignal?.summary
+        || overview
+        || pains[0]
+        || opportunities[0]
+        || `${sanitizeCompanyName(lead?.companyName || lead?.company_name || lead?.company, lead?.companyDomain || lead?.company_website, lead?.email)} tiene iniciativas relevantes en marcha.`
+    );
+
+    return {
+        ...raw,
+        cross,
+        enhanced,
+        overview,
+        summary,
+        pains,
+        opportunities,
+        talkTracks,
+        subjectLines,
+        emailDraft,
+        signals,
+        leadContext: {
+            iceBreaker,
+            recentActivitySummary: recentActivity,
+            profileSummary,
+        },
+        warnings,
+        sources,
+    };
+}
+
+function hasMeaningfulResearch(raw: any): boolean {
+    const normalized = normalizeResearchData(raw, {});
+    return Boolean(
+        normalized?.overview ||
+        normalized?.signals?.length ||
+        normalized?.pains?.length ||
+        normalized?.opportunities?.length ||
+        normalized?.talkTracks?.length ||
+        normalized?.subjectLines?.length ||
+        normalized?.emailDraft?.body
+    );
+}
+
+function appendSignatureIfMissing(body: string, userSignature: string, signerName?: string | null): string {
+    const draft = String(body || '').trim();
+    const signature = String(userSignature || '').trim();
+    if (!signature) return draft;
+    const lowerDraft = draft.toLowerCase();
+    const lowerSignature = signature.toLowerCase();
+    const lowerName = String(signerName || '').trim().toLowerCase();
+    if (lowerSignature && lowerDraft.includes(lowerSignature)) return draft;
+    if (lowerName && lowerDraft.includes(lowerName)) return draft;
+    return `${draft}\n\n${signature}`.trim();
+}
+
+function buildFallbackSubject(companyName: string, researchData: any): string {
+    return researchData?.subjectLines?.[0]
+        || researchData?.emailDraft?.subject
+        || `Ideas para ${companyName}`;
+}
+
+function buildFallbackBody(params: {
+    firstName: string;
+    companyName: string;
+    researchData: any;
+    senderCompanyName: string;
+    senderValueProp: string;
+    userSignature: string;
+}) {
+    const { firstName, companyName, researchData, senderCompanyName, senderValueProp, userSignature } = params;
+    const signal = researchData?.signals?.[0]?.summary || researchData?.signals?.[0]?.title || '';
+    const pain = researchData?.pains?.[0] || '';
+    const opener = researchData?.leadContext?.iceBreaker
+        || signal
+        || researchData?.summary
+        || `vi que ${companyName} está impulsando iniciativas relevantes en su mercado.`;
+    const reason = pain
+        ? `Creo que podría hacer sentido conversar sobre ${pain.charAt(0).toLowerCase()}${pain.slice(1)}.`
+        : 'Creo que podría hacer sentido conversar sobre formas concretas de mejorar velocidad comercial y eficiencia operativa.';
+    const valueLine = senderValueProp
+        ? `Desde ${senderCompanyName} ${senderValueProp.charAt(0).toLowerCase()}${senderValueProp.slice(1)}.`
+        : `Desde ${senderCompanyName} ayudamos a equipos comerciales a generar más pipeline con menos trabajo manual.`;
+
+    const body = `Hola ${firstName},
+
+Estuve revisando ${companyName} y ${opener}
+
+${reason}
+
+${valueLine}
+
+¿Tendrías disponibilidad para una breve conversación esta semana?
+
+Saludos,`;
+
+    return appendSignatureIfMissing(body, userSignature, senderCompanyName);
 }
 
 function withInternalApiSecret(headers: Record<string, string>): Record<string, string> {
@@ -143,6 +334,28 @@ function getNextUtcDayStartIso() {
     const now = new Date();
     const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 5));
     return next.toISOString();
+}
+
+function sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getMissionStatus(supabase: SupabaseClient, missionId?: string | null): Promise<string | null> {
+    if (!missionId) return null;
+    const { data, error } = await supabase
+        .from('antonia_missions')
+        .select('status')
+        .eq('id', missionId)
+        .maybeSingle();
+    if (error) {
+        console.warn('[mission-status] Failed to fetch mission status:', missionId, error.message || error);
+        return null;
+    }
+    return String(data?.status || '').trim() || null;
+}
+
+function shouldRespectPausedMission(taskType: string) {
+    return ['GENERATE_CAMPAIGN', 'SEARCH', 'ENRICH', 'INVESTIGATE', 'CONTACT', 'CONTACT_INITIAL', 'CONTACT_CAMPAIGN'].includes(taskType);
 }
 
 const BUSINESS_HOURS_START = 8;
@@ -1464,10 +1677,164 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         });
 
         try {
+            const safeCompanyName = sanitizeCompanyName(
+                lead.companyName || lead.company_name || lead.company || lead.organization?.name,
+                lead.companyDomain || lead.company_domain || lead.company_website,
+                lead.email,
+            );
+
             console.log(`[INVESTIGATE] Investigating lead: `, {
                 name: lead.fullName || lead.full_name || lead.name,
-                company: lead.companyName || lead.company_name || lead.company
+                company: safeCompanyName
             });
+
+            let leadResearchError: any = null;
+
+            try {
+                const companyDomain = cleanDomain(lead.companyDomain || lead.company_domain || lead.company_website);
+                const leadResearchPayload = {
+                    user_id: userId,
+                    organization_id: task.organization_id,
+                    lead_ref: lead.id || lead.email || lead.linkedinUrl || lead.linkedin_url || `${lead.fullName || lead.full_name || lead.name || ''}|${safeCompanyName}`,
+                    lead: {
+                        id: lead.id,
+                        apollo_id: lead.apolloId || lead.apollo_id || lead.id || null,
+                        full_name: lead.fullName || lead.full_name || lead.name || null,
+                        first_name: lead.first_name || lead.firstName || safeFirstName(lead.fullName || lead.full_name || lead.name),
+                        last_name: lead.last_name || lead.lastName || null,
+                        title: lead.title || null,
+                        headline: lead.headline || null,
+                        email: lead.email || null,
+                        phone: lead.primaryPhone || null,
+                        linkedin_url: lead.linkedinUrl || lead.linkedin_url || null,
+                        location: lead.location || null,
+                        city: lead.city || null,
+                        country: lead.country || null,
+                        seniority: lead.seniority || null,
+                        department: Array.isArray(lead.departments) ? lead.departments[0] : null,
+                    },
+                    company: {
+                        name: safeCompanyName,
+                        domain: companyDomain || null,
+                        website_url: companyDomain ? `https://${companyDomain}` : null,
+                        linkedin_url: lead.companyLinkedinUrl || lead.company_linkedin_url || null,
+                        industry: lead.organizationIndustry || lead.industry || null,
+                        size: lead.organizationSize || null,
+                    },
+                    seller_context: {
+                        company_name: userCompanyProfile.name,
+                        company_domain: cleanDomain(userProfile?.company_domain),
+                        sector: userCompanyProfile.sector,
+                        description: userCompanyProfile.description,
+                        services: asStringArray(userCompanyProfile.services),
+                        value_proposition: userCompanyProfile.valueProposition,
+                        proof_points: asStringArray(profileExtended.proofPoints || profileExtended.proof_points),
+                        target_market: asStringArray(profileExtended.targetMarket || profileExtended.target_market),
+                    },
+                    user_context: {
+                        id: userContext.id,
+                        name: userContext.name,
+                        job_title: userContext.jobTitle,
+                    },
+                    options: {
+                        language: 'es',
+                        depth: 'standard',
+                        include_outreach_pack: true,
+                        include_company_research: true,
+                        include_lead_research: true,
+                        include_recent_signals: true,
+                        include_call_prep: true,
+                        include_competitive_context: true,
+                        include_raw_sources: true,
+                        max_sources: 15,
+                        force_refresh: true,
+                    },
+                };
+
+                const startResponse = await fetch(getLeadResearchUrl(), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                    },
+                    body: JSON.stringify(leadResearchPayload),
+                });
+
+                const startText = await startResponse.text();
+                let leadResearchResult: any = null;
+                try {
+                    leadResearchResult = JSON.parse(startText);
+                } catch {
+                    leadResearchResult = { raw: startText };
+                }
+
+                if (!startResponse.ok) {
+                    throw new Error(leadResearchResult?.message || leadResearchResult?.error || `lead-research http ${startResponse.status}`);
+                }
+
+                const reportId = String(leadResearchResult?.report_id || '').trim();
+                if (reportId && ['queued', 'in_progress'].includes(String(leadResearchResult?.status || ''))) {
+                    for (let pollAttempt = 0; pollAttempt < 18; pollAttempt++) {
+                        await sleep(5000);
+                        const pollResponse = await fetch(`${getLeadResearchUrl().replace(/\/$/, '')}/${encodeURIComponent(reportId)}`, {
+                            headers: { Accept: 'application/json' },
+                        });
+                        const pollText = await pollResponse.text();
+                        try {
+                            leadResearchResult = JSON.parse(pollText);
+                        } catch {
+                            leadResearchResult = { raw: pollText };
+                        }
+                        if (!pollResponse.ok) {
+                            throw new Error(leadResearchResult?.message || leadResearchResult?.error || `lead-research poll ${pollResponse.status}`);
+                        }
+                        if (['completed', 'partial', 'insufficient_data', 'failed'].includes(String(leadResearchResult?.status || ''))) {
+                            break;
+                        }
+                    }
+                }
+
+                const normalizedLeadResearch = normalizeResearchData(leadResearchResult, { ...lead, companyName: safeCompanyName });
+                if (hasMeaningfulResearch(normalizedLeadResearch)) {
+                    investigatedLeads.push({ ...lead, companyName: safeCompanyName, research: normalizedLeadResearch });
+
+                    if (lead?.id) {
+                        await supabase
+                            .from('leads')
+                            .update({ last_investigated_at: attemptAt, investigation_error: null } as any)
+                            .eq('id', lead.id);
+                    }
+
+                    await safeInsertLeadEvents(supabase, [
+                        {
+                            organization_id: task.organization_id,
+                            mission_id: task.mission_id,
+                            task_id: task.id,
+                            lead_id: String(lead.id),
+                            event_type: 'lead_investigate_completed',
+                            stage: 'investigate',
+                            outcome: String(leadResearchResult?.status || 'completed'),
+                            message: 'Investigacion completada (lead-research)',
+                            meta: {
+                                provider: 'lead-research',
+                                reportId: reportId || null,
+                                hasOverview: Boolean(normalizedLeadResearch?.overview),
+                                warnings: normalizedLeadResearch?.warnings || [],
+                            },
+                            created_at: attemptAt,
+                        }
+                    ]);
+
+                    console.log(`[INVESTIGATE] lead-research completed for ${lead.email || safeCompanyName}`);
+                    continue;
+                }
+
+                leadResearchError = new Error(`lead-research returned ${leadResearchResult?.status || 'empty_result'}`);
+            } catch (lrErr: any) {
+                leadResearchError = lrErr;
+            }
+
+            console.warn(`[INVESTIGATE] Falling back to N8N for ${lead.email || safeCompanyName}:`, leadResearchError?.message || leadResearchError);
 
             // Construct specific N8N payload structure
             const n8nPayload = {
@@ -1475,7 +1842,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                     {
                         leadRef: lead.id,
                         targetCompany: {
-                            name: lead.companyName || lead.company_name || lead.company || lead.organization?.name,
+                            name: safeCompanyName,
                             domain: lead.companyDomain || lead.company_domain || lead.company_website,
                             linkedin: null, // Populate if available
                             country: lead.location || null,
@@ -1500,7 +1867,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 title: lead.title,
                 email: lead.email,
                 linkedinUrl: lead.linkedinUrl || lead.linkedin_url,
-                companyName: lead.companyName || lead.company_name || lead.company || lead.organization?.name,
+                companyName: safeCompanyName,
                 companyDomain: lead.companyDomain || lead.company_domain || lead.company_website,
                 userContext: userContext
             };
@@ -1582,11 +1949,13 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 }
 
 
+                researchData = normalizeResearchData(researchData, { ...lead, companyName: safeCompanyName });
+
                 if (researchData && researchData.overview) {
-                    investigatedLeads.push({ ...lead, research: researchData });
+                    investigatedLeads.push({ ...lead, companyName: safeCompanyName, research: researchData });
                     console.log(`[INVESTIGATE] Successfully investigated lead`);
                 } else if (researchData) {
-                    investigatedLeads.push({ ...lead, research: researchData });
+                    investigatedLeads.push({ ...lead, companyName: safeCompanyName, research: researchData });
                     console.warn(`[INVESTIGATE] Parsed data missing 'overview' field`);
                 } else {
                     console.warn(`[INVESTIGATE] Received empty or invalid research data`);
@@ -1611,7 +1980,11 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                             }
                         }
                     }
-                    investigatedLeads.push({ ...lead, research: { overview: debugMsg } });
+                    investigatedLeads.push({
+                        ...lead,
+                        companyName: safeCompanyName,
+                        research: normalizeResearchData({ overview: debugMsg }, { ...lead, companyName: safeCompanyName })
+                    });
                 }
 
                 // Persist investigation timestamp for quick UI filters
@@ -1644,15 +2017,16 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 console.error(`[INVESTIGATE] API error: ${response.status} - ${errorText} `);
 
                 // Treat non-OK as a failure, but keep the pipeline moving with a fallback summary
-                const fallbackSummary = `${lead.companyName || lead.company || 'Company'} - ${lead.title || 'Professional'}.` +
-                    `${lead.email ? ` Contact: ${lead.email}` : ' Contact information unavailable.'}`;
+                const fallbackSummary = `No se pudo completar la investigacion automatica de ${safeCompanyName}, pero el lead sigue elegible para contacto manual.`;
 
                 investigatedLeads.push({
                     ...lead,
+                    companyName: safeCompanyName,
                     research: {
                         overview: fallbackSummary,
                         source: 'http_error',
-                        note: `N8N error ${response.status}`
+                        note: `Fallback por error ${response.status}`,
+                        summary: fallbackSummary,
                     }
                 });
 
@@ -1683,15 +2057,15 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
             console.error('[INVESTIGATE] Failed to investigate lead:', e);
 
             // Fallback: Use generic summary based on available lead data
-            const fallbackSummary = `${lead.companyName || lead.company || 'Company'} - ${lead.title || 'Professional'}.` +
-                `${lead.email ? `Contact: ${lead.email}` : 'Contact information available.'} `;
+            const fallbackSummary = `No se pudo completar la investigacion automatica de ${sanitizeCompanyName(lead.companyName || lead.company_name || lead.company, lead.companyDomain || lead.company_website, lead.email)}, pero el lead sigue elegible para seguimiento manual.`;
 
             investigatedLeads.push({
                 ...lead,
                 research: {
                     overview: fallbackSummary,
                     source: 'fallback',
-                    note: 'Research service temporarily unavailable'
+                    note: 'Research service temporarily unavailable',
+                    summary: fallbackSummary,
                 }
             });
 
@@ -1947,9 +2321,13 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
     // Fetch user's email signature from profiles
     const { data: profile } = await supabase
         .from('profiles')
-        .select('signatures, full_name, job_title')
+        .select('signatures, full_name, job_title, company_name, company_domain')
         .eq('id', userId)
         .single();
+
+    const profileExtended = profile?.signatures?.profile_extended || {};
+    const senderCompanyName = profile?.company_name || profileExtended.companyName || 'nuestro equipo';
+    const senderValueProp = profileExtended.valueProposition || profileExtended.value_proposition || '';
 
     // Get the signature for the provider being used (google or outlook)
     // Signatures are stored as: { google: "...", outlook: "..." }
@@ -1967,12 +2345,12 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
     }
 
     // Default templates (Fallback if research.emailDraft is missing)
-    const defaultSubject = 'Oportunidad de colaboración - {{company}}';
+    const defaultSubject = 'Ideas para {{company}}';
     let defaultBody = `Hola {{name}},
 
-Estuve leyendo sobre {{company}} y vi que {{research.summary}}
+Estuve revisando {{company}} y vi que {{research.summary}}
 
-Me pareció muy interesante y me gustaría conectar contigo para explorar posibles oportunidades de colaboración.
+Creo que podría hacer sentido conversar para explorar oportunidades concretas.
 
 ¿Tendrías disponibilidad para una breve conversación?
 
@@ -1992,6 +2370,18 @@ Saludos,`;
     let contactIndex = 0;
     for (const lead of leadsToContact) {
         contactIndex++;
+        const currentMissionStatus = await getMissionStatus(supabase, task.mission_id);
+        if (currentMissionStatus && currentMissionStatus !== 'active') {
+            console.warn(`[CONTACT] Mission ${task.mission_id} is ${currentMissionStatus}. Stopping contact loop before sending to ${lead.email || lead.id}.`);
+            return {
+                contactedCount,
+                skipped: true,
+                reason: currentMissionStatus === 'paused' ? 'mission_paused' : 'mission_not_active',
+                missionStatus: currentMissionStatus,
+                stoppedBeforeLeadId: lead?.id || null,
+            };
+        }
+
         await safeHeartbeatTask(supabase, task.id, {
             progress_current: contactIndex,
             progress_total: leadsToContact.length,
@@ -1999,46 +2389,56 @@ Saludos,`;
         });
 
         try {
-            // Safe access to research summary
-            const researchData = lead.research;
-            const researchSummary = researchData?.overview || researchData?.summary || 'tienen iniciativas interesantes en curso.';
+            const safeCompanyName = sanitizeCompanyName(
+                lead.companyName || lead.company_name || lead.company,
+                lead.companyDomain || lead.company_domain || lead.company_website,
+                lead.email,
+            );
+            const firstName = safeFirstName(lead.fullName || lead.full_name || lead.name);
+            const researchData = normalizeResearchData(lead.research, { ...lead, companyName: safeCompanyName }) || {};
+            const researchSummary = truncateText(
+                researchData?.summary
+                || researchData?.overview
+                || 'estan impulsando iniciativas relevantes que valdria la pena conversar.'
+            );
+            const preferredDraft = researchData?.emailDraft && researchData.emailDraft.subject && researchData.emailDraft.body
+                ? researchData.emailDraft
+                : null;
 
             // Determine Subject and Body
             // Priority 1: Use Draft from Research
             let finalSubject = defaultSubject;
             let finalBody = defaultBody;
 
-            if (researchData?.emailDraft?.subject && researchData?.emailDraft?.body) {
+            if (preferredDraft) {
                 console.log(`[CONTACT] Using AI Generated Draft for ${lead.email}`);
-                finalSubject = researchData.emailDraft.subject;
-                finalBody = researchData.emailDraft.body;
-
-                // If the draft body does NOT contain the signature, append it?
-                // Usually N8N drafts might include a placeholder or just the text.
-                // Let's assume we append signature if strictly necessary OR if the draft doesn't look like it has one.
-                // Safest approach: Append signature if configured signature is not null and body doesn't end with it.
-                // For now, let's trust the draft BUT ensure unsubscription link is added.
-                // Actually, let's append our signature if the body is short/generic.
-                // Better yet: Just append the signature if we generated it from profile.
-                // If using N8N draft, user might expect the prompt to handle signing.
-                // Reviewing user example: "Saludos cordiales,\n\nNicolás Yaur..." IS in the draft.
-                // So if draft exists, we DO NOT append userSignature again, unless we detect it's missing.
+                finalSubject = preferredDraft.subject;
+                finalBody = appendSignatureIfMissing(preferredDraft.body, userSignature, profile?.full_name);
 
             } else {
-                console.log(`[CONTACT] Using Default Template for ${lead.email}`);
-                // Use fallback template (unsubscribe footer is appended server-side in /api/contact/send)
-                finalBody = defaultBody;
+                console.log(`[CONTACT] Using enriched fallback template for ${lead.email}`);
+                finalSubject = buildFallbackSubject(safeCompanyName, researchData);
+                finalBody = buildFallbackBody({
+                    firstName,
+                    companyName: safeCompanyName,
+                    researchData,
+                    senderCompanyName,
+                    senderValueProp,
+                    userSignature,
+                });
             }
 
             // Replace template variables (Applicable to both Default and Drafts if they use {{}} syntax, though N8N drafts usually come resolved)
             // We should still run replacement just in case the draft uses placeholders
             const personalizedSubject = finalSubject
                 .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || lead.name || 'there')
-                .replace(/\{\{company\}\}/g, lead.companyName || lead.company_name || lead.company || 'your company');
+                .replace(/\{\{company\}\}/g, safeCompanyName || 'your company')
+                .replace(/\{\{firstName\}\}/g, firstName);
 
             const personalizedBody = finalBody
                 .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || lead.name || 'there')
-                .replace(/\{\{company\}\}/g, lead.companyName || lead.company_name || lead.company || 'your company')
+                .replace(/\{\{company\}\}/g, safeCompanyName || 'your company')
+                .replace(/\{\{firstName\}\}/g, firstName)
                 .replace(/\{\{title\}\}/g, lead.title || 'your role')
                 .replace(/\{\{research\.summary\}\}/g, researchSummary)
                 .replace(/\{\{email\}\}/g, lead.email || '');
@@ -2076,7 +2476,7 @@ Saludos,`;
                     // Store display fields for UI/analytics
                     name: lead.fullName || lead.full_name || lead.name || '',
                     email: lead.email,
-                    company: lead.companyName || lead.company_name || lead.company || '',
+                    company: safeCompanyName,
                     role: lead.title || '',
                     industry: lead.industry || null,
                     city: lead.city || null,
@@ -2162,7 +2562,7 @@ Saludos,`;
 
                     name: lead.fullName || lead.full_name || lead.name || '',
                     email: lead.email,
-                    company: lead.companyName || lead.company_name || lead.company || '',
+                    company: safeCompanyName,
                     role: lead.title || '',
                     industry: lead.industry || null,
                     city: lead.city || null,
@@ -3531,6 +3931,18 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
 
     for (const lead of leads) {
         try {
+            const currentMissionStatus = await getMissionStatus(supabase, task.mission_id);
+            if (currentMissionStatus && currentMissionStatus !== 'active') {
+                console.warn(`[CONTACT_CAMPAIGN] Mission ${task.mission_id} is ${currentMissionStatus}. Stopping follow-up loop before sending to ${lead.email || lead.id}.`);
+                return {
+                    contactedCount,
+                    skipped: true,
+                    reason: currentMissionStatus === 'paused' ? 'mission_paused' : 'mission_not_active',
+                    missionStatus: currentMissionStatus,
+                    stoppedBeforeLeadId: lead?.id || null,
+                };
+            }
+
             console.log(`[CONTACT_CAMPAIGN] Sending campaign email to ${lead.email} `);
 
             if (lead?.id) {
@@ -3691,7 +4103,7 @@ async function processTaskWithTimeout(task: any, supabase: SupabaseClient) {
     }
 }
 
-async function processTask(task: any, supabase: SupabaseClient) {
+async function processTask(task: any, supabase: SupabaseClient): Promise<any> {
     console.log(`[Worker] Processing task ${task.id} (${task.type})`);
 
     // Note: Status already set to 'processing' by optimistic lock in antoniaTick
@@ -3703,6 +4115,16 @@ async function processTask(task: any, supabase: SupabaseClient) {
     // }).eq('id', task.id);
 
     try {
+        const missionStatus = await getMissionStatus(supabase, task.mission_id);
+        if (missionStatus && missionStatus !== 'active' && shouldRespectPausedMission(task.type)) {
+            return {
+                skipped: true,
+                reason: missionStatus === 'paused' ? 'mission_paused' : 'mission_not_active',
+                missionStatus,
+                taskType: task.type,
+            };
+        }
+
         const { data: taskConfig } = await supabase
             .from('antonia_config')
             .select('*')
@@ -3766,7 +4188,7 @@ async function processTask(task: any, supabase: SupabaseClient) {
                 details: result
             });
 
-            return;
+            return result;
         }
 
         await supabase.from('antonia_tasks').update({
@@ -3783,6 +4205,8 @@ async function processTask(task: any, supabase: SupabaseClient) {
             message: `Task ${task.type} completed successfully.`,
             details: result
         });
+
+        return result;
 
     } catch (e: any) {
         console.error(`[Worker] Task ${task.id} Failed`, e.stack || e);
@@ -3843,6 +4267,8 @@ async function processTask(task: any, supabase: SupabaseClient) {
                 message: `Task ${task.type} failed permanently: ${e.message}`
             });
         }
+
+        throw e;
     }
 }
 

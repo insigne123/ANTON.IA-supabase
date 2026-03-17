@@ -260,6 +260,22 @@ export async function POST(req: Request) {
                                     .update({ status: 'paused', updated_at: new Date().toISOString() })
                                     .eq('id', missionId)
                                     .eq('status', 'active');
+
+                                await supabase
+                                    .from('antonia_tasks')
+                                    .update({
+                                        status: 'completed',
+                                        result: {
+                                            skipped: true,
+                                            reason: 'mission_paused',
+                                            source: 'negative_reply_guardrail',
+                                        },
+                                        error_message: null,
+                                        updated_at: new Date().toISOString(),
+                                    } as any)
+                                    .eq('mission_id', missionId)
+                                    .eq('status', 'pending')
+                                    .in('type', ['GENERATE_CAMPAIGN', 'SEARCH', 'ENRICH', 'INVESTIGATE', 'CONTACT', 'CONTACT_INITIAL', 'CONTACT_CAMPAIGN']);
                             }
                         }
                     } catch (err) {
