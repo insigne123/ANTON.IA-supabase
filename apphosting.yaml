@@ -7,7 +7,7 @@ build:
 
     - name: setup
       entrypoint: bash
-      args: ["-lc", "npm ci"]
+      args: ["-lc", "npm ci --include=dev"]
 
     - name: build
       entrypoint: bash
