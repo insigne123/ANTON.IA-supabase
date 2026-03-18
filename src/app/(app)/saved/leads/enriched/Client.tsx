@@ -801,7 +801,7 @@ export default function EnrichedLeadsClient() {
         toast({
           variant: 'destructive',
           title: 'Backend sin lead research configurado',
-          description: 'Configura el endpoint de /api/lead-research en App Hosting y vuelve a publicar.',
+          description: 'Configura el webhook de n8n para investigacion y vuelve a publicar.',
         });
         return;
       }
@@ -878,7 +878,7 @@ export default function EnrichedLeadsClient() {
       organizationService.getCredits().then(res => {
         if (res) setSocialCredits(res.credits);
       });
-      toast({ title: 'Investigación completa', description: `Procesados ${selected.length} leads con el motor nuevo.` });
+      toast({ title: 'Investigación completa', description: `Procesados ${selected.length} leads con n8n.` });
     }
   }
   function clearInvestigationFor(lead: EnrichedLead) {
@@ -1423,7 +1423,7 @@ export default function EnrichedLeadsClient() {
   async function generateEmailFromReportFor(e: EnrichedLead) {
     const report = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
     if (!report?.cross?.emailDraft) {
-      toast({ title: 'Sin borrador de IA', description: 'Investiga con el motor nuevo y asegúrate de que el reporte incluya outreach pack.' });
+      toast({ title: 'Sin borrador de IA', description: 'Investiga con n8n y asegúrate de que el reporte incluya borrador.' });
       if (report) openReportFor(e);
       return;
     }
@@ -1444,7 +1444,7 @@ export default function EnrichedLeadsClient() {
   function openReportFor(e: EnrichedLead) {
     const rep = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain || null, companyName: e.companyName || null });
     if (!rep?.cross) {
-      toast({ title: 'Sin reporte', description: 'Investiga con el motor nuevo antes de abrir el reporte.' });
+      toast({ title: 'Sin reporte', description: 'Investiga con n8n antes de abrir el reporte.' });
       return;
     }
     setReportToView(rep);
@@ -1533,7 +1533,7 @@ export default function EnrichedLeadsClient() {
     <div className="space-y-6">
       <PageHeader
         title="Leads enriquecidos"
-        description="Selecciona leads, investiga con el motor nuevo y luego contacta con mejor contexto comercial."
+        description="Selecciona leads, investiga con n8n y luego contacta con mejor contexto comercial."
       />
       <BackBar fallbackHref="/saved/leads" className="mb-2" />
 
@@ -1762,7 +1762,7 @@ export default function EnrichedLeadsClient() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-12 text-center" title="Marcar para investigar con el motor nuevo">
+                  <TableHead className="w-12 text-center" title="Marcar para investigar con n8n">
                     <div className="flex flex-col items-center gap-1">
                       <span className="text-[10px] uppercase text-muted-foreground">Inv.</span>
                       <Checkbox
@@ -2141,7 +2141,7 @@ export default function EnrichedLeadsClient() {
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => setDraftSource('investigation')} />
-                  Investigación (motor nuevo)
+                        Investigación (n8n)
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="radio" name="draft-source" value="style" checked={draftSource === 'style'} onChange={() => {

@@ -11,9 +11,10 @@ import { buildAntoniaDailyDashboardHtml, type AntoniaDailyMissionRow } from './r
 
 // NOTE: Keep defaults for backwards compatibility, but prefer env vars in production.
 const DEFAULT_APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
-const DEFAULT_LEAD_SEARCH_URL = 'https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search';
-const DEFAULT_LEAD_RESEARCH_URL = 'https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-research';
+const DEFAULT_LEAD_SEARCH_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search';
+const DEFAULT_LEAD_RESEARCH_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-research';
 const DISABLE_EXTERNAL_SEARCH_FALLBACK = String(process.env.LEADS_DISABLE_EXTERNAL_FALLBACK || 'false').toLowerCase() === 'true';
+const USE_N8N_RESEARCH_ONLY = String(process.env.LEAD_RESEARCH_USE_N8N || 'true').toLowerCase() === 'true';
 
 function getAppUrl(): string {
     return (
@@ -1688,9 +1689,9 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 company: safeCompanyName
             });
 
-            let leadResearchError: any = null;
+            let leadResearchError: any = USE_N8N_RESEARCH_ONLY ? new Error('n8n_research_forced') : null;
 
-            try {
+            if (!USE_N8N_RESEARCH_ONLY) try {
                 const companyDomain = cleanDomain(lead.companyDomain || lead.company_domain || lead.company_website);
                 const leadResearchPayload = {
                     user_id: userId,
@@ -1834,7 +1835,11 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 leadResearchError = lrErr;
             }
 
-            console.warn(`[INVESTIGATE] Falling back to N8N for ${lead.email || safeCompanyName}:`, leadResearchError?.message || leadResearchError);
+            if (USE_N8N_RESEARCH_ONLY) {
+                console.log(`[INVESTIGATE] Using legacy N8N research flow for ${lead.email || safeCompanyName}`);
+            } else {
+                console.warn(`[INVESTIGATE] Falling back to N8N for ${lead.email || safeCompanyName}:`, leadResearchError?.message || leadResearchError);
+            }
 
             // Construct specific N8N payload structure
             const n8nPayload = {
@@ -1873,7 +1878,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
             };
 
             // 🚀 Call N8N directly (URL configurable via env)
-            const N8N_WEBHOOK_URL = process.env.ANTONIA_N8N_WEBHOOK_URL || "https://nicogun.app.n8n.cloud/webhook/ANTONIA";
+            const N8N_WEBHOOK_URL = process.env.ANTONIA_N8N_WEBHOOK_URL || process.env.N8N_RESEARCH_WEBHOOK_URL || process.env.N8N_WEBHOOK_URL || "https://nicogun.app.n8n.cloud/webhook/ANTONIA";
 
             const response = await fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',

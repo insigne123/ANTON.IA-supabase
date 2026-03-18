@@ -4,12 +4,12 @@ import type { NextRequest } from 'next/server';
 
 export async function middleware(req: NextRequest) {
     const requestHost = req.nextUrl.hostname.toLowerCase();
-    const backendHostedAppHost = String(process.env.BACKEND_HOSTED_APP_URL || 'https://studio--studio-6624658482-61b7b.us-central1.hosted.app').trim();
+    const backendHostedAppHost = String(process.env.BACKEND_HOSTED_APP_URL || 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app').trim();
     const backendHostedAppHostName = (() => {
         try {
             return new URL(backendHostedAppHost).hostname.toLowerCase();
         } catch {
-            return 'studio--studio-6624658482-61b7b.us-central1.hosted.app';
+            return 'backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app';
         }
     })();
     const canonicalAppUrl = String(process.env.CANONICAL_APP_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://studio--leadflowai-3yjcy.us-central1.hosted.app').trim();

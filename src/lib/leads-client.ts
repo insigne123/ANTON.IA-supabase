@@ -8,6 +8,7 @@ import type {
 } from '@/lib/schemas/leads';
 
 const PATH = '/api/leads/search';
+const PROFILE_STATUS_PATH = '/api/leads/profile-status';
 
 type SearchPayload = LeadsSearchParams | LinkedInProfileSearchRequest | CompanyNameSearchRequest;
 
@@ -78,6 +79,36 @@ export async function searchCompanyNameLeads(
   signal?: AbortSignal,
 ): Promise<LeadSearchResponse> {
   return postSearch(body, signal);
+}
+
+export async function getLinkedInProfileStatuses(
+  ids: string[],
+  signal?: AbortSignal,
+): Promise<Array<{
+  id: string;
+  linkedin_url?: string | null;
+  primary_phone?: string | null;
+  phone_numbers?: any[] | null;
+  enrichment_status?: string | null;
+  updated_at?: string | null;
+}>> {
+  const normalizedIds = ids.map((value) => String(value || '').trim()).filter(Boolean);
+  if (normalizedIds.length === 0) return [];
+
+  const res = await fetch(PROFILE_STATUS_PATH, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: normalizedIds }),
+    cache: 'no-store',
+    signal,
+  });
+
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(String(json?.message || json?.error || `HTTP_${res.status}`));
+  }
+
+  return Array.isArray(json?.items) ? json.items : [];
 }
 
 export type {

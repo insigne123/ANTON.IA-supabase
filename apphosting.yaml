@@ -92,8 +92,12 @@ env:
     availability: [BUILD, RUNTIME]
 
   - variable: BACKEND_HOSTED_APP_URL
-    value: https://studio--studio-6624658482-61b7b.us-central1.hosted.app
+    value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app
     availability: [BUILD, RUNTIME]
+
+  - variable: ANTONIA_LEAD_SEARCH_URL
+    value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search
+    availability: [RUNTIME]
 
   - variable: NEXT_PUBLIC_AZURE_AD_CLIENT_ID
     value: 3826e4b9-f46e-48b7-aa7c-f06e11bd9686
@@ -157,7 +161,15 @@ env:
     availability: [RUNTIME]
 
   - variable: ANTONIA_LEAD_RESEARCH_URL
-    value: https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-research
+    value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-research
+    availability: [RUNTIME]
+
+  - variable: N8N_RESEARCH_WEBHOOK_URL
+    value: https://nicogun.app.n8n.cloud/webhook/ANTONIA
+    availability: [RUNTIME]
+
+  - variable: N8N_WEBHOOK_URL
+    value: https://nicogun.app.n8n.cloud/webhook/ANTONIA
     availability: [RUNTIME]
 
   - variable: LEAD_RESEARCH_WORKER_SECRET

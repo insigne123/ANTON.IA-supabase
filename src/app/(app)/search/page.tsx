@@ -24,6 +24,7 @@ import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import * as Quota from '@/lib/quota-client';
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from '@/lib/search-config';
 import {
+  getLinkedInProfileStatuses,
   searchCompanyNameLeads,
   searchLeads,
   searchLinkedInProfileLead,
@@ -168,6 +169,14 @@ function normalizePhoneNumbersForEnriched(phoneNumbers?: UILaed['phoneNumbers'])
     .filter((phone) => phone.raw_number || phone.sanitized_number);
 }
 
+function getPhoneFallback(phoneNumbers?: UILaed['phoneNumbers']) {
+  return phoneNumbers?.find((phone) => phone?.sanitized_number)?.sanitized_number || null;
+}
+
+function hasLeadPhone(lead: UILaed) {
+  return Boolean(lead.primaryPhone || getPhoneFallback(lead.phoneNumbers));
+}
+
 function mapLeadToEnriched(l: UILaed) {
   return {
     id: l.id,
@@ -229,7 +238,9 @@ export default function SearchPage() {
   const totalPages = useMemo(() => Math.max(1, Math.ceil(leads.length / pageSize)), [leads.length, pageSize]);
   const pagedLeads = useMemo(() => leads.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize), [leads, pageIndex, pageSize]);
   const abortRef = useRef<AbortController | null>(null);
+  const profileStatusAbortRef = useRef<AbortController | null>(null);
   const submittingRef = useRef(false);
+  const profilePhoneToastStateRef = useRef<'idle' | 'found' | 'missing'>('idle');
 
   // Saved Searches State
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
@@ -270,6 +281,7 @@ export default function SearchPage() {
     if (field === 'searchMode' || field === 'linkedinUrl' || field === 'revealEmail' || field === 'revealPhone') {
       setProfileSearchNotice(null);
       setLastProfilePhoneStatus(null);
+      profilePhoneToastStateRef.current = 'idle';
     }
     if (field === 'searchMode' || field === 'companyName' || field === 'companyDomains' || field === 'title' || field === 'seniorities' || field === 'maxResults') {
       setCompanyCandidates([]);
@@ -429,6 +441,7 @@ export default function SearchPage() {
     setError('');
     setProfileSearchNotice(null);
     setLastProfilePhoneStatus(null);
+    profilePhoneToastStateRef.current = 'idle';
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
@@ -537,10 +550,113 @@ export default function SearchPage() {
     setError('');
     setProfileSearchNotice(null);
     setLastProfilePhoneStatus(null);
+    profilePhoneToastStateRef.current = 'idle';
     setCompanyCandidates([]);
     setSelectedOrganization(null);
     setCompanySelectionPending(false);
   };
+
+  const pendingProfileLeadIds = useMemo(
+    () => filters.searchMode === 'linkedin_profile'
+      ? leads
+        .filter((lead) => lead.id && !hasLeadPhone(lead) && lead.enrichmentStatus === 'pending_phone')
+        .map((lead) => lead.id)
+      : [],
+    [filters.searchMode, leads],
+  );
+  const pendingProfileLeadIdsKey = useMemo(() => pendingProfileLeadIds.join('|'), [pendingProfileLeadIds]);
+
+  useEffect(() => {
+    if (filters.searchMode !== 'linkedin_profile' || pendingProfileLeadIds.length === 0) {
+      profileStatusAbortRef.current?.abort();
+      profileStatusAbortRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+
+    const poll = async () => {
+      if (cancelled) return;
+
+      profileStatusAbortRef.current?.abort();
+      const controller = new AbortController();
+      profileStatusAbortRef.current = controller;
+
+      try {
+        const items = await getLinkedInProfileStatuses(pendingProfileLeadIds, controller.signal);
+        if (cancelled || items.length === 0) return;
+
+        const byId = new Map(items.map((item) => [String(item.id || '').trim(), item]));
+        const resolvedWithPhone = items.filter((item) => {
+          const phoneNumbers = Array.isArray(item.phone_numbers) ? item.phone_numbers : [];
+          return Boolean(item.primary_phone || phoneNumbers.find((phone) => phone?.sanitized_number));
+        });
+        const stillPending = items.some((item) => {
+          const phoneNumbers = Array.isArray(item.phone_numbers) ? item.phone_numbers : [];
+          const hasPhone = Boolean(item.primary_phone || phoneNumbers.find((phone) => phone?.sanitized_number));
+          return !hasPhone && String(item.enrichment_status || '').trim() === 'pending_phone';
+        });
+
+        setLeads((prev) => prev.map((lead) => {
+          const item = byId.get(String(lead.id || '').trim());
+          if (!item) return lead;
+          const nextPhoneNumbers = Array.isArray(item.phone_numbers) ? item.phone_numbers : lead.phoneNumbers;
+          const nextPrimaryPhone = item.primary_phone || getPhoneFallback(nextPhoneNumbers) || lead.primaryPhone || null;
+          return {
+            ...lead,
+            phoneNumbers: nextPhoneNumbers || null,
+            primaryPhone: nextPrimaryPhone,
+            enrichmentStatus: String(item.enrichment_status || '').trim() || (nextPrimaryPhone ? 'completed' : lead.enrichmentStatus),
+          };
+        }));
+
+        if (resolvedWithPhone.length > 0) {
+          setProfileSearchNotice({
+            tone: 'info',
+            title: 'Telefono disponible',
+            description: 'El telefono ya esta visible en el resultado y puedes guardarlo sin salir de esta pantalla.',
+          });
+          setLastProfilePhoneStatus(null);
+          if (profilePhoneToastStateRef.current !== 'found') {
+            profilePhoneToastStateRef.current = 'found';
+            toast({
+              title: 'Telefono encontrado',
+              description: 'El numero ya se actualizo en el resultado de la busqueda.',
+            });
+          }
+        } else if (!stillPending && profilePhoneToastStateRef.current !== 'missing') {
+          profilePhoneToastStateRef.current = 'missing';
+          setLastProfilePhoneStatus('failed');
+          setProfileSearchNotice({
+            tone: 'warning',
+            title: 'Telefono no disponible por ahora',
+            description: 'Apollo termino el enriquecimiento, pero no devolvio un numero para este perfil.',
+          });
+        }
+      } catch (error: any) {
+        if (cancelled || error?.name === 'AbortError') return;
+        console.warn('[search] profile phone polling failed:', error?.message || error);
+      }
+    };
+
+    poll();
+    const intervalId = window.setInterval(() => {
+      attempts += 1;
+      if (attempts >= 18) {
+        window.clearInterval(intervalId);
+        return;
+      }
+      poll();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      profileStatusAbortRef.current?.abort();
+      profileStatusAbortRef.current = null;
+    };
+  }, [filters.searchMode, pendingProfileLeadIds, pendingProfileLeadIdsKey, toast]);
 
   const isPageAllSelected = useMemo(() => {
     if (pagedLeads.length === 0) return false;
@@ -926,7 +1042,26 @@ export default function SearchPage() {
                               <Image src={lead.avatar} width={40} height={40} className="rounded-full" alt={lead.name || ''} data-ai-hint="person face" unoptimized />
                               <AvatarFallback>{lead.name ? lead.name.charAt(0) : ''}</AvatarFallback>
                             </Avatar>
-                            <span className="font-medium">{lead.name}</span>
+                            <div>
+                              <div className="font-medium">{lead.name}</div>
+                              {(lead.email || filters.searchMode === 'linkedin_profile') ? (
+                                <div className="mt-1 flex flex-col gap-1 text-xs">
+                                  {lead.email ? <span className="text-muted-foreground">{lead.email}</span> : null}
+                                  {filters.searchMode === 'linkedin_profile' ? (
+                                    lead.primaryPhone ? (
+                                      <span className="font-medium text-emerald-600">{lead.primaryPhone}</span>
+                                    ) : lead.enrichmentStatus === 'pending_phone' ? (
+                                      <span className="inline-flex items-center gap-1 text-blue-600">
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                        Telefono en proceso...
+                                      </span>
+                                    ) : (
+                                      <span className="text-muted-foreground">Sin telefono visible aun</span>
+                                    )
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
                         </TableCell>
                         <TableCell>{lead.title}</TableCell>

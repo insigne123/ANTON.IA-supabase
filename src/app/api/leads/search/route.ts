@@ -25,7 +25,7 @@ const APOLLO_BASE = 'https://api.apollo.io/api/v1';
 const LINKEDIN_PROFILE_TABLE_NAME = 'people_search_leads';
 const DEFAULT_APOLLO_WEBHOOK_BASE_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
 const USE_APIFY = String(process.env.USE_APIFY || "false") === "true";
-const DEFAULT_LEAD_SEARCH_URL = "https://studio--studio-6624658482-61b7b.us-central1.hosted.app/api/lead-search";
+const DEFAULT_LEAD_SEARCH_URL = "https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search";
 const LEAD_SEARCH_URL = process.env.ANTONIA_LEAD_SEARCH_URL || process.env.LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
 const TIMEOUT_MS = Number(process.env.LEADS_N8N_TIMEOUT_MS ?? 60000);
 const MAX_RETRIES = Number(process.env.LEADS_N8N_MAX_RETRIES ?? 0);
@@ -401,6 +401,7 @@ function buildPeopleSearchLeadRow(person: any, options: {
   const organizationWebsite = getApolloOrganizationWebsite(person);
   const normalizedLinkedin = normalizeLinkedinProfileUrl(lead.linkedin_url || options.linkedinUrl) || null;
   const now = new Date().toISOString();
+  const batchRunId = String(options.batchRunId || '').trim() || now;
 
   return {
     id: String(person?.id || '').trim(),
@@ -411,7 +412,7 @@ function buildPeopleSearchLeadRow(person: any, options: {
     title: lead.title || null,
     organization_website: organizationWebsite,
     page: 1,
-    batch_run_id: options.batchRunId || null,
+    batch_run_id: batchRunId,
     created_at: now,
     organization_id: options.organizationId || null,
     industry: lead.organization?.industry || null,
@@ -1184,146 +1185,26 @@ export async function POST(req: NextRequest) {
     }
 
     if (!Array.isArray(body)) {
-      const requestedProvider = String((body as any)?.provider || '').trim().toLowerCase();
-      const organizationId = await resolveOrganizationIdForUser(userId);
-      const requestOrigin = resolveRequestOrigin(req);
       const profileParsed = LinkedInProfileSearchRequestSchema.safeParse(body);
       if (profileParsed.success) {
         const profileReq = profileParsed.data;
         const linkedinUrl = String(
           profileReq.linkedin_url || profileReq.linkedin_profile_url || profileReq.linkedinUrl || ''
         ).trim();
-        const providerDecision = resolveLeadProvider({
-          requestedProvider,
-          organizationId,
-          defaultProviderEnv: 'LEADS_PROVIDER_DEFAULT',
-          fallbackDefaultProvider: 'apollo',
-        });
 
-      const profilePayload = {
-        user_id: userId,
-        search_mode: 'linkedin_profile',
-        linkedin_url: linkedinUrl,
-        reveal_email: profileReq.reveal_email ?? profileReq.revealEmail ?? true,
+        const profilePayload = {
+          user_id: userId,
+          search_mode: 'linkedin_profile',
+          linkedin_url: linkedinUrl,
+          reveal_email: profileReq.reveal_email ?? profileReq.revealEmail ?? true,
           reveal_phone: profileReq.reveal_phone ?? profileReq.revealPhone ?? true,
         };
 
-      const profileMeta = {
-        providerRequested: providerDecision.requestedProvider,
-        providerDefault: providerDecision.defaultProvider,
-        providerForcedReason: providerDecision.forcedApolloReason,
-        search_mode: 'linkedin_profile',
-        requested_reveal: {
-          email: profilePayload.reveal_email,
-          phone: profilePayload.reveal_phone,
-        },
-      };
-
-      if (providerDecision.provider === 'pdl') {
-        const response = await callPdlProfileSearch(
-          {
-            linkedinUrl,
-            revealEmail: Boolean(profilePayload.reveal_email),
-            revealPhone: Boolean(profilePayload.reveal_phone),
-          },
-          {
-            ...profileMeta,
-            providerUsed: 'pdl',
-            fallbackApplied: false,
-          },
-        );
-        response.headers.set('x-provider-used', 'pdl');
+        const response = await callLeadSearchService(profilePayload, {
+          search_mode: 'linkedin_profile',
+        });
         response.headers.set('x-search-mode', 'linkedin_profile');
         return response;
-      }
-
-      const response = await callApolloProfileSearch(
-        {
-          linkedinUrl,
-          revealEmail: Boolean(profilePayload.reveal_email),
-          revealPhone: Boolean(profilePayload.reveal_phone),
-          organizationId,
-          requestOrigin,
-        },
-        {
-        ...profileMeta,
-        providerUsed: 'apollo',
-        fallbackApplied: false,
-        },
-      );
-
-      if (profilePayload.reveal_phone) {
-        const errorPayload = await response.clone().json().catch(() => null);
-        const errorMessage = String(errorPayload?.message || errorPayload?.details || errorPayload?.error || '');
-
-        if (response.status === 502 && isApolloPhoneRevealWebhookError(errorMessage)) {
-          const fallbackResponse = await callApolloProfileSearch(
-            {
-              linkedinUrl,
-              revealEmail: Boolean(profilePayload.reveal_email),
-              revealPhone: false,
-              organizationId,
-              requestOrigin,
-            },
-            {
-              ...profileMeta,
-              providerUsed: 'apollo',
-              effective_reveal: {
-                email: profilePayload.reveal_email,
-                phone: false,
-              },
-              applied_reveal: {
-                email: profilePayload.reveal_email,
-                phone: false,
-              },
-              phone_enrichment: {
-                requested: true,
-                queued: false,
-                status: 'skipped',
-                message: 'La busqueda encontro el perfil, pero el telefono se omitio porque Apollo exige webhook_url para reveal_phone_number.',
-                webhook_url: null,
-                provider_status: 400,
-                provider_details: errorMessage,
-              },
-              provider_warnings: [
-                'La busqueda se reintento sin telefono porque Apollo exige webhook_url para reveal_phone_number.',
-              ],
-              phone_reveal_fallback_applied: true,
-              phone_reveal_fallback_reason: 'apollo_requires_webhook_url',
-              warning: 'La busqueda se reintento sin telefono porque Apollo exige webhook_url para reveal_phone_number.',
-              fallbackApplied: false,
-            },
-          );
-          fallbackResponse.headers.set('x-provider-used', 'apollo');
-          fallbackResponse.headers.set('x-search-mode', 'linkedin_profile');
-          return fallbackResponse;
-        }
-      }
-
-      if (!response.ok && providerDecision.pdlEligible && isPdlFallbackEnabled()) {
-        const errorPayload = await response.clone().json().catch(() => null);
-        const errorMessage = String(errorPayload?.message || errorPayload?.details || errorPayload?.error || '').trim();
-        const fallbackResponse = await callPdlProfileSearch(
-          {
-            linkedinUrl,
-            revealEmail: Boolean(profilePayload.reveal_email),
-            revealPhone: Boolean(profilePayload.reveal_phone),
-          },
-          {
-            ...profileMeta,
-            providerUsed: 'pdl',
-            fallbackApplied: true,
-            fallbackReason: errorMessage || `apollo_profile_search_failed_${response.status}`,
-          },
-        );
-        fallbackResponse.headers.set('x-provider-used', 'pdl');
-        fallbackResponse.headers.set('x-search-mode', 'linkedin_profile');
-        return fallbackResponse;
-      }
-
-      response.headers.set('x-provider-used', 'apollo');
-      response.headers.set('x-search-mode', 'linkedin_profile');
-      return response;
       }
 
       const companyParsed = CompanyNameSearchRequestSchema.safeParse(body);
@@ -1352,74 +1233,10 @@ export async function POST(req: NextRequest) {
           selected_organization_name: String(companyReq.selected_organization_name || '').trim() || undefined,
           selected_organization_domain: normalizeDomainList([companyReq.selected_organization_domain])[0] || undefined,
         };
-        const providerDecision = resolveLeadProvider({
-          requestedProvider,
-          organizationId,
-          defaultProviderEnv: 'LEADS_PROVIDER_DEFAULT',
-          fallbackDefaultProvider: 'apollo',
-        });
-        const companyMeta = {
-          providerRequested: providerDecision.requestedProvider,
-          providerDefault: providerDecision.defaultProvider,
-          providerForcedReason: providerDecision.forcedApolloReason,
+        const response = await callLeadSearchService(companyPayload, {
           search_mode: 'company_name',
           company_name: companyPayload.company_name || companyPayload.selected_organization_name,
-        };
-
-        if (providerDecision.provider === 'pdl') {
-          const pdlResponse = await callPdlCompanyNameSearch(
-            {
-              companyName: companyPayload.company_name,
-              titles: Array.isArray(companyPayload.titles) ? companyPayload.titles : [],
-              maxResults: companyPayload.max_results,
-              organizationDomains,
-              selectedOrganizationId: companyPayload.selected_organization_id,
-              selectedOrganizationName: companyPayload.selected_organization_name,
-              selectedOrganizationDomain: companyPayload.selected_organization_domain,
-            },
-            {
-              ...companyMeta,
-              providerUsed: 'pdl',
-              fallbackApplied: false,
-            },
-          );
-          pdlResponse.headers.set('x-provider-used', 'pdl');
-          pdlResponse.headers.set('x-search-mode', 'company_name');
-          return pdlResponse;
-        }
-
-        const response = await callLeadSearchService(companyPayload, {
-          ...companyMeta,
-          providerUsed: 'apollo',
-          fallbackApplied: false,
         });
-
-        if (!response.ok && providerDecision.pdlEligible && isPdlFallbackEnabled()) {
-          const errorPayload = await response.clone().json().catch(() => null);
-          const errorMessage = String(errorPayload?.message || errorPayload?.details || errorPayload?.error || '').trim();
-          const fallbackResponse = await callPdlCompanyNameSearch(
-            {
-              companyName: companyPayload.company_name,
-              titles: Array.isArray(companyPayload.titles) ? companyPayload.titles : [],
-              maxResults: companyPayload.max_results,
-              organizationDomains,
-              selectedOrganizationId: companyPayload.selected_organization_id,
-              selectedOrganizationName: companyPayload.selected_organization_name,
-              selectedOrganizationDomain: companyPayload.selected_organization_domain,
-            },
-            {
-              ...companyMeta,
-              providerUsed: 'pdl',
-              fallbackApplied: true,
-              fallbackReason: errorMessage || `apollo_company_search_failed_${response.status}`,
-            },
-          );
-          fallbackResponse.headers.set('x-provider-used', 'pdl');
-          fallbackResponse.headers.set('x-search-mode', 'company_name');
-          return fallbackResponse;
-        }
-
-        response.headers.set('x-provider-used', 'apollo');
         response.headers.set('x-search-mode', 'company_name');
         return response;
       }

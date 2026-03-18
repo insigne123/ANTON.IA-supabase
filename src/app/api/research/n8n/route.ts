@@ -11,6 +11,8 @@ import { extractJsonFromMaybeFenced } from '@/lib/extract-json';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 
+import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
+
 export const dynamic = 'force-dynamic'; // evita caché
 export const revalidate = 0;
 export const runtime = 'nodejs';
@@ -71,7 +73,11 @@ export async function POST(req: Request): Promise<Response> {
   // --- Authenticate User via Session (Cookies) ---
   const supabase = createRouteHandlerClient({ cookies });
   const { data: { user } } = await supabase.auth.getUser();
-  const userId = user?.id || 'anon';
+  const userIdHeader = req.headers.get('x-user-id')?.trim() || '';
+  if (userIdHeader && !user?.id && !isTrustedInternalRequest(req)) {
+    return json(401, { error: 'UNAUTHORIZED_INTERNAL_REQUEST' });
+  }
+  const userId = user?.id || userIdHeader || 'anon';
 
   // Fallback to header only if session is missing (e.g. server-to-server calls?? unlikely in this app context)
   // const userIdHeader = req.headers.get('x-user-id');
