@@ -14,22 +14,134 @@ import { campaignsStorage, type CampaignStep, type CampaignStepAttachment } from
 import type { Campaign } from '@/lib/services/campaigns-service';
 
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
-import { Trash2, Plus, Pause, Play, Eye, X, Sparkles, MessageSquare } from 'lucide-react';
+import { Trash2, Plus, Pause, Play, Eye, X, Sparkles, MessageSquare, Search as SearchIcon, SlidersHorizontal } from 'lucide-react';
 import { computeEligibilityForCampaign, type EligiblePreviewRow } from '@/lib/campaign-eligibility';
 import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { googleAuthService } from '@/lib/google-auth-service';
 import type { ContactedLead } from '@/lib/types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { CommentsSection } from '@/components/comments-section';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignAnalytics } from '@/components/campaigns/CampaignAnalytics';
 import { CampaignFlow } from '@/components/campaigns/CampaignFlow';
 import { cn } from '@/lib/utils';
+import { profileService } from '@/lib/services/profile-service';
+import {
+  type CampaignRunStatus,
+  type CampaignType,
+  createDefaultCampaignSettings,
+  defaultCampaignReactivationSettings,
+  evaluateLeadForReactivation,
+  inferCampaignType,
+  type CampaignReconnectionBrief,
+  type CampaignReconnectionSettings,
+  type CampaignReactivationSettings,
+} from '@/lib/campaign-settings';
 
 type Mode = { kind: 'list' } | { kind: 'edit'; id?: string };
 
 type DraftStep = CampaignStep & { _files?: File[] };
+
+function buildDraftStep(index = 0, campaignType: CampaignType = 'reconnection'): DraftStep {
+  const isReconnection = campaignType === 'reconnection';
+  return {
+    id: crypto.randomUUID(),
+    name: index === 0 ? (isReconnection ? 'Reactivacion inicial' : 'Follow-up inicial') : (isReconnection ? `Reactivacion ${index + 1}` : `Follow-up ${index + 1}`),
+    offsetDays: index === 0 ? (isReconnection ? 0 : 3) : 3,
+    subject: '',
+    bodyHtml: '',
+    attachments: [],
+  };
+}
+
+function buildDraftState(campaignType: CampaignType = 'reconnection') {
+  const isReconnection = campaignType === 'reconnection';
+  return {
+    campaignType,
+    name: isReconnection ? 'Campaña de reconexion' : 'Campaña de seguimiento',
+    steps: [buildDraftStep(0, campaignType)],
+    excludedLeadIds: [] as string[],
+    settings: createDefaultCampaignSettings({ withReactivationAudience: isReconnection, campaignType }),
+  };
+}
+
+function getCampaignTypeLabel(campaignType: CampaignType) {
+  return campaignType === 'reconnection' ? 'Reconexión' : 'Seguimiento';
+}
+
+function getCampaignTypeDescription(campaignType: CampaignType) {
+  return campaignType === 'reconnection'
+    ? 'Promociona un nuevo servicio o vuelve a activar leads antiguos con personalización inteligente.'
+    : 'Automatiza follow-ups clásicos por offset para no perseguir manualmente cada lead contactado.';
+}
+
+function getCampaignEditorTitle(campaignType: CampaignType, hasId: boolean) {
+  if (hasId) {
+    return campaignType === 'reconnection' ? 'Gestionar campaña de reconexión' : 'Gestionar campaña de seguimiento';
+  }
+  return campaignType === 'reconnection' ? 'Nueva campaña de reconexión' : 'Nueva campaña de seguimiento';
+}
+
+function formatRunStatusLabel(status?: CampaignRunStatus | null) {
+  switch (status) {
+    case 'success': return 'OK';
+    case 'partial': return 'Parcial';
+    case 'failed': return 'Con fallos';
+    case 'skipped': return 'Sin ejecutar';
+    case 'idle': return 'Sin elegibles';
+    default: return 'Sin ejecuciones';
+  }
+}
+
+function getRunStatusVariant(status?: CampaignRunStatus | null): 'default' | 'secondary' | 'destructive' | 'outline' {
+  switch (status) {
+    case 'success': return 'default';
+    case 'partial': return 'secondary';
+    case 'failed': return 'destructive';
+    default: return 'outline';
+  }
+}
+
+function formatRunAt(value?: string | null) {
+  if (!value) return 'Nunca';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Nunca';
+  return date.toLocaleString('es-CL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function getContactLeadKey(lead: Partial<ContactedLead>) {
+  return String(lead.leadId || lead.id || '').trim();
+}
+
+function getReactivationSummary(settings: CampaignReactivationSettings) {
+  const segments: string[] = [];
+  if (settings.includeClickedNoReply) segments.push('click');
+  if (settings.includeOpenedNoReply) segments.push('apertura');
+  if (settings.includeDeliveredNoOpen) segments.push('entregado');
+  if (settings.includeNeutralReplies) segments.push('reply neutral');
+  if (settings.includeNoSignal) segments.push('sin señal');
+  return segments.length > 0 ? segments.join(' · ') : 'sin segmentos activos';
+}
+
+function toValuePointsText(points: string[]) {
+  return (points || []).join('\n');
+}
+
+function parseValuePoints(value: string) {
+  return String(value || '')
+    .split(/\n|;/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function formatPreviewDate(value: string | null) {
+  if (!value) return 'Sin fecha';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Sin fecha';
+  return date.toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' });
+}
 
 function fileToBase64(file: File): Promise<CampaignStepAttachment> {
   return new Promise((resolve, reject) => {
@@ -71,28 +183,43 @@ export default function CampaignsPage() {
 
   // Selección en la tabla de previsualización
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [eligibleNameFilter, setEligibleNameFilter] = useState('');
+  const [eligibleDaysFilter, setEligibleDaysFilter] = useState<'all' | '7' | '14' | '30'>('all');
+  const [eligibleStepFilter, setEligibleStepFilter] = useState('all');
+  const [eligibleIndustryFilter, setEligibleIndustryFilter] = useState('all');
   const selectedCount = selectedIds.size;
-  const allSelected = previewRows.length > 0 && selectedCount === previewRows.length;
-  const someSelected = selectedCount > 0 && !allSelected;
+  const previewStepOptions = useMemo(() => Array.from(new Set(previewRows.map((row) => row.nextStep?.name ?? `Paso ${row.nextStepIdx + 1}`))), [previewRows]);
+  const previewIndustryOptions = useMemo(() => Array.from(new Set(previewRows.map((row) => String(row.leadIndustry || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [previewRows]);
+  const filteredPreviewRows = useMemo(() => {
+    const query = eligibleNameFilter.trim().toLowerCase();
+    return previewRows.filter((row) => {
+      const stepLabel = row.nextStep?.name ?? `Paso ${row.nextStepIdx + 1}`;
+      const matchesName = !query || [row.leadName, row.leadEmail, row.leadCompany].some((value) => String(value || '').toLowerCase().includes(query));
+      const matchesDays = eligibleDaysFilter === 'all' || row.daysSinceLastContact >= Number(eligibleDaysFilter);
+      const matchesStep = eligibleStepFilter === 'all' || stepLabel === eligibleStepFilter;
+      const matchesIndustry = eligibleIndustryFilter === 'all' || row.leadIndustry === eligibleIndustryFilter;
+      return matchesName && matchesDays && matchesStep && matchesIndustry;
+    });
+  }, [previewRows, eligibleNameFilter, eligibleDaysFilter, eligibleStepFilter, eligibleIndustryFilter]);
+  const allSelected = filteredPreviewRows.length > 0 && filteredPreviewRows.every((row) => selectedIds.has(row.leadId));
+  const someSelected = filteredPreviewRows.some((row) => selectedIds.has(row.leadId)) && !allSelected;
 
   // Editor state
   const [draft, setDraft] = useState<{
     id?: string;
+    campaignType: CampaignType;
     name: string;
     steps: DraftStep[];
     excludedLeadIds: string[];
     settings: NonNullable<Campaign['settings']>;
-  }>({
-    name: 'Nueva campaña',
-    steps: [{ id: crypto.randomUUID(), name: 'Follow-up 1', offsetDays: 3, subject: '', bodyHtml: '', attachments: [] }],
-    excludedLeadIds: [],
-    settings: {
-      smartScheduling: { enabled: false, timezone: 'UTC', startHour: 9, endHour: 17 },
-      tracking: { enabled: false, pixel: true, linkTracking: true },
-    }
-  });
+  }>(buildDraftState);
+  const [campaignTypeFilter, setCampaignTypeFilter] = useState<'all' | CampaignType>('all');
 
   const [contacted, setContacted] = useState<ContactedLead[]>([]);
+  const reactivationAudience = draft.settings.audience?.kind === 'reactivation'
+    ? draft.settings.audience.reactivation
+    : null;
+  const reconnectionSettings = draft.settings.reconnection;
 
   const metricsByCampaignId = useMemo(() => {
     const leadMap = new Map((contacted || []).map((l: any) => [String(l.leadId || l.id || ''), l]));
@@ -123,6 +250,64 @@ export default function CampaignsPage() {
     return out;
   }, [contacted, items]);
 
+  const filteredItems = useMemo(() => {
+    return items.filter((campaign) => campaignTypeFilter === 'all' || campaign.campaignType === campaignTypeFilter);
+  }, [campaignTypeFilter, items]);
+
+  const campaignOverview = useMemo(() => {
+    const active = items.filter((campaign) => !campaign.isPaused);
+    return {
+      total: items.length,
+      active: active.length,
+      reconnection: items.filter((campaign) => campaign.campaignType === 'reconnection').length,
+      followUp: items.filter((campaign) => campaign.campaignType === 'follow_up').length,
+      missingAutomation: active.filter((campaign) => !campaign.lastRunAt).length,
+    };
+  }, [items]);
+
+  const reactivationStats = useMemo(() => {
+    if (!reactivationAudience) return null;
+
+    const excluded = new Set(draft.excludedLeadIds);
+    const stats = {
+      totalCandidates: 0,
+      matched: 0,
+      clicked: 0,
+      opened: 0,
+      delivered: 0,
+      neutral: 0,
+      noSignal: 0,
+      failedDelivery: 0,
+      doNotContact: 0,
+      noEvidence: 0,
+      tooRecent: 0,
+    };
+
+    for (const lead of contacted) {
+      const leadId = getContactLeadKey(lead);
+      if (!leadId || excluded.has(leadId) || !lead.email) continue;
+
+      stats.totalCandidates += 1;
+      const evaluation = evaluateLeadForReactivation(lead, reactivationAudience);
+
+      if (evaluation.hasFailedDelivery) stats.failedDelivery += 1;
+      if (evaluation.isDoNotContact) stats.doNotContact += 1;
+      if (!evaluation.hasDeliveryEvidence) stats.noEvidence += 1;
+      if (evaluation.daysSinceLastContact < reactivationAudience.minDaysSinceLastContact) stats.tooRecent += 1;
+
+      if (!evaluation.matched) continue;
+
+      stats.matched += 1;
+      if (evaluation.segment === 'clicked_no_reply') stats.clicked += 1;
+      if (evaluation.segment === 'opened_no_reply') stats.opened += 1;
+      if (evaluation.segment === 'delivered_no_open') stats.delivered += 1;
+      if (evaluation.segment === 'neutral_reply') stats.neutral += 1;
+      if (evaluation.segment === 'no_signal') stats.noSignal += 1;
+    }
+
+    return stats;
+  }, [contacted, draft.excludedLeadIds, reactivationAudience]);
+
   useEffect(() => {
     async function load() {
       if (authLoading) return;
@@ -134,29 +319,101 @@ export default function CampaignsPage() {
     load();
   }, [authLoading, user]);
 
-  function startCreate() {
-    setDraft({
-      name: 'Nueva campaña',
-      steps: [{ id: crypto.randomUUID(), name: 'Follow-up 1', offsetDays: 3, subject: '', bodyHtml: '', attachments: [] }],
-      excludedLeadIds: [],
+  function updateReactivationSettings(patch: Partial<CampaignReactivationSettings>) {
+    setDraft((current) => ({
+      ...current,
       settings: {
-        smartScheduling: { enabled: false, timezone: 'UTC', startHour: 9, endHour: 17 },
-        tracking: { enabled: false, pixel: true, linkTracking: true },
-      }
+        ...current.settings,
+        audience: {
+          kind: 'reactivation',
+          reactivation: {
+            ...(current.settings.audience?.kind === 'reactivation'
+              ? current.settings.audience.reactivation
+              : defaultCampaignReactivationSettings),
+            ...patch,
+          },
+        },
+      },
+    }));
+  }
+
+  function updateReconnectionSettings(patch: Partial<CampaignReconnectionSettings>) {
+    setDraft((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        reconnection: {
+          ...current.settings.reconnection,
+          ...patch,
+          brief: {
+            ...current.settings.reconnection.brief,
+            ...(patch.brief || {}),
+          },
+        },
+      },
+    }));
+  }
+
+  function updateReconnectionBrief(patch: Partial<CampaignReconnectionBrief>) {
+    updateReconnectionSettings({
+      brief: {
+        ...reconnectionSettings.brief,
+        ...patch,
+      },
     });
+  }
+
+  function openAiGenerator() {
+    if (draft.campaignType === 'follow_up') {
+      setAiGoal('Crear una secuencia de seguimiento amable y persistente para leads ya contactados, con foco en retomar la conversación y obtener respuesta.');
+      setAiAudience('Leads contactados anteriormente que aún no responden');
+      setAiOpen(true);
+      return;
+    }
+
+    const goalParts = [
+      reconnectionSettings.brief.offerName ? `Servicio o producto: ${reconnectionSettings.brief.offerName}` : '',
+      reconnectionSettings.brief.offerSummary ? `Contexto: ${reconnectionSettings.brief.offerSummary}` : '',
+      reconnectionSettings.brief.valuePoints.length ? `Puntos de valor: ${reconnectionSettings.brief.valuePoints.join('; ')}` : '',
+      reconnectionSettings.brief.cta ? `CTA: ${reconnectionSettings.brief.cta}` : '',
+      reconnectionSettings.brief.tone ? `Tono: ${reconnectionSettings.brief.tone}` : '',
+    ].filter(Boolean);
+
+    setAiGoal(goalParts.join('\n'));
+    setAiAudience(reconnectionSettings.brief.audienceHint || 'Leads ya contactados elegibles para reconexion');
+    setAiOpen(true);
+  }
+
+  function toggleReactivationAudience(enabled: boolean) {
+    setDraft((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        audience: enabled
+          ? {
+            kind: 'reactivation',
+            reactivation: current.settings.audience?.kind === 'reactivation'
+              ? current.settings.audience.reactivation
+              : { ...defaultCampaignReactivationSettings },
+          }
+          : undefined,
+      },
+    }));
+  }
+
+  function startCreate(campaignType: CampaignType) {
+    setDraft(buildDraftState(campaignType));
     setMode({ kind: 'edit' });
   }
 
   function startEdit(c: Campaign) {
     setDraft({
       id: c.id,
+      campaignType: c.campaignType || inferCampaignType({ settings: c.settings }),
       name: c.name,
       steps: c.steps.map((s) => ({ ...s })),
       excludedLeadIds: [...c.excludedLeadIds],
-      settings: c.settings || {
-        smartScheduling: { enabled: false, timezone: 'UTC', startHour: 9, endHour: 17 },
-        tracking: { enabled: false, pixel: true, linkTracking: true },
-      }
+      settings: c.settings || createDefaultCampaignSettings({ campaignType: c.campaignType || 'follow_up' }),
     });
     setMode({ kind: 'edit', id: c.id });
   }
@@ -164,7 +421,7 @@ export default function CampaignsPage() {
   function addStep() {
     setDraft((d) => ({
       ...d,
-      steps: [...d.steps, { id: crypto.randomUUID(), name: `Follow-up ${d.steps.length + 1}`, offsetDays: 3, subject: '', bodyHtml: '', attachments: [] }],
+      steps: [...d.steps, buildDraftStep(d.steps.length, d.campaignType)],
     }));
   }
 
@@ -195,6 +452,32 @@ export default function CampaignsPage() {
       toast({ variant: 'destructive', title: 'Agrega al menos un paso', description: 'Necesitas un paso de seguimiento.' });
       return;
     }
+    if (draft.campaignType === 'reconnection' && draft.settings.reconnection.enabled && !draft.settings.reconnection.brief.offerSummary.trim() && !draft.settings.reconnection.brief.offerName.trim()) {
+      toast({
+        variant: 'destructive',
+        title: 'Describe qué vas a promocionar',
+        description: 'Agrega al menos un resumen o nombre del servicio para que la IA personalice la campaña de reconexion.',
+      });
+      return;
+    }
+    if (draft.campaignType === 'reconnection' && draft.settings.audience?.kind === 'reactivation') {
+      const audience = draft.settings.audience.reactivation;
+      const hasActiveSegment =
+        audience.includeOpenedNoReply ||
+        audience.includeClickedNoReply ||
+        audience.includeDeliveredNoOpen ||
+        audience.includeNeutralReplies ||
+        audience.includeNoSignal;
+
+      if (!hasActiveSegment) {
+        toast({
+          variant: 'destructive',
+          title: 'Activa al menos un segmento',
+          description: 'Selecciona qué tipo de leads reactivados quieres incluir en esta campaña.',
+        });
+        return;
+      }
+    }
     setSaving(true);
     try {
       const steps: CampaignStep[] = [];
@@ -208,20 +491,30 @@ export default function CampaignsPage() {
           attachments: await buildAttachments(s),
         });
       }
+      const normalizedSettings = {
+        ...draft.settings,
+        reconnection: {
+          ...draft.settings.reconnection,
+          enabled: draft.campaignType === 'reconnection' && draft.settings.reconnection.enabled,
+        },
+        audience: draft.campaignType === 'reconnection' ? draft.settings.audience : undefined,
+      };
       if (draft.id) {
         await campaignsStorage.update(draft.id, {
+          campaignType: draft.campaignType,
           name: draft.name,
           steps,
           excludedLeadIds: draft.excludedLeadIds,
-          settings: draft.settings
+          settings: normalizedSettings
         });
         toast({ title: 'Campaña actualizada', description: 'Se guardaron los cambios.' });
       } else {
         await campaignsStorage.add({
+          campaignType: draft.campaignType,
           name: draft.name,
           steps,
           excludedLeadIds: draft.excludedLeadIds,
-          settings: draft.settings
+          settings: normalizedSettings
         });
         toast({ title: 'Campaña creada', description: 'Ya puedes previsualizar elegibles.' });
       }
@@ -267,7 +560,7 @@ export default function CampaignsPage() {
 
   function excludeAll(checked: boolean) {
     if (checked) {
-      const allIds = contacted.map((c: any) => String(c.leadId)).filter(Boolean);
+      const allIds = contacted.map((lead) => getContactLeadKey(lead)).filter(Boolean);
       setDraft((d) => ({ ...d, excludedLeadIds: [...new Set(allIds)] }));
     } else {
       setDraft((d) => ({ ...d, excludedLeadIds: [] }));
@@ -392,15 +685,26 @@ export default function CampaignsPage() {
       const step = campaign.steps[row.nextStepIdx];
       if (!step) throw new Error('Paso no encontrado.');
 
-      // Render template
-      // Note: We don't have sender name easily available without auth service call.
-      // We can default to 'Mi Empresa' or fetch profile if needed.
-      // For now, let's use a generic placeholder or try to get it from profile if stored.
-      const senderName = 'Mi Empresa'; // TODO: Fetch from profile service
+      const personalizationRes = await fetch('/api/campaigns/personalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId: campaign.id,
+          leadId: row.leadId,
+          leadEmail: row.leadEmail,
+          stepIndex: row.nextStepIdx,
+          matchReason: row.matchReason,
+          daysSinceLastContact: row.daysSinceLastContact,
+        }),
+      });
 
-      const subject = renderTemplate(step.subject || '', contacted, { name: senderName });
-      const rawBody = renderTemplate(step.bodyHtml || '', contacted, { name: senderName });
-      let bodyHtml = normalizeBodyHtml(rawBody);
+      const personalizationPayload = await personalizationRes.json().catch(() => ({}));
+      if (!personalizationRes.ok) {
+        throw new Error(personalizationPayload?.error || 'No se pudo personalizar el mensaje');
+      }
+
+      const subject = String(personalizationPayload.subject || '').trim();
+      let bodyHtml = normalizeBodyHtml(String(personalizationPayload.bodyHtml || ''));
 
       const tracking = campaign.settings?.tracking;
       const trackingEnabled = Boolean(tracking?.enabled);
@@ -506,9 +810,13 @@ export default function CampaignsPage() {
 
   const toggleAll = (checked: boolean) => {
     if (checked) {
-      setSelectedIds(new Set(previewRows.map(r => r.leadId)));
+      setSelectedIds(new Set(filteredPreviewRows.map(r => r.leadId)));
     } else {
-      setSelectedIds(new Set());
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        filteredPreviewRows.forEach((row) => next.delete(row.leadId));
+        return next;
+      });
     }
   };
 
@@ -517,14 +825,27 @@ export default function CampaignsPage() {
     if (!aiGoal.trim()) return;
     setAiLoading(true);
     try {
+      const profile = await profileService.getCurrentProfile().catch(() => null);
+      const generatedBrief = {
+        ...reconnectionSettings.brief,
+        offerSummary: aiGoal.trim(),
+        audienceHint: aiAudience.trim() || reconnectionSettings.brief.audienceHint,
+      };
+
       const res = await fetch('/api/ai/generate-campaign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           goal: aiGoal,
           targetAudience: aiAudience,
-          companyName: 'Mi Empresa', // TODO: Get from profile
+          companyName: profile?.company_name || 'Mi Empresa',
           language: 'es',
+          campaignType: draft.campaignType === 'reconnection' ? 'reconnection' : 'standard',
+          offerName: generatedBrief.offerName,
+          offerSummary: generatedBrief.offerSummary,
+          offerBenefits: generatedBrief.valuePoints,
+          cta: generatedBrief.cta,
+          tone: generatedBrief.tone,
         }),
       });
       if (!res.ok) throw new Error('Error generando campaña');
@@ -540,7 +861,18 @@ export default function CampaignsPage() {
         attachments: [],
       }));
 
-      setDraft(d => ({ ...d, steps: newSteps }));
+      setDraft(d => ({
+        ...d,
+        steps: newSteps,
+        settings: {
+          ...d.settings,
+          reconnection: {
+            ...d.settings.reconnection,
+            enabled: d.campaignType === 'reconnection',
+            brief: generatedBrief,
+          },
+        },
+      }));
       setAiOpen(false);
       toast({ title: 'Campaña generada', description: 'Revisa y edita los pasos antes de guardar.' });
     } catch (e: any) {
@@ -552,36 +884,86 @@ export default function CampaignsPage() {
 
   return (
     <div className="container mx-auto space-y-6">
-      <PageHeader title="Campañas" description="Crea campañas con pasos, excluye leads y previsualiza elegibles." />
+      <PageHeader title="Campañas" description="Separa reconexión inteligente y seguimiento clásico. Las campañas activas se revisan automáticamente desde el cron principal de ANTONIA." />
 
       {mode.kind === 'list' && (
         <>
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card className="border-border/60 bg-card/80 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.14)]">
+              <CardHeader className="pb-2"><CardDescription>Total</CardDescription><CardTitle className="text-2xl">{campaignOverview.total}</CardTitle></CardHeader>
+            </Card>
+            <Card className="border-border/60 bg-card/80 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.14)]">
+              <CardHeader className="pb-2"><CardDescription>Activas</CardDescription><CardTitle className="text-2xl">{campaignOverview.active}</CardTitle></CardHeader>
+            </Card>
+            <Card className="border-border/60 bg-card/80 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.14)]">
+              <CardHeader className="pb-2"><CardDescription>Reconexión</CardDescription><CardTitle className="text-2xl">{campaignOverview.reconnection}</CardTitle></CardHeader>
+            </Card>
+            <Card className="border-border/60 bg-card/80 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.14)]">
+              <CardHeader className="pb-2"><CardDescription>Sin ejecución automática</CardDescription><CardTitle className="text-2xl">{campaignOverview.missingAutomation}</CardTitle></CardHeader>
+            </Card>
+          </div>
+
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader>
               <div>
                 <CardTitle>Mis campañas</CardTitle>
-                <CardDescription>Administra, pausa/reanuda, previsualiza y elimina.</CardDescription>
+                <CardDescription>Reconexión para difundir algo nuevo. Seguimiento para perseguir automáticamente mensajes ya enviados.</CardDescription>
               </div>
-              <Button onClick={startCreate}><Plus className="mr-2 h-4 w-4" />Nueva campaña</Button>
             </CardHeader>
             <CardContent>
+              <div className="mb-4 rounded-xl border bg-muted/20 p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Filtrar y crear</div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant={campaignTypeFilter === 'all' ? 'secondary' : 'outline'} size="sm" onClick={() => setCampaignTypeFilter('all')}>Todas</Button>
+                      <Button variant={campaignTypeFilter === 'reconnection' ? 'secondary' : 'outline'} size="sm" onClick={() => setCampaignTypeFilter('reconnection')}>Reconexión</Button>
+                      <Button variant={campaignTypeFilter === 'follow_up' ? 'secondary' : 'outline'} size="sm" onClick={() => setCampaignTypeFilter('follow_up')}>Seguimiento</Button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="outline" onClick={() => startCreate('follow_up')}><Plus className="mr-2 h-4 w-4" />Nueva de seguimiento</Button>
+                    <Button onClick={() => startCreate('reconnection')}><Sparkles className="mr-2 h-4 w-4" />Nueva de reconexión</Button>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className="rounded-full border bg-background px-3 py-1">Activas: {campaignOverview.active}</span>
+                  <span className="rounded-full border bg-background px-3 py-1">Pendientes de revisar: {campaignOverview.missingAutomation}</span>
+                  <span className="rounded-full border bg-background px-3 py-1">Separadas por tipo para evitar mezclar reconexión con seguimiento</span>
+                </div>
+              </div>
               <div className="border rounded-md overflow-x-auto">
                 <Table>
                   <TableHeader>
                       <TableRow>
                         <TableHead>Nombre</TableHead>
+                        <TableHead>Tipo</TableHead>
                         <TableHead>Pasos</TableHead>
                         <TableHead>Métricas</TableHead>
+                        <TableHead>Automatización</TableHead>
                         <TableHead>Estado</TableHead>
                         <TableHead className="text-right">Acciones</TableHead>
                       </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {items.length === 0 ? (
-                      <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No hay campañas.</TableCell></TableRow>
-                    ) : items.map((c) => (
-                      <TableRow key={c.id}>
-                        <TableCell className="font-medium">{c.name}</TableCell>
+                    {filteredItems.length === 0 ? (
+                      <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No hay campañas para este filtro.</TableCell></TableRow>
+                    ) : filteredItems.map((c) => {
+                        const campaignSettings = c.settings || createDefaultCampaignSettings({ campaignType: c.campaignType });
+                        return <TableRow key={c.id}>
+                        <TableCell>
+                          <div className="font-medium">{c.name}</div>
+                          {c.campaignType === 'reconnection' ? (
+                            <div className="text-xs text-muted-foreground">
+                              Reactivacion · {campaignSettings.audience?.reactivation.minDaysSinceLastContact ?? defaultCampaignReactivationSettings.minDaysSinceLastContact}d · {campaignSettings.reconnection?.brief?.offerName || getReactivationSummary(campaignSettings.audience?.reactivation || defaultCampaignReactivationSettings)}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-muted-foreground">Seguimiento clasico por offset</div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={c.campaignType === 'reconnection' ? 'default' : 'outline'}>{getCampaignTypeLabel(c.campaignType)}</Badge>
+                        </TableCell>
                         <TableCell>{c.steps.length}</TableCell>
                         <TableCell>
                           {(() => {
@@ -592,6 +974,17 @@ export default function CampaignsPage() {
                               </div>
                             );
                           })()}
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <Badge variant={getRunStatusVariant(c.lastRunStatus)}>{formatRunStatusLabel(c.lastRunStatus)}</Badge>
+                            <div className="text-xs text-muted-foreground">Ultima revisión: {formatRunAt(c.lastRunAt)}</div>
+                            {c.lastRunSummary?.eligibleCount !== undefined ? (
+                              <div className="text-xs text-muted-foreground">
+                                Elegibles: <span className="text-foreground font-medium">{c.lastRunSummary.eligibleCount ?? 0}</span> · Enviados: <span className="text-foreground font-medium">{c.lastRunSummary.sentCount ?? 0}</span>
+                              </div>
+                            ) : null}
+                          </div>
                         </TableCell>
                         <TableCell>{c.isPaused ? 'Pausada' : 'Activa'}</TableCell>
                         <TableCell className="text-right space-x-2">
@@ -605,8 +998,8 @@ export default function CampaignsPage() {
                             <Trash2 className="mr-1 h-4 w-4" />Eliminar
                           </Button>
                         </TableCell>
-                      </TableRow>
-                    ))}
+                      </TableRow>;
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -619,8 +1012,9 @@ export default function CampaignsPage() {
         <Tabs defaultValue="editor" className="space-y-6">
           <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold tracking-tight">{draft.id ? 'Gestionar Campaña' : 'Nueva Campaña'}</h2>
-              <p className="text-muted-foreground">Configura los pasos, revisa métricas y ajusta exclusiones.</p>
+              <div className="mb-2"><Badge variant={draft.campaignType === 'reconnection' ? 'default' : 'outline'}>{getCampaignTypeLabel(draft.campaignType)}</Badge></div>
+              <h2 className="text-2xl font-bold tracking-tight">{getCampaignEditorTitle(draft.campaignType, Boolean(draft.id))}</h2>
+              <p className="text-muted-foreground">{getCampaignTypeDescription(draft.campaignType)}</p>
             </div>
             <div className="flex items-center gap-2">
               <TabsList>
@@ -645,7 +1039,7 @@ export default function CampaignsPage() {
                         <Button size="sm" variant={viewMode === 'list' ? 'secondary' : 'ghost'} className="h-7 px-2" onClick={() => setViewMode('list')}>Lista</Button>
                         <Button size="sm" variant={viewMode === 'flow' ? 'secondary' : 'ghost'} className="h-7 px-2" onClick={() => setViewMode('flow')}>Flujo</Button>
                       </div>
-                      <Button variant="outline" size="sm" onClick={() => setAiOpen(true)}>
+                      <Button variant="outline" size="sm" onClick={openAiGenerator}>
                         <Sparkles className="mr-2 h-4 w-4" />
                         IA
                       </Button>
@@ -656,6 +1050,127 @@ export default function CampaignsPage() {
                       <label className="text-sm font-medium">Nombre de la campaña</label>
                       <Input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
                     </div>
+
+                    {draft.campaignType === 'reconnection' ? (
+                      <div className="rounded-lg border bg-muted/20 p-4 space-y-4">
+                        <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <div className="text-sm font-medium">Brief de reconexion</div>
+                            <p className="text-xs text-muted-foreground">
+                              Describe el nuevo servicio o producto. Si un lead no tiene investigacion previa, la campaña la dispara automaticamente con n8n antes de personalizar el mensaje.
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex items-center gap-2">
+                              <Switch
+                                id="reconnection-enabled"
+                                checked={reconnectionSettings.enabled}
+                                onCheckedChange={(checked) => updateReconnectionSettings({ enabled: checked })}
+                              />
+                              <Label htmlFor="reconnection-enabled">Personalizacion inteligente</Label>
+                            </div>
+                            <Button type="button" variant="secondary" size="sm" onClick={openAiGenerator}>
+                              <Sparkles className="mr-2 h-4 w-4" />
+                              Generar secuencia
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div className="grid gap-1.5">
+                            <Label>Nombre del servicio</Label>
+                            <Input
+                              value={reconnectionSettings.brief.offerName}
+                              onChange={(e) => updateReconnectionBrief({ offerName: e.target.value })}
+                              placeholder="Ej: Auditoria SEO continua"
+                            />
+                          </div>
+                          <div className="grid gap-1.5">
+                            <Label>Audiencia ideal</Label>
+                            <Input
+                              value={reconnectionSettings.brief.audienceHint}
+                              onChange={(e) => updateReconnectionBrief({ audienceHint: e.target.value })}
+                              placeholder="Ej: Leads de marketing y growth en SaaS B2B"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid gap-1.5">
+                          <Label>Que quieres promocionar</Label>
+                          <Textarea
+                            rows={4}
+                            value={reconnectionSettings.brief.offerSummary}
+                            onChange={(e) => updateReconnectionBrief({ offerSummary: e.target.value })}
+                            placeholder="Describe el servicio, problema que resuelve, para quien aplica y por que ahora vale la pena reconectar al lead."
+                          />
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div className="grid gap-1.5">
+                            <Label>Puntos de valor</Label>
+                            <Textarea
+                              rows={4}
+                              value={toValuePointsText(reconnectionSettings.brief.valuePoints)}
+                              onChange={(e) => updateReconnectionBrief({ valuePoints: parseValuePoints(e.target.value) })}
+                              placeholder="Un punto por linea. Ej: Reduce tiempo operativo en 40%"
+                            />
+                          </div>
+                          <div className="space-y-4">
+                            <div className="grid gap-1.5">
+                              <Label>CTA sugerido</Label>
+                              <Input
+                                value={reconnectionSettings.brief.cta}
+                                onChange={(e) => updateReconnectionBrief({ cta: e.target.value })}
+                                placeholder="Ej: Te parece si lo vemos en 15 minutos?"
+                              />
+                            </div>
+                            <div className="grid gap-1.5">
+                              <Label>Tono</Label>
+                              <Input
+                                value={reconnectionSettings.brief.tone}
+                                onChange={(e) => updateReconnectionBrief({ tone: e.target.value })}
+                                placeholder="Ej: consultivo y cercano"
+                              />
+                            </div>
+                            <div className="grid gap-3 pt-1">
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  id="reconnection-auto-research"
+                                  checked={reconnectionSettings.autoResearchOnSend}
+                                  onCheckedChange={(checked) => updateReconnectionSettings({ autoResearchOnSend: checked })}
+                                  disabled={!reconnectionSettings.enabled}
+                                />
+                                <Label htmlFor="reconnection-auto-research">Investigar automaticamente con n8n si falta contexto</Label>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  id="reconnection-ai-personalization"
+                                  checked={reconnectionSettings.personalizeWithAi}
+                                  onCheckedChange={(checked) => updateReconnectionSettings({ personalizeWithAi: checked })}
+                                  disabled={!reconnectionSettings.enabled}
+                                />
+                                <Label htmlFor="reconnection-ai-personalization">Personalizar cada correo con IA</Label>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed bg-muted/20 p-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <div className="text-sm font-medium">Seguimiento clásico</div>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Esta campaña se dedica a enviar follow-ups automáticamente según los offsets definidos en cada paso. Ideal para no perseguir manualmente respuestas después del primer contacto.
+                            </p>
+                          </div>
+                          <Button type="button" variant="secondary" size="sm" onClick={openAiGenerator}>
+                            <Sparkles className="mr-2 h-4 w-4" />
+                            Generar secuencia
+                          </Button>
+                        </div>
+                      </div>
+                    )}
 
                     {viewMode === 'list' ? (
                       <div className="space-y-4">
@@ -844,8 +1359,12 @@ export default function CampaignsPage() {
           <TabsContent value="settings">
             <Card>
               <CardHeader>
-                <CardTitle>Exclusiones y Configuración Avanzada</CardTitle>
-                <CardDescription>Gestiona quiénes no deben recibir correos de esta campaña.</CardDescription>
+                <CardTitle>Audiencia, exclusiones y configuración</CardTitle>
+                <CardDescription>
+                  {draft.campaignType === 'reconnection'
+                    ? 'Configura la audiencia de reconexión, filtros de elegibilidad y exclusiones.'
+                    : 'Configura tracking, horarios de envío y exclusiones para el seguimiento automático.'}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
 
@@ -958,6 +1477,168 @@ export default function CampaignsPage() {
 
                 <div className="h-px bg-border my-6" />
 
+                {draft.campaignType === 'reconnection' ? (
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="text-sm font-medium">Reactivacion de leads</h3>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Usa esta opcion para volver a contactar leads ya trabajados, priorizando senales reales de entrega o interes.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="reactivation-enabled"
+                        checked={draft.settings.audience?.kind === 'reactivation'}
+                        onCheckedChange={toggleReactivationAudience}
+                      />
+                      <Label htmlFor="reactivation-enabled">Activar filtros de reactivacion</Label>
+                    </div>
+
+                    {reactivationAudience ? (
+                    <div className="space-y-4 border rounded-md p-4">
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        <div className="grid gap-1.5">
+                          <Label>Dias minimos desde el ultimo contacto</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={reactivationAudience.minDaysSinceLastContact}
+                            onChange={(e) => updateReactivationSettings({ minDaysSinceLastContact: Number(e.target.value || 0) })}
+                          />
+                        </div>
+                        <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                          <div className="font-medium">Resumen del segmento</div>
+                          <div className="text-xs text-muted-foreground mt-1">
+                            {getReactivationSummary(reactivationAudience)}
+                          </div>
+                        </div>
+                        <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                          <div className="font-medium">Candidatos estimados</div>
+                          <div className="text-xs text-muted-foreground mt-1">
+                            {reactivationStats?.matched ?? 0} de {reactivationStats?.totalCandidates ?? 0} leads con email cumplen estos filtros.
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="reactivation-delivery-evidence"
+                            checked={reactivationAudience.requireDeliveryEvidence}
+                            onCheckedChange={(value) => updateReactivationSettings({ requireDeliveryEvidence: value })}
+                          />
+                          <Label htmlFor="reactivation-delivery-evidence">Requerir evidencia de entrega o engagement</Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="reactivation-opened"
+                            checked={reactivationAudience.includeOpenedNoReply}
+                            onCheckedChange={(value) => updateReactivationSettings({ includeOpenedNoReply: value })}
+                          />
+                          <Label htmlFor="reactivation-opened">Incluir abiertos sin respuesta</Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="reactivation-clicked"
+                            checked={reactivationAudience.includeClickedNoReply}
+                            onCheckedChange={(value) => updateReactivationSettings({ includeClickedNoReply: value })}
+                          />
+                          <Label htmlFor="reactivation-clicked">Incluir clicks sin respuesta</Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="reactivation-delivered"
+                            checked={reactivationAudience.includeDeliveredNoOpen}
+                            onCheckedChange={(value) => updateReactivationSettings({ includeDeliveredNoOpen: value })}
+                          />
+                          <Label htmlFor="reactivation-delivered">Incluir correos entregados sin apertura</Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="reactivation-neutral"
+                            checked={reactivationAudience.includeNeutralReplies}
+                            onCheckedChange={(value) => updateReactivationSettings({ includeNeutralReplies: value })}
+                          />
+                          <Label htmlFor="reactivation-neutral">Incluir replies neutrales o auto-reply</Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="reactivation-no-signal"
+                            checked={reactivationAudience.includeNoSignal}
+                            onCheckedChange={(value) => updateReactivationSettings({ includeNoSignal: value })}
+                          />
+                          <Label htmlFor="reactivation-no-signal">Incluir leads sin senales previas</Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="reactivation-failed"
+                            checked={reactivationAudience.excludeFailedDeliveries}
+                            onCheckedChange={(value) => updateReactivationSettings({ excludeFailedDeliveries: value })}
+                          />
+                          <Label htmlFor="reactivation-failed">Excluir entregas fallidas o invalidas</Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="reactivation-dnc"
+                            checked={reactivationAudience.excludeDoNotContact}
+                            onCheckedChange={(value) => updateReactivationSettings({ excludeDoNotContact: value })}
+                          />
+                          <Label htmlFor="reactivation-dnc">Excluir negativos, unsubscribe y do-not-contact</Label>
+                        </div>
+                      </div>
+
+                      {reactivationStats ? (
+                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                          <div className="rounded-md border p-3">
+                            <div className="text-xs text-muted-foreground">Clicks sin reply</div>
+                            <div className="text-lg font-semibold">{reactivationStats.clicked}</div>
+                          </div>
+                          <div className="rounded-md border p-3">
+                            <div className="text-xs text-muted-foreground">Aperturas sin reply</div>
+                            <div className="text-lg font-semibold">{reactivationStats.opened}</div>
+                          </div>
+                          <div className="rounded-md border p-3">
+                            <div className="text-xs text-muted-foreground">Entregados sin apertura</div>
+                            <div className="text-lg font-semibold">{reactivationStats.delivered}</div>
+                          </div>
+                          <div className="rounded-md border p-3">
+                            <div className="text-xs text-muted-foreground">Replies neutrales</div>
+                            <div className="text-lg font-semibold">{reactivationStats.neutral}</div>
+                          </div>
+                          <div className="rounded-md border p-3">
+                            <div className="text-xs text-muted-foreground">Sin senal</div>
+                            <div className="text-lg font-semibold">{reactivationStats.noSignal}</div>
+                          </div>
+                          <div className="rounded-md border p-3">
+                            <div className="text-xs text-muted-foreground">Fallidos / invalidos</div>
+                            <div className="text-lg font-semibold">{reactivationStats.failedDelivery}</div>
+                          </div>
+                          <div className="rounded-md border p-3">
+                            <div className="text-xs text-muted-foreground">Do not contact</div>
+                            <div className="text-lg font-semibold">{reactivationStats.doNotContact}</div>
+                          </div>
+                          <div className="rounded-md border p-3">
+                            <div className="text-xs text-muted-foreground">Demasiado recientes</div>
+                            <div className="text-lg font-semibold">{reactivationStats.tooRecent}</div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                        Activa la reactivacion para limitar la campaña a leads ya contactados que muestran senales validas para un nuevo acercamiento.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                    En seguimiento clásico no necesitas segmentar por reactivación: el sistema revisa automáticamente offsets, replies, unsubscribe y exclusiones para decidir a quién tocar en cada corrida.
+                  </div>
+                )}
+
+                <div className="h-px bg-border my-6" />
+
                 <div className="space-y-3">
                   <div className="text-sm font-medium">Leads contactados que NO participarán</div>
                   <div className="flex items-center gap-2 mb-2">
@@ -979,8 +1660,9 @@ export default function CampaignsPage() {
                       <TableBody>
                         {contacted.length === 0 ? (
                           <TableRow><TableCell colSpan={5} className="text-center py-6 text-muted-foreground">No hay leads contactados aún.</TableCell></TableRow>
-                        ) : contacted.map((cl: any) => {
-                          const id = String(cl.leadId || '');
+                        ) : contacted.map((cl: ContactedLead) => {
+                          const id = getContactLeadKey(cl);
+                          if (!id) return null;
                           const checked = draft.excludedLeadIds.includes(id);
                           return (
                             <TableRow key={id}>
@@ -990,7 +1672,7 @@ export default function CampaignsPage() {
                               <TableCell>{cl.name}</TableCell>
                               <TableCell>{cl.company || '—'}</TableCell>
                               <TableCell>{cl.email}</TableCell>
-                              <TableCell>{cl.status}</TableCell>
+                              <TableCell>{cl.deliveryStatus === 'bounced' ? 'Bounce' : cl.deliveryStatus === 'soft_bounced' ? 'Entrega fallida' : cl.status}</TableCell>
                             </TableRow>
                           );
                         })}
@@ -1013,7 +1695,46 @@ export default function CampaignsPage() {
                 <DialogTitle>Leads elegibles</DialogTitle>
               </DialogHeader>
               {previewLoading ? null : (
-                <div className="flex items-center gap-3">
+                <div className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px_180px_180px]">
+                    <div className="relative">
+                      <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={eligibleNameFilter}
+                        onChange={(e) => setEligibleNameFilter(e.target.value)}
+                        placeholder="Buscar por nombre, email o empresa"
+                        className="pl-9"
+                      />
+                    </div>
+                    <select
+                      className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                      value={eligibleDaysFilter}
+                      onChange={(e) => setEligibleDaysFilter(e.target.value as 'all' | '7' | '14' | '30')}
+                    >
+                      <option value="all">Todos los días</option>
+                      <option value="7">7+ días</option>
+                      <option value="14">14+ días</option>
+                      <option value="30">30+ días</option>
+                    </select>
+                    <select
+                      className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                      value={eligibleStepFilter}
+                      onChange={(e) => setEligibleStepFilter(e.target.value)}
+                    >
+                      <option value="all">Todos los pasos</option>
+                      {previewStepOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                    <select
+                      className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                      value={eligibleIndustryFilter}
+                      onChange={(e) => setEligibleIndustryFilter(e.target.value)}
+                    >
+                      <option value="all">Todas las industrias</option>
+                      {previewIndustryOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-3">
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={allSelected}
@@ -1023,6 +1744,10 @@ export default function CampaignsPage() {
                     <span className="text-sm">
                       {allSelected ? 'Todos seleccionados' : someSelected ? `${selectedCount} seleccionados` : 'Seleccionar todo'}
                     </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                    {filteredPreviewRows.length} de {previewRows.length} visibles
                   </div>
                   <div className="ml-auto flex gap-2">
                     <Button
@@ -1043,6 +1768,7 @@ export default function CampaignsPage() {
                     </Button>
                   </div>
                 </div>
+                </div>
               )}
             </div>
 
@@ -1061,14 +1787,14 @@ export default function CampaignsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {previewRows.length === 0 ? (
+                    {filteredPreviewRows.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                          No hay leads elegibles todavía.
+                          No hay leads elegibles para estos filtros.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      previewRows.map((row) => (
+                      filteredPreviewRows.map((row) => (
                         <TableRow key={row.leadId} className="align-middle">
                           <TableCell className="py-3">
                             <Checkbox
@@ -1081,11 +1807,16 @@ export default function CampaignsPage() {
                             <div className="flex flex-col">
                               <span className="font-medium">{row.leadName ?? 'Sin nombre'}</span>
                               <span className="text-xs text-muted-foreground">{row.leadEmail ?? 'Sin email'}</span>
+                              <span className="text-xs text-muted-foreground">{row.leadCompany ?? 'Sin empresa'}{row.leadIndustry ? ` · ${row.leadIndustry}` : ''}</span>
+                              <span className="text-xs text-muted-foreground">{row.matchReason}</span>
                             </div>
                           </TableCell>
                           <TableCell className="py-3">
                             <div className="text-sm">
                               {row.nextStep?.name ?? `Paso ${row.nextStepIdx + 1}`}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Ultimo contacto: {formatPreviewDate(row.lastContactAt)}
                             </div>
                           </TableCell>
                           <TableCell className="py-3">{row.daysSinceLastContact}</TableCell>
@@ -1122,24 +1853,24 @@ export default function CampaignsPage() {
       <Dialog open={aiOpen} onOpenChange={setAiOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Generar campaña con IA</DialogTitle>
+            <DialogTitle>Generar campaña de reconexion con IA</DialogTitle>
             <DialogDescription>
-              Describe el objetivo de tu campaña y la IA generará los pasos, asuntos y correos por ti.
+              Describe lo que quieres promocionar y la IA preparara la secuencia base para luego personalizar cada envio lead por lead.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="ai-goal">Objetivo de la campaña</Label>
+              <Label htmlFor="ai-goal">Servicio o anuncio a difundir</Label>
               <Textarea
                 id="ai-goal"
-                placeholder="Ej: Recuperar clientes que pidieron presupuesto pero no compraron..."
+                placeholder="Ej: Nuevo servicio de automatizacion de soporte con IA para empresas que ya mostraron interes en eficiencia operativa..."
                 value={aiGoal}
                 onChange={(e) => setAiGoal(e.target.value)}
                 rows={3}
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="ai-audience">Público objetivo (Opcional)</Label>
+              <Label htmlFor="ai-audience">Quién debería recibirlo</Label>
               <Input
                 id="ai-audience"
                 placeholder="Ej: Gerentes de marketing en empresas de software"

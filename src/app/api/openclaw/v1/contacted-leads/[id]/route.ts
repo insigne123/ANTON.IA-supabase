@@ -20,13 +20,17 @@ const ALLOWED_PATCH_FIELDS = new Set([
     'reply_message_id',
     'reply_subject',
     'reply_snippet',
+    'delivery_status',
+    'bounced_at',
+    'bounce_category',
+    'bounce_reason',
 ]);
 
 const CONTACTED_FULL_SELECT =
-    'id, organization_id, mission_id, user_id, lead_id, name, email, company, role, status, subject, provider, sent_at, clicked_at, click_count, opened_at, replied_at, evaluation_status, engagement_score, last_interaction_at, last_update_at, reply_preview, last_reply_text, reply_intent, reply_sentiment, reply_confidence, reply_summary, campaign_followup_allowed, campaign_followup_reason, reply_message_id, reply_subject, reply_snippet, created_at';
+    'id, organization_id, mission_id, user_id, lead_id, name, email, company, role, status, subject, provider, sent_at, clicked_at, click_count, opened_at, delivered_at, delivery_status, bounced_at, bounce_category, bounce_reason, replied_at, evaluation_status, engagement_score, last_interaction_at, last_update_at, reply_preview, last_reply_text, reply_intent, reply_sentiment, reply_confidence, reply_summary, campaign_followup_allowed, campaign_followup_reason, reply_message_id, reply_subject, reply_snippet, created_at';
 
 const CONTACTED_LEGACY_SELECT =
-    'id, organization_id, mission_id, user_id, lead_id, name, email, company, role, status, subject, provider, sent_at, clicked_at, click_count, opened_at, replied_at, evaluation_status, engagement_score, last_interaction_at, last_update_at, reply_preview, last_reply_text, reply_intent, reply_sentiment, reply_confidence, reply_summary, campaign_followup_allowed, campaign_followup_reason, created_at';
+    'id, organization_id, mission_id, user_id, lead_id, name, email, company, role, status, subject, provider, sent_at, clicked_at, click_count, opened_at, delivered_at, delivery_status, bounced_at, bounce_category, bounce_reason, replied_at, evaluation_status, engagement_score, last_interaction_at, last_update_at, reply_preview, last_reply_text, reply_intent, reply_sentiment, reply_confidence, reply_summary, campaign_followup_allowed, campaign_followup_reason, created_at';
 
 function isMissingColumnError(error: any): boolean {
     const message = String(error?.message || '').toLowerCase();

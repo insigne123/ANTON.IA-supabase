@@ -17,6 +17,10 @@ export type MiniMessage = {
 
 function esc(s: string) { return s.replace(/'/g, "''"); }
 
+function isSystemSender(address: string) {
+  return /mailer-daemon|postmaster|microsoftoffice|outlook/i.test(String(address || ''));
+}
+
 async function graphFetch(path: string) {
   const token = await microsoftAuthService.getReadToken(); // requiere Mail.Read
   const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
@@ -51,8 +55,9 @@ export async function graphFindReplies(args: {
   fromEmail?: string;
   internetMessageId?: string;
   top?: number;
+  allowSystemSenders?: boolean;
 }): Promise<MiniMessage[]> {
-  const { conversationId, fromEmail, top = 25 } = args;
+  const { conversationId, fromEmail, top = 25, allowSystemSenders = false } = args;
   if (!conversationId) return [];
   try {
     const me = (microsoftAuthService.getUserIdentity().email || '').toLowerCase();
@@ -80,7 +85,7 @@ export async function graphFindReplies(args: {
         const from = (m?.from?.emailAddress?.address || '').toLowerCase();
         if (!from) return false;
         if (me && from === me) return false; // descarta mis correos
-        if (targetFrom && from !== targetFrom) return false;
+        if (targetFrom && from !== targetFrom && !(allowSystemSenders && isSystemSender(from))) return false;
         return true;
       });
   } catch (err: any) {

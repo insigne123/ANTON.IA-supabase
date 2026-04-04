@@ -32,7 +32,7 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
                 <DialogHeader>
                     <DialogTitle>Opciones de Enriquecimiento</DialogTitle>
                     <DialogDescription>
-                        Elige qué datos deseas obtener de Apollo. Cada dato tiene un costo de créditos.
+                        Elige qué datos deseas obtener del proveedor de datos. Cada dato tiene un costo de créditos.
                     </DialogDescription>
                 </DialogHeader>
 

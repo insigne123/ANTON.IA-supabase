@@ -1,71 +1,53 @@
 'use server';
 
-import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import type { StyleProfile } from '@/lib/types';
 import { generateStructured } from '@/ai/openai-json';
 
-// Esquema de entrada para el flujo
 const UpdateStyleInputSchema = z.object({
-    currentStyle: z.any(), // StyleProfile, pero z.any() para flexibilidad
-    userInstruction: z.string(),
-    sampleLead: z.any().optional(), // Contexto opcional para entender mejor
+  currentStyle: z.any(),
+  userInstruction: z.string(),
+  sampleLead: z.any().optional(),
 });
 
-// Esquema de salida
 const UpdateStyleOutputSchema = z.object({
-    updatedStyle: z.any(), // Partial<StyleProfile>
-    explanation: z.string(), // Explicación de qué cambió
+  updatedStyle: z.any(),
+  explanation: z.string(),
 });
 
-export const updateStyleProfileFlow = ai.defineFlow(
-    {
-        name: 'updateStyleProfile',
-        inputSchema: UpdateStyleInputSchema,
-        outputSchema: UpdateStyleOutputSchema,
-    },
-    async (input) => {
-        const prompt = `
-Eres un experto en Copywriting B2B y diseño de correos electrónicos.
-Tu tarea es modificar un "Perfil de Estilo" (JSON) basado en las instrucciones del usuario.
+export async function updateStyleProfile(input: z.infer<typeof UpdateStyleInputSchema>) {
+  const prompt = `
+Eres un experto en copywriting B2B y diseno de estilos para email outbound.
+Tu tarea es modificar un Perfil de Estilo JSON segun la instruccion del usuario.
 
-# Current Style Profile (JSON):
+# Perfil actual
 ${JSON.stringify(input.currentStyle, null, 2)}
 
-# User Instruction:
-"${input.userInstruction}"
+# Instruccion del usuario
+${JSON.stringify(input.userInstruction)}
 
-# Tarea:
-1. Analiza la instrucción del usuario.
-2. Modifica los campos del perfil de estilo que sean necesarios (tone, length, structure, personalization, templates).
-3. NO cambies el nombre ni el ID del estilo a menos que se pida explícitamente.
-4. Si la instrucción pide cambiar el contenido (ej: "menciona Coca-Cola"), edita \`bodyTemplate\` y \`subjectTemplate\`.
-   - Recuerda usar tokens como {{lead.firstName}}, {{company.name}}, {{sender.name}}.
-   - Si el usuario pide algo específico sobre su empresa, intégralo en el template.
-5. Devuelve el JSON del estilo actualizado Y una breve explicación de qué cambiaste.
+# Lead de ejemplo opcional
+${JSON.stringify(input.sampleLead || {})}
 
-# Formato de Salida (JSON):
-Devuelve UNICAMENTE un objeto JSON con esta estructura:
+# Reglas
+- Modifica solo los campos necesarios para reflejar la instruccion.
+- No cambies el nombre del estilo salvo que el usuario lo pida explicitamente.
+- Si el usuario pide cambios concretos de redaccion, actualiza subjectTemplate y bodyTemplate.
+- Usa placeholders como {{lead.firstName}}, {{company.name}}, {{sender.name}} cuando corresponda.
+- No inventes datos de empresas, clientes o resultados.
+- Devuelve un JSON con esta forma exacta:
 {
-  "updatedStyle": { ...campos modificados del estilo... },
-  "explanation": "Texto breve explicando los cambios hechos (en español)."
+  "updatedStyle": { ... },
+  "explanation": "..."
 }
 `;
 
-        const output = await generateStructured({
-            prompt,
-            schema: UpdateStyleOutputSchema,
-            temperature: 0.5,
-        });
-
-        if (!output) {
-            throw new Error('No se pudo generar una respuesta de la IA.');
-        }
-
-        return output;
-    }
-);
-
-export async function updateStyleProfile(input: z.infer<typeof UpdateStyleInputSchema>) {
-    return updateStyleProfileFlow(input);
+  return generateStructured({
+    prompt,
+    schema: UpdateStyleOutputSchema,
+    temperature: 0.5,
+  });
 }
+
+export type UpdateStyleProfileInput = z.infer<typeof UpdateStyleInputSchema>;
+export type UpdateStyleProfileOutput = z.infer<typeof UpdateStyleOutputSchema>;

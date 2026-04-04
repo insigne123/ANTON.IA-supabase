@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { supabaseService } from '@/lib/supabase-service';
 import type { Lead, EnrichedLead } from '@/lib/types';
@@ -34,6 +35,13 @@ export default function SavedLeadsPage() {
   const [selLead, setSelLead] = useState<Record<string, boolean>>({});
   const [enriching, setEnriching] = useState(false);
   const [showOnlyMyLeads, setShowOnlyMyLeads] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [companyFilter, setCompanyFilter] = useState('');
+  const [titleFilter, setTitleFilter] = useState('');
+  const [industryFilter, setIndustryFilter] = useState('all');
+  const [createdByFilter, setCreatedByFilter] = useState('all');
+  const [createdFrom, setCreatedFrom] = useState('');
+  const [createdTo, setCreatedTo] = useState('');
   const [selectedLeadForComments, setSelectedLeadForComments] = useState<Lead | null>(null);
 
   // Dialog state
@@ -147,10 +155,32 @@ export default function SavedLeadsPage() {
     downloadCsv(`leads_${new Date().toISOString().slice(0, 10)}.csv`, csv);
   };
 
+  const industryOptions = useMemo(() => Array.from(new Set(savedLeads.map((lead) => String(lead.industry || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [savedLeads]);
+  const creatorOptions = useMemo(() => Array.from(new Set(savedLeads.map((lead) => String(lead.userId || '').trim()).filter(Boolean))), [savedLeads]);
+
   const filteredLeads = useMemo(() => {
-    if (!showOnlyMyLeads || !user) return savedLeads;
-    return savedLeads.filter(l => l.userId === user.id);
-  }, [savedLeads, showOnlyMyLeads, user]);
+    const term = searchTerm.trim().toLowerCase();
+
+    return savedLeads.filter((lead) => {
+      if (showOnlyMyLeads && user && lead.userId !== user.id) return false;
+      if (industryFilter !== 'all' && String(lead.industry || '').trim() !== industryFilter) return false;
+      if (createdByFilter !== 'all' && String(lead.userId || '').trim() !== createdByFilter) return false;
+      if (companyFilter && !String(lead.company || '').toLowerCase().includes(companyFilter.toLowerCase())) return false;
+      if (titleFilter && !String(lead.title || '').toLowerCase().includes(titleFilter.toLowerCase())) return false;
+
+      const leadDate = new Date((lead as any).createdAt || 0);
+      if (createdFrom) {
+        if (Number.isNaN(leadDate.getTime()) || leadDate < new Date(`${createdFrom}T00:00:00`)) return false;
+      }
+      if (createdTo) {
+        if (Number.isNaN(leadDate.getTime()) || leadDate > new Date(`${createdTo}T23:59:59`)) return false;
+      }
+
+      if (!term) return true;
+      const haystack = [lead.name, lead.company, lead.title, lead.industry, lead.email, lead.userId].map((value) => String(value || '').toLowerCase());
+      return haystack.some((value) => value.includes(term));
+    });
+  }, [savedLeads, showOnlyMyLeads, user, searchTerm, companyFilter, titleFilter, industryFilter, createdByFilter, createdFrom, createdTo]);
 
   const pageLeads = filteredLeads;
 
@@ -264,6 +294,7 @@ export default function SavedLeadsPage() {
         // Aseguramos que phoneNumbers y primaryPhone se pasen
         return {
           id: e.id,
+          apolloId: e.apolloId,
           fullName: e.fullName,
           title: e.title,
           email: e.email,
@@ -276,6 +307,7 @@ export default function SavedLeadsPage() {
           industry: sourceLead?.industry,
           phoneNumbers: e.phoneNumbers,
           primaryPhone: e.primaryPhone,
+          enrichmentStatus: e.enrichmentStatus,
         };
       });
 
@@ -288,6 +320,7 @@ export default function SavedLeadsPage() {
         email: e.email || undefined,
         primaryPhone: e.primaryPhone || (e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined),
         emailStatus: e.email ? (e.emailStatus || 'verified') : 'not_found',
+        enrichmentStatus: e.enrichmentStatus || ((e.primaryPhone || e.phoneNumbers?.length) ? 'completed' : (revealPhone ? 'pending_phone' : 'completed')),
       }));
 
       let addRes: any = { addedCount: 0 };
@@ -313,10 +346,13 @@ export default function SavedLeadsPage() {
       setSelLead({});
 
       const foundCount = leadsToSave.filter(l => !!l.email || !!l.primaryPhone).length;
+      const pendingPhoneCount = leadsToSave.filter(l => l.enrichmentStatus === 'pending_phone').length;
 
       toast({
         title: 'Enriquecimiento completado',
-        description: `Procesados: ${leadsToSave.length}. Con datos: ${foundCount}. Movidos a Enriquecidos.`,
+        description: pendingPhoneCount > 0
+          ? `Procesados: ${leadsToSave.length}. Con datos inmediatos: ${foundCount}. Telefonos en proceso: ${pendingPhoneCount}. Movidos a Enriquecidos.`
+          : `Procesados: ${leadsToSave.length}. Con datos: ${foundCount}. Movidos a Enriquecidos.`,
       });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error', description: e.message || 'Ocurrió un error' });
@@ -331,30 +367,37 @@ export default function SavedLeadsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Guardados · Leads"
-        description="Administra y enriquece tus leads guardados para prepararlos para la investigación y el contacto."
+        description="Revisa tu base guardada, filtra rápido y enriquece solo lo que realmente vale la pena mover." 
       />
 
       <div className="mb-4">
         <DailyQuotaProgress kinds={['enrich']} compact />
       </div>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
+      <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
+        <CardHeader className="flex flex-col gap-5 border-b border-border/60 bg-muted/10 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-3">
+            <div className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground">Base guardada</div>
             <CardTitle>Leads guardados</CardTitle>
             <CardDescription>Selecciona los que no tienen email para enriquecerlos.</CardDescription>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs">
+              <span className="rounded-full border border-border/70 bg-background/80 px-3 py-1">Visibles: {filteredLeads.length}</span>
+              <span className="rounded-full border border-border/70 bg-background/80 px-3 py-1">Sin email: {filteredLeads.filter((lead) => !lead.email).length}</span>
+              <span className="rounded-full border border-border/70 bg-background/80 px-3 py-1">Creados por ti: {savedLeads.filter((lead) => lead.userId === user?.id).length}</span>
+            </div>
           </div>
-          <div className="flex gap-2 items-center">
+          <div className="flex flex-wrap gap-2 items-center lg:max-w-[620px] lg:justify-end">
             <div className="flex items-center space-x-2 mr-4">
               <Switch id="my-leads" checked={showOnlyMyLeads} onCheckedChange={setShowOnlyMyLeads} />
               <Label htmlFor="my-leads">Solo mis leads</Label>
             </div>
-            <Button variant="outline" onClick={handleExportCsv}>
+            <Button variant="outline" className="shadow-none" onClick={handleExportCsv}>
               <Download className="mr-2 h-4 w-4" />
               Exportar CSV
             </Button>
             <Button
               variant="outline"
+              className="shadow-none"
               onClick={() => router.push('/saved/leads/enriched')}
             >
               Ver enriquecidos
@@ -362,6 +405,7 @@ export default function SavedLeadsPage() {
 
             <Button
               variant="secondary"
+              className="shadow-none"
               disabled={enriching || Object.values(selLead).every(v => !v)}
               onClick={initiateEnrichSelected}
             >
@@ -370,6 +414,27 @@ export default function SavedLeadsPage() {
           </div>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 rounded-[22px] border border-border/70 bg-muted/15 p-4">
+            <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Filtros</div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <Input placeholder="Buscar lead, empresa, cargo o email" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              <Input placeholder="Filtrar por empresa" value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)} />
+              <Input placeholder="Filtrar por cargo" value={titleFilter} onChange={(e) => setTitleFilter(e.target.value)} />
+              <select className="h-10 rounded-md border bg-background px-3 py-2 text-sm" value={industryFilter} onChange={(e) => setIndustryFilter(e.target.value)}>
+                <option value="all">Todas las industrias</option>
+                {industryOptions.map((industry) => <option key={industry} value={industry}>{industry}</option>)}
+              </select>
+              <select className="h-10 rounded-md border bg-background px-3 py-2 text-sm" value={createdByFilter} onChange={(e) => setCreatedByFilter(e.target.value)}>
+                <option value="all">Todas las personas</option>
+                {creatorOptions.map((creatorId) => <option key={creatorId} value={creatorId}>{creatorId === user?.id ? 'Yo' : creatorId}</option>)}
+              </select>
+              <Input type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} />
+              <Input type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} />
+              <Button variant="ghost" onClick={() => { setSearchTerm(''); setCompanyFilter(''); setTitleFilter(''); setIndustryFilter('all'); setCreatedByFilter('all'); setCreatedFrom(''); setCreatedTo(''); setShowOnlyMyLeads(false); }}>
+                Limpiar filtros
+              </Button>
+            </div>
+          </div>
           <div className="rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>

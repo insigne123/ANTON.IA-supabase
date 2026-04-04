@@ -19,8 +19,12 @@ type PendingLeadRow = {
   phone_numbers?: any;
   primary_phone?: string | null;
   enrichment_status?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
   data?: Record<string, any> | null;
 };
+
+const STALE_PENDING_PHONE_MS = 20 * 60 * 1000;
 
 type PeopleSearchRow = {
   id?: string | null;
@@ -89,6 +93,12 @@ function getApolloId(row: PendingLeadRow) {
   return String(row.data?.apolloId || row.data?.apollo_id || '').trim();
 }
 
+function isLeadPendingTooLong(row: PendingLeadRow) {
+  const reference = new Date(row.updated_at || row.created_at || 0).getTime();
+  if (!Number.isFinite(reference) || reference <= 0) return false;
+  return Date.now() - reference >= STALE_PENDING_PHONE_MS;
+}
+
 async function resolveUserContext(req: NextRequest) {
   const headerUserId = req.headers.get('x-user-id')?.trim() || '';
   if (headerUserId) {
@@ -138,7 +148,7 @@ export async function POST(req: NextRequest) {
 
     let pendingQuery = admin
       .from('enriched_leads')
-      .select('id, user_id, organization_id, full_name, company_name, email, linkedin_url, phone_numbers, primary_phone, enrichment_status, data')
+      .select('id, user_id, organization_id, full_name, company_name, email, linkedin_url, phone_numbers, primary_phone, enrichment_status, created_at, updated_at, data')
       .eq('enrichment_status', 'pending_phone')
       .limit(requestedIds.length > 0 ? Math.max(requestedIds.length, 1) : 50);
 
@@ -246,6 +256,21 @@ export async function POST(req: NextRequest) {
         : (primaryPhone || phoneNumbers.length > 0 ? 'completed' : 'pending_phone');
 
       if (nextStatus === 'pending_phone' && !primaryPhone && phoneNumbers.length === 0) {
+        if (isLeadPendingTooLong(lead)) {
+          const data = { ...(lead.data || {}), phoneSyncSource: 'people_search_leads', phoneSyncedAt: now, phoneSyncResolution: 'completed_without_phone' };
+          const { error: staleUpdateError } = await admin
+            .from('enriched_leads')
+            .update({
+              enrichment_status: 'completed',
+              updated_at: now,
+              data,
+            })
+            .eq('id', lead.id);
+
+          if (staleUpdateError) throw staleUpdateError;
+          updatedIds.push(lead.id);
+          completedWithoutPhone += 1;
+        }
         continue;
       }
 
@@ -274,6 +299,27 @@ export async function POST(req: NextRequest) {
       }
 
       updatedIds.push(lead.id);
+    }
+
+    const unresolvedStaleLeads = pending.filter((lead) => {
+      if (updatedIds.includes(lead.id)) return false;
+      return isLeadPendingTooLong(lead);
+    });
+
+    for (const lead of unresolvedStaleLeads) {
+      const data = { ...(lead.data || {}), phoneSyncedAt: now, phoneSyncResolution: 'no_match_timeout' };
+      const { error: staleUpdateError } = await admin
+        .from('enriched_leads')
+        .update({
+          enrichment_status: 'completed',
+          updated_at: now,
+          data,
+        })
+        .eq('id', lead.id);
+
+      if (staleUpdateError) throw staleUpdateError;
+      updatedIds.push(lead.id);
+      completedWithoutPhone += 1;
     }
 
     return NextResponse.json({

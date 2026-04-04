@@ -1,12 +1,15 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { generatePhoneScript } from '@/ai/flows/generate-phone-script';
+import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
     try {
+        await requireAuth();
+
         const body = await req.json();
         const { report, companyProfile, lead } = body;
 
@@ -31,6 +34,7 @@ export async function POST(req: NextRequest) {
         const out = await generatePhoneScript({ report: report || {}, companyProfile, lead });
         return NextResponse.json(out);
     } catch (e: any) {
+        if (e?.name === 'AuthError') return handleAuthError(e);
         console.error('AI phone script generation error:', e);
         return NextResponse.json({ error: e?.message || 'Error al generar el guion con IA' }, { status: 500 });
     }

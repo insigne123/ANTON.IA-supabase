@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { ai } from '@/ai/genkit';
 import { z } from 'zod';
+import { generateStructured } from '@/ai/openai-json';
+import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -40,6 +41,8 @@ const OutputSchema = z.object({
 
 export async function POST(req: Request) {
   try {
+    await requireAuth();
+
     const json = await req.json();
     const { instruction, drafts } = InputSchema.parse(json);
 
@@ -75,13 +78,13 @@ LISTA DE BORRADORES A EDITAR:
 ${JSON.stringify(examples, null, 2)}
     `;
 
-    // Llamada a Genkit
-    const result = await ai.generate({
+    const result = await generateStructured({
       prompt,
-      output: { schema: OutputSchema },
+      schema: OutputSchema,
+      temperature: 0.3,
     });
 
-    if (!result?.output?.edits) {
+    if (!result?.edits) {
       throw new Error('La IA no devolvió un formato válido.');
     }
 
@@ -92,7 +95,7 @@ ${JSON.stringify(examples, null, 2)}
 
     // Mapeo de vuelta a la estructura del cliente
     // Intentamos hacer match por ID
-    const editMap = new Map(result.output.edits.map(e => [e.leadId, e]));
+    const editMap = new Map(result.edits.map(e => [e.leadId, e]));
 
     const responseDrafts = drafts.map(original => {
       const id = original.lead.id || original.lead.email;
@@ -111,6 +114,7 @@ ${JSON.stringify(examples, null, 2)}
     return NextResponse.json({ drafts: responseDrafts });
 
   } catch (e: any) {
+    if (e?.name === 'AuthError') return handleAuthError(e);
     console.error('[bulk-edit] error:', e);
     return NextResponse.json({ error: e.message || 'Error processing with AI' }, { status: 500 });
   }

@@ -1,8 +1,20 @@
 import { NextResponse } from 'next/server';
+import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+function isDebugApiEnabled() {
+  return process.env.NODE_ENV !== 'production' || String(process.env.DEBUG_API_ENABLED || '').trim() === 'true';
+}
+
 export async function GET() {
+  if (!isDebugApiEnabled()) return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 });
+  try {
+    await requireAuth();
+  } catch (error) {
+    return handleAuthError(error);
+  }
+
   const token = process.env.APIFY_TOKEN;
   if (!token) return NextResponse.json({ ok: false, error: 'APIFY_TOKEN missing' }, { status: 500 });
 

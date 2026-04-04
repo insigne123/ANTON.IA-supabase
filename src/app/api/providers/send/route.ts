@@ -6,6 +6,8 @@ import { refreshGoogleToken, refreshMicrosoftToken } from '@/lib/server-auth-hel
 import { sendGmail, sendOutlook } from '@/lib/server-email-sender';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { normalizeConnectedEmailProvider } from '@/lib/email-provider';
+import { checkAndConsumeDailyQuota } from '@/lib/server/daily-quota-store';
+import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
 
 export const dynamic = 'force-dynamic';
 
@@ -134,11 +136,26 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Failed to refresh token. Please reconnect.' }, { status: 401 });
         }
 
+        const prepared = prepareOutboundEmail({ html: finalBody, unsubscribeUrl });
+        const preflight = validateOutboundEmail({ to, subject, html: prepared.html, text: prepared.text, requireUnsubscribe: true, unsubscribeUrl });
+        if (!preflight.ok) {
+            return NextResponse.json({ error: preflight.errors.join(' ') }, { status: 400 });
+        }
+
+        const { allowed, count, limit } = await checkAndConsumeDailyQuota({
+            userId: user.id,
+            resource: 'contact',
+            limit: 50,
+        });
+        if (!allowed) {
+            return NextResponse.json({ error: `Daily quota exceeded for contact. Used ${count}/${limit}.` }, { status: 429 });
+        }
+
         // 3. Send Email
         if (provider === 'google') {
-            await sendGmail(accessToken, to, subject, finalBody);
+            await sendGmail(accessToken, to, subject, prepared.html, { textBody: prepared.text, unsubscribeUrl });
         } else {
-            await sendOutlook(accessToken, to, subject, finalBody);
+            await sendOutlook(accessToken, to, subject, prepared.html, { textBody: prepared.text, unsubscribeUrl });
         }
 
         return NextResponse.json({ success: true });

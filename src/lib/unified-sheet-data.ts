@@ -6,6 +6,7 @@ import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { savedOpportunitiesStorage } from '@/lib/services/opportunities-service';
 import { unifiedSheetService, type CustomData } from '@/lib/services/unified-sheet-service';
 import type { UnifiedRow } from './unified-sheet-types';
+import { hasReplySignal } from './antonia-reply-metrics';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
@@ -99,6 +100,7 @@ function mapSavedLead(l: any, customMap: Record<string, CustomData>): UnifiedRow
       name: normalizeStr(l?.name ?? `${(l as any)?.first_name ?? ''} ${(l as any)?.last_name ?? ''}`) || null,
       company: normalizeStr(l?.company ?? (l as any)?.companyName) || null,
       title: normalizeStr(l?.title ?? (l as any)?.position) || null,
+      industry: normalizeStr(l?.industry ?? (l as any)?.organization_industry) || null,
       email,
       linkedinUrl: normalizeStr((l as any)?.linkedin_url ?? l?.linkedinUrl) || null,
       status: 'saved',
@@ -144,6 +146,7 @@ function mapEnrichedLead(e: any, customMap: Record<string, CustomData>): Unified
       name: normalizeStr(e?.fullName ?? e?.name ?? `${(e as any)?.firstName ?? ''} ${(e as any)?.lastName ?? ''}`) || null,
       company: normalizeStr(e?.company ?? e?.companyName) || null,
       title: normalizeStr(e?.title ?? (e as any)?.position) || null,
+      industry: normalizeStr(e?.industry ?? e?.organizationIndustry ?? (e as any)?.organization_industry) || null,
       email,
       linkedinUrl: normalizeStr(e?.linkedinUrl ?? (e as any)?.linkedin_url) || null,
       status: 'enriched',
@@ -179,6 +182,7 @@ function mapOpportunity(o: any, customMap: Record<string, CustomData>): UnifiedR
       name: normalizeStr(o?.role ?? o?.title ?? o?.name) || null,
       company: normalizeStr(o?.company ?? o?.companyName) || null,
       title: normalizeStr(o?.seniority ?? o?.level) || null,
+      industry: normalizeStr(o?.industry ?? o?.organizationIndustry) || null,
       email: null,
       linkedinUrl: normalizeStr(o?.jobUrl) || null,
       status: 'saved',
@@ -208,6 +212,14 @@ function mapContacted(c: any, customMap: Record<string, CustomData>): UnifiedRow
     const gid = `contacted|${String(idBase)}`;
     const custom = customMap[gid];
     const email = normalizeStr(c?.to ?? c?.email ?? c?.recipient) || null;
+    const replied = hasReplySignal({
+      repliedAt: c?.repliedAt,
+      replied_at: c?.replied_at,
+      replyIntent: c?.replyIntent,
+      reply_intent: c?.reply_intent,
+      lastReplyText: c?.lastReplyText,
+      last_reply_text: c?.last_reply_text,
+    });
 
     return {
       gid,
@@ -215,9 +227,10 @@ function mapContacted(c: any, customMap: Record<string, CustomData>): UnifiedRow
       name: normalizeStr(c?.name) || null,
       company: normalizeStr(c?.company) || null,
       title: normalizeStr(c?.title) || null,
+      industry: normalizeStr(c?.industry) || null,
       email,
       linkedinUrl: normalizeStr(c?.linkedinUrl) || null,
-      status: (normalizeStr(c?.status) as UnifiedRow['status']) ?? 'sent',
+      status: replied ? 'replied' : ((normalizeStr(c?.status) as UnifiedRow['status']) ?? 'sent'),
       kind: 'contacted',
       createdAt: (c as any)?.createdAt ?? null,
       updatedAt: (c as any)?.updatedAt ?? null,

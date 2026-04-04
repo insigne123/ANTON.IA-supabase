@@ -50,9 +50,7 @@ import { MissionTunerDialog } from '@/components/antonia/MissionTunerDialog';
 import { AutopilotControlCenter } from '@/components/antonia/AutopilotControlCenter';
 import { AutopilotExceptionsPanel } from '@/components/antonia/AutopilotExceptionsPanel';
 import { AutopilotNextActionsPanel } from '@/components/antonia/AutopilotNextActionsPanel';
-import { AutopilotPlaybookBenchmarksPanel } from '@/components/antonia/AutopilotPlaybookBenchmarksPanel';
 import { AutopilotExecutiveReportPanel } from '@/components/antonia/AutopilotExecutiveReportPanel';
-import { AntoniaPlaybookPicker } from '@/components/antonia/AntoniaPlaybookPicker';
 
 import {
     Sheet,
@@ -80,11 +78,33 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { companySizes } from '@/lib/data';
 import { APOLLO_SENIORITIES } from '@/lib/apollo-taxonomies';
-import { ANTONIA_OUTSOURCING_PLAYBOOKS, type AntoniaPlaybook } from '@/lib/antonia-playbooks';
 import { buildMissionGoalSummary, shortMissionGoalLabel } from '@/lib/antonia-mission-goals';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+
+function simplifyAutopilotModeLabel(value?: string | null) {
+    switch (value) {
+        case 'full_auto':
+            return 'Full Auto';
+        case 'semi_auto':
+            return 'Semi Auto';
+        default:
+            return 'Manual Assist';
+    }
+}
+
+function simplifyAutopilotModeDescription(value?: string | null) {
+    switch (value) {
+        case 'full_auto':
+            return 'ANTONIA ejecuta sola y solo frena cuando detecta riesgo.';
+        case 'semi_auto':
+            return 'ANTONIA trabaja sola en casos seguros y te pide ayuda cuando duda.';
+        default:
+            return 'ANTONIA prepara el trabajo y una persona decide antes de enviar.';
+    }
+}
 
 export default function AntoniaPage() {
     const [activeTab, setActiveTab] = useState('builder');
@@ -95,7 +115,6 @@ export default function AntoniaPage() {
     const [userId, setUserId] = useState<string | null>(null);
     const [existingCampaigns, setExistingCampaigns] = useState<Campaign[]>([]);
     const [campaignSearch, setCampaignSearch] = useState('');
-    const [selectedPlaybookId, setSelectedPlaybookId] = useState<string | null>(null);
 
     // Wizard State
     const [step, setStep] = useState(1);
@@ -117,8 +136,6 @@ export default function AntoniaPage() {
         enrichmentLevel: 'basic' as 'basic' | 'deep',
         campaignName: '',
         campaignContext: '',
-        playbookId: '',
-        playbookName: '',
         autoGenerateCampaign: false,
         dailySearchLimit: 1,
         dailyEnrichLimit: 10,
@@ -371,8 +388,6 @@ export default function AntoniaPage() {
                 enrichmentLevel: 'basic',
                 campaignName: '',
                 campaignContext: '',
-                playbookId: '',
-                playbookName: '',
                 autoGenerateCampaign: false,
                 dailySearchLimit: 1,
                 dailyEnrichLimit: 10,
@@ -486,27 +501,6 @@ export default function AntoniaPage() {
         }));
     };
 
-    const applyPlaybook = (playbook: AntoniaPlaybook) => {
-        setSelectedPlaybookId(playbook.id);
-        setWizardData((prev) => ({
-            ...prev,
-            ...playbook.defaults,
-            playbookId: playbook.id,
-            playbookName: playbook.name,
-            campaignName: playbook.defaults.autoGenerateCampaign ? '' : prev.campaignName,
-        }));
-        setStep(1);
-        setActiveTab('builder');
-        toast({
-            title: 'Playbook aplicado',
-            description: `${playbook.name} cargo la mision con defaults de outsourcing.`,
-        });
-    };
-
-
-
-
-
     const handleUpdateConfig = async (key: keyof AntoniaConfig, value: any) => {
         if (!orgId) return;
         try {
@@ -519,13 +513,19 @@ export default function AntoniaPage() {
                 dailyEnrichLimit: 50,
                 dailyInvestigateLimit: 20,
                 trackingEnabled: false,
-                autopilotEnabled: false,
-                autopilotMode: 'manual_assist',
+                autopilotEnabled: true,
+                autopilotMode: 'full_auto',
                 approvalMode: 'low_score_only',
                 minAutoSendScore: 70,
                 minReviewScore: 45,
                 bookingLink: '',
                 meetingInstructions: '',
+                replyAutopilotEnabled: false,
+                replyAutopilotMode: 'draft_only',
+                replyApprovalMode: 'high_risk_only',
+                replyMaxAutoTurns: 2,
+                autoSendBookingReplies: false,
+                allowReplyAttachments: false,
                 pauseOnNegativeReply: true,
                 pauseOnFailureSpike: true,
                 createdAt: new Date().toISOString(),
@@ -582,14 +582,13 @@ export default function AntoniaPage() {
         <div className="container mx-auto space-y-6">
             <PageHeader
                 title="Agente ANTON.IA"
-                description="Tu asistente de prospección automatizada. Define misiones y ANTONIA se encarga del resto."
+                description="Configura misiones, revisa actividad y mantén el control sin navegar entre paneles innecesarios."
             />
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full max-w-4xl grid-cols-6">
+                <TabsList className="h-auto w-full max-w-4xl justify-start gap-1 overflow-x-auto rounded-2xl border border-border/60 bg-card/70 p-1 shadow-[0_8px_24px_-20px_rgba(15,23,42,0.14)]">
                     <TabsTrigger value="builder">Crear Misión</TabsTrigger>
                     <TabsTrigger value="active">Activas ({missions.length})</TabsTrigger>
-                    <TabsTrigger value="autopilot">Autopilot</TabsTrigger>
                     <TabsTrigger value="reportes" className="flex items-center gap-2">
                         <FileText className="w-4 h-4" /> Reportes
                     </TabsTrigger>
@@ -606,75 +605,18 @@ export default function AntoniaPage() {
                     {/* Quota Usage Dashboard */}
                     <QuotaUsageCard />
 
-                    {orgId && <ActiveAgentsPanel organizationId={orgId} />}
-
-                    <AntoniaPlaybookPicker
-                        playbooks={ANTONIA_OUTSOURCING_PLAYBOOKS}
-                        selectedId={selectedPlaybookId}
-                        onApply={applyPlaybook}
-                    />
-
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* Left: Helper */}
-                        <div className="lg:col-span-1 space-y-4">
-                            <Card className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-950/20 dark:to-pink-950/20 border-purple-200 dark:border-purple-800">
-                                <CardHeader>
-                                    <div className="flex items-center gap-2">
-                                        <Bot className="w-5 h-5 text-purple-600" />
-                                        <CardTitle className="text-lg">¿Cómo funciona?</CardTitle>
-                                    </div>
-                                </CardHeader>
-                                <CardContent className="text-sm space-y-4">
-                                    <div className="flex gap-3">
-                                        <div className="mt-1 p-2 bg-white dark:bg-gray-900 rounded-lg border shadow-sm">
-                                            <Target className="w-4 h-4 text-purple-600" />
-                                        </div>
-                                        <div>
-                                            <p className="font-semibold text-gray-900 dark:text-gray-100">1. Define tu Objetivo</p>
-                                            <p className="text-gray-600 dark:text-gray-400 text-xs mt-1">Especifica cargo, ubicación e industria de tus prospectos ideales.</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-3">
-                                        <div className="mt-1 p-2 bg-white dark:bg-gray-900 rounded-lg border shadow-sm">
-                                            <Globe className="w-4 h-4 text-blue-600" />
-                                        </div>
-                                        <div>
-                                            <p className="font-semibold text-gray-900 dark:text-gray-100">2. Búsqueda Automática</p>
-                                            <p className="text-gray-600 dark:text-gray-400 text-xs mt-1">ANTONIA busca en LinkedIn, Apollo y bases de datos públicas 24/7.</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-3">
-                                        <div className="mt-1 p-2 bg-white dark:bg-gray-900 rounded-lg border shadow-sm">
-                                            <Briefcase className="w-4 h-4 text-orange-600" />
-                                        </div>
-                                        <div>
-                                            <p className="font-semibold text-gray-900 dark:text-gray-100">3. Enriquecimiento y Contacto</p>
-                                            <p className="text-gray-600 dark:text-gray-400 text-xs mt-1">Verifica emails, enriquece datos y activa campañas automáticamente.</p>
-                                        </div>
-                                    </div>
-                                    <Separator />
-                                    <div className="bg-white/50 dark:bg-gray-900/50 p-3 rounded-lg border">
-                                        <div className="flex items-center gap-2 text-xs text-purple-700 dark:text-purple-300">
-                                            <Sparkles className="w-3 h-3" />
-                                            <span className="font-medium">ANTONIA trabaja incluso cuando estás offline</span>
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        </div>
-
-                        {/* Right: Wizard Form */}
-                        <Card className="lg:col-span-2 border-2 shadow-sm">
+                    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+                        <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
                             <CardHeader>
                                 <div className="flex justify-between items-center">
                                     <CardTitle>Nueva Misión</CardTitle>
                                     <Badge variant="outline">Paso {step} de 3</Badge>
                                 </div>
-                                <div className="h-1 w-full bg-secondary mt-4 rounded-full overflow-hidden">
-                                    <div className="h-full bg-gradient-to-r from-purple-600 to-pink-600 transition-all duration-500" style={{ width: `${(step / 3) * 100}%` }} />
+                                <div className="mt-4 h-1 w-full overflow-hidden rounded-full bg-secondary">
+                                    <div className="h-full bg-primary transition-all duration-500" style={{ width: `${(step / 3) * 100}%` }} />
                                 </div>
                             </CardHeader>
-                            <CardContent className="py-6 min-h-[320px]">
+                            <CardContent className="py-6">
                                 {step === 1 && (
                                     <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
                                         <h3 className="text-lg font-medium mb-4">Audiencia Objetivo</h3>
@@ -811,37 +753,50 @@ export default function AntoniaPage() {
 
                                 {step === 2 && (
                                     <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
-                                        <h3 className="text-lg font-medium mb-4">Acciones a Ejecutar</h3>
+                                        <div className="mb-4 space-y-1">
+                                            <h3 className="text-lg font-medium">Cómo debe trabajar la misión</h3>
+                                            <p className="text-sm text-muted-foreground">Completa solo lo que ayude a ANTONIA a encontrar mejores prospectos y redactar mensajes más precisos.</p>
+                                        </div>
                                         <div className="space-y-2">
                                             <Label>Nombre de la Misión (Opcional)</Label>
                                             <Input
-                                                placeholder="ej. Búsqueda Gerentes Retail Chile"
+                                                placeholder="Ej. Directores de Operaciones en retail Chile"
                                                 value={wizardData.missionName || ''}
                                                 onChange={(e) => setWizardData({ ...wizardData, missionName: e.target.value })}
                                             />
+                                            <p className="text-xs text-muted-foreground">Úsalo para reconocer esta misión rápido cuando tengas varias activas.</p>
                                         </div>
                                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                                            <div className="space-y-2">
-                                                <Label>ICP / cuenta ideal</Label>
+                                            <div className="space-y-2 rounded-2xl border border-border/60 bg-background/60 p-4">
+                                                <div className="space-y-1">
+                                                    <Label>Empresa o cuenta ideal</Label>
+                                                    <p className="text-xs text-muted-foreground">Describe qué tipo de empresa vale la pena priorizar.</p>
+                                                </div>
                                                 <Textarea
                                                     rows={3}
-                                                    placeholder="Ej: retailers con multiples sucursales, alta rotacion y picos de contratacion"
+                                                    placeholder="Ej. Empresas con varias sucursales, alta rotación de personal y necesidad frecuente de reforzar equipos operativos."
                                                     value={wizardData.idealCustomerProfile}
                                                     onChange={(e) => setWizardData({ ...wizardData, idealCustomerProfile: e.target.value })}
                                                 />
                                             </div>
-                                            <div className="space-y-2">
-                                                <Label>Propuesta de valor</Label>
+                                            <div className="space-y-2 rounded-2xl border border-border/60 bg-background/60 p-4">
+                                                <div className="space-y-1">
+                                                    <Label>Qué valor quieres destacar</Label>
+                                                    <p className="text-xs text-muted-foreground">Resume el beneficio principal que ANTONIA debe usar en el outreach.</p>
+                                                </div>
                                                 <Textarea
                                                     rows={3}
-                                                    placeholder="Ej: cubrir dotacion mas rapido y bajar carga operativa con outsourcing flexible"
+                                                    placeholder="Ej. Ayudamos a cubrir dotación más rápido y a reducir la carga operativa con outsourcing flexible."
                                                     value={wizardData.valueProposition}
                                                     onChange={(e) => setWizardData({ ...wizardData, valueProposition: e.target.value })}
                                                 />
                                             </div>
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label>Nivel de Enriquecimiento</Label>
+                                        <div className="space-y-2 rounded-2xl border border-border/60 bg-background/60 p-4">
+                                            <div className="space-y-1">
+                                                <Label>Nivel de enriquecimiento</Label>
+                                                <p className="text-xs text-muted-foreground">Elige cuánta información adicional quieres pedir por lead.</p>
+                                            </div>
                                             <Select
                                                 value={wizardData.enrichmentLevel}
                                                 onValueChange={(v) => setWizardData({ ...wizardData, enrichmentLevel: v as 'basic' | 'deep' })}
@@ -857,9 +812,15 @@ export default function AntoniaPage() {
                                             <p className="text-xs text-muted-foreground">El nivel profundo consume más créditos pero obtiene datos completos.</p>
                                         </div>
 
-                                        <div className="space-y-4 border p-4 rounded-lg bg-secondary/10">
+                                        <div className="space-y-4 rounded-2xl border border-border/60 bg-muted/10 p-5">
                                             <Label className="text-base font-semibold">Límites Diarios de esta Misión</Label>
-                                            <p className="text-xs text-muted-foreground">Configura cuántas operaciones ANTONIA realizará por día para esta misión.</p>
+                                            <p className="text-xs text-muted-foreground">Define cuánta actividad puede ejecutar la misión cada día. Empieza conservador y luego ajusta.</p>
+                                            <div className="grid gap-2 md:grid-cols-4 text-xs">
+                                                <div className="rounded-lg border bg-background p-3"><span className="text-muted-foreground">Búsquedas</span><div className="mt-1 font-medium">{wizardData.dailySearchLimit} / día</div></div>
+                                                <div className="rounded-lg border bg-background p-3"><span className="text-muted-foreground">Enriquecimiento</span><div className="mt-1 font-medium">{wizardData.dailyEnrichLimit} / día</div></div>
+                                                <div className="rounded-lg border bg-background p-3"><span className="text-muted-foreground">Investigación</span><div className="mt-1 font-medium">{wizardData.dailyInvestigateLimit} / día</div></div>
+                                                <div className="rounded-lg border bg-background p-3"><span className="text-muted-foreground">Contacto</span><div className="mt-1 font-medium">{wizardData.dailyContactLimit} / día</div></div>
+                                            </div>
 
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div className="space-y-2">
@@ -968,11 +929,11 @@ export default function AntoniaPage() {
                                             </div>
                                         </div>
 
-                                        <div className="space-y-4 border p-4 rounded-lg bg-secondary/10">
+                                        <div className="space-y-4 rounded-2xl border border-border/60 bg-muted/10 p-5">
                                             <div className="flex items-center justify-between">
                                                 <div className="space-y-0.5">
-                                                    <Label>Campaña Inteligente</Label>
-                                                    <p className="text-xs text-muted-foreground">Deja que ANTONIA redacte y configure la campaña por ti.</p>
+                                                    <Label>Campaña inteligente</Label>
+                                                    <p className="text-xs text-muted-foreground">Elige si quieres que ANTONIA genere una campaña nueva o la sume a una existente.</p>
                                                 </div>
                                                 <Switch
                                                     checked={wizardData.autoGenerateCampaign}
@@ -985,7 +946,7 @@ export default function AntoniaPage() {
                                                     <div className="flex items-center gap-2">
                                                         <Search className="w-4 h-4 text-muted-foreground" />
                                                         <Input
-                                                            placeholder="Buscar campaña..."
+                                                            placeholder="Buscar campaña existente"
                                                             value={campaignSearch}
                                                             onChange={(e) => setCampaignSearch(e.target.value)}
                                                             className="h-8"
@@ -1107,7 +1068,7 @@ export default function AntoniaPage() {
                                     </div>
                                 )}
                             </CardContent>
-                            <CardFooter className="flex justify-between bg-secondary/10 py-4">
+                            <CardFooter className="flex justify-between border-t bg-muted/10 py-4">
                                 <Button
                                     variant="ghost"
                                     onClick={() => setStep(s => Math.max(1, s - 1))}
@@ -1135,6 +1096,30 @@ export default function AntoniaPage() {
                                 )}
                             </CardFooter>
                         </Card>
+
+                        <div className="space-y-6">
+                            {orgId && <ActiveAgentsPanel organizationId={orgId} />}
+                            <Card className="rounded-[24px] border-border/60 bg-card/80 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
+                                <CardHeader className="pb-3">
+                                    <CardTitle className="text-base">Cómo trabaja ANTONIA</CardTitle>
+                                    <CardDescription>Solo lo esencial para entender el flujo antes de lanzar una misión.</CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4 text-sm">
+                                    <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                                        <div className="font-medium">1. Define a quién buscar</div>
+                                        <p className="mt-1 text-muted-foreground">Cargo, ubicación, industria y tamaño de empresa.</p>
+                                    </div>
+                                    <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                                        <div className="font-medium">2. Ajusta el ritmo diario</div>
+                                        <p className="mt-1 text-muted-foreground">Búsqueda, enriquecimiento, investigación y contacto.</p>
+                                    </div>
+                                    <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                                        <div className="font-medium">3. Lanza y revisa</div>
+                                        <p className="mt-1 text-muted-foreground">ANTONIA ejecuta y tú supervisas donde haga falta.</p>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        </div>
                     </div>
                 </TabsContent>
 
@@ -1202,7 +1187,6 @@ export default function AntoniaPage() {
                                         {mission.params?.targetOutcome && (
                                             <div className="mb-3 flex flex-wrap gap-2">
                                                 <Badge variant="outline">{shortMissionGoalLabel(mission.params)}</Badge>
-                                                {mission.params?.playbookName && <Badge variant="secondary">{mission.params.playbookName}</Badge>}
                                             </div>
                                         )}
 
@@ -1277,16 +1261,6 @@ export default function AntoniaPage() {
                     </div>
                 </TabsContent>
 
-                <TabsContent value="autopilot" className="space-y-6">
-                    <QuotaUsageCard />
-                    {orgId && <ActiveAgentsPanel organizationId={orgId} />}
-                    <AutopilotExecutiveReportPanel />
-                    <AutopilotNextActionsPanel onOpenTab={setActiveTab} />
-                    <AutopilotControlCenter config={config} onUpdateConfig={handleUpdateConfig} />
-                    <AutopilotPlaybookBenchmarksPanel />
-                    <AutopilotExceptionsPanel />
-                </TabsContent>
-
                 <TabsContent value="reportes" className="space-y-6">
                     <div className="grid grid-cols-1 gap-6">
                         <ReportsHistory
@@ -1310,315 +1284,310 @@ export default function AntoniaPage() {
                 </TabsContent>
 
                 <TabsContent value="settings" className="space-y-6">
-                    <Card>
-                        <CardHeader>
+                    <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
+                        <CardHeader className="border-b border-border/60 bg-muted/10">
                             <CardTitle>Configuración de ANTONIA</CardTitle>
-                            <CardDescription>Gestiona cómo ANTONIA se comunica contigo y opera</CardDescription>
+                            <CardDescription>Deja visibles solo las decisiones importantes. El resto queda resumido o plegado.</CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-6">
-                            <div className="space-y-4">
-                                <h3 className="text-lg font-medium">Notificaciones</h3>
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <Label htmlFor="daily-report">Reporte Diario por Email</Label>
-                                        <p className="text-sm text-muted-foreground">Recibe un resumen cada 24 horas</p>
-                                    </div>
-                                    <Switch
-                                        id="daily-report"
-                                        checked={config?.dailyReportEnabled}
-                                        onCheckedChange={(c) => handleUpdateConfig('dailyReportEnabled', c)}
-                                    />
+                        <CardContent className="space-y-6 p-6">
+                            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Modo</div>
+                                    <div className="mt-2 font-medium">{config?.autopilotEnabled ? simplifyAutopilotModeLabel(config?.autopilotMode) : 'Asistida / manual'}</div>
                                 </div>
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <Label htmlFor="instant-alerts">Alertas Instantáneas</Label>
-                                        <p className="text-sm text-muted-foreground">Notificaciones inmediatas para leads calientes</p>
-                                    </div>
-                                    <Switch
-                                        id="instant-alerts"
-                                        checked={config?.instantAlertsEnabled}
-                                        onCheckedChange={(c) => handleUpdateConfig('instantAlertsEnabled', c)}
-                                    />
+                                <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Aprobación</div>
+                                    <div className="mt-2 font-medium">{config?.approvalMode === 'all_contacts' ? 'Todo' : config?.approvalMode === 'high_risk_only' ? 'Solo alto riesgo' : config?.approvalMode === 'disabled' ? 'Sin aprobación' : 'Solo leads dudosos'}</div>
                                 </div>
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <Label htmlFor="tracking-enabled">Tracking de Aperturas</Label>
-                                        <p className="text-sm text-muted-foreground">Inyectar pixel invisible en emails</p>
-                                    </div>
-                                    <Switch
-                                        id="tracking-enabled"
-                                        checked={!!config?.trackingEnabled}
-                                        onCheckedChange={(c) => handleUpdateConfig('trackingEnabled', c)}
-                                    />
+                                <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Tracking</div>
+                                    <div className="mt-2 font-medium">{config?.trackingEnabled ? 'Activo' : 'Inactivo'}</div>
                                 </div>
-                                <div>
-                                    <Label>Emails de Notificación</Label>
-                                    <p className="text-sm text-muted-foreground mb-2">Recibe reportes y alertas en estas direcciones.</p>
+                                <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Booking link</div>
+                                    <div className="mt-2 truncate font-medium">{config?.bookingLink || 'No configurado'}</div>
+                                </div>
+                            </div>
 
-                                    <div className="space-y-3">
-                                        <div className="flex gap-2">
-                                            <Input
-                                                placeholder="ej. equipo@empresa.com"
-                                                value={newEmail}
-                                                onChange={(e) => setNewEmail(e.target.value)}
-                                                onKeyDown={(e) => e.key === 'Enter' && handleAddEmail()}
+                            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+                                <Card className="rounded-[24px] border-border/60 shadow-none">
+                                    <CardHeader className="pb-3">
+                                        <CardTitle className="text-base">Controles principales</CardTitle>
+                                        <CardDescription>Lo mínimo para definir cómo trabaja ANTONIA y cómo te avisa.</CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="space-y-5">
+                                        <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/60 bg-background/70 p-4">
+                                            <div className="space-y-1">
+                                                <Label htmlFor="daily-report">Reporte diario por email</Label>
+                                                <p className="text-sm text-muted-foreground">Resumen automático una vez al día.</p>
+                                            </div>
+                                            <Switch
+                                                id="daily-report"
+                                                checked={config?.dailyReportEnabled}
+                                                onCheckedChange={(c) => handleUpdateConfig('dailyReportEnabled', c)}
                                             />
-                                            <Button onClick={handleAddEmail} size="icon">
-                                                <Plus className="w-4 h-4" />
-                                            </Button>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/60 bg-background/70 p-4">
+                                            <div className="space-y-1">
+                                                <Label htmlFor="instant-alerts">Alertas instantáneas</Label>
+                                                <p className="text-sm text-muted-foreground">Avisos inmediatos cuando aparece algo urgente.</p>
+                                            </div>
+                                            <Switch
+                                                id="instant-alerts"
+                                                checked={config?.instantAlertsEnabled}
+                                                onCheckedChange={(c) => handleUpdateConfig('instantAlertsEnabled', c)}
+                                            />
+                                        </div>
+                                        <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/60 bg-background/70 p-4">
+                                            <div className="space-y-1">
+                                                <Label htmlFor="tracking-enabled">Tracking de aperturas</Label>
+                                                <p className="text-sm text-muted-foreground">Medir aperturas en los emails enviados.</p>
+                                            </div>
+                                            <Switch
+                                                id="tracking-enabled"
+                                                checked={!!config?.trackingEnabled}
+                                                onCheckedChange={(c) => handleUpdateConfig('trackingEnabled', c)}
+                                            />
                                         </div>
 
-                                        <div className="border rounded-md overflow-hidden">
-                                            <Table>
-                                                <TableBody>
-                                                    {notificationEmails.map((email) => (
-                                                        <TableRow key={email}>
-                                                            <TableCell className="py-2">{email}</TableCell>
-                                                            <TableCell className="py-2 text-right">
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    onClick={() => handleRemoveEmail(email)}
-                                                                    className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                                                                >
-                                                                    <Trash2 className="w-4 h-4" />
-                                                                </Button>
-                                                            </TableCell>
-                                                        </TableRow>
-                                                    ))}
-                                                    {notificationEmails.length === 0 && (
-                                                        <TableRow>
-                                                            <TableCell colSpan={2} className="text-center text-muted-foreground py-4 text-sm">
-                                                                No hay emails configurados.
-                                                            </TableCell>
-                                                        </TableRow>
-                                                    )}
-                                                </TableBody>
-                                            </Table>
-                                        </div>
-                                    </div>
-                                </div>
-                             </div>
-
-                             <Separator />
-
-                            <div className="space-y-4">
-                                <h3 className="text-lg font-medium">Autopilot y Guardrails</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="flex items-center justify-between rounded-lg border p-4">
-                                        <div>
-                                            <Label htmlFor="autopilot-master">Autopilot</Label>
-                                            <p className="text-sm text-muted-foreground">Permite a ANTONIA operar con reglas automáticas.</p>
-                                        </div>
-                                        <Switch
-                                            id="autopilot-master"
-                                            checked={!!config?.autopilotEnabled}
-                                            onCheckedChange={(c) => handleUpdateConfig('autopilotEnabled', c)}
-                                        />
-                                    </div>
-                                    <div className="space-y-2 rounded-lg border p-4">
-                                        <Label>Modo operativo</Label>
-                                        <Select
-                                            value={config?.autopilotMode || 'manual_assist'}
-                                            onValueChange={(value) => handleUpdateConfig('autopilotMode', value)}
-                                        >
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="manual_assist">Manual Assist</SelectItem>
-                                                <SelectItem value="semi_auto">Semi Auto</SelectItem>
-                                                <SelectItem value="full_auto">Full Auto</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="space-y-2 rounded-lg border p-4">
-                                        <Label>Política de aprobación</Label>
-                                        <Select
-                                            value={config?.approvalMode || 'low_score_only'}
-                                            onValueChange={(value) => handleUpdateConfig('approvalMode', value)}
-                                        >
-                                            <SelectTrigger>
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all_contacts">Aprobar todos</SelectItem>
-                                                <SelectItem value="low_score_only">Solo score bajo</SelectItem>
-                                                <SelectItem value="high_risk_only">Solo alto riesgo</SelectItem>
-                                                <SelectItem value="disabled">Sin aprobación</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="rounded-lg border p-4">
-                                        <div className="grid grid-cols-2 gap-3">
+                                        <div className="grid gap-4 md:grid-cols-2">
                                             <div className="space-y-2">
-                                                <Label htmlFor="auto-send-score">Score auto-send</Label>
+                                                <Label>Modo de trabajo</Label>
+                                                <Select
+                                                    value={config?.autopilotMode || 'manual_assist'}
+                                                    onValueChange={(value) => handleUpdateConfig('autopilotMode', value)}
+                                                >
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Selecciona modo" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="manual_assist">Manual Assist</SelectItem>
+                                                        <SelectItem value="semi_auto">Semi Auto</SelectItem>
+                                                        <SelectItem value="full_auto">Full Auto</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Política de aprobación</Label>
+                                                <Select
+                                                    value={config?.approvalMode || 'low_score_only'}
+                                                    onValueChange={(value) => handleUpdateConfig('approvalMode', value)}
+                                                >
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Selecciona política" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="all_contacts">Aprobar todos</SelectItem>
+                                                        <SelectItem value="low_score_only">Solo score bajo</SelectItem>
+                                                        <SelectItem value="high_risk_only">Solo alto riesgo</SelectItem>
+                                                        <SelectItem value="disabled">Sin aprobación</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+
+                                <Card className="rounded-[24px] border-border/60 shadow-none">
+                                    <CardHeader className="pb-3">
+                                        <CardTitle className="text-base">Canales y contacto</CardTitle>
+                                        <CardDescription>Qué cuentas puede usar ANTONIA y dónde debe avisarte.</CardDescription>
+                                    </CardHeader>
+                                    <CardContent className="space-y-5">
+                                        <div className="space-y-3">
+                                            <Label>Emails de notificación</Label>
+                                            <div className="flex gap-2">
                                                 <Input
-                                                    key={`auto-send-score-${config?.minAutoSendScore ?? 70}`}
-                                                    id="auto-send-score"
+                                                    placeholder="equipo@empresa.com"
+                                                    value={newEmail}
+                                                    onChange={(e) => setNewEmail(e.target.value)}
+                                                    onKeyDown={(e) => e.key === 'Enter' && handleAddEmail()}
+                                                />
+                                                <Button onClick={handleAddEmail} size="icon" className="shadow-none">
+                                                    <Plus className="w-4 h-4" />
+                                                </Button>
+                                            </div>
+                                            <div className="space-y-2 rounded-2xl border border-border/60 bg-background/70 p-3">
+                                                {notificationEmails.length > 0 ? notificationEmails.map((email) => (
+                                                    <div key={email} className="flex items-center justify-between gap-3 rounded-xl bg-background px-3 py-2">
+                                                        <span className="truncate text-sm">{email}</span>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() => handleRemoveEmail(email)}
+                                                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </Button>
+                                                    </div>
+                                                )) : <div className="px-1 py-2 text-sm text-muted-foreground">No hay emails configurados.</div>}
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                                                <div className="font-medium">Google / Gmail</div>
+                                                <p className="mt-1 text-sm text-muted-foreground">Cuenta principal para envío automático.</p>
+                                                <Button variant="outline" className="mt-3 shadow-none" onClick={handleConnectGoogle}>
+                                                    <Settings className="mr-2 h-4 w-4" />
+                                                    {googleConnected ? 'Reconectar' : 'Conectar'}
+                                                </Button>
+                                            </div>
+                                            <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                                                <div className="font-medium">Microsoft Outlook</div>
+                                                <p className="mt-1 text-sm text-muted-foreground">Alternativa para envío automático.</p>
+                                                <Button variant="outline" className="mt-3 shadow-none" onClick={handleConnectOutlook}>
+                                                    <Settings className="mr-2 h-4 w-4" />
+                                                    {outlookConnected ? 'Reconectar' : 'Conectar'}
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+
+                            <Accordion type="multiple" className="w-full space-y-4">
+                                <AccordionItem value="limits" className="overflow-hidden rounded-[24px] border border-border/60 px-0">
+                                    <AccordionTrigger className="px-5 py-4 text-base font-medium hover:no-underline">Límites diarios</AccordionTrigger>
+                                    <AccordionContent className="px-5 pb-5">
+                                        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                                            <div className="space-y-2">
+                                                <Label htmlFor="search-limit">Búsquedas</Label>
+                                                <Input
+                                                    id="search-limit"
+                                                    type="number"
+                                                    min="1"
+                                                    max="5"
+                                                    defaultValue={config?.dailySearchLimit ?? 3}
+                                                    onBlur={(e) => {
+                                                        const val = parseInt(e.target.value);
+                                                        if (!isNaN(val) && val > 0) handleUpdateConfig('dailySearchLimit', val);
+                                                    }}
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="enrich-limit">Enriquecimientos</Label>
+                                                <Input
+                                                    id="enrich-limit"
+                                                    type="number"
+                                                    min="1"
+                                                    max="50"
+                                                    defaultValue={config?.dailyEnrichLimit ?? 50}
+                                                    onBlur={(e) => {
+                                                        const val = parseInt(e.target.value);
+                                                        if (!isNaN(val) && val > 0) handleUpdateConfig('dailyEnrichLimit', val);
+                                                    }}
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="investigate-limit">Investigaciones</Label>
+                                                <Input
+                                                    id="investigate-limit"
+                                                    type="number"
+                                                    min="1"
+                                                    max="50"
+                                                    defaultValue={config?.dailyInvestigateLimit ?? 20}
+                                                    onBlur={(e) => {
+                                                        const val = parseInt(e.target.value);
+                                                        if (!isNaN(val) && val > 0) handleUpdateConfig('dailyInvestigateLimit', val);
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
+                                    </AccordionContent>
+                                </AccordionItem>
+
+                                <AccordionItem value="advanced" className="overflow-hidden rounded-[24px] border border-border/60 px-0">
+                                    <AccordionTrigger className="px-5 py-4 text-base font-medium hover:no-underline">Controles avanzados</AccordionTrigger>
+                                    <AccordionContent className="space-y-6 px-5 pb-5">
+                                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                            <div className="space-y-2 rounded-xl border bg-card p-4">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <div>
+                                                        <Label htmlFor="autopilot-enabled">Activar autopilot</Label>
+                                                        <p className="text-xs text-muted-foreground">Habilita decisiones automáticas con guardrails.</p>
+                                                    </div>
+                                                    <Switch
+                                                        id="autopilot-enabled"
+                                                        checked={!!config?.autopilotEnabled}
+                                                        onCheckedChange={(value) => handleUpdateConfig('autopilotEnabled', value)}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="space-y-2 rounded-xl border bg-card p-4">
+                                                <Label htmlFor="min-auto-send">Auto-send</Label>
+                                                <Input
+                                                    key={`min-auto-send-${config?.minAutoSendScore ?? 70}`}
+                                                    id="min-auto-send"
                                                     type="number"
                                                     min="0"
                                                     max="100"
                                                     defaultValue={config?.minAutoSendScore ?? 70}
-                                                    onBlur={(e) => handleUpdateConfig('minAutoSendScore', Number(e.target.value || 0))}
+                                                    onBlur={(event) => handleUpdateConfig('minAutoSendScore', Number(event.target.value || 0))}
                                                 />
                                             </div>
-                                            <div className="space-y-2">
-                                                <Label htmlFor="review-score">Score review</Label>
+                                            <div className="space-y-2 rounded-xl border bg-card p-4">
+                                                <Label htmlFor="min-review">Review</Label>
                                                 <Input
-                                                    key={`review-score-${config?.minReviewScore ?? 45}`}
-                                                    id="review-score"
+                                                    key={`min-review-${config?.minReviewScore ?? 45}`}
+                                                    id="min-review"
                                                     type="number"
                                                     min="0"
                                                     max="100"
                                                     defaultValue={config?.minReviewScore ?? 45}
-                                                    onBlur={(e) => handleUpdateConfig('minReviewScore', Number(e.target.value || 0))}
+                                                    onBlur={(event) => handleUpdateConfig('minReviewScore', Number(event.target.value || 0))}
+                                                />
+                                            </div>
+                                            <div className="space-y-2 rounded-xl border bg-card p-4">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <div>
+                                                        <Label htmlFor="pause-negative">Pausar por reply negativo</Label>
+                                                        <p className="text-xs text-muted-foreground">Protege reputación.</p>
+                                                    </div>
+                                                    <Switch
+                                                        id="pause-negative"
+                                                        checked={!!config?.pauseOnNegativeReply}
+                                                        onCheckedChange={(value) => handleUpdateConfig('pauseOnNegativeReply', value)}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid gap-4 md:grid-cols-2">
+                                            <div className="space-y-2 rounded-xl border bg-card p-4">
+                                                <Label htmlFor="booking-link">Booking link</Label>
+                                                <Input
+                                                    key={`booking-link-${config?.bookingLink || ''}`}
+                                                    id="booking-link"
+                                                    defaultValue={config?.bookingLink || ''}
+                                                    placeholder="https://calendly.com/tu-equipo/demo"
+                                                    onBlur={(event) => handleUpdateConfig('bookingLink', event.target.value)}
+                                                />
+                                            </div>
+                                            <div className="space-y-2 rounded-xl border bg-card p-4">
+                                                <Label htmlFor="meeting-instructions">Notas para reuniones</Label>
+                                                <Textarea
+                                                    key={`meeting-instructions-${config?.meetingInstructions || ''}`}
+                                                    id="meeting-instructions"
+                                                    defaultValue={config?.meetingInstructions || ''}
+                                                    placeholder="Contexto que ANTONIA debe usar cuando un lead pide reunión."
+                                                    onBlur={(event) => handleUpdateConfig('meetingInstructions', event.target.value)}
+                                                    className="min-h-[96px]"
                                                 />
                                             </div>
                                         </div>
-                                    </div>
-                                    <div className="flex items-center justify-between rounded-lg border p-4">
-                                        <div>
-                                            <Label htmlFor="pause-negative-reply">Pausar por reply negativo</Label>
-                                            <p className="text-sm text-muted-foreground">Evita seguir empujando secuencias en cuentas sensibles.</p>
+
+                                        <div className="grid gap-6 xl:grid-cols-2">
+                                            <AutopilotControlCenter config={config} onUpdateConfig={handleUpdateConfig} />
+                                            <AutopilotExecutiveReportPanel />
                                         </div>
-                                        <Switch
-                                            id="pause-negative-reply"
-                                            checked={!!config?.pauseOnNegativeReply}
-                                            onCheckedChange={(c) => handleUpdateConfig('pauseOnNegativeReply', c)}
-                                        />
-                                    </div>
-                                    <div className="flex items-center justify-between rounded-lg border p-4">
-                                        <div>
-                                            <Label htmlFor="pause-failure-spike">Pausar por fallos</Label>
-                                            <p className="text-sm text-muted-foreground">Detiene contacto si la entrega o el canal empiezan a fallar.</p>
+                                        <div className="grid gap-6 xl:grid-cols-2">
+                                            <AutopilotExceptionsPanel />
+                                            <AutopilotNextActionsPanel onOpenTab={(tab) => setActiveTab(tab === 'autopilot' ? 'settings' : tab)} />
                                         </div>
-                                        <Switch
-                                            id="pause-failure-spike"
-                                            checked={!!config?.pauseOnFailureSpike}
-                                            onCheckedChange={(c) => handleUpdateConfig('pauseOnFailureSpike', c)}
-                                        />
-                                    </div>
-                                    <div className="space-y-2 rounded-lg border p-4 md:col-span-2">
-                                        <Label htmlFor="booking-link-settings">Booking link</Label>
-                                        <Input
-                                            key={`booking-link-settings-${config?.bookingLink ?? ''}`}
-                                            id="booking-link-settings"
-                                            defaultValue={config?.bookingLink ?? ''}
-                                            placeholder="https://calendly.com/tu-equipo/demo"
-                                            onBlur={(e: React.FocusEvent<HTMLInputElement>) => handleUpdateConfig('bookingLink', e.target.value)}
-                                        />
-                                        <p className="text-xs text-muted-foreground">Link que ANTONIA sugerira cuando detecte interes o pedido de reunion.</p>
-                                    </div>
-                                    <div className="space-y-2 rounded-lg border p-4 md:col-span-2">
-                                        <Label htmlFor="meeting-instructions-settings">Notas para handoff a reunion</Label>
-                                        <Textarea
-                                            key={`meeting-instructions-settings-${config?.meetingInstructions ?? ''}`}
-                                            id="meeting-instructions-settings"
-                                            defaultValue={config?.meetingInstructions ?? ''}
-                                            placeholder="Ej: ofrece una llamada de 20 min, menciona capacidad de staffing y pide confirmar asistentes."
-                                            onBlur={(e: React.FocusEvent<HTMLTextAreaElement>) => handleUpdateConfig('meetingInstructions', e.target.value)}
-                                            className="min-h-[100px]"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <Separator />
-
-                            <div className="space-y-4">
-                                <h3 className="text-lg font-medium">Límites y Cuotas Diarias</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="search-limit">Búsquedas Diarias (Ejecuciones)</Label>
-                                        <Input
-                                            id="search-limit"
-                                            type="number"
-                                            min="1"
-                                            max="5"
-                                            defaultValue={config?.dailySearchLimit ?? 3}
-                                            onBlur={(e) => {
-                                                const val = parseInt(e.target.value);
-                                                if (!isNaN(val) && val > 0) {
-                                                    handleUpdateConfig('dailySearchLimit', val);
-                                                }
-                                            }}
-                                        />
-                                        <p className="text-xs text-muted-foreground">Máx. 5 búsquedas por día</p>
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="enrich-limit">Enriquecimientos Diarios</Label>
-                                        <Input
-                                            id="enrich-limit"
-                                            type="number"
-                                            min="1"
-                                            max="50"
-                                            defaultValue={config?.dailyEnrichLimit ?? 50}
-                                            onBlur={(e) => {
-                                                const val = parseInt(e.target.value);
-                                                if (!isNaN(val) && val > 0) {
-                                                    handleUpdateConfig('dailyEnrichLimit', val);
-                                                }
-                                            }}
-                                        />
-                                        <p className="text-xs text-muted-foreground">Máx. 50 leads a verificar email</p>
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="investigate-limit">Investigaciones Diarias (Deep)</Label>
-                                        <Input
-                                            id="investigate-limit"
-                                            type="number"
-                                            min="1"
-                                            max="50"
-                                            defaultValue={config?.dailyInvestigateLimit ?? 20}
-                                            onBlur={(e) => {
-                                                const val = parseInt(e.target.value);
-                                                if (!isNaN(val) && val > 0) {
-                                                    handleUpdateConfig('dailyInvestigateLimit', val);
-                                                }
-                                            }}
-                                        />
-                                        <p className="text-xs text-muted-foreground">Máx. 50 leads con datos completos (Tel)</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <Separator />
-
-                            <div className="space-y-4">
-                                <h3 className="text-lg font-medium">Integraciones (Acceso Offline)</h3>
-                                <p className="text-sm text-muted-foreground">Para que ANTONIA pueda enviar emails mientras estás desconectado, necesita acceso a tu cuenta.</p>
-
-                                <div className="space-y-3">
-                                    <div className="p-4 border rounded-lg bg-secondary/20 flex flex-col md:flex-row justify-between items-center gap-4">
-                                        <div>
-                                            <p className="font-medium">Google / Gmail</p>
-                                            <p className="text-sm text-muted-foreground">Requerido para envío automático de emails</p>
-                                        </div>
-                                        <Button
-                                            variant="outline"
-                                            onClick={handleConnectGoogle}
-                                        >
-                                            <Settings className="w-4 h-4 mr-2" />
-                                            {googleConnected ? 'Reconectar' : 'Conectar'} Cuenta
-                                        </Button>
-                                    </div>
-
-                                    <div className="p-4 border rounded-lg bg-secondary/20 flex flex-col md:flex-row justify-between items-center gap-4">
-                                        <div>
-                                            <p className="font-medium">Microsoft Outlook</p>
-                                            <p className="text-sm text-muted-foreground">Alternativa para envío automático de emails</p>
-                                        </div>
-                                        <Button
-                                            variant="outline"
-                                            onClick={handleConnectOutlook}
-                                        >
-                                            <Settings className="w-4 h-4 mr-2" />
-                                            {outlookConnected ? 'Reconectar' : 'Conectar'} Cuenta
-                                        </Button>
-                                    </div>
-                                </div>
-                            </div>
+                                    </AccordionContent>
+                                </AccordionItem>
+                            </Accordion>
                         </CardContent>
                     </Card>
                 </TabsContent>

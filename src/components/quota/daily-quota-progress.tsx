@@ -114,7 +114,8 @@ export default function DailyQuotaProgress({ className, kinds, compact, title = 
   }, [tick, ks]);
 
   const content = (
-    <div className={cn('space-y-3', compact && 'p-0')}>
+    <div className={cn('space-y-3', compact && 'rounded-[24px] border border-border/60 bg-card/65 p-4 shadow-[0_8px_24px_-20px_rgba(15,23,42,0.16)]')}>
+      {compact && title ? <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">{title}</div> : null}
       {rows.map((r) => (
         <div key={r.kind} className="grid grid-cols-[1fr_auto] gap-2 items-center">
           <div className="space-y-1">

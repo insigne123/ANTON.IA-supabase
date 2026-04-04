@@ -88,6 +88,51 @@ test('decideAutopilotContactAction skips leads without email', () => {
   assert.match(decision.reason, /sin email/i);
 });
 
+test('assessLeadMissionFit blocks leads outside the requested industry', () => {
+  const fit = autopilot.assessLeadMissionFit(
+    {
+      company: 'LATAM Airlines',
+      title: 'Head of Recruiting',
+      industry: 'Logistics',
+      organization_industry: 'Airlines/Aviation',
+      researchReport: {
+        company: { industry: 'Airlines/Aviation', size: 12000 },
+        cross: { company: { industry: 'Airlines/Aviation' }, overview: 'Aerolinea lider en Sudamerica.' },
+      },
+    },
+    {
+      industry: 'Logistics',
+      companySize: '5001+',
+      seniorities: ['head'],
+    }
+  );
+
+  assert.equal(fit.action, 'block');
+  assert.match(fit.reason, /industria/i);
+});
+
+test('assessLeadMissionFit allows strong ICP matches', () => {
+  const fit = autopilot.assessLeadMissionFit(
+    {
+      company: 'Chilexpress',
+      title: 'Head of Operations',
+      organization_industry: 'Logistics and Supply Chain',
+      location: 'Santiago, Chile',
+      organization_size: 6500,
+    },
+    {
+      jobTitle: 'Operations',
+      industry: 'Logistics',
+      location: 'Chile',
+      companySize: '5001+',
+      seniorities: ['head'],
+    }
+  );
+
+  assert.equal(fit.action, 'allow');
+  assert.ok(fit.matchedSignals.length >= 3);
+});
+
 test('buildSuggestedMeetingReply includes booking link when available', () => {
   const reply = autopilot.buildSuggestedMeetingReply({
     leadName: 'Camila Torres',

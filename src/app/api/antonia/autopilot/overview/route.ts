@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { countUniqueReplyContacts } from '@/lib/antonia-reply-metrics';
 import { resolveAutopilotConfig } from '@/lib/antonia-autopilot';
 import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -24,6 +25,12 @@ function mapConfigRow(row: any, organizationId: string) {
     minReviewScore: Number(row?.min_review_score || 45),
     bookingLink: row?.booking_link || '',
     meetingInstructions: row?.meeting_instructions || '',
+    replyAutopilotEnabled: Boolean(row?.reply_autopilot_enabled ?? false),
+    replyAutopilotMode: row?.reply_autopilot_mode || 'draft_only',
+    replyApprovalMode: row?.reply_approval_mode || 'high_risk_only',
+    replyMaxAutoTurns: Number(row?.reply_max_auto_turns || 2),
+    autoSendBookingReplies: Boolean(row?.auto_send_booking_replies ?? false),
+    allowReplyAttachments: Boolean(row?.allow_reply_attachments ?? false),
     pauseOnNegativeReply: Boolean(row?.pause_on_negative_reply ?? true),
     pauseOnFailureSpike: Boolean(row?.pause_on_failure_spike ?? true),
     createdAt: row?.created_at || new Date().toISOString(),
@@ -38,7 +45,7 @@ export async function GET() {
 
     const todayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
 
-    const [configRes, missionsRes, processingRes, pendingRes, exceptionRowsRes, contactsRes, repliesRes, hotRes, hotScoreRes, warmScoreRes, coolScoreRes, coldScoreRes] = await Promise.all([
+    const [configRes, missionsRes, processingRes, pendingRes, exceptionRowsRes, contactsRes, repliesRes, contactRowsRes, replyRowsRes, hotRes, hotScoreRes, warmScoreRes, coolScoreRes, coldScoreRes] = await Promise.all([
       admin
         .from('antonia_config')
         .select('*')
@@ -73,8 +80,19 @@ export async function GET() {
         .eq('organization_id', organizationId)
         .gte('created_at', todayStart),
       admin
-        .from('lead_responses')
+        .from('contacted_leads')
         .select('*', { count: 'exact', head: true })
+        .eq('organization_id', organizationId)
+        .not('replied_at', 'is', null)
+        .gte('replied_at', todayStart),
+      admin
+        .from('contacted_leads')
+        .select('id, lead_id, email, replied_at, reply_intent, last_reply_text')
+        .eq('organization_id', organizationId)
+        .gte('created_at', todayStart),
+      admin
+        .from('lead_responses')
+        .select('contacted_id, lead_id, type')
         .eq('organization_id', organizationId)
         .eq('type', 'reply')
         .gte('created_at', todayStart),
@@ -111,6 +129,9 @@ export async function GET() {
     const exceptionRows = (exceptionRowsRes.data || []) as any[];
     const openExceptions = exceptionRows.filter((item) => item.status === 'open');
     const approvalsPending = openExceptions.filter((item) => item.category === 'approval_required').length;
+    const repliesToday = countUniqueReplyContacts((contactRowsRes.data || []) as any[], (replyRowsRes.data || []) as any[])
+      || repliesRes.count
+      || 0;
 
     const missions = ((missionsRes.data || []) as any[]);
     const missionSummaries = await Promise.all(
@@ -159,7 +180,7 @@ export async function GET() {
         approvalsPending,
         hotLeads: hotRes.count || 0,
         contactsToday: contactsRes.count || 0,
-        repliesToday: repliesRes.count || 0,
+        repliesToday,
       },
       exceptionSummary: {
         critical: openExceptions.filter((item) => item.severity === 'critical').length,

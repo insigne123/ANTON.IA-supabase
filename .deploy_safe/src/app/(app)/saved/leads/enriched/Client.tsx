@@ -1,0 +1,2642 @@
+﻿
+'use client';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+
+import { useRouter } from 'next/navigation';
+import { PageHeader } from '@/components/page-header';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useToast } from '@/hooks/use-toast';
+import type { EnrichedLead, LeadResearchReport, StyleProfile } from '@/lib/types';
+import { upsertLeadReports, findReportForLead, leadResearchStorage, getLeadReports } from '@/lib/lead-research-storage';
+import { BackBar } from '@/components/back-bar';
+import { v4 as uuid } from 'uuid';
+import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
+import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage, updateEnrichedLead } from '@/lib/services/enriched-leads-service';
+import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin, Phone, BrainCircuit, Clock3, Sparkles, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { extensionService } from '@/lib/services/extension-service';
+import { PhoneCallModal } from '@/components/phone-call-modal';
+import { supabaseService } from '@/lib/supabase-service';
+import { getCompanyProfile } from '@/lib/data';
+import { supabase } from '@/lib/supabase';
+import { adaptLeadResearchResponseToReport, buildLeadResearchPayloadFromLead, getLeadResearchWarnings, hasMeaningfulLeadResearch } from '@/lib/lead-research';
+import { sendEmail } from '@/lib/outlook-email-service';
+import { sendGmailEmail } from '@/lib/gmail-email-service';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { isResearched, markResearched, unmarkResearched } from '@/lib/researched-leads-storage';
+import { microsoftAuthService } from '@/lib/microsoft-auth-service';
+import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
+import { renderTemplate, buildPersonEmailContext } from '@/lib/template';
+import { buildSenderInfo, applySignaturePlaceholders } from '@/lib/signature-placeholders';
+import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
+import * as Quota from '@/lib/quota-client';
+import { generateCompanyOutreachV2, ensureSubjectPrefix } from '@/lib/outreach-templates';
+import { emailDraftsStorage } from '@/lib/email-drafts-storage';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { getFirstNameSafe } from '@/lib/template';
+import { generateMailFromStyle } from '@/lib/ai/style-mail';
+import { styleProfilesStorage } from '@/lib/style-profiles-storage';
+import { profileService } from '@/lib/services/profile-service';
+import { generateLinkedinDraft } from '@/lib/ai/linkedin-templates';
+import { plannerService, ScheduleConfig } from '@/lib/services/planner-service';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { CalendarIcon } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
+
+
+const extractDomainFromEmail = (email?: string | null) =>
+  email && email.includes('@') ? email.split('@')[1].toLowerCase() : undefined;
+
+type ResearchLifecycleStatus = 'idle' | 'preparing' | 'queued' | 'in_progress' | 'completed' | 'partial' | 'insufficient_data' | 'failed';
+
+const RESEARCH_STANDARD_ESTIMATE_MS = 55000;
+
+function getResearchStageCopy(status: ResearchLifecycleStatus, elapsedMs: number) {
+  if (status === 'queued') return 'En cola para iniciar investigacion';
+  if (status === 'completed') return 'Investigacion completada';
+  if (status === 'partial') return 'Investigacion parcial lista';
+  if (status === 'insufficient_data') return 'Informacion limitada, armando resumen';
+  if (status === 'failed') return 'La investigacion encontro un error';
+
+  if (elapsedMs < 6000) return 'Preparando contexto del lead';
+  if (elapsedMs < 18000) return 'Analizando empresa, sitio y posicionamiento';
+  if (elapsedMs < 32000) return 'Buscando señales y contexto reciente';
+  if (elapsedMs < 46000) return 'Construyendo angulos, pains y oportunidades';
+  return 'Redactando borradores y guion de llamada';
+}
+
+function getResearchProgressValue(status: ResearchLifecycleStatus, elapsedMs: number) {
+  if (status === 'completed' || status === 'partial') return 100;
+  if (status === 'failed') return 100;
+  if (status === 'insufficient_data') return 92;
+  if (status === 'queued') return 8;
+
+  const ratio = Math.min(elapsedMs / RESEARCH_STANDARD_ESTIMATE_MS, 0.95);
+  return Math.max(6, Math.round(ratio * 100));
+}
+
+import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
+
+import { organizationService } from '@/lib/services/organization-service';
+
+export default function EnrichedLeadsClient() {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [tick, setTick] = useState(0); // Force re-render
+  // ... existing state
+
+  // --- Social Credits ---
+  const [socialCredits, setSocialCredits] = useState<number | null>(null);
+  const [socialEnabled, setSocialEnabled] = useState(true);
+
+  // ... existing useEffects
+
+  useEffect(() => {
+    // Load credits on mount
+    organizationService.getCredits().then(res => {
+      if (res) {
+        setSocialCredits(res.credits);
+        setSocialEnabled(res.enabled);
+      }
+    });
+  }, []);
+
+  const [enriched, setEnriched] = useState<EnrichedLead[]>([]);
+  const [sel, setSel] = useState<Record<string, boolean>>({});           // selección para INVESTIGAR
+  const [reports, setReports] = useState<LeadResearchReport[]>([]);
+  const [openReport, setOpenReport] = useState(false);
+  // Estados para Modal de llamada
+  const [callModalOpen, setCallModalOpen] = useState(false);
+  const [leadToCall, setLeadToCall] = useState<EnrichedLead | null>(null);
+
+  const [reportToView, setReportToView] = useState<LeadResearchReport | null>(null);
+  const [reportLead, setReportLead] = useState<EnrichedLead | null>(null);
+
+  const [seqRunning, setSeqRunning] = useState(false);
+  const [seqDone, setSeqDone] = useState(0);
+  const [seqTotal, setSeqTotal] = useState(0);
+  const [researchUi, setResearchUi] = useState<{
+    leadName: string;
+    index: number;
+    total: number;
+    startedAt: number;
+    status: ResearchLifecycleStatus;
+    reportId?: string | null;
+    warning?: string | null;
+  }>({
+    leadName: '',
+    index: 0,
+    total: 0,
+    startedAt: 0,
+    status: 'idle',
+    reportId: null,
+    warning: null,
+  });
+  const [researchPulseMs, setResearchPulseMs] = useState(0);
+
+  const [selectedToContact, setSelectedToContact] = useState<Set<string>>(new Set());
+  const [openCompose, setOpenCompose] = useState(false);
+  const [composeList, setComposeList] = useState<Array<{ lead: EnrichedLead; subject: string; body: string }>>([]);
+  const [sendingBulk, setSendingBulk] = useState(false);
+  const [sendProgress, setSendProgress] = useState({ done: 0, total: 0 });
+  const [bulkProvider, setBulkProvider] = useState<'outlook' | 'gmail'>('outlook');
+  const [draftSource, setDraftSource] = useState<'investigation' | 'style'>('investigation');
+  const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
+  const [selectedStyleName, setSelectedStyleName] = useState<string>('');
+  const [usePixel, setUsePixel] = useState(true);
+  const [useLinkTracking, setUseLinkTracking] = useState(false);
+  const [useReadReceipt, setUseReadReceipt] = useState(false);
+
+  // Bulk LinkedIn State
+  const [openBulkLinkedin, setOpenBulkLinkedin] = useState(false);
+  const [bulkLinkedinRunning, setBulkLinkedinRunning] = useState(false);
+  const [bulkLinkedinProgress, setBulkLinkedinProgress] = useState<{ current: number; total: number; currentName: string }>({ current: 0, total: 0, currentName: '' });
+  const bulkLinkedinStopRef = useRef(false);
+
+  // Editor IA inline (dentro del modal actual, sin abrir otro <Dialog/>)
+  const [showBulkEditor, setShowBulkEditor] = useState(false);
+  const [editInstruction, setEditInstruction] = useState('');
+  const [applyingEdit, setApplyingEdit] = useState(false);
+
+  // --- Enrichment Options ---
+  const [openEnrichOptions, setOpenEnrichOptions] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  const [leadsToEnrich, setLeadsToEnrich] = useState<EnrichedLead[]>([]);
+
+  async function handleConfirmEnrich(opts: { revealEmail: boolean; revealPhone: boolean }) {
+    if (!leadsToEnrich.length) return;
+    setEnriching(true);
+    try {
+      // Map to minimal payload
+      const payloadLeads = leadsToEnrich.map(l => ({
+        fullName: l.fullName,
+        linkedinUrl: l.linkedinUrl,
+        companyName: l.companyName,
+        companyDomain: l.companyDomain,
+        title: l.title,
+        sourceOpportunityId: l.sourceOpportunityId,
+        clientRef: l.id
+      }));
+
+      const res = await fetch('/api/opportunities/enrich-apollo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leads: payloadLeads,
+          revealEmail: opts.revealEmail,
+          revealPhone: opts.revealPhone,
+          tableName: 'enriched_leads'
+        }),
+      });
+
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+
+      const data = await res.json();
+
+      // Print server-side logs for debugging
+      if (data?.debug?.serverLogs && Array.isArray(data.debug.serverLogs)) {
+        console.groupCollapsed('[Server Logs] Apollo Enrichment');
+        data.debug.serverLogs.forEach((l: string) => console.log(l));
+        console.groupEnd();
+      }
+
+      const { enriched: newEnriched } = data;
+
+      if (Array.isArray(newEnriched) && newEnriched.length) {
+        const toUpdate: EnrichedLead[] = [];
+        const toAdd: EnrichedLead[] = [];
+
+        newEnriched.forEach((incoming: EnrichedLead & { clientRef?: string }) => {
+          // Match with existing
+          const existing = enriched.find(e => e.id === incoming.clientRef);
+          if (existing) {
+            // Merge important fields, keep ID
+            toUpdate.push({
+              ...existing, // Keep original creation date, etc
+              email: incoming.email || existing.email,
+              emailStatus: incoming.emailStatus || existing.emailStatus,
+              phoneNumbers: incoming.phoneNumbers,
+              primaryPhone: incoming.primaryPhone,
+              // If unlocked new info
+              linkedinUrl: incoming.linkedinUrl || existing.linkedinUrl,
+              companyName: incoming.companyName || existing.companyName,
+              title: incoming.title || existing.title,
+              // Ensure we use the proper ID for the update
+              id: existing.id
+            });
+          } else {
+            toAdd.push(incoming);
+          }
+        });
+
+        if (toUpdate.length > 0) {
+          await enrichedLeadsStorage.update(toUpdate);
+        }
+        if (toAdd.length > 0) {
+          await enrichedLeadsStorage.addDedup(toAdd);
+        }
+
+        // Reload list
+        const fresh = await enrichedLeadsStorageGet();
+        setEnriched(fresh);
+        toast({ title: 'Enriquecimiento completado', description: `Se actualizaron ${toUpdate.length} y agregaron ${toAdd.length} leads.` });
+      }
+
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Error', description: e.message });
+    } finally {
+      setEnriching(false);
+      setLeadsToEnrich([]);
+    }
+  }
+
+  function initiateEnrichment(leads: EnrichedLead[]) {
+    setLeadsToEnrich(leads);
+    setOpenEnrichOptions(true);
+  }
+
+  // --- LinkedIn Modal ---
+  const [openLinkedin, setOpenLinkedin] = useState(false);
+  const [linkedinLead, setLinkedinLead] = useState<EnrichedLead | null>(null);
+  const [linkedinMessage, setLinkedinMessage] = useState('');
+  const [sendingLinkedin, setSendingLinkedin] = useState(false);
+
+  // --- Campaign Schedule Modal ---
+  const [openSchedule, setOpenSchedule] = useState(false);
+  const [scheduleConfig, setScheduleConfig] = useState<ScheduleConfig>({
+    startDate: new Date(),
+    msgsPerDay: 50,
+    skipWeekends: true,
+    channel: 'linkedin'
+  });
+  const [scheduling, setScheduling] = useState(false);
+
+  // ===== Filtros (incluye/excluye) =====
+  const [showFilters, setShowFilters] = useState(false);
+  const [fIncCompany, setFIncCompany] = useState('');
+  const [fIncLead, setFIncLead] = useState('');
+  const [fIncTitle, setFIncTitle] = useState('');
+  const [fExcCompany, setFExcCompany] = useState('');
+  const [fExcLead, setFExcLead] = useState('');
+  const [fExcTitle, setFExcTitle] = useState('');
+  const [applied, setApplied] = useState({
+    incCompany: '', incLead: '', incTitle: '',
+    excCompany: '', excLead: '', excTitle: '',
+  });
+
+  // --- PAGINACIÓN ---
+  const [pageSize, setPageSize] = useState<number>(50);
+  const [page, setPage] = useState<number>(1);
+  const pendingPhoneSyncRef = useRef(false);
+
+  // --- FILTROS ---
+  const [companyFilter, setCompanyFilter] = useState('');
+  const [nameFilter, setNameFilter] = useState('');
+  const [titleFilter, setTitleFilter] = useState('');
+
+  const loadData = useCallback(async () => {
+    const e = await enrichedLeadsStorageGet();
+    const saved = await supabaseService.getLeads();
+
+      const patched = e.map((x) => {
+        if (x.companyName && x.companyDomain) return x;
+
+        // buscar el lead guardado que corresponde (mismo linkedin o mismo nombre+empresa)
+        const match =
+          saved.find(s => x.linkedinUrl && s.linkedinUrl === x.linkedinUrl) ||
+          saved.find(s => `${s.name}|${s.company}`.toLowerCase() === `${x.fullName}|${x.companyName || ''}`.toLowerCase());
+
+        const fromEmail = extractDomainFromEmail(x.email);
+        const fromWebsite =
+          match?.companyWebsite
+            ? (match.companyWebsite.startsWith('http') ? new URL(match.companyWebsite).hostname : match.companyWebsite)
+              .replace(/^https?:\/\//, '').replace(/^www\./, '')
+            : undefined;
+
+        return {
+          ...x,
+          companyName: x.companyName ?? match?.company ?? x.companyName ?? undefined,
+          companyDomain: x.companyDomain ?? fromWebsite ?? fromEmail ?? x.companyDomain ?? undefined,
+        };
+      });
+
+      setEnriched(patched);
+      setReports(getLeadReports());
+    setStyleProfiles(styleProfilesStorage.list());
+  }, []);
+
+  const syncPendingPhoneLeads = useCallback(async (ids?: string[]) => {
+    const targetIds = (ids || enriched.filter((lead) => lead.enrichmentStatus === 'pending_phone').map((lead) => lead.id))
+      .filter(Boolean)
+      .slice(0, 50);
+
+    if (targetIds.length === 0 || pendingPhoneSyncRef.current) return;
+    pendingPhoneSyncRef.current = true;
+
+    try {
+      const res = await fetch('/api/enriched-leads/phone-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: targetIds }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.warn('[phone-sync] request failed:', data);
+        return;
+      }
+
+      if ((data?.updated || 0) > 0 || (data?.completedWithoutPhone || 0) > 0) {
+        await loadData();
+      }
+    } catch (error) {
+      console.warn('[phone-sync] unexpected error:', error);
+    } finally {
+      pendingPhoneSyncRef.current = false;
+    }
+  }, [enriched, loadData]);
+
+  useEffect(() => {
+    if (!seqRunning || !researchUi.startedAt) {
+      setResearchPulseMs(0);
+      return;
+    }
+
+    const tick = () => setResearchPulseMs(Date.now() - researchUi.startedAt);
+    tick();
+    const intervalId = window.setInterval(tick, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [seqRunning, researchUi.startedAt]);
+
+  useEffect(() => {
+    loadData();
+
+    // Realtime Subscription
+    const channel = supabase
+      .channel('enriched-leads-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'enriched_leads' },
+        (payload) => {
+          if (payload.eventType === 'UPDATE') {
+            const newData = payload.new as any; // typed as any to access custom cols if needed
+            const oldData = payload.old as any;
+            const newPhones = Array.isArray(newData.phone_numbers) ? newData.phone_numbers : [];
+            const phoneFound = Boolean(newData.primary_phone) || newPhones.length > 0;
+
+            // Detect Status Change: Pending -> Completed
+            if (newData.enrichment_status === 'completed' && oldData.enrichment_status === 'pending_phone') {
+              if (phoneFound) {
+                toast({
+                  title: '¡Teléfono encontrado!',
+                  description: `Se actualizó el contacto para ${newData.full_name || 'un lead'}.`,
+                  duration: 5000,
+                });
+              } else {
+                toast({
+                  title: 'Búsqueda de teléfono finalizada',
+                  description: `No se encontró teléfono para ${newData.full_name || 'este lead'}.`,
+                  duration: 4500,
+                });
+              }
+            }
+          }
+          // Reload data
+          loadData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadData, toast]);
+
+  // Listen for Auth Changes to reload data if session restores late
+  useEffect(() => {
+    const pendingIds = enriched
+      .filter((lead) => lead.enrichmentStatus === 'pending_phone')
+      .map((lead) => lead.id)
+      .filter(Boolean);
+
+    if (pendingIds.length === 0) return;
+
+    syncPendingPhoneLeads(pendingIds);
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        syncPendingPhoneLeads(pendingIds);
+      }
+    }, 15000);
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        syncPendingPhoneLeads(pendingIds);
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [enriched, syncPendingPhoneLeads]);
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' || (event === 'INITIAL_SESSION' && session)) {
+        // Force reload when we are sure we have a user
+        enrichedLeadsStorageGet().then((e) => {
+          supabaseService.getLeads().then((saved) => {
+            const patched = e.map((x) => {
+              if (x.companyName && x.companyDomain) return x;
+              const match =
+                saved.find(s => x.linkedinUrl && s.linkedinUrl === x.linkedinUrl) ||
+                saved.find(s => `${s.name}|${s.company}`.toLowerCase() === `${x.fullName}|${x.companyName || ''}`.toLowerCase());
+              const fromEmail = extractDomainFromEmail(x.email);
+              const fromWebsite =
+                match?.companyWebsite
+                  ? (match.companyWebsite.startsWith('http') ? new URL(match.companyWebsite).hostname : match.companyWebsite)
+                    .replace(/^https?:\/\//, '').replace(/^www\./, '')
+                  : undefined;
+              return {
+                ...x,
+                companyName: x.companyName ?? match?.company ?? x.companyName ?? undefined,
+                companyDomain: x.companyDomain ?? fromWebsite ?? fromEmail ?? x.companyDomain ?? undefined,
+              };
+            });
+            setEnriched(patched);
+          });
+        });
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // 🔄 Refrescar si otro tab/página (compose) modifica el localStorage
+  // DEPRECATED: Cloud sync handles this differently (realtime), removing local storage listener.
+  /*
+  useEffect(() => {
+    function onStorage(ev: StorageEvent) {
+      if (ev.key === 'leadflow-enriched-leads') {
+        setEnriched(enrichedLeadsStorageGet());
+      }
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+  */
+
+  // Referencia compuesta estable (id || email || linkedin || nombre|empresa)
+  const leadRefOf = useCallback((e: EnrichedLead) => {
+    return e.id || e.email || e.linkedinUrl || `${e.fullName}|${e.companyName || ''}`;
+  }, []);
+
+  /** Reporte (cualquier fuente: por ref, por dominio o por nombre). */
+  const hasReport = useCallback((e: EnrichedLead) => {
+    const ref = leadRefOf(e);
+    const byRef = reports.find(r => (r.meta?.leadRef || '') === ref);
+    if (byRef) return true;
+    const domain = e.companyDomain;
+    if (domain && reports.find(r => r.company.domain === domain)) return true;
+    const name = e.companyName;
+    if (name && reports.find(r => (r.company.name || '').toLowerCase() === name.toLowerCase())) return true;
+    return false;
+  }, [leadRefOf, reports]);
+
+  /** Reporte estrictamente por referencia de lead (NO por dominio/nombre). */
+  const hasReportStrict = useCallback((e: EnrichedLead) => {
+    const ref = leadRefOf(e);
+    return !!reports.find(r => (r.meta?.leadRef || '') === ref);
+  }, [leadRefOf, reports]);
+
+  // Helper to inject link tracking (duplicated from compose, should be util but ok for now)
+  function rewriteLinksForTracking(html: string, trackingId: string): string {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    // Unify regex with the robust one from EmailTestPage
+    return html.replace(/href=(["'])(http[^"']+)\1/gi, (match: string, quote: string, url: string) => {
+      if (url.includes('/api/tracking/click')) return match;
+      const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
+      return `href=${quote}${trackingUrl}${quote}`;
+    });
+  }
+
+  const canContact = useCallback((lead: EnrichedLead) => hasReport(lead) && !!lead.email, [hasReport]);
+
+  // Normaliza cadenas (quita acentos y pasa a minúsculas)
+  const norm = useCallback((s?: string | null) =>
+    (s || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, ''), []);
+
+  const splitTerms = useCallback((value: string) =>
+    value
+      .split(',')
+      .map(t => norm(t).trim())
+      .filter(Boolean), [norm]);
+
+  // ---- Aplicación de filtros con soporte de múltiples términos (separados por coma) ----
+  const filtered = useMemo(() => {
+    // incluye
+    const incCompanies = splitTerms(applied.incCompany);
+    const incLeads = splitTerms(applied.incLead);
+    const incTitles = splitTerms(applied.incTitle);
+    // excluye
+    const excCompanies = splitTerms(applied.excCompany);
+    const excLeads = splitTerms(applied.excLead);
+    const excTitles = splitTerms(applied.excTitle);
+
+    const containsAny = (value?: string | null, terms?: string[]) => {
+      if (!terms || terms.length === 0) return true; // si no hay filtro, pasa
+      const v = norm(value);
+      return terms.some(t => v.includes(t));
+    };
+
+    const excludesAll = (value?: string | null, terms?: string[]) => {
+      if (!terms || terms.length === 0) return true; // si no hay filtro, pasa
+      const v = norm(value);
+      return terms.every(t => !v.includes(t));
+    };
+
+
+    return enriched.filter(e =>
+      // INCLUIR: debe cumplir todos los grupos que el usuario haya escrito
+      containsAny(e.companyName, incCompanies) &&
+      containsAny(e.fullName, incLeads) &&
+      containsAny(e.title, incTitles) &&
+
+      // EXCLUIR: si alguno matchea, se descarta
+      excludesAll(e.companyName, excCompanies) &&
+      excludesAll(e.fullName, excLeads) &&
+      excludesAll(e.title, excTitles)
+    );
+  }, [enriched, applied, splitTerms, norm]);
+
+  // Mantener número de página válido si cambia la cantidad total
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    if (page > totalPages) setPage(totalPages);
+  }, [filtered.length, pageSize, page]);
+
+  // Resetear a la primera página si cambia el tamaño de página
+  useEffect(() => { setPage(1); }, [pageSize]);
+
+  // --- Cálculo de la página actual (sobre filtrados) ---
+  const total = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const startIdx = (page - 1) * pageSize;
+  const endIdx = Math.min(startIdx + pageSize, total);
+  const pageLeads = useMemo(() => filtered.slice(startIdx, endIdx), [filtered, startIdx, endIdx]);
+
+  // Elegibles totales (sobre la lista filtrada completa)
+  const researchEligible = useMemo(
+    () => filtered.filter(e => !!e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)).length,
+    [filtered, leadRefOf, hasReportStrict]
+  );
+
+  // === Métricas para los "seleccionar todos" ===
+  const researchEligiblePage = useMemo(
+    // Elegible si: tiene email, NO está marcado investigado y NO tiene reporte por ref (otros leads no bloquean)
+    () => pageLeads.filter(e => e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)).length,
+    [pageLeads, leadRefOf, hasReportStrict]
+  );
+  const contactEligiblePage = useMemo(() => pageLeads.filter(canContact).length, [pageLeads, canContact]);
+
+  const allResearchChecked = useMemo(
+    () => researchEligiblePage > 0 && pageLeads.filter(e => e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)).every(e => sel[e.id]),
+    [pageLeads, sel, researchEligiblePage, leadRefOf, hasReportStrict]
+  );
+  const allContactChecked = useMemo(
+    () => contactEligiblePage > 0 && pageLeads.filter(canContact).every(l => selectedToContact.has(l.id)),
+    [pageLeads, selectedToContact, contactEligiblePage, canContact]
+  );
+
+  const anyInvestigated = useMemo(
+    () => enriched.some(e => isResearched(leadRefOf(e)) || hasReport(e)),
+    [enriched, leadRefOf, hasReport]
+  );
+
+  const toggleAllResearch = (checked: boolean) => {
+    if (!checked) {
+      // desmarca solo los visibles
+      setSel(prev => {
+        const copy = { ...prev };
+        pageLeads.forEach(e => { delete copy[e.id]; });
+        return copy;
+      });
+      return;
+    }
+    setSel(prev => {
+      const next = { ...prev };
+      pageLeads.forEach(e => {
+        if (e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)) next[e.id] = true;
+      });
+      return next;
+    });
+  };
+  const toggleAllContact = (checked: boolean) => {
+    if (!checked) {
+      const next = new Set<string>(selectedToContact);
+      pageLeads.forEach(l => next.delete(l.id));
+      setSelectedToContact(next);
+      return;
+    }
+    const next = new Set<string>(selectedToContact);
+    pageLeads.forEach(l => { if (canContact(l)) next.add(l.id); });
+    setSelectedToContact(next);
+  };
+
+  const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+  /** Obtiene el ID del usuario autenticado en Supabase para acciones del cliente. */
+  async function getUserIdOrFail(): Promise<string> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.id) {
+      // Si no hay usuario, redirigir (aunque el middleware ya debería proteger)
+      toast({ variant: 'destructive', title: 'Error de sesión', description: 'No se detectó usuario. Recarga la página.' });
+      throw new Error('no_identity');
+    }
+    return user.id;
+  }
+
+  async function runOneInvestigation(e: EnrichedLead, userId: string, index: number, total: number) {
+    const leadRef = leadRefOf(e);
+    const realProfile = await profileService.getCurrentProfile();
+    const payload = buildLeadResearchPayloadFromLead({
+      lead: e,
+      userId,
+      userName: realProfile?.full_name,
+      userJobTitle: realProfile?.job_title,
+      sellerProfile: realProfile,
+    });
+
+    setResearchUi({
+      leadName: e.fullName,
+      index,
+      total,
+      startedAt: Date.now(),
+      status: 'preparing',
+      reportId: null,
+      warning: null,
+    });
+
+    const startRes = await fetch('/api/lead-research', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-App-Env': 'LeadFlowAI',
+      },
+      cache: 'no-store',
+      body: JSON.stringify(payload),
+    });
+
+    let initial: any = null;
+    let raw = '';
+    try {
+      initial = await startRes.json();
+    } catch {
+      raw = await startRes.text().catch(() => '');
+    }
+
+    if (!startRes.ok) {
+      const msg = initial?.message || initial?.error || raw || 'lead-research error';
+      throw new Error(msg);
+    }
+
+    let final = initial;
+    const reportId = String(initial?.report_id || '').trim() || null;
+    const warnings = getLeadResearchWarnings(initial);
+    setResearchUi((prev) => ({
+      ...prev,
+      status: (String(initial?.status || 'in_progress') as ResearchLifecycleStatus),
+      reportId,
+      warning: warnings[0] || null,
+    }));
+
+    if (reportId && ['queued', 'in_progress'].includes(String(initial?.status || ''))) {
+      for (let attempt = 0; attempt < 18; attempt++) {
+        await sleep(4000);
+        const pollRes = await fetch(`/api/lead-research/${encodeURIComponent(reportId)}`, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        });
+
+        let polled: any = null;
+        try {
+          polled = await pollRes.json();
+        } catch {
+          polled = null;
+        }
+
+        if (!pollRes.ok) {
+          throw new Error(polled?.message || polled?.error || `lead-research poll error ${pollRes.status}`);
+        }
+
+        final = polled;
+        const nextWarnings = getLeadResearchWarnings(polled);
+        setResearchUi((prev) => ({
+          ...prev,
+          status: (String(polled?.status || 'in_progress') as ResearchLifecycleStatus),
+          warning: nextWarnings[0] || prev.warning || null,
+        }));
+
+        if (['completed', 'partial', 'insufficient_data', 'failed'].includes(String(polled?.status || ''))) {
+          break;
+        }
+      }
+    }
+
+    // Espejo local de cuota
+    Quota.incClientQuota('research');
+
+    const report = adaptLeadResearchResponseToReport(final, leadRef);
+    upsertLeadReports([report]);
+    setReports(getLeadReports());
+
+    setResearchUi((prev) => ({
+      ...prev,
+      status: (String(final?.status || 'completed') as ResearchLifecycleStatus),
+      warning: getLeadResearchWarnings(final)[0] || prev.warning || null,
+    }));
+
+    if (hasMeaningfulLeadResearch(report) && ['completed', 'partial'].includes(String(final?.status || ''))) {
+      markResearched([leadRef]);
+    }
+
+    if (String(final?.status || '') === 'insufficient_data') {
+      toast({
+        variant: 'destructive',
+        title: `Investigacion limitada para ${e.fullName}`,
+        description: 'El backend no encontro suficiente informacion util para generar un reporte comercial fuerte.',
+      });
+    } else if (getLeadResearchWarnings(final).length > 0) {
+      toast({
+        title: `Investigacion completada con advertencias`,
+        description: getLeadResearchWarnings(final)[0],
+      });
+    }
+  }
+
+  async function investigateOneByOne() {
+    if (seqRunning) return;
+    const selectedLeadsForResearch = Object.keys(sel).filter(id => sel[id]);
+    const selected = enriched.filter(e => selectedLeadsForResearch.includes(e.id));
+    if (selected.length === 0) return;
+
+    // Preflight: verifica que el proxy al motor de research este disponible
+    try {
+      const health = await fetch('/api/lead-research', { method: 'GET', cache: 'no-store' }).then(r => r.json());
+      if (!health?.endpoint) {
+        toast({
+          variant: 'destructive',
+          title: 'Backend sin lead research configurado',
+          description: 'Configura el webhook de n8n para investigacion y vuelve a publicar.',
+        });
+        return;
+      }
+    } catch { /* ignoramos si falla el GET, el POST igual reportará */ }
+
+    if (!Quota.canUseClientQuota('research')) {
+      toast({ variant: 'destructive', title: 'Límite diario alcanzado', description: `Has llegado al límite de investigaciones por hoy.` });
+      return;
+    }
+
+    setSeqRunning(true);
+    setSeqDone(0);
+    setSeqTotal(selected.length);
+
+    try {
+      // Obtener identidad UNA vez para toda la cola.
+      const userId = await getUserIdOrFail().catch((err) => {
+        console.warn('[research] identity error', err);
+        toast({
+          variant: 'destructive',
+          title: 'Sesion no disponible',
+          description: 'Recarga la pagina para continuar con la investigación.',
+        });
+        throw new Error('missing user id');
+      });
+
+      for (let idx = 0; idx < selected.length; idx++) {
+        const e = selected[idx];
+        // NO bloqueamos por dominio/nombre: solo si ya existe reporte para ESTE leadRef
+        if (hasReportStrict(e)) {
+          setSeqDone(prev => prev + 1);
+          continue;
+        }
+
+        let lastErr: any = null;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            await runOneInvestigation(e, userId, idx + 1, selected.length);
+            lastErr = null;
+            break;
+          } catch (err: any) {
+            lastErr = err;
+            if (String(err?.message || '').includes('missing user id')) {
+              // No reintentes si no hay identidad
+              break;
+            }
+            await sleep(1500);
+          }
+        }
+        if (lastErr) {
+          console.error(`Investigación falló para ${e.companyName}:`, lastErr?.message);
+          setResearchUi(prev => ({
+            ...prev,
+            leadName: e.fullName,
+            index: idx + 1,
+            total: selected.length,
+            status: 'failed',
+            warning: lastErr?.message || null,
+          }));
+          toast({
+            variant: "destructive",
+            title: `Investigación falló para ${e.companyName}`,
+            description: lastErr?.message || 'Error desconocido en el motor de investigación.'
+          });
+        }
+        setSeqDone(prev => prev + 1);
+        await sleep(1200);
+      }
+    } finally {
+      setSeqRunning(false);
+      setResearchUi(prev => ({ ...prev, status: prev.status === 'failed' ? 'failed' : 'idle' }));
+      setResearchPulseMs(0);
+      // Refresh credits
+      organizationService.getCredits().then(res => {
+        if (res) setSocialCredits(res.credits);
+      });
+      toast({ title: 'Investigación completa', description: `Procesados ${selected.length} leads con n8n.` });
+    }
+  }
+  function clearInvestigationFor(lead: EnrichedLead) {
+    if (!confirm(`¿Borrar investigación para ${lead.fullName}?`)) return;
+    const ref = leadRefOf(lead);
+    const domain = (lead.companyDomain || '').trim();
+
+    leadResearchStorage.removeWhere(r => {
+      const rRef = (r?.meta?.leadRef || '').trim();
+      const rDom = (r?.company?.domain || '').trim();
+      return Boolean((ref && rRef === ref) || (domain && rDom === domain));
+    });
+
+    toast({ title: 'Investigación eliminada', description: `Se borraron los datos de ${lead.fullName}.` });
+    setTick(t => t + 1);
+  }
+
+  /** Borra reportes de investigación y desmarca "investigado" para TODOS los leads visibles. */
+  function clearInvestigations() {
+    if (!enriched.length) return;
+    const ok = confirm('¿Borrar todos los reportes e investigaciones de los leads listados? Podrás investigarlos nuevamente.');
+    if (!ok) return;
+
+    // 1) Construir referencias y dominios objetivo
+    const refs = enriched.map(leadRefOf).filter(Boolean);
+    const domains = new Set(enriched.map(e => (e.companyDomain || '').trim()).filter(Boolean));
+
+    // 2) Eliminar reportes (cualquier reporte que haga match por leadRef o por dominio)
+    const removedCount = leadResearchStorage.removeWhere((r) => {
+      const ref = (r?.meta?.leadRef || '').trim();
+      const dom = (r?.company?.domain || '').trim();
+      return Boolean((ref && refs.includes(ref)) || (dom && domains.has(dom)));
+    });
+
+    // 3) Desmarcar "investigado"
+    unmarkResearched(refs);
+
+    // 4) Refrescar estado
+    setReports(getLeadReports());
+    setSel({});                         // limpiar selección de investigar
+    setSelectedToContact(new Set());    // limpiar selección de contactar
+
+    // 5) Aviso
+    toast({
+      title: 'Investigaciones borradas',
+      description: removedCount > 0
+        ? `Se eliminaron ${removedCount} reporte(s). Ahora puedes investigar de nuevo.`
+        : 'No se encontraron reportes para borrar. Igual puedes investigar de nuevo.',
+    });
+  }
+
+  /** Borra reportes e investigación SOLO de los "Contactar seleccionados". */
+  function clearInvestigationsSelected() {
+    const targets = enriched.filter(l => selectedToContact.has(l.id));
+    if (!targets.length) return;
+    const ok = confirm(`¿Borrar investigaciones de ${targets.length} lead(s) seleccionados? Podrás investigarlos nuevamente.`);
+    if (!ok) return;
+
+    const refs = targets.map(leadRefOf).filter(Boolean);
+    const domains = new Set(targets.map(e => (e.companyDomain || '').trim()).filter(Boolean));
+
+    const removedCount = leadResearchStorage.removeWhere((r) => {
+      const ref = (r?.meta?.leadRef || '').trim();
+      const dom = (r?.company?.domain || '').trim();
+      return Boolean((ref && refs.includes(ref)) || (dom && domains.has(dom)));
+    });
+
+    unmarkResearched(refs);
+
+    // Limpiar selección de contactar para los que ya no tienen reporte
+    const nextSel = new Set<string>(selectedToContact);
+    targets.forEach(t => nextSel.delete(t.id));
+    setSelectedToContact(nextSel);
+
+    setReports(getLeadReports());
+    toast({
+      title: 'Investigaciones borradas (seleccionados)',
+      description: removedCount > 0 ? `Se eliminaron ${removedCount} reporte(s).` : 'No se encontraron reportes para borrar.',
+    });
+  }
+
+  /** Borra reportes e investigación de un único lead (usado en el modal de reporte). */
+  function clearSingleInvestigation(lead: EnrichedLead) {
+    const ok = confirm(`¿Borrar la investigación de ${lead.fullName}?`);
+    if (!ok) return;
+    const ref = leadRefOf(lead);
+    const dom = (lead.companyDomain || '').trim();
+    const removedCount = leadResearchStorage.removeWhere((r) => {
+      const rref = (r?.meta?.leadRef || '').trim();
+      const rdom = (r?.company?.domain || '').trim();
+      return (!!ref && rref === ref) || (!!dom && rdom === dom);
+    });
+    unmarkResearched([ref]);
+    const nextSel = new Set<string>(selectedToContact); nextSel.delete(lead.id);
+    setSelectedToContact(nextSel);
+    setReports(getLeadReports());
+    setOpenReport(false);
+    toast({
+      title: 'Investigación borrada',
+      description: removedCount > 0 ? 'Se eliminó el reporte. Ya puedes reinvestigar.' : 'No se encontró reporte para borrar.',
+    });
+  }
+
+  function openLinkedinCompose(lead: EnrichedLead) {
+    if (!lead.linkedinUrl) return;
+    setLinkedinLead(lead);
+
+    // Contextual AI Generation
+    const rep = findReportForLead({ leadId: leadRefOf(lead), companyDomain: lead.companyDomain || null, companyName: lead.companyName || null });
+    const draft = generateLinkedinDraft(lead, rep);
+
+    setLinkedinMessage(draft);
+    setOpenLinkedin(true);
+  }
+
+  function isLinkedinPendingInviteError(error?: string) {
+    const text = String(error || '').toLowerCase();
+    return text.includes('connection request already pending') || text.includes('already pending');
+  }
+
+  function getLinkedinPendingInviteMessage() {
+    return {
+      title: 'Invitacion ya pendiente',
+      description: 'Este perfil ya tiene una solicitud de conexion pendiente en LinkedIn. No es un problema de Premium ni de la extension.',
+    };
+  }
+
+  async function handleBulkLinkedin() {
+    // 1. Get selected leads with LinkedIn URLs
+    const leadsToProcess = enriched.filter(l => selectedToContact.has(l.id) && l.linkedinUrl);
+
+    if (leadsToProcess.length === 0) {
+      toast({ title: 'No hay leads válidos', description: 'Selecciona leads que tengan URL de LinkedIn.' });
+      return;
+    }
+
+    // 2. Validate Extension
+    if (!extensionService.isInstalled) {
+      toast({
+        variant: 'destructive',
+        title: 'Extensión no detectada',
+        description: 'Instala la extensión de Chrome de Anton.IA para usar esta función.'
+      });
+      return;
+    }
+
+    // 3. Warning for large selections
+    if (leadsToProcess.length > 20) {
+      const confirmed = confirm(
+        `⚠️ Vas a contactar ${leadsToProcess.length} leads.\n\n` +
+        `Esto tomará aproximadamente ${Math.round(leadsToProcess.length * 7.5 / 60)} minutos.\n\n` +
+        `Procesar muchos leads aumenta el riesgo de detección por LinkedIn.\n\n` +
+        `¿Deseas continuar?`
+      );
+      if (!confirmed) return;
+    }
+
+    // Reset stop flag
+    bulkLinkedinStopRef.current = false;
+
+    setBulkLinkedinRunning(true);
+    setBulkLinkedinProgress({ current: 0, total: leadsToProcess.length, currentName: '' });
+
+    let processedCount = 0;
+    let successCount = 0;
+    let failCount = 0;
+    let skippedCount = 0;
+
+    for (const lead of leadsToProcess) {
+      // Check stop flag
+      if (bulkLinkedinStopRef.current) {
+        console.log('[Bulk LinkedIn] Stopped by user');
+        toast({ title: 'Proceso detenido', description: `Procesados: ${processedCount} de ${leadsToProcess.length}` });
+        break;
+      }
+
+      setBulkLinkedinProgress(prev => ({ ...prev, currentName: lead.fullName || 'Desconocido', current: processedCount + 1 }));
+
+      try {
+        // 2. Generate message using same logic as single contact
+        const company = getCompanyProfile() || {};
+        const rep = findReportForLead({
+          leadId: leadRefOf(lead),
+          companyDomain: lead.companyDomain || null,
+          companyName: lead.companyName || null
+        });
+
+        const draft = generateLinkedinDraft(lead, rep);
+        const messageBody = draft || `Hola ${getFirstNameSafe(lead.fullName)}, me gustaría conectar contigo.`;
+
+        // 3. Send via Extension
+        console.log(`[Bulk LinkedIn] Processing ${lead.fullName}...`);
+        const res = await extensionService.sendLinkedinDM(lead.linkedinUrl!, messageBody);
+
+        // 4. Log Result
+        if (res.success) {
+          successCount++;
+          // Log directly since handleLogCall signature doesn't match
+          await contactedLeadsStorage.add({
+            id: uuid(),
+            leadId: lead.id,
+            name: lead.fullName || 'Desconocido',
+            email: lead.email || '',
+            company: lead.companyName,
+            role: lead.title,
+            industry: lead.industry || undefined,
+            city: lead.city || lead.country || undefined,
+            country: lead.country || undefined,
+            subject: `LinkedIn: Mensaje enviado automáticamente.\n\n${messageBody}`,
+            sentAt: new Date().toISOString(),
+            status: 'sent',
+            provider: 'linkedin',
+            lastUpdateAt: new Date().toISOString(),
+          });
+
+          // Remove from enriched list and storage
+          await removeEnrichedLeadById(lead.id);
+          setEnriched(prev => prev.filter(e => e.id !== lead.id));
+
+          // Remove from selection
+          setSelectedToContact(prev => {
+            const next = new Set(prev);
+            next.delete(lead.id);
+            return next;
+          });
+        } else {
+          if (isLinkedinPendingInviteError(res.error)) {
+            skippedCount++;
+            const info = getLinkedinPendingInviteMessage();
+            console.warn('[Bulk LinkedIn] Invite already pending for:', lead.fullName);
+            toast({
+              title: `${info.title}: ${lead.fullName}`,
+              description: info.description,
+            });
+          } else {
+            failCount++;
+            console.error('[Bulk LinkedIn] Failed for:', lead.fullName, res.error);
+            toast({
+              title: `Error: ${lead.fullName}`,
+              description: res.error || 'No se pudo enviar el mensaje',
+              variant: 'destructive'
+            });
+          }
+        }
+
+      } catch (err) {
+        failCount++;
+        console.error('[Bulk LinkedIn] Exception:', err);
+        toast({
+          title: `Error: ${lead.fullName}`,
+          description: 'Error inesperado al procesar',
+          variant: 'destructive'
+        });
+      }
+
+      processedCount++;
+
+      // 5. Wait safely between contacts (5-10s random delay)
+      if (processedCount < leadsToProcess.length && !bulkLinkedinStopRef.current) {
+        const delayTime = 5000 + Math.random() * 5000;
+        console.log(`[Bulk LinkedIn] Waiting ${Math.round(delayTime / 1000)}s before next contact...`);
+        await new Promise(r => setTimeout(r, delayTime));
+      }
+    }
+
+    setBulkLinkedinRunning(false);
+    setOpenBulkLinkedin(false);
+
+    toast({
+      title: 'Proceso finalizado',
+      description: `Procesados: ${processedCount} | Exitosos: ${successCount} | Omitidos: ${skippedCount} | Fallidos: ${failCount}`
+    });
+  }
+
+  async function handleScheduleCampaign() {
+    // Get selected leads
+    const selectedIds = Array.from(selectedToContact);
+    const leadsToSchedule = enriched.filter(e => selectedIds.includes(e.id)).map(e => ({
+      id: e.id,
+      name: e.fullName,
+      company: e.companyName,
+      email: e.email, // Assuming email is always present for contacting
+      linkedinUrl: e.linkedinUrl,
+      role: e.title,
+      industry: (e as any).industry // safe cast if property exists in enriched lead,
+    }));
+
+    // Validation
+    if (scheduleConfig.channel === 'linkedin') {
+      const missingUrl = leadsToSchedule.filter(l => !l.linkedinUrl).length;
+      if (missingUrl > 0) {
+        toast({ variant: 'destructive', title: 'Error', description: `${missingUrl} leads no tienen URL de LinkedIn.` });
+        return;
+      }
+    }
+
+    setScheduling(true);
+    try {
+      const plan = plannerService.calculateSchedule(leadsToSchedule, scheduleConfig);
+      await plannerService.saveSchedule(plan);
+
+      toast({ title: 'Campaña Agendada', description: `Se programaron ${plan.length} envíos.` });
+      setOpenSchedule(false);
+      router.push('/planner');
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Error', description: e.message });
+    } finally {
+      setScheduling(false);
+    }
+  }
+
+  async function handleSendLinkedin() {
+    if (!linkedinLead || !linkedinMessage) return;
+    setSendingLinkedin(true);
+
+    try {
+      // 1. Check Extension
+      if (!extensionService.isInstalled) {
+        toast({
+          variant: 'destructive',
+          title: 'Extensión no detectada',
+          description: 'Instala la extensión de Chrome de Anton.IA para enviar DMs.'
+        });
+        setSendingLinkedin(false);
+        return;
+      }
+
+      // 2. Send Command
+      const res = await extensionService.sendLinkedinDM(linkedinLead.linkedinUrl!, linkedinMessage);
+
+      if (res.success) {
+        // 3. Save Log
+        await contactedLeadsStorage.add({
+          id: uuid(),
+          leadId: linkedinLead.id,
+          name: linkedinLead.fullName,
+          email: linkedinLead.email || '',
+          company: linkedinLead.companyName,
+          role: linkedinLead.title,
+          industry: linkedinLead.industry,
+          city: linkedinLead.city,
+          country: linkedinLead.country,
+
+          subject: 'LinkedIn DM',
+          status: 'sent',
+          provider: 'linkedin', // New provider
+          linkedinThreadUrl: linkedinLead.linkedinUrl, // Best proxy for now
+          linkedinMessageStatus: 'sent',
+          sentAt: new Date().toISOString(),
+
+          // Tech fields
+          lastUpdateAt: new Date().toISOString()
+        });
+
+        toast({ title: 'Mensaje Enviado', description: 'La extensión procesó el envío correctamente.' });
+        setOpenLinkedin(false);
+
+        // Optional: Remove from enriched?
+        // await removeEnrichedLeadById(linkedinLead.id);
+      } else {
+        console.error('Extension returned error:', res.error);
+        if (isLinkedinPendingInviteError(res.error)) {
+          const info = getLinkedinPendingInviteMessage();
+          toast({ title: info.title, description: info.description });
+          setOpenLinkedin(false);
+        } else {
+          toast({ variant: 'destructive', title: 'Error en Envio', description: res.error });
+        }
+      }
+
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Excepción', description: e.message });
+    } finally {
+      setSendingLinkedin(false);
+    }
+  }
+
+  function openBulkCompose() {
+    const company = getCompanyProfile() || {};
+    const sender = buildSenderInfo();
+    const overrides = emailDraftsStorage.getMap();
+
+    const drafts = enriched
+      .filter(l => selectedToContact.has(l.id))
+      .map(l => {
+        const rep = findReportForLead({ leadId: leadRefOf(l), companyDomain: l.companyDomain || null, companyName: l.companyName || null });
+        let subj = '';
+        let body = '';
+        if (draftSource === 'style' && styleProfiles.length) {
+          const prof = styleProfiles.find(p => p.name === selectedStyleName) || styleProfiles[0];
+          const gen = generateMailFromStyle(
+            prof,
+            rep?.cross || null,
+            { id: l.id, fullName: l.fullName, email: l.email!, title: l.title, companyName: l.companyName, companyDomain: l.companyDomain, linkedinUrl: l.linkedinUrl }
+          );
+          subj = gen.subject; body = gen.body;
+        } else {
+          // Investigación (comportamiento actual)
+          const seed = rep?.cross?.emailDraft
+            ? { subject: rep.cross.emailDraft.subject, body: rep.cross.emailDraft.body }
+            : (() => {
+              const v2 = generateCompanyOutreachV2({
+                leadFirstName: (l.fullName || '').split(' ')[0] || '',
+                companyName: l.companyName,
+                myCompanyProfile: company,
+              });
+              return { subject: v2.subjectBase, body: v2.body };
+            })();
+          subj = seed.subject || ''; body = seed.body || '';
+        }
+
+        const ctx = buildPersonEmailContext({
+          lead: { name: l.fullName, email: l.email!, title: l.title, company: l.companyName },
+          company: { name: l.companyName, domain: l.companyDomain },
+          sender,
+        });
+        subj = renderTemplate(subj, ctx);
+        body = renderTemplate(body, ctx);
+        body = applySignaturePlaceholders(body, sender);
+
+        // Asegurar prefijo con el nombre SOLO en el asunto
+        subj = ensureSubjectPrefix(subj, ctx.lead.firstName);
+
+        // Aplicar override guardado, si existe
+        const ov = overrides[l.id];
+        if (ov?.subject || ov?.body) {
+          subj = ov.subject || subj;
+          body = ov.body || body;
+        }
+
+        return { lead: l, subject: subj, body };
+      });
+
+    setComposeList(drafts);
+    if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
+    setBulkProvider('outlook');
+    setOpenCompose(true);
+  }
+
+  async function sendBulk() {
+    const items = composeList;
+    if (!items?.length) return;
+
+    setSendingBulk(true);
+    setSendProgress({ done: 0, total: items.length });
+    const removedIds = new Set<string>();
+
+    for (let i = 0; i < items.length; i++) {
+      const { lead, subject, body } = items[i];
+      try {
+        let res: any = null;
+        const trackingId = uuid(); // Pre-generate ID for tracking
+        let finalHtmlBody = body.replace(/\n/g, '<br/>');
+
+        // 2. Rewrite Links if enabled
+        if (useLinkTracking) {
+          finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
+        }
+
+        // 3. Inject Pixel if enabled
+        if (usePixel) {
+          const origin = typeof window !== 'undefined' ? window.location.origin : '';
+          let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
+          const profile = getCompanyProfile();
+          if (profile?.logo && profile.logo.startsWith('http')) {
+            pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
+          }
+          // FIX: Removed display:none to prevent blocking by email clients
+          const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
+          finalHtmlBody += `\n<br>${trackingPixel}`;
+        }
+
+        if (bulkProvider === 'outlook') {
+          res = await sendEmail({
+            to: lead.email!,
+            subject,
+            htmlBody: finalHtmlBody,
+            requestReceipts: useReadReceipt,
+          });
+        } else {
+          // Gmail
+          res = await sendGmailEmail({
+            to: lead.email!,
+            subject,
+            html: finalHtmlBody,
+          });
+        }
+        Quota.incClientQuota('contact');
+        await contactedLeadsStorage.add({
+          id: trackingId, // Use the same ID
+          leadId: lead.id,
+          name: lead.fullName,
+          email: lead.email!,
+          company: lead.companyName,
+          role: lead.title,
+          industry: lead.industry,
+          city: lead.city,
+          country: lead.country,
+          subject,
+          sentAt: new Date().toISOString(),
+          status: 'sent',
+          provider: bulkProvider,
+          // Campos según proveedor
+          messageId: bulkProvider === 'outlook' ? res?.messageId : res?.id,
+          conversationId: bulkProvider === 'outlook' ? res?.conversationId : undefined,
+          internetMessageId: bulkProvider === 'outlook' ? res?.internetMessageId : undefined,
+          threadId: bulkProvider === 'gmail' ? res?.threadId : undefined,
+          lastUpdateAt: new Date().toISOString(),
+        });
+
+        // ✅ mover fuera de Enriquecidos si el envío fue OK
+        await removeEnrichedLeadById(lead.id);
+        removedIds.add(lead.id);
+      } catch (e: any) {
+        console.error(`send mail error (${bulkProvider})`, lead.email, e?.message);
+      }
+      setSendProgress(p => ({ ...p, done: p.done + 1 }));
+      await new Promise(res => setTimeout(res, 500));
+    }
+
+    setSendingBulk(false);
+    setOpenCompose(false);
+    // Actualiza UI y selecciones
+    if (removedIds.size) {
+      setEnriched(prev => prev.filter(x => !removedIds.has(x.id)));
+      setSelectedToContact(new Set(Array.from(selectedToContact).filter(id => !removedIds.has(id))));
+    }
+    toast({
+      title: 'Listo',
+      description: `Enviados por ${bulkProvider}: ${items.length}. Quitados de Enriquecidos: ${removedIds.size}`,
+    });
+  }
+
+  const goContact = (id: string, subject?: string, body?: string) => {
+    const url = new URL(window.location.origin + `/contact/compose`);
+    url.searchParams.set('id', id);
+    if (subject) url.searchParams.set('subject', subject);
+    if (body) url.searchParams.set('body', body);
+    router.push(url.toString());
+  };
+
+  async function generateEmailFromReportFor(e: EnrichedLead) {
+    const report = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
+    if (!report?.cross?.emailDraft) {
+      toast({ title: 'Sin borrador de IA', description: 'Investiga con n8n y asegúrate de que el reporte incluya borrador.' });
+      if (report) openReportFor(e);
+      return;
+    }
+    const company = getCompanyProfile() || {};
+    const sender = buildSenderInfo();
+    const ctx = buildPersonEmailContext({
+      lead: { name: e.fullName, email: e.email!, title: e.title, company: e.companyName },
+      company: { name: e.companyName, domain: e.companyDomain },
+      sender,
+    });
+    let subj = renderTemplate(report.cross.emailDraft.subject || '', ctx);
+    let body = renderTemplate(report.cross.emailDraft.body || '', ctx);
+    body = applySignaturePlaceholders(body, sender);
+    subj = ensureSubjectPrefix(subj, ctx.lead.firstName);
+    goContact(e.id, subj, body);
+  }
+
+  function openReportFor(e: EnrichedLead) {
+    const rep = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain || null, companyName: e.companyName || null });
+    if (!rep?.cross) {
+      toast({ title: 'Sin reporte', description: 'Investiga con n8n antes de abrir el reporte.' });
+      return;
+    }
+    setReportToView(rep);
+    setReportLead(e);
+    setOpenReport(true);
+  }
+
+  async function handleLogCall(result: 'connected' | 'voicemail' | 'wrong_number' | 'no_answer', notes: string) {
+    if (!leadToCall) return;
+
+    try {
+      // 1. Guardar en Contactados con notas completas
+      const resultLabel = result === 'connected' ? 'Contactado' :
+        result === 'voicemail' ? 'Buzón de voz' :
+          result === 'wrong_number' ? 'Número equivocado' :
+            'No contestó';
+
+      await contactedLeadsStorage.add({
+        id: uuid(),
+        leadId: leadToCall.id,
+        name: leadToCall.fullName,
+        email: leadToCall.email || '',
+        company: leadToCall.companyName,
+        role: leadToCall.title,
+        industry: leadToCall.industry || undefined,
+        city: leadToCall.city || leadToCall.country || undefined,
+        country: leadToCall.country || undefined,
+        subject: notes ? `Llamada: ${resultLabel} - ${notes}` : `Llamada telefónica: ${resultLabel}`,
+        sentAt: new Date().toISOString(),
+        status: result === 'connected' ? 'sent' : 'failed',
+        provider: 'phone',
+        lastUpdateAt: new Date().toISOString(),
+      });
+
+      // 2. Remover de Enriquecidos
+      await removeEnrichedLeadById(leadToCall.id);
+      setEnriched(prev => prev.filter(e => e.id !== leadToCall.id));
+
+      toast({
+        title: 'Llamada registrada',
+        description: `Lead movido a Contactados. ${notes ? 'Notas guardadas.' : ''}`
+      });
+    } catch (e) {
+      console.error(e);
+      toast({ variant: 'destructive', title: 'Error', description: 'No se pudo guardar la llamada.' });
+    }
+  }
+
+  async function handleDeleteEnriched(id: string) {
+    const ok = confirm('¿Eliminar este lead de Enriquecidos?');
+    if (!ok) return;
+    const next = await removeEnrichedLeadById(id);
+    setEnriched(next);
+    // limpia selecciones
+    setSel(prev => { const p = { ...prev }; delete p[id]; return p; });
+    const s = new Set(selectedToContact); s.delete(id); setSelectedToContact(s);
+    toast({ title: 'Eliminado', description: 'Se quitó el lead de Enriquecidos.' });
+  }
+
+  // Contadores para toda la selección (no solo la página actual)
+  const researchCount = Object.values(sel).filter(Boolean).length;
+  const contactCount = selectedToContact.size;
+
+  // ---------- Export helpers ----------
+  const exportHeaders = ['Nombre', 'Cargo', 'Empresa', 'Email', 'Teléfono', 'LinkedIn', 'Dominio'];
+  const toRow = (e: EnrichedLead): (string | number)[] => ([
+    e.fullName || '',
+    e.title || '',
+    e.companyName || '',
+    e.email || (e.emailStatus === 'locked' ? '(locked)' : ''),
+    e.primaryPhone || (e.phoneNumbers && e.phoneNumbers[0] ? e.phoneNumbers[0].sanitized_number : '') || '',
+    e.linkedinUrl || '',
+    e.companyDomain || '',
+  ]);
+  const buildRows = (list: EnrichedLead[]) => list.map(toRow);
+  const handleExportCsv = () => {
+    if (!enriched.length) return;
+    exportToCsv(exportHeaders, buildRows(enriched), 'enriched-leads.csv');
+  };
+  const handleExportXlsx = async () => {
+    if (!enriched.length) return;
+    await exportToXlsx(exportHeaders, buildRows(enriched), 'enriched-leads.xlsx');
+  };
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Leads enriquecidos"
+        description="Selecciona leads, investiga con n8n y luego contacta con mejor contexto comercial."
+      />
+      <BackBar fallbackHref="/saved/leads" className="mb-2" />
+
+      {socialCredits !== null && (
+        <div className={`mb-4 px-4 py-2 rounded-md text-sm border flex items-center justify-between ${socialCredits > 0 ? 'bg-blue-50 text-blue-800 border-blue-100' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+          <div className="flex items-center gap-2">
+            <span className="text-lg">⚡</span>
+            <span>
+              <strong>Investigación Profunda (LinkedIn):</strong> {socialCredits} créditos restantes.
+              {socialCredits === 0 && <span className="ml-2 opacity-80">(Se usará investigación estándar sin LinkedIn)</span>}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="mb-4">
+        <DailyQuotaProgress kinds={['research']} compact />
+      </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Lista de leads enriquecidos ({filtered.length} / {enriched.length})</CardTitle>
+            <CardDescription>
+              {researchEligible === 0
+                ? 'No hay leads con email para investigar.'
+                : 'Solo se investigan los que tienen email revelado.'}
+            </CardDescription>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowFilters(v => !v)}
+              title="Mostrar/Ocultar filtros"
+            >
+              Filtrar
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={clearInvestigationsSelected}
+              disabled={selectedToContact.size === 0}
+              title={selectedToContact.size === 0 ? 'Selecciona leads para contactar' : 'Borrar investigaciones de los seleccionados para contactar'}
+            >
+              <Eraser className="mr-2 h-4 w-4" />
+              Borrar investigaciones de seleccionados
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={clearInvestigations}
+              disabled={!anyInvestigated}
+              title={anyInvestigated ? 'Borrar todos los reportes y marcas de investigación' : 'No hay investigaciones que borrar'}
+            >
+              <Eraser className="mr-2 h-4 w-4" />
+              Borrar investigaciones
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => initiateEnrichment(enriched.filter(e => selectedToContact.has(e.id)))}
+              disabled={selectedToContact.size === 0}
+            >
+              <RotateCw className="mr-2 h-4 w-4" />
+              Enriquecer Datos
+            </Button>
+
+            {selectedToContact.size > 0 && (
+              <Button
+                variant="outline"
+                className="text-blue-700 border-blue-200 bg-blue-50 hover:bg-blue-100"
+                onClick={() => setOpenBulkLinkedin(true)}
+              >
+                <Linkedin className="h-4 w-4 mr-2" />
+                Contactar LinkedIn ({selectedToContact.size})
+              </Button>
+            )}
+
+            <Button onClick={openBulkCompose} disabled={selectedToContact.size === 0}>
+              Contactar seleccionados ({selectedToContact.size})
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setOpenSchedule(true)}
+              disabled={selectedToContact.size === 0}
+            >
+              Agendar Campaña
+            </Button>
+            <Button
+              onClick={() => investigateOneByOne()}
+              disabled={seqRunning || researchCount === 0}
+            >
+              {seqRunning ? 'Investigando...' : `Investigar (Vane) (${researchCount})`}
+            </Button>
+            {/* NUEVO: exportaciones */}
+            <Button
+              variant="outline"
+              onClick={handleExportCsv}
+              disabled={enriched.length === 0}
+              title={enriched.length === 0 ? 'No hay datos para exportar' : 'Exportar CSV'}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Exportar CSV
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleExportXlsx}
+              disabled={enriched.length === 0}
+              title={enriched.length === 0 ? 'No hay datos para exportar' : 'Exportar XLSX'}
+            >
+              <FileSpreadsheet className="mr-2 h-4 w-4" />
+              XLSX
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {/* Panel de filtros (colapsable) */}
+          {showFilters && (
+            <div className="mb-4 border rounded-md p-3 bg-muted/30">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir · Empresa</div>
+                  <Input value={fIncCompany} onChange={e => setFIncCompany(e.target.value)} placeholder="contiene… (separa con comas)" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir · Nombre</div>
+                  <Input value={fIncLead} onChange={e => setFIncLead(e.target.value)} placeholder="contiene… (separa con comas)" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir · Cargo</div>
+                  <Input value={fIncTitle} onChange={e => setFIncTitle(e.target.value)} placeholder="contiene… (separa con comas)" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Excluir · Empresa</div>
+                  <Input value={fExcCompany} onChange={e => setFExcCompany(e.target.value)} placeholder="no contenga… (separa con comas)" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Excluir · Nombre</div>
+                  <Input value={fExcLead} onChange={e => setFExcLead(e.target.value)} placeholder="no contenga… (separa con comas)" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Excluir · Cargo</div>
+                  <Input value={fExcTitle} onChange={e => setFExcTitle(e.target.value)} placeholder="no contenga… (separa con comas)" />
+                </div>
+              </div>
+              <div className="mt-3 flex justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setFIncCompany(''); setFIncLead(''); setFIncTitle('');
+                    setFExcCompany(''); setFExcLead(''); setFExcTitle('');
+                    setApplied({ incCompany: '', incLead: '', incTitle: '', excCompany: '', excLead: '', excTitle: '' });
+                  }}
+                >
+                  Limpiar
+                </Button>
+
+                <Button
+                  onClick={() => {
+                    setApplied({
+                      incCompany: fIncCompany,
+                      incLead: fIncLead,
+                      incTitle: fIncTitle,
+                      excCompany: fExcCompany,
+                      excLead: fExcLead,
+                      excTitle: fExcTitle,
+                    });
+                    setPage(1);
+                  }}
+                >
+                  Filtrar
+                </Button>
+
+                <Button variant="outline" onClick={() => setShowFilters(false)}>Ocultar</Button>
+              </div>
+            </div>
+          )}
+
+          {seqRunning && (
+            <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/70 p-4">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-medium text-blue-900">
+                    <BrainCircuit className="h-4 w-4" />
+                    Investigacion en progreso
+                  </div>
+                  <div className="text-lg font-semibold text-slate-900">
+                    {researchUi.leadName ? `Analizando a ${researchUi.leadName}` : 'Preparando investigacion'}
+                  </div>
+                  <div className="text-sm text-slate-600">
+                    {getResearchStageCopy(researchUi.status, researchPulseMs)} · Lead {Math.max(researchUi.index, seqDone + 1)}/{seqTotal}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 border border-blue-100">
+                      <Clock3 className="h-3.5 w-3.5" />
+                      Estimado 45-60s por lead
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 border border-blue-100">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      ETA actual ~{Math.max(0, Math.ceil((RESEARCH_STANDARD_ESTIMATE_MS - Math.min(researchPulseMs, RESEARCH_STANDARD_ESTIMATE_MS)) / 1000))}s
+                    </span>
+                    {researchUi.reportId ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 border border-blue-100">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Reporte #{researchUi.reportId.slice(0, 8)}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="w-full max-w-xl space-y-2">
+                  <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-slate-600">
+                    <span>{researchUi.status === 'queued' ? 'En cola' : researchUi.status === 'in_progress' ? 'Procesando' : 'Investigando'}</span>
+                    <span>{getResearchProgressValue(researchUi.status, researchPulseMs)}%</span>
+                  </div>
+                  <Progress value={getResearchProgressValue(researchUi.status, researchPulseMs)} className="h-2.5 bg-blue-100" />
+                  {researchUi.warning ? (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-none" />
+                      <span>{researchUi.warning}</span>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-500">Mantén esta pestaña abierta. El progreso se actualizará automáticamente mientras se construye el reporte.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="rounded-md border overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12 text-center" title="Marcar para investigar con n8n">
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="text-[10px] uppercase text-muted-foreground">Inv.</span>
+                      <Checkbox
+                        checked={allResearchChecked}
+                        disabled={researchEligiblePage === 0}
+                        onCheckedChange={(v) => toggleAllResearch(Boolean(v))}
+                        aria-label="Seleccionar todos para investigar"
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead className="w-12 text-center" title="Marcar para CONTACTAR por email">
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="text-[10px] uppercase text-muted-foreground">Cont.</span>
+                      <Checkbox
+                        checked={contactEligiblePage > 0 ? allContactChecked : false}
+                        disabled={contactEligiblePage === 0}
+                        onCheckedChange={(v) => toggleAllContact(Boolean(v))}
+                        aria-label="Seleccionar todos para contactar"
+                      />
+                    </div>
+                  </TableHead>
+                  <TableHead>Nombre</TableHead>
+                  <TableHead>Cargo</TableHead>
+                  <TableHead>Empresa</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Teléfono</TableHead>
+                  <TableHead>LinkedIn</TableHead>
+                  <TableHead>Dominio</TableHead>
+                  <TableHead className="w-64 text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageLeads.map(e => (
+                  <TableRow key={e.id}>
+                    <TableCell className="text-center">
+                      <Checkbox
+                        checked={!!sel[e.id]}
+                        onCheckedChange={(v) => setSel(prev => ({ ...prev, [e.id]: Boolean(v) }))}
+                        disabled={
+                          !e.email ||
+                          isResearched(leadRefOf(e)) ||
+                          hasReportStrict(e)
+                        }
+                        title={
+                          !e.email
+                            ? 'Este lead no tiene email revelado'
+                            : isResearched(leadRefOf(e)) || hasReportStrict(e)
+                              ? 'Este lead ya fue investigado'
+                              : ''
+                        }
+                      />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Checkbox
+                        disabled={!canContact(e)}
+                        checked={selectedToContact.has(e.id)}
+                        onCheckedChange={(v) => {
+                          const next = new Set(selectedToContact);
+                          if (v) next.add(e.id);
+                          else next.delete(e.id);
+                          setSelectedToContact(next);
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell>{e.fullName}</TableCell>
+                    <TableCell>{e.title || '—'}</TableCell>
+                    <TableCell>{e.companyName || '—'}</TableCell>
+                    <TableCell>
+                      {(!e.email || e.email === 'Not Found')
+                        ? (e.emailStatus === 'locked'
+                          ? '(locked)'
+                          : <span className="text-muted-foreground text-xs italic">Not Found</span>)
+                        : e.email}
+                    </TableCell>
+                    <TableCell>
+                      {(() => {
+                        const fallbackPhone = e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined;
+                        const shownPhone = e.primaryPhone || fallbackPhone;
+
+                        if (e.primaryPhone === 'Not Found' || (!shownPhone && e.enrichmentStatus !== 'pending_phone')) {
+                          return <span className="text-muted-foreground text-xs italic">Not Found</span>;
+                        }
+
+                        if (shownPhone) {
+                          return (
+                            <div
+                              className="flex flex-col gap-1 cursor-pointer hover:bg-muted/50 p-1 rounded transition-colors group"
+                              onClick={() => {
+                                const rep = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
+                                setLeadToCall(e);
+                                setReportToView(rep || null); // Reusamos estado o pasamos directo
+                                setCallModalOpen(true);
+                              }}
+                              title="Clic para abrir Terminal de Llamada"
+                            >
+                              <div className="flex items-center gap-1 text-sm font-medium text-blue-600 group-hover:text-blue-800">
+                                <Phone className="h-3 w-3" />
+                                <span>{shownPhone}</span>
+                              </div>
+                              {e.phoneNumbers && e.phoneNumbers.length > 1 && (
+                                <span className="text-[10px] text-muted-foreground">+{e.phoneNumbers.length - 1} más</span>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        if (e.enrichmentStatus === 'pending_phone') {
+                          return (
+                            <div className="w-full max-w-[100px] space-y-1" title="Esperando webhook de Apollo (aprox 90s)...">
+                              <div className="flex justify-between text-[9px] text-muted-foreground uppercase">
+                                <span>Buscando...</span>
+                                <span>90s</span>
+                              </div>
+                              <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-blue-500 rounded-full animate-progress-90"
+                                  style={{ animation: 'progress 90s linear forwards' }}
+                                ></div>
+                              </div>
+                              <style jsx>{`
+                                 @keyframes progress {
+                                   from { width: 0%; }
+                                   to { width: 100%; }
+                                 }
+                               `}</style>
+                            </div>
+                          );
+                        }
+
+                        return <span className="text-muted-foreground text-xs italic">—</span>;
+                      })()}
+                    </TableCell>
+                    <TableCell>{e.linkedinUrl ? <a className="underline" target="_blank" href={e.linkedinUrl}>Perfil</a> : '—'}</TableCell>
+                    <TableCell>{e.companyDomain || '—'}</TableCell>
+                    <TableCell className="text-right space-x-2">
+                      <Button size="sm" variant="outline" onClick={() => openReportFor(e)}>Ver reporte</Button>
+                      <Button size="sm" onClick={() => generateEmailFromReportFor(e)} disabled={!canContact(e)}>Contactar</Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => openLinkedinCompose(e)}
+                        disabled={!e.linkedinUrl}
+                        title="Contactar por LinkedIn"
+                      >
+                        <Linkedin className="h-4 w-4" />
+                      </Button>
+                      <Button size="icon" variant="ghost" onClick={() => handleDeleteEnriched(e.id)} title="Eliminar">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          {/* Paginador inferior (igual al superior) */}
+          <div className="flex items-center justify-between mt-3 text-sm">
+            <div className="text-muted-foreground">
+              Mostrando {total === 0 ? 0 : startIdx + 1}–{endIdx} de {total}
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="sm" onClick={() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === 1}>«</Button>
+              <Button variant="outline" size="sm" onClick={() => { setPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === 1}>‹</Button>
+              {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
+                const half = 3;
+                let start = Math.max(1, page - half);
+                let end = Math.min(totalPages, start + 6);
+                start = Math.max(1, end - 6);
+                const n = start + i;
+                if (n > end) return null;
+                const active = n === page;
+                return (
+                  <Button
+                    key={n}
+                    size="sm"
+                    variant={active ? 'default' : 'outline'}
+                    onClick={() => { setPage(n); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  >
+                    {n}
+                  </Button>
+                );
+              })}
+              <Button variant="outline" size="sm" onClick={() => { setPage(p => Math.min(totalPages, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === totalPages}>›</Button>
+              <Button variant="outline" size="sm" onClick={() => { setPage(totalPages); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === totalPages}>»</Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Dialog open={openReport} onOpenChange={setOpenReport}>
+        <DialogContent className="max-w-4xl max-h-[90vh]" onEscapeKeyDown={() => setOpenReport(false)}>
+          <DialogHeader>
+            <DialogTitle>Reporte · {reportToView?.cross?.company.name}</DialogTitle>
+          </DialogHeader>
+          {reportToView?.cross && reportLead && (
+            <div className="w-full flex justify-end mb-2">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => clearInvestigationFor(reportLead)}
+                title="Eliminar investigación de este lead"
+              >
+                <Eraser className="h-4 w-4 mr-1" /> Eliminar investigación de este lead
+              </Button>
+            </div>
+          )}
+          {reportToView?.cross && (
+            <ScrollArea className="h-[calc(90vh-180px)] pr-4">
+              <div className="space-y-4 text-sm leading-relaxed">
+                <div className="text-lg font-semibold">{reportToView.cross.company.name}</div>
+
+                {/* --- Social Context / LinkedIn --- */}
+                {reportToView.cross.leadContext && (reportToView.cross.leadContext.iceBreaker || reportToView.cross.leadContext.recentActivitySummary || reportToView.cross.leadContext.profileSummary) && (
+                  <div className="border border-blue-200 bg-blue-50 rounded-lg p-4 shadow-sm">
+                    <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-blue-900">
+                      <Linkedin className="h-5 w-5" />
+                      Contexto Social (LinkedIn)
+                    </h3>
+                    <div className="space-y-3">
+                      {reportToView.cross.leadContext.iceBreaker && (
+                        <div className="bg-white p-3 rounded-md border border-blue-200 shadow-sm">
+                          <strong className="text-blue-800 block mb-2 text-sm">💬 Icebreaker Sugerido:</strong>
+                          <p className="italic text-gray-800 text-sm leading-relaxed">"{reportToView.cross.leadContext.iceBreaker}"</p>
+                        </div>
+                      )}
+
+                      {reportToView.cross.leadContext.recentActivitySummary && (
+                        <div className="bg-white p-3 rounded-md border border-blue-200">
+                          <strong className="text-blue-800 block mb-2 text-sm">📊 Resumen de Actividad:</strong>
+                          <p className="text-gray-700 text-sm leading-relaxed">{reportToView.cross.leadContext.recentActivitySummary}</p>
+                        </div>
+                      )}
+
+                      {reportToView.cross.leadContext.profileSummary && (
+                        <div className="pt-3 border-t border-blue-200">
+                          <strong className="text-blue-800 block mb-2 text-sm">👤 Resumen de Perfil:</strong>
+                          <p className="text-gray-600 text-sm leading-relaxed">{reportToView.cross.leadContext.profileSummary}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {reportToView.cross.overview && <p>{reportToView.cross.overview}</p>}
+
+                {(() => {
+                  const reportSignals = reportToView.signals || [];
+                  return reportSignals.length > 0 ? (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Señales recientes</h4>
+                    <ul className="space-y-2">
+                      {reportSignals.map((signal, i) => (
+                        <li key={i} className="rounded-md border bg-muted/40 p-3">
+                          <div className="font-medium">{signal.title}</div>
+                          <div className="text-xs text-muted-foreground mt-1">{signal.type}{signal.when ? ` · ${signal.when}` : ''}</div>
+                          {signal.url ? <a className="underline text-xs mt-1 inline-block" href={signal.url} target="_blank">Abrir fuente</a> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                  ) : null;
+                })()}
+
+                {reportToView.cross.pains?.length > 0 && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Pains</h4>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.pains.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  </section>
+                )}
+
+                {reportToView.cross.valueProps?.length > 0 && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Cómo ayudamos</h4>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.valueProps.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  </section>
+                )}
+
+                {reportToView.cross.useCases?.length > 0 && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Casos de uso</h4>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.useCases.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  </section>
+                )}
+
+                {reportToView.cross.talkTracks?.length > 0 && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Talk tracks</h4>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.talkTracks.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  </section>
+                )}
+
+                {reportToView.cross.subjectLines?.length > 0 && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Asuntos sugeridos</h4>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.subjectLines.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  </section>
+                )}
+
+                {reportToView.cross.emailDraft && (
+                  <section className="border rounded p-3 bg-muted/50">
+                    <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Borrador de correo</div>
+                    <div><strong>Asunto:</strong> {reportToView.cross.emailDraft.subject}</div>
+                    <pre className="whitespace-pre-wrap mt-2 font-mono text-xs">{reportToView.cross.emailDraft.body}</pre>
+                  </section>
+                )}
+
+                {reportToView.raw?.buyer_intelligence && (
+                  <section className="border rounded p-3 bg-emerald-50/60">
+                    <div className="text-xs font-semibold uppercase text-emerald-700 mb-2">Buyer intelligence</div>
+                    <div className="grid gap-2 md:grid-cols-2 text-sm">
+                      <div><strong>Fit score:</strong> {reportToView.raw.buyer_intelligence.fit_score ?? '—'}</div>
+                      <div><strong>Ángulo recomendado:</strong> {reportToView.raw.buyer_intelligence.recommended_angle || '—'}</div>
+                      <div><strong>Canal recomendado:</strong> {reportToView.raw.buyer_intelligence.recommended_channel || '—'}</div>
+                      <div><strong>CTA sugerido:</strong> {reportToView.raw.buyer_intelligence.recommended_cta || '—'}</div>
+                    </div>
+                    {Array.isArray(reportToView.raw.buyer_intelligence.fit_reasons) && reportToView.raw.buyer_intelligence.fit_reasons.length > 0 ? (
+                      <ul className="list-disc pl-5 mt-3">
+                        {reportToView.raw.buyer_intelligence.fit_reasons.map((reason: string, i: number) => <li key={i}>{reason}</li>)}
+                      </ul>
+                    ) : null}
+                  </section>
+                )}
+
+                {reportToView.raw?.outreach_pack?.call_script && (
+                  <section className="border rounded p-3 bg-amber-50/50">
+                    <div className="text-xs font-semibold uppercase text-amber-800 mb-2">Guion de llamada</div>
+                    <div className="space-y-2 text-sm">
+                      {reportToView.raw.outreach_pack.call_script.opening ? <p><strong>Apertura:</strong> {reportToView.raw.outreach_pack.call_script.opening}</p> : null}
+                      {Array.isArray(reportToView.raw.outreach_pack.call_script.discovery_questions) && reportToView.raw.outreach_pack.call_script.discovery_questions.length > 0 ? (
+                        <div>
+                          <strong>Preguntas de descubrimiento:</strong>
+                          <ul className="list-disc pl-5 mt-1">
+                            {reportToView.raw.outreach_pack.call_script.discovery_questions.map((q: string, i: number) => <li key={i}>{q}</li>)}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {reportToView.raw.outreach_pack.call_script.cta ? <p><strong>Cierre sugerido:</strong> {reportToView.raw.outreach_pack.call_script.cta}</p> : null}
+                    </div>
+                  </section>
+                )}
+
+                {reportToView.cross.sources?.length ? (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Fuentes</h4>
+                    <ul className="space-y-1">
+                      {reportToView.cross.sources.map((s, i) => (
+                        <li key={i}>• <a className="underline" href={s.url} target="_blank">{s.title || s.url}</a></li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+              </div>
+            </ScrollArea>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={openCompose} onOpenChange={setOpenCompose}>
+        <DialogContent className="max-w-4xl max-h-[92vh] overflow-hidden flex flex-col" onEscapeKeyDown={() => setOpenCompose(false)}>
+          <DialogHeader><DialogTitle>Contactar {composeList.length} leads</DialogTitle></DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          {/* Fuente del borrador + Perfil de estilo + Proveedor */}
+          <div className="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+            <div className="col-span-1">
+              <div className="text-xs text-muted-foreground mb-1">Fuente del borrador</div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => setDraftSource('investigation')} />
+                        Investigación (n8n)
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="draft-source" value="style" checked={draftSource === 'style'} onChange={() => {
+                    setDraftSource('style');
+                    if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
+                  }} />
+                  Estilo (Email Studio)
+                </label>
+              </div>
+            </div>
+            <div className="col-span-1">
+              <div className="text-xs text-muted-foreground mb-1">Perfil de estilo</div>
+              <select
+                className="h-9 w-full rounded-md border bg-background px-2 text-sm disabled:opacity-50"
+                disabled={draftSource !== 'style' || styleProfiles.length === 0}
+                value={selectedStyleName}
+                onChange={(e) => setSelectedStyleName(e.target.value)}
+              >
+                {styleProfiles.length === 0 ? <option value="">(No hay estilos guardados)</option> :
+                  styleProfiles.map(p => <option key={p.name} value={p.name}>{p.name}</option>)
+                }
+              </select>
+            </div>
+            <div className="col-span-1">
+              <div className="text-xs text-muted-foreground mb-1">Proveedor de envío</div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="bulk-provider" value="outlook" checked={bulkProvider === 'outlook'} onChange={() => setBulkProvider('outlook')} />
+                  Outlook
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="bulk-provider" value="gmail" checked={bulkProvider === 'gmail'} onChange={() => setBulkProvider('gmail')} />
+                  Gmail
+                </label>
+              </div>
+            </div>
+          </div>
+          {/* Barra superior del modal: ayuda y botón de edición IA */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs text-muted-foreground">
+              Revisa y ajusta los borradores antes de enviar. Proveedor: <strong>{bulkProvider}</strong>
+            </div>
+            <Button variant="secondary" onClick={() => setShowBulkEditor(v => !v)} disabled={composeList.length === 0}>
+              {showBulkEditor ? 'Ocultar editor IA' : 'Editar con IA (todos)'}
+            </Button>
+          </div>
+
+          {/* Editor IA masivo inline */}
+          {showBulkEditor && (
+            <div className="mb-3 border rounded-md p-3 bg-muted/40">
+              <div className="text-sm text-muted-foreground mb-1">
+                Describe cómo quieres modificar los correos (se aplicará a todos). Ejemplos:
+                <ul className="list-disc pl-5 mt-1">
+                  <li>Agrega una línea: "Hemos trabajado con empresas relacionadas al outsourcing".</li>
+                  <li>Añade al asunto "Piloto gratis".</li>
+                  <li>
+                    Menciona colaboración con <code>{'{{company.name}}'}</code> si aplica.
+                  </li>
+                </ul>
+              </div>
+              <Textarea
+                value={editInstruction}
+                onChange={(e) => setEditInstruction(e.target.value)}
+                rows={5}
+                placeholder='Ej: Agrega una línea: "Hemos trabajado con empresas relacionadas al outsourcing".'
+              />
+              <div className="mt-2 flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => { setEditInstruction(''); setShowBulkEditor(false); }}
+                  disabled={applyingEdit}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={async () => {
+                    if (!editInstruction.trim() || !composeList.length) return;
+                    setApplyingEdit(true);
+                    try {
+                      const payload = {
+                        instruction: editInstruction.trim(),
+                        drafts: composeList.map(it => ({
+                          subject: it.subject,
+                          body: it.body,
+                          lead: {
+                            id: it.lead.id,
+                            fullName: it.lead.fullName,
+                            email: it.lead.email,
+                            title: it.lead.title,
+                            companyName: it.lead.companyName,
+                            companyDomain: it.lead.companyDomain,
+                            linkedinUrl: it.lead.linkedinUrl,
+                          },
+                        })),
+                      };
+                      const r = await fetch('/api/email/bulk-edit', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                      });
+                      const j = await r.json();
+                      if (!r.ok) throw new Error(j?.error || 'No se pudo aplicar la edición');
+                      const edited = (j?.drafts || []) as Array<{ subject: string; body: string }>;
+                      if (edited.length === composeList.length) {
+                        setComposeList(prev => prev.map((it, i) => ({ ...it, subject: edited[i].subject, body: edited[i].body })));
+                      }
+                      setShowBulkEditor(false);
+                      setEditInstruction('');
+                      toast({ title: 'Edición aplicada', description: `Se actualizaron ${edited.length} borradores.` });
+                    } catch (e: any) {
+                      toast({ variant: 'destructive', title: 'Error', description: e?.message || 'Falló la edición con IA' });
+                    } finally {
+                      setApplyingEdit(false);
+                    }
+                  }}
+                  disabled={applyingEdit || !editInstruction.trim() || composeList.length === 0}
+                >
+                  {applyingEdit ? 'Aplicando…' : 'Aplicar a todos'}
+                </Button>
+              </div>
+            </div>
+          )}
+
+
+          {/* Tracking Options (NEW) */}
+          <div className="mb-4 border border-border/50 rounded-md p-3 bg-muted/20">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Inyecta una imagen invisible para detectar apertura en tiempo real">
+                  <input
+                    type="checkbox"
+                    checked={usePixel}
+                    onChange={(e) => setUsePixel(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  Activar Tracking Pixel
+                  <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded ml-1">Recomendado</span>
+                </label>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Inserta un píxel invisible para detectar aperturas.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Reescribe enlaces para saber si el usuario hizo clic">
+                  <input
+                    type="checkbox"
+                    checked={useLinkTracking}
+                    onChange={(e) => setUseLinkTracking(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  Track Link Clicks
+                </label>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Hace rastreables los links de tus correos.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Solicita confirmación de lectura estándar">
+                  <input
+                    type="checkbox"
+                    checked={useReadReceipt}
+                    onChange={(e) => setUseReadReceipt(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  Solicitar Confirmación
+                </label>
+                <p className="text-xs text-muted-foreground ml-6">
+                  Pide confirmación explícita al destinatario.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-4 p-1">
+            {composeList.map(({ lead, subject, body }, i) => (
+              <div key={lead.id} className="border rounded-lg p-3">
+                <div className="font-semibold text-sm">{lead.fullName} &lt;{lead.email}&gt;</div>
+                <div className="text-xs text-muted-foreground">{lead.title} @ {lead.companyName}</div>
+
+                <div className="mt-3 text-xs font-semibold">Asunto</div>
+                <Input
+                  value={subject}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setComposeList(prev => {
+                      const next = [...prev]; next[i] = { ...next[i], subject: v }; return next;
+                    });
+                    emailDraftsStorage.set(lead.id, v, body);
+                  }}
+                  aria-label={`Asunto para ${lead.fullName}`}
+                />
+
+                <div className="mt-3 text-xs font-semibold">Cuerpo</div>
+                <Textarea
+                  value={body}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setComposeList(prev => {
+                      const next = [...prev]; next[i] = { ...next[i], body: v }; return next;
+                    });
+                    emailDraftsStorage.set(lead.id, subject, v);
+                  }}
+                  rows={10}
+                  aria-label={`Cuerpo para ${lead.fullName}`}
+                  className="font-mono"
+                />
+
+                <div className="mt-2 flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      // Regenerar orientado a persona con datos actuales
+                      const company = getCompanyProfile() || {};
+                      const sender = buildSenderInfo();
+                      const rep = findReportForLead({
+                        leadId: leadRefOf(lead),
+                        companyDomain: lead.companyDomain || null,
+                        companyName: lead.companyName || null
+                      });
+                      const seed = rep?.cross?.emailDraft
+                        ? { subject: rep.cross.emailDraft.subject, body: rep.cross.emailDraft.body }
+                        : (() => {
+                          const v2 = generateCompanyOutreachV2({
+                            leadFirstName: (lead.fullName || '').split(' ')[0] || '',
+                            companyName: lead.companyName,
+                            myCompanyProfile: company,
+                          });
+                          return { subject: v2.subjectBase, body: v2.body };
+                        })();
+                      const ctx = buildPersonEmailContext({
+                        lead: { name: lead.fullName, email: lead.email!, title: lead.title, company: lead.companyName },
+                        company: { name: lead.companyName, domain: lead.companyDomain },
+                        sender,
+                      });
+                      let subj = renderTemplate(seed.subject || '', ctx);
+                      let bod = renderTemplate(seed.body || '', ctx);
+                      bod = applySignaturePlaceholders(bod, sender);
+                      subj = ensureSubjectPrefix(subj, ctx.lead.firstName);
+
+                      setComposeList(prev => {
+                        const next = [...prev]; next[i] = { ...next[i], subject: subj, body: bod }; return next;
+                      });
+                      emailDraftsStorage.set(lead.id, subj, bod);
+                      toast({ title: 'Borrador regenerado', description: `Se personalizó para ${ctx.lead.firstName}.` });
+                    }}
+                    title="Regenerar con IA orientado a persona"
+                  >
+                    <RotateCw className="h-4 w-4 mr-1" /> Regenerar
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      emailDraftsStorage.remove(lead.id);
+                      toast({ title: 'Borrador restaurado', description: 'Se eliminó la edición local.' });
+                      // Reabrimos el modal recomputando con overrides limpios
+                      setComposeList(prev => {
+                        const next = [...prev];
+                        // Simplemente recargamos sin override:
+                        // (Dejamos al usuario pulsar "Regenerar" si quiere 100% desde plantilla)
+                        return next;
+                      });
+                    }}
+                    title="Eliminar cambios guardados localmente"
+                  >
+                    <Undo2 className="h-4 w-4 mr-1" /> Restaurar
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      emailDraftsStorage.set(lead.id, subject, body);
+                      toast({ title: 'Guardado', description: 'Se guardó el borrador editado.' });
+                    }}
+                    title="Guardar cambios del borrador"
+                  >
+                    <Save className="h-4 w-4 mr-1" /> Guardar
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+          </div>
+          <div className="mt-3 pt-3 border-t flex items-center justify-between shrink-0">
+            {sendingBulk
+              ? <div className="text-xs">Enviando… {sendProgress.done}/{sendProgress.total}</div>
+              : <div className="text-xs text-muted-foreground">
+                Revisa y ajusta los borradores antes de enviar. Proveedor: <strong>{bulkProvider}</strong>
+              </div>}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setOpenCompose(false)} disabled={sendingBulk}>Cerrar</Button>
+              <Button onClick={sendBulk} disabled={sendingBulk || !composeList?.length}>
+                {sendingBulk ? 'Enviando…' : `Enviar todos (${bulkProvider})`}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* LinkedIn Compose Modal */}
+      <Dialog open={openLinkedin} onOpenChange={setOpenLinkedin}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Contactar por LinkedIn</DialogTitle>
+            <CardDescription>
+              Se abrirá una pestaña de LinkedIn y la extensión escribirá por ti.
+            </CardDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm">
+              <strong>Para:</strong> {linkedinLead?.fullName}
+            </div>
+            <Textarea
+              value={linkedinMessage}
+              onChange={(e) => setLinkedinMessage(e.target.value)}
+              rows={6}
+              placeholder="Escribe tu mensaje aquí..."
+            />
+            <div className="text-xs text-muted-foreground">
+              * Antón.IA simulará escritura humana. No cierres la nueva pestaña inmediatamente.
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setOpenLinkedin(false)}>Cancelar</Button>
+              <Button onClick={handleSendLinkedin} disabled={sendingLinkedin}>
+                {sendingLinkedin ? 'Enviando...' : 'Enviar con Extensión'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Campaign Scheduler Modal */}
+      <Dialog open={openSchedule} onOpenChange={setOpenSchedule}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Agendar Campaña Inteligente</DialogTitle>
+            <CardDescription>
+              Distribuye {selectedToContact.size} leads automáticamente en el calendario.
+            </CardDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Canal</Label>
+              <Select
+                value={scheduleConfig.channel}
+                onValueChange={(v: any) => setScheduleConfig({ ...scheduleConfig, channel: v })}
+              >
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="Canal" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="linkedin">LinkedIn DM</SelectItem>
+                  <SelectItem value="email">Email</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Inicio</Label>
+              <div className="col-span-3">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className={`w-full justify-start text-left font-normal ${!scheduleConfig.startDate && "text-muted-foreground"}`}>
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {scheduleConfig.startDate ? format(scheduleConfig.startDate, "PPP", { locale: es }) : <span>Elegir fecha</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar mode="single" selected={scheduleConfig.startDate} onSelect={(d) => d && setScheduleConfig({ ...scheduleConfig, startDate: d })} initialFocus />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Ritmo</Label>
+              <div className="col-span-3 flex items-center gap-2">
+                <Input
+                  type="number"
+                  value={scheduleConfig.msgsPerDay}
+                  onChange={(e) => setScheduleConfig({ ...scheduleConfig, msgsPerDay: parseInt(e.target.value) || 0 })}
+                  className="w-20"
+                />
+                <span className="text-sm text-muted-foreground">mensajes / día</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label className="text-right">Opciones</Label>
+              <div className="col-span-3 flex items-center gap-2">
+                <Checkbox
+                  id="skipWeekends"
+                  checked={scheduleConfig.skipWeekends}
+                  onCheckedChange={(c) => setScheduleConfig({ ...scheduleConfig, skipWeekends: Boolean(c) })}
+                />
+                <Label htmlFor="skipWeekends" className="text-sm font-normal">Saltar fines de semana</Label>
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setOpenSchedule(false)}>Cancelar</Button>
+            <Button onClick={handleScheduleCampaign} disabled={scheduling}>
+              {scheduling ? 'Agendando...' : 'Confirmar Agenda'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <PhoneCallModal
+        open={callModalOpen}
+        onOpenChange={setCallModalOpen}
+        lead={leadToCall}
+        report={reportToView} // Nos aseguramos de pasarle el reporte que corresponde al leadToCall
+        onLogCall={handleLogCall}
+      />
+
+      <EnrichmentOptionsDialog
+        open={openEnrichOptions}
+        onOpenChange={setOpenEnrichOptions}
+        onConfirm={handleConfirmEnrich}
+        loading={enriching}
+        leadCount={leadsToEnrich.length}
+      />
+
+      {/* Bulk LinkedIn Modal */}
+      <Dialog open={openBulkLinkedin} onOpenChange={(open) => {
+        // Prevent closing during execution
+        if (bulkLinkedinRunning && !open) {
+          const confirmed = confirm('¿Seguro que deseas detener el proceso? Los leads ya contactados se han registrado.');
+          if (confirmed) {
+            bulkLinkedinStopRef.current = true;
+          }
+          return;
+        }
+        setOpenBulkLinkedin(open);
+      }}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>{bulkLinkedinRunning ? 'Procesando Contactos LinkedIn' : '⚠️ Información Importante'}</DialogTitle>
+          </DialogHeader>
+
+          {!bulkLinkedinRunning ? (
+            <div className="space-y-4">
+              <div className="bg-amber-50 border-l-4 border-amber-500 p-4 text-amber-700">
+                <p className="font-bold">¡No minimices esta ventana!</p>
+                <p className="text-sm mt-1">
+                  Para que la automatización funcione correctamente, el navegador debe estar <strong>activo y visible</strong>.
+                  Si minimizas la ventana o cambias de pestaña por mucho tiempo, el navegador "congelará" el proceso para ahorrar batería.
+                </p>
+              </div>
+              <p className="text-sm text-gray-600">
+                Te recomendamos usar <strong>pantalla dividida</strong> o abrir esta app en una ventana separada visible.
+                El sistema contactará a <strong>{selectedToContact.size} leads</strong> uno por uno, con pausas de seguridad de 5-10 segundos.
+              </p>
+              <div className="flex justify-end gap-3 mt-4">
+                <Button variant="outline" onClick={() => setOpenBulkLinkedin(false)}>Cancelar</Button>
+                <Button onClick={handleBulkLinkedin}>Entendido, Comenzar</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6 py-4">
+              <div className="text-center">
+                <div className="text-2xl font-bold mb-2">{bulkLinkedinProgress.current} / {bulkLinkedinProgress.total}</div>
+                <p className="text-muted-foreground">Contactando a: <span className="font-medium text-foreground">{bulkLinkedinProgress.currentName}</span></p>
+              </div>
+
+              <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
+                <div
+                  className="bg-primary h-full transition-all duration-500"
+                  style={{ width: `${(bulkLinkedinProgress.current / bulkLinkedinProgress.total) * 100}%` }}
+                ></div>
+              </div>
+
+              <p className="text-xs text-center text-muted-foreground animate-pulse">
+                Por favor espera y mantén la ventana visible...
+              </p>
+
+              <div className="flex justify-center mt-4">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    bulkLinkedinStopRef.current = true;
+                    toast({ title: 'Deteniendo...', description: 'El proceso se detendrá después del lead actual.' });
+                  }}
+                >
+                  Detener Proceso
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+

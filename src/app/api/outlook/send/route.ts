@@ -1,10 +1,51 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { checkAndConsumeDailyQuota } from '@/lib/server/daily-quota-store';
 import { sanitizeHeaderText } from '@/lib/email-header-utils';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
+import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
+import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
+
+function escapeODataLiteral(s: string) {
+  return s.replace(/'/g, "''");
+}
+
+function toISO(dt: Date) {
+  return dt.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+async function findRecentlySentByToAndSubject(token: string, params: { to: string; subject: string; lookbackMinutes?: number }) {
+  const { to, subject, lookbackMinutes = 15 } = params;
+  const since = new Date(Date.now() - lookbackMinutes * 60 * 1000);
+  const select = '$select=id,subject,conversationId,internetMessageId,toRecipients,sentDateTime';
+  const order = '$orderby=sentDateTime desc';
+  const top = '$top=25';
+  const filter = `$filter=sentDateTime ge ${escapeODataLiteral(toISO(since))}`;
+  const res = await fetch(`https://graph.microsoft.com/v1.0/me/mailFolders('SentItems')/messages?${filter}&${order}&${top}&${select}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ConsistencyLevel: 'eventual',
+    },
+    cache: 'no-store',
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const list = Array.isArray(data?.value) ? data.value : [];
+  const wantedTo = to.trim().toLowerCase();
+  const wantedSubject = subject.trim();
+  return list.find((m: any) => {
+    const okSubj = String(m.subject || '').trim() === wantedSubject;
+    const okTo = (m.toRecipients || []).some((r: any) => String(r?.emailAddress?.address || '').trim().toLowerCase() === wantedTo);
+    return okSubj && okTo;
+  }) || null;
+}
 
 export async function POST(req: Request) {
   try {
-    const userId = req.headers.get('x-user-id')?.trim() || '';
+    const supabase = createRouteHandlerClient({ cookies });
+    const { data: { user } } = await supabase.auth.getUser();
+    const userId = user?.id || req.headers.get('x-user-id')?.trim() || '';
     if (!userId) {
       return NextResponse.json({ error: 'missing user id' }, { status: 400 });
     }
@@ -32,18 +73,59 @@ export async function POST(req: Request) {
     }
     const token = auth.slice(7);
 
-    const { to, subject, body, isHtml = false, attachments = [] } = await req.json();
+    const { to, subject, body, isHtml = false, attachments = [], requestReceipts = false } = await req.json();
     const safeSubject = sanitizeHeaderText(subject || '');
 
     if (!to || !safeSubject || !body) {
       return NextResponse.json({ error: 'to, subject y body son requeridos' }, { status: 400 });
     }
 
+    let orgId: string | null = null;
+    if (user?.id) {
+      const { data: member } = await supabase
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', user.id)
+        .limit(1)
+        .maybeSingle();
+      if (member) orgId = member.organization_id;
+
+      const { data: blocked } = await supabase
+        .from('unsubscribed_emails')
+        .select('id')
+        .eq('email', to)
+        .or(orgId ? `user_id.eq.${user.id},organization_id.eq.${orgId}` : `user_id.eq.${user.id}`)
+        .maybeSingle();
+      if (blocked) return NextResponse.json({ error: 'El destinatario se ha dado de baja de tus envíos.' }, { status: 403 });
+
+      const domain = String(to).split('@')[1]?.toLowerCase().trim();
+      if (domain && orgId) {
+        const { data: blockedDomain } = await supabase
+          .from('excluded_domains')
+          .select('id')
+          .eq('organization_id', orgId)
+          .eq('domain', domain)
+          .maybeSingle();
+        if (blockedDomain) return NextResponse.json({ error: `El dominio ${domain} está bloqueado por tu organización.` }, { status: 403 });
+      }
+    }
+
+    const unsubscribeUrl = generateUnsubscribeLink(to, userId, orgId);
+    const prepared = prepareOutboundEmail({
+      html: isHtml ? body : undefined,
+      text: isHtml ? undefined : body,
+      unsubscribeUrl,
+    });
+    const preflight = validateOutboundEmail({ to, subject: safeSubject, html: prepared.html, text: prepared.text, requireUnsubscribe: true, unsubscribeUrl });
+    if (!preflight.ok) return NextResponse.json({ error: preflight.errors.join(' ') }, { status: 400 });
+
     const graphBody = {
       message: {
         subject: safeSubject,
-        body: { contentType: isHtml ? 'HTML' : 'Text', content: body },
+        body: { contentType: 'HTML', content: prepared.html },
         toRecipients: [{ emailAddress: { address: to } }],
+        isDeliveryReceiptRequested: !!requestReceipts,
+        isReadReceiptRequested: !!requestReceipts,
         // opcional
         attachments: attachments.map((a: any) => ({
           '@odata.type': '#microsoft.graph.fileAttachment',
@@ -74,7 +156,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, status: res.status, graph: data }, { status: res.status });
     }
 
-    return NextResponse.json({ ok: true, status: res.status });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const sentMeta = await findRecentlySentByToAndSubject(token, { to, subject: safeSubject }).catch(() => null);
+
+    return NextResponse.json({ ok: true, status: res.status, messageId: sentMeta?.id, conversationId: sentMeta?.conversationId, internetMessageId: sentMeta?.internetMessageId });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
   }

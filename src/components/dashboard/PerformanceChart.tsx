@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { subDays, format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { hasReplySignal } from '@/lib/antonia-reply-metrics';
 
 const chartConfig = {
   sent: { label: 'Enviados', color: 'hsl(var(--primary))' },
@@ -45,7 +46,7 @@ export default function PerformanceChart() {
             }
           } catch (e) { /* ignore date parse error */ }
 
-          if (c.status === 'replied' && c.repliedAt) {
+          if (hasReplySignal(c as any) && c.repliedAt) {
             try {
               const repliedDate = new Date(c.repliedAt);
               if (isNaN(repliedDate.getTime())) return;

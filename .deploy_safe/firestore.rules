@@ -1,0 +1,19 @@
+// firestore.rules
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Documento/colecciones del usuario autenticado
+    match /users/{userId} {
+      // El dueño puede leer/escribir su doc y subcolecciones
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // Subcolecciones típicas
+      match /{sub=**}/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    // Si tienes colecciones públicas (catalogos, config global), explícitalas aquí
+    // match /public/{doc} { allow read: if true; allow write: if false; }
+  }
+}

@@ -127,6 +127,8 @@ export async function getEnrichedLeads(): Promise<EnrichedLead[]> {
     const { data: { user } } = await supabase.auth.getUser();
     console.log('[enriched-leads] get: user', user?.id);
 
+    if (!user) return [];
+
     const orgId = await organizationService.getCurrentOrganizationId();
     console.log('[enriched-leads] get: orgId', orgId);
 
@@ -136,8 +138,10 @@ export async function getEnrichedLeads(): Promise<EnrichedLead[]> {
         .order('created_at', { ascending: false });
 
     if (orgId) {
-        // Allow seeing enriched leads for the current org OR personal (null org_id)
-        query = query.or(`organization_id.eq.${orgId},organization_id.is.null`);
+        // Allow seeing enriched leads that belong to the user, the current org, or legacy rows with null org_id.
+        query = query.or(`user_id.eq.${user.id},organization_id.eq.${orgId},organization_id.is.null`);
+    } else {
+        query = query.eq('user_id', user.id);
     }
 
     const { data, error } = await query;

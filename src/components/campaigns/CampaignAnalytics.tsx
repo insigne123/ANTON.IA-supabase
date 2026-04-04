@@ -40,7 +40,7 @@ export function CampaignAnalytics({ campaign, contactedLeads }: CampaignAnalytic
                 if (lead.replyIntent === 'meeting_request' || lead.replyIntent === 'positive') {
                     actionRequired++;
                 }
-                if (lead.replyIntent === 'negative' || lead.replyIntent === 'unsubscribe') {
+                if (lead.replyIntent === 'negative' || lead.replyIntent === 'unsubscribe' || lead.replyIntent === 'delivery_failure') {
                     stopped++;
                 }
             }

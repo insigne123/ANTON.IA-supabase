@@ -4,14 +4,20 @@
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import type { Campaign, CampaignStep } from '@/lib/services/campaigns-service';
 import type { ContactedLead } from '@/lib/types';
+import { evaluateLeadForReactivation, getLeadLastContactAt, normalizeCampaignSettings } from '@/lib/campaign-settings';
+import { findPriorReplyMatch, hasLeadReplied } from '@/lib/contact-history-guard';
 
 export type EligiblePreviewRow = {
   leadId: string;
   leadEmail: string | null;
   leadName: string | null;
+  leadCompany: string | null;
+  leadIndustry: string | null;
   nextStepIdx: number;
   nextStep: CampaignStep;
   daysSinceLastContact: number;
+  matchReason: string;
+  lastContactAt: string | null;
 };
 
 type Options = {
@@ -42,10 +48,12 @@ export async function computeEligibilityForCampaign(
 ): Promise<EligiblePreviewRow[]> {
   const now = opts.now ?? new Date();
   const verifyReplies = opts.verifyReplies ?? false;
+  const settings = normalizeCampaignSettings(campaign.settings);
 
   // SOLO usamos fuente local. No hacemos side effects ni llamadas externas.
   const contacted = await contactedLeadsStorage.get() ?? [];
   const excluded = new Set(campaign.excludedLeadIds ?? []);
+  const priorReplyRows = contacted.filter((lead) => hasLeadReplied(lead));
 
   const rows: EligiblePreviewRow[] = [];
 
@@ -60,6 +68,8 @@ export async function computeEligibilityForCampaign(
 
     // If replies exist but the classifier says to stop, skip
     if (lead.campaignFollowupAllowed === false) continue;
+
+    if (findPriorReplyMatch({ id: lead.leadId || (lead as any).id, email: lead.email }, priorReplyRows)) continue;
 
     // If replied and no explicit allow, skip by default
     if (lead.status === 'replied' && lead.campaignFollowupAllowed !== true) continue;
@@ -84,8 +94,7 @@ export async function computeEligibilityForCampaign(
 
     // 3) Respetar offsetDays desde el último contacto/followup
     // Fuente local: lead.lastContactAt o lead.lastFollowupAt (usa lo que tengas).
-    const lastAtStr: string | undefined =
-      (lead as any).lastFollowupAt ?? (lead as any).lastContactAt ?? (lead as any).firstContactAt ?? lead.sentAt;
+    const lastAtStr = getLeadLastContactAt(lead);
     if (!lastAtStr) continue;
 
     const lastAt = new Date(lastAtStr);
@@ -96,13 +105,24 @@ export async function computeEligibilityForCampaign(
 
     if (days < offset) continue; // aún no cumple el offset
 
+    let matchReason = 'Seguimiento pendiente';
+    if (settings.audience?.kind === 'reactivation') {
+      const evaluation = evaluateLeadForReactivation(lead, settings.audience.reactivation, now);
+      if (!evaluation.matched) continue;
+      matchReason = evaluation.primaryLabel || 'Reactivacion';
+    }
+
     rows.push({
       leadId,
       leadEmail: lead.email ?? null,
       leadName: lead.name ?? null,
+      leadCompany: lead.company ?? null,
+      leadIndustry: lead.industry ?? null,
       nextStepIdx,
       nextStep,
       daysSinceLastContact: days,
+      matchReason,
+      lastContactAt: lastAtStr,
     });
   }
 

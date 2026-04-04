@@ -214,6 +214,8 @@ const N8NWebhookLeadSchema = z.object({
   id: z.string(),
   first_name: z.string().optional().nullable(),
   last_name: z.string().optional().nullable(),
+  full_name: z.string().optional().nullable(),
+  name: z.string().optional().nullable(),
   email: z.string().optional().nullable(),
   title: z.string().optional().nullable(),
   organization: z
@@ -221,13 +223,27 @@ const N8NWebhookLeadSchema = z.object({
       id: z.string().optional().nullable(),
       name: z.string().optional().nullable(),
       domain: z.string().optional().nullable(),
+      industry: z.string().optional().nullable(),
+      website_url: z.string().optional().nullable(),
+      linkedin_url: z.string().optional().nullable(),
     })
     .optional()
     .nullable(),
+  organization_id: z.string().optional().nullable(),
+  organization_name: z.string().optional().nullable(),
+  organization_domain: z.string().optional().nullable(),
+  organization_industry: z.string().optional().nullable(),
+  organization_website_url: z.string().optional().nullable(),
+  organization_linkedin_url: z.string().optional().nullable(),
+  company_name: z.string().optional().nullable(),
+  company: z.string().optional().nullable(),
+  job_company_name: z.string().optional().nullable(),
+  job_company_industry: z.string().optional().nullable(),
+  job_company_website: z.string().optional().nullable(),
   linkedin_url: z.string().optional().nullable(),
   photo_url: z.string().optional().nullable(),
   email_status: z.string().optional().nullable(),
-});
+}).passthrough();
 
 const N8NWebhookObjectSchema = z.object({
   count: z.number().nonnegative().optional(), // Legacy support

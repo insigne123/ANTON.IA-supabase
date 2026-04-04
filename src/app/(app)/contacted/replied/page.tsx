@@ -21,17 +21,20 @@ export default function ContactedRepliedPage() {
   const [items, setItems] = useState<ContactedLead[]>([]);
   const [open, setOpen] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
+  const [draftLoading, setDraftLoading] = useState(false);
   const [title, setTitle] = useState('');
   const [html, setHtml] = useState('');
   const [webLink, setWebLink] = useState<string | undefined>(undefined);
   const [suggestion, setSuggestion] = useState<string>('');
+  const [draftDecision, setDraftDecision] = useState<string>('');
+  const [selected, setSelected] = useState<ContactedLead | null>(null);
 
   const refresh = async () => setItems(await contactedLeadsStorage.get());
   useEffect(() => { refresh(); }, []);
 
   const rows = useMemo(() => {
     return items
-      .filter(x => x.status === 'replied')
+      .filter(x => x.status === 'replied' || !!x.repliedAt)
       .sort((a, b) => {
         const da = new Date(a.repliedAt || a.lastUpdateAt || a.sentAt).getTime();
         const db = new Date(b.repliedAt || b.lastUpdateAt || b.sentAt).getTime();
@@ -44,6 +47,7 @@ export default function ContactedRepliedPage() {
     positive: 'Positiva',
     negative: 'No interesado',
     unsubscribe: 'No contactar',
+    delivery_failure: 'Entrega fallida',
     auto_reply: 'Auto-reply',
     neutral: 'Neutral',
     unknown: 'Sin clasificar',
@@ -65,6 +69,9 @@ export default function ContactedRepliedPage() {
 
   async function viewReply(it: ContactedLead) {
     setViewLoading(true);
+    setSelected(it);
+    setSuggestion('');
+    setDraftDecision('');
     try {
       const resolved = await resolveReplyContent(it);
       setTitle(resolved.subject || '(respuesta)');
@@ -75,6 +82,32 @@ export default function ContactedRepliedPage() {
       toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo cargar la respuesta' });
     } finally {
       setViewLoading(false);
+    }
+  }
+
+  async function generateDraft() {
+    if (!selected) return;
+    setDraftLoading(true);
+    try {
+      const res = await fetch('/api/antonia/replies/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactedId: selected.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'No se pudo generar borrador');
+      setSuggestion(data?.draft?.bodyText || 'No se genero texto.');
+      setDraftDecision(data?.decision?.reason || 'Sin razon disponible.');
+      if (data?.exception?.id) {
+        toast({
+          title: 'Revision humana requerida',
+          description: 'ANTONIA detecto que este reply requiere supervision. Quedo registrado en Exception Queue.',
+        });
+      }
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo generar la respuesta' });
+    } finally {
+      setDraftLoading(false);
     }
   }
 
@@ -134,7 +167,7 @@ export default function ContactedRepliedPage() {
                     </TableCell>
                     <TableCell>
                       {it.replyIntent ? (
-                        <Badge variant={it.replyIntent === 'meeting_request' || it.replyIntent === 'positive' ? 'default' : it.replyIntent === 'negative' || it.replyIntent === 'unsubscribe' ? 'destructive' : 'secondary'}>
+                        <Badge variant={it.replyIntent === 'meeting_request' || it.replyIntent === 'positive' ? 'default' : it.replyIntent === 'negative' || it.replyIntent === 'unsubscribe' || it.replyIntent === 'delivery_failure' ? 'destructive' : 'secondary'}>
                           {intentLabel[it.replyIntent] || it.replyIntent}
                         </Badge>
                       ) : (
@@ -184,12 +217,13 @@ export default function ContactedRepliedPage() {
                     Abrir original
                   </a>
                 )}
-                <Button onClick={() => setSuggestion("¡Hola! Gracias por tu interés. ¿Te parece si agendamos una llamada rápida el martes a las 10am?")} variant="secondary">
-                  💡 Generar Respuesta con IA
+                <Button onClick={generateDraft} variant="secondary" disabled={draftLoading || !selected}>
+                  {draftLoading ? 'Generando...' : '💡 Generar Respuesta con IA'}
                 </Button>
               </div>
               {suggestion && (
                 <div className="mt-4 p-4 bg-muted rounded-md relative">
+                  {draftDecision ? <p className="text-xs text-muted-foreground mb-2">Policy: {draftDecision}</p> : null}
                   <p className="text-sm italic">{suggestion}</p>
                   <Button size="sm" variant="ghost" className="absolute top-2 right-2" onClick={() => navigator.clipboard.writeText(suggestion)}>Copiar</Button>
                 </div>

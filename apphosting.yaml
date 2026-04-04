@@ -15,7 +15,7 @@ build:
 
     - name: bundle
       entrypoint: bash
-      args: ["-lc", "cp -R . ${BUILD_DIR}"]
+      args: ["-lc", "mkdir -p \"${BUILD_DIR}\" && tar --exclude='./.git' --exclude='./.env.local' --exclude='./chrome-extension.pem' --exclude='./antonia-extension-v1.1.zip' --exclude='./*.log' --exclude='./typecheck*.log' --exclude='./widget_error.txt' -cf - . | tar -xf - -C \"${BUILD_DIR}\""]
 
 runConfig:
   minInstances: 0
@@ -28,6 +28,14 @@ env:
   # === Existing Variables ===
   - variable: APOLLO_API_KEY
     secret: APOLLO_API_KEY
+    availability: [RUNTIME]
+
+  - variable: OPENAI_API_KEY
+    secret: OPENAI_API_KEY
+    availability: [RUNTIME]
+
+  - variable: OPENAI_MODEL
+    value: gpt-4o-mini
     availability: [RUNTIME]
 
   # === Lead providers (Apollo/PDL trial) ===
@@ -97,6 +105,26 @@ env:
 
   - variable: ANTONIA_LEAD_SEARCH_URL
     value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search
+    availability: [RUNTIME]
+
+  - variable: ENRICHMENT_SERVICE_URL
+    value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/enrich
+    availability: [RUNTIME]
+
+  - variable: ENRICHMENT_SERVICE_SECRET
+    secret: ENRICHMENT_SERVICE_SECRET
+    availability: [RUNTIME]
+
+  - variable: INTERNAL_API_SECRET
+    secret: INTERNAL_API_SECRET
+    availability: [RUNTIME]
+
+  - variable: APOLLO_WEBHOOK_SECRET
+    secret: APOLLO_WEBHOOK_SECRET
+    availability: [RUNTIME]
+
+  - variable: DEBUG_API_ENABLED
+    value: "false"
     availability: [RUNTIME]
 
   - variable: NEXT_PUBLIC_AZURE_AD_CLIENT_ID

@@ -47,11 +47,31 @@ export async function POST(req: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+    const { data: memberships, error: membershipError } = await admin
+      .from('organization_members')
+      .select('organization_id')
+      .eq('user_id', ctx.userId);
+
+    if (membershipError) {
+      console.error('[profile-status] membership query error:', membershipError);
+      return NextResponse.json({ error: 'PROFILE_STATUS_MEMBERSHIP_ERROR', message: membershipError.message }, { status: 500 });
+    }
+
+    const organizationIds = Array.isArray(memberships)
+      ? memberships
+        .map((item: any) => String(item?.organization_id || '').trim())
+        .filter(Boolean)
+      : [];
+
+    if (organizationIds.length === 0) {
+      return NextResponse.json({ error: 'FORBIDDEN', message: 'User does not belong to any organization' }, { status: 403 });
+    }
 
     const { data, error } = await admin
       .from('people_search_leads')
-      .select('id, linkedin_url, primary_phone, phone_numbers, enrichment_status, updated_at, organization_id')
-      .in('id', ids);
+      .select('id, linkedin_url, email, email_status, primary_phone, phone_numbers, enrichment_status, updated_at')
+      .in('id', ids)
+      .in('organization_id', organizationIds);
 
     if (error) {
       console.error('[profile-status] query error:', error);

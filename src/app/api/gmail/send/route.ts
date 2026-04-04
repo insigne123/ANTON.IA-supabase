@@ -4,6 +4,8 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { sanitizeHeaderText } from '@/lib/email-header-utils';
+import { checkAndConsumeDailyQuota } from '@/lib/server/daily-quota-store';
+import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
 
 type SendReq = {
   to: string;
@@ -212,23 +214,21 @@ export async function POST(req: Request) {
       console.log('[gmail/send] Skipping domain check - domain:', domain, 'orgId:', orgId);
     }
 
-    // --- Inject Unsubscribe Link ---
     const unsubscribeUrl = generateUnsubscribeLink(body.to, user.id, orgId);
     console.log('[Gmail] Generated Unsubscribe Link:', unsubscribeUrl);
+    const prepared = prepareOutboundEmail({ html: body.html, text: body.text, unsubscribeUrl });
+    const preflight = validateOutboundEmail({ to: body.to, subject: body.subject, html: prepared.html, text: prepared.text, requireUnsubscribe: true, unsubscribeUrl });
+    if (!preflight.ok) {
+      return NextResponse.json({ error: preflight.errors.join(' ') }, { status: 400 });
+    }
 
-    const footerHtml = `
-        <br/><br/>
-        <div style="font-family: sans-serif; font-size: 12px; color: #888; border-top: 1px solid #eee; padding-top: 10px; margin-top: 20px; display: block;">
-            <p style="margin: 0;">Si no deseas recibir más correos de nosotros, puedes <a href="${unsubscribeUrl}" target="_blank" style="color: #666; text-decoration: underline;">darte de baja aquí</a>.</p>
-        </div>
-    `;
-
-    let safeHtml = (body.html && body.html.trim().length) ? body.html : '<div></div>';
-    const bodyTagRegex = /<\/body>/i;
-    if (bodyTagRegex.test(safeHtml)) {
-      safeHtml = safeHtml.replace(bodyTagRegex, `${footerHtml}</body>`);
-    } else {
-      safeHtml += footerHtml;
+    const { allowed, count, limit } = await checkAndConsumeDailyQuota({
+      userId: user.id,
+      resource: 'contact',
+      limit: 50,
+    });
+    if (!allowed) {
+      return NextResponse.json({ error: `Daily quota exceeded for contact. Used ${count}/${limit}.` }, { status: 429 });
     }
 
     // --- If 'from' is missing, fetch it from Google ---
@@ -252,7 +252,7 @@ export async function POST(req: Request) {
     }
 
     // --- Build & Send ---
-    const rawRfc822 = buildRfc822Raw({ ...body, html: safeHtml });
+    const rawRfc822 = buildRfc822Raw({ ...body, html: prepared.html, text: prepared.text });
     const raw = encodeBase64Url(rawRfc822);
 
     const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {

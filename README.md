@@ -117,3 +117,13 @@ curl -X POST "http://localhost:9003/api/opportunities/enrich-apollo" \
 
 Rollback inmediato: `PDL_TRIAL_ENABLED=false` o quitar la org de `PDL_ALLOWED_ORG_IDS`.
 # Leadflowai-21-11
+
+## UI/UX Workflow
+
+Para trabajo visual, revisar primero:
+
+- `docs/ui-ux/apple-inspired-methodology.md`
+- `docs/ui-ux/README.md`
+- `docs/ui-ux/visual-system.md`
+- `docs/ui-ux/reference-workflow.md`
+- `docs/ui-ux/release-audit-checklist.md`

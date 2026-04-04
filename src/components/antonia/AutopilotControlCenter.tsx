@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bot, Flame, Gauge, Loader2, RefreshCw, ShieldCheck, Siren, Sparkles, Waves } from 'lucide-react';
 
@@ -119,6 +120,9 @@ export function AutopilotControlCenter({
             )}
             {effectiveConfig?.approvalMode && (
               <Badge variant="outline">{approvalModeLabel(effectiveConfig.approvalMode)}</Badge>
+            )}
+            {effectiveConfig?.replyAutopilotMode && (
+              <Badge variant="secondary">Reply {effectiveConfig.replyAutopilotMode}</Badge>
             )}
           </div>
 
@@ -249,6 +253,105 @@ export function AutopilotControlCenter({
                 onBlur={(event) => onUpdateConfig('meetingInstructions', event.target.value)}
                 className="min-h-[96px]"
               />
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-xl border bg-card p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <Label className="text-sm">Reply Autopilot</Label>
+                <p className="text-xs text-muted-foreground">Controla como ANTONIA responde replies positivos, ambiguos o riesgosos.</p>
+              </div>
+              <Link href="/antonia/reply-lab">
+                <Button variant="outline" size="sm">Abrir Reply Safety Lab</Button>
+              </Link>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="flex items-center justify-between rounded-xl border bg-background p-4">
+                <div>
+                  <Label htmlFor="reply-autopilot-enabled">Activar reply autopilot</Label>
+                  <p className="text-xs text-muted-foreground">Permite responder automaticamente dentro de un scope seguro.</p>
+                </div>
+                <Switch
+                  id="reply-autopilot-enabled"
+                  checked={!!effectiveConfig?.replyAutopilotEnabled}
+                  onCheckedChange={(value) => onUpdateConfig('replyAutopilotEnabled', value)}
+                />
+              </div>
+
+              <div className="space-y-2 rounded-xl border bg-background p-4">
+                <Label>Modo de reply</Label>
+                <Select
+                  value={effectiveConfig?.replyAutopilotMode || 'draft_only'}
+                  onValueChange={(value) => onUpdateConfig('replyAutopilotMode', value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecciona modo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="draft_only">Draft Only</SelectItem>
+                    <SelectItem value="shadow_mode">Shadow Mode</SelectItem>
+                    <SelectItem value="auto_safe">Auto Safe</SelectItem>
+                    <SelectItem value="full_auto">Full Auto</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2 rounded-xl border bg-background p-4">
+                <Label>Politica de aprobacion reply</Label>
+                <Select
+                  value={effectiveConfig?.replyApprovalMode || 'high_risk_only'}
+                  onValueChange={(value) => onUpdateConfig('replyApprovalMode', value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecciona politica" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all_replies">Aprobar todas</SelectItem>
+                    <SelectItem value="high_risk_only">Solo alto riesgo</SelectItem>
+                    <SelectItem value="disabled">Sin aprobacion</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2 rounded-xl border bg-background p-4">
+                <Label htmlFor="reply-max-auto-turns">Max. turnos auto</Label>
+                <Input
+                  key={`reply-max-auto-turns-${effectiveConfig?.replyMaxAutoTurns ?? 2}`}
+                  id="reply-max-auto-turns"
+                  type="number"
+                  min="1"
+                  max="10"
+                  defaultValue={effectiveConfig?.replyMaxAutoTurns ?? 2}
+                  onBlur={(event) => onUpdateConfig('replyMaxAutoTurns', Number(event.target.value || 0))}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <div className="flex items-center justify-between rounded-xl border bg-background p-4">
+                <div>
+                  <Label htmlFor="reply-auto-booking">Auto-send para meeting request</Label>
+                  <p className="text-xs text-muted-foreground">Si el lead pide reunion y existe booking link, ANTONIA puede responder sola.</p>
+                </div>
+                <Switch
+                  id="reply-auto-booking"
+                  checked={!!effectiveConfig?.autoSendBookingReplies}
+                  onCheckedChange={(value) => onUpdateConfig('autoSendBookingReplies', value)}
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-xl border bg-background p-4">
+                <div>
+                  <Label htmlFor="reply-attachments">Permitir assets en replies</Label>
+                  <p className="text-xs text-muted-foreground">Habilita brochures o one-pagers solo si la policy lo permite.</p>
+                </div>
+                <Switch
+                  id="reply-attachments"
+                  checked={!!effectiveConfig?.allowReplyAttachments}
+                  onCheckedChange={(value) => onUpdateConfig('allowReplyAttachments', value)}
+                />
+              </div>
             </div>
           </div>
         </CardContent>

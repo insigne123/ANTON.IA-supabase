@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Users, Send, MailCheck, Briefcase } from 'lucide-react';
+import { countUniqueReplyContacts } from '@/lib/antonia-reply-metrics';
 // Imports removed: Storage services are no longer used for counts to improve performance.
 
 
@@ -48,14 +49,16 @@ export default function SummaryCards() {
           repliedRes,
           campaignsRes,
           enrichedRes,
-          oppsRes
+          oppsRes,
+          repliedSignalRes,
+          replyRowsRes,
         ] = await Promise.all([
           // 1. Contacted Leads (Total)
           supabase.from('contacted_leads')
             .select('*', { count: 'exact', head: true })
             .eq('organization_id', orgId),
 
-          // 2. Replies (Status='replied')
+          // 2. Legacy replies by status
           supabase.from('contacted_leads')
             .select('*', { count: 'exact', head: true })
             .eq('organization_id', orgId)
@@ -79,11 +82,20 @@ export default function SummaryCards() {
           supabase.from('opportunities')
             .select('*', { count: 'exact', head: true })
           // .eq('user_id', user.id) // Redundant if RLS enabled, but safe.
+          ,
+          supabase.from('contacted_leads')
+            .select('id, lead_id, email, replied_at, reply_intent, last_reply_text')
+            .eq('organization_id', orgId),
+          supabase.from('lead_responses')
+            .select('contacted_id, lead_id, type')
+            .eq('organization_id', orgId)
         ]);
+
+        const repliedCount = countUniqueReplyContacts((repliedSignalRes as any)?.data || [], (replyRowsRes as any)?.data || []);
 
         setSummary({
           contacted: contactedRes.count || 0,
-          replied: repliedRes.count || 0,
+          replied: repliedCount || repliedRes.count || 0,
           activeCampaigns: campaignsRes.count || 0,
           enrichedLeads: enrichedRes.count || 0,
           savedOpps: oppsRes.count || 0,
@@ -97,23 +109,23 @@ export default function SummaryCards() {
   }, []);
 
   const cardItems = [
-    { title: 'Leads Contactados', value: summary.contacted, icon: Send },
-    { title: 'Respuestas Obtenidas', value: summary.replied, icon: MailCheck },
-    { title: 'Campañas Activas', value: summary.activeCampaigns, icon: Users },
-    { title: 'Oportunidades Guardadas', value: summary.savedOpps, icon: Briefcase },
+    { title: 'Contactados', value: summary.contacted, icon: Send },
+    { title: 'Respuestas', value: summary.replied, icon: MailCheck },
+    { title: 'Campañas activas', value: summary.activeCampaigns, icon: Users },
+    { title: 'Oportunidades', value: summary.savedOpps, icon: Briefcase },
   ];
 
   return (
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
       {cardItems.map((item, i) => (
-        <Card key={i}>
+        <Card key={i} className="overflow-hidden rounded-[24px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">{item.title}</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">{item.title}</CardTitle>
             <item.icon className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{item.value}</div>
-            <p className="text-xs text-muted-foreground">Total histórico</p>
+            <div className="text-3xl font-semibold tracking-tight">{item.value}</div>
+            <p className="text-xs text-muted-foreground">Total acumulado</p>
           </CardContent>
         </Card>
       ))}

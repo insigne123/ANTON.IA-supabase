@@ -35,13 +35,6 @@ function escapeODataLiteral(s: string) {
   return s.replace(/'/g, "''");
 }
 
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-function toISO(dt: Date) {
-  // Sin milisegundos
-  return dt.toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
-
 async function graphFetch(input: string, init?: RequestInit, needRead = false) {
   const token = needRead
     ? await microsoftAuthService.getReadToken()
@@ -59,192 +52,39 @@ async function graphFetch(input: string, init?: RequestInit, needRead = false) {
   return res;
 }
 
-/**
- * Busca en "Sent Items" el mensaje más reciente que cuadre con asunto y destinatario.
- * Requiere Mail.Read.
- */
-async function findRecentlySentByToAndSubject(params: {
-  to: string;
-  subject: string;
-  lookbackMinutes?: number;
-}): Promise<GraphMessage | null> {
-  const { to, subject, lookbackMinutes = 10 } = params;
-  const since = new Date(Date.now() - lookbackMinutes * 60 * 1000);
-  const select = '$select=id,subject,webLink,conversationId,internetMessageId,toRecipients,sentDateTime';
-  const order = '$orderby=sentDateTime desc';
-  const top = '$top=25';
-  const filter = `$filter=sentDateTime ge ${escapeODataLiteral(toISO(since))}`;
-
-  // Trae los últimos enviados en la ventana y filtra en cliente por exactitud
-  const url = `/me/mailFolders('SentItems')/messages?${filter}&${order}&${top}&${select}`;
-
-  const res = await graphFetch(
-    url,
-    { headers: { ConsistencyLevel: 'eventual' } },
-    /* needRead */ true
-  );
-  if (!res.ok) {
-    throw new Error(`graph search error ${res.status}: ${await res.text()}`);
-  }
-  const data = await res.json();
-  const list: GraphMessage[] = Array.isArray(data?.value) ? data.value : [];
-
-  const wantedTo = to.trim().toLowerCase();
-  const wantedSubject = subject.trim();
-
-  const match = list.find((m) => {
-    const okSubj = (m.subject || '').trim() === wantedSubject;
-    const okTo =
-      (m.toRecipients || []).some(
-        (r) => r?.emailAddress?.address?.trim().toLowerCase() === wantedTo
-      );
-    return okSubj && okTo;
-  });
-
-  return match || null;
-}
-
 // --- Public API ---
 
 /** Envía un correo intentando crear borrador; si falta Mail.ReadWrite, cae a /me/sendMail. */
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
-  const toRecipients = [{ emailAddress: { address: input.to } }];
-  const ccRecipients = (input.cc || []).map((a) => ({ emailAddress: { address: a } }));
-  const bccRecipients = (input.bcc || []).map((a) => ({ emailAddress: { address: a } }));
-
-  // Aplica firma si está habilitada
   const sig = await emailSignatureStorage.get('outlook');
   const finalHtml = applySignatureHTML(input.htmlBody, sig?.html);
+  const token = await microsoftAuthService.getSendToken();
 
-  const draftBody = {
-    subject: input.subject,
-    body: { contentType: 'HTML', content: finalHtml },
-    toRecipients,
-    ...(ccRecipients.length ? { ccRecipients } : {}),
-    ...(bccRecipients.length ? { bccRecipients } : {}),
-    isDeliveryReceiptRequested: !!input.requestReceipts,
-    isReadReceiptRequested: !!input.requestReceipts,
-  };
-
-  // 1) Camino A: crear borrador (requiere Mail.ReadWrite)
-  try {
-    const draftRes = await graphFetch('/me/messages', {
-      method: 'POST',
-      body: JSON.stringify(draftBody),
-    });
-
-    if (!draftRes.ok) {
-      const txt = await draftRes.text();
-      throw Object.assign(new Error(`Graph draft error ${draftRes.status}: ${txt}`), {
-        status: draftRes.status,
-        body: txt,
-      });
-    }
-
-    const draft = await draftRes.json();
-    const messageId = draft?.id as string;
-    if (!messageId) throw new Error('No se pudo crear el borrador');
-
-    if (Array.isArray(input.attachments) && input.attachments.length) {
-      for (const a of input.attachments) {
-        const addRes = await graphFetch(`/me/messages/${encodeURIComponent(messageId)}/attachments`, {
-          method: 'POST',
-          body: JSON.stringify({
-            '@odata.type': '#microsoft.graph.fileAttachment',
-            name: a.name,
-            contentBytes: a.contentBytes,
-            contentType: a.contentType || undefined,
-          }),
-        });
-        if (!addRes.ok) {
-          throw new Error(`Graph attach error ${addRes.status}: ${await addRes.text()}`);
-        }
-      }
-    }
-
-    const sendRes = await graphFetch(`/me/messages/${encodeURIComponent(messageId)}/send`, {
-      method: 'POST',
-    });
-    if (!sendRes.ok) {
-      throw new Error(`Graph send error ${sendRes.status}: ${await sendRes.text()}`);
-    }
-
-    return {
-      messageId,
-      internetMessageId: draft?.internetMessageId as string | undefined,
-      conversationId: draft?.conversationId as string | undefined,
-    };
-  } catch (err: any) {
-    // Si falló por permisos (403/401) u otro “insufficient privileges”, usar camino B
-    const msg = String(err?.message || '');
-    const status = Number(err?.status || 0);
-    const insufficient =
-      status === 401 ||
-      status === 403 ||
-      /access.?denied/i.test(msg) ||
-      /insufficient/i.test(msg);
-
-    if (!insufficient) {
-      // Error real no relacionado a permisos: propagar
-      throw err;
-    }
-  }
-
-  // 2) Camino B: /me/sendMail (solo necesita Mail.Send) + recuperar metadatos con Mail.Read
-  const sendMailBody = {
-    message: {
-      subject: input.subject,
-      body: { contentType: 'HTML', content: finalHtml },
-      toRecipients,
-      ...(ccRecipients.length ? { ccRecipients } : {}),
-      ...(bccRecipients.length ? { bccRecipients } : {}),
-      ...(Array.isArray(input.attachments) && input.attachments.length
-        ? {
-          attachments: input.attachments.map(a => ({
-            '@odata.type': '#microsoft.graph.fileAttachment',
-            name: a.name,
-            contentBytes: a.contentBytes,
-            contentType: a.contentType || undefined,
-          }))
-        }
-        : {}
-      ),
-    },
-    saveToSentItems: true,
-  };
-
-  const sendRes = await graphFetch('/me/sendMail', {
+  const res = await fetch('/api/outlook/send', {
     method: 'POST',
-    body: JSON.stringify(sendMailBody),
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      to: input.to,
+      subject: input.subject,
+      body: finalHtml,
+      isHtml: true,
+      attachments: input.attachments || [],
+      requestReceipts: !!input.requestReceipts,
+    }),
   });
-  if (!sendRes.ok) {
-    throw new Error(`Graph sendMail error ${sendRes.status}: ${await sendRes.text()}`);
-  }
 
-  // Dar tiempo a que el ítem aparezca en "Sent Items"
-  await delay(1500);
-
-  let msgMeta: GraphMessage | null = null;
-  try {
-    const tryFind = async (attempt = 1): Promise<GraphMessage | null> => {
-      const found = await findRecentlySentByToAndSubject({
-        to: input.to,
-        subject: input.subject,
-        lookbackMinutes: 15,
-      });
-      if (found || attempt >= 3) return found;
-      await delay(1000 * attempt); // backoff 1s, 2s
-      return tryFind(attempt + 1);
-    };
-    msgMeta = await tryFind();
-  } catch {
-    msgMeta = null;
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok || !payload?.ok) {
+    throw new Error(payload?.error || payload?.graph?.error?.message || `Outlook send failed (${res.status})`);
   }
 
   return {
-    messageId: msgMeta?.id || `sentmail:${Date.now()}`, // fallback
-    internetMessageId: msgMeta?.internetMessageId,
-    conversationId: msgMeta?.conversationId,
+    messageId: payload?.messageId || `sentmail:${Date.now()}`,
+    internetMessageId: payload?.internetMessageId,
+    conversationId: payload?.conversationId,
   };
 }
 

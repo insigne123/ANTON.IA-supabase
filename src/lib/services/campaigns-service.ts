@@ -2,6 +2,8 @@ import { supabase } from '@/lib/supabase';
 import { contactedLeadsStorage } from './contacted-leads-service';
 import { organizationService } from './organization-service';
 import { activityLogService } from './activity-log-service';
+import type { CampaignSettings } from '@/lib/campaign-settings';
+import { inferCampaignType, normalizeCampaignSettings, type CampaignRunStatus, type CampaignType } from '@/lib/campaign-settings';
 
 // Constants for table names
 const TABLE_CAMPAIGNS = 'campaigns';
@@ -35,39 +37,36 @@ export type CampaignStep = {
 export type Campaign = {
     id: string;
     organizationId?: string;
+    campaignType: CampaignType;
     name: string;
     isPaused: boolean;
     steps: CampaignStep[];
     excludedLeadIds: string[];
     createdAt: string;
     updatedAt: string;
+    lastRunAt?: string | null;
+    lastRunStatus?: CampaignRunStatus | null;
+    lastRunSummary?: Record<string, any> | null;
     // Progreso por lead (independiente por campaña)
     sentRecords?: Record<string, { lastStepIdx: number; lastSentAt: string }>;
 
     // Campaign-wide settings
-    settings?: {
-        smartScheduling?: {
-            enabled: boolean;
-            timezone: string;
-            startHour: number; // 0-23
-            endHour: number;   // 0-23
-        };
-        tracking?: {
-            enabled: boolean;
-            pixel?: boolean;
-            linkTracking?: boolean;
-        };
-    };
+    settings?: CampaignSettings;
 };
 
 function mapRowToCampaign(row: any, steps: any[] = []): Campaign {
+    const settings = normalizeCampaignSettings(row.settings);
     return {
         id: row.id,
         organizationId: row.organization_id,
+        campaignType: inferCampaignType({ campaignType: row.campaign_type, settings }),
         name: row.name || 'Campaña',
         isPaused: row.status === 'paused',
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        lastRunAt: row.last_run_at || null,
+        lastRunStatus: row.last_run_status || null,
+        lastRunSummary: row.last_run_summary || null,
         steps: steps.map(s => ({
             id: s.id,
             name: s.name || `Paso ${s.order_index + 1}`,
@@ -79,7 +78,7 @@ function mapRowToCampaign(row: any, steps: any[] = []): Campaign {
         })),
         excludedLeadIds: row.excluded_lead_ids || [],
         sentRecords: row.sent_records || row.sentRecords || {},
-        settings: row.settings || undefined
+        settings
     };
 }
 
@@ -143,6 +142,7 @@ export const campaignsStorage = {
                 .insert({
                     user_id: user.id,
                     organization_id: orgId,
+                    campaign_type: input.campaignType || inferCampaignType({ settings: input.settings }),
                     name: input.name,
                     status: input.isPaused ? 'paused' : 'active',
                     excluded_lead_ids: input.excludedLeadIds || [],
@@ -191,6 +191,7 @@ export const campaignsStorage = {
             const updateData: any = { updated_at: new Date().toISOString() };
             if (patch.name !== undefined) updateData.name = patch.name;
             if (patch.isPaused !== undefined) updateData.status = patch.isPaused ? 'paused' : 'active';
+            if (patch.campaignType !== undefined) updateData.campaign_type = patch.campaignType;
             if (patch.excludedLeadIds !== undefined) updateData.excluded_lead_ids = patch.excludedLeadIds;
             if (patch.settings !== undefined) updateData.settings = patch.settings;
             if (patch.sentRecords !== undefined) updateData.sent_records = patch.sentRecords;

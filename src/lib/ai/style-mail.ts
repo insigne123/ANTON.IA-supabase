@@ -64,6 +64,8 @@ export function generateMailFromStyle(
   const sender = buildSenderInfo();
   const companyName = lead.companyName || report?.company?.name || "";
   const leadFirstName = (lead.fullName || "").split(" ")[0] || "";
+  const ctaLabel = (profile as any)?.cta?.label as string | undefined;
+  const ctaDur = (profile as any)?.cta?.duration as string | undefined;
 
   // 1) Punto de partida: si el perfil tiene plantillas, úsalas; si no, usa el borrador del reporte (si existe).
   let subject = (profile as any).subjectTemplate || report?.emailDraft?.subject || "Propuesta";
@@ -86,12 +88,16 @@ export function generateMailFromStyle(
       domain: lead.companyDomain || report?.company?.domain || "",
     },
     sender,
+    cta: {
+      label: ctaLabel || '',
+      duration: ctaDur || '',
+    },
     report: {
-      overview: report?.overview || "",
-      pains: (report?.pains || []).join("; "),
-      valueProps: (report?.valueProps || []).join("; "),
-      useCases: (report?.useCases || []).join("; "),
-      talkTracks: (report?.talkTracks || []).join("; "),
+      overview: report?.overview || "su iniciativa actual de crecimiento",
+      pains: (report?.pains || []).join("; ") || "prioridades comerciales y operativas del equipo",
+      valueProps: (report?.valueProps || []).join("; ") || "automatizacion comercial, mejor priorizacion y seguimiento consistente",
+      useCases: (report?.useCases || []).join("; ") || "casos de prospeccion, seguimiento y activacion de pipeline",
+      talkTracks: (report?.talkTracks || []).join("; ") || "un enfoque practico y rapido de implementar",
     },
   };
 
@@ -112,8 +118,6 @@ export function generateMailFromStyle(
     body = words.slice(0, 160).join(" ") + (words.length > 160 ? "…" : "");
   }
 
-  const ctaLabel = (profile as any)?.cta?.label as string | undefined;
-  const ctaDur = (profile as any)?.cta?.duration as string | undefined;
   if (ctaLabel || ctaDur) {
     const hasCTA = /15 ?min|10 ?min|20 ?min|agendar|reunión|llamada/i.test(body);
     if (!hasCTA) {

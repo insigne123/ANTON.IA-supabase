@@ -1,14 +1,17 @@
 import { supabase } from './supabase';
 import type { Campaign, CampaignStep, CampaignStepAttachment } from './types';
 import { organizationService } from './services/organization-service';
+import { inferCampaignType, normalizeCampaignSettings } from './campaign-settings';
 
 const TABLE_CAMPAIGNS = 'campaigns';
 const TABLE_STEPS = 'campaign_steps';
 
 function mapRowToCampaign(row: any, steps: CampaignStep[]): Campaign {
+  const settings = normalizeCampaignSettings(row.settings);
   return {
     id: row.id,
     organizationId: row.organization_id,
+    campaignType: inferCampaignType({ campaignType: row.campaign_type, settings }),
     name: row.name,
     status: row.status as 'active' | 'paused',
     // isPaused era el booleano antiguo, mapeamos status
@@ -26,9 +29,14 @@ function mapRowToCampaign(row: any, steps: CampaignStep[]): Campaign {
     // DEBO USAR LOS TIPOS DE SRC/LIB/TYPES.TS AHORA, UNIFICANDO.
 
     excludeLeadIds: row.excluded_lead_ids || [],
+    settings,
+    lastRunAt: row.last_run_at || null,
+    lastRunStatus: row.last_run_status || null,
+    lastRunSummary: row.last_run_summary || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     steps: steps,
+    sentRecords: row.sent_records || row.sentRecords || {},
   };
 }
 

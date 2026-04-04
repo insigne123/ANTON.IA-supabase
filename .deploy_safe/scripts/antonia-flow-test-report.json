@@ -1,0 +1,61 @@
+{
+  "generatedAt": "2026-02-16T23:35:23.390Z",
+  "passed": 9,
+  "failed": 0,
+  "results": [
+    {
+      "name": "generateCampaignFlow",
+      "ok": true,
+      "durationMs": 15830,
+      "preview": "{\"steps\":5}"
+    },
+    {
+      "name": "classifyReplyFlow",
+      "ok": true,
+      "durationMs": 49344,
+      "preview": "{\"intent\":\"meeting_request\",\"shouldContinue\":false}"
+    },
+    {
+      "name": "generatePhoneScript",
+      "ok": true,
+      "durationMs": 3253,
+      "preview": "{\"hasOpening\":true,\"hasPitch\":true}"
+    },
+    {
+      "name": "updateStyleProfile",
+      "ok": true,
+      "durationMs": 2523,
+      "preview": "{\"hasExplanation\":true}"
+    },
+    {
+      "name": "renderEmailTemplate",
+      "ok": true,
+      "durationMs": 1855,
+      "preview": "{\"hasSubject\":true,\"hasBody\":true}"
+    },
+    {
+      "name": "enhanceCompanyReport",
+      "ok": true,
+      "durationMs": 25,
+      "preview": "{\"passthrough\":true}"
+    },
+    {
+      "name": "generateOutreachFromReport",
+      "ok": true,
+      "durationMs": 2226,
+      "preview": "{\"hasSubject\":true,\"hasBody\":true}"
+    },
+    {
+      "name": "generateCompanyProfile",
+      "ok": true,
+      "durationMs": 2852,
+      "preview": "{\"sector\":\"Tecnología, Servicios de consultoría en TI y desarrollo de software\",\"hasWebsite\":true}"
+    },
+    {
+      "name": "replyClassifierHelper",
+      "ok": true,
+      "durationMs": 38404,
+      "preview": "{\"intent\":\"unsubscribe\",\"shouldContinue\":false}"
+    }
+  ]
+}

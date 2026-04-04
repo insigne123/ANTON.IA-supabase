@@ -4,6 +4,26 @@ import { createClient } from "@supabase/supabase-js";
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+function resolveRedirectDestination(req: NextRequest, rawUrl: string | null): string {
+    const fallback = req.nextUrl.origin;
+    const trimmed = String(rawUrl || '').trim();
+    if (!trimmed) return fallback;
+
+    try {
+        const parsed = trimmed.startsWith('/')
+            ? new URL(trimmed, req.nextUrl.origin)
+            : new URL(trimmed);
+
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return fallback;
+        }
+
+        return parsed.toString();
+    } catch {
+        return fallback;
+    }
+}
+
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
@@ -53,6 +73,7 @@ export async function GET(req: NextRequest) {
                     .update({
                         click_count: currentClicks,
                         clicked_at: nowIso,
+                        delivery_status: 'clicked',
                         last_interaction_at: nowIso,
                         engagement_score: newScore,
                         evaluation_status: 'pending',
@@ -66,7 +87,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Redirect to the original URL (or fallback to homepage if missing)
-    const destination = url || "/";
+    const destination = resolveRedirectDestination(req, url);
 
     // Use 307 Temporary Redirect to preserve method/body if any (though GET here)
     return NextResponse.redirect(destination, 307);

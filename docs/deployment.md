@@ -25,9 +25,42 @@ Para las funciones que consumen Firestore en el backend asegúrate de exportar u
 - `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, `NEXT_PUBLIC_BASE_URL`
 - `NEXT_PUBLIC_SEARCH_POLL_INTERVAL_MS`, `NEXT_PUBLIC_SEARCH_MAX_POLL_MINUTES`, `NEXT_PUBLIC_SEARCH_PAGE_SIZE`
 - `INTERNAL_API_SECRET` (protege llamadas server-to-server con `x-user-id`; usar el mismo valor en Next y Firebase Functions)
+- `APOLLO_WEBHOOK_SECRET` (obligatorio para `/api/apollo-webhook` y `/api/webhooks/apollo`)
+- `DEBUG_API_ENABLED=false` (mantener las rutas debug desactivadas en producción)
 - `OPENCLAW_ORG_ID`, `OPENCLAW_API_KEY` (o `OPENCLAW_API_KEYS`), `OPENCLAW_TOKEN_SECRET`, `OPENCLAW_TOKEN_TTL_SECONDS`, `OPENCLAW_SCOPES`
 
 Consulta `.env.example` para un inventario completo con valores de referencia.
+
+## Scheduler de producción
+
+Si el despliegue principal corre en Firebase App Hosting, `vercel.json` no agenda cron jobs. En ese caso debes configurar un scheduler externo que invoque estas rutas con `CRON_SECRET`:
+
+- `GET /api/cron/antonia`
+- `GET /api/cron/process-campaigns`
+
+Recomendación mínima:
+
+- Cloud Scheduler cada 5 minutos a `https://<tu-app>/api/cron/antonia`
+- Header `Authorization: Bearer <CRON_SECRET>` o `x-cron-secret: <CRON_SECRET>`
+- Mantener `ANTONIA_FIREBASE_TICK_URL` y `ANTONIA_FIREBASE_TICK_SECRET` solo si seguirás usando el worker de Firebase como respaldo/delegado
+
+## Verificaciones previas al release
+
+Antes de desplegar ejecuta:
+
+```bash
+npm run verify:prod-config
+npm run verify:antonia-cron
+npm run build
+```
+
+Checklist manual breve:
+
+- Confirmar que `INTERNAL_API_SECRET`, `APOLLO_WEBHOOK_SECRET`, `CRON_SECRET` y `SUPABASE_SERVICE_ROLE_KEY` existen en Secret Manager/App Hosting
+- Confirmar que `chrome-extension.pem` no viaja en el artefacto final ni en imágenes de runtime
+- Ejecutar `GET /api/cron/antonia?dryRun=1&skipFirebaseForward=1` con `CRON_SECRET`
+- Ejecutar `GET /api/cron/process-campaigns?dryRun=1&includeDetails=1` con `CRON_SECRET`
+- Verificar que los webhooks Apollo manden `x-webhook-secret` o `Bearer <APOLLO_WEBHOOK_SECRET>`
 
 Para el onboarding de OpenClaw (single org), revisa `docs/openclaw-credentials-and-setup.md`.
 

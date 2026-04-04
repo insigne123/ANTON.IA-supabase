@@ -94,6 +94,7 @@ export async function resolveReplyContent(it: ContactedLead): Promise<ResolvedRe
       conversationId: it.conversationId,
       fromEmail: it.email,
       internetMessageId: it.internetMessageId,
+      allowSystemSenders: true,
       top: 25,
     }).catch(() => []);
 

@@ -37,7 +37,7 @@ export async function createAntoniaException(supabase: any, input: CreateAntonia
     .select('*')
     .single();
 
-  if (!error) return data;
+  if (!error) return { ...data, __meta: { created: true } };
 
   if (String((error as any)?.code || '') === '23505' && row.dedupe_key) {
     const { data: existing } = await supabase
@@ -46,7 +46,7 @@ export async function createAntoniaException(supabase: any, input: CreateAntonia
       .eq('dedupe_key', row.dedupe_key)
       .eq('status', 'open')
       .maybeSingle();
-    return existing || null;
+    return existing ? { ...existing, __meta: { created: false } } : null;
   }
 
   console.error('[AntoniaException] create failed:', error);

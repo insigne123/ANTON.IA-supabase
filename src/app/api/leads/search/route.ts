@@ -132,6 +132,18 @@ function normalizeLeadSearchResponse(json: unknown) {
   }
 }
 
+function buildLeadSearchGetUrl(recordId: string) {
+  const base = String(LEAD_SEARCH_URL || '').trim();
+  if (!base) return '';
+  try {
+    const url = new URL(base);
+    url.searchParams.set('record_id', recordId);
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
 function pickLeadSearchMeta(json: unknown) {
   const payload = Array.isArray(json) ? (json[0] ?? {}) : (json ?? {});
   if (!payload || typeof payload !== 'object') return {};
@@ -170,6 +182,13 @@ function hasApolloProfileMatch(person: any) {
     String(person.first_name || '').trim() ||
     String(person.last_name || '').trim()
   );
+}
+
+function normalizeClientEnrichmentStatus(status?: string | null) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.startsWith('pending')) return 'pending';
+  return normalized;
 }
 
 function pickApolloProfileEmail(person: any, revealEmail: boolean) {
@@ -345,6 +364,7 @@ function resolveRequestOrigin(req: NextRequest) {
 function resolveLinkedInProfileWebhookUrl(
   recordId: string,
   revealEmail: boolean,
+  revealPhone: boolean,
   requestOrigin?: string | null,
 ) {
   const candidates = [
@@ -376,7 +396,11 @@ function resolveLinkedInProfileWebhookUrl(
       parsed.searchParams.set('record_id', recordId);
       parsed.searchParams.set('table_name', LINKEDIN_PROFILE_TABLE_NAME);
       parsed.searchParams.set('reveal_email', String(revealEmail));
-      parsed.searchParams.set('reveal_phone', 'true');
+      parsed.searchParams.set('reveal_phone', String(revealPhone));
+      const webhookSecret = String(process.env.APOLLO_WEBHOOK_SECRET || '').trim();
+      if (webhookSecret) {
+        parsed.searchParams.set('webhook_secret', webhookSecret);
+      }
       return parsed.toString();
     } catch {
       continue;
@@ -384,6 +408,24 @@ function resolveLinkedInProfileWebhookUrl(
   }
 
   return null;
+}
+
+async function resolveSearchUserId(req: NextRequest) {
+  const userIdFromHeader = req.headers.get('x-user-id')?.trim() || '';
+  if (userIdFromHeader) {
+    if (!isTrustedInternalRequest(req)) {
+      return { error: NextResponse.json({ error: 'UNAUTHORIZED_INTERNAL_REQUEST', message: 'Invalid internal API secret' }, { status: 401 }) };
+    }
+    return { userId: userIdFromHeader };
+  }
+
+  const supabase = createRouteHandlerClient({ cookies: (() => req.cookies) as any });
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.id) {
+    return { error: NextResponse.json({ error: 'UNAUTHORIZED', message: 'User must be logged in' }, { status: 401 }) };
+  }
+
+  return { userId: user.id };
 }
 
 function buildPeopleSearchLeadRow(person: any, options: {
@@ -439,6 +481,35 @@ function buildPeopleSearchLeadRow(person: any, options: {
   };
 }
 
+function mapStoredLinkedInProfileLead(row: any) {
+  const personLike = {
+    id: row?.id,
+    first_name: row?.first_name,
+    last_name: row?.last_name,
+    email: row?.email,
+    title: row?.title,
+    linkedin_url: row?.linkedin_url,
+    photo_url: row?.photo_url,
+    email_status: row?.email_status,
+    phone_numbers: Array.isArray(row?.phone_numbers) ? row.phone_numbers : [],
+    primary_phone: row?.primary_phone,
+    enrichment_status: row?.enrichment_status,
+    organization: {
+      name: row?.organization_name || row?.org_name,
+      primary_domain: row?.organization_domain,
+      industry: row?.organization_industry || row?.industry,
+      website_url: row?.organization_website,
+    },
+  };
+
+  const lead = mapApolloProfileLead(personLike, 0, {
+    revealEmail: true,
+    revealPhone: true,
+  });
+  lead.enrichment_status = normalizeClientEnrichmentStatus(row?.enrichment_status) || lead.enrichment_status;
+  return lead;
+}
+
 async function saveLinkedInProfileLead(person: any, options: {
   linkedinUrl: string;
   organizationId?: string | null;
@@ -448,25 +519,59 @@ async function saveLinkedInProfileLead(person: any, options: {
 }) {
   const recordId = String(person?.id || '').trim();
   if (!recordId) {
-    throw new Error('Apollo profile match missing id');
+    throw new Error('Profile match missing provider id');
   }
 
   const admin = getSupabaseAdminClient();
+  const { data: existing } = await admin
+    .from(LINKEDIN_PROFILE_TABLE_NAME)
+    .select('*')
+    .eq('id', recordId)
+    .maybeSingle();
+
   const row = buildPeopleSearchLeadRow(person, options);
+  const merged = {
+    ...existing,
+    ...row,
+    email: row.email || existing?.email || null,
+    email_status: row.email_status || existing?.email_status || null,
+    phone_numbers: Array.isArray(row.phone_numbers) && row.phone_numbers.length > 0
+      ? row.phone_numbers
+      : (Array.isArray(existing?.phone_numbers) ? existing.phone_numbers : []),
+    primary_phone: row.primary_phone || existing?.primary_phone || null,
+    organization_website: row.organization_website || existing?.organization_website || null,
+    organization_domain: row.organization_domain || existing?.organization_domain || null,
+    organization_industry: row.organization_industry || existing?.organization_industry || row.industry || existing?.industry || null,
+    title: row.title || existing?.title || null,
+    name: row.name || existing?.name || null,
+    first_name: row.first_name || existing?.first_name || null,
+    last_name: row.last_name || existing?.last_name || null,
+    photo_url: row.photo_url || existing?.photo_url || null,
+    enrichment_status: row.primary_phone || row.email || existing?.primary_phone || existing?.email
+      ? (options.enrichmentStatus || existing?.enrichment_status || 'completed')
+      : (existing?.enrichment_status || options.enrichmentStatus || 'pending_profile'),
+  };
   const { error } = await admin
     .from(LINKEDIN_PROFILE_TABLE_NAME)
-    .upsert(row, { onConflict: 'id' });
+    .upsert(merged, { onConflict: 'id' });
 
   if (error) throw error;
-  return row;
+
+  const { data: persisted } = await admin
+    .from(LINKEDIN_PROFILE_TABLE_NAME)
+    .select('*')
+    .eq('id', recordId)
+    .maybeSingle();
+
+  return persisted || merged;
 }
 
-async function markLeadAsPendingPhoneEnrichment(recordId: string) {
+async function markLeadAsPendingProfileEnrichment(recordId: string) {
   const admin = getSupabaseAdminClient();
   const { error } = await admin
     .from(LINKEDIN_PROFILE_TABLE_NAME)
     .update({
-      enrichment_status: 'pending_phone',
+      enrichment_status: 'pending_profile',
       updated_at: new Date().toISOString(),
     })
     .eq('id', recordId);
@@ -474,18 +579,19 @@ async function markLeadAsPendingPhoneEnrichment(recordId: string) {
   if (error) throw error;
 }
 
-async function queueLinkedInPhoneEnrichment(
+async function queueLinkedInProfileReveal(
   apiKey: string,
   apolloPersonId: string,
   revealEmail: boolean,
+  revealPhone: boolean,
   requestOrigin?: string | null,
 ): Promise<PhoneEnrichmentQueueResult> {
-  const webhookUrl = resolveLinkedInProfileWebhookUrl(apolloPersonId, revealEmail, requestOrigin);
+  const webhookUrl = resolveLinkedInProfileWebhookUrl(apolloPersonId, revealEmail, revealPhone, requestOrigin);
   if (!webhookUrl) {
     return {
       queued: false,
       status: 'skipped',
-      message: 'No se pudo construir un webhook publico HTTPS para pedir el telefono a Apollo.',
+        message: 'No se pudo construir un webhook publico HTTPS para pedir el telefono al proveedor.',
       webhookUrl: null,
       providerStatus: null,
       providerDetails: 'missing_public_webhook_url',
@@ -495,7 +601,7 @@ async function queueLinkedInPhoneEnrichment(
   const params = new URLSearchParams();
   params.set('id', apolloPersonId);
   params.set('reveal_personal_emails', String(revealEmail));
-  params.set('reveal_phone_number', 'true');
+  params.set('reveal_phone_number', String(revealPhone));
   params.set('webhook_url', webhookUrl);
 
   try {
@@ -529,7 +635,7 @@ async function queueLinkedInPhoneEnrichment(
       return {
         queued: false,
         status: 'failed',
-        message: message || 'Apollo no pudo encolar el telefono.',
+        message: message || 'El proveedor no pudo encolar los datos del perfil.',
         webhookUrl,
         providerStatus: response.status,
         providerDetails: message || null,
@@ -539,7 +645,7 @@ async function queueLinkedInPhoneEnrichment(
     return {
       queued: true,
       status: 'queued',
-      message: 'El telefono se esta enriqueciendo y se actualizara en breve por webhook.',
+      message: 'El perfil se esta completando y se actualizara en breve por webhook.',
       webhookUrl,
       providerStatus: response.status,
       providerDetails: null,
@@ -548,7 +654,7 @@ async function queueLinkedInPhoneEnrichment(
     return {
       queued: false,
       status: 'failed',
-      message: error?.message || 'Apollo no pudo encolar el telefono.',
+      message: error?.message || 'El proveedor no pudo encolar los datos del perfil.',
       webhookUrl,
       providerStatus: null,
       providerDetails: error?.message || null,
@@ -641,8 +747,10 @@ async function callApolloProfileSearch(
     const providerWarnings: string[] = [];
     let queueResult: PhoneEnrichmentQueueResult | null = null;
 
+    let persistedProfile: any = null;
+
     try {
-      await saveLinkedInProfileLead(person, {
+      persistedProfile = await saveLinkedInProfileLead(person, {
         linkedinUrl: params.linkedinUrl,
         organizationId: params.organizationId,
         enrichmentStatus: 'completed',
@@ -652,13 +760,23 @@ async function callApolloProfileSearch(
       providerWarnings.push(`No se pudo preparar el registro de seguimiento para telefono: ${saveError?.message || 'error desconocido'}`);
     }
 
-    if (params.revealPhone) {
+    const lead = persistedProfile
+      ? mapStoredLinkedInProfileLead(persistedProfile)
+      : mapApolloProfileLead(person, 0, {
+        revealEmail: params.revealEmail,
+        revealPhone: false,
+      });
+    const emailFound = Boolean(lead.email);
+    const phoneFound = Boolean(lead.primary_phone);
+    const shouldQueueReveal = params.revealPhone && !phoneFound;
+
+    if (shouldQueueReveal) {
       const apolloPersonId = String(person?.id || '').trim();
       if (!apolloPersonId) {
         queueResult = {
           queued: false,
           status: 'failed',
-          message: 'Apollo encontro el perfil, pero no devolvio un identificador valido para pedir el telefono.',
+          message: 'El proveedor encontro el perfil, pero no devolvio un identificador valido para completar los datos solicitados.',
           webhookUrl: null,
           providerStatus: null,
           providerDetails: 'missing_apollo_person_id',
@@ -667,51 +785,51 @@ async function callApolloProfileSearch(
         queueResult = {
           queued: false,
           status: 'failed',
-          message: 'No se pudo preparar el registro interno para recibir el telefono de Apollo.',
+          message: 'No se pudo preparar el registro interno para completar los datos del perfil.',
           webhookUrl: null,
           providerStatus: null,
           providerDetails: 'failed_to_prepare_tracking_row',
         };
       } else {
-        queueResult = await queueLinkedInPhoneEnrichment(
+        queueResult = await queueLinkedInProfileReveal(
           apiKey,
           apolloPersonId,
           params.revealEmail,
+          params.revealPhone,
           params.requestOrigin,
         );
 
-        if (queueResult.queued) {
+        if (queueResult?.queued) {
           try {
-            await markLeadAsPendingPhoneEnrichment(apolloPersonId);
+            await markLeadAsPendingProfileEnrichment(apolloPersonId);
           } catch (markError: any) {
             queueResult = {
               queued: false,
               status: 'failed',
-              message: 'Apollo acepto la cola del telefono, pero no se pudo marcar el registro como pendiente.',
+              message: 'El proveedor acepto la cola de enriquecimiento, pero no se pudo marcar el registro como pendiente.',
               webhookUrl: queueResult.webhookUrl,
               providerStatus: queueResult.providerStatus,
-              providerDetails: markError?.message || 'failed_to_mark_pending_phone',
+              providerDetails: markError?.message || 'failed_to_mark_pending_profile',
             };
           }
         }
       }
     }
 
-    const lead = mapApolloProfileLead(person, 0, {
-      revealEmail: params.revealEmail,
-      revealPhone: false,
-    });
     if (queueResult?.queued) {
-      lead.enrichment_status = 'pending_phone';
+      lead.enrichment_status = 'pending';
+    } else {
+      const emailSatisfied = !params.revealEmail || emailFound;
+      const phoneSatisfied = !params.revealPhone || phoneFound;
+      lead.enrichment_status = emailSatisfied && phoneSatisfied ? 'completed' : 'failed';
     }
-    const emailFound = Boolean(lead.email);
 
     const responseBody: Record<string, unknown> = {
       count: 1,
       leads: [lead],
       requested_reveal: requestedReveal,
       applied_reveal: requestedReveal,
-      effective_reveal: buildRevealFlags(params.revealEmail ? emailFound : false, false),
+      effective_reveal: buildRevealFlags(params.revealEmail ? emailFound : false, params.revealPhone ? phoneFound : false),
       ...(meta || {}),
     };
 
@@ -736,7 +854,7 @@ async function callApolloProfileSearch(
     return NextResponse.json(
       {
         error: 'APOLLO_PROFILE_SEARCH_ERROR',
-        message: error?.message || 'Unknown Apollo profile search error',
+        message: error?.message || 'Unknown profile search error',
         requested_reveal: requestedReveal,
         ...(meta || {}),
       },
@@ -1150,32 +1268,52 @@ async function callPdlCompanyNameSearch(
   );
 }
 
+export async function GET(req: NextRequest) {
+  try {
+    const recordId = String(req.nextUrl.searchParams.get('record_id') || '').trim();
+    if (!recordId) {
+      return NextResponse.json({ error: 'MISSING_RECORD_ID' }, { status: 400 });
+    }
+
+    const ctx = await resolveSearchUserId(req);
+    if ('error' in ctx) return ctx.error;
+    const url = buildLeadSearchGetUrl(recordId);
+    if (!url) {
+      return NextResponse.json({ error: 'PROFILE_RECORD_FETCH_ERROR', message: 'Lead search backend URL missing' }, { status: 500 });
+    }
+
+    const response = await fetchWithTimeout(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+    }, TIMEOUT_MS);
+
+    const raw = await response.text();
+    let json: any = null;
+    if (raw?.trim()) {
+      try {
+        json = JSON.parse(raw);
+      } catch {
+        json = null;
+      }
+    }
+
+    if (!response.ok) {
+      return NextResponse.json({ error: 'PROFILE_RECORD_FETCH_ERROR', message: String(json?.message || json?.error || raw || `HTTP_${response.status}`) }, { status: response.status === 200 ? 500 : response.status });
+    }
+
+    return NextResponse.json(json || { lead: null }, { status: 200, headers: { 'Cache-Control': 'no-store' } });
+  } catch (error: any) {
+    return NextResponse.json({ error: 'PROFILE_RECORD_FETCH_ERROR', message: error?.message || 'Unknown error' }, { status: 500 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
-    // 1. Authenticate: Support both session cookies and x-user-id header (for Cloud Functions)
-    const userIdFromHeader = req.headers.get('x-user-id')?.trim() || '';
-
-    if (userIdFromHeader && !isTrustedInternalRequest(req)) {
-      return NextResponse.json(
-        { error: "UNAUTHORIZED_INTERNAL_REQUEST", message: "Invalid internal API secret" },
-        { status: 401 }
-      );
-    }
-
-    let userId: string;
-
-    if (userIdFromHeader) {
-      userId = userIdFromHeader;
-    } else {
-      const supabase = createRouteHandlerClient({ cookies: (() => req.cookies) as any });
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!user) {
-        return NextResponse.json({ error: "UNAUTHORIZED", message: "User must be logged in" }, { status: 401 });
-      }
-
-      userId = user.id;
-    }
+    const ctx = await resolveSearchUserId(req);
+    if ('error' in ctx) return ctx.error;
+    const userId = ctx.userId;
 
     let body: unknown = null;
     try {
@@ -1191,7 +1329,8 @@ export async function POST(req: NextRequest) {
         const linkedinUrl = String(
           profileReq.linkedin_url || profileReq.linkedin_profile_url || profileReq.linkedinUrl || ''
         ).trim();
-
+        const organizationId = await resolveOrganizationIdForUser(userId);
+        const requestedProvider = String((body as any)?.provider || '').trim().toLowerCase();
         const profilePayload = {
           user_id: userId,
           search_mode: 'linkedin_profile',
@@ -1202,8 +1341,13 @@ export async function POST(req: NextRequest) {
 
         const response = await callLeadSearchService(profilePayload, {
           search_mode: 'linkedin_profile',
+          providerRequested: requestedProvider || null,
+          providerUsed: 'backend-antonia',
+          providerDefault: 'apollo',
+          fallbackApplied: false,
         });
         response.headers.set('x-search-mode', 'linkedin_profile');
+        response.headers.set('x-provider-used', 'backend-antonia');
         return response;
       }
 

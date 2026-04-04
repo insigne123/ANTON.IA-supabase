@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 
 import { useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -15,7 +16,7 @@ import { BackBar } from '@/components/back-bar';
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage, updateEnrichedLead } from '@/lib/services/enriched-leads-service';
-import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin, Phone, BrainCircuit, Clock3, Sparkles, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin, Phone, BrainCircuit, Clock3, Sparkles, CheckCircle2, AlertTriangle, MoreHorizontal } from 'lucide-react';
 import { extensionService } from '@/lib/services/extension-service';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { supabaseService } from '@/lib/supabase-service';
@@ -38,8 +39,8 @@ import { emailDraftsStorage } from '@/lib/email-drafts-storage';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { getFirstNameSafe } from '@/lib/template';
-import { generateMailFromStyle } from '@/lib/ai/style-mail';
 import { styleProfilesStorage } from '@/lib/style-profiles-storage';
+import { restyleDraftWithProfile } from '@/lib/email-style-restyle';
 import { profileService } from '@/lib/services/profile-service';
 import { generateLinkedinDraft } from '@/lib/ai/linkedin-templates';
 import { plannerService, ScheduleConfig } from '@/lib/services/planner-service';
@@ -51,6 +52,7 @@ import { CalendarIcon } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 
 const extractDomainFromEmail = (email?: string | null) =>
@@ -216,16 +218,19 @@ export default function EnrichedLeadsClient() {
         const toAdd: EnrichedLead[] = [];
 
         newEnriched.forEach((incoming: EnrichedLead & { clientRef?: string }) => {
+          const incomingEnrichmentStatus = (incoming as any).enrichmentStatus as EnrichedLead['enrichmentStatus'];
           // Match with existing
           const existing = enriched.find(e => e.id === incoming.clientRef);
           if (existing) {
             // Merge important fields, keep ID
             toUpdate.push({
               ...existing, // Keep original creation date, etc
+              apolloId: incoming.apolloId || existing.apolloId,
               email: incoming.email || existing.email,
               emailStatus: incoming.emailStatus || existing.emailStatus,
               phoneNumbers: incoming.phoneNumbers,
               primaryPhone: incoming.primaryPhone,
+              enrichmentStatus: incomingEnrichmentStatus || existing.enrichmentStatus,
               // If unlocked new info
               linkedinUrl: incoming.linkedinUrl || existing.linkedinUrl,
               companyName: incoming.companyName || existing.companyName,
@@ -234,7 +239,10 @@ export default function EnrichedLeadsClient() {
               id: existing.id
             });
           } else {
-            toAdd.push(incoming);
+            toAdd.push({
+              ...incoming,
+              enrichmentStatus: incomingEnrichmentStatus || ((incoming.primaryPhone || incoming.phoneNumbers?.length) ? 'completed' : 'pending_phone'),
+            });
           }
         });
 
@@ -297,11 +305,16 @@ export default function EnrichedLeadsClient() {
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState<number>(1);
   const pendingPhoneSyncRef = useRef(false);
+  const [syncingPendingPhones, setSyncingPendingPhones] = useState(false);
 
   // --- FILTROS ---
   const [companyFilter, setCompanyFilter] = useState('');
   const [nameFilter, setNameFilter] = useState('');
   const [titleFilter, setTitleFilter] = useState('');
+  const [industryFilter, setIndustryFilter] = useState('all');
+  const [phoneFilter, setPhoneFilter] = useState<'all' | 'ready' | 'pending' | 'missing'>('all');
+  const [createdFrom, setCreatedFrom] = useState('');
+  const [createdTo, setCreatedTo] = useState('');
 
   const loadData = useCallback(async () => {
     const e = await enrichedLeadsStorageGet();
@@ -341,6 +354,7 @@ export default function EnrichedLeadsClient() {
 
     if (targetIds.length === 0 || pendingPhoneSyncRef.current) return;
     pendingPhoneSyncRef.current = true;
+    setSyncingPendingPhones(true);
 
     try {
       const res = await fetch('/api/enriched-leads/phone-sync', {
@@ -362,6 +376,7 @@ export default function EnrichedLeadsClient() {
       console.warn('[phone-sync] unexpected error:', error);
     } finally {
       pendingPhoneSyncRef.current = false;
+      setSyncingPendingPhones(false);
     }
   }, [enriched, loadData]);
 
@@ -545,6 +560,19 @@ export default function EnrichedLeadsClient() {
       .map(t => norm(t).trim())
       .filter(Boolean), [norm]);
 
+  const getLeadPhoneState = useCallback((lead: EnrichedLead) => {
+    const fallbackPhone = lead.phoneNumbers?.length ? lead.phoneNumbers[0].sanitized_number : undefined;
+    const shownPhone = lead.primaryPhone || fallbackPhone;
+    if (shownPhone && shownPhone !== 'Not Found') return 'ready';
+    if (lead.enrichmentStatus === 'pending_phone') return 'pending';
+    return 'missing';
+  }, []);
+
+  const industryOptions = useMemo(
+    () => Array.from(new Set(enriched.map((lead) => String(lead.industry || lead.organizationIndustry || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [enriched],
+  );
+
   // ---- Aplicación de filtros con soporte de múltiples términos (separados por coma) ----
   const filtered = useMemo(() => {
     // incluye
@@ -575,12 +603,26 @@ export default function EnrichedLeadsClient() {
       containsAny(e.fullName, incLeads) &&
       containsAny(e.title, incTitles) &&
 
+      (!companyFilter || norm(e.companyName).includes(norm(companyFilter))) &&
+      (!nameFilter || norm(e.fullName).includes(norm(nameFilter))) &&
+      (!titleFilter || norm(e.title).includes(norm(titleFilter))) &&
+      (industryFilter === 'all' || String(e.industry || e.organizationIndustry || '').trim() === industryFilter) &&
+      (phoneFilter === 'all' || getLeadPhoneState(e) === phoneFilter) &&
+      (() => {
+        if (!createdFrom && !createdTo) return true;
+        const created = new Date(e.createdAt || 0);
+        if (Number.isNaN(created.getTime())) return false;
+        if (createdFrom && created < new Date(`${createdFrom}T00:00:00`)) return false;
+        if (createdTo && created > new Date(`${createdTo}T23:59:59`)) return false;
+        return true;
+      })() &&
+
       // EXCLUIR: si alguno matchea, se descarta
       excludesAll(e.companyName, excCompanies) &&
       excludesAll(e.fullName, excLeads) &&
       excludesAll(e.title, excTitles)
     );
-  }, [enriched, applied, splitTerms, norm]);
+  }, [enriched, applied, splitTerms, norm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo, getLeadPhoneState]);
 
   // Mantener número de página válido si cambia la cantidad total
   useEffect(() => {
@@ -602,6 +644,10 @@ export default function EnrichedLeadsClient() {
   const researchEligible = useMemo(
     () => filtered.filter(e => !!e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)).length,
     [filtered, leadRefOf, hasReportStrict]
+  );
+  const pendingPhoneCount = useMemo(
+    () => enriched.filter((lead) => lead.enrichmentStatus === 'pending_phone').length,
+    [enriched],
   );
 
   // === Métricas para los "seleccionar todos" ===
@@ -1256,39 +1302,32 @@ export default function EnrichedLeadsClient() {
     }
   }
 
-  function openBulkCompose() {
+  async function buildComposeDrafts(source: 'investigation' | 'style', styleName?: string) {
     const company = getCompanyProfile() || {};
     const sender = buildSenderInfo();
     const overrides = emailDraftsStorage.getMap();
+    const profile = source === 'style'
+      ? (styleProfiles.find(p => p.name === styleName) || styleProfiles[0] || null)
+      : null;
 
-    const drafts = enriched
+    const drafts = await Promise.all(
+      enriched
       .filter(l => selectedToContact.has(l.id))
-      .map(l => {
+      .map(async (l) => {
         const rep = findReportForLead({ leadId: leadRefOf(l), companyDomain: l.companyDomain || null, companyName: l.companyName || null });
-        let subj = '';
-        let body = '';
-        if (draftSource === 'style' && styleProfiles.length) {
-          const prof = styleProfiles.find(p => p.name === selectedStyleName) || styleProfiles[0];
-          const gen = generateMailFromStyle(
-            prof,
-            rep?.cross || null,
-            { id: l.id, fullName: l.fullName, email: l.email!, title: l.title, companyName: l.companyName, companyDomain: l.companyDomain, linkedinUrl: l.linkedinUrl }
-          );
-          subj = gen.subject; body = gen.body;
-        } else {
-          // Investigación (comportamiento actual)
-          const seed = rep?.cross?.emailDraft
-            ? { subject: rep.cross.emailDraft.subject, body: rep.cross.emailDraft.body }
-            : (() => {
-              const v2 = generateCompanyOutreachV2({
-                leadFirstName: (l.fullName || '').split(' ')[0] || '',
-                companyName: l.companyName,
-                myCompanyProfile: company,
-              });
-              return { subject: v2.subjectBase, body: v2.body };
-            })();
-          subj = seed.subject || ''; body = seed.body || '';
-        }
+        const seed = rep?.cross?.emailDraft
+          ? { subject: rep.cross.emailDraft.subject, body: rep.cross.emailDraft.body }
+          : (() => {
+            const v2 = generateCompanyOutreachV2({
+              leadFirstName: (l.fullName || '').split(' ')[0] || '',
+              companyName: l.companyName,
+              myCompanyProfile: company,
+            });
+            return { subject: v2.subjectBase, body: v2.body };
+          })();
+
+        let subj = seed.subject || '';
+        let body = seed.body || '';
 
         const ctx = buildPersonEmailContext({
           lead: { name: l.fullName, email: l.email!, title: l.title, company: l.companyName },
@@ -1297,6 +1336,21 @@ export default function EnrichedLeadsClient() {
         });
         subj = renderTemplate(subj, ctx);
         body = renderTemplate(body, ctx);
+
+        if (profile) {
+          const styled = await restyleDraftWithProfile({
+            mode: 'leads',
+            baseSubject: subj,
+            baseBody: body,
+            styleProfile: profile,
+            lead: { id: l.id, fullName: l.fullName, email: l.email!, title: l.title, companyName: l.companyName, companyDomain: l.companyDomain, linkedinUrl: l.linkedinUrl },
+            report: rep?.cross || null,
+            companyProfile: company,
+          });
+          subj = styled.subject;
+          body = styled.body;
+        }
+
         body = applySignaturePlaceholders(body, sender);
 
         // Asegurar prefijo con el nombre SOLO en el asunto
@@ -1310,12 +1364,24 @@ export default function EnrichedLeadsClient() {
         }
 
         return { lead: l, subject: subj, body };
-      });
+      })
+    );
 
-    setComposeList(drafts);
-    if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
-    setBulkProvider('outlook');
-    setOpenCompose(true);
+    return drafts;
+  }
+
+  async function openBulkCompose() {
+    try {
+      const styleName = selectedStyleName || styleProfiles[0]?.name || '';
+      const drafts = await buildComposeDrafts(draftSource, styleName);
+
+      setComposeList(drafts);
+      if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
+      setBulkProvider('outlook');
+      setOpenCompose(true);
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo preparar el borrador.' });
+    }
   }
 
   async function sendBulk() {
@@ -1538,118 +1604,160 @@ export default function EnrichedLeadsClient() {
       <BackBar fallbackHref="/saved/leads" className="mb-2" />
 
       {socialCredits !== null && (
-        <div className={`mb-4 px-4 py-2 rounded-md text-sm border flex items-center justify-between ${socialCredits > 0 ? 'bg-blue-50 text-blue-800 border-blue-100' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-          <div className="flex items-center gap-2">
-            <span className="text-lg">⚡</span>
-            <span>
-              <strong>Investigación Profunda (LinkedIn):</strong> {socialCredits} créditos restantes.
-              {socialCredits === 0 && <span className="ml-2 opacity-80">(Se usará investigación estándar sin LinkedIn)</span>}
-            </span>
+        <div className={`mb-4 rounded-[24px] border px-4 py-3 text-sm ${socialCredits > 0 ? 'border-border/60 bg-card/85 text-foreground dark:bg-card/70' : 'border-border/60 bg-card/75 text-muted-foreground dark:bg-card/60'}`}>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-muted text-base text-foreground">⚡</span>
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">Investigación profunda en LinkedIn</div>
+              <div className="text-sm opacity-90">
+                {socialCredits} crédito{socialCredits === 1 ? '' : 's'} disponibles{socialCredits === 0 ? '. Se usará investigación estándar.' : '.'}
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      <div className="mb-4">
-        <DailyQuotaProgress kinds={['research']} compact />
+      <div className="mb-4 max-w-xl">
+        <DailyQuotaProgress kinds={['research']} compact title="Cuota de investigación" />
       </div>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Lista de leads enriquecidos ({filtered.length} / {enriched.length})</CardTitle>
+      {pendingPhoneCount > 0 ? (
+        <Alert className="border-blue-200 bg-blue-50/70 text-blue-950">
+          <RotateCw className={`h-4 w-4 ${syncingPendingPhones ? 'animate-spin' : 'animate-pulse'}`} />
+          <AlertTitle>Telefonos en proceso</AlertTitle>
+          <AlertDescription className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <span>
+              {pendingPhoneCount} lead{pendingPhoneCount === 1 ? '' : 's'} siguen esperando telefono desde el proveedor. Si no llega nada tras un rato, el estado se cerrara automaticamente como completado sin telefono.
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-blue-300 bg-white text-blue-900 hover:bg-blue-100"
+              onClick={() => syncPendingPhoneLeads()}
+              disabled={syncingPendingPhones}
+            >
+              <RotateCw className={`mr-2 h-4 w-4 ${syncingPendingPhones ? 'animate-spin' : ''}`} />
+              {syncingPendingPhones ? 'Actualizando...' : 'Actualizar ahora'}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
+        <CardHeader className="gap-5 border-b border-border/60 bg-muted/10 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-3">
+            <div className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground">Leads enriquecidos</div>
+            <CardTitle className="text-2xl font-semibold tracking-tight">{filtered.length} de {enriched.length} listos para revisar</CardTitle>
             <CardDescription>
               {researchEligible === 0
                 ? 'No hay leads con email para investigar.'
                 : 'Solo se investigan los que tienen email revelado.'}
             </CardDescription>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs">
+              <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">Con teléfono: {enriched.filter((lead) => getLeadPhoneState(lead) === 'ready').length}</span>
+              <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">Pendientes: {pendingPhoneCount}</span>
+              <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">Sin teléfono: {enriched.filter((lead) => getLeadPhoneState(lead) === 'missing').length}</span>
+              <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">Investigables: {researchEligible}</span>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setShowFilters(v => !v)}
-              title="Mostrar/Ocultar filtros"
-            >
-              Filtrar
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={clearInvestigationsSelected}
-              disabled={selectedToContact.size === 0}
-              title={selectedToContact.size === 0 ? 'Selecciona leads para contactar' : 'Borrar investigaciones de los seleccionados para contactar'}
-            >
-              <Eraser className="mr-2 h-4 w-4" />
-              Borrar investigaciones de seleccionados
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={clearInvestigations}
-              disabled={!anyInvestigated}
-              title={anyInvestigated ? 'Borrar todos los reportes y marcas de investigación' : 'No hay investigaciones que borrar'}
-            >
-              <Eraser className="mr-2 h-4 w-4" />
-              Borrar investigaciones
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => initiateEnrichment(enriched.filter(e => selectedToContact.has(e.id)))}
-              disabled={selectedToContact.size === 0}
-            >
-              <RotateCw className="mr-2 h-4 w-4" />
-              Enriquecer Datos
-            </Button>
-
-            {selectedToContact.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2 lg:max-w-[760px] lg:justify-end">
+            <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/80 p-1">
               <Button
-                variant="outline"
-                className="text-blue-700 border-blue-200 bg-blue-50 hover:bg-blue-100"
-                onClick={() => setOpenBulkLinkedin(true)}
+                variant="ghost"
+                className="h-9 rounded-full px-4 shadow-none"
+                onClick={() => setShowFilters(v => !v)}
+                title="Mostrar u ocultar filtros"
               >
-                <Linkedin className="h-4 w-4 mr-2" />
-                Contactar LinkedIn ({selectedToContact.size})
+                Filtrar
               </Button>
-            )}
+              <Button
+                variant="ghost"
+                className="h-9 rounded-full px-4 shadow-none"
+                onClick={handleExportCsv}
+                disabled={enriched.length === 0}
+                title={enriched.length === 0 ? 'No hay datos para exportar' : 'Exportar CSV'}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                CSV
+              </Button>
+              <Button
+                variant="ghost"
+                className="h-9 rounded-full px-4 shadow-none"
+                onClick={handleExportXlsx}
+                disabled={enriched.length === 0}
+                title={enriched.length === 0 ? 'No hay datos para exportar' : 'Exportar XLSX'}
+              >
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                XLSX
+              </Button>
+            </div>
 
-            <Button onClick={openBulkCompose} disabled={selectedToContact.size === 0}>
-              Contactar seleccionados ({selectedToContact.size})
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setOpenSchedule(true)}
-              disabled={selectedToContact.size === 0}
-            >
-              Agendar Campaña
-            </Button>
-            <Button
-              onClick={() => investigateOneByOne()}
-              disabled={seqRunning || researchCount === 0}
-            >
-              {seqRunning ? 'Investigando...' : `Investigar (Vane) (${researchCount})`}
-            </Button>
-            {/* NUEVO: exportaciones */}
-            <Button
-              variant="outline"
-              onClick={handleExportCsv}
-              disabled={enriched.length === 0}
-              title={enriched.length === 0 ? 'No hay datos para exportar' : 'Exportar CSV'}
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Exportar CSV
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleExportXlsx}
-              disabled={enriched.length === 0}
-              title={enriched.length === 0 ? 'No hay datos para exportar' : 'Exportar XLSX'}
-            >
-              <FileSpreadsheet className="mr-2 h-4 w-4" />
-              XLSX
-            </Button>
+            <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/80 p-1">
+              <Button
+                className="h-9 rounded-full px-4 shadow-none"
+                onClick={openBulkCompose}
+                disabled={selectedToContact.size === 0}
+                title={selectedToContact.size === 0 ? 'Selecciona leads aptos para contactar' : 'Abrir borradores para los seleccionados'}
+              >
+                Contactar {selectedToContact.size > 0 ? `(${selectedToContact.size})` : ''}
+              </Button>
+              <Button
+                variant="ghost"
+                className="h-9 rounded-full px-4 shadow-none"
+                onClick={() => investigateOneByOne()}
+                disabled={seqRunning || researchCount === 0}
+                title={researchCount === 0 ? 'Selecciona leads con email que aun no tengan investigacion' : 'Investigar los leads seleccionados'}
+              >
+                {seqRunning ? 'Investigando...' : `Investigar ${researchCount > 0 ? `(${researchCount})` : ''}`}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full shadow-none" aria-label="Más acciones">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuItem onClick={() => initiateEnrichment(enriched.filter(e => selectedToContact.has(e.id)))} disabled={selectedToContact.size === 0}>
+                    Reintentar enriquecimiento
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setOpenBulkLinkedin(true)} disabled={selectedToContact.size === 0}>
+                    Contactar por LinkedIn
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={clearInvestigationsSelected} disabled={selectedToContact.size === 0}>
+                    Borrar investigaciones de seleccionados
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={clearInvestigations} disabled={!anyInvestigated} className="text-destructive focus:text-destructive">
+                    Borrar todas las investigaciones
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
           {/* Panel de filtros (colapsable) */}
           {showFilters && (
-            <div className="mb-4 border rounded-md p-3 bg-muted/30">
+            <div className="mb-4 rounded-xl border bg-muted/30 p-4">
+              <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <Input value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} placeholder="Busqueda rapida por empresa" />
+                <Input value={nameFilter} onChange={e => setNameFilter(e.target.value)} placeholder="Busqueda rapida por nombre" />
+                <Input value={titleFilter} onChange={e => setTitleFilter(e.target.value)} placeholder="Busqueda rapida por cargo" />
+                <select className="h-10 rounded-md border bg-background px-3 py-2 text-sm" value={industryFilter} onChange={(e) => setIndustryFilter(e.target.value)}>
+                  <option value="all">Todas las industrias</option>
+                  {industryOptions.map((industry) => <option key={industry} value={industry}>{industry}</option>)}
+                </select>
+                <select className="h-10 rounded-md border bg-background px-3 py-2 text-sm" value={phoneFilter} onChange={(e) => setPhoneFilter(e.target.value as any)}>
+                  <option value="all">Todos los telefonos</option>
+                  <option value="ready">Telefono listo</option>
+                  <option value="pending">En proceso</option>
+                  <option value="missing">Sin telefono</option>
+                </select>
+                <Input type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} />
+                <Input type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} />
+                <div className="flex items-center text-xs text-muted-foreground">Usa estos filtros para limpiar rápido la lista antes de investigar o contactar.</div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
                   <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir · Empresa</div>
@@ -1680,6 +1788,7 @@ export default function EnrichedLeadsClient() {
                 <Button
                   variant="ghost"
                   onClick={() => {
+                    setCompanyFilter(''); setNameFilter(''); setTitleFilter(''); setIndustryFilter('all'); setPhoneFilter('all'); setCreatedFrom(''); setCreatedTo('');
                     setFIncCompany(''); setFIncLead(''); setFIncTitle('');
                     setFExcCompany(''); setFExcLead(''); setFExcTitle('');
                     setApplied({ incCompany: '', incLead: '', incTitle: '', excCompany: '', excLead: '', excTitle: '' });
@@ -1708,6 +1817,10 @@ export default function EnrichedLeadsClient() {
               </div>
             </div>
           )}
+
+          <div className="mb-4 rounded-2xl border border-border/60 bg-muted/15 px-4 py-3 text-sm text-muted-foreground">
+            Para contactar o programar envíos, marca la columna <span className="font-medium text-foreground">Cont.</span>. Esa selección solo se habilita si el lead tiene email y ya cuenta con reporte de investigación.
+          </div>
 
           {seqRunning && (
             <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/70 p-4">
@@ -1796,8 +1909,8 @@ export default function EnrichedLeadsClient() {
               </TableHeader>
               <TableBody>
                 {pageLeads.map(e => (
-                  <TableRow key={e.id}>
-                    <TableCell className="text-center">
+                  <TableRow key={e.id} className="align-middle">
+                    <TableCell className="py-3 text-center">
                       <Checkbox
                         checked={!!sel[e.id]}
                         onCheckedChange={(v) => setSel(prev => ({ ...prev, [e.id]: Boolean(v) }))}
@@ -1815,7 +1928,7 @@ export default function EnrichedLeadsClient() {
                         }
                       />
                     </TableCell>
-                    <TableCell className="text-center">
+                    <TableCell className="py-3 text-center">
                       <Checkbox
                         disabled={!canContact(e)}
                         checked={selectedToContact.has(e.id)}
@@ -1827,29 +1940,35 @@ export default function EnrichedLeadsClient() {
                         }}
                       />
                     </TableCell>
-                    <TableCell>{e.fullName}</TableCell>
-                    <TableCell>{e.title || '—'}</TableCell>
-                    <TableCell>{e.companyName || '—'}</TableCell>
-                    <TableCell>
+                    <TableCell className="py-3">
+                      <div className="max-w-[160px] font-medium leading-6">{e.fullName}</div>
+                    </TableCell>
+                    <TableCell className="py-3">
+                      <div className="max-w-[220px] text-sm leading-6 text-muted-foreground line-clamp-2">{e.title || '—'}</div>
+                    </TableCell>
+                    <TableCell className="py-3">
+                      <div className="max-w-[160px] truncate">{e.companyName || '—'}</div>
+                    </TableCell>
+                    <TableCell className="py-3">
                       {(!e.email || e.email === 'Not Found')
                         ? (e.emailStatus === 'locked'
                           ? '(locked)'
                           : <span className="text-muted-foreground text-xs italic">Not Found</span>)
-                        : e.email}
+                        : <div className="max-w-[260px] truncate">{e.email}</div>}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="py-3">
                       {(() => {
                         const fallbackPhone = e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined;
                         const shownPhone = e.primaryPhone || fallbackPhone;
 
                         if (e.primaryPhone === 'Not Found' || (!shownPhone && e.enrichmentStatus !== 'pending_phone')) {
-                          return <span className="text-muted-foreground text-xs italic">Not Found</span>;
+                          return <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600">Sin telefono</span>;
                         }
 
                         if (shownPhone) {
                           return (
                             <div
-                              className="flex flex-col gap-1 cursor-pointer hover:bg-muted/50 p-1 rounded transition-colors group"
+                              className="flex cursor-pointer items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 transition-colors group hover:bg-emerald-100/70"
                               onClick={() => {
                                 const rep = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
                                 setLeadToCall(e);
@@ -1858,12 +1977,12 @@ export default function EnrichedLeadsClient() {
                               }}
                               title="Clic para abrir Terminal de Llamada"
                             >
-                              <div className="flex items-center gap-1 text-sm font-medium text-blue-600 group-hover:text-blue-800">
+                              <div className="flex items-center gap-1 text-sm font-medium text-emerald-700 group-hover:text-emerald-900">
                                 <Phone className="h-3 w-3" />
                                 <span>{shownPhone}</span>
                               </div>
                               {e.phoneNumbers && e.phoneNumbers.length > 1 && (
-                                <span className="text-[10px] text-muted-foreground">+{e.phoneNumbers.length - 1} más</span>
+                                <span className="text-[10px] text-muted-foreground">+{e.phoneNumbers.length - 1}</span>
                               )}
                             </div>
                           );
@@ -1871,23 +1990,9 @@ export default function EnrichedLeadsClient() {
 
                         if (e.enrichmentStatus === 'pending_phone') {
                           return (
-                            <div className="w-full max-w-[100px] space-y-1" title="Esperando webhook de Apollo (aprox 90s)...">
-                              <div className="flex justify-between text-[9px] text-muted-foreground uppercase">
-                                <span>Buscando...</span>
-                                <span>90s</span>
-                              </div>
-                              <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-blue-500 rounded-full animate-progress-90"
-                                  style={{ animation: 'progress 90s linear forwards' }}
-                                ></div>
-                              </div>
-                              <style jsx>{`
-                                 @keyframes progress {
-                                   from { width: 0%; }
-                                   to { width: 100%; }
-                                 }
-                               `}</style>
+                            <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-medium text-blue-700" title="Esperando actualización del proveedor...">
+                              <RotateCw className="h-3 w-3 animate-spin" />
+                              En proceso
                             </div>
                           );
                         }
@@ -1895,23 +2000,32 @@ export default function EnrichedLeadsClient() {
                         return <span className="text-muted-foreground text-xs italic">—</span>;
                       })()}
                     </TableCell>
-                    <TableCell>{e.linkedinUrl ? <a className="underline" target="_blank" href={e.linkedinUrl}>Perfil</a> : '—'}</TableCell>
-                    <TableCell>{e.companyDomain || '—'}</TableCell>
-                    <TableCell className="text-right space-x-2">
-                      <Button size="sm" variant="outline" onClick={() => openReportFor(e)}>Ver reporte</Button>
-                      <Button size="sm" onClick={() => generateEmailFromReportFor(e)} disabled={!canContact(e)}>Contactar</Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={() => openLinkedinCompose(e)}
-                        disabled={!e.linkedinUrl}
-                        title="Contactar por LinkedIn"
-                      >
-                        <Linkedin className="h-4 w-4" />
-                      </Button>
-                      <Button size="icon" variant="ghost" onClick={() => handleDeleteEnriched(e.id)} title="Eliminar">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                    <TableCell className="py-3">{e.linkedinUrl ? <a className="underline underline-offset-4" target="_blank" href={e.linkedinUrl}>Perfil</a> : '—'}</TableCell>
+                    <TableCell className="py-3">
+                      <div className="max-w-[150px] truncate">{e.companyDomain || '—'}</div>
+                    </TableCell>
+                    <TableCell className="py-3">
+                      <div className="flex min-w-[200px] items-center justify-end gap-2">
+                        <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/80 p-1">
+                          <Button size="sm" variant="ghost" className="h-8 rounded-full px-3" onClick={() => openReportFor(e)}>Reporte</Button>
+                          <Button size="sm" className="h-8 rounded-full px-3 shadow-none" onClick={() => generateEmailFromReportFor(e)} disabled={!canContact(e)}>Contactar</Button>
+                        </div>
+                        <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/80 p-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 rounded-full"
+                            onClick={() => openLinkedinCompose(e)}
+                            disabled={!e.linkedinUrl}
+                            title="Contactar por LinkedIn"
+                          >
+                            <Linkedin className="h-4 w-4" />
+                          </Button>
+                          <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" onClick={() => handleDeleteEnriched(e.id)} title="Eliminar">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -2140,13 +2254,26 @@ export default function EnrichedLeadsClient() {
               <div className="text-xs text-muted-foreground mb-1">Fuente del borrador</div>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => setDraftSource('investigation')} />
+                  <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => {
+                    setDraftSource('investigation');
+                    if (openCompose) {
+                      void buildComposeDrafts('investigation', selectedStyleName || styleProfiles[0]?.name || '').then(setComposeList).catch((e: any) => {
+                        toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo actualizar el borrador.' });
+                      });
+                    }
+                  }} />
                         Investigación (n8n)
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="radio" name="draft-source" value="style" checked={draftSource === 'style'} onChange={() => {
+                    const nextStyle = selectedStyleName || styleProfiles[0]?.name || '';
                     setDraftSource('style');
                     if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
+                    if (openCompose && nextStyle) {
+                      void buildComposeDrafts('style', nextStyle).then(setComposeList).catch((e: any) => {
+                        toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo aplicar la personalizacion.' });
+                      });
+                    }
                   }} />
                   Estilo (Email Studio)
                 </label>
@@ -2158,7 +2285,15 @@ export default function EnrichedLeadsClient() {
                 className="h-9 w-full rounded-md border bg-background px-2 text-sm disabled:opacity-50"
                 disabled={draftSource !== 'style' || styleProfiles.length === 0}
                 value={selectedStyleName}
-                onChange={(e) => setSelectedStyleName(e.target.value)}
+                onChange={(e) => {
+                  const nextStyle = e.target.value;
+                  setSelectedStyleName(nextStyle);
+                  if (openCompose && draftSource === 'style') {
+                    void buildComposeDrafts('style', nextStyle).then(setComposeList).catch((err: any) => {
+                      toast({ variant: 'destructive', title: 'Error', description: err?.message || 'No se pudo aplicar la personalizacion.' });
+                    });
+                  }
+                }}
               >
                 {styleProfiles.length === 0 ? <option value="">(No hay estilos guardados)</option> :
                   styleProfiles.map(p => <option key={p.name} value={p.name}>{p.name}</option>)

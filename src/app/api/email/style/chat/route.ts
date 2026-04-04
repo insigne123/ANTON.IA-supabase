@@ -6,11 +6,18 @@ import { updateStyleProfile } from '@/ai/flows/update-style-profile';
 
 // Render: llama a tu endpoint existente de render (servidor a servidor)
 async function renderEmail(style: StyleProfile, mode: 'leads' | 'opportunities', sampleData: any) {
+  const templateId = mode === 'opportunities' ? 'seed-opps-1' : 'seed-leads-1';
   const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/email/render`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // tu render ya conoce "template" y "data"; añadimos styleProfile como "hints"
-    body: JSON.stringify({ mode, data: sampleData, styleProfile: style }),
+    body: JSON.stringify({
+      templateId,
+      mode,
+      data: sampleData,
+      tone: style.tone,
+      length: style.length,
+      aiIntensity: 'none',
+    }),
     cache: 'no-store',
   }).catch(() => null);
 

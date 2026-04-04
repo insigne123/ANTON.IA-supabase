@@ -4,7 +4,7 @@ import type { ColumnDef, ColumnKey, UnifiedRow } from './unified-sheet-types';
 const SCHEMA_KEY = 'leadflow-sheet-columns-v1';
 const CUSTOM_DATA_KEY = 'leadflow-sheet-custom-v1';
 const COLUMNS_VERSION_KEY = 'unified_sheet_columns_v';
-const CURRENT_COLUMNS_VERSION = 2;
+const CURRENT_COLUMNS_VERSION = 3;
 
 
 export function defaultColumns(): ColumnDef[] {
@@ -13,17 +13,22 @@ export function defaultColumns(): ColumnDef[] {
     { key: 'email', label: 'Email', visible: true, width: 240, editable: false }, // <-- NUEVA por defecto
     { key: 'company', label: 'Empresa', visible: true, width: 220, editable: false },
     { key: 'title', label: 'Cargo', visible: true, width: 220, editable: false },
+    { key: 'industry', label: 'Industria', visible: true, width: 180, editable: false },
+    { key: 'createdAt', label: 'Captación', visible: true, width: 160, editable: false },
     { key: 'status', label: 'Estado', visible: true, width: 140, editable: false },
     { key: 'stage', label: 'Stage', visible: true, width: 160, editable: true },
     { key: 'owner', label: 'Owner', visible: true, width: 140, editable: true },
     { key: 'notes', label: 'Notas', visible: true, width: 320, editable: true },
     { key: 'kind', label: 'Tipo', visible: false, width: 110 },
-    // { key: 'source', label: 'Fuente', visible: false, width: 110 },
-    { key: 'createdAt', label: 'Creado', visible: false, width: 160 },
-    // { key: 'sentAt', label: 'Enviado', visible: false, width: 160 },
-    // { key: 'repliedAt', label: 'Respondido', visible: false, width: 160 },
+    { key: 'source', label: 'Fuente', visible: false, width: 120 },
     { key: 'updatedAt', label: 'Última act.', visible: false, width: 160 },
     { key: 'linkedinUrl', label: 'LinkedIn', visible: false, width: 160 },
+    { key: 'nextAction', label: 'Próximo paso', visible: false, width: 220, editable: true },
+    { key: 'nextActionType', label: 'Tipo de paso', visible: false, width: 150, editable: true },
+    { key: 'nextActionDueAt', label: 'Próxima fecha', visible: false, width: 170, editable: true },
+    { key: 'autopilotStatus', label: 'Autopilot', visible: false, width: 160, editable: true },
+    { key: 'lastAutopilotEvent', label: 'Último evento', visible: false, width: 220, editable: true },
+    { key: 'meetingLink', label: 'Link reunión', visible: false, width: 220, editable: true },
   ];
   return cols;
 }
@@ -43,14 +48,32 @@ export function loadColumns(): ColumnDef[] {
     const version = Number(localStorage.getItem(COLUMNS_VERSION_KEY) || '0');
     let cols: ColumnDef[] = raw ? (JSON.parse(raw) as ColumnDef[]) : [...defaultColumns()];
 
-    // Migración: asegurar columna "email"
-    const hasEmail = cols.some((c) => c.key === 'email');
+    // Migraciones de columnas visibles
+  const hasEmail = cols.some((c) => c.key === 'email');
+  const ensureColumn = (column: ColumnDef, afterKey?: ColumnKey) => {
+      if (cols.some((c) => c.key === column.key)) return;
+      const afterIdx = afterKey ? cols.findIndex((c) => c.key === afterKey) : -1;
+      if (afterIdx >= 0) cols.splice(afterIdx + 1, 0, column);
+      else cols.push(column);
+    };
     if (!hasEmail) {
       const emailCol: ColumnDef = { key: 'email', label: 'Email', visible: true, width: 240, editable: false };
       const nameIdx = cols.findIndex((c) => c.key === 'name');
       if (nameIdx >= 0) cols.splice(nameIdx + 1, 0, emailCol);
       else cols.unshift(emailCol);
     }
+
+    ensureColumn({ key: 'industry', label: 'Industria', visible: true, width: 180, editable: false }, 'title');
+    ensureColumn({ key: 'createdAt', label: 'Captación', visible: true, width: 160, editable: false }, 'industry');
+    ensureColumn({ key: 'source', label: 'Fuente', visible: false, width: 120 }, 'kind');
+    ensureColumn({ key: 'nextAction', label: 'Próximo paso', visible: false, width: 220, editable: true }, 'notes');
+    ensureColumn({ key: 'nextActionType', label: 'Tipo de paso', visible: false, width: 150, editable: true }, 'nextAction');
+    ensureColumn({ key: 'nextActionDueAt', label: 'Próxima fecha', visible: false, width: 170, editable: true }, 'nextActionType');
+    ensureColumn({ key: 'autopilotStatus', label: 'Autopilot', visible: false, width: 160, editable: true }, 'nextActionDueAt');
+    ensureColumn({ key: 'lastAutopilotEvent', label: 'Último evento', visible: false, width: 220, editable: true }, 'autopilotStatus');
+    ensureColumn({ key: 'meetingLink', label: 'Link reunión', visible: false, width: 220, editable: true }, 'lastAutopilotEvent');
+
+    cols = cols.filter((column, index, arr) => arr.findIndex((item) => item.key === column.key) === index);
 
     if (version < CURRENT_COLUMNS_VERSION || !hasEmail) {
       // Persistimos migración para no rehacerla en cada carga

@@ -3,6 +3,7 @@
 import { googleAuthService } from './google-auth-service';
 import { emailSignatureStorage } from './email-signature-storage';
 import { applySignatureHTML } from './signature-apply';
+import { stripHtmlToText } from './email-outbound';
 
 export type GmailSendInput = {
   to: string;
@@ -14,19 +15,6 @@ export type GmailSendInput = {
   replyTo?: string;
   attachments?: Array<{ name: string; contentBytes: string; contentType?: string }>;
 };
-
-// Helper para derivar texto plano desde HTML
-function stripHtmlToText(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n\n')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<[^>]+>/g, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
 
 export async function sendGmailEmail(input: GmailSendInput): Promise<{ id: string; threadId: string; }> {
   // Try to get client session silently. If not available, we fall back to server-side token.

@@ -2,7 +2,7 @@ import { classifyReplyFlow } from '@/ai/flows/classify-reply';
 import { isHardNegativeReply } from '@/lib/reply-intent-rules';
 
 export type ReplyClassification = {
-  intent: 'meeting_request' | 'positive' | 'negative' | 'unsubscribe' | 'auto_reply' | 'neutral' | 'unknown';
+  intent: 'meeting_request' | 'positive' | 'negative' | 'unsubscribe' | 'auto_reply' | 'neutral' | 'unknown' | 'delivery_failure';
   sentiment: 'positive' | 'negative' | 'neutral';
   shouldContinue: boolean;
   confidence: number;

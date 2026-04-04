@@ -1,7 +1,14 @@
 
 import { encodeHeaderRFC2047, sanitizeHeaderText } from '@/lib/email-header-utils';
+import { prepareOutboundEmail } from '@/lib/email-outbound';
 
-export async function sendGmail(accessToken: string, to: string, subject: string, htmlBody: string) {
+type ServerEmailSendOptions = {
+    unsubscribeUrl?: string | null;
+    textBody?: string;
+};
+
+export async function sendGmail(accessToken: string, to: string, subject: string, htmlBody: string, options: ServerEmailSendOptions = {}) {
+    const prepared = prepareOutboundEmail({ html: htmlBody, text: options.textBody, unsubscribeUrl: options.unsubscribeUrl });
     // Construct raw email
     const utf8Subject = encodeHeaderRFC2047(subject);
     const messageParts = [
@@ -10,7 +17,7 @@ export async function sendGmail(accessToken: string, to: string, subject: string
         'MIME-Version: 1.0',
         `Subject: ${utf8Subject}`,
         '',
-        htmlBody,
+        prepared.html,
     ];
     const message = messageParts.join('\r\n');
     const encodedMessage = Buffer.from(message, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -33,7 +40,8 @@ export async function sendGmail(accessToken: string, to: string, subject: string
     return res.json();
 }
 
-export async function sendOutlook(accessToken: string, to: string, subject: string, htmlBody: string) {
+export async function sendOutlook(accessToken: string, to: string, subject: string, htmlBody: string, options: ServerEmailSendOptions = {}) {
+    const prepared = prepareOutboundEmail({ html: htmlBody, text: options.textBody, unsubscribeUrl: options.unsubscribeUrl });
     const safeSubject = sanitizeHeaderText(subject);
     const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
         method: 'POST',
@@ -46,7 +54,7 @@ export async function sendOutlook(accessToken: string, to: string, subject: stri
                 subject: safeSubject,
                 body: {
                     contentType: 'HTML',
-                    content: htmlBody,
+                    content: prepared.html,
                 },
                 toRecipients: [
                     {

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { adaptLeadResearchResponseToReport } from '@/lib/lead-research';
+import { storeLeadResearchReport } from '@/lib/server/lead-research-reports';
 
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
 
@@ -302,6 +304,33 @@ export async function POST(req: NextRequest) {
     }
 
     const normalized = normalizeN8nResearchResponse(payload, body);
+
+    try {
+      const { data: member } = await createRouteHandlerClient({ cookies: (() => req.cookies) as any })
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', ctx.userId)
+        .limit(1)
+        .maybeSingle();
+
+      const report = adaptLeadResearchResponseToReport(normalized, normalized.lead_ref || buildLeadRef(body));
+      await storeLeadResearchReport({
+        userId: ctx.userId,
+        organizationId: body?.organization_id || member?.organization_id || null,
+        lead: {
+          id: body?.lead?.id || body?.id || null,
+          leadId: body?.lead?.id || body?.id || null,
+          name: body?.lead?.full_name || body?.lead?.fullName || body?.fullName || null,
+          email: body?.lead?.email || body?.email || null,
+          company: body?.company?.name || body?.companyName || null,
+          companyDomain: body?.company?.domain || body?.companyDomain || null,
+        } as any,
+        report,
+      });
+    } catch (cacheError) {
+      console.warn('[lead-research] cache store failed:', cacheError);
+    }
+
     return NextResponse.json(normalized, {
       status: 200,
       headers: { 'Cache-Control': 'no-store' },

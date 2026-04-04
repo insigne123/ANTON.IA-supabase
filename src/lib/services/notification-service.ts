@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import { sendGmail, sendOutlook } from '../server-email-sender';
 import { refreshGoogleToken, refreshMicrosoftToken } from '../server-auth-helpers';
 import { buildAntoniaDailyDashboardHtml, type AntoniaDailyMissionRow } from './antonia-report-email';
+import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
+import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
 
 function parseRecipients(raw?: string | null): string[] {
     if (!raw) return [];
@@ -101,11 +103,19 @@ async function sendSystemEmail(to: string, subject: string, html: string, organi
             return;
         }
 
+        const unsubscribeUrl = generateUnsubscribeLink(to, preferred.user_id, organizationId || null);
+        const prepared = prepareOutboundEmail({ html, unsubscribeUrl });
+        const preflight = validateOutboundEmail({ to, subject, html: prepared.html, text: prepared.text, requireUnsubscribe: true, unsubscribeUrl });
+        if (!preflight.ok) {
+            console.error('[SystemMail] Preflight failed:', preflight.errors);
+            return;
+        }
+
         if (provider === 'google') {
-            await sendGmail(accessToken, to, subject, html);
+            await sendGmail(accessToken, to, subject, prepared.html, { textBody: prepared.text, unsubscribeUrl });
             console.log(`[SystemMail] ✅ Sent via Gmail to: ${to} | Subject: ${subject}`);
         } else {
-            await sendOutlook(accessToken, to, subject, html);
+            await sendOutlook(accessToken, to, subject, prepared.html, { textBody: prepared.text, unsubscribeUrl });
             console.log(`[SystemMail] ✅ Sent via Outlook to: ${to} | Subject: ${subject}`);
         }
     } catch (error) {

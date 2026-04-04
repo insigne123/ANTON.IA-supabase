@@ -46,6 +46,7 @@ type ExecutiveReport = {
 
 const metricConfig = [
   { key: 'activeMissions', label: 'Misiones activas', icon: Target },
+  { key: 'replies', label: 'Replies totales', icon: TrendingUp },
   { key: 'meetings', label: 'Meetings', icon: CalendarRange },
   { key: 'positiveReplies', label: 'Replies positivas', icon: TrendingUp },
   { key: 'atRiskMissions', label: 'En riesgo', icon: Briefcase },
@@ -95,7 +96,7 @@ export function AutopilotExecutiveReportPanel() {
           <div className="rounded-xl border border-dashed p-8 text-sm text-muted-foreground">No se pudo generar el reporte ejecutivo.</div>
         ) : (
           <>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
               {metricConfig.map(({ key, label, icon: Icon }) => (
                 <div key={key} className="rounded-xl border p-4">
                   <div className="flex items-center justify-between gap-3">

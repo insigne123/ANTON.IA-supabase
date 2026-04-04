@@ -3,6 +3,7 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AntoniaMission } from '@/lib/types';
 import { BarChart, Activity, Mail, MessageSquare, TrendingUp, Zap } from 'lucide-react';
+import { countUniqueReplyContacts, percentWithFloor } from '@/lib/antonia-reply-metrics';
 
 interface MetricsDashboardProps {
     organizationId: string;
@@ -20,6 +21,9 @@ interface MissionMetrics {
 
 export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organizationId, activeMissionId }) => {
     const [metrics, setMetrics] = useState<MissionMetrics[]>([]);
+    const [orgReplyTotal, setOrgReplyTotal] = useState(0);
+    const [orgSentTotal, setOrgSentTotal] = useState(0);
+    const [orgOpenedTotal, setOrgOpenedTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const supabase = createClientComponentClient();
 
@@ -33,9 +37,11 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
         try {
             let missionQuery = supabase
                 .from('antonia_missions')
-                .select('id, title')
+                .select('id, title, status, updated_at')
                 .eq('organization_id', organizationId)
-                .eq('status', 'active'); // Solo misiones activas
+                .in('status', ['active', 'paused', 'completed', 'failed'])
+                .order('updated_at', { ascending: false })
+                .limit(30);
 
             if (activeMissionId) {
                 missionQuery = missionQuery.eq('id', activeMissionId);
@@ -52,22 +58,41 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
 
             const missionIds = missions.map(m => m.id);
 
-            const { data: leads, error: leadsError } = await supabase
+            const [{ data: leads, error: leadsError }, { data: replyRows, error: replyError }] = await Promise.all([
+              supabase
                 .from('contacted_leads')
-                .select('mission_id, status, opened_at, clicked_at, replied_at')
-                .in('mission_id', missionIds);
+                .select('id, mission_id, lead_id, email, status, opened_at, clicked_at, replied_at, reply_intent, last_reply_text')
+                .in('mission_id', missionIds),
+              supabase
+                .from('lead_responses')
+                .select('mission_id, contacted_id, lead_id, type')
+                .in('mission_id', missionIds)
+                .eq('type', 'reply'),
+            ]);
 
             if (leadsError) throw leadsError;
+            if (replyError) throw replyError;
+
+            const { data: organizationReplyRows } = await supabase
+              .from('contacted_leads')
+              .select('id, lead_id, email, replied_at, reply_intent, last_reply_text, opened_at')
+              .eq('organization_id', organizationId);
+
+            const computedOrgReplyTotal = countUniqueReplyContacts((organizationReplyRows as any[]) || [], (replyRows as any[]) || []);
+            setOrgReplyTotal(computedOrgReplyTotal);
+            setOrgSentTotal((organizationReplyRows || []).length);
+            setOrgOpenedTotal((organizationReplyRows || []).filter((row: any) => row.opened_at).length);
 
             const aggregated = missions.map(mission => {
                 const missionLeads = leads?.filter(l => l.mission_id === mission.id) || [];
+                const missionReplies = replyRows?.filter((row: any) => row.mission_id === mission.id) || [];
                 return {
                     missionId: mission.id,
                     missionTitle: mission.title,
                     totalSent: missionLeads.length,
                     totalOpened: missionLeads.filter(l => l.opened_at).length,
                     totalClicked: missionLeads.filter(l => l.clicked_at).length,
-                    totalReplied: missionLeads.filter(l => l.replied_at).length
+                    totalReplied: countUniqueReplyContacts(missionLeads as any[], missionReplies as any[])
                 };
             });
 
@@ -103,12 +128,15 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
         );
     }
 
-    const grandTotalSent = metrics.reduce((acc, curr) => acc + curr.totalSent, 0);
-    const grandTotalOpened = metrics.reduce((acc, curr) => acc + curr.totalOpened, 0);
-    const grandTotalReplied = metrics.reduce((acc, curr) => acc + curr.totalReplied, 0);
+            const missionSentTotal = metrics.reduce((acc, curr) => acc + curr.totalSent, 0);
+            const missionOpenedTotal = metrics.reduce((acc, curr) => acc + curr.totalOpened, 0);
+            const missionReplyTotal = metrics.reduce((acc, curr) => acc + curr.totalReplied, 0);
+            const grandTotalSent = Math.max(missionSentTotal, orgSentTotal || 0);
+            const grandTotalOpened = Math.max(missionOpenedTotal, orgOpenedTotal || 0);
+            const grandTotalReplied = Math.max(missionReplyTotal, orgReplyTotal || 0);
 
-    const openRate = grandTotalSent > 0 ? Math.round((grandTotalOpened / grandTotalSent) * 100) : 0;
-    const replyRate = grandTotalSent > 0 ? Math.round((grandTotalReplied / grandTotalSent) * 100) : 0;
+    const openRate = percentWithFloor(grandTotalOpened, grandTotalSent);
+    const replyRate = percentWithFloor(grandTotalReplied, grandTotalSent);
 
     return (
         <div className="space-y-8">
@@ -143,7 +171,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
                     </CardHeader>
                     <CardContent className="relative">
                         <div className="flex items-baseline gap-2">
-                            <span className="text-3xl font-bold text-foreground">{openRate}%</span>
+                            <span className="text-3xl font-bold text-foreground">{openRate.toFixed(1)}%</span>
                             {openRate > 20 && (
                                 <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
                                     <TrendingUp className="h-3 w-3" />
@@ -168,7 +196,7 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
                     </CardHeader>
                     <CardContent className="relative">
                         <div className="flex items-baseline gap-2">
-                            <span className="text-3xl font-bold text-foreground">{replyRate}%</span>
+                            <span className="text-3xl font-bold text-foreground">{replyRate.toFixed(1)}%</span>
                             {replyRate > 5 && (
                                 <span className="text-xs font-medium text-violet-600 dark:text-violet-400 flex items-center gap-0.5">
                                     <TrendingUp className="h-3 w-3" />
@@ -191,14 +219,14 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
                         Rendimiento por Misión
                     </h3>
                     <span className="text-xs text-muted-foreground">
-                        {metrics.length} {metrics.length === 1 ? 'misión activa' : 'misiones activas'}
+                        {metrics.length} {metrics.length === 1 ? 'misión con actividad' : 'misiones con actividad'}
                     </span>
                 </div>
 
                 <div className="space-y-3">
                     {metrics.map((m) => {
-                        const mOpenRate = m.totalSent > 0 ? (m.totalOpened / m.totalSent) * 100 : 0;
-                        const mReplyRate = m.totalSent > 0 ? (m.totalReplied / m.totalSent) * 100 : 0;
+                        const mOpenRate = percentWithFloor(m.totalOpened, m.totalSent);
+                        const mReplyRate = percentWithFloor(m.totalReplied, m.totalSent);
 
                         return (
                             <Card key={m.missionId} className="border-border/50 hover:border-primary/50 transition-all duration-200">
@@ -215,13 +243,13 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ organization
                                             <div className="text-right">
                                                 <div className="text-xs text-muted-foreground">Apertura</div>
                                                 <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                                                    {Math.round(mOpenRate)}%
+                                                    {mOpenRate.toFixed(1)}%
                                                 </div>
                                             </div>
                                             <div className="text-right">
                                                 <div className="text-xs text-muted-foreground">Respuesta</div>
                                                 <div className="text-sm font-bold text-violet-600 dark:text-violet-400">
-                                                    {Math.round(mReplyRate)}%
+                                                    {mReplyRate.toFixed(1)}%
                                                 </div>
                                             </div>
                                         </div>

@@ -1,8 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { matchesConfiguredSecret } from '@/lib/server/internal-api-auth';
+
+function isAuthorizedApolloWebhook(req: NextRequest) {
+    const expectedSecret = String(process.env.APOLLO_WEBHOOK_SECRET || '').trim();
+    if (!expectedSecret) return false;
+
+    const url = new URL(req.url);
+    const providedSecret =
+        req.headers.get('x-webhook-secret') ||
+        req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ||
+        url.searchParams.get('webhook_secret');
+
+    return matchesConfiguredSecret(expectedSecret, providedSecret);
+}
+
+function extractApolloPerson(body: any) {
+    if (!body || typeof body !== 'object') return null;
+    if (body.person && typeof body.person === 'object') return body.person;
+    if (Array.isArray(body.people) && body.people[0] && typeof body.people[0] === 'object') return body.people[0];
+    return body;
+}
 
 export async function POST(req: NextRequest) {
     try {
+        if (!String(process.env.APOLLO_WEBHOOK_SECRET || '').trim()) {
+            return NextResponse.json({ error: 'APOLLO_WEBHOOK_SECRET_NOT_CONFIGURED' }, { status: 503 });
+        }
+
+        if (!isAuthorizedApolloWebhook(req)) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         // Service Role Client to bypass RLS for webhook updates
         const supabase = createClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -17,7 +46,7 @@ export async function POST(req: NextRequest) {
         }
 
         const body = await req.json();
-        const person = body?.person || body; // Apollo sometimes wraps in 'person'
+        const person = extractApolloPerson(body);
 
         if (!person) {
             console.warn('[webhook-apollo] No person data found in body');

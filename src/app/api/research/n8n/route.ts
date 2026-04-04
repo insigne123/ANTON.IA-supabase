@@ -74,10 +74,13 @@ export async function POST(req: Request): Promise<Response> {
   const supabase = createRouteHandlerClient({ cookies });
   const { data: { user } } = await supabase.auth.getUser();
   const userIdHeader = req.headers.get('x-user-id')?.trim() || '';
-  if (userIdHeader && !user?.id && !isTrustedInternalRequest(req)) {
+  if (!user?.id && userIdHeader && !isTrustedInternalRequest(req)) {
     return json(401, { error: 'UNAUTHORIZED_INTERNAL_REQUEST' });
   }
-  const userId = user?.id || userIdHeader || 'anon';
+  const userId = user?.id || userIdHeader;
+  if (!userId) {
+    return json(401, { error: 'UNAUTHORIZED' });
+  }
 
   // Fallback to header only if session is missing (e.g. server-to-server calls?? unlikely in this app context)
   // const userIdHeader = req.headers.get('x-user-id');
@@ -156,7 +159,7 @@ export async function POST(req: Request): Promise<Response> {
   let organizationId: string | null = null;
   let useSocialContext = false;
 
-  if (userId && userId !== 'anon') {
+  if (userId) {
     // 1. Fetch User details
     let userJobTitle: string | null = null;
     let userFullName: string | null = null;

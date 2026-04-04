@@ -1,5 +1,6 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import { generateStructured } from '@/ai/openai-json';
 
 export const generateCampaignFlow = ai.defineFlow(
     {
@@ -10,6 +11,12 @@ export const generateCampaignFlow = ai.defineFlow(
             companyName: z.string().optional(),
             targetAudience: z.string().optional(),
             language: z.string().optional(),
+            campaignType: z.enum(['standard', 'reconnection']).optional(),
+            offerName: z.string().optional(),
+            offerSummary: z.string().optional(),
+            offerBenefits: z.array(z.string()).optional(),
+            cta: z.string().optional(),
+            tone: z.string().optional(),
 
             // Antonia usage
             jobTitle: z.string().optional(),
@@ -28,7 +35,7 @@ export const generateCampaignFlow = ai.defineFlow(
         }),
     },
     async (input) => {
-        const { goal, jobTitle, industry, missionTitle, campaignContext, userName, companyName, targetAudience, language } = input;
+        const { goal, jobTitle, industry, missionTitle, campaignContext, userName, companyName, targetAudience, language, campaignType, offerName, offerSummary, offerBenefits, cta, tone } = input;
 
         // Mode detection: If jobTitle is present, it's a specific Antonia mission
         const isAntoniaMission = !!jobTitle;
@@ -57,6 +64,33 @@ export const generateCampaignFlow = ai.defineFlow(
                 - Tone: Professional but conversational
                 - Length: Concise and impactful
             `;
+        } else if (campaignType === 'reconnection') {
+            prompt = `
+              Act as a senior B2B lifecycle copywriter.
+              Create a reconnection campaign sequence for previously contacted leads.
+
+              Offer name: ${offerName || 'Nuevo servicio'}
+              Offer summary: ${offerSummary || goal || 'Reactivar leads previos'}
+              Offer benefits: ${JSON.stringify(offerBenefits || [])}
+              CTA: ${cta || 'Proponer una llamada breve'}
+              Tone: ${tone || 'consultivo y directo'}
+              My Company: ${companyName || 'Unknown'}
+              Target audience: ${targetAudience || 'Leads ya contactados'}
+              Language: ${language || 'es'}
+
+              Requirements:
+              - Return exactly 3 steps.
+              - Step 1 offsetDays: 0.
+              - Step 2 offsetDays: 4.
+              - Step 3 offsetDays: 9.
+              - This is NOT cold outreach. It is reconnection about a new service/product/update.
+              - Keep the copy adaptable so it can later be personalized lead by lead.
+              - Subject lines must be concise and natural.
+              - Body must be HTML format (use <p>, <br>, <strong>).
+              - Use placeholders {{lead.name}}, {{company}}, {{sender.name}} when they help, but keep the structure strong even before personalization.
+              - Mention the new offer and one concrete outcome.
+              - Close each email with a simple CTA.
+            `;
         } else {
             prompt = `
               Act as an expert email marketing copywriter.
@@ -77,18 +111,17 @@ export const generateCampaignFlow = ai.defineFlow(
             `;
         }
 
-        const { output } = await ai.generate({
+        const output = await generateStructured({
             prompt,
-            output: {
-                schema: z.object({
-                    steps: z.array(z.object({
-                        name: z.string(),
-                        offsetDays: z.number(),
-                        subject: z.string(),
-                        bodyHtml: z.string(),
-                    })),
-                }),
-            },
+            schema: z.object({
+                steps: z.array(z.object({
+                    name: z.string(),
+                    offsetDays: z.number(),
+                    subject: z.string(),
+                    bodyHtml: z.string(),
+                })),
+            }),
+            temperature: 0.4,
         });
 
         if (!output) {

@@ -26,6 +26,11 @@ import { PhoneCallModal } from '@/components/phone-call-modal';
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
 import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
 import { styleProfilesStorage } from '@/lib/style-profiles-storage';
+import { getCompanyProfile } from '@/lib/data';
+import { buildSenderInfo, applySignaturePlaceholders } from '@/lib/signature-placeholders';
+import { buildPersonEmailContext, renderTemplate } from '@/lib/template';
+import { ensureSubjectPrefix, generateCompanyOutreachV2 } from '@/lib/outreach-templates';
+import { restyleDraftWithProfile } from '@/lib/email-style-restyle';
 import * as Quota from '@/lib/quota-client';
 
 
@@ -401,24 +406,75 @@ export default function EnrichedOpportunitiesPage() {
   };
 
   // --- BULK CONTACT LOGIC ---
-  const handleOpenBulkCompose = () => {
+  const buildComposeDrafts = async (source: 'investigation' | 'style', styleName?: string) => {
     const ids = Array.from(selectedToContact);
-    if (ids.length === 0) return;
-    const toCompose: Array<{ lead: EnrichedOppLead; subject: string; body: string }> = [];
+    const company = getCompanyProfile() || {};
+    const sender = buildSenderInfo();
+    const profile = source === 'style'
+      ? (styleProfiles.find(p => p.name === styleName) || styleProfiles[0] || null)
+      : null;
 
-    ids.forEach(id => {
+    const toCompose = (await Promise.all(ids.map(async (id) => {
       const l = enriched.find(x => x.id === id);
-      if (!l || !canContact(l)) return; // Double check
-      // const rep = getReportFor(l); -> l.report
-      toCompose.push({
-        lead: l,
-        subject: l.report?.emailDraft?.subject || `Contacto: ${l.fullName}`,
-        body: l.report?.emailDraft?.body || `Hola ${l.fullName}, te contacto desde...`
-      });
-    });
+      if (!l || !canContact(l)) return null;
 
-    setComposeList(toCompose);
-    setOpenCompose(true);
+      const seed = l.report?.emailDraft
+        ? {
+          subject: l.report.emailDraft.subject || `Contacto: ${l.fullName}`,
+          body: l.report.emailDraft.body || `Hola ${l.fullName}, te contacto desde...`,
+        }
+        : (() => {
+          const v2 = generateCompanyOutreachV2({
+            leadFirstName: (l.fullName || '').split(' ')[0] || '',
+            companyName: l.companyName || '',
+            myCompanyProfile: company,
+          });
+          return { subject: v2.subjectBase, body: v2.body };
+        })();
+
+      let subject = seed.subject;
+      let body = seed.body;
+      const ctx = buildPersonEmailContext({
+        lead: { name: l.fullName, email: l.email!, title: l.title, company: l.companyName },
+        company: { name: l.companyName, domain: l.companyDomain },
+        sender,
+      });
+      subject = renderTemplate(subject || '', ctx);
+      body = renderTemplate(body || '', ctx);
+
+      if (profile) {
+        const styled = await restyleDraftWithProfile({
+          mode: 'opportunities',
+          baseSubject: subject,
+          baseBody: body,
+          styleProfile: profile,
+          lead: { id: l.id, fullName: l.fullName, email: l.email, title: l.title, companyName: l.companyName, companyDomain: l.companyDomain },
+          report: l.report || null,
+          companyProfile: company,
+        });
+        subject = styled.subject;
+        body = styled.body;
+      }
+
+      body = applySignaturePlaceholders(body, sender);
+      subject = ensureSubjectPrefix(subject, ctx.lead.firstName);
+
+      return { lead: l, subject, body };
+    }))).filter(Boolean) as Array<{ lead: EnrichedOppLead; subject: string; body: string }>;
+
+    return toCompose;
+  };
+
+  const handleOpenBulkCompose = async () => {
+    if (selectedToContact.size === 0) return;
+    try {
+      const toCompose = await buildComposeDrafts(draftSource, selectedStyleName || styleProfiles[0]?.name || '');
+
+      setComposeList(toCompose);
+      setOpenCompose(true);
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo preparar el borrador.' });
+    }
   };
 
   const handleSendBulk = async () => {
@@ -753,13 +809,26 @@ export default function EnrichedOpportunitiesPage() {
               <Label className="text-xs text-muted-foreground mb-1">Fuente del borrador</Label>
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => setDraftSource('investigation')} />
+                  <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => {
+                    setDraftSource('investigation');
+                    if (openCompose) {
+                      void buildComposeDrafts('investigation', selectedStyleName || styleProfiles[0]?.name || '').then(setComposeList).catch((e: any) => {
+                        toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo actualizar el borrador.' });
+                      });
+                    }
+                  }} />
                   Investigación
                 </label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="radio" name="draft-source" value="style" checked={draftSource === 'style'} onChange={() => {
+                    const nextStyle = selectedStyleName || styleProfiles[0]?.name || '';
                     setDraftSource('style');
                     if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
+                    if (openCompose && nextStyle) {
+                      void buildComposeDrafts('style', nextStyle).then(setComposeList).catch((e: any) => {
+                        toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo aplicar la personalizacion.' });
+                      });
+                    }
                   }} />
                   Estilo (Email Studio)
                 </label>
@@ -771,7 +840,15 @@ export default function EnrichedOpportunitiesPage() {
                 className="h-9 w-full rounded-md border bg-background px-2 text-sm disabled:opacity-50"
                 disabled={draftSource !== 'style' || styleProfiles.length === 0}
                 value={selectedStyleName}
-                onChange={(e) => setSelectedStyleName(e.target.value)}
+                onChange={(e) => {
+                  const nextStyle = e.target.value;
+                  setSelectedStyleName(nextStyle);
+                  if (openCompose && draftSource === 'style') {
+                    void buildComposeDrafts('style', nextStyle).then(setComposeList).catch((err: any) => {
+                      toast({ variant: 'destructive', title: 'Error', description: err?.message || 'No se pudo aplicar la personalizacion.' });
+                    });
+                  }
+                }}
               >
                 {styleProfiles.length === 0 ? <option value="">(No hay estilos)</option> :
                   styleProfiles.map(p => <option key={p.name} value={p.name}>{p.name}</option>)

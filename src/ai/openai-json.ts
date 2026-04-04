@@ -1,16 +1,13 @@
 import { z } from 'genkit';
-import { ai } from '@/ai/genkit';
 
 type StructuredOptions<T extends z.ZodTypeAny> = {
   prompt: string;
   schema: T;
   temperature?: number;
   openAiModel?: string;
-  googleFallbackModel?: string;
 };
 
 const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const DEFAULT_GOOGLE_MODEL = process.env.GOOGLE_FALLBACK_MODEL || 'googleai/gemini-2.0-flash';
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -117,39 +114,14 @@ async function tryOpenAI<T extends z.ZodTypeAny>(
   return opts.schema.parse(parsed);
 }
 
-async function runGeminiFallback<T extends z.ZodTypeAny>(opts: StructuredOptions<T>): Promise<z.infer<T>> {
-  const model = opts.googleFallbackModel || DEFAULT_GOOGLE_MODEL;
-  const temperature = opts.temperature ?? 0.3;
-
-  const { output } = await ai.generate({
-    prompt: opts.prompt,
-    model,
-    config: { temperature },
-    output: {
-      format: 'json',
-      schema: opts.schema,
-    },
-  });
-
-  if (!output) {
-    throw new Error('empty model output');
-  }
-
-  return opts.schema.parse(output);
-}
-
 export async function generateStructured<T extends z.ZodTypeAny>(
   opts: StructuredOptions<T>
 ): Promise<z.infer<T>> {
   const openaiKey = String(process.env.OPENAI_API_KEY || '').trim();
 
-  if (openaiKey) {
-    try {
-      return await withRetries(() => tryOpenAI(opts, openaiKey), 3);
-    } catch (e: any) {
-      console.warn('[AI] OpenAI failed, falling back to Gemini:', e?.message || e);
-    }
+  if (!openaiKey) {
+    throw new Error('Missing AI provider credentials. Set OPENAI_API_KEY to use OpenAI.');
   }
 
-  return withRetries(() => runGeminiFallback(opts), 3);
+  return withRetries(() => tryOpenAI(opts, openaiKey), 3);
 }

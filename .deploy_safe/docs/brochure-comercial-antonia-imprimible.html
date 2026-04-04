@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Brochure Comercial - ANTON.IA</title>
+  <style>
+    :root {
+      --ink: #102a43;
+      --ink-soft: #334e68;
+      --paper: #f8fbff;
+      --brand: #0f4c81;
+      --brand-2: #e67e22;
+      --line: #d9e2ec;
+      --white: #ffffff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Trebuchet MS", "Verdana", sans-serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #eef6ff 0%, var(--paper) 40%, #ffffff 100%);
+      line-height: 1.45;
+    }
+
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 32px 24px 60px;
+    }
+
+    .hero {
+      background: linear-gradient(130deg, #0f4c81, #1e6aa8 70%, #2a8ac7);
+      color: #fff;
+      border-radius: 18px;
+      padding: 28px;
+      box-shadow: 0 18px 50px rgba(15, 76, 129, 0.22);
+      margin-bottom: 24px;
+    }
+
+    .hero-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .hero-copy {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .logo-box {
+      width: 150px;
+      min-width: 150px;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #101820;
+      border: 1px solid rgba(255, 255, 255, 0.32);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    .logo-box img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 6px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 999px;
+      font-size: 12px;
+      letter-spacing: 0.4px;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 36px;
+      line-height: 1.1;
+      letter-spacing: 0.4px;
+    }
+
+    .sub {
+      margin: 0;
+      font-size: 18px;
+      color: rgba(255, 255, 255, 0.95);
+      max-width: 780px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .card {
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 8px 20px rgba(16, 42, 67, 0.05);
+    }
+
+    .card h2,
+    .card h3 {
+      margin: 0 0 10px;
+      color: var(--brand);
+    }
+
+    .card h2 { font-size: 21px; }
+    .card h3 { font-size: 18px; }
+
+    p {
+      margin: 0 0 10px;
+      color: var(--ink-soft);
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--ink-soft);
+    }
+
+    li { margin: 0 0 6px; }
+
+    .full {
+      grid-column: 1 / -1;
+    }
+
+    .impact {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .kpi {
+      border: 1px dashed #b5c7da;
+      border-radius: 10px;
+      padding: 10px;
+      background: #f4f9ff;
+      min-height: 100px;
+    }
+
+    .kpi strong {
+      display: block;
+      color: var(--brand);
+      margin-bottom: 6px;
+      font-size: 13px;
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+    }
+
+    .kpi span {
+      font-size: 13px;
+      color: var(--ink-soft);
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .step {
+      background: #fdfefe;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .step:before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--brand), var(--brand-2));
+    }
+
+    .step strong {
+      display: block;
+      margin: 6px 0;
+      color: var(--brand);
+      font-size: 14px;
+    }
+
+    .foot {
+      margin-top: 16px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: #f6fbff;
+      border: 1px solid var(--line);
+      color: var(--ink-soft);
+      font-size: 13px;
+    }
+
+    .brandline {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #5c7186;
+      text-align: right;
+    }
+
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+      .impact { grid-template-columns: 1fr 1fr; }
+      .timeline { grid-template-columns: 1fr; }
+      .hero-head { flex-direction: column; }
+      .logo-box { width: 120px; min-width: 120px; }
+      h1 { font-size: 30px; }
+      .sub { font-size: 16px; }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .wrap {
+        max-width: none;
+        margin: 0;
+        padding: 10mm;
+      }
+      .hero { box-shadow: none; }
+      .card { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <div class="hero-head">
+        <div class="hero-copy">
+          <div class="tag">BROCHURE COMERCIAL</div>
+          <h1>ANTON.IA para Outsourcing</h1>
+          <p class="sub">
+            Plataforma comercial para empresas de outsourcing que necesitan generar
+            reuniones calificadas, acelerar propuestas y convertir mas cuentas objetivo
+            en contratos recurrentes.
+          </p>
+        </div>
+        <div class="logo-box" aria-label="Logo Inversiones YAGO">
+          <img src="../Logo%20YAGO%20(1).jpg" alt="Logo Inversiones YAGO" />
+        </div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Desafio comercial en outsourcing</h2>
+        <ul>
+          <li>Ciclo comercial largo y dependiente de trabajo manual.</li>
+          <li>Baja tasa de reuniones con decisores reales.</li>
+          <li>Poca trazabilidad entre contacto, seguimiento y cierre.</li>
+          <li>Dificultad para sostener pipeline de forma predecible.</li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <h2>Resultado comercial esperado</h2>
+        <ul>
+          <li>Mas reuniones calificadas con empresas target.</li>
+          <li>Mayor productividad por ejecutivo comercial.</li>
+          <li>Mejor tasa de respuesta con mensajes personalizados.</li>
+          <li>Pipeline mas ordenado para direccion y forecast.</li>
+        </ul>
+      </article>
+
+      <article class="card full">
+        <h2>Capacidades clave</h2>
+        <ul>
+          <li><strong>Agente por misiones:</strong> ejecuta busqueda, enriquecimiento, investigacion, contacto y reporte.</li>
+          <li><strong>Segmentacion comercial:</strong> filtros por industria, cargo, seniority, ubicacion y tamano de empresa.</li>
+          <li><strong>Secuencias inteligentes:</strong> follow-ups, pruebas A/B, exclusiones y agenda automatizada.</li>
+          <li><strong>Operacion multicanal:</strong> Gmail, Outlook, LinkedIn y registro de llamadas.</li>
+          <li><strong>Priorizacion por senales:</strong> aperturas, clics, respuestas y clasificacion de intencion.</li>
+          <li><strong>Vista de negocio:</strong> dashboard, CRM pipeline y sheet unificado exportable.</li>
+          <li><strong>Control y compliance:</strong> bajas, dominios bloqueados, cuotas y gestion por equipo.</li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <h3>Enfoque para empresa de outsourcing</h3>
+        <ul>
+          <li>Captacion de nuevos clientes para outsourcing de talento.</li>
+          <li>Prospeccion para outsourcing operativo y administrativo.</li>
+          <li>Generacion de reuniones con RRHH, Operaciones y Finanzas.</li>
+          <li>Escalamiento de cuentas medianas y corporativas.</li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <h3>Diferenciales comerciales</h3>
+        <ul>
+          <li>Pipeline continuo de oportunidades con operacion 24/7.</li>
+          <li>Mensajes mas relevantes sin perder velocidad comercial.</li>
+          <li>Menor dependencia de tareas manuales repetitivas.</li>
+          <li>Mejor visibilidad para decisiones de direccion.</li>
+        </ul>
+      </article>
+
+      <article class="card full">
+        <h2>Impacto esperado para outsourcing</h2>
+        <div class="impact">
+          <div class="kpi">
+            <strong>Cuentas activadas</strong>
+            <span>Empresas objetivo abordadas por semana y por vertical.</span>
+          </div>
+          <div class="kpi">
+            <strong>Reuniones calificadas</strong>
+            <span>Meetings comerciales con decisores de compra.</span>
+          </div>
+          <div class="kpi">
+            <strong>Velocidad comercial</strong>
+            <span>Tiempo desde deteccion de lead hasta primer contacto.</span>
+          </div>
+          <div class="kpi">
+            <strong>Conversion pipeline</strong>
+            <span>De reunion a propuesta y de propuesta a cierre.</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card full">
+        <h2>Plan de adopcion sugerido</h2>
+        <div class="timeline">
+          <div class="step">
+            <strong>Fase 1</strong>
+            Definicion de ICP, oferta prioritaria y guiones comerciales.
+          </div>
+          <div class="step">
+            <strong>Fase 2</strong>
+            Piloto de 4-6 semanas con 1-2 segmentos y metas semanales.
+          </div>
+          <div class="step">
+            <strong>Fase 3</strong>
+            Escalamiento por equipo y estandarizacion de campanas exitosas.
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="foot">
+      Material adaptado para evaluacion ejecutiva y comercial en empresas de outsourcing.
+      Puede usarse como base para comite de compra, piloto controlado o propuesta de adopcion.
+    </section>
+
+    <div class="brandline">ANTON.IA - Motor comercial para outsourcing B2B</div>
+  </main>
+</body>
+</html>

@@ -11,12 +11,17 @@ export function hasConfiguredInternalApiSecret(): boolean {
     return String(process.env.INTERNAL_API_SECRET || '').trim().length > 0;
 }
 
+export function matchesConfiguredSecret(expectedValue: string | null | undefined, providedValue: string | null | undefined): boolean {
+    const expected = String(expectedValue || '').trim();
+    const provided = String(providedValue || '').trim();
+    if (!expected || !provided) return false;
+    return safeEqual(expected, provided);
+}
+
 export function isTrustedInternalRequest(req: Request): boolean {
     const expected = String(process.env.INTERNAL_API_SECRET || '').trim();
-    if (!expected) return true;
+    if (!expected) return false;
 
     const provided = String(req.headers.get('x-internal-api-secret') || '').trim();
-    if (!provided) return false;
-
-    return safeEqual(expected, provided);
+    return matchesConfiguredSecret(expected, provided);
 }

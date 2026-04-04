@@ -89,13 +89,13 @@ export default function NextStepsWidget() {
   if (!mounted) return null;
 
   return (
-    <Card>
+    <Card className="overflow-hidden rounded-[24px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Lightbulb className="h-5 w-5 text-primary" />
-          <span>Próximos Pasos Sugeridos</span>
+          <span>Próximos pasos</span>
         </CardTitle>
-        <CardDescription>Acciones recomendadas para mantener el ritmo de tu prospección.</CardDescription>
+        <CardDescription>Lo más importante para avanzar hoy.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
 
@@ -104,7 +104,7 @@ export default function NextStepsWidget() {
           <div className="space-y-3 border-b pb-4">
             <div className="flex items-center gap-2">
               <AlertCircle className="h-4 w-4 text-orange-500" />
-              <h4 className="text-sm font-semibold text-orange-700">Leads Pendientes de Respuesta (+3 días)</h4>
+              <h4 className="text-sm font-semibold text-orange-700">Leads sin respuesta (+3 días)</h4>
             </div>
 
             <div className="space-y-2">
@@ -114,7 +114,7 @@ export default function NextStepsWidget() {
                     <span className="text-sm font-medium text-gray-800">{lead.name || 'Sin nombre'}</span>
                     <span className="text-xs text-gray-500">{lead.company}</span>
                   </div>
-                  <Button variant="ghost" size="sm" className="h-7 text-xs text-orange-700 hover:text-orange-800 hover:bg-orange-100" asChild>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs text-orange-700 hover:bg-orange-100 hover:text-orange-800" asChild>
                     <Link href="/crm">Ver en CRM</Link>
                   </Button>
                 </div>
@@ -127,8 +127,8 @@ export default function NextStepsWidget() {
         {eligibleCampaignLeads > 0 && (
           <div className="flex items-center justify-between rounded-lg border bg-accent/50 p-3">
             <div>
-              <p className="font-semibold text-sm">Seguimientos de Campaña</p>
-              <p className="text-xs text-muted-foreground">{eligibleCampaignLeads} lead(s) son elegibles para un seguimiento hoy.</p>
+              <p className="text-sm font-semibold">Seguimientos de campaña</p>
+              <p className="text-xs text-muted-foreground">{eligibleCampaignLeads} lead(s) pueden recibir seguimiento hoy.</p>
             </div>
             <Button size="sm" asChild>
               <Link href="/campaigns">
@@ -141,7 +141,7 @@ export default function NextStepsWidget() {
         {/* Sección: Leads Listos */}
         {readyLeads.length > 0 && (
           <div className="space-y-2">
-            <p className="font-semibold text-sm">Leads Listos para Primer Contacto</p>
+            <p className="text-sm font-semibold">Listos para primer contacto</p>
             {readyLeads.map(lead => (
               <div key={lead.id} className="flex items-center justify-between text-sm">
                 <p>
@@ -153,7 +153,7 @@ export default function NextStepsWidget() {
                 </Button>
               </div>
             ))}
-            <Link href="/saved/leads/enriched" className="text-xs text-primary hover:underline flex items-center mt-2">
+            <Link href="/saved/leads/enriched" className="mt-2 flex items-center text-xs text-primary hover:underline">
               Ver todos los leads enriquecidos <ArrowRight className="ml-1 h-3 w-3" />
             </Link>
           </div>

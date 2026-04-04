@@ -3,6 +3,8 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { classifyReply, extractReplyPreview } from '@/lib/reply-classifier';
 import { notificationService } from '@/lib/services/notification-service';
+import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { maybeEscalateReplyReviewFromContactedId } from '@/lib/server/antonia-reply-escalation';
 
 export const dynamic = 'force-dynamic';
 
@@ -145,6 +147,18 @@ async function updateLead(supabase: any, id: string, text: string) {
             'Respuesta positiva detectada',
             `Lead ${row.email || id} respondió: ${summary}. Revisar: ${appUrl}/contacted/replied`
         );
+    }
+
+    if (row?.organization_id && row?.id && classification.intent !== 'negative' && classification.intent !== 'unsubscribe' && classification.intent !== 'delivery_failure') {
+        await maybeEscalateReplyReviewFromContactedId({
+            supabase: getSupabaseAdminClient(),
+            organizationId: row.organization_id,
+            userId: row.user_id,
+            contactedId: row.id,
+            rawReply: text,
+        }).catch((error) => {
+            console.warn('[scheduler/reply] escalation failed:', error);
+        });
     }
 
     if (error) {

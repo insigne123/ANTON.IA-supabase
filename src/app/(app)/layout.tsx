@@ -23,7 +23,7 @@ export default function AppLayout({
           <ThemeToggle />
         </div>
 
-        <main className="flex-1 px-4 py-4 md:px-8 md:py-8">{children}</main>
+        <main className="flex-1 min-w-0 overflow-x-hidden px-4 py-4 md:px-8 md:py-8">{children}</main>
       </SidebarInset>
     </SidebarProvider>
   );

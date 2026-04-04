@@ -1,6 +1,10 @@
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
+
+const ROOT = process.cwd();
 
 const compilerOptions = {
   module: ts.ModuleKind.ESNext,
@@ -12,6 +16,15 @@ const compilerOptions = {
 };
 
 export async function resolve(specifier, context, nextResolve) {
+  if (specifier.startsWith('@/')) {
+    const absolute = pathToFileURL(path.join(ROOT, 'src', specifier.slice(2))).href;
+    try {
+      return await nextResolve(absolute, context);
+    } catch {
+      return nextResolve(`${absolute}.ts`, context);
+    }
+  }
+
   try {
     return await nextResolve(specifier, context);
   } catch (err) {

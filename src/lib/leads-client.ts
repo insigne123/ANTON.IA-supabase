@@ -25,7 +25,7 @@ function extractSearchErrorMessage(json: any, status: number): string {
       const inner = JSON.parse(innerMatch[1]);
       const innerText = String(inner?.details?.error || inner?.message || inner?.error || '');
       if (innerText.toLowerCase().includes('webhook_url') && innerText.toLowerCase().includes('reveal_phone_number')) {
-        return 'Apollo requiere webhook_url para revelar telefono. Desactiva "Revelar telefono" o espera el ajuste del backend.';
+        return 'El proveedor requiere un webhook publico HTTPS para revelar telefono. Desactiva "Revelar telefono" o espera el ajuste del backend.';
       }
       if (innerText) return innerText;
     } catch {
@@ -87,6 +87,8 @@ export async function getLinkedInProfileStatuses(
 ): Promise<Array<{
   id: string;
   linkedin_url?: string | null;
+  email?: string | null;
+  email_status?: string | null;
   primary_phone?: string | null;
   phone_numbers?: any[] | null;
   enrichment_status?: string | null;
@@ -109,6 +111,36 @@ export async function getLinkedInProfileStatuses(
   }
 
   return Array.isArray(json?.items) ? json.items : [];
+}
+
+export async function getLinkedInProfileLead(
+  recordId: string,
+  signal?: AbortSignal,
+): Promise<{
+  id: string;
+  linkedin_url?: string | null;
+  email?: string | null;
+  email_status?: string | null;
+  primary_phone?: string | null;
+  phone_numbers?: any[] | null;
+  enrichment_status?: string | null;
+  updated_at?: string | null;
+} | null> {
+  const normalizedId = String(recordId || '').trim();
+  if (!normalizedId) return null;
+
+  const res = await fetch(`${PATH}?record_id=${encodeURIComponent(normalizedId)}`, {
+    method: 'GET',
+    cache: 'no-store',
+    signal,
+  });
+
+  const json = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(String(json?.message || json?.error || `HTTP_${res.status}`));
+  }
+
+  return json?.lead || null;
 }
 
 export type {

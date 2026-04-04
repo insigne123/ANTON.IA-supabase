@@ -1,15 +1,11 @@
 import { NextResponse } from 'next/server';
 
+import { countUniquePositiveReplyContacts, countUniqueReplyContacts, percentWithFloor } from '@/lib/antonia-reply-metrics';
 import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-
-function percent(part: number, total: number) {
-  if (!total) return 0;
-  return Math.round((part / total) * 1000) / 10;
-}
 
 export async function GET() {
   try {
@@ -32,11 +28,17 @@ export async function GET() {
       const playbookName = String(mission?.params?.playbookName || '').trim();
       if (!playbookId) continue;
 
-      const [contactedRes, failedRes, complianceRes] = await Promise.all([
+      const [contactedRes, replyRes, failedRes, complianceRes] = await Promise.all([
         admin
           .from('contacted_leads')
-          .select('id, opened_at, replied_at, reply_intent')
+          .select('id, mission_id, lead_id, email, opened_at, replied_at, reply_intent, last_reply_text')
           .eq('mission_id', mission.id)
+          .limit(5000),
+        admin
+          .from('lead_responses')
+          .select('mission_id, contacted_id, lead_id, type')
+          .eq('mission_id', mission.id)
+          .eq('type', 'reply')
           .limit(5000),
         admin
           .from('antonia_exceptions')
@@ -53,10 +55,11 @@ export async function GET() {
       ]);
 
       const contacted = (contactedRes.data || []) as any[];
+      const replyRows = (replyRes.data || []) as any[];
       const contacts = contacted.length;
       const opened = contacted.filter((row) => !!row.opened_at).length;
-      const replies = contacted.filter((row) => !!row.replied_at).length;
-      const positives = contacted.filter((row) => ['positive', 'meeting_request'].includes(String(row.reply_intent || ''))).length;
+      const replies = countUniqueReplyContacts(contacted, replyRows);
+      const positives = countUniquePositiveReplyContacts(contacted);
       const failed = (failedRes.data || []).length;
       const compliance = (complianceRes.data || []).length;
 
@@ -85,10 +88,10 @@ export async function GET() {
     const items = Array.from(byPlaybook.values())
       .map((item) => ({
         ...item,
-        openRate: percent(item.opens, item.contacts),
-        replyRate: percent(item.replies, item.contacts),
-        positiveRate: percent(item.positives, item.contacts),
-        deliverabilityRisk: percent(item.failed + item.compliance, item.contacts),
+        openRate: percentWithFloor(item.opens, item.contacts),
+        replyRate: percentWithFloor(item.replies, item.contacts),
+        positiveRate: percentWithFloor(item.positives, item.contacts),
+        deliverabilityRisk: percentWithFloor(item.failed + item.compliance, item.contacts),
       }))
       .sort((a, b) => b.positiveRate - a.positiveRate);
 

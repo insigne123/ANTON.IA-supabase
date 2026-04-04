@@ -1,16 +1,12 @@
 import { NextResponse } from 'next/server';
 
+import { countUniqueMeetingRequestContacts, countUniquePositiveReplyContacts, countUniqueReplyContacts, percentWithFloor } from '@/lib/antonia-reply-metrics';
 import { computeMissionGoalProgress, shortMissionGoalLabel } from '@/lib/antonia-mission-goals';
 import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-
-function percent(part: number, total: number) {
-  if (!total) return 0;
-  return Math.round((part / total) * 1000) / 10;
-}
 
 export async function GET() {
   try {
@@ -21,26 +17,47 @@ export async function GET() {
       .from('antonia_missions')
       .select('id, title, status, params, created_at, updated_at')
       .eq('organization_id', organizationId)
-      .in('status', ['active', 'paused'])
+      .in('status', ['active', 'paused', 'completed', 'failed'])
       .order('updated_at', { ascending: false })
-      .limit(25);
+      .limit(50);
 
     if (error) throw error;
 
+    const missionIds = ((missions || []) as any[]).map((mission) => mission.id).filter(Boolean);
+
+    const [contactRowsRes, replyRowsRes] = missionIds.length > 0
+      ? await Promise.all([
+        admin
+          .from('contacted_leads')
+          .select('id, mission_id, lead_id, email, replied_at, reply_intent, last_reply_text')
+          .in('mission_id', missionIds),
+        admin
+          .from('lead_responses')
+          .select('mission_id, contacted_id, lead_id, type')
+          .in('mission_id', missionIds)
+          .eq('type', 'reply'),
+      ])
+      : [{ data: [], error: null } as any, { data: [], error: null } as any];
+
+    if (contactRowsRes.error) throw contactRowsRes.error;
+    if (replyRowsRes.error) throw replyRowsRes.error;
+
+    const contactRows = (contactRowsRes.data || []) as any[];
+    const replyRows = (replyRowsRes.data || []) as any[];
+
     const missionRows = await Promise.all(((missions || []) as any[]).map(async (mission) => {
-      const [contactsRes, repliesRes, positivesRes, meetingsRes, approvalsRes, criticalRes] = await Promise.all([
-        admin.from('contacted_leads').select('*', { count: 'exact', head: true }).eq('mission_id', mission.id),
-        admin.from('contacted_leads').select('*', { count: 'exact', head: true }).eq('mission_id', mission.id).not('replied_at', 'is', null),
-        admin.from('contacted_leads').select('*', { count: 'exact', head: true }).eq('mission_id', mission.id).in('reply_intent', ['positive', 'meeting_request']),
-        admin.from('contacted_leads').select('*', { count: 'exact', head: true }).eq('mission_id', mission.id).eq('reply_intent', 'meeting_request'),
+      const [approvalsRes, criticalRes] = await Promise.all([
         admin.from('antonia_exceptions').select('*', { count: 'exact', head: true }).eq('mission_id', mission.id).eq('status', 'open').eq('category', 'approval_required'),
         admin.from('antonia_exceptions').select('*', { count: 'exact', head: true }).eq('mission_id', mission.id).eq('status', 'open').in('severity', ['high', 'critical']),
       ]);
 
-      const contacts = Number(contactsRes.count || 0);
-      const replies = Number(repliesRes.count || 0);
-      const positiveReplies = Number(positivesRes.count || 0);
-      const meetings = Number(meetingsRes.count || 0);
+      const missionContacts = contactRows.filter((row) => row.mission_id === mission.id);
+      const missionReplies = replyRows.filter((row) => row.mission_id === mission.id);
+
+      const contacts = missionContacts.length;
+      const replies = countUniqueReplyContacts(missionContacts, missionReplies);
+      const positiveReplies = countUniquePositiveReplyContacts(missionContacts);
+      const meetings = countUniqueMeetingRequestContacts(missionContacts);
       const approvalsPending = Number(approvalsRes.count || 0);
       const criticalOpen = Number(criticalRes.count || 0);
       const progress = computeMissionGoalProgress(mission.params || {}, {
@@ -62,9 +79,9 @@ export async function GET() {
         meetings,
         approvalsPending,
         criticalOpen,
-        replyRate: percent(replies, contacts),
-        positiveRate: percent(positiveReplies, contacts),
-        meetingRate: percent(meetings, contacts),
+        replyRate: percentWithFloor(replies, contacts),
+        positiveRate: percentWithFloor(positiveReplies, contacts),
+        meetingRate: percentWithFloor(meetings, contacts),
       };
     }));
 
@@ -99,15 +116,15 @@ export async function GET() {
       insights.push(`${summary.atRiskMissions} misiones van atras respecto a su objetivo o tienen riesgo operativo.`);
     }
     if (summary.contacts > 0) {
-      insights.push(`Reply rate global: ${percent(summary.replies, summary.contacts)}% · Meeting rate: ${percent(summary.meetings, summary.contacts)}%.`);
+      insights.push(`Reply rate global: ${percentWithFloor(summary.replies, summary.contacts)}% · Meeting rate: ${percentWithFloor(summary.meetings, summary.contacts)}%.`);
     }
 
     return NextResponse.json({
       summary,
       rates: {
-        replyRate: percent(summary.replies, summary.contacts),
-        positiveRate: percent(summary.positiveReplies, summary.contacts),
-        meetingRate: percent(summary.meetings, summary.contacts),
+        replyRate: percentWithFloor(summary.replies, summary.contacts),
+        positiveRate: percentWithFloor(summary.positiveReplies, summary.contacts),
+        meetingRate: percentWithFloor(summary.meetings, summary.contacts),
       },
       missions: missionRows,
       insights,

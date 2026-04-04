@@ -1,0 +1,99 @@
+{
+  "generatedAt": "2026-02-16T23:36:49.007Z",
+  "mission": {
+    "id": "85d918d3-ca70-4c3e-9033-23d48b4f5192",
+    "title": "Busqueda altos cargos chile Outsourcing"
+  },
+  "insertedTasks": [
+    "5b384281-34ef-4807-b39a-000f106aff5d",
+    "19b2087b-fafd-4641-8520-be8a8b14284e"
+  ],
+  "taskStatus": [
+    {
+      "id": "5b384281-34ef-4807-b39a-000f106aff5d",
+      "status": "completed",
+      "error_message": null,
+      "updated_at": "2026-02-16T23:36:39.769+00:00"
+    },
+    {
+      "id": "19b2087b-fafd-4641-8520-be8a8b14284e",
+      "status": "completed",
+      "error_message": null,
+      "updated_at": "2026-02-16T23:36:39.88+00:00"
+    }
+  ],
+  "missionReport": {
+    "id": "0974d670-21bc-4d49-95d8-a212de77fa79",
+    "created_at": "2026-02-16T23:36:38.792+00:00",
+    "sent_to": [
+      "nicogun123@gmail.com"
+    ],
+    "summary": {
+      "audit": {
+        "found": 0,
+        "enrichEmail": 78,
+        "enrichFailed": 10,
+        "investigated": 74,
+        "contactedSent": 87,
+        "enrichNoEmail": 2,
+        "contactedFailed": 0,
+        "contactedBlocked": 0,
+        "investigateFailed": 0
+      },
+      "title": "Busqueda altos cargos chile Outsourcing",
+      "blocked": 0,
+      "replies": 0,
+      "missionId": "85d918d3-ca70-4c3e-9033-23d48b4f5192",
+      "leadsFound": 200,
+      "investigated": 74,
+      "leadsEnriched": 100,
+      "leadsContacted": 95
+    }
+  },
+  "dailyReport": {
+    "id": "b111c8d6-eb33-4c21-ae83-2e1271c99d4c",
+    "created_at": "2026-02-16T23:36:39.009+00:00",
+    "sent_to": [
+      "nicogun123@gmail.com"
+    ],
+    "summary": {
+      "replies": 0,
+      "contacted": 10,
+      "windowEnd": "2026-02-16T23:36:37.707Z",
+      "leadsFound": 0,
+      "perMission": {
+        "85d918d3-ca70-4c3e-9033-23d48b4f5192": {
+          "found": 0,
+          "enrichEmail": 10,
+          "enrichFailed": 0,
+          "investigated": 9,
+          "contactedSent": 10,
+          "enrichNoEmail": 0,
+          "contactedFailed": 0,
+          "contactedBlocked": 0,
+          "investigateFailed": 0
+        }
+      },
+      "searchRuns": 0,
+      "tasksFailed": 1,
+      "windowStart": "2026-02-15T23:36:37.707Z",
+      "leadsEnriched": 20,
+      "activeMissions": 1,
+      "tasksCompleted": 16,
+      "leadsInvestigated": 20
+    }
+  },
+  "checks": {
+    "missionTaskCompleted": true,
+    "dailyTaskCompleted": true,
+    "missionReportExists": true,
+    "dailyReportExists": true,
+    "missionHasContacted": true,
+    "missionHasInvestigated": true,
+    "missionHtmlHasLabels": true,
+    "dailyHasInvestigated": true,
+    "dailyHasContacted": true,
+    "dailyHtmlHasLabels": true
+  },
+  "passed": true
+}

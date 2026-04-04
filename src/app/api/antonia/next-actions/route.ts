@@ -58,6 +58,21 @@ function buildActionFromException(row: any, config: any): NextAction | null {
     };
   }
 
+  if (row.category === 'manual_action_required') {
+    return {
+      id: row.id,
+      priority: row.severity === 'critical' ? 99 : 91,
+      kind: 'reply_review',
+      title: `${leadLabel} necesita revision humana`,
+      description: row.description || 'ANTONIA no esta segura de como responder y preparo un borrador para revisar.',
+      ctaLabel: 'Abrir respondidos',
+      ctaTarget: '/contacted/replied',
+      ctaTargetType: 'route',
+      suggestedReply: row?.payload?.suggestedReply || undefined,
+      meta: { missionId: row.mission_id, severity: row.severity },
+    };
+  }
+
   if (row.category === 'negative_reply_guardrail') {
     return {
       id: row.id,

@@ -1,0 +1,1657 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Manual de Usuario - ANTON.IA</title>
+  <style>
+    :root {
+      --ink: #17304a;
+      --ink-soft: #42617d;
+      --paper: #f4f8fc;
+      --white: #ffffff;
+      --brand: #0f4c81;
+      --brand-strong: #0a365c;
+      --accent: #e67e22;
+      --accent-soft: #fff2e6;
+      --mint: #e9f7f4;
+      --sky: #eaf4ff;
+      --line: #d6e3ef;
+      --line-strong: #b8cddd;
+      --shadow: 0 20px 55px rgba(15, 76, 129, 0.12);
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --radius-sm: 12px;
+      --body-font: "Segoe UI", "Trebuchet MS", "Verdana", sans-serif;
+      --title-font: Georgia, "Times New Roman", serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    @page {
+      size: A4;
+      margin: 12mm;
+    }
+
+    html {
+      background: #dfeaf3;
+    }
+
+    body {
+      margin: 0;
+      font-family: var(--body-font);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(15, 76, 129, 0.12), transparent 26%),
+        linear-gradient(180deg, #edf5fb 0%, #f7fbff 30%, #ffffff 100%);
+      line-height: 1.55;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .document {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 28px 22px 56px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 24px;
+      padding: 30px;
+      border-radius: 30px;
+      background:
+        radial-gradient(circle at 85% 20%, rgba(255, 255, 255, 0.18), transparent 0 28%),
+        linear-gradient(135deg, #0a365c 0%, #0f4c81 48%, #1d7ab7 100%);
+      color: #fff;
+      box-shadow: 0 28px 70px rgba(10, 54, 92, 0.24);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -50px;
+      top: -60px;
+      width: 240px;
+      height: 240px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .hero-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero-copy {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      padding: 7px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 999px;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-family: var(--title-font);
+      font-size: 44px;
+      line-height: 1.02;
+      letter-spacing: 0.02em;
+    }
+
+    .hero p.lead {
+      max-width: 740px;
+      margin: 16px 0 0;
+      font-size: 18px;
+      color: rgba(255, 255, 255, 0.95);
+    }
+
+    .brand-block {
+      min-width: 150px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 12px;
+      text-align: right;
+      position: relative;
+      z-index: 1;
+    }
+
+    .brand-mark {
+      width: 74px;
+      height: 74px;
+      border-radius: 22px;
+      display: grid;
+      place-items: center;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.32);
+      font-family: var(--title-font);
+      font-size: 34px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    }
+
+    .brand-note {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .hero-metrics {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 26px;
+    }
+
+    .metric {
+      padding: 14px 14px 12px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+    }
+
+    .metric strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .metric span {
+      display: block;
+      font-size: 13px;
+      line-height: 1.45;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .section {
+      margin-bottom: 18px;
+      padding: 22px 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: var(--shadow);
+      page-break-inside: avoid;
+    }
+
+    .section.page-break {
+      break-before: page;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+
+    .section-tag {
+      display: inline-block;
+      margin-bottom: 8px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: var(--sky);
+      color: var(--brand);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin: 0;
+      font-family: var(--title-font);
+      font-size: 29px;
+      line-height: 1.12;
+      color: var(--brand-strong);
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+      line-height: 1.25;
+      color: var(--brand);
+    }
+
+    h4 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      letter-spacing: 0.01em;
+      color: var(--brand-strong);
+    }
+
+    p {
+      margin: 0 0 10px;
+      color: var(--ink-soft);
+    }
+
+    .intro {
+      max-width: 760px;
+    }
+
+    .grid-2,
+    .grid-3,
+    .grid-4 {
+      display: grid;
+      gap: 14px;
+    }
+
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .card,
+    .panel,
+    .callout,
+    .status-card,
+    .faq,
+    .module,
+    .workflow-step {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--white);
+      page-break-inside: avoid;
+    }
+
+    .card,
+    .panel,
+    .module,
+    .faq,
+    .workflow-step,
+    .status-card {
+      padding: 16px;
+    }
+
+    .panel.soft {
+      background: linear-gradient(180deg, #fbfdff 0%, #f4f9ff 100%);
+    }
+
+    .module {
+      background: linear-gradient(180deg, #ffffff 0%, #f9fbfe 100%);
+    }
+
+    .module strong,
+    .status-card strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--brand-strong);
+    }
+
+    .callout {
+      padding: 15px 16px;
+      background: var(--mint);
+      border-left: 5px solid #1f8f77;
+    }
+
+    .callout.warn {
+      background: var(--accent-soft);
+      border-left-color: var(--accent);
+    }
+
+    .callout.info {
+      background: var(--sky);
+      border-left-color: var(--brand);
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--brand-strong);
+    }
+
+    ul,
+    ol {
+      margin: 0;
+      padding-left: 20px;
+      color: var(--ink-soft);
+    }
+
+    li { margin-bottom: 7px; }
+
+    .toc {
+      columns: 2;
+      column-gap: 28px;
+      margin-top: 8px;
+    }
+
+    .toc li {
+      break-inside: avoid;
+      margin-bottom: 8px;
+      padding-left: 2px;
+    }
+
+    .table-wrap {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--white);
+      page-break-inside: avoid;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    thead {
+      background: #edf5fd;
+    }
+
+    th,
+    td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    th {
+      color: var(--brand-strong);
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .checklist {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .checklist li {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      margin: 0;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.85);
+    }
+
+    .checklist .dot,
+    .step-number,
+    .module-number {
+      flex: 0 0 auto;
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      background: var(--brand);
+    }
+
+    .workflow {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .workflow-step {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .workflow-step p:last-child,
+    .card p:last-child,
+    .panel p:last-child,
+    .faq p:last-child,
+    .module p:last-child,
+    .callout p:last-child,
+    .status-card p:last-child {
+      margin-bottom: 0;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .pill {
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line-strong);
+      background: #f7fbff;
+      font-size: 12px;
+      color: var(--brand-strong);
+    }
+
+    .sidebar-map {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 10px;
+    }
+
+    .sidebar-item {
+      padding: 13px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, #ffffff 0%, #f9fbfe 100%);
+    }
+
+    .sidebar-item strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--brand-strong);
+      font-size: 14px;
+    }
+
+    .sidebar-item p {
+      margin: 0;
+      color: var(--ink-soft);
+    }
+
+    .compare-note {
+      font-size: 12px;
+      color: #5a7894;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .status-card {
+      background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+    }
+
+    .faq {
+      background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+    }
+
+    .footer-line {
+      margin-top: 12px;
+      text-align: right;
+      font-size: 12px;
+      color: #6c8398;
+    }
+
+    .small {
+      font-size: 13px;
+    }
+
+    .muted {
+      color: #6b8399;
+    }
+
+    @media (max-width: 860px) {
+      .hero-top,
+      .section-header {
+        flex-direction: column;
+      }
+
+      .hero-metrics,
+      .grid-4,
+      .grid-3,
+      .grid-2,
+      .sidebar-map,
+      .status-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .toc {
+        columns: 1;
+      }
+
+      .brand-block {
+        align-items: flex-start;
+        text-align: left;
+      }
+
+      .hero h1 {
+        font-size: 36px;
+      }
+
+      .hero p.lead {
+        font-size: 16px;
+      }
+    }
+
+    @media print {
+      html { background: #fff; }
+
+      body {
+        background: #fff;
+      }
+
+      .document {
+        max-width: none;
+        padding: 0;
+      }
+
+      .section,
+      .hero {
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="document">
+    <section class="hero">
+      <div class="hero-top">
+        <div class="hero-copy">
+          <div class="eyebrow">Manual de usuario</div>
+          <h1>ANTON.IA</h1>
+          <p class="lead">
+            Guía práctica para dejar lista tu cuenta, organizar tu trabajo diario y usar ANTON.IA
+            con claridad: desde la búsqueda de contactos hasta el seguimiento comercial.
+          </p>
+          <div class="pill-row">
+            <span class="pill">Uso diario</span>
+            <span class="pill">Prospección B2B</span>
+            <span class="pill">Automatización con supervisión</span>
+            <span class="pill">Consulta rápida</span>
+          </div>
+        </div>
+        <div class="brand-block">
+          <div class="brand-mark">A</div>
+          <div class="brand-note">
+            Documento orientado a usuario final.<br />
+            No incluye configuración técnica ni información de desarrollo.
+          </div>
+        </div>
+      </div>
+      <div class="hero-metrics">
+        <div class="metric">
+          <strong>Primer acceso</strong>
+          <span>Configura tu perfil, tu organización y tu canal de envío principal.</span>
+        </div>
+        <div class="metric">
+          <strong>Prospección</strong>
+          <span>Busca contactos por filtros, empresa o perfil puntual y guarda los más útiles.</span>
+        </div>
+        <div class="metric">
+          <strong>Contacto</strong>
+          <span>Contacta por Gmail, Outlook, LinkedIn o llamada con contexto comercial.</span>
+        </div>
+        <div class="metric">
+          <strong>Seguimiento</strong>
+          <span>Revisa respuestas, campañas, CRM y tareas pendientes desde un solo lugar.</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Vista general</span>
+          <h2>Cómo aprovechar este manual</h2>
+        </div>
+      </div>
+      <p class="intro">
+        Este documento sigue el recorrido real de uso dentro de ANTON.IA. Si es tu primera vez,
+        avanza en orden. Si ya trabajas con la plataforma, puedes ir directo a las pantallas que más uses
+        en tu rutina: búsquedas, leads enriquecidos, campañas, CRM o Agente ANTON.IA.
+      </p>
+      <div class="grid-2" style="margin-top: 14px;">
+        <div class="panel soft">
+          <h3>Índice rápido</h3>
+          <ol class="toc">
+            <li>Antes de empezar</li>
+            <li>Primer acceso y configuración inicial</li>
+            <li>Recorrido por la interfaz</li>
+            <li>Flujo 1: búsqueda de leads</li>
+            <li>Trabajar con Guardados · Leads</li>
+            <li>Usar Leads enriquecidos</li>
+            <li>Redactar, enviar y monitorear</li>
+            <li>Flujo 2: oportunidades de contratación</li>
+            <li>CRM unificado y CRM / Pipeline</li>
+            <li>Campañas</li>
+            <li>Agente ANTON.IA</li>
+            <li>Email Studio</li>
+            <li>Organización, bajas y buenas prácticas</li>
+            <li>Qué significan los estados más comunes</li>
+            <li>Rutina recomendada de uso</li>
+            <li>Preguntas frecuentes</li>
+          </ol>
+        </div>
+        <div class="panel soft">
+          <h3>Ruta rápida para un usuario nuevo</h3>
+          <ul class="checklist">
+            <li><span class="dot">1</span><div><strong>Ingresa a tu cuenta.</strong> Puedes iniciar sesión con email y contraseña o con Google.</div></li>
+            <li><span class="dot">2</span><div><strong>Completa “Mi Perfil de Empresa”.</strong> Esa información se usa para personalización, investigación y mensajes.</div></li>
+            <li><span class="dot">3</span><div><strong>Conecta Gmail u Outlook.</strong> Sin un canal conectado no podrás enviar correos desde la plataforma.</div></li>
+            <li><span class="dot">4</span><div><strong>Haz tu primera búsqueda.</strong> Guarda los contactos más útiles y enriquece solo los que sí vas a trabajar.</div></li>
+            <li><span class="dot">5</span><div><strong>Contacta, sigue respuestas y actualiza el CRM.</strong> Usa Contactados, Respondidos y Analítica para cerrar el ciclo.</div></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section page-break">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Preparación</span>
+          <h2>1. Antes de empezar</h2>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h3>Requisitos recomendados</h3>
+          <ul>
+            <li>Tener una cuenta activa dentro de una organización.</li>
+            <li>Disponer de al menos un canal de correo para envío: Gmail u Outlook.</li>
+            <li>Definir la oferta comercial y el tipo de cliente que quieres buscar.</li>
+            <li>Contar con acceso a LinkedIn si usarás investigación o contacto desde ese canal.</li>
+            <li>Revisar tus cuotas diarias para no interrumpir búsquedas, enriquecimientos o envíos.</li>
+          </ul>
+        </div>
+        <div class="callout info">
+          <strong>Para qué te sirve</strong>
+          <p>
+            La app te ayuda a buscar contactos, completar datos de contacto, preparar mensajes,
+            dar seguimiento a las respuestas y ordenar tu trabajo comercial en un CRM visual.
+          </p>
+        </div>
+      </div>
+      <div class="grid-3" style="margin-top: 14px;">
+        <div class="module">
+          <span class="section-tag">Esencial</span>
+          <strong>Buscar y guardar</strong>
+          <p>Empieza por búsqueda de leads u oportunidades y guarda solo lo que realmente quieras trabajar.</p>
+        </div>
+        <div class="module">
+          <span class="section-tag">Esencial</span>
+          <strong>Enriquecer e investigar</strong>
+          <p>Completa email o teléfono y agrega contexto antes de escribir o automatizar.</p>
+        </div>
+        <div class="module">
+          <span class="section-tag">Esencial</span>
+          <strong>Contactar y seguir</strong>
+          <p>Envía, monitorea aperturas y respuestas, y mueve cada lead a la etapa correcta.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Configuración inicial</span>
+          <h2>2. Primer acceso y puesta en marcha</h2>
+        </div>
+      </div>
+
+      <div class="workflow">
+        <div class="workflow-step">
+          <div class="step-number">1</div>
+          <div>
+            <h3>Inicia sesión o crea tu cuenta</h3>
+            <p>
+              En la pantalla de acceso puedes entrar con email y contraseña, registrarte o continuar con Google.
+              Si llegaste desde una invitación, después de iniciar sesión volverás automáticamente al flujo que te corresponde.
+            </p>
+            <div class="pill-row">
+              <span class="pill">Iniciar sesión</span>
+              <span class="pill">Registrarse</span>
+              <span class="pill">Google</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="workflow-step">
+          <div class="step-number">2</div>
+          <div>
+            <h3>Completa “Mi Perfil de Empresa”</h3>
+            <p>
+              Este perfil alimenta la personalización de mensajes, la investigación comercial y parte del contexto usado por ANTON.IA.
+              Conviene dejarlo listo antes de iniciar prospección masiva.
+            </p>
+            <div class="grid-2" style="margin-top: 10px;">
+              <div class="card">
+                <h4>Campos principales</h4>
+                <ul>
+                  <li>Nombre y cargo.</li>
+                  <li>Nombre de empresa y sitio web.</li>
+                  <li>Sector o industria.</li>
+                  <li>Descripción de empresa.</li>
+                  <li>Servicios y propuesta de valor.</li>
+                </ul>
+              </div>
+              <div class="card">
+                <h4>Atajo útil</h4>
+                <p>
+                  Usa <strong>Autocompletar con IA</strong> cuando ya conoces el nombre de la empresa pero quieres acelerar
+                  la carga del perfil. Luego revisa y ajusta el texto para que refleje tu mensaje real.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="workflow-step">
+          <div class="step-number">3</div>
+          <div>
+            <h3>Conecta tu canal de correo</h3>
+            <p>
+              Antes de enviar campañas o correos uno a uno, conecta al menos un proveedor. La app te muestra el estado
+              de conexión y qué capacidad queda habilitada con cada uno.
+            </p>
+            <div class="table-wrap" style="margin-top: 10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Proveedor</th>
+                    <th>Qué habilita</th>
+                    <th>Cuándo conviene usarlo</th>
+                    <th>Atención</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Gmail</strong></td>
+                    <td>Envío manual desde la app, campañas automáticas y posibilidad de mantener la conexión para próximos envíos.</td>
+                    <td>Si quieres una conexión directa y simple para empezar a enviar rápido.</td>
+                    <td>Revisa la conexión si cambias permisos o cuenta principal.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Outlook</strong></td>
+                    <td>Envío manual, automatización y uso de Microsoft 365 como canal principal.</td>
+                    <td>Si tu operación comercial vive en Outlook o en cuentas corporativas Microsoft.</td>
+                    <td>Además de la conexión principal, puede requerir activar la sesión en el navegador para envíos manuales sin fricción.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="compare-note" style="margin-top: 8px;">
+              Recomendación práctica: conecta primero un solo proveedor, valida el envío manual y luego automatiza campañas o misiones.
+            </p>
+          </div>
+        </div>
+
+        <div class="workflow-step">
+          <div class="step-number">4</div>
+          <div>
+            <h3>Revisa tu organización y tu equipo</h3>
+            <p>
+              En <strong>Configuración de Organización</strong> puedes actualizar el nombre de la empresa, ver quién tiene acceso,
+              generar invitaciones y revisar invitaciones pendientes. Si eres administrador, úsalo para mantener ordenado el espacio de trabajo.
+            </p>
+            <div class="pill-row">
+              <span class="pill">Perfil de organización</span>
+              <span class="pill">Miembros activos</span>
+              <span class="pill">Invitaciones pendientes</span>
+              <span class="pill">Revocar invitación</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="workflow-step">
+          <div class="step-number">5</div>
+          <div>
+            <h3>Instala la extensión si vas a usar LinkedIn</h3>
+            <p>
+              La extensión es necesaria para acciones de LinkedIn desde la app. Solo tiene sentido instalarla
+              si realmente vas a investigar perfiles, leer información visible o contactar por ese canal.
+            </p>
+            <div class="callout warn" style="margin-top: 10px;">
+              <strong>Importante</strong>
+              <p>
+                La extensión trabaja sobre LinkedIn cuando tú disparas una acción desde ANTON.IA. Si tu flujo es solo por email,
+                no necesitas instalarla para usar el resto de la plataforma.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section page-break">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Navegación</span>
+          <h2>3. Recorrido por la interfaz</h2>
+        </div>
+      </div>
+      <p class="intro">
+        El menú lateral concentra la operación diaria. La lógica general es simple: buscar, guardar, enriquecer,
+        contactar, revisar respuestas y ordenar el avance dentro del CRM.
+      </p>
+      <div class="callout info" style="margin-bottom: 14px;">
+        <strong>Nota rápida sobre términos</strong>
+        <p>
+          En este manual se mantienen algunos nombres tal como aparecen en la app. Cuando leas <strong>lead</strong>, piensa en un contacto o prospecto.
+          Cuando leas <strong>CRM</strong>, piensa en la parte de la plataforma donde se organiza el seguimiento comercial.
+        </p>
+      </div>
+      <div class="sidebar-map">
+        <div class="sidebar-item"><strong>Dashboard</strong><p>Vista inicial con métricas, actividad, cuotas y próximos pasos.</p></div>
+        <div class="sidebar-item"><strong>Agente ANTON.IA</strong><p>Crea misiones, supervisa la automatización y define límites.</p></div>
+        <div class="sidebar-item"><strong>Mi Perfil de Empresa</strong><p>Configura el contexto con el que se presentan tus mensajes.</p></div>
+        <div class="sidebar-item"><strong>Búsqueda de Leads</strong><p>Encuentra prospectos por filtros, empresa o perfil puntual.</p></div>
+        <div class="sidebar-item"><strong>Oportunidades</strong><p>Detecta empresas que están contratando y busca decisores.</p></div>
+        <div class="sidebar-item"><strong>Campañas</strong><p>Crea secuencias de reconexión o seguimiento automático.</p></div>
+        <div class="sidebar-item"><strong>CRM unificado</strong><p>Vista hoja para trabajar con datos, filtros, exportaciones e importación.</p></div>
+        <div class="sidebar-item"><strong>CRM / Pipeline</strong><p>Vista tipo tablero para mover leads y priorizar el trabajo comercial.</p></div>
+        <div class="sidebar-item"><strong>Guardados · Leads</strong><p>Base de leads elegidos para enriquecer o revisar.</p></div>
+        <div class="sidebar-item"><strong>Guardados · Oportunidades</strong><p>Empresas detectadas para buscar contactos y avanzar.</p></div>
+        <div class="sidebar-item"><strong>Leads Contactados</strong><p>Historial de correos, aperturas, respuestas y llamadas.</p></div>
+        <div class="sidebar-item"><strong>Ajustes</strong><p>Conexiones, firmas, organización, bajas y políticas.</p></div>
+      </div>
+      <div class="grid-2" style="margin-top: 14px;">
+        <div class="card">
+          <h3>Qué verás en Dashboard</h3>
+          <ul>
+            <li>Indicadores de rendimiento y actividad reciente.</li>
+            <li>Progreso de cuotas diarias.</li>
+            <li>Señales que requieren atención inmediata.</li>
+            <li>Atajos a CRM, campañas y seguimiento.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Idea clave para no perderte</h3>
+          <p>
+            <strong>Guardados</strong> es tu zona de preparación, <strong>Contactados</strong> es tu zona de seguimiento,
+              <strong>CRM</strong> es el espacio donde ordenas el avance y <strong>ANTON.IA</strong> es tu centro de automatización.
+            </p>
+          </div>
+        </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Flujo principal</span>
+          <h2>4. Flujo 1: búsqueda de leads</h2>
+        </div>
+      </div>
+
+      <div class="workflow">
+        <div class="workflow-step">
+          <div class="step-number">1</div>
+          <div>
+            <h3>Abre “Búsqueda de Leads” y elige un modo</h3>
+            <div class="grid-3" style="margin-top: 10px;">
+              <div class="module">
+                <strong>Búsqueda por filtros</strong>
+                <p>Ideal para abrir mercado. Filtra por industria, país, tamaño de empresa, cargo y nivel de seniority.</p>
+              </div>
+              <div class="module">
+                <strong>Perfil de LinkedIn</strong>
+                <p>Úsalo cuando ya sabes a quién quieres investigar. Puedes pedir email y teléfono si están disponibles.</p>
+              </div>
+              <div class="module">
+                <strong>Empresa por nombre</strong>
+                <p>Útil para buscar contactos dentro de una cuenta concreta. Puedes ayudar a desambiguar con dominio y cargos.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="workflow-step">
+          <div class="step-number">2</div>
+          <div>
+            <h3>Completa solo lo necesario</h3>
+            <p>
+              No hace falta llenar todos los campos. Cuanto más clara sea la intención comercial, mejores serán los resultados.
+              Algunas reglas útiles:
+            </p>
+            <ul>
+              <li>En búsqueda por filtros, prioriza industria, ubicación y tamaño antes de refinar por cargo.</li>
+              <li>En empresa por nombre, agrega dominios si el nombre es ambiguo o muy común.</li>
+              <li>En perfil puntual, usa la URL completa del perfil de LinkedIn.</li>
+              <li>Guarda filtros que reutilices con frecuencia para no reconstruir búsquedas repetidas.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="workflow-step">
+          <div class="step-number">3</div>
+          <div>
+            <h3>Guarda las búsquedas que sí sirven</h3>
+            <p>
+              ANTON.IA permite guardar búsquedas que realmente vas a reutilizar y volver a cargarlas más adelante. Esto es especialmente útil si trabajas
+              por vertical, país o tipo de decisor. Puedes manejar búsquedas privadas o compartidas según tu dinámica de equipo.
+            </p>
+          </div>
+        </div>
+
+        <div class="workflow-step">
+          <div class="step-number">4</div>
+          <div>
+            <h3>Revisa resultados y guarda solo los leads valiosos</h3>
+            <p>
+              La recomendación es no guardar todo. Evalúa cargo, empresa, industria, ubicación y señales de encaje comercial.
+              Lo ideal es pasar a guardados una selección manejable, con criterio y prioridad.
+            </p>
+            <div class="callout info" style="margin-top: 10px;">
+              <strong>Tip de calidad</strong>
+              <p>
+                Si una empresa parece correcta pero todavía dudas del decisor, guarda el lead y revísalo después en guardados o
+                con investigación. Si desde el inicio hay poco encaje, mejor descartarlo y no consumir enriquecimiento.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Preparación comercial</span>
+          <h2>5. Trabajar con “Guardados · Leads”</h2>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h3>Qué puedes hacer aquí</h3>
+          <ul>
+            <li>Filtrar por nombre, empresa, cargo, industria, creador y fecha.</li>
+            <li>Ver solo tus leads si compartes base con el equipo.</li>
+            <li>Exportar CSV para revisión externa.</li>
+            <li>Agregar comentarios por lead.</li>
+            <li>Seleccionar leads sin email para enriquecerlos.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Cómo decidir a quién enriquecer</h3>
+          <ul>
+            <li>Prioriza cuentas objetivo o roles cercanos a compra.</li>
+            <li>Enriquece primero los leads que realmente podrían ser contactados esta semana.</li>
+            <li>No gastes esfuerzo en leads con poco encaje solo porque aparecieron en la búsqueda.</li>
+            <li>Usa comentarios para dejar contexto al equipo antes de mover a la siguiente etapa.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout warn" style="margin-top: 14px;">
+        <strong>Importante</strong>
+        <p>
+          El enriquecimiento conviene usarlo como filtro de calidad, no como acción automática sobre toda la base.
+          El mejor resultado llega cuando el guardado previo ya fue selectivo.
+        </p>
+      </div>
+    </section>
+
+    <section class="section page-break">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Investigación y contacto</span>
+          <h2>6. Usar “Leads enriquecidos”</h2>
+        </div>
+      </div>
+      <p class="intro">
+        Esta es una de las pantallas más importantes del flujo. Aquí decides qué leads investigar, cuáles revisar primero,
+        qué datos exportar y qué acción tomar por email, LinkedIn o llamada.
+      </p>
+      <div class="grid-3" style="margin-top: 12px;">
+        <div class="status-card">
+          <strong>Con teléfono</strong>
+          <p>Ya puedes usar ese dato en llamadas o en tu priorización comercial.</p>
+        </div>
+        <div class="status-card">
+          <strong>En proceso</strong>
+          <p>El teléfono todavía se está resolviendo. Puedes seguir usando la app mientras esperas.</p>
+        </div>
+        <div class="status-card">
+          <strong>Sin teléfono</strong>
+          <p>El lead sigue siendo útil para email o LinkedIn, aunque no se haya encontrado número.</p>
+        </div>
+      </div>
+      <div class="workflow" style="margin-top: 14px;">
+        <div class="workflow-step">
+          <div class="step-number">1</div>
+          <div>
+            <h3>Filtra y limpia la lista antes de actuar</h3>
+            <p>
+              Usa filtros por empresa, nombre, cargo, industria, teléfono o fecha. Si lo necesitas, añade reglas de inclusión y exclusión
+              para quedarte solo con la parte de la lista que sí vas a revisar o contactar.
+            </p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-number">2</div>
+          <div>
+            <h3>Investiga antes de escribir</h3>
+            <p>
+              La investigación agrega contexto comercial y mejora la calidad del mensaje. Lo recomendable es hacerlo antes de abrir borradores,
+              especialmente en cuentas objetivo o cuando la personalización sí cambia la tasa de respuesta.
+            </p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-number">3</div>
+          <div>
+            <h3>Marca la columna de contacto solo cuando el lead esté listo</h3>
+            <p>
+              En esta vista la selección para contactar se habilita cuando el lead ya tiene la información mínima para avanzar. La regla práctica es:
+            </p>
+            <ul>
+              <li>Debe existir email para contacto por correo.</li>
+              <li>Si la pantalla lo pide, conviene completar la investigación antes de abrir el borrador.</li>
+              <li>Puedes abrir borradores en lote o contactar de forma individual.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-number">4</div>
+          <div>
+            <h3>Elige la acción correcta por canal</h3>
+            <div class="grid-3" style="margin-top: 10px;">
+              <div class="module">
+                <strong>Email</strong>
+                <p>Abre borradores, ajusta asunto y cuerpo, activa seguimiento de aperturas o clics si lo necesitas y envía con Gmail u Outlook.</p>
+              </div>
+              <div class="module">
+                <strong>LinkedIn</strong>
+                <p>Úsalo cuando el canal social sea más natural para ese lead y tengas la extensión instalada.</p>
+              </div>
+              <div class="module">
+                <strong>Llamada</strong>
+                <p>Si ya tienes teléfono, registra la llamada y deja notas para el CRM y el equipo.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-number">5</div>
+          <div>
+            <h3>Exporta solo cuando haga falta</h3>
+            <p>
+              Puedes exportar CSV o XLSX desde esta pantalla. Úsalo para análisis externo, revisión de dirección comercial o trabajo cruzado con otras áreas.
+              Si toda la operación sigue dentro de ANTON.IA, es mejor conservar la trazabilidad en la plataforma.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Correo y seguimiento</span>
+          <h2>7. Redactar, enviar y monitorear</h2>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="panel soft">
+          <h3>Editor de contacto</h3>
+          <p>
+            Desde la pantalla de composición puedes revisar el asunto, editar el cuerpo, regenerar el borrador y elegir la fuente
+            o el estilo que quieres aplicar antes del envío.
+          </p>
+          <h4>Opciones de seguimiento disponibles</h4>
+          <ul>
+            <li><strong>Aperturas:</strong> puede registrar aperturas si el proveedor y el destinatario lo permiten.</li>
+            <li><strong>Clics:</strong> permite medir si hubo interacción en los enlaces enviados desde la app.</li>
+            <li><strong>Confirmación de lectura:</strong> solicita una confirmación estándar cuando el cliente la soporte.</li>
+          </ul>
+        </div>
+        <div class="panel soft">
+          <h3>Leads Contactados</h3>
+          <p>
+            Aquí verás el historial de enviados, su estado y las acciones de verificación disponibles. Puedes abrir el email,
+            verificar lectura, verificar respuesta o revisar la respuesta cuando ya exista.
+          </p>
+          <div class="pill-row">
+            <span class="pill">No abierto</span>
+            <span class="pill">Entregado</span>
+            <span class="pill">Abierto</span>
+            <span class="pill">Clic en enlace</span>
+            <span class="pill">Respondido</span>
+            <span class="pill">Entrega fallida</span>
+          </div>
+        </div>
+      </div>
+      <div class="grid-2" style="margin-top: 14px;">
+        <div class="card">
+          <h3>Leads Respondidos</h3>
+          <p>
+            La vista de respondidos organiza los hilos por respuesta más reciente y clasifica la intención para facilitar decisiones.
+          </p>
+          <ul>
+            <li>Reunión</li>
+            <li>Positiva</li>
+            <li>No interesado</li>
+            <li>No contactar</li>
+            <li>Entrega fallida</li>
+            <li>Respuesta automática</li>
+            <li>Neutral</li>
+            <li>Sin clasificar</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Analítica de Contactos</h3>
+          <p>
+            Revisa métricas de rendimiento por área empresarial, canal, nivel del cargo e industria. Úsalo para responder preguntas como:
+          </p>
+          <ul>
+            <li>¿Qué canal abre más puertas?</li>
+            <li>¿Qué perfiles responden mejor?</li>
+            <li>¿Qué segmento genera más clics o reuniones?</li>
+            <li>¿Dónde conviene insistir y dónde conviene cambiar el enfoque?</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout info" style="margin-top: 14px;">
+        <strong>Buena práctica</strong>
+        <p>
+          No esperes al final de la semana para revisar respuestas. La mayor parte del valor aparece cuando reaccionas rápido
+          a los hilos positivos, neutrales o de posible reunión.
+        </p>
+      </div>
+    </section>
+
+    <section class="section page-break">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Prospección por señales</span>
+          <h2>8. Flujo 2: oportunidades de contratación</h2>
+        </div>
+      </div>
+      <p class="intro">
+        El módulo de oportunidades sirve para detectar empresas que están contratando y convertir esa señal en un punto de entrada comercial.
+      </p>
+      <div class="workflow">
+        <div class="workflow-step">
+          <div class="step-number">1</div>
+          <div>
+            <h3>Busca vacantes</h3>
+            <p>
+              Puedes filtrar por título, ubicación, rango de fecha y cantidad máxima de resultados. La intención aquí no es encontrar candidatos,
+              sino empresas activas en contratación que podrían necesitar tu oferta.
+            </p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-number">2</div>
+          <div>
+            <h3>Guarda las vacantes o las empresas correctas</h3>
+            <p>
+              Revisa la lista, guarda las vacantes que valen la pena o usa el agrupado por empresa para quedarte con las cuentas objetivo.
+            </p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-number">3</div>
+          <div>
+            <h3>Busca decisores dentro de esas empresas</h3>
+            <p>
+              El siguiente paso es definir cargos y, si aplica, ubicación de esas personas. Después puedes buscar leads para cada empresa y enriquecer
+              solo a los seleccionados.
+            </p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-number">4</div>
+          <div>
+            <h3>Pasa a guardados y luego a oportunidades enriquecidas</h3>
+            <p>
+              Desde ahí el flujo se parece mucho al de leads enriquecidos: investigación, revisión, contacto, exportación y priorización.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="grid-2" style="margin-top: 14px;">
+        <div class="card">
+          <h3>Cuándo usar este módulo</h3>
+          <ul>
+            <li>Cuando tu oferta está relacionada con crecimiento de equipos, contratación o capacidad operativa.</li>
+            <li>Cuando quieres abrir mercado usando señales reales de actividad empresarial.</li>
+            <li>Cuando ya tienes empresas objetivo y quieres validar si están en fase de expansión.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Enfoque recomendado</h3>
+          <p>
+            No conviertas cada vacante en una excusa para escribir. Úsala como señal para elegir mejor el ángulo del mensaje y el decisor correcto.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Control comercial</span>
+          <h2>9. CRM unificado y CRM / Pipeline</h2>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="panel soft">
+          <h3>CRM unificado (vista hoja)</h3>
+          <p>
+            Esta vista junta leads, contactados y oportunidades en una sola tabla. Es útil cuando necesitas comparar, ordenar,
+            exportar o trabajar con más contexto sin cambiar de pantalla.
+          </p>
+          <ul>
+            <li>Búsqueda por nombre, empresa, email, cargo o industria.</li>
+            <li>Filtro por estado, industria y fechas.</li>
+            <li>Elección de columnas visibles y su orden.</li>
+            <li>Exportación a CSV, XLSX o PDF.</li>
+            <li>Importación de leads desde CSV.</li>
+          </ul>
+        </div>
+        <div class="panel soft">
+          <h3>CRM / Pipeline</h3>
+          <p>
+            Esta vista permite gestionar el avance comercial con un tablero visual. Puedes mover leads entre columnas y usar el detalle del lead
+            para revisar contexto, próxima acción y señales recientes.
+          </p>
+          <ul>
+            <li>Tablero tipo kanban.</li>
+            <li>Alertas inteligentes.</li>
+            <li>Modo foco para trabajar una sola etapa.</li>
+            <li>Resumen de contactados, interesados, reuniones y oportunidades perdidas.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-top: 14px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Etapa</th>
+              <th>Cuándo usarla</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Inbox</strong></td><td>Lead recién llegado o recién enriquecido, aún sin decisión comercial clara.</td></tr>
+            <tr><td><strong>Calificado</strong></td><td>El lead cumple el perfil y vale la pena trabajarlo.</td></tr>
+            <tr><td><strong>Contactado</strong></td><td>Ya hubo email, llamada u otra primera interacción.</td></tr>
+            <tr><td><strong>Interesado</strong></td><td>Existe respuesta, señal positiva o conversación en curso.</td></tr>
+            <tr><td><strong>Reunión</strong></td><td>Ya se agendó una llamada o reunión comercial.</td></tr>
+            <tr><td><strong>Negociación</strong></td><td>La oportunidad avanza hacia propuesta, negociación o cierre.</td></tr>
+            <tr><td><strong>Ganado / Perdido</strong></td><td>Resultado final del proceso comercial.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section page-break">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Automatización</span>
+          <h2>10. Campañas</h2>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h3>Tipos de campaña</h3>
+          <ul>
+            <li><strong>Reconexión:</strong> reactiva leads antiguos o sin movimiento reciente con un ángulo nuevo.</li>
+            <li><strong>Seguimiento:</strong> acompaña de forma ordenada leads ya contactados usando tiempos definidos entre cada paso.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Qué verás en la vista principal</h3>
+          <ul>
+            <li>Total de campañas.</li>
+            <li>Cuántas están activas.</li>
+            <li>Cuántas son de reconexión.</li>
+            <li>Cuántas no tienen ejecución automática activa.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="workflow" style="margin-top: 14px;">
+        <div class="workflow-step">
+          <div class="step-number">1</div>
+          <div>
+            <h3>Crea o edita tu campaña</h3>
+            <p>Define nombre, tipo, pasos de la secuencia y el objetivo práctico del seguimiento.</p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-number">2</div>
+          <div>
+            <h3>Configura audiencia, exclusiones y reglas</h3>
+            <p>
+              Aquí decides a quién incluir, a quién excluir y qué filtros de reactivación se deben respetar.
+              Por ejemplo, puedes incluir leads abiertos sin respuesta o con clics, y excluir entregas fallidas o contactos marcados como no contactar.
+            </p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-number">3</div>
+          <div>
+            <h3>Activa el seguimiento y revisa a quiénes alcanzará</h3>
+            <p>
+              Antes de activar una campaña, valida que la audiencia sea coherente.
+              Si no encuentra contactos aptos o aparece una restricción, ajusta la configuración antes de lanzarla.
+            </p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-number">4</div>
+          <div>
+            <h3>Pausa, reanuda o corrige según resultado</h3>
+            <p>
+              Una campaña no es “configurar y olvidar”. Revisa el rendimiento, mira respondedores, analiza aperturas y ajusta secuencia,
+              audiencia o exclusiones cuando sea necesario.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="callout info" style="margin-top: 14px;">
+        <strong>Cuándo conviene usar campañas</strong>
+        <p>
+          Úsalas cuando ya tengas una base preparada y quieras sostener seguimiento sin perseguir manualmente cada hilo.
+          Si todavía estás definiendo el mensaje, el tipo de cliente o el encaje comercial, primero trabaja manualmente y luego escala.
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Operación continua</span>
+          <h2>11. Agente ANTON.IA</h2>
+        </div>
+      </div>
+      <p class="intro">
+        El Agente ANTON.IA está pensado para ayudarte a ejecutar trabajo en segundo plano con control humano. No reemplaza tu criterio comercial:
+        te apoya cuando ya sabes qué audiencia quieres abordar y qué nivel de automatización estás dispuesto a permitir.
+      </p>
+      <div class="grid-2" style="margin-top: 14px;">
+        <div class="panel soft">
+          <h3>Crear una misión</h3>
+          <ul>
+            <li>Define la audiencia objetivo.</li>
+            <li>Indica cómo debe trabajar la misión.</li>
+            <li>Revisa el resumen antes de lanzar.</li>
+            <li>Asocia o genera la campaña correspondiente cuando aplique.</li>
+          </ul>
+        </div>
+        <div class="panel soft">
+            <h3>Qué podrás supervisar</h3>
+          <ul>
+            <li>Actividad y tareas pendientes.</li>
+            <li>Reportes diarios e instantáneos.</li>
+            <li>Rendimiento de campañas relacionadas.</li>
+            <li>Canales conectados, límites diarios y políticas de aprobación.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-top: 14px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Modo</th>
+              <th>Cómo se comporta</th>
+              <th>Cuándo conviene</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Asistencia manual</strong><br /><span class="small muted">En la app: Manual Assist</span></td>
+              <td>ANTON.IA prepara trabajo y tú apruebas o ejecutas lo importante.</td>
+              <td>Inicio de adopción, equipos nuevos o cuentas sensibles.</td>
+            </tr>
+            <tr>
+              <td><strong>Semiautomático</strong><br /><span class="small muted">En la app: Semi Auto</span></td>
+              <td>Automatiza más acciones, pero conserva puntos de control y supervisión.</td>
+              <td>Cuando el proceso ya está probado y quieres más velocidad con control.</td>
+            </tr>
+            <tr>
+              <td><strong>Automático</strong><br /><span class="small muted">En la app: Full Auto</span></td>
+              <td>Reduce la intervención manual al mínimo dentro de las reglas definidas.</td>
+              <td>Solo cuando tu forma de trabajo ya está validada y el riesgo operativo es bajo.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grid-2" style="margin-top: 14px;">
+        <div class="card">
+          <h3>Políticas de aprobación</h3>
+          <ul>
+            <li>Aprobar todos.</li>
+            <li>Solo contactos dudosos o con baja puntuación.</li>
+            <li>Solo contactos de alto riesgo.</li>
+            <li>Sin aprobación previa.</li>
+          </ul>
+        </div>
+        <div class="callout warn">
+          <strong>Configuración recomendada al empezar</strong>
+          <p>
+            Para la mayoría de equipos, una buena combinación inicial es <strong>Semiautomático</strong> con aprobación para leads dudosos
+            o de alto riesgo. Eso te da velocidad sin perder visibilidad en decisiones delicadas.
+          </p>
+        </div>
+      </div>
+      <div class="grid-4" style="margin-top: 14px;">
+        <div class="status-card"><strong>Reporte diario</strong><p>Resumen automático una vez al día.</p></div>
+        <div class="status-card"><strong>Alertas instantáneas</strong><p>Notificaciones cuando aparece algo urgente.</p></div>
+        <div class="status-card"><strong>Seguimiento</strong><p>Seguimiento de aperturas y señales de interacción.</p></div>
+        <div class="status-card"><strong>Límites diarios</strong><p>Control de búsquedas, enriquecimiento, investigación y contacto.</p></div>
+      </div>
+    </section>
+
+    <section class="section page-break">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Estilo y plantillas</span>
+          <h2>12. Email Studio</h2>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h3>Modo conversacional</h3>
+          <p>
+            Ideal para describir el tono que quieres lograr y refinar el resultado dialogando con el asistente.
+            Sirve cuando todavía estás buscando una voz clara para tus mensajes comerciales.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Modo avanzado</h3>
+          <p>
+            Úsalo cuando ya tienes una estructura más definida y quieres construir una biblioteca de estilos, bloques o plantillas reutilizables.
+          </p>
+        </div>
+      </div>
+      <div class="grid-2" style="margin-top: 14px;">
+        <div class="panel soft">
+          <h3>Firmas por canal</h3>
+          <p>
+            Puedes configurar firma para Gmail y Outlook por separado. La app la añade automáticamente al enviar,
+            así mantienes consistencia sin editar el cierre de cada mensaje a mano.
+          </p>
+        </div>
+        <div class="panel soft">
+          <h3>Pruebas de envío</h3>
+          <p>
+            Úsalo para validar cómo se ve el correo real y confirmar si el seguimiento de aperturas, los enlaces y la estructura funcionan como esperas antes de escalar.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Equipo y cumplimiento</span>
+          <h2>13. Organización, bajas y buenas prácticas</h2>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h3>Configuración de organización</h3>
+          <ul>
+            <li>Actualizar nombre de la empresa.</li>
+            <li>Ver miembros activos.</li>
+            <li>Generar invitaciones para nuevos usuarios.</li>
+            <li>Revisar invitaciones pendientes y revocarlas si hace falta.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Bajas y bloqueos</h3>
+          <ul>
+            <li>Gestionar correos que no deben volver a recibir mensajes.</li>
+            <li>Excluir dominios completos cuando la política comercial lo requiera.</li>
+            <li>Probar si una dirección quedaría bloqueada antes de usarla.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="grid-2" style="margin-top: 14px;">
+        <div class="callout info">
+          <strong>Buenas prácticas de cumplimiento</strong>
+          <p>
+            Respeta siempre las bajas, evita insistir con contactos negativos y usa las exclusiones por dominio cuando una cuenta
+            o empresa completa deba salir del alcance comercial.
+          </p>
+        </div>
+        <div class="callout warn">
+          <strong>Uso de la extensión de LinkedIn</strong>
+          <p>
+            Si realizas acciones por LinkedIn, hazlo con lotes razonables y con supervisión. Ese canal requiere más cuidado operativo
+            que el correo tradicional.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section page-break">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Estados y términos</span>
+          <h2>14. Qué significan los estados más comunes</h2>
+        </div>
+      </div>
+      <div class="status-grid">
+        <div class="status-card">
+          <strong>Ciclo del lead</strong>
+          <ul>
+            <li><strong>Guardado:</strong> se seleccionó pero todavía no se completó el contacto.</li>
+            <li><strong>Enriquecido:</strong> ya tiene más datos y está más cerca de ser contactado.</li>
+            <li><strong>Enviado:</strong> el mensaje salió desde la plataforma.</li>
+            <li><strong>Abierto:</strong> se detectó una apertura.</li>
+            <li><strong>Clic en enlace:</strong> hubo interacción con un enlace.</li>
+            <li><strong>Respondido:</strong> ya existe respuesta del contacto.</li>
+          </ul>
+        </div>
+        <div class="status-card">
+          <strong>Estados de entrega</strong>
+          <ul>
+            <li><strong>No abierto:</strong> enviado sin señal de apertura.</li>
+            <li><strong>Entregado:</strong> llegó al destinatario.</li>
+            <li><strong>Entrega fallida (bounce):</strong> el mensaje no pudo completarse correctamente.</li>
+            <li><strong>Respuesta automática:</strong> la respuesta es automática, no necesariamente interés real.</li>
+          </ul>
+        </div>
+        <div class="status-card">
+          <strong>Respuesta clasificada</strong>
+          <ul>
+            <li><strong>Reunión:</strong> oportunidad clara de avanzar.</li>
+            <li><strong>Positiva:</strong> buena señal, pero quizá aún sin agenda.</li>
+            <li><strong>No interesado:</strong> conviene detener seguimiento.</li>
+            <li><strong>No contactar:</strong> excluye del alcance comercial.</li>
+            <li><strong>Neutral / sin clasificar:</strong> requiere revisión humana.</li>
+          </ul>
+        </div>
+        <div class="status-card">
+          <strong>Cuotas diarias</strong>
+          <ul>
+            <li><strong>Búsqueda:</strong> controla cuántas consultas realizas.</li>
+            <li><strong>Enriquecimiento:</strong> limita cuántos leads completas por día.</li>
+            <li><strong>Investigación:</strong> regula profundidad y volumen de análisis.</li>
+            <li><strong>Contacto:</strong> ayuda a mantener ritmo y reputación sanos.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Operación diaria</span>
+          <h2>15. Rutina recomendada de uso</h2>
+        </div>
+      </div>
+      <div class="workflow">
+        <div class="workflow-step"><div class="step-number">1</div><div><h3>Empieza en Dashboard</h3><p>Revisa alertas, actividad y límites disponibles para el día.</p></div></div>
+        <div class="workflow-step"><div class="step-number">2</div><div><h3>Procesa respondidos primero</h3><p>Las respuestas calientes siempre valen más que una búsqueda nueva.</p></div></div>
+        <div class="workflow-step"><div class="step-number">3</div><div><h3>Busca o reactiva base</h3><p>Decide si abrir nueva prospección, usar oportunidades o reactivar leads antiguos con campañas.</p></div></div>
+        <div class="workflow-step"><div class="step-number">4</div><div><h3>Enriquece e investiga solo lo necesario</h3><p>Trabaja en lotes razonables, no en listas gigantes sin prioridad.</p></div></div>
+        <div class="workflow-step"><div class="step-number">5</div><div><h3>Contacta con intención clara</h3><p>Elige canal, ajusta mensaje y activa el seguimiento cuando tenga sentido.</p></div></div>
+        <div class="workflow-step"><div class="step-number">6</div><div><h3>Actualiza el CRM</h3><p>Mueve el lead a la etapa correcta para no perder visibilidad del avance.</p></div></div>
+        <div class="workflow-step"><div class="step-number">7</div><div><h3>Revisa campañas y misiones</h3><p>Confirma que la automatización esté trabajando sobre segmentos coherentes.</p></div></div>
+        <div class="workflow-step"><div class="step-number">8</div><div><h3>Cierra el día con aprendizaje</h3><p>Observa qué mensajes se abrieron, quién respondió y qué enfoque rindió mejor.</p></div></div>
+      </div>
+    </section>
+
+    <section class="section page-break">
+      <div class="section-header">
+        <div>
+          <span class="section-tag">Ayuda rápida</span>
+          <h2>16. Preguntas frecuentes</h2>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="faq">
+          <h3>No puedo contactar a un lead</h3>
+          <p>
+            Revisa si ese lead ya tiene email y si la pantalla pide algún dato adicional, como investigación o información mínima del borrador.
+            En varias vistas el contacto se habilita solo cuando el lead cumple las condiciones necesarias para avanzar con orden.
+          </p>
+        </div>
+        <div class="faq">
+          <h3>Outlook me pide iniciar sesión al enviar</h3>
+          <p>
+            Además de la conexión principal, Outlook puede requerir que ese navegador tenga la sesión activada para envíos manuales.
+            Usa la opción correspondiente dentro de la pantalla de conexión.
+          </p>
+        </div>
+        <div class="faq">
+          <h3>Quiero usar LinkedIn pero no veo funcionar la acción</h3>
+          <p>
+            Verifica que la extensión esté instalada, que tengas una sesión activa en LinkedIn y que estés usando el flujo desde la app.
+          </p>
+        </div>
+        <div class="faq">
+          <h3>El teléfono todavía no aparece</h3>
+          <p>
+            Algunos teléfonos pasan por un estado intermedio. Mientras tanto puedes seguir trabajando con email, investigación y CRM.
+          </p>
+        </div>
+        <div class="faq">
+          <h3>Ya no puedo buscar o enriquecer más</h3>
+          <p>
+            Lo más probable es que hayas alcanzado una cuota diaria. Revisa el indicador del módulo correspondiente antes de seguir.
+          </p>
+        </div>
+        <div class="faq">
+          <h3>¿Cuándo usar campañas y cuándo usar ANTON.IA?</h3>
+          <p>
+            Usa campañas cuando el objetivo es ejecutar secuencias sobre una base ya preparada. Usa ANTON.IA cuando quieres coordinar varias tareas
+            desde un mismo lugar, como buscar, enriquecer, contactar y generar seguimiento con reglas de automatización.
+          </p>
+        </div>
+      </div>
+      <div class="footer-line">ANTON.IA · Manual de usuario</div>
+    </section>
+  </main>
+</body>
+</html>

@@ -18,6 +18,7 @@ export interface UnifiedRow {
   company?: string | null;
   title?: string | null;
   linkedinUrl?: string | null;
+  industry?: string | null;
 
   // Metadatos
   status: UnifiedStatus;
@@ -44,8 +45,10 @@ export interface UnifiedRow {
 export type ColumnKey =
   | 'name' | 'email' | 'company' | 'title' | 'status'
   | 'kind' | 'source' | 'createdAt'
-  | 'updatedAt' | 'linkedinUrl'
-  | 'stage' | 'owner' | 'notes';
+  | 'updatedAt' | 'linkedinUrl' | 'industry'
+  | 'stage' | 'owner' | 'notes'
+  | 'nextAction' | 'nextActionType' | 'nextActionDueAt'
+  | 'autopilotStatus' | 'lastAutopilotEvent' | 'meetingLink';
 
 export type ColumnDef = {
   key: ColumnKey;

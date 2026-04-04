@@ -7,11 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
 // Iconos
-import { Send, Wand2, Save, Bot, User, Sparkles, Trash2, Copy, RefreshCw, Zap, AlignLeft, ShieldCheck, Languages } from 'lucide-react';
+import { Send, Wand2, Save, Bot, Trash2, RefreshCw, Zap, AlignLeft, ShieldCheck, Languages, Mail, Clock3, SlidersHorizontal, ChevronsUpDown, FileText, ScanSearch } from 'lucide-react';
 
 import type { ChatMessage, StyleProfile } from '@/lib/types';
 import { styleProfilesStorage, defaultStyle } from '@/lib/style-profiles-storage';
@@ -32,6 +29,25 @@ const QUICK_ACTIONS = [
   { label: 'Más formal', icon: ShieldCheck, prompt: 'Cambia el tono a uno más profesional y corporativo.' },
   { label: 'Traducir al inglés', icon: Languages, prompt: 'Traduce los templates al inglés manteniendo el formato.' },
 ];
+
+function summarizeStyleChanges(prev: StyleProfile, next: StyleProfile) {
+  const changes: string[] = [];
+  if ((prev.tone || '') !== (next.tone || '')) changes.push(`tono ${prev.tone || 'base'} -> ${next.tone || 'base'}`);
+  if ((prev.length || '') !== (next.length || '')) changes.push(`longitud ${prev.length || 'base'} -> ${next.length || 'base'}`);
+  if ((prev.language || '') !== (next.language || '')) changes.push(`idioma ${prev.language || 'base'} -> ${next.language || 'base'}`);
+  if ((prev.subjectTemplate || '') !== (next.subjectTemplate || '')) changes.push('asunto retocado');
+  if ((prev.bodyTemplate || '') !== (next.bodyTemplate || '')) changes.push('cuerpo retocado');
+  if ((prev.cta?.label || '') !== (next.cta?.label || '') || (prev.cta?.duration || '') !== (next.cta?.duration || '')) {
+    changes.push('CTA ajustado');
+  }
+  return changes;
+}
+
+function formatAssistantReply(explanation: string, changes: string[]) {
+  const intro = explanation?.trim() || 'Ajuste aplicado al estilo.';
+  if (changes.length === 0) return `Listo. ${intro}`;
+  return `Listo. ${intro}\n\nCambios clave:\n- ${changes.join('\n- ')}\n\nSi quieres, puedo refinarlo una vuelta más hacia objeciones, claridad o cierre.`;
+}
 
 export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
   const { toast } = useToast();
@@ -88,13 +104,34 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
     }
   }, [mounted]);
 
+  const selectedSampleLead = useMemo(
+    () => sampleLeads.find((lead) => lead.id === sampleLeadId) || null,
+    [sampleLeads, sampleLeadId]
+  );
+
+  const selectedSampleReport = useMemo(() => {
+    if (!selectedSampleLead) return null;
+    return findReportForLead({
+      leadId: selectedSampleLead.id,
+      companyDomain: selectedSampleLead.companyDomain || null,
+      companyName: selectedSampleLead.companyName || null,
+    })?.cross || null;
+  }, [selectedSampleLead]);
+
+  const sampleInsight = useMemo(() => {
+    const report = selectedSampleReport as any;
+    const firstPain = report?.pains?.[0];
+    const firstValue = report?.valueProps?.[0];
+    return {
+      pain: firstPain || 'sin pain principal detectado aun',
+      value: firstValue || 'sin propuesta de valor concreta aun',
+    };
+  }, [selectedSampleReport]);
+
   // ======= Render preview (local, sin depender del endpoint) =======
   const recomputePreview = useCallback((s: StyleProfile) => {
-    // lead + reporte real si existe (si no, contexto vacío)
-    const lead = sampleLeads.find(l => l.id === sampleLeadId) || null;
-    const rep = lead
-      ? findReportForLead({ leadId: lead.id, companyDomain: lead.companyDomain || null, companyName: lead.companyName || null })?.cross || null
-      : null;
+    const lead = selectedSampleLead;
+    const rep = selectedSampleReport;
 
     const gen = generateMailFromStyle(
       s,
@@ -117,8 +154,11 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
     if (!/{{|}}|\[\[|\]\]/.test(s.bodyTemplate || '')) {
       ws.push('Sugerencia: usa tokens como {{lead.firstName}} o [[company.name]].');
     }
+    if (!lead?.fullName || !lead?.companyName) {
+      ws.push('La vista previa usa datos parciales; el mail se verá mejor con un lead de ejemplo más completo.');
+    }
     setWarnings(ws);
-  }, [sampleLeads, sampleLeadId]);
+  }, [selectedSampleLead, selectedSampleReport]);
 
   // Recalcula preview cuando cambie estilo o lead de ejemplo
   useEffect(() => {
@@ -144,7 +184,12 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
           messages: next,
           styleProfile: style,
           mode,
-          sampleData: { leadId: sampleLeadId }
+          sampleData: {
+            lead: selectedSampleLead,
+            report: selectedSampleReport,
+            companyProfile: selectedSampleReport?.company || null,
+            leadId: sampleLeadId,
+          }
         })
       });
       const j = await res.json();
@@ -163,9 +208,7 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
       recomputePreview(updated);
 
       // Add AI response
-      const assistantMsg = j.explanation
-        ? `Hecho: ${j.explanation}`
-        : 'Estilo actualizado.';
+      const assistantMsg = formatAssistantReply(j.explanation, summarizeStyleChanges(style, updated));
 
       setMessages(prev => [...prev, { role: 'assistant' as const, content: assistantMsg, id: crypto.randomUUID() }]);
 
@@ -179,7 +222,7 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
   }
 
   const chatRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { chatRef.current?.scrollTo({ top: 1e9, behavior: 'smooth' }); }, [messages]);
+  useEffect(() => { chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: 'smooth' }); }, [messages]);
 
   function send() {
     runChatTurn(input);
@@ -240,63 +283,80 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
   ), []);
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 h-[calc(100vh-140px)] min-h-[600px]">
+    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 xl:h-[calc(100vh-140px)] min-h-[600px]">
       {/* Columna Izquierda: Chat IA (4 cols) */}
-      <div className="xl:col-span-4 flex flex-col gap-4 h-full">
-        <Card className="flex-1 flex flex-col shadow-md overflow-hidden border-2 border-primary/5">
-          <CardHeader className="py-4 bg-muted/20 border-b">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-indigo-500" />
-              Asistente de Estilo
-            </CardTitle>
-            <CardDescription>Pide cambios a la IA para afinar tus plantillas.</CardDescription>
+      <div className="xl:col-span-4 flex flex-col gap-4 xl:h-full">
+        <Card className="flex flex-col overflow-hidden border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] shadow-[0_20px_70px_-50px_rgba(15,23,42,0.35)] h-[min(68vh,680px)] xl:h-full dark:border-slate-800 dark:bg-[linear-gradient(180deg,#020617_0%,#111827_100%)] dark:shadow-[0_20px_70px_-50px_rgba(2,6,23,0.95)]">
+          <CardHeader className="border-b border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.12),_transparent_35%),linear-gradient(180deg,_rgba(248,250,252,0.95)_0%,_rgba(255,255,255,0.96)_100%)] py-4 dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.16),_transparent_30%),linear-gradient(180deg,_rgba(15,23,42,0.96)_0%,_rgba(2,6,23,0.98)_100%)]">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle className="text-lg">Asistente de estilo</CardTitle>
+                <Badge variant="outline" className="rounded-full border-slate-200 bg-white/80 text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                  chat
+                </Badge>
+              </div>
+              <CardDescription className="dark:text-slate-300">Describe el cambio que quieres y revisa el resultado sin salir del editor.</CardDescription>
+              <div className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                <div className="mb-1 flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+                  <ScanSearch className="h-3.5 w-3.5 text-sky-500 dark:text-sky-300" />
+                  Contexto del lead
+                </div>
+                <div className="space-y-1 text-sm text-slate-700 dark:text-slate-200">
+                  <p><span className="font-medium text-slate-900 dark:text-white">Pain:</span> {sampleInsight.pain}</p>
+                  <p><span className="font-medium text-slate-900 dark:text-white">Valor:</span> {sampleInsight.value}</p>
+                </div>
+              </div>
+            </div>
           </CardHeader>
 
-          <CardContent className="flex-1 flex flex-col p-0 overflow-hidden bg-background">
-            <ScrollArea ref={chatRef} className="flex-1 p-4">
-              <div className="space-y-4">
+          <CardContent className="flex-1 flex flex-col p-0 overflow-hidden bg-transparent">
+            <div ref={chatRef} className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(248,250,252,0.45)_0%,rgba(255,255,255,0.82)_100%)] p-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.55)_0%,rgba(2,6,23,0.86)_100%)]">
+              <div className="space-y-4 pr-1">
                 {messages.map(m => (
                   <div key={m.id} className={`flex gap-3 items-start ${m.role === 'user' ? 'justify-end' : ''}`}>
                     {m.role === 'assistant' && (
-                      <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center border border-indigo-200 shrink-0">
-                        <Bot className="h-4 w-4 text-indigo-600" />
+                      <div className="h-8 w-8 rounded-full bg-indigo-100/90 flex items-center justify-center border border-indigo-200 shrink-0 shadow-sm dark:border-indigo-500/30 dark:bg-indigo-500/15">
+                        <Bot className="h-4 w-4 text-indigo-600 dark:text-indigo-300" />
                       </div>
                     )}
-                    <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm
+                    <div className={`max-w-[88%] whitespace-pre-line rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm
                       ${m.role === 'user'
-                        ? 'bg-primary text-primary-foreground rounded-tr-sm'
-                        : 'bg-muted/50 border rounded-tl-sm'}`}>
+                        ? 'bg-[linear-gradient(180deg,#0f172a_0%,#1e293b_100%)] text-white rounded-tr-sm dark:bg-[linear-gradient(180deg,#1e293b_0%,#334155_100%)] dark:text-white'
+                        : 'border border-slate-200 bg-white/90 rounded-tl-sm dark:border-slate-800 dark:bg-slate-950/85 dark:text-slate-100'}`}>
                       {m.content}
+                      <div className={`mt-2 text-[10px] uppercase tracking-[0.16em] ${m.role === 'user' ? 'text-white/60 dark:text-white/65' : 'text-muted-foreground dark:text-slate-400'}`}>
+                        {m.role === 'user' ? 'tu instruccion' : 'agente'}
+                      </div>
                     </div>
                   </div>
                 ))}
                 {isProcessing && (
                   <div className="flex gap-3 items-start animate-pulse">
-                    <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center border border-indigo-200 shrink-0">
-                      <Bot className="h-4 w-4 text-indigo-600" />
+                    <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center border border-indigo-200 shrink-0 dark:border-indigo-500/30 dark:bg-indigo-500/15">
+                      <Bot className="h-4 w-4 text-indigo-600 dark:text-indigo-300" />
                     </div>
-                    <div className="bg-muted/50 border rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-muted-foreground">
+                    <div className="bg-muted/50 border rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-muted-foreground dark:border-slate-800 dark:bg-slate-950/75 dark:text-slate-300">
                       Pensando cambios...
                     </div>
                   </div>
                 )}
               </div>
-            </ScrollArea>
+            </div>
 
             {/* Acciones Rápidas */}
-            <div className="p-3 bg-muted/10 border-t">
-              <div className="text-xs font-medium text-muted-foreground mb-2 px-1">Acciones rápidas:</div>
+            <div className="border-t border-slate-200 bg-white/80 p-3 backdrop-blur-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="mb-2 flex items-center gap-2 px-1 text-xs font-medium text-muted-foreground dark:text-slate-300"><SlidersHorizontal className="h-3.5 w-3.5" /> Atajos</div>
               <div className="grid grid-cols-2 gap-2">
                 {QUICK_ACTIONS.map((action, i) => (
                   <Button
                     key={i}
                     variant="outline"
                     size="sm"
-                    className="h-8 text-xs justify-start bg-background hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 transition-colors"
+                    className="h-9 justify-start rounded-xl border-slate-200 bg-white text-xs text-slate-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-indigo-500/40 dark:hover:bg-slate-700 dark:hover:text-white dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
                     onClick={() => runChatTurn(action.prompt)}
                     disabled={isProcessing}
                   >
-                    <action.icon className="h-3 w-3 mr-2 opacity-70" />
+                    <action.icon className="h-3 w-3 mr-2 opacity-70 dark:opacity-90" />
                     {action.label}
                   </Button>
                 ))}
@@ -304,7 +364,7 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
             </div>
 
             {/* Input */}
-            <div className="p-3 border-t bg-background">
+            <div className="border-t border-slate-200 bg-white/90 p-3 dark:border-slate-800 dark:bg-slate-950/90">
               <div className="relative">
                 <Textarea
                   placeholder="Ej: hazlo más directo, menciona clientes previos..."
@@ -316,12 +376,12 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
                       send();
                     }
                   }}
-                  className="min-h-[50px] pr-12 resize-none"
+                  className="min-h-[58px] rounded-2xl border-slate-200 bg-slate-50 pr-12 resize-none shadow-inner dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                   disabled={isProcessing}
                 />
                 <Button
                   size="icon"
-                  className="absolute right-2 bottom-2 h-7 w-7"
+                  className="absolute right-2 bottom-2 h-8 w-8 rounded-xl bg-slate-950 shadow-sm hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-950 dark:hover:bg-white"
                   onClick={send}
                   disabled={!input.trim() || isProcessing}
                 >
@@ -333,29 +393,39 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
         </Card>
 
         {/* Gestor rápido de estilos */}
-        <Card className="shrink-0">
-          <CardHeader className="py-3 px-4 pb-2">
-            <CardTitle className="text-base text-muted-foreground font-normal">Estilo Actual</CardTitle>
+        <Card className="shrink-0 overflow-hidden border border-slate-200 bg-white shadow-[0_18px_55px_-45px_rgba(15,23,42,0.35)] dark:border-slate-800 dark:bg-slate-950 dark:shadow-[0_18px_55px_-45px_rgba(2,6,23,0.95)]">
+          <CardHeader className="border-b border-slate-200 bg-slate-50/80 px-4 py-3 pb-2 dark:border-slate-800 dark:bg-slate-900/80">
+            <CardTitle className="text-base text-muted-foreground font-normal">Estilo actual</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <div className="flex items-center gap-2 mb-3">
               <div className="font-medium text-lg truncate flex-1" title={style.name}>{style.name}</div>
               <Badge variant="outline" className="capitalize">{style.tone}</Badge>
             </div>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={saveProfile} className="flex-1"><Save className="h-3.5 w-3.5 mr-2" />Guardar</Button>
-              <Button size="sm" variant="outline" onClick={() => setSelectedStyleName('')} title="Ver lista"><RefreshCw className="h-3.5 w-3.5" /></Button>
+            <div className="mb-4 grid grid-cols-[1fr_auto] gap-2">
+              <Button size="sm" onClick={saveProfile} className="h-10 rounded-xl bg-slate-950 shadow-sm hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-950 dark:hover:bg-white"><Save className="h-3.5 w-3.5 mr-2" />Guardar</Button>
+              <Button size="sm" variant="outline" onClick={() => setSelectedStyleName('')} title="Ver lista" className="h-10 rounded-xl border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"><RefreshCw className="h-3.5 w-3.5" /></Button>
+            </div>
+            <div className="mb-4 text-sm text-slate-600 dark:text-slate-300">
+              <span className="font-medium text-slate-900 dark:text-slate-100">{style.tone || 'professional'}</span>
+              <span> · </span>
+              <span>{style.length || 'medium'}</span>
+              <span> · </span>
+              <span>{style.language || 'es'}</span>
             </div>
 
             {/* Lista desplegable simple si se quiere cambiar */}
             <div className="mt-4 pt-4 border-t space-y-2">
-              <div className="text-xs font-medium text-muted-foreground">Otros estilos guardados:</div>
-              <div className="max-h-[100px] overflow-y-auto space-y-1 pr-1">
+              <div className="flex items-center justify-between gap-2 text-xs font-medium text-muted-foreground">
+                <span>Estilos guardados</span>
+                <span className="flex items-center gap-1 text-[10px] uppercase tracking-[0.15em]"><ChevronsUpDown className="h-3 w-3" /> presets</span>
+              </div>
+              <div className="max-h-[132px] overflow-y-auto space-y-1 pr-1">
                 {styles.map(s => (
                   <button
                     key={s.name}
                     onClick={() => loadProfile(s.name)}
-                    className={`w-full text-left text-xs px-2 py-1.5 rounded flex justify-between group ${s.name === style.name ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-muted'}`}
+                    className={`w-full text-left text-xs px-3 py-2 rounded-xl flex justify-between group transition-colors ${s.name === style.name ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-200 dark:border-indigo-500/30' : 'border border-transparent hover:bg-muted hover:border-slate-200 dark:hover:bg-slate-900 dark:hover:border-slate-800 dark:text-slate-300'}`}
                   >
                     <span className="truncate">{s.name}</span>
                     <div className="hidden group-hover:flex gap-1">
@@ -371,32 +441,33 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
       </div>
 
       {/* Columna Derecha: Editor y Preview (8 cols) */}
-      <div className="xl:col-span-8 grid grid-rows-[auto_1fr] gap-6 h-full">
+      <div className="xl:col-span-8 grid xl:grid-rows-[auto_1fr] gap-6 xl:h-full">
 
         {/* Editor de Plantillas */}
-        <Card className="flex flex-col shadow-sm">
-          <CardHeader className="py-3 px-5 border-b bg-muted/10 flex flex-row items-center justify-between">
+        <Card className="flex flex-col overflow-hidden border border-slate-200 bg-white shadow-[0_20px_70px_-50px_rgba(15,23,42,0.32)] dark:border-slate-800 dark:bg-slate-950 dark:shadow-[0_20px_70px_-50px_rgba(2,6,23,0.95)]">
+          <CardHeader className="py-4 px-5 border-b border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between dark:border-slate-800 dark:bg-[linear-gradient(180deg,#020617_0%,#0f172a_100%)]">
             <div className="flex items-center gap-2">
               <CardTitle className="text-base">Plantillas</CardTitle>
-              <Badge variant="secondary" className="font-normal text-xs text-muted-foreground">
-                Edita manualmente o usa el chat
-              </Badge>
+              <Badge variant="secondary" className="font-normal text-xs text-muted-foreground shadow-sm">Editor</Badge>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {mounted && sampleLeads.length > 0 ? (
-                <select
-                  className="h-8 max-w-[200px] rounded border bg-background px-2 text-xs"
-                  value={sampleLeadId}
-                  onChange={e => setSampleLeadId(e.target.value)}
-                >
-                  {sampleLeads.map(l => <option key={l.id} value={l.id}>{l.fullName} · {l.companyName}</option>)}
-                </select>
+                <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+                  <FileText className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
+                  <select
+                    className="h-6 max-w-[220px] bg-transparent pr-2 text-xs outline-none dark:text-slate-200 dark:[color-scheme:dark]"
+                    value={sampleLeadId}
+                    onChange={e => setSampleLeadId(e.target.value)}
+                  >
+                    {sampleLeads.map(l => <option key={l.id} value={l.id}>{l.fullName} · {l.companyName}</option>)}
+                  </select>
+                </div>
               ) : <span className="text-xs text-muted-foreground">Sin leads para previsualizar</span>}
             </div>
           </CardHeader>
           <CardContent className="p-5 space-y-4">
             {/* Subject */}
-            <div className="grid gap-1.5">
+            <div className="grid gap-1.5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/60">
               <div className="flex justify-between items-end">
                 <label className="text-xs font-medium uppercase text-muted-foreground tracking-wider">Asunto</label>
                 <div className="text-[10px] text-muted-foreground">{style.subjectTemplate?.length || 0} caracteres</div>
@@ -406,12 +477,12 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
                 onChange={e => setStyle(s => ({ ...s, subjectTemplate: e.target.value }))}
                 onBlur={() => recomputePreview({ ...style })}
                 placeholder="Ej: {{lead.firstName}}, idea rápida para {{company.name}}"
-                className="font-mono text-sm border-muted-foreground/30 focus-visible:border-indigo-500"
+                className="font-mono text-sm border-slate-200 bg-white focus-visible:border-indigo-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
               />
             </div>
 
             {/* Body */}
-            <div className="grid gap-1.5 flex-1">
+            <div className="grid gap-1.5 flex-1 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/60">
               <div className="flex justify-between items-end mb-1">
                 <label className="text-xs font-medium uppercase text-muted-foreground tracking-wider">Cuerpo</label>
                 <div className="text-xs text-muted-foreground">Tokens disponibles: {KNOWN_TOKENS.length}</div>
@@ -424,7 +495,7 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
                 onChange={e => setStyle(s => ({ ...s, bodyTemplate: e.target.value }))}
                 onBlur={() => recomputePreview({ ...style })}
                 rows={12}
-                className="font-mono text-sm leading-6 border-muted-foreground/30 focus-visible:border-indigo-500 min-h-[280px]"
+                className="font-mono text-sm leading-6 border-slate-200 bg-white focus-visible:border-indigo-500 min-h-[280px] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500"
                 placeholder={`Saludo\n\nHook\n\nContexto\n\nValor + CTA\n\nFirma`}
               />
             </div>
@@ -432,24 +503,89 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
         </Card>
 
         {/* Preview Result */}
-        <Card className="flex flex-col shadow-sm border-dashed border-2 relative overflow-hidden bg-slate-50">
+        <Card className="flex flex-col shadow-[0_22px_80px_-55px_rgba(15,23,42,0.42)] border border-slate-200 relative overflow-hidden bg-[linear-gradient(180deg,#eef4ff_0%,#f8fafc_100%)] dark:border-slate-800 dark:bg-[linear-gradient(180deg,#0f172a_0%,#020617_100%)] dark:shadow-[0_22px_80px_-55px_rgba(2,6,23,0.98)]">
           <div className="absolute top-0 right-0 p-2 opacity-5 pointer-events-none">
             <Wand2 className="h-32 w-32" />
           </div>
-          <CardHeader className="py-2 px-5 border-b bg-white">
-            <CardTitle className="text-sm font-medium text-slate-500">Vista Previa (Lead Real)</CardTitle>
+          <CardHeader className="py-4 px-5 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-300">Vista previa</CardTitle>
+            </div>
           </CardHeader>
           <CardContent className="flex-1 overflow-auto p-5">
-            <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-sm border p-6 min-h-[300px]">
-              <div className="border-b pb-4 mb-4 space-y-1">
-                <div className="text-sm text-gray-500"><span className="font-medium text-gray-700">Asunto:</span> {highlightTokens(subjectPreview || '...')}</div>
+            <div className="mx-auto max-w-4xl rounded-[28px] border border-slate-200 bg-white shadow-[0_30px_80px_-45px_rgba(15,23,42,0.45)] overflow-hidden dark:border-slate-800 dark:bg-slate-950 dark:shadow-[0_30px_80px_-45px_rgba(2,6,23,0.98)]">
+              <div className="border-b border-slate-200 bg-[linear-gradient(180deg,#f8fbff_0%,#f3f6fb_100%)] px-5 py-3 dark:border-slate-800 dark:bg-[linear-gradient(180deg,#111827_0%,#0f172a_100%)]">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-full bg-[#ea4335]" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-[#fbbc05]" />
+                      <span className="h-2.5 w-2.5 rounded-full bg-[#34a853]" />
+                    </div>
+                    <div className="flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs text-slate-500 shadow-sm border border-slate-200 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                      <Mail className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
+                      Mensaje nuevo
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
+                    <Clock3 className="h-3.5 w-3.5" />
+                    ahora
+                  </div>
+                </div>
               </div>
-              <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
-                {highlightTokens(bodyPreview || '...')}
+              <div className="grid gap-6 bg-[#f8fafc] p-4 lg:grid-cols-[220px_minmax(0,1fr)] dark:bg-[#020617]">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-950/80">
+                  <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Contexto</div>
+                  <div className="space-y-3 text-slate-600 dark:text-slate-300">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.15em] text-slate-400 dark:text-slate-500">Para</div>
+                      <div className="font-medium text-slate-800 dark:text-slate-100">{selectedSampleLead?.fullName || 'Lead de ejemplo'}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{selectedSampleLead?.email || 'correo no disponible'}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.15em] text-slate-400 dark:text-slate-500">Empresa</div>
+                      <div className="font-medium text-slate-800 dark:text-slate-100">{selectedSampleLead?.companyName || 'Empresa de ejemplo'}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{selectedSampleLead?.title || 'Cargo no disponible'}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.15em] text-slate-400 dark:text-slate-500">Agente</div>
+                      <div className="text-sm text-slate-700 dark:text-slate-200">{style.tone || 'professional'} · {style.length || 'medium'}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.15em] text-slate-400 dark:text-slate-500">Objetivo</div>
+                      <div className="text-sm text-slate-700 dark:text-slate-200">correo mas creible, directo y listo para revisar</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.15em] text-slate-400 dark:text-slate-500">Motor</div>
+                      <div className="text-sm text-slate-700 dark:text-slate-200">chat + templates + validacion visual</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950/85">
+                  <div className="mb-5 flex items-start justify-between gap-4 border-b border-slate-100 pb-4 dark:border-slate-800">
+                    <div className="min-w-0">
+                      <div className="mb-2 text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">{highlightTokens(subjectPreview || 'Sin asunto')}</div>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-500 dark:text-slate-400">
+                        <span className="font-medium text-slate-700 dark:text-slate-200">Tú</span>
+                        <span>&lt;tu-bandeja@anton.ia&gt;</span>
+                        <span>para</span>
+                        <span className="text-slate-700 dark:text-slate-200">{selectedSampleLead?.fullName || 'lead de ejemplo'}</span>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-400 dark:text-slate-500">borrador</div>
+                  </div>
+                  <div className="space-y-4 text-[15px] leading-7 text-slate-800 dark:text-slate-200">
+                    {(bodyPreview || '...').split(/\n\n+/).map((paragraph, index) => (
+                      <p key={`${index}-${paragraph.slice(0, 12)}`}>
+                        {highlightTokens(paragraph)}
+                      </p>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               {warnings?.length > 0 && (
-                <div className="mt-8 p-3 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-800">
+                <div className="border-t border-amber-100 bg-amber-50/80 p-4 text-xs text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
                   <div className="font-bold flex items-center gap-1 mb-1"><ShieldCheck className="h-3 w-3" /> Sugerencias de calidad:</div>
                   <ul className="list-disc pl-4 space-y-0.5">{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
                 </div>

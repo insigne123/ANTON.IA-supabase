@@ -1,6 +1,49 @@
 // src/lib/normalizers/n8n.ts
 import { LeadsResponseSchema, N8NWebhookResponseSchema } from "@/lib/schemas/leads";
 
+function firstNonEmpty(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+    }
+  }
+  return undefined;
+}
+
+function normalizeOrganization(lead: any) {
+  const organization = {
+    id: firstNonEmpty(lead?.organization?.id, lead?.organization_id),
+    name: firstNonEmpty(
+      lead?.organization?.name,
+      lead?.organization_name,
+      lead?.job_company_name,
+      lead?.company_name,
+      lead?.company,
+    ),
+    domain: firstNonEmpty(
+      lead?.organization?.domain,
+      lead?.organization_domain,
+    ),
+    industry: firstNonEmpty(
+      lead?.organization?.industry,
+      lead?.organization_industry,
+      lead?.job_company_industry,
+    ),
+    website_url: firstNonEmpty(
+      lead?.organization?.website_url,
+      lead?.organization_website_url,
+      lead?.job_company_website,
+    ),
+    linkedin_url: firstNonEmpty(
+      lead?.organization?.linkedin_url,
+      lead?.organization_linkedin_url,
+    ),
+  };
+
+  return Object.values(organization).some(Boolean) ? organization : undefined;
+}
+
 /**
  * Normaliza la respuesta del webhook n8n al shape interno de la app.
  * Soporta tanto {count, leads} como [ {count, leads} ].
@@ -27,13 +70,7 @@ export function normalizeFromN8N(json: unknown) {
       last_name: l.last_name ?? "",
       email: l.email ?? "",
       title: l.title ?? "",
-      organization: l.organization
-        ? {
-          id: l.organization.id ?? undefined,
-          name: l.organization.name ?? undefined,
-          domain: l.organization.domain ?? undefined,
-        }
-        : undefined,
+      organization: normalizeOrganization(l),
       linkedin_url: l.linkedin_url ?? "",
       photo_url: l.photo_url ?? "",
       email_status: l.email_status ?? "",

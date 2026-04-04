@@ -24,7 +24,7 @@ import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import * as Quota from '@/lib/quota-client';
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from '@/lib/search-config';
 import {
-  getLinkedInProfileStatuses,
+  getLinkedInProfileLead,
   searchCompanyNameLeads,
   searchLeads,
   searchLinkedInProfileLead,
@@ -96,7 +96,11 @@ function MultiCheckDropdown({
   );
 }
 
-function normalizeLeadForUI(raw: Lead, options?: { phoneStatus?: 'not_requested' | 'queued' | 'skipped' | 'failed' | undefined }): UILaed {
+function normalizeLeadForUI(raw: Lead, options?: {
+  phoneStatus?: 'not_requested' | 'queued' | 'skipped' | 'failed' | undefined;
+  revealEmail?: boolean;
+  revealPhone?: boolean;
+}): UILaed {
   const name =
     `${raw.first_name || ''} ${raw.last_name || ''}`.trim() || '—';
 
@@ -104,7 +108,7 @@ function normalizeLeadForUI(raw: Lead, options?: { phoneStatus?: 'not_requested'
     raw.organization?.name?.trim() || '—';
 
   const title = raw.title?.trim() || '—';
-  const industry = (raw.organization as any)?.industry?.trim() || '—';
+  const industry = raw.organization?.industry?.trim() || '—';
 
   const location = '—'; // n8n response no lo trae, pero UI lo espera
 
@@ -112,12 +116,14 @@ function normalizeLeadForUI(raw: Lead, options?: { phoneStatus?: 'not_requested'
     raw.photo_url?.trim() ||
     `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&size=40`;
 
-  const companyWebsite = raw.organization?.domain ? `https://${raw.organization.domain}` : null;
-  const companyLinkedin = null;
+  const companyWebsite = raw.organization?.website_url?.trim() || (raw.organization?.domain ? `https://${raw.organization.domain}` : null);
+  const companyLinkedin = raw.organization?.linkedin_url?.trim() || null;
   const linkedinUrl = raw.linkedin_url || null;
   const phoneNumbers = Array.isArray(raw.phone_numbers) ? raw.phone_numbers : undefined;
   const fallbackPhone = phoneNumbers?.find((phone) => phone?.sanitized_number)?.sanitized_number || null;
   const primaryPhone = raw.primary_phone || fallbackPhone || null;
+  const revealEmail = options?.revealEmail ?? true;
+  const revealPhone = options?.revealPhone ?? true;
   const enrichmentStatus =
     raw.enrichment_status ||
     ((options?.phoneStatus === 'queued' && !primaryPhone) ? 'pending_phone' : undefined);
@@ -127,7 +133,7 @@ function normalizeLeadForUI(raw: Lead, options?: { phoneStatus?: 'not_requested'
     name,
     title,
     company,
-    email: (raw.email && raw.email !== 'email_not_unlocked@domain.com') ? raw.email : null,
+    email: revealEmail && raw.email && raw.email !== 'email_not_unlocked@domain.com' ? raw.email : null,
     avatar,
     location,
     industry,
@@ -135,13 +141,13 @@ function normalizeLeadForUI(raw: Lead, options?: { phoneStatus?: 'not_requested'
     companyLinkedin,
     linkedinUrl,
     apolloId: raw.apollo_id || undefined,
-    phoneNumbers: phoneNumbers || null,
-    primaryPhone,
-    enrichmentStatus,
+    phoneNumbers: revealPhone ? (phoneNumbers || null) : null,
+    primaryPhone: revealPhone ? primaryPhone : null,
+    enrichmentStatus: revealPhone || revealEmail ? enrichmentStatus : undefined,
     country: null,
     city: null,
     status: 'saved',
-    emailEnrichment: raw.email ? { enriched: true, source: 'n8n' } : undefined,
+    emailEnrichment: revealEmail && raw.email ? { enriched: true, source: 'n8n' } : undefined,
   };
 }
 
@@ -281,6 +287,9 @@ export default function SearchPage() {
     if (field === 'searchMode' || field === 'linkedinUrl' || field === 'revealEmail' || field === 'revealPhone') {
       setProfileSearchNotice(null);
       setLastProfilePhoneStatus(null);
+      setProfilePhonePollingIds([]);
+      setProfilePhonePollingStartedAt(null);
+      setProfilePhonePollingElapsedMs(0);
       profilePhoneToastStateRef.current = 'idle';
     }
     if (field === 'searchMode' || field === 'companyName' || field === 'companyDomains' || field === 'title' || field === 'seniorities' || field === 'maxResults') {
@@ -298,6 +307,9 @@ export default function SearchPage() {
     description: string;
   }>(null);
   const [lastProfilePhoneStatus, setLastProfilePhoneStatus] = useState<'not_requested' | 'queued' | 'skipped' | 'failed' | null>(null);
+  const [profilePhonePollingIds, setProfilePhonePollingIds] = useState<string[]>([]);
+  const [profilePhonePollingStartedAt, setProfilePhonePollingStartedAt] = useState<number | null>(null);
+  const [profilePhonePollingElapsedMs, setProfilePhonePollingElapsedMs] = useState(0);
   const [companyCandidates, setCompanyCandidates] = useState<CompanySearchOrganization[]>([]);
   const [selectedOrganization, setSelectedOrganization] = useState<CompanySearchOrganization | null>(null);
   const [companySelectionPending, setCompanySelectionPending] = useState(false);
@@ -378,41 +390,60 @@ export default function SearchPage() {
       setSelectedOrganization(result.selected_organization || (candidates.length === 1 ? candidates[0] : null));
       setProfileSearchNotice(null);
       setLastProfilePhoneStatus(null);
-      setLeads(result.leads.map((raw) => normalizeLeadForUI(raw)));
+      setProfilePhonePollingIds([]);
+      setProfilePhonePollingStartedAt(null);
+      setProfilePhonePollingElapsedMs(0);
+      setLeads(result.leads.map((raw) => normalizeLeadForUI(raw, {
+        revealEmail: true,
+        revealPhone: true,
+      })));
       return;
     }
 
     setCompanyCandidates([]);
     setCompanySelectionPending(false);
     setSelectedOrganization(null);
+    setProfilePhonePollingIds([]);
+    setProfilePhonePollingStartedAt(null);
+    setProfilePhonePollingElapsedMs(0);
 
     const phoneStatus = mode === 'linkedin_profile'
       ? (result.phone_enrichment?.status || null)
       : null;
     setLastProfilePhoneStatus(phoneStatus);
-    setLeads(result.leads.map((raw) => normalizeLeadForUI(raw, { phoneStatus: phoneStatus || undefined })));
+    setLeads(result.leads.map((raw) => normalizeLeadForUI(raw, {
+      phoneStatus: phoneStatus || undefined,
+      revealEmail: filters.revealEmail,
+      revealPhone: filters.revealPhone,
+    })));
 
     if (mode === 'linkedin_profile') {
       const warnings = Array.isArray(result.provider_warnings) ? result.provider_warnings.filter(Boolean) : [];
 
       if (phoneStatus === 'queued') {
+        setProfilePhonePollingIds(result.leads.map((raw) => raw.id).filter(Boolean));
+        setProfilePhonePollingStartedAt(Date.now());
         setProfileSearchNotice({
           tone: 'info',
-          title: 'Telefono en proceso',
-          description: result.phone_enrichment?.message || 'El telefono se esta enriqueciendo y se actualizara en breve.',
+          title: 'Datos del perfil en proceso',
+          description: result.phone_enrichment?.message || 'El perfil se esta completando y se actualizara en breve.',
         });
       } else if (phoneStatus === 'skipped' || phoneStatus === 'failed') {
+        setProfilePhonePollingStartedAt(null);
         setProfileSearchNotice({
           tone: 'warning',
           title: 'Telefono no disponible por ahora',
           description: result.phone_enrichment?.message || warnings[0] || 'La busqueda encontro el perfil, pero el telefono no pudo enriquecerse en este momento.',
         });
       } else if (warnings.length > 0) {
+        setProfilePhonePollingStartedAt(null);
         setProfileSearchNotice({
           tone: 'warning',
           title: 'Advertencia del proveedor',
           description: warnings[0],
         });
+      } else {
+        setProfilePhonePollingStartedAt(null);
       }
     }
   };
@@ -441,6 +472,9 @@ export default function SearchPage() {
     setError('');
     setProfileSearchNotice(null);
     setLastProfilePhoneStatus(null);
+    setProfilePhonePollingIds([]);
+    setProfilePhonePollingStartedAt(null);
+    setProfilePhonePollingElapsedMs(0);
     profilePhoneToastStateRef.current = 'idle';
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -522,6 +556,9 @@ export default function SearchPage() {
       }
       setLeads([]);
       setLastProfilePhoneStatus(null);
+      setProfilePhonePollingIds([]);
+      setProfilePhonePollingStartedAt(null);
+      setProfilePhonePollingElapsedMs(0);
     } finally {
       setIsLoading(false);
       submittingRef.current = false;
@@ -550,24 +587,17 @@ export default function SearchPage() {
     setError('');
     setProfileSearchNotice(null);
     setLastProfilePhoneStatus(null);
+    setProfilePhonePollingIds([]);
+    setProfilePhonePollingStartedAt(null);
+    setProfilePhonePollingElapsedMs(0);
     profilePhoneToastStateRef.current = 'idle';
     setCompanyCandidates([]);
     setSelectedOrganization(null);
     setCompanySelectionPending(false);
   };
 
-  const pendingProfileLeadIds = useMemo(
-    () => filters.searchMode === 'linkedin_profile'
-      ? leads
-        .filter((lead) => lead.id && !hasLeadPhone(lead) && lead.enrichmentStatus === 'pending_phone')
-        .map((lead) => lead.id)
-      : [],
-    [filters.searchMode, leads],
-  );
-  const pendingProfileLeadIdsKey = useMemo(() => pendingProfileLeadIds.join('|'), [pendingProfileLeadIds]);
-
   useEffect(() => {
-    if (filters.searchMode !== 'linkedin_profile' || pendingProfileLeadIds.length === 0) {
+    if (filters.searchMode !== 'linkedin_profile' || profilePhonePollingIds.length === 0) {
       profileStatusAbortRef.current?.abort();
       profileStatusAbortRef.current = null;
       return;
@@ -584,54 +614,90 @@ export default function SearchPage() {
       profileStatusAbortRef.current = controller;
 
       try {
-        const items = await getLinkedInProfileStatuses(pendingProfileLeadIds, controller.signal);
+        const items = (await Promise.all(
+          profilePhonePollingIds.map((id) => getLinkedInProfileLead(id, controller.signal).catch(() => null))
+        )).filter(Boolean) as Array<{
+          id: string;
+          linkedin_url?: string | null;
+          email?: string | null;
+          email_status?: string | null;
+          primary_phone?: string | null;
+          phone_numbers?: any[] | null;
+          enrichment_status?: string | null;
+          updated_at?: string | null;
+        }>;
         if (cancelled || items.length === 0) return;
 
         const byId = new Map(items.map((item) => [String(item.id || '').trim(), item]));
-        const resolvedWithPhone = items.filter((item) => {
+        const resolvedWithRequestedData = items.filter((item) => {
           const phoneNumbers = Array.isArray(item.phone_numbers) ? item.phone_numbers : [];
-          return Boolean(item.primary_phone || phoneNumbers.find((phone) => phone?.sanitized_number));
+          const hasPhone = Boolean(item.primary_phone || phoneNumbers.find((phone) => phone?.sanitized_number));
+          const hasEmail = Boolean(String(item.email || '').trim());
+          const phoneSatisfied = !filters.revealPhone || hasPhone;
+          const emailSatisfied = !filters.revealEmail || hasEmail;
+          return phoneSatisfied && emailSatisfied && (hasPhone || hasEmail);
         });
         const stillPending = items.some((item) => {
           const phoneNumbers = Array.isArray(item.phone_numbers) ? item.phone_numbers : [];
           const hasPhone = Boolean(item.primary_phone || phoneNumbers.find((phone) => phone?.sanitized_number));
-          return !hasPhone && String(item.enrichment_status || '').trim() === 'pending_phone';
+          const hasEmail = Boolean(String(item.email || '').trim());
+          const phoneMissing = filters.revealPhone && !hasPhone;
+          const emailMissing = filters.revealEmail && !hasEmail;
+          const status = String(item.enrichment_status || '').trim();
+          return (phoneMissing || emailMissing) && (status === 'pending_phone' || status === 'pending_profile');
         });
 
         setLeads((prev) => prev.map((lead) => {
           const item = byId.get(String(lead.id || '').trim());
           if (!item) return lead;
-          const nextPhoneNumbers = Array.isArray(item.phone_numbers) ? item.phone_numbers : lead.phoneNumbers;
-          const nextPrimaryPhone = item.primary_phone || getPhoneFallback(nextPhoneNumbers) || lead.primaryPhone || null;
-          return {
+          const nextPhoneNumbersRaw = Array.isArray(item.phone_numbers) ? item.phone_numbers : lead.phoneNumbers;
+          const nextPrimaryPhoneRaw = item.primary_phone || getPhoneFallback(nextPhoneNumbersRaw) || lead.primaryPhone || null;
+          const nextEmailRaw = String(item.email || '').trim() || lead.email || null;
+          const nextPhoneNumbers = filters.revealPhone ? (nextPhoneNumbersRaw || null) : null;
+          const nextPrimaryPhone = filters.revealPhone ? nextPrimaryPhoneRaw : null;
+          const nextEmail = filters.revealEmail ? nextEmailRaw : null;
+          const nextLead: UILaed = {
             ...lead,
-            phoneNumbers: nextPhoneNumbers || null,
+            email: nextEmail,
+            phoneNumbers: nextPhoneNumbers,
             primaryPhone: nextPrimaryPhone,
-            enrichmentStatus: String(item.enrichment_status || '').trim() || (nextPrimaryPhone ? 'completed' : lead.enrichmentStatus),
+            enrichmentStatus: filters.revealPhone || filters.revealEmail
+              ? (String(item.enrichment_status || '').trim() || (nextPrimaryPhoneRaw ? 'completed' : lead.enrichmentStatus))
+              : undefined,
+            emailEnrichment: nextEmail
+              ? { enriched: true, source: 'n8n' }
+              : undefined,
           };
+          return nextLead;
         }));
 
-        if (resolvedWithPhone.length > 0) {
+        if (resolvedWithRequestedData.length > 0) {
+          setProfilePhonePollingIds([]);
+          setProfilePhonePollingStartedAt(null);
+          setProfilePhonePollingElapsedMs(0);
           setProfileSearchNotice({
             tone: 'info',
-            title: 'Telefono disponible',
-            description: 'El telefono ya esta visible en el resultado y puedes guardarlo sin salir de esta pantalla.',
+            title: 'Perfil actualizado',
+            description: 'El telefono y los datos revelados ya estan visibles en el resultado y puedes guardarlos sin salir de esta pantalla.',
           });
           setLastProfilePhoneStatus(null);
           if (profilePhoneToastStateRef.current !== 'found') {
             profilePhoneToastStateRef.current = 'found';
             toast({
-              title: 'Telefono encontrado',
-              description: 'El numero ya se actualizo en el resultado de la busqueda.',
+              title: 'Datos actualizados',
+              description: 'El perfil ya se actualizo en el resultado de la busqueda.',
             });
           }
-        } else if (!stillPending && profilePhoneToastStateRef.current !== 'missing') {
+        } else if (!stillPending && attempts >= 5 && profilePhoneToastStateRef.current !== 'missing') {
+          setProfilePhonePollingIds([]);
+          setProfilePhonePollingStartedAt(null);
+          setProfilePhonePollingElapsedMs(0);
           profilePhoneToastStateRef.current = 'missing';
           setLastProfilePhoneStatus('failed');
           setProfileSearchNotice({
             tone: 'warning',
-            title: 'Telefono no disponible por ahora',
-            description: 'Apollo termino el enriquecimiento, pero no devolvio un numero para este perfil.',
+            title: 'Datos no disponibles por ahora',
+            description: 'El proveedor termino el enriquecimiento, pero no devolvio todos los datos solicitados para este perfil.',
           });
         }
       } catch (error: any) {
@@ -644,6 +710,8 @@ export default function SearchPage() {
     const intervalId = window.setInterval(() => {
       attempts += 1;
       if (attempts >= 18) {
+        setProfilePhonePollingIds([]);
+        setProfilePhonePollingStartedAt(null);
         window.clearInterval(intervalId);
         return;
       }
@@ -656,7 +724,19 @@ export default function SearchPage() {
       profileStatusAbortRef.current?.abort();
       profileStatusAbortRef.current = null;
     };
-  }, [filters.searchMode, pendingProfileLeadIds, pendingProfileLeadIdsKey, toast]);
+  }, [filters.searchMode, filters.revealEmail, filters.revealPhone, profilePhonePollingIds, toast]);
+
+  useEffect(() => {
+    if (!profilePhonePollingStartedAt || profilePhonePollingIds.length === 0) {
+      setProfilePhonePollingElapsedMs(0);
+      return;
+    }
+
+    const updateElapsed = () => setProfilePhonePollingElapsedMs(Date.now() - profilePhonePollingStartedAt);
+    updateElapsed();
+    const intervalId = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [profilePhonePollingIds.length, profilePhonePollingStartedAt]);
 
   const isPageAllSelected = useMemo(() => {
     if (pagedLeads.length === 0) return false;
@@ -710,6 +790,9 @@ export default function SearchPage() {
     setFilters({ ...DEFAULT_FILTERS, ...(search.criteria || {}) });
     setProfileSearchNotice(null);
     setLastProfilePhoneStatus(null);
+    setProfilePhonePollingIds([]);
+    setProfilePhonePollingStartedAt(null);
+    setProfilePhonePollingElapsedMs(0);
     setCompanyCandidates([]);
     setSelectedOrganization(null);
     setCompanySelectionPending(false);
@@ -729,15 +812,15 @@ export default function SearchPage() {
   };
 
   return (
-    <div className="container mx-auto py-2">
+    <div className="container mx-auto space-y-6 py-2">
       <PageHeader
         title="Búsqueda de Leads"
-        description="Encuentra nuevos prospectos utilizando filtros avanzados para refinar tu búsqueda."
+        description="Encuentra prospectos con menos fricción, guarda criterios útiles y revisa resultados listos para decidir."
       >
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline">
+              <Button variant="outline" className="shadow-none">
                 <Bookmark className="mr-2 h-4 w-4" />
                 Cargar Búsqueda
               </Button>
@@ -763,15 +846,15 @@ export default function SearchPage() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <Button variant="secondary" onClick={() => setSaveSearchOpen(true)}>
+          <Button variant="secondary" onClick={() => setSaveSearchOpen(true)} className="shadow-none">
             <BookmarkPlus className="mr-2 h-4 w-4" />
             Guardar Filtros
           </Button>
         </div>
       </PageHeader>
 
-      <Card className="mb-8">
-        <CardHeader>
+      <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
+        <CardHeader className="border-b border-border/60 bg-muted/10">
           <CardTitle>Filtros de Búsqueda</CardTitle>
           <CardDescription>
             {filters.searchMode === 'linkedin_profile'
@@ -927,19 +1010,42 @@ export default function SearchPage() {
             )}
           </div>
 
-          <div className="mt-6 flex justify-end gap-2">
-            <Button variant="outline" onClick={handleClear}><X className="mr-2" />Limpiar</Button>
-            <Button onClick={handleSearch} disabled={isLoading}><Search className="mr-2" />{isLoading ? 'Buscando...' : (filters.searchMode === 'linkedin_profile' ? 'Buscar Perfil' : filters.searchMode === 'company_name' ? 'Buscar Empresa' : 'Buscar Leads')}</Button>
+          <div className="mt-6 flex flex-wrap justify-end gap-2">
+            <Button variant="outline" className="shadow-none" onClick={handleClear}><X className="mr-2" />Limpiar</Button>
+            <Button className="shadow-none" onClick={handleSearch} disabled={isLoading}><Search className="mr-2" />{isLoading ? 'Buscando...' : (filters.searchMode === 'linkedin_profile' ? 'Buscar Perfil' : filters.searchMode === 'company_name' ? 'Buscar Empresa' : 'Buscar Leads')}</Button>
             {isLoading && (
-              <Button variant="outline" onClick={handleAbort}>Cancelar</Button>
+              <Button variant="outline" className="shadow-none" onClick={handleAbort}>Cancelar</Button>
             )}
           </div>
 
           {profileSearchNotice ? (
             <Alert className="mt-4" variant={profileSearchNotice.tone === 'warning' ? 'destructive' : 'default'}>
-              {profileSearchNotice.tone === 'warning' ? <AlertCircle className="h-4 w-4" /> : <Info className="h-4 w-4" />}
+              {profileSearchNotice.tone === 'warning'
+                ? <AlertCircle className="h-4 w-4" />
+                : (profilePhonePollingIds.length > 0 ? <Loader2 className="h-4 w-4 animate-spin" /> : <Info className="h-4 w-4" />)}
               <AlertTitle>{profileSearchNotice.title}</AlertTitle>
-              <AlertDescription>{profileSearchNotice.description}</AlertDescription>
+              <AlertDescription>
+                <div className="space-y-3">
+                  <p>{profileSearchNotice.description}</p>
+                  {profilePhonePollingIds.length > 0 ? (
+                    <div className="space-y-2 rounded-md border border-blue-200/60 bg-blue-50/70 p-3 text-blue-900">
+                      <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide">
+                        <span className="inline-flex items-center gap-2">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Esperando telefono por webhook
+                        </span>
+                        <span>{Math.floor(profilePhonePollingElapsedMs / 1000)}s</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-blue-100">
+                        <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-500" />
+                      </div>
+                      <p className="text-xs text-blue-800/80">
+                        Puedes seguir usando la app; el numero aparecera aqui apenas el proveedor complete el enriquecimiento.
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              </AlertDescription>
             </Alert>
           ) : null}
 
@@ -975,8 +1081,8 @@ export default function SearchPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+      <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
+        <CardHeader className="flex flex-col gap-4 border-b border-border/60 bg-muted/10 md:flex-row md:items-center md:justify-between">
           <div>
             <CardTitle>Resultados de la Búsqueda</CardTitle>
             <CardDescription>
@@ -1046,17 +1152,28 @@ export default function SearchPage() {
                               <div className="font-medium">{lead.name}</div>
                               {(lead.email || filters.searchMode === 'linkedin_profile') ? (
                                 <div className="mt-1 flex flex-col gap-1 text-xs">
-                                  {lead.email ? <span className="text-muted-foreground">{lead.email}</span> : null}
-                                  {filters.searchMode === 'linkedin_profile' ? (
-                                    lead.primaryPhone ? (
-                                      <span className="font-medium text-emerald-600">{lead.primaryPhone}</span>
-                                    ) : lead.enrichmentStatus === 'pending_phone' ? (
+                                  {filters.searchMode === 'linkedin_profile' && filters.revealEmail ? (
+                                    lead.email ? (
+                                      <span className="text-muted-foreground">{lead.email}</span>
+                                    ) : lead.enrichmentStatus === 'pending_profile' && !lead.primaryPhone ? (
                                       <span className="inline-flex items-center gap-1 text-blue-600">
                                         <Loader2 className="h-3 w-3 animate-spin" />
-                                        Telefono en proceso...
+                                        Correo en proceso...
                                       </span>
                                     ) : (
-                                      <span className="text-muted-foreground">Sin telefono visible aun</span>
+                                      <span className="text-muted-foreground">Sin correo visible</span>
+                                    )
+                                  ) : lead.email ? <span className="text-muted-foreground">{lead.email}</span> : null}
+                                  {filters.searchMode === 'linkedin_profile' && filters.revealPhone ? (
+                                    lead.primaryPhone ? (
+                                      <span className="font-medium text-emerald-600">{lead.primaryPhone}</span>
+                                    ) : lead.enrichmentStatus === 'pending_profile' || lead.enrichmentStatus === 'pending_phone' ? (
+                                      <span className="inline-flex items-center gap-1 text-blue-600">
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                        Teléfono en proceso...
+                                      </span>
+                                    ) : (
+                                      <span className="text-muted-foreground">Sin teléfono visible</span>
                                     )
                                   ) : null}
                                 </div>

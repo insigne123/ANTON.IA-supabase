@@ -6,13 +6,18 @@
     "dev": "next dev -p 9003",
     "genkit:dev": "genkit start -- tsx src/ai/dev.ts",
     "genkit:watch": "genkit start -- tsx --watch src/ai/dev.ts",
-    "prebuild": "node scripts/check-fences.mjs",
+    "prebuild": "node scripts/generate-app-version.mjs && node scripts/check-fences.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/run-node-tests.mjs",
-    "smoke:openclaw": "node scripts/openclaw-smoke.mjs"
+    "verify:prod-config": "node scripts/verify-production-config.mjs",
+    "smoke:openclaw": "node scripts/openclaw-smoke.mjs",
+    "verify:antonia-cron": "node scripts/verify-antonia-cron.mjs",
+    "repair:contacted-history": "node scripts/repair-contacted-history.mjs",
+    "repair:crm-pipeline-history": "node scripts/repair-crm-pipeline-history.mjs",
+    "verify:linkedin-profile": "node scripts/verify-linkedin-profile-search.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^3.17.0",

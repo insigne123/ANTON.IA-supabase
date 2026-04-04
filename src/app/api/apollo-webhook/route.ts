@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { matchesConfiguredSecret } from '@/lib/server/internal-api-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export const dynamic = 'force-dynamic';
@@ -8,6 +9,19 @@ export const revalidate = 0;
 export const runtime = 'nodejs';
 
 const ALLOWED_TABLES = new Set(['people_search_leads', 'enriched_leads']);
+
+function isAuthorizedApolloWebhook(req: NextRequest) {
+  const expectedSecret = String(process.env.APOLLO_WEBHOOK_SECRET || '').trim();
+  if (!expectedSecret) return false;
+
+  const url = new URL(req.url);
+  const providedSecret =
+    req.headers.get('x-webhook-secret') ||
+    req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ||
+    url.searchParams.get('webhook_secret');
+
+  return matchesConfiguredSecret(expectedSecret, providedSecret);
+}
 
 function cleanDomain(urlLike?: string | null) {
   const raw = String(urlLike || '').trim();
@@ -104,15 +118,44 @@ function getFullName(person: any) {
   return `${String(person?.first_name || '').trim()} ${String(person?.last_name || '').trim()}`.trim();
 }
 
+function extractApolloPerson(body: any) {
+  if (!body || typeof body !== 'object') return null;
+  if (body.person && typeof body.person === 'object') return body.person;
+  if (Array.isArray(body.people) && body.people[0] && typeof body.people[0] === 'object') return body.people[0];
+  return body;
+}
+
+function pickEmail(person: any) {
+  const direct = String(person?.email || '').trim();
+  if (direct) return direct;
+
+  if (Array.isArray(person?.personal_emails)) {
+    const personal = person.personal_emails
+      .map((value: unknown) => String(value || '').trim())
+      .find(Boolean);
+    if (personal) return personal;
+  }
+
+  if (Array.isArray(person?.emails)) {
+    const fromList = person.emails
+      .map((entry: any) => String(entry?.email || entry?.address || entry || '').trim())
+      .find(Boolean);
+    if (fromList) return fromList;
+  }
+
+  return null;
+}
+
 function buildPeopleSearchUpdates(person: any) {
   const now = new Date().toISOString();
   const { phoneNumbers, primaryPhone, hasPhone } = pickPhones(person);
   const organizationName = getOrganizationName(person) || null;
   const organizationWebsite = getOrganizationWebsite(person);
+  const email = pickEmail(person);
 
   return {
     linkedin_url: normalizeLinkedinProfileUrl(person?.linkedin_url) || null,
-    email: String(person?.email || '').trim() || null,
+    email,
     name: getFullName(person) || null,
     org_name: organizationName,
     title: String(person?.title || person?.headline || '').trim() || null,
@@ -146,12 +189,13 @@ function buildEnrichedLeadUpdates(person: any) {
   const { phoneNumbers, primaryPhone, hasPhone } = pickPhones(person);
   const organizationName = getOrganizationName(person) || null;
   const organizationWebsite = getOrganizationWebsite(person);
+  const email = pickEmail(person);
 
   return {
     full_name: getFullName(person) || null,
     first_name: String(person?.first_name || '').trim() || null,
     last_name: String(person?.last_name || '').trim() || null,
-    email: String(person?.email || '').trim() || null,
+    email,
     email_status: String(person?.email_status || '').trim() || null,
     company_name: organizationName,
     organization_name: organizationName,
@@ -178,6 +222,14 @@ function buildEnrichedLeadUpdates(person: any) {
 
 export async function POST(req: NextRequest) {
   try {
+    if (!String(process.env.APOLLO_WEBHOOK_SECRET || '').trim()) {
+      return NextResponse.json({ error: 'APOLLO_WEBHOOK_SECRET_NOT_CONFIGURED' }, { status: 503 });
+    }
+
+    if (!isAuthorizedApolloWebhook(req)) {
+      return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+    }
+
     const url = new URL(req.url);
     const recordId = url.searchParams.get('record_id')?.trim() || '';
     const tableName = url.searchParams.get('table_name')?.trim() || 'people_search_leads';
@@ -191,7 +243,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => null);
-    const person = body?.person || body;
+    const person = extractApolloPerson(body);
     if (!person || typeof person !== 'object') {
       return NextResponse.json({ ok: true, ignored: 'missing_person_payload' }, { status: 200 });
     }

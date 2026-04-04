@@ -1,4 +1,7 @@
-// Apify → ítem crudo que retorna el actor
+import type { CampaignSettings } from '@/lib/campaign-settings';
+import type { CampaignRunStatus, CampaignType } from '@/lib/campaign-settings';
+
+// Apify → item crudo que retorna el actor
 export interface ApifyLead {
   id?: string;
   // Persona
@@ -83,7 +86,9 @@ export interface Lead {
 export type SavedLead = Lead;
 
 // ⬇️ incluye 'read' y metadatos de respuesta
-export type ContactStatus = 'sent' | 'replied' | 'scheduled' | 'queued' | 'failed';
+export type ContactStatus = 'sent' | 'opened' | 'replied' | 'scheduled' | 'queued' | 'failed';
+export type ContactDeliveryStatus = 'unknown' | 'delivered' | 'opened' | 'clicked' | 'replied' | 'bounced' | 'soft_bounced';
+export type ContactBounceCategory = 'left_company' | 'mailbox_not_found' | 'domain_error' | 'policy_block' | 'mailbox_full' | 'temporary_failure' | 'generic';
 
 export interface ContactedLead {
   id: string;
@@ -114,8 +119,21 @@ export interface ContactedLead {
   deliveredAt?: string;                // cuándo se confirmó entrega por DSN
   readReceiptMessageId?: string;       // id del correo de MDN
   deliveryReceiptMessageId?: string;   // id del correo de DSN
+  deliveryStatus?: ContactDeliveryStatus;
+  bouncedAt?: string;
+  bounceCategory?: ContactBounceCategory;
+  bounceReason?: string;
+  threadKey?: string;
+  lifecycleState?: 'queued' | 'sent' | 'delivered' | 'opened' | 'clicked' | 'replied' | 'bounced' | 'failed' | string;
+  lastEventType?: string;
+  lastEventAt?: string;
+  preflightStatus?: 'ok' | 'warning' | 'blocked' | string;
+  preflightReason?: string;
 
   lastUpdateAt?: string;
+  lastInteractionAt?: string;
+  engagementScore?: number;
+  evaluationStatus?: 'pending' | 'action_required' | 'do_not_contact' | string;
 
   // respuesta
   replyMessageId?: string;
@@ -136,7 +154,7 @@ export interface ContactedLead {
   lastReplyText?: string;
 
   // Reply intelligence
-  replyIntent?: 'meeting_request' | 'positive' | 'negative' | 'unsubscribe' | 'auto_reply' | 'neutral' | 'unknown';
+  replyIntent?: 'meeting_request' | 'positive' | 'negative' | 'unsubscribe' | 'auto_reply' | 'neutral' | 'unknown' | 'delivery_failure';
   replySentiment?: 'positive' | 'negative' | 'neutral';
   replyConfidence?: number;
   replySummary?: string;
@@ -459,10 +477,15 @@ export type CampaignStep = {
 export type Campaign = {
   id: string;
   organizationId?: string;
+  campaignType?: CampaignType;
   name: string;
   status: CampaignStatus;
   steps: CampaignStep[];
   excludeLeadIds?: string[];
+  settings?: CampaignSettings;
+  lastRunAt?: string;
+  lastRunStatus?: CampaignRunStatus;
+  lastRunSummary?: Record<string, any>;
   createdAt: string;
   updatedAt: string;
   // Progreso por lead (independiente por campaña)
@@ -535,6 +558,12 @@ export interface AntoniaConfig {
   minReviewScore?: number;
   bookingLink?: string;
   meetingInstructions?: string;
+  replyAutopilotEnabled?: boolean;
+  replyAutopilotMode?: 'draft_only' | 'shadow_mode' | 'auto_safe' | 'full_auto';
+  replyApprovalMode?: 'all_replies' | 'high_risk_only' | 'disabled';
+  replyMaxAutoTurns?: number;
+  autoSendBookingReplies?: boolean;
+  allowReplyAttachments?: boolean;
   pauseOnNegativeReply?: boolean;
   pauseOnFailureSpike?: boolean;
   createdAt: string;

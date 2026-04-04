@@ -15,34 +15,25 @@ export default function DashboardPage() {
     <div className="space-y-8">
       <PageHeader
         title="Dashboard"
-        description="Bienvenido a tu centro de control. Aquí tienes un resumen de tu actividad y próximos pasos."
+        description="Revisa tus métricas, detecta lo que necesita atención y sigue el siguiente paso sin perder tiempo."
       />
 
-      {/* Sección Superior: Cuotas y Métricas Principales */}
-      <div className="grid gap-6 md:grid-cols-12">
-        <div className="md:col-span-8">
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-6">
           <SummaryCards />
+          <div className="grid gap-6 lg:grid-cols-2">
+            <NextStepsWidget />
+            <PerformanceChart />
+          </div>
         </div>
-        <div className="md:col-span-4">
-          <DailyQuotaProgress title="Consumo Diario" />
-        </div>
-      </div>
+        <DailyQuotaProgress title="Uso diario" />
+      </section>
 
-      {/* Sección Media: Próximos Pasos y Gráficos */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <NextStepsWidget />
-        <PerformanceChart />
-      </div>
-
-      {/* Sección Analítica Profunda */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <section className="grid gap-6 lg:grid-cols-2">
         <FunnelChart />
-        {/* Espacio para futuras analíticas o mover ActivityFeed aquí */}
-      </div>
+      </section>
 
-      {/* Sección Inferior: Actividad Reciente */}
       <ActivityFeed />
-
     </div>
   );
 }

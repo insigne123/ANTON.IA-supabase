@@ -13,6 +13,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const DAILY_LIMIT = 50;
+const DEFAULT_ENRICHMENT_SERVICE_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/enrich';
 
 const ALLOWED_TABLES = new Set(['enriched_opportunities', 'enriched_leads']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -114,6 +115,7 @@ export async function POST(req: NextRequest) {
           body,
           tableName,
           providerDecision,
+          organizationId,
         });
       } catch (error: any) {
         if (!isPdlFallbackEnabled()) {
@@ -154,6 +156,25 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.APOLLO_API_KEY;
     if (!apiKey) return NextResponse.json({ error: 'APOLLO_API_KEY missing' }, { status: 500 });
 
+    const externalUrl = (
+      process.env.ENRICHMENT_SERVICE_URL ||
+      DEFAULT_ENRICHMENT_SERVICE_URL
+    ).trim();
+    const backendSecret = (
+      process.env.BACKEND_ENRICH_SECRET ||
+      process.env.ENRICHMENT_SERVICE_SECRET ||
+      process.env.API_SECRET_KEY ||
+      ''
+    ).trim();
+
+    if (!externalUrl) {
+      return NextResponse.json({ error: 'ENRICHMENT_SERVICE_URL missing' }, { status: 500 });
+    }
+
+    if (!backendSecret) {
+      return NextResponse.json({ error: 'ENRICHMENT_SERVICE_SECRET missing' }, { status: 500 });
+    }
+
     let quotaStatus = { count: 0, limit: DAILY_LIMIT };
     let useMemQuota = false;
     const dayKey = new Date().toISOString().slice(0, 10);
@@ -177,6 +198,7 @@ export async function POST(req: NextRequest) {
     let stoppedByQuota = false;
     let consumed = 0;
     const enrichedOut: any[] = [];
+    const providerErrors: string[] = [];
 
     for (const l of leads) {
       if (quotaStatus.count >= quotaStatus.limit) { stoppedByQuota = true; break; }
@@ -217,6 +239,7 @@ export async function POST(req: NextRequest) {
         const initialRow = {
           id: enrichedId,
           user_id: userId,
+          organization_id: organizationId,
           full_name: l.fullName,
           email: l.email || undefined,
           company_name: l.companyName,
@@ -229,6 +252,7 @@ export async function POST(req: NextRequest) {
           data: {
             sourceOpportunityId: l.sourceOpportunityId,
             companyDomain: cleanDomain(l.companyDomain),
+            apolloId: foundApolloId,
           }
         };
         const { error: insertError } = await getSupabaseAdmin().from(tableName).insert(initialRow);
@@ -253,24 +277,6 @@ export async function POST(req: NextRequest) {
       // [STEP 2] CONSOLIDATED ENRICHMENT (New API)
       // The new API handles both email and phone enrichment in a single call
       try {
-        const externalUrl = (process.env.ENRICHMENT_SERVICE_URL || '').trim();
-        const backendSecret = (
-          process.env.BACKEND_ENRICH_SECRET ||
-          process.env.ENRICHMENT_SERVICE_SECRET ||
-          process.env.API_SECRET_KEY ||
-          ''
-        ).trim();
-
-        if (!externalUrl) {
-          log('[ERROR] ENRICHMENT_SERVICE_URL not configured. Skipping enrichment.');
-          continue;
-        }
-
-        if (!backendSecret) {
-          log('[ERROR] BACKEND_ENRICH_SECRET/ENRICHMENT_SERVICE_SECRET not configured. Skipping enrichment.');
-          continue;
-        }
-
         // Prepare request payload for new API
         const parts = l.fullName.trim().split(/\s+/);
         const firstName = parts.length > 0 ? parts[0] : '';
@@ -336,6 +342,7 @@ export async function POST(req: NextRequest) {
 
             // Map the response to our database structure
             const updateData: any = {
+              organization_id: organizationId,
               full_name: extracted.first_name && extracted.last_name
                 ? `${extracted.first_name} ${extracted.last_name}`
                 : l.fullName,
@@ -418,9 +425,11 @@ export async function POST(req: NextRequest) {
         } else {
           const errorText = await enrichRes.text();
           log('[ERROR] Enrichment API failed:', enrichRes.status, errorText);
+          providerErrors.push(errorText || `HTTP_${enrichRes.status}`);
         }
       } catch (e: any) {
         log('[ERROR] Enrichment exception:', e?.message || e);
+        providerErrors.push(String(e?.message || e || 'unknown_enrichment_error'));
       }
 
 
@@ -468,6 +477,9 @@ export async function POST(req: NextRequest) {
       fallbackApplied,
       fallbackReason,
     };
+    if (enrichedOut.length === 0 && providerErrors.length > 0) {
+      responsePayload.error = providerErrors[0];
+    }
 
     if (useMemQuota && secret) {
       const token = signTicket({ userId, dayKey, count: quotaStatus.count }, secret);
@@ -493,8 +505,9 @@ async function handlePdlEnrichment(params: {
   body: EnrichInput & { tableName?: string };
   tableName: string;
   providerDecision: any;
+  organizationId?: string | null;
 }) {
-  const { req, userId, body, tableName, providerDecision } = params;
+  const { req, userId, body, tableName, providerDecision, organizationId = null } = params;
   const { leads, revealEmail = true, revealPhone = false } = body;
   const shouldRevealEmail = Boolean(revealEmail);
   const shouldRevealPhone = Boolean(revealPhone);
@@ -569,6 +582,7 @@ async function handlePdlEnrichment(params: {
       const initialRow = {
         id: enrichedId,
         user_id: userId,
+        organization_id: organizationId,
         full_name: l.fullName,
         email: l.email || undefined,
         company_name: l.companyName,
@@ -581,6 +595,7 @@ async function handlePdlEnrichment(params: {
         data: {
           sourceOpportunityId: l.sourceOpportunityId,
           companyDomain: cleanDomain(l.companyDomain),
+          apolloId: foundApolloId,
         },
       };
 
@@ -652,6 +667,7 @@ async function handlePdlEnrichment(params: {
           : 'completed';
 
         const updateData: any = {
+          organization_id: organizationId,
           full_name: fullName,
           email,
           email_status: email ? 'verified' : 'not_found',

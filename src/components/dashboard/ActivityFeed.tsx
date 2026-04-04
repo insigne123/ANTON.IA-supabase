@@ -82,10 +82,10 @@ export default function ActivityFeed() {
   }, []);
 
   return (
-    <Card>
+    <Card className="overflow-hidden rounded-[24px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
       <CardHeader>
-        <CardTitle>Actividad Reciente</CardTitle>
-        <CardDescription>Un vistazo a tus últimas acciones y las respuestas de tus leads.</CardDescription>
+        <CardTitle>Actividad reciente</CardTitle>
+        <CardDescription>Tus movimientos más recientes y las señales que vale la pena revisar.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {activities.length > 0 ? (

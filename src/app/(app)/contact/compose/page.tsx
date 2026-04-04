@@ -27,7 +27,7 @@ import { findReportForLead } from '@/lib/lead-research-storage';
 import { getFirstNameSafe } from '@/lib/template';
 import { sendGmailEmail } from '@/lib/gmail-email-service';
 import { styleProfilesStorage } from '@/lib/style-profiles-storage';
-import { generateMailFromStyle } from '@/lib/ai/style-mail';
+import { restyleDraftWithProfile } from '@/lib/email-style-restyle';
 
 type AnyLead = EnrichedLead | EnrichedOppLead | any;
 
@@ -136,7 +136,7 @@ function ComposeInner() {
     setSelectedStyleName(prev => prev || (list[0]?.name || ''));
   }, []);
 
-  const buildDraftForLead = useCallback((leadObj: AnyLead, opts?: { forceRegenerate?: boolean }) => {
+  const buildBaseDraftForLead = useCallback((leadObj: AnyLead, opts?: { forceRegenerate?: boolean }) => {
     const company = getCompanyProfile() || {};
     const sender = buildSenderInfo();
     const leadData = {
@@ -149,6 +149,11 @@ function ComposeInner() {
     // Si hay parámetros en URL y NO estamos forzando regeneración, respétalos.
     const generatedSubject = !opts?.forceRegenerate ? (sp.get('subject') || '') : '';
     const generatedBody = !opts?.forceRegenerate ? (sp.get('body') || '') : '';
+    const rep = findReportForLead({
+      leadId: (leadObj as any).id || (leadObj as any).email || null,
+      companyDomain: (leadObj as any).companyDomain || null,
+      companyName: (leadObj as any).companyName || null,
+    });
 
     let initialSubject: string;
     let initialBody: string;
@@ -157,41 +162,17 @@ function ComposeInner() {
       initialSubject = generatedSubject;
       initialBody = generatedBody;
     } else {
-      const rep = findReportForLead({
-        leadId: (leadObj as any).id || (leadObj as any).email || null,
-        companyDomain: (leadObj as any).companyDomain || null,
-        companyName: (leadObj as any).companyName || null,
-      });
-      if (draftSource === 'style' && styleProfiles.length) {
-        const prof = styleProfiles.find(p => p.name === selectedStyleName) || styleProfiles[0];
-        const gen = generateMailFromStyle(
-          prof,
-          rep?.cross || null,
-          {
-            id: (leadObj as any).id,
-            fullName: leadData.name,
-            email: leadData.email,
-            title: (leadObj as any).title,
-            companyName: leadData.company,
-            companyDomain: (leadObj as any).companyDomain,
-          }
-        );
-        initialSubject = gen.subject;
-        initialBody = gen.body;
+      if (rep?.cross?.emailDraft?.body) {
+        initialSubject = rep.cross.emailDraft.subject || 'Propuesta';
+        initialBody = htmlToPlainParas(rep.cross.emailDraft.body || '');
       } else {
-        // Investigación por defecto (como hoy)
-        if (rep?.cross?.emailDraft?.body) {
-          initialSubject = rep.cross.emailDraft.subject || 'Propuesta';
-          initialBody = htmlToPlainParas(rep.cross.emailDraft.body || '');
-        } else {
-          const v2 = generateCompanyOutreachV2({
-            leadFirstName: leadData.firstName,
-            companyName: leadData.company,
-            myCompanyProfile: company,
-          });
-          initialSubject = v2.subjectBase;
-          initialBody = v2.body;
-        }
+        const v2 = generateCompanyOutreachV2({
+          leadFirstName: leadData.firstName,
+          companyName: leadData.company,
+          myCompanyProfile: company,
+        });
+        initialSubject = v2.subjectBase;
+        initialBody = v2.body;
       }
     }
 
@@ -203,8 +184,49 @@ function ComposeInner() {
     bod = htmlToPlainParas(bod);
     // 3) Solo aseguramos el prefijo con el nombre en el ASUNTO (no tocamos el cuerpo estilo empresa).
     subj = ensureSubjectPrefix(subj, leadData.firstName);
-    return { subject: subj, body: bod };
-  }, [draftSource, selectedStyleName, styleProfiles, sp]);
+    return {
+      subject: subj,
+      body: bod,
+      report: rep?.cross || null,
+      leadData,
+      company,
+    };
+  }, [sp]);
+
+  const buildDraftForLead = useCallback(async (leadObj: AnyLead, opts?: { forceRegenerate?: boolean }) => {
+    const base = buildBaseDraftForLead(leadObj, opts);
+
+    if (draftSource !== 'style' || styleProfiles.length === 0) {
+      return { subject: base.subject, body: base.body };
+    }
+
+    const profile = styleProfiles.find(p => p.name === selectedStyleName) || styleProfiles[0];
+    if (!profile) {
+      return { subject: base.subject, body: base.body };
+    }
+
+    const styled = await restyleDraftWithProfile({
+      mode: (leadObj as any)?._sourceTable === 'opportunities' ? 'opportunities' : 'leads',
+      baseSubject: base.subject,
+      baseBody: base.body,
+      styleProfile: profile,
+      lead: {
+        id: (leadObj as any).id,
+        fullName: base.leadData.name,
+        email: base.leadData.email,
+        title: (leadObj as any).title,
+        companyName: base.leadData.company,
+        companyDomain: (leadObj as any).companyDomain,
+      },
+      report: base.report,
+      companyProfile: base.company,
+    });
+
+    return {
+      subject: ensureSubjectPrefix(styled.subject, base.leadData.firstName),
+      body: htmlToPlainParas(styled.body),
+    };
+  }, [buildBaseDraftForLead, draftSource, selectedStyleName, styleProfiles]);
 
   const [usePixel, setUsePixel] = useState(true);
   const [useReadReceipt, setUseReadReceipt] = useState(false);
@@ -212,10 +234,17 @@ function ComposeInner() {
 
   useEffect(() => {
     if (!lead) return;
-    const tuned = buildDraftForLead(lead);
-    setSubject(tuned.subject);
-    setBody(tuned.body);
-  }, [lead, buildDraftForLead]);
+    let cancelled = false;
+    void buildDraftForLead(lead).then((tuned) => {
+      if (cancelled) return;
+      setSubject(tuned.subject);
+      setBody(tuned.body);
+    }).catch((e: any) => {
+      if (cancelled) return;
+      toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo aplicar la personalizacion.' });
+    });
+    return () => { cancelled = true; };
+  }, [lead, buildDraftForLead, toast]);
 
   // Helper to inject link tracking
   function rewriteLinksForTracking(html: string, trackingId: string): string {
@@ -232,7 +261,7 @@ function ComposeInner() {
     if (!lead) return;
     setIsRegenerating(true);
     try {
-      const tuned = buildDraftForLead(lead, { forceRegenerate: true });
+      const tuned = await buildDraftForLead(lead, { forceRegenerate: true });
       setSubject(tuned.subject);
       setBody(tuned.body);
       toast({ title: 'Borrador actualizado', description: 'Se regeneró el asunto y el cuerpo con el nuevo formato.' });

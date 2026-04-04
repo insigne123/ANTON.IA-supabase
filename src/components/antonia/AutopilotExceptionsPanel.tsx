@@ -32,6 +32,10 @@ function categoryLabel(value: string) {
       return 'Aprobacion';
     case 'positive_reply':
       return 'Lead caliente';
+    case 'manual_action_required':
+      return 'Revision reply';
+    case 'reply_guardrail':
+      return 'Lead ya respondio';
     case 'send_failed':
       return 'Fallo de envio';
     case 'compliance_block':
@@ -72,6 +76,7 @@ export function AutopilotExceptionsPanel() {
   const counts = useMemo(() => ({
     approvals: items.filter((item) => item.category === 'approval_required').length,
     hot: items.filter((item) => item.category === 'positive_reply').length,
+    manual: items.filter((item) => item.category === 'manual_action_required').length,
     critical: items.filter((item) => item.severity === 'critical').length,
   }), [items]);
 
@@ -130,7 +135,7 @@ export function AutopilotExceptionsPanel() {
         </div>
 
         {filter === 'open' && (
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
             <div className="rounded-xl border p-4">
               <p className="text-sm text-muted-foreground">Aprobaciones</p>
               <p className="text-2xl font-semibold">{counts.approvals}</p>
@@ -138,6 +143,10 @@ export function AutopilotExceptionsPanel() {
             <div className="rounded-xl border p-4">
               <p className="text-sm text-muted-foreground">Leads calientes</p>
               <p className="text-2xl font-semibold">{counts.hot}</p>
+            </div>
+            <div className="rounded-xl border p-4">
+              <p className="text-sm text-muted-foreground">Revision reply</p>
+              <p className="text-2xl font-semibold">{counts.manual}</p>
             </div>
             <div className="rounded-xl border p-4">
               <p className="text-sm text-muted-foreground">Criticas</p>

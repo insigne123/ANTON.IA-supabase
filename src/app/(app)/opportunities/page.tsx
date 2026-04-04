@@ -330,7 +330,7 @@ export default function OpportunitiesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Oportunidades (LinkedIn → Apollo)" description="Encuentra empresas que están contratando y luego contacta a los decisores." />
+      <PageHeader title="Oportunidades" description="Encuentra empresas que están contratando y luego contacta a los decisores." />
 
       <Card>
         <CardHeader>
