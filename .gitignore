@@ -14,3 +14,21 @@ functions/.webpack/
 *.log
 .DS_Store
 node_modules
+
+# Local backup artifacts
+.deploy_safe/
+.deploy_safe_bundle_quota.tar.gz
+.idx/
+.modified
+Logo YAGO (1).jpg
+devDependencies
+antonia-extension-v1.1.zip
+chrome-extension (2).zip
+chrome-extension (3).zip
+chrome-extension.zip
+chrome-extension.crx
+chrome-extension.pem
+supabase/.temp/
+tsc_output.txt
+typecheck_log.txt
+widget_error.txt
