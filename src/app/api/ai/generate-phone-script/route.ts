@@ -1,0 +1,41 @@
+
+import { NextRequest, NextResponse } from 'next/server';
+import { generatePhoneScript } from '@/ai/flows/generate-phone-script';
+import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+export async function POST(req: NextRequest) {
+    try {
+        await requireAuth();
+
+        const body = await req.json();
+        const { report, companyProfile, lead } = body;
+
+        // Validar que existan los campos requeridos
+        // NOTE: `report` puede ser vacío si aún no se investigó. En ese caso, generamos un guion más general.
+        if (!companyProfile || !lead) {
+            return NextResponse.json(
+                { error: 'Faltan campos requeridos: companyProfile, lead' },
+                { status: 400 }
+            );
+        }
+
+        // Validar que el lead tenga datos mínimos
+        if (!lead.fullName) {
+            return NextResponse.json(
+                { error: 'El lead debe tener al menos un nombre (fullName)' },
+                { status: 400 }
+            );
+        }
+
+        // Generar el script
+        const out = await generatePhoneScript({ report: report || {}, companyProfile, lead });
+        return NextResponse.json(out);
+    } catch (e: any) {
+        if (e?.name === 'AuthError') return handleAuthError(e);
+        console.error('AI phone script generation error:', e);
+        return NextResponse.json({ error: e?.message || 'Error al generar el guion con IA' }, { status: 500 });
+    }
+}

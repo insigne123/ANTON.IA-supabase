@@ -1,0 +1,16 @@
+{
+  "name": "ANTON.IA",
+  "short_name": "ANTON.IA",
+  "description": "AI-powered lead search, research, and outreach.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050816",
+  "theme_color": "#050816",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png"
+    }
+  ]
+}

@@ -1,0 +1,388 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
+import { tokenService } from '@/lib/services/token-service';
+import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
+import { encodeHeaderRFC2047, sanitizeHeaderText } from '@/lib/email-header-utils';
+import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
+import { checkAndConsumeDailyQuota } from '@/lib/server/daily-quota-store';
+import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
+import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+export async function POST(req: NextRequest) {
+    try {
+        const body = await req.json();
+        const { to, subject, body: emailBody, userId: bodyUserId, isHtml } = body;
+
+        const debug = process.env.CONTACT_DEBUG === 'true';
+        const debugLog = (...args: any[]) => { if (debug) console.log(...args); };
+        const debugError = (...args: any[]) => { if (debug) console.error(...args); };
+
+        // 1. Authenticate (support both x-user-id header and session)
+        const headerUserId = req.headers.get('x-user-id');
+        let userId = headerUserId || bodyUserId;
+        const isInternalAutomationRequest = Boolean(headerUserId);
+
+        if (headerUserId && !isTrustedInternalRequest(req)) {
+            return NextResponse.json({ error: 'Unauthorized internal request' }, { status: 401 });
+        }
+
+        debugLog(`[CONTACT_DEBUG] START Request`);
+        debugLog(`[CONTACT_DEBUG] Header UserID: '${headerUserId}'`);
+        debugLog(`[CONTACT_DEBUG] Body UserID: '${bodyUserId}'`);
+        debugLog(`[CONTACT_DEBUG] Final UserID: '${userId}'`);
+
+        let supabase;
+
+        // CRITICAL FIX: If call comes from Cloud Functions (headerUserId exists), 
+        // we must use SERVICE ROLE to bypass RLS, because there are no cookies.
+        if (headerUserId && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+            debugLog('[CONTACT_DEBUG] Using SERVICE ROLE client (Server-to-Server)');
+            supabase = createClient(
+                process.env.NEXT_PUBLIC_SUPABASE_URL!,
+                process.env.SUPABASE_SERVICE_ROLE_KEY!,
+                {
+                    auth: {
+                        autoRefreshToken: false,
+                        persistSession: false
+                    }
+                }
+            );
+        } else {
+            debugLog('[CONTACT_DEBUG] Using SESSION client (Browser/Cookie)');
+            supabase = createRouteHandlerClient({ cookies });
+
+            // If no explicit userId, try to get from session
+            if (!userId) {
+                const { data: { user } } = await supabase.auth.getUser();
+                userId = user?.id;
+                debugLog(`[CONTACT_DEBUG] Session UserID lookup result: '${userId}'`);
+            }
+        }
+
+        if (!userId) {
+            debugError('[CONTACT_DEBUG] Unauthorized - Missing user ID');
+            return NextResponse.json({ error: 'Unauthorized - Missing user ID' }, { status: 401 });
+        }
+
+        // 2. Get User's Token (Check Google first, then Outlook)
+        debugLog(`[CONTACT_DEBUG] Checking tokens for UserID: '${userId}' in provider_tokens table`);
+        let provider = 'google';
+        let tokenData = await tokenService.getToken(supabase, userId, 'google');
+
+        if (!tokenData?.refresh_token) {
+            debugLog(`[CONTACT_DEBUG] No Google token found, checking Outlook...`);
+            provider = 'outlook';
+            tokenData = await tokenService.getToken(supabase, userId, 'outlook');
+        } else {
+            debugLog(`[CONTACT_DEBUG] Found Google token`);
+        }
+
+        if (!tokenData?.refresh_token) {
+            debugError(`[CONTACT_DEBUG] NO TOKEN FOUND for UserID: '${userId}'. Returning 400.`);
+            debugError(`[CONTACT_DEBUG] Potential causes: RLS blocking read (if not using service role), or user truly has no tokens.`);
+            return NextResponse.json({ error: 'No connected email provider found for user' }, { status: 400 });
+        }
+
+        // 3. Refresh Access Token
+        let accessToken = '';
+
+        if (provider === 'google') {
+            accessToken = await refreshGoogleToken(tokenData.refresh_token);
+        } else {
+            accessToken = await refreshOutlookToken(tokenData.refresh_token);
+        }
+
+        if (!accessToken) {
+            debugError('[CONTACT_DEBUG] Failed to refresh access token');
+            return NextResponse.json({ error: 'Failed to refresh access token calling provider' }, { status: 401 });
+        }
+
+        // 3.1. CHECK TRACKING CONFIG
+        let finalBody = emailBody;
+        let effectiveIsHtml = Boolean(isHtml);
+        const { missionId, leadId, tracking } = body;
+
+        let missionOrgId: string | null = null;
+
+        if (missionId && leadId) {
+            try {
+                // Get OrgID from Mission
+                const { data: mission } = await supabase
+                    .from('antonia_missions')
+                    .select('organization_id')
+                    .eq('id', missionId)
+                    .single();
+
+                if (mission) {
+                    missionOrgId = mission.organization_id;
+
+                    if (isInternalAutomationRequest) {
+                        const { data: leadRow } = await supabase
+                            .from('leads')
+                            .select('id, last_investigated_at, investigation_error')
+                            .eq('id', leadId)
+                            .maybeSingle();
+
+                        if (!leadRow) {
+                            return NextResponse.json({ error: 'Lead not found for automatic contact', code: 'LEAD_NOT_FOUND' }, { status: 412 });
+                        }
+
+                        const investigationError = String(leadRow.investigation_error || '').trim();
+                        if (!leadRow.last_investigated_at || investigationError) {
+                            return NextResponse.json({
+                                error: 'Lead research incomplete for automatic contact',
+                                code: 'LEAD_RESEARCH_INCOMPLETE',
+                                researchError: investigationError || null,
+                            }, { status: 412 });
+                        }
+                    }
+
+                    // Block if unsubscribed (user-level or org-level)
+                    try {
+                        const toEmail = String(to || '').trim().toLowerCase();
+                        if (toEmail) {
+                            const blocked = await isEmailSuppressedForScope(toEmail, { userId, organizationId: missionOrgId });
+
+                            if (blocked) {
+                                debugLog('[CONTACT_DEBUG] Recipient is unsubscribed:', toEmail);
+                                return NextResponse.json({ error: 'Recipient unsubscribed' }, { status: 409 });
+                            }
+                        }
+                    } catch (e) {
+                        debugError('[CONTACT_DEBUG] Failed unsubscribe check:', e);
+                    }
+
+                    // Block if org domain is excluded
+                    try {
+                        const toEmail = String(to || '').trim().toLowerCase();
+                        const domain = toEmail.split('@')[1]?.trim() || '';
+                        if (domain && missionOrgId) {
+                            const { data: blockedDomain } = await supabase
+                                .from('excluded_domains')
+                                .select('id')
+                                .eq('organization_id', missionOrgId)
+                                .eq('domain', domain)
+                                .maybeSingle();
+
+                            if (blockedDomain) {
+                                debugLog('[CONTACT_DEBUG] Recipient domain is blocked:', domain);
+                                return NextResponse.json({ error: `Domain blocked: ${domain}` }, { status: 403 });
+                            }
+                        }
+                    } catch (e) {
+                        debugError('[CONTACT_DEBUG] Failed domain blacklist check:', e);
+                    }
+
+                    const { data: config } = await supabase
+                        .from('antonia_config')
+                        .select('tracking_enabled')
+                        .eq('organization_id', mission.organization_id)
+                        .single();
+
+                    const trackingEnabled = typeof tracking?.enabled === 'boolean'
+                        ? tracking.enabled
+                        : Boolean(config?.tracking_enabled);
+                    const trackPixel = trackingEnabled && (tracking?.pixel ?? true);
+                    const trackLinks = trackingEnabled && (tracking?.linkTracking ?? true);
+
+                    if (trackingEnabled && effectiveIsHtml) {
+                        // Link tracking (optional)
+                        if (trackLinks && !finalBody.includes('/api/tracking/click')) {
+                            const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+                            finalBody = finalBody.replace(/href=("|')(http[^"']+)("|')/gi, (match: string, quote: string, url: string) => {
+                                if (String(url).includes('/api/tracking/click')) return match;
+                                if (String(url).includes('/unsubscribe?')) return match;
+                                if (String(url).startsWith('mailto:')) return match;
+                                const trackingUrl = `${appUrl}/api/tracking/click?id=${leadId}&url=${encodeURIComponent(url)}`;
+                                return `href=${quote}${trackingUrl}${quote}`;
+                            });
+                        }
+
+                        // Pixel tracking (optional)
+                        if (trackPixel && !finalBody.includes('/api/tracking/open?id=')) {
+                            const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+                            const pixelUrl = `${appUrl}/api/tracking/open?id=${leadId}`;
+                            const pixelHtml = `<img src="${pixelUrl}" width="1" height="1" style="display:none;" alt="" />`;
+                            finalBody = finalBody + pixelHtml;
+                        }
+                    } else if (trackingEnabled && !effectiveIsHtml && trackPixel) {
+                        // If text/plain, wrap into HTML to allow pixel (links tracking skipped)
+                        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+                        const pixelUrl = `${appUrl}/api/tracking/open?id=${leadId}`;
+                        const pixelHtml = `<img src="${pixelUrl}" width="1" height="1" style="display:none;" alt="" />`;
+                        finalBody = `<div>${emailBody.replace(/\n/g, '<br>')}</div>${pixelHtml}`;
+                        effectiveIsHtml = true;
+                    }
+
+                }
+            } catch (e) {
+                debugError('[CONTACT_DEBUG] Error checking tracking config:', e);
+            }
+        }
+
+        const unsubscribeUrl = generateUnsubscribeLink(String(to || '').trim(), userId, missionOrgId);
+        const prepared = prepareOutboundEmail({
+            html: effectiveIsHtml ? finalBody : undefined,
+            text: effectiveIsHtml ? undefined : finalBody,
+            unsubscribeUrl,
+        });
+        const preflight = validateOutboundEmail({
+            to,
+            subject,
+            html: prepared.html,
+            text: prepared.text,
+            requireUnsubscribe: true,
+            unsubscribeUrl,
+        });
+        if (!preflight.ok) {
+            return NextResponse.json({ error: preflight.errors.join(' ') }, { status: 400 });
+        }
+        finalBody = effectiveIsHtml ? prepared.html : prepared.text;
+        effectiveIsHtml = true;
+
+        const quota = await checkAndConsumeDailyQuota({
+            userId,
+            resource: 'contact',
+            limit: 50,
+        });
+        if (!quota.allowed) {
+            return NextResponse.json({ error: `Daily quota exceeded for contact. Used ${quota.count}/${quota.limit}.` }, { status: 429 });
+        }
+
+        // 4. Send Email
+        let result;
+        if (provider === 'google') {
+            result = await sendGmail(accessToken, to, subject, finalBody, effectiveIsHtml);
+        } else {
+            result = await sendOutlook(accessToken, to, subject, finalBody, effectiveIsHtml);
+        }
+
+        if (!result.success) {
+                debugError(`[CONTACT_DEBUG] Send failed: ${result.error}`);
+            return NextResponse.json({ error: result.error }, { status: 500 });
+        }
+
+        debugLog(`[CONTACT_DEBUG] Email sent successfully via ${provider}`);
+        return NextResponse.json({ success: true, provider: provider === 'google' ? 'gmail' : 'outlook' });
+
+    } catch (error: any) {
+        console.error('[CONTACT_API] Error:', error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}
+
+// --- Helper Functions ---
+
+async function refreshGoogleToken(refreshToken: string) {
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) throw new Error('Missing Google credentials');
+
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+            client_id: clientId,
+            client_secret: clientSecret,
+            refresh_token: refreshToken,
+            grant_type: 'refresh_token'
+        })
+    });
+
+    const data = await res.json();
+    return data.access_token;
+}
+
+async function refreshOutlookToken(refreshToken: string) {
+    const clientId = process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID;
+    const clientSecret = process.env.AZURE_AD_CLIENT_SECRET;
+    const tenantId = process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'common';
+
+    if (!clientId || !clientSecret) throw new Error('Missing Outlook credentials');
+
+    const res = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+            client_id: clientId,
+            client_secret: clientSecret,
+            refresh_token: refreshToken,
+            grant_type: 'refresh_token',
+            scope: 'Mail.Send'
+        })
+    });
+
+    const data = await res.json();
+    return data.access_token;
+}
+
+async function sendGmail(accessToken: string, to: string, subject: string, body: string, isHtml: boolean = false) {
+    // Construct raw email
+    const contentType = isHtml ? 'text/html' : 'text/plain';
+    const safeSubject = encodeHeaderRFC2047(subject);
+    const str = [
+        `To: ${to}`,
+        `Subject: ${safeSubject}`,
+        `Content-Type: ${contentType}; charset=utf-8`,
+        'MIME-Version: 1.0',
+        '',
+        body
+    ].join('\r\n');
+
+    const raw = Buffer.from(str, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ raw })
+    });
+
+    if (!res.ok) {
+        const err = await res.text();
+        return { success: false, error: err };
+    }
+    return { success: true };
+}
+
+async function sendOutlook(accessToken: string, to: string, subject: string, body: string, isHtml: boolean = false) {
+    const safeSubject = sanitizeHeaderText(subject);
+    const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            message: {
+                subject: safeSubject,
+                body: {
+                    contentType: isHtml ? 'HTML' : 'Text',
+                    content: body
+                },
+                toRecipients: [
+                    {
+                        emailAddress: {
+                            address: to
+                        }
+                    }
+                ]
+            },
+            saveToSentItems: true
+        })
+    });
+
+    if (!res.ok) {
+        const err = await res.text();
+        return { success: false, error: err };
+    }
+    return { success: true };
+}

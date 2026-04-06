@@ -1,0 +1,55 @@
+# Guía Express: Uso del ID para Enriquecimiento
+
+Esta guía explica exclusivamente cómo manejar el ID del lead para asegurar que el enriquecimiento funcione correctamente.
+
+## 1. Obtener el ID
+El ID que necesitas es el **Apollo Person ID**.
+
+En el JSON que mostraste (el de `person`), es este:
+```json
+{
+  "person": {
+    "id": "632dc818a8fa3c00012db9af", <-- ESTE ES EL ID CORRECTO
+    "first_name": "Nadac",
+    ...
+  }
+}
+```
+
+**¿Dónde encuentras este ID en la respuesta de Búsqueda de Leads?**
+En la respuesta de nuestra API de búsqueda (`/api/lead-search`), este mismo ID viene en el campo `id` de cada lead:
+
+```json
+{
+  "leads": [
+    {
+      "id": "632dc818a8fa3c00012db9af", <-- TOMALO DE AQUÍ
+      "first_name": "Nadac",
+      ...
+    }
+  ]
+}
+```
+
+Este es el valor que debes usar.
+
+## 2. Enviar el ID al Enriquecimiento
+Cuando llames al endpoint de enriquecimiento (`/api/enrich`), debes pasar ese mismo ID en el campo `record_id`.
+
+Además, es **obligatorio** especificar la tabla correcta: `people_search_leads`.
+
+**Payload Correcto para Enriquecer:**
+```json
+{
+  "record_id": "69f6f1aa-eeb9-4cc3-a0a5-c8adaff090d5",  // El ID que obtuviste en el paso 1
+  "table_name": "people_search_leads",                 // SIEMPRE usa este nombre de tabla
+  "lead": {
+    "apollo_id": "..." // Opcional si ya tienes el ID interno
+  }
+}
+```
+
+## Resumen para la otra IA
+1. **Extraer** `lead.id` de la respuesta de búsqueda.
+2. **Inyectar** ese valor en `record_id` de la petición de enriquecimiento.
+3. **Fijar** `table_name` como `"people_search_leads"`.

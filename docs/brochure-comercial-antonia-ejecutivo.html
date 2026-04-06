@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Brochure Comercial - ANTON.IA</title>
+  <style>
+    :root {
+      --bg: #f6f2ea;
+      --paper: rgba(255, 252, 246, 0.9);
+      --ink: #1f2a24;
+      --muted: #5f6c64;
+      --line: rgba(31, 42, 36, 0.12);
+      --brand: #163a33;
+      --brand-soft: #27584d;
+      --accent: #d27b2c;
+      --accent-soft: #f2ddc4;
+      --glow: rgba(210, 123, 44, 0.2);
+      --shadow: 0 20px 55px rgba(22, 58, 51, 0.14);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 16px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Aptos", "Segoe UI", "Trebuchet MS", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(242, 221, 196, 0.9), transparent 34%),
+        radial-gradient(circle at top right, rgba(39, 88, 77, 0.14), transparent 28%),
+        linear-gradient(180deg, #f8f4ee 0%, #f5efe6 32%, #f9f6f1 100%);
+      line-height: 1.5;
+    }
+
+    .page {
+      max-width: 1140px;
+      margin: 0 auto;
+      padding: 34px 22px 56px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border-radius: var(--radius-xl);
+      padding: 34px;
+      background:
+        linear-gradient(135deg, rgba(22, 58, 51, 0.98), rgba(34, 77, 67, 0.96) 58%, rgba(210, 123, 44, 0.94));
+      color: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .hero:before,
+    .hero:after {
+      content: "";
+      position: absolute;
+      border-radius: 999px;
+      pointer-events: none;
+    }
+
+    .hero:before {
+      width: 320px;
+      height: 320px;
+      top: -120px;
+      right: -60px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .hero:after {
+      width: 210px;
+      height: 210px;
+      bottom: -70px;
+      left: -35px;
+      background: rgba(255, 255, 255, 0.07);
+    }
+
+    .hero-grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.9fr);
+      gap: 26px;
+      align-items: stretch;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.08);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 12px;
+      margin-bottom: 20px;
+    }
+
+    .brand-mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      overflow: hidden;
+      flex: 0 0 auto;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .brand-mark img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      font-size: 58px;
+      line-height: 0.95;
+      margin-bottom: 16px;
+      max-width: 720px;
+    }
+
+    .hero p {
+      margin: 0;
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    .lead {
+      font-size: 19px;
+      max-width: 700px;
+    }
+
+    .hero-points {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .pill {
+      padding: 9px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      color: #fff;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(8px);
+    }
+
+    .hero-panel {
+      display: grid;
+      gap: 14px;
+    }
+
+    .glass {
+      padding: 18px;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(10px);
+    }
+
+    .glass h3 {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+
+    .glass strong {
+      display: block;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+      color: rgba(255, 255, 255, 0.78);
+    }
+
+    .mini-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .mini-card {
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+    }
+
+    .mini-card span {
+      display: block;
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      opacity: 0.8;
+      margin-bottom: 8px;
+    }
+
+    .mini-card strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1.15;
+      text-transform: none;
+      letter-spacing: normal;
+      color: #fff;
+      margin: 0;
+    }
+
+    .section {
+      margin-top: 26px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .section-title h2 {
+      font-size: 32px;
+      color: var(--brand);
+    }
+
+    .section-title p {
+      max-width: 560px;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .cards-3,
+    .cards-4,
+    .cards-2 {
+      display: grid;
+      gap: 16px;
+    }
+
+    .cards-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .cards-4 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .cards-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      position: relative;
+      overflow: hidden;
+      padding: 22px;
+      border-radius: var(--radius-lg);
+      background: var(--paper);
+      border: 1px solid var(--line);
+      box-shadow: 0 12px 30px rgba(31, 42, 36, 0.05);
+    }
+
+    .card:before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: linear-gradient(90deg, var(--brand), var(--accent));
+      opacity: 0.92;
+    }
+
+    .card h3 {
+      font-size: 24px;
+      color: var(--brand);
+      margin-bottom: 10px;
+    }
+
+    .card h4 {
+      font-size: 20px;
+      color: var(--brand);
+      margin-bottom: 8px;
+    }
+
+    .card p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .stat {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--brand-soft);
+      background: var(--accent-soft);
+      margin-bottom: 14px;
+    }
+
+    .list {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .list-item {
+      display: grid;
+      grid-template-columns: 26px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .dot {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, var(--brand), var(--accent));
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      box-shadow: 0 10px 18px var(--glow);
+    }
+
+    .dot.alt {
+      background: linear-gradient(135deg, #234e43, #2f7766);
+      box-shadow: 0 10px 18px rgba(39, 88, 77, 0.16);
+    }
+
+    .feature-band {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 16px;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .step {
+      padding: 20px;
+      border-radius: var(--radius-lg);
+      background: linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(252, 247, 239, 0.9));
+      border: 1px solid var(--line);
+      box-shadow: 0 12px 30px rgba(31, 42, 36, 0.05);
+    }
+
+    .step strong {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      margin-bottom: 14px;
+      color: #fff;
+      font-size: 14px;
+      background: linear-gradient(135deg, var(--brand), var(--accent));
+      box-shadow: 0 10px 18px var(--glow);
+    }
+
+    .step h3 {
+      font-size: 20px;
+      color: var(--brand);
+      margin-bottom: 8px;
+    }
+
+    .step p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .quote {
+      padding: 26px;
+      border-radius: var(--radius-xl);
+      color: #fff;
+      background:
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.12), transparent 36%),
+        linear-gradient(135deg, #21483f, #163a33 60%, #102d27);
+      box-shadow: var(--shadow);
+    }
+
+    .quote p {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.3;
+      color: rgba(255, 255, 255, 0.96);
+      font-family: Georgia, "Times New Roman", serif;
+    }
+
+    .quote small {
+      display: block;
+      margin-top: 12px;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .cta {
+      margin-top: 22px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .cta-main,
+    .cta-side {
+      padding: 24px;
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--line);
+      background: rgba(255, 251, 245, 0.88);
+      box-shadow: 0 12px 30px rgba(31, 42, 36, 0.05);
+    }
+
+    .cta-main h2,
+    .cta-side h3 {
+      color: var(--brand);
+      margin-bottom: 10px;
+    }
+
+    .cta-main p,
+    .cta-side p,
+    .cta-side li {
+      color: var(--muted);
+    }
+
+    .cta-badge {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: #f3e4d3;
+      color: var(--brand);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 14px;
+    }
+
+    .cta ul {
+      padding-left: 18px;
+      margin: 12px 0 0;
+    }
+
+    .footnote {
+      margin-top: 16px;
+      text-align: center;
+      font-size: 13px;
+      color: #6c776f;
+    }
+
+    @media (max-width: 1040px) {
+      h1 { font-size: 48px; }
+      .hero-grid,
+      .feature-band,
+      .cta {
+        grid-template-columns: 1fr;
+      }
+      .cards-4 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .timeline {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 760px) {
+      .page {
+        padding: 16px 14px 28px;
+      }
+      .hero {
+        padding: 22px;
+      }
+      h1 {
+        font-size: 38px;
+      }
+      .lead {
+        font-size: 17px;
+      }
+      .section-title {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .cards-3,
+      .cards-4,
+      .cards-2,
+      .mini-grid,
+      .timeline {
+        grid-template-columns: 1fr;
+      }
+      .quote p {
+        font-size: 21px;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .page {
+        max-width: none;
+        padding: 8mm;
+      }
+      .hero,
+      .quote,
+      .card,
+      .step,
+      .cta-main,
+      .cta-side {
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="eyebrow">
+            <span class="brand-mark">
+              <img src="../public/icon.png" alt="ANTON.IA" />
+            </span>
+            Brochure comercial
+          </div>
+          <h1>ANTON.IA</h1>
+          <p class="lead">
+            La app que convierte la prospección comercial en una operación continua,
+            ordenada y medible para generar más reuniones calificadas y abrir nuevas oportunidades de negocio.
+          </p>
+          <div class="hero-points">
+            <span class="pill">Prospección inteligente</span>
+            <span class="pill">Seguimiento automático</span>
+            <span class="pill">Mensajes más relevantes</span>
+            <span class="pill">Pipeline con visibilidad real</span>
+          </div>
+        </div>
+
+        <aside class="hero-panel">
+          <div class="glass">
+            <strong>Qué cambia para el negocio</strong>
+            <h3>Menos fricción. Más conversaciones valiosas.</h3>
+            <p>
+              ANTON.IA ayuda a reducir trabajo manual, acelerar el primer contacto y priorizar
+              mejor a los leads con señales reales de interés.
+            </p>
+          </div>
+
+          <div class="mini-grid">
+            <div class="mini-card">
+              <span>Impacto</span>
+              <strong>Más reuniones con decisores</strong>
+            </div>
+            <div class="mini-card">
+              <span>Velocidad</span>
+              <strong>Menor tiempo entre lead y contacto</strong>
+            </div>
+            <div class="mini-card">
+              <span>Control</span>
+              <strong>Seguimiento claro del pipeline</strong>
+            </div>
+            <div class="mini-card">
+              <span>Escala</span>
+              <strong>Operación comercial 24/7</strong>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Por qué una empresa la contrata</h2>
+        <p>
+          Porque crecer comercialmente no debería depender solo de más horas manuales,
+          sino de un sistema que detecta oportunidades, activa seguimiento y da visibilidad al equipo.
+        </p>
+      </div>
+
+      <div class="cards-3">
+        <article class="card">
+          <div class="stat">Beneficio 01</div>
+          <h3>Más reuniones, no más ruido</h3>
+          <p>
+            Ayuda a enfocar la prospección en cuentas y contactos con mejor fit, para que el esfuerzo comercial
+            vaya donde hay más probabilidad de respuesta y avance.
+          </p>
+        </article>
+
+        <article class="card">
+          <div class="stat">Beneficio 02</div>
+          <h3>Menos tareas repetitivas</h3>
+          <p>
+            Automatiza parte importante del trabajo operativo: búsqueda, enriquecimiento, seguimiento
+            y organización del pipeline, liberando tiempo para vender mejor.
+          </p>
+        </article>
+
+        <article class="card">
+          <div class="stat">Beneficio 03</div>
+          <h3>Más control comercial</h3>
+          <p>
+            Centraliza campañas, respuestas, leads calientes y próximos pasos,
+            para que dirección comercial pueda tomar decisiones con información clara.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Qué hace ANTON.IA en la práctica</h2>
+        <p>
+          Funciona como un asistente comercial que trabaja en segundo plano y mantiene activo el flujo de prospección.
+        </p>
+      </div>
+
+      <div class="timeline">
+        <article class="step">
+          <strong>1</strong>
+          <h3>Detecta</h3>
+          <p>Encuentra cuentas objetivo y contactos según cargo, industria, ubicación y tipo de empresa.</p>
+        </article>
+
+        <article class="step">
+          <strong>2</strong>
+          <h3>Prepara</h3>
+          <p>Completa información clave del lead para mejorar la calidad del primer acercamiento.</p>
+        </article>
+
+        <article class="step">
+          <strong>3</strong>
+          <h3>Activa</h3>
+          <p>Lanza campañas y seguimientos con mensajes más relevantes y consistentes.</p>
+        </article>
+
+        <article class="step">
+          <strong>4</strong>
+          <h3>Prioriza</h3>
+          <p>Ordena respuestas, detecta oportunidades calientes y muestra qué conviene atender primero.</p>
+        </article>
+      </div>
+
+      <div class="feature-band">
+        <article class="card">
+          <h3>Capacidades comerciales clave</h3>
+          <div class="list">
+            <div class="list-item">
+              <div class="dot">A</div>
+              <p>Búsqueda y segmentación de prospectos con foco en perfiles de valor para tu negocio.</p>
+            </div>
+            <div class="list-item">
+              <div class="dot">B</div>
+              <p>Enriquecimiento de contactos para facilitar el acceso a decisores reales.</p>
+            </div>
+            <div class="list-item">
+              <div class="dot">C</div>
+              <p>Campañas y follow-ups que mantienen el contacto sin perder consistencia.</p>
+            </div>
+            <div class="list-item">
+              <div class="dot">D</div>
+              <p>Lectura de señales como aperturas, clics y respuestas para priorizar mejor.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <h3>Ideal para empresas que venden</h3>
+          <div class="list">
+            <div class="list-item">
+              <div class="dot alt">1</div>
+              <p>Servicios B2B</p>
+            </div>
+            <div class="list-item">
+              <div class="dot alt">2</div>
+              <p>Outsourcing y staffing</p>
+            </div>
+            <div class="list-item">
+              <div class="dot alt">3</div>
+              <p>Consultoría y soluciones de alto valor</p>
+            </div>
+            <div class="list-item">
+              <div class="dot alt">4</div>
+              <p>Equipos que necesitan más pipeline sin inflar estructura</p>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <h2>Beneficios comerciales que se notan</h2>
+        <p>
+          ANTON.IA no reemplaza a tu equipo comercial: lo multiplica con más velocidad, más foco y mejor seguimiento.
+        </p>
+      </div>
+
+      <div class="cards-4">
+        <article class="card">
+          <h4>Más productividad</h4>
+          <p>Cada ejecutivo puede dedicar más tiempo a conversaciones reales y menos a tareas operativas.</p>
+        </article>
+        <article class="card">
+          <h4>Más orden</h4>
+          <p>El pipeline deja de depender de planillas dispersas y seguimientos manuales.</p>
+        </article>
+        <article class="card">
+          <h4>Más visibilidad</h4>
+          <p>Se vuelve más fácil entender qué campañas avanzan, qué leads responden y dónde actuar.</p>
+        </article>
+        <article class="card">
+          <h4>Más consistencia</h4>
+          <p>La prospección se sostiene incluso cuando el equipo está ocupado en reuniones o cierres.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="cards-2">
+        <article class="quote">
+          <p>
+            “Si hoy el crecimiento comercial depende demasiado del trabajo manual,
+            ANTON.IA te ayuda a transformar la prospección en una operación escalable.”
+          </p>
+          <small>Enfoque comercial y ejecutivo</small>
+        </article>
+
+        <article class="card">
+          <h3>Resultados que conviene seguir</h3>
+          <div class="list">
+            <div class="list-item">
+              <div class="dot alt">+</div>
+              <p>Reuniones calificadas generadas</p>
+            </div>
+            <div class="list-item">
+              <div class="dot alt">+</div>
+              <p>Tiempo desde lead detectado hasta primer contacto</p>
+            </div>
+            <div class="list-item">
+              <div class="dot alt">+</div>
+              <p>Tasa de respuesta y avance por campaña</p>
+            </div>
+            <div class="list-item">
+              <div class="dot alt">+</div>
+              <p>Conversión del pipeline a propuesta y cierre</p>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="cta">
+      <article class="cta-main">
+        <div class="cta-badge">Mensaje final</div>
+        <h2>ANTON.IA es una herramienta para vender con más ritmo, más foco y más control.</h2>
+        <p>
+          Es una opción especialmente valiosa para empresas que quieren profesionalizar su prospección,
+          abrir más conversaciones de calidad y construir un pipeline más predecible sin volver más pesada su operación.
+        </p>
+      </article>
+
+      <aside class="cta-side">
+        <h3>Entrega comercial sugerida</h3>
+        <ul>
+          <li>Usar este brochure en reuniones de presentación o propuesta.</li>
+          <li>Imprimir en PDF desde el navegador para compartirlo por correo o WhatsApp.</li>
+          <li>Acompañarlo con una demo breve centrada en beneficios y casos de uso.</li>
+        </ul>
+      </aside>
+    </section>
+
+    <div class="footnote">ANTON.IA · Prospección comercial inteligente para crecimiento B2B</div>
+  </main>
+</body>
+</html>

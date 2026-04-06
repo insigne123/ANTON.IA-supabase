@@ -1,0 +1,230 @@
+# apphosting.yaml
+
+build:
+  steps:
+    - name: fetch                
+      uri: ${SOURCE_TARBALL_URL}
+
+    - name: setup
+      entrypoint: bash
+      args: ["-lc", "npm ci --include=dev"]
+
+    - name: build
+      entrypoint: bash
+      args: ["-lc", "npm run build"]
+
+    - name: bundle
+      entrypoint: bash
+      args: ["-lc", "mkdir -p \"${BUILD_DIR}\" && tar --exclude='./.git' --exclude='./.env.local' --exclude='./chrome-extension.pem' --exclude='./antonia-extension-v1.1.zip' --exclude='./*.log' --exclude='./typecheck*.log' --exclude='./widget_error.txt' -cf - . | tar -xf - -C \"${BUILD_DIR}\""]
+
+runConfig:
+  minInstances: 0
+  maxInstances: 20
+  concurrency: 100
+  cpu: 1
+  memoryMiB: 768
+
+env:
+  # === Existing Variables ===
+  - variable: APOLLO_API_KEY
+    secret: APOLLO_API_KEY
+    availability: [RUNTIME]
+
+  - variable: OPENAI_API_KEY
+    secret: OPENAI_API_KEY
+    availability: [RUNTIME]
+
+  - variable: OPENAI_MODEL
+    value: gpt-4o-mini
+    availability: [RUNTIME]
+
+  # === Lead providers (Apollo/PDL trial) ===
+  - variable: LEADS_PROVIDER_DEFAULT
+    value: apollo
+    availability: [RUNTIME]
+
+  - variable: ENRICHMENT_PROVIDER_DEFAULT
+    value: apollo
+    availability: [RUNTIME]
+
+  - variable: PDL_TRIAL_ENABLED
+    value: "false"
+    availability: [RUNTIME]
+
+  - variable: PDL_BASE_URL
+    value: https://api.peopledatalabs.com/v5
+    availability: [RUNTIME]
+
+  - variable: PDL_TIMEOUT_MS
+    value: "30000"
+    availability: [RUNTIME]
+
+  - variable: PDL_SEARCH_PAGE_SIZE
+    value: "100"
+    availability: [RUNTIME]
+
+  - variable: PDL_SEARCH_MAX_PAGES
+    value: "10"
+    availability: [RUNTIME]
+
+  - variable: PDL_MAX_RESULTS
+    value: "200"
+    availability: [RUNTIME]
+
+  - variable: PDL_ENRICH_MIN_LIKELIHOOD
+    value: "2"
+    availability: [RUNTIME]
+
+  - variable: PDL_FALLBACK_TO_APOLLO
+    value: "true"
+    availability: [RUNTIME]
+
+  - variable: LEADS_DISABLE_EXTERNAL_FALLBACK
+    value: "false"
+    availability: [RUNTIME]
+
+  - variable: APIFY_APOLLO_ACTOR_ID
+    value: code_crafter/apollo-io-scraper
+    availability: [RUNTIME]
+
+  - variable: NEXT_PUBLIC_GOOGLE_CLIENT_ID
+    value: 1083965020353-50m4ibu3c1f56qc00c5j128bfv0mlk91.apps.googleusercontent.com
+    availability: [BUILD, RUNTIME]
+
+  - variable: NEXT_PUBLIC_BASE_URL
+    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app
+    availability: [BUILD, RUNTIME]
+
+  - variable: CANONICAL_APP_URL
+    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app
+    availability: [BUILD, RUNTIME]
+
+  - variable: BACKEND_HOSTED_APP_URL
+    value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app
+    availability: [BUILD, RUNTIME]
+
+  - variable: ANTONIA_LEAD_SEARCH_URL
+    value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search
+    availability: [RUNTIME]
+
+  - variable: ENRICHMENT_SERVICE_URL
+    value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/enrich
+    availability: [RUNTIME]
+
+  - variable: ENRICHMENT_SERVICE_SECRET
+    secret: ENRICHMENT_SERVICE_SECRET
+    availability: [RUNTIME]
+
+  - variable: INTERNAL_API_SECRET
+    secret: INTERNAL_API_SECRET
+    availability: [RUNTIME]
+
+  - variable: APOLLO_WEBHOOK_SECRET
+    secret: APOLLO_WEBHOOK_SECRET
+    availability: [RUNTIME]
+
+  - variable: DEBUG_API_ENABLED
+    value: "false"
+    availability: [RUNTIME]
+
+  - variable: NEXT_PUBLIC_AZURE_AD_CLIENT_ID
+    value: 3826e4b9-f46e-48b7-aa7c-f06e11bd9686
+    availability: [BUILD, RUNTIME]
+
+  - variable: NEXT_PUBLIC_AZURE_AD_TENANT_ID
+    value: common
+    availability: [BUILD, RUNTIME]
+
+  - variable: NEXT_PUBLIC_AZURE_AD_REDIRECT_URI
+    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app/outlook
+    availability: [BUILD, RUNTIME]
+
+  - variable: AZURE_AD_CLIENT_SECRET
+    secret: AZURE_AD_CLIENT_SECRET
+    availability: [RUNTIME]
+
+  - variable: GOOGLE_CLIENT_SECRET
+    secret: GOOGLE_CLIENT_SECRET
+    availability: [RUNTIME]
+
+  - variable: NEXT_PUBLIC_SUPABASE_URL
+    value: https://yfdelflsheurzaicwayi.supabase.co
+    availability: [BUILD, RUNTIME]
+
+  - variable: NEXT_PUBLIC_SUPABASE_ANON_KEY
+    value: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlmZGVsZmxzaGV1cnphaWN3YXlpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkxNzQ3NTYsImV4cCI6MjA3NDc1MDc1Nn0.V-1iPr7r-KorFVWPriopLW2aDGT6__6-DFHcNq-D7o4"
+    availability: [BUILD, RUNTIME]
+
+  - variable: SUPABASE_SERVICE_ROLE_KEY
+    secret: SUPABASE_SERVICE_ROLE_KEY
+    availability: [RUNTIME]
+
+  # === Lead Research / Vane (server-only) ===
+  - variable: VANE_BASE_URL
+    value: https://alan-flexible-boards-payments.trycloudflare.com
+    availability: [RUNTIME]
+
+  - variable: VANE_PROVIDER_NAME
+    value: OpenAI
+    availability: [RUNTIME]
+
+  - variable: VANE_CHAT_MODEL_KEY
+    value: gpt-4o-mini
+    availability: [RUNTIME]
+
+  - variable: VANE_EMBEDDING_MODEL_KEY
+    value: text-embedding-3-small
+    availability: [RUNTIME]
+
+  - variable: VANE_AUTH_HEADER_NAME
+    value: x-vane-auth
+    availability: [RUNTIME]
+
+  - variable: VANE_AUTH_HEADER_VALUE
+    secret: VANE_AUTH_HEADER_VALUE
+    availability: [RUNTIME]
+
+  - variable: VANE_TIMEOUT_MS
+    value: "240000"
+    availability: [RUNTIME]
+
+  - variable: ANTONIA_LEAD_RESEARCH_URL
+    value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-research
+    availability: [RUNTIME]
+
+  - variable: N8N_RESEARCH_WEBHOOK_URL
+    value: https://nicogun.app.n8n.cloud/webhook/ANTONIA
+    availability: [RUNTIME]
+
+  - variable: N8N_WEBHOOK_URL
+    value: https://nicogun.app.n8n.cloud/webhook/ANTONIA
+    availability: [RUNTIME]
+
+  - variable: LEAD_RESEARCH_WORKER_SECRET
+    secret: LEAD_RESEARCH_WORKER_SECRET
+    availability: [RUNTIME]
+
+  # === ANTON.IA Agent Variables ===
+  # App URL for internal API calls
+  - variable: NEXT_PUBLIC_APP_URL
+    value: https://studio--leadflowai-3yjcy.us-central1.hosted.app
+    availability: [BUILD, RUNTIME]
+
+  # Firebase Functions integration for ANTON.IA worker
+  - variable: ANTONIA_FIREBASE_TICK_URL
+    value: https://antoniatickhttp-2rxibeopja-uc.a.run.app
+    availability: [RUNTIME]
+
+  - variable: ANTONIA_FIREBASE_TICK_SECRET
+    secret: ANTONIA_TICK_SECRET
+    availability: [RUNTIME]
+
+  # Cron endpoint protection
+  - variable: CRON_SECRET
+    secret: ANTONIA_TICK_SECRET
+    availability: [RUNTIME]
+
+  # Tracking webhook protection (optional but recommended)
+  - variable: TRACKING_WEBHOOK_SECRET
+    secret: TRACKING_WEBHOOK_SECRET
+    availability: [RUNTIME]
