@@ -204,6 +204,10 @@ env:
     value: https://n8n.yago.cl/webhook/ANTONIA
     availability: [RUNTIME]
 
+  - variable: N8N_RESEARCH_TIMEOUT_MS
+    value: "120000"
+    availability: [RUNTIME]
+
   - variable: LEAD_RESEARCH_WORKER_SECRET
     secret: LEAD_RESEARCH_WORKER_SECRET
     availability: [RUNTIME]

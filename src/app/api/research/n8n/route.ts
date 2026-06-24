@@ -50,6 +50,129 @@ function withTimeout<T>(p: Promise<T>, ms = 20000): Promise<T> {
   });
 }
 
+function getWebhookTimeoutMs() {
+  const raw = Number(process.env.N8N_RESEARCH_TIMEOUT_MS || process.env.LEADS_N8N_TIMEOUT_MS || 120000);
+  if (!Number.isFinite(raw)) return 120000;
+  return Math.min(240000, Math.max(10000, Math.trunc(raw)));
+}
+
+function getTextFromMaybeFenced(raw: any) {
+  let s = String(raw || '').trim();
+  if (!s) return '';
+
+  const fence = String.fromCharCode(96).repeat(3);
+  const first = s.indexOf(fence);
+  if (first >= 0) {
+    let after = s.slice(first + fence.length);
+    const nl = after.indexOf('\n');
+    if (nl >= 0) after = after.slice(nl + 1);
+    const second = after.indexOf(fence);
+    s = second >= 0 ? after.slice(0, second) : after;
+  }
+
+  return s.trim();
+}
+
+function parseResearchJson(raw: any) {
+  const strict = extractJsonFromMaybeFenced(raw);
+  if (strict && typeof strict === 'object') return strict;
+
+  const text = getTextFromMaybeFenced(raw);
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+
+  const sliced = text.slice(start).trim();
+  const end = sliced.lastIndexOf('}');
+  if (end > 0) {
+    try {
+      return JSON.parse(sliced.slice(0, end + 1));
+    } catch {
+      // continue with a targeted salvage below
+    }
+  }
+
+  // n8n/OpenAI can occasionally truncate the last optional block. Keep the report body.
+  const optionalTail = sliced.match(/,\s*"nextSteps"\s*:/);
+  if (optionalTail?.index && optionalTail.index > 0) {
+    try {
+      return JSON.parse(`${sliced.slice(0, optionalTail.index)}\n}`);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function getResultObject(result: any) {
+  if (Array.isArray(result)) {
+    const withJson = result.find((item) => item?.json && typeof item.json === 'object')?.json;
+    if (withJson) return withJson;
+    return result.find((item) => item && typeof item === 'object') || {};
+  }
+
+  return result && typeof result === 'object' ? result : {};
+}
+
+function getMessageContentCandidates(result: any) {
+  const candidates: string[] = [];
+  const add = (value: any) => {
+    const text = String(value || '').trim();
+    if (text && !candidates.includes(text)) candidates.push(text);
+  };
+
+  if (typeof result === 'string') add(result);
+  add(result?.message?.content);
+  add(result?.json?.message?.content);
+  add(result?.content);
+  add(result?.json?.content);
+
+  if (Array.isArray(result)) {
+    for (const item of result) {
+      add(item?.message?.content);
+      add(item?.json?.message?.content);
+      add(item?.content);
+      add(item?.json?.content);
+    }
+  }
+
+  return candidates;
+}
+
+function buildLeadRef(canon: LeadPayload) {
+  return String(
+    canon.id ||
+    canon.email ||
+    canon.linkedinUrl ||
+    `${canon.fullName || ''}|${canon.companyName || canon.companyDomain || ''}`
+  ).trim();
+}
+
+function buildReportFromCross(parsed: any, canon: LeadPayload) {
+  const company = parsed?.company || {};
+  return {
+    cross: parsed,
+    company: {
+      name: company.name || canon.companyName || '',
+      domain: company.domain || canon.companyDomain || '',
+    },
+    meta: { leadRef: buildLeadRef(canon) },
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function extractReportsFromMessageContent(result: any, canon: LeadPayload) {
+  for (const content of getMessageContentCandidates(result)) {
+    const parsed = parseResearchJson(content);
+    if (!parsed || typeof parsed !== 'object') continue;
+
+    if (Array.isArray((parsed as any).reports)) return (parsed as any).reports;
+    return [buildReportFromCross(parsed, canon)];
+  }
+
+  return [];
+}
+
 export async function GET(): Promise<Response> {
   const hasUrl = !!(
     process.env.ANTONIA_N8N_WEBHOOK_URL ||
@@ -250,13 +373,14 @@ export async function POST(req: Request): Promise<Response> {
       use_social_context: useSocialContext
     };
 
+    const timeoutMs = getWebhookTimeoutMs();
     n8nRes = await withTimeout(fetch(webhook, {
       method: 'POST',
       headers,
       body: JSON.stringify(forward),
       // Evita colas/caches intermedias
       cache: 'no-store',
-    }), 20000);
+    }), timeoutMs);
   } catch (e: any) {
     console.error('[research:n8n] fetch error:', e?.message || e);
     return json(e?.message === 'timeout' ? 504 : 502, { error: 'n8n unreachable', reason: e?.message || 'fetch_failed' });
@@ -292,40 +416,28 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // Normalizamos campos esperados por el cliente
+  const resultObject = getResultObject(result);
   const out: N8nResponse =
     typeof result === 'string'
       ? { reports: [], skipped: [], text: result }
       : {
-        reports: Array.isArray(result.reports) ? result.reports : [],
-        skipped: Array.isArray(result.skipped) ? result.skipped : [],
-        ...result,
+        reports: Array.isArray(resultObject.reports) ? resultObject.reports : [],
+        skipped: Array.isArray(resultObject.skipped) ? resultObject.skipped : [],
+        ...resultObject,
       };
 
   // --- Fallback: n8n devolvió un mensaje con JSON en message.content ---
   try {
-    if ((!out.reports || out.reports.length === 0) && (result as any)?.message?.content) {
-      const parsed = extractJsonFromMaybeFenced((result as any).message?.content);
-      if (parsed && typeof parsed === 'object') {
-        const leadRef =
-          canon.id ||
-          canon.email ||
-          canon.linkedinUrl ||
-          `${canon.fullName || ''}|${canon.companyName || canon.companyDomain || ''}`;
-
-        const company = (parsed as any).company || {};
-        out.reports = [{
-          cross: parsed,
-          company: {
-            name: company.name || (canon.companyName ?? ''),
-            domain: company.domain || (canon.companyDomain ?? ''),
-          },
-          meta: { leadRef },
-          createdAt: new Date().toISOString(),
-        }];
-      }
+    if (!out.reports || out.reports.length === 0) {
+      out.reports = extractReportsFromMessageContent(result, canon);
     }
   } catch (e) {
     console.warn('[research:n8n] fallback parse failed:', (e as any)?.message);
+  }
+
+  if (!out.reports || out.reports.length === 0) {
+    console.warn('[research:n8n] n8n returned no parseable reports', { userId, resultType: Array.isArray(result) ? 'array' : typeof result });
+    return json(502, { error: 'N8N_RESPONSE_UNPARSEABLE', message: 'n8n no devolvio un reporte interpretable' });
   }
 
   console.info('[research:n8n] OK → n8n aceptó', { userId, useSocialContext, reports: out.reports?.length ?? 0, skipped: out.skipped?.length ?? 0 });
