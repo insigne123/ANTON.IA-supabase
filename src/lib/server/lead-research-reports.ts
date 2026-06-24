@@ -50,7 +50,10 @@ function getCompanyDomain(lead: Partial<ContactedLead> & { companyDomain?: strin
 }
 
 function getScopeKey(userId: string, organizationId?: string | null) {
-  return organizationId || `user:${userId}`;
+  const orgId = String(organizationId || '').trim();
+  if (orgId) return orgId;
+  const normalizedUserId = String(userId || '').trim();
+  return normalizedUserId ? `user:${normalizedUserId}` : '';
 }
 
 function getInternalAppBaseUrl() {
@@ -73,6 +76,8 @@ export async function findCachedLeadResearchReport(input: LeadResearchCacheInput
   try {
     const supabase = getSupabaseAdminClient();
     const scopeKey = getScopeKey(input.userId, input.organizationId);
+    if (!scopeKey) return null;
+
     const leadRef = getLeadRef(input.lead);
     const email = String(input.lead.email || '').trim().toLowerCase();
     const companyDomain = getCompanyDomain(input.lead);
@@ -133,7 +138,7 @@ export async function storeLeadResearchReport(input: LeadResearchCacheInput & { 
     const companyName = String(input.lead.company || input.report.company?.name || '').trim() || null;
     const nowIso = new Date().toISOString();
 
-    if (!leadRef) return;
+    if (!scopeKey || !leadRef) return;
 
     await supabase
       .from('lead_research_reports')

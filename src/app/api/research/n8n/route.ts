@@ -52,6 +52,7 @@ function withTimeout<T>(p: Promise<T>, ms = 20000): Promise<T> {
 
 export async function GET(): Promise<Response> {
   const hasUrl = !!(
+    process.env.ANTONIA_N8N_WEBHOOK_URL ||
     process.env.N8N_RESEARCH_WEBHOOK_URL ||
     process.env.N8N_WEBHOOK_URL
   );
@@ -63,6 +64,7 @@ export async function GET(): Promise<Response> {
 
 export async function POST(req: Request): Promise<Response> {
   const webhook =
+    process.env.ANTONIA_N8N_WEBHOOK_URL ||
     process.env.N8N_RESEARCH_WEBHOOK_URL ||
     process.env.N8N_WEBHOOK_URL; // ← compatibilidad con tu .env compartido
   if (!webhook) {
@@ -230,6 +232,9 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
+  const forwardOrganizationId = String(body?.organization_id || organizationId || '').trim() || null;
+  const forwardScopeKey = String(body?.scope_key || body?.scopeKey || forwardOrganizationId || `user:${userId}`).trim();
+
   let n8nRes: Response;
   try {
     // Reenviamos el body original pero garantizando campos canónicos en raíz
@@ -238,6 +243,9 @@ export async function POST(req: Request): Promise<Response> {
     const forward = {
       ...body,
       ...canon,
+      user_id: body?.user_id || userId,
+      organization_id: forwardOrganizationId,
+      scope_key: forwardScopeKey,
       userContext,
       use_social_context: useSocialContext
     };
