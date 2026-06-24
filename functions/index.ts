@@ -2155,7 +2155,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
             };
 
             // 🚀 Call N8N directly (URL configurable via env)
-            const N8N_WEBHOOK_URL = process.env.ANTONIA_N8N_WEBHOOK_URL || process.env.N8N_RESEARCH_WEBHOOK_URL || process.env.N8N_WEBHOOK_URL || "https://n8n.yago.cl/webhook/ANTONIA2.0";
+            const N8N_WEBHOOK_URL = process.env.ANTONIA_N8N_WEBHOOK_URL || process.env.N8N_RESEARCH_WEBHOOK_URL || process.env.N8N_WEBHOOK_URL || "https://n8n.yago.cl/webhook/ANTONIA";
 
             const response = await fetch(N8N_WEBHOOK_URL, {
                 method: 'POST',
