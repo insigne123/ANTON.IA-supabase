@@ -124,6 +124,7 @@ export default function EnrichedLeadsClient() {
   const [reportLead, setReportLead] = useState<EnrichedLead | null>(null);
 
   const [seqRunning, setSeqRunning] = useState(false);
+  const seqRunningRef = useRef(false);
   const [seqDone, setSeqDone] = useState(0);
   const [seqTotal, setSeqTotal] = useState(0);
   const [researchUi, setResearchUi] = useState<{
@@ -835,10 +836,15 @@ export default function EnrichedLeadsClient() {
   }
 
   async function investigateOneByOne() {
-    if (seqRunning) return;
+    if (seqRunning || seqRunningRef.current) return;
+    seqRunningRef.current = true;
+
     const selectedLeadsForResearch = Object.keys(sel).filter(id => sel[id]);
     const selected = enriched.filter(e => selectedLeadsForResearch.includes(e.id));
-    if (selected.length === 0) return;
+    if (selected.length === 0) {
+      seqRunningRef.current = false;
+      return;
+    }
 
     // Preflight: verifica que el proxy al motor de research este disponible
     try {
@@ -849,15 +855,18 @@ export default function EnrichedLeadsClient() {
           title: 'Backend sin lead research configurado',
           description: 'Configura el webhook de n8n para investigacion y vuelve a publicar.',
         });
+        seqRunningRef.current = false;
         return;
       }
     } catch { /* ignoramos si falla el GET, el POST igual reportará */ }
 
     if (!Quota.canUseClientQuota('research')) {
       toast({ variant: 'destructive', title: 'Límite diario alcanzado', description: `Has llegado al límite de investigaciones por hoy.` });
+      seqRunningRef.current = false;
       return;
     }
 
+    let failedCount = 0;
     setSeqRunning(true);
     setSeqDone(0);
     setSeqTotal(selected.length);
@@ -883,7 +892,7 @@ export default function EnrichedLeadsClient() {
         }
 
         let lastErr: any = null;
-        for (let attempt = 1; attempt <= 2; attempt++) {
+        for (let attempt = 1; attempt <= 1; attempt++) {
           try {
             await runOneInvestigation(e, userId, idx + 1, selected.length);
             lastErr = null;
@@ -898,6 +907,7 @@ export default function EnrichedLeadsClient() {
           }
         }
         if (lastErr) {
+          failedCount += 1;
           console.error(`Investigación falló para ${e.companyName}:`, lastErr?.message);
           setResearchUi(prev => ({
             ...prev,
@@ -917,6 +927,7 @@ export default function EnrichedLeadsClient() {
         await sleep(1200);
       }
     } finally {
+      seqRunningRef.current = false;
       setSeqRunning(false);
       setResearchUi(prev => ({ ...prev, status: prev.status === 'failed' ? 'failed' : 'idle' }));
       setResearchPulseMs(0);
@@ -924,7 +935,15 @@ export default function EnrichedLeadsClient() {
       organizationService.getCredits().then(res => {
         if (res) setSocialCredits(res.credits);
       });
-      toast({ title: 'Investigación completa', description: `Procesados ${selected.length} leads con n8n.` });
+      if (failedCount > 0) {
+        toast({
+          variant: 'destructive',
+          title: 'Investigación incompleta',
+          description: `${selected.length - failedCount} procesados, ${failedCount} con error.`,
+        });
+      } else {
+        toast({ title: 'Investigación completa', description: `Procesados ${selected.length} leads con n8n.` });
+      }
     }
   }
   function clearInvestigationFor(lead: EnrichedLead) {

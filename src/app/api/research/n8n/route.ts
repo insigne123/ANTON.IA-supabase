@@ -91,17 +91,65 @@ function parseResearchJson(raw: any) {
     }
   }
 
-  // n8n/OpenAI can occasionally truncate the last optional block. Keep the report body.
-  const optionalTail = sliced.match(/,\s*"nextSteps"\s*:/);
-  if (optionalTail?.index && optionalTail.index > 0) {
-    try {
-      return JSON.parse(`${sliced.slice(0, optionalTail.index)}\n}`);
-    } catch {
-      return null;
+  // n8n/OpenAI can occasionally truncate optional tail blocks. Keep the report body.
+  const optionalTailKeys = ['nextSteps', 'confidence', 'contradictions', 'sources'];
+  for (const key of optionalTailKeys) {
+    const optionalTail = sliced.match(new RegExp(`,\\s*"${key}"\\s*:`));
+    if (optionalTail?.index && optionalTail.index > 0) {
+      try {
+        return JSON.parse(`${sliced.slice(0, optionalTail.index)}\n}`);
+      } catch {
+        // Try the next optional tail key.
+      }
     }
   }
 
   return null;
+}
+
+function extractCitationSources(result: any) {
+  const sources: Array<{ title?: string; url: string }> = [];
+  const addAnnotations = (annotations: any) => {
+    for (const annotation of Array.isArray(annotations) ? annotations : []) {
+      const citation = annotation?.url_citation;
+      const url = String(citation?.url || '').trim();
+      if (!url) continue;
+
+      const exists = sources.some((source) => source.url.toLowerCase() === url.toLowerCase());
+      if (!exists) sources.push({ title: citation?.title || undefined, url });
+    }
+  };
+
+  addAnnotations(result?.message?.annotations);
+  addAnnotations(result?.annotations);
+  addAnnotations(result?.json?.message?.annotations);
+  addAnnotations(result?.json?.annotations);
+
+  if (Array.isArray(result)) {
+    for (const item of result) {
+      addAnnotations(item?.message?.annotations);
+      addAnnotations(item?.annotations);
+      addAnnotations(item?.json?.message?.annotations);
+      addAnnotations(item?.json?.annotations);
+    }
+  }
+
+  return sources;
+}
+
+function mergeSources(value: any, fallbackSources: Array<{ title?: string; url: string }>) {
+  const sources = Array.isArray(value) ? value : [];
+  const merged: Array<{ title?: string; url: string }> = [];
+
+  for (const source of [...sources, ...fallbackSources]) {
+    const url = String(source?.url || '').trim();
+    if (!url) continue;
+
+    const exists = merged.some((item) => item.url.toLowerCase() === url.toLowerCase());
+    if (!exists) merged.push({ title: source?.title || source?.name || undefined, url });
+  }
+
+  return merged;
 }
 
 function getResultObject(result: any) {
@@ -148,10 +196,15 @@ function buildLeadRef(canon: LeadPayload) {
   ).trim();
 }
 
-function buildReportFromCross(parsed: any, canon: LeadPayload) {
+function buildReportFromCross(parsed: any, canon: LeadPayload, fallbackSources: Array<{ title?: string; url: string }> = []) {
   const company = parsed?.company || {};
+  const cross = {
+    ...parsed,
+    sources: mergeSources(parsed?.sources, fallbackSources),
+  };
+
   return {
-    cross: parsed,
+    cross,
     company: {
       name: company.name || canon.companyName || '',
       domain: company.domain || canon.companyDomain || '',
@@ -162,12 +215,13 @@ function buildReportFromCross(parsed: any, canon: LeadPayload) {
 }
 
 function extractReportsFromMessageContent(result: any, canon: LeadPayload) {
+  const fallbackSources = extractCitationSources(result);
   for (const content of getMessageContentCandidates(result)) {
     const parsed = parseResearchJson(content);
     if (!parsed || typeof parsed !== 'object') continue;
 
     if (Array.isArray((parsed as any).reports)) return (parsed as any).reports;
-    return [buildReportFromCross(parsed, canon)];
+    return [buildReportFromCross(parsed, canon, fallbackSources)];
   }
 
   return [];
