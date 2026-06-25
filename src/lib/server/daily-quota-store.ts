@@ -31,6 +31,13 @@ export type DailyQuotaResult = {
   resetAtISO: string;
 };
 
+export type EffectiveDailyQuotaLimits = {
+  leadSearch: number;
+  enrich: number;
+  research: number;
+  contact: number;
+};
+
 // Map 'resource' string to database column name
 const RESOURCE_TO_COLUMN: Record<string, string> = {
   'leadSearch': 'leads_searched',
@@ -59,6 +66,11 @@ function todayKeyUTC(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function positiveInt(value: any, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback;
+}
+
 function nextDayStartISOUTC(): string {
   const now = new Date();
   const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
@@ -80,6 +92,35 @@ async function resolveOrganizationIdForQuota(userId: string, organizationId?: st
   const resolvedOrgId = (data as { organization_id?: string } | null)?.organization_id;
   if (!resolvedOrgId) throw new Error(`User ${userId} has no organization for quota`);
   return resolvedOrgId;
+}
+
+async function resolveMissionQuotaDefaults(organizationId: string): Promise<EffectiveDailyQuotaLimits> {
+  try {
+    const { data, error } = await getSupabaseAdmin()
+      .from('antonia_missions')
+      .select('daily_search_limit, daily_enrich_limit, daily_investigate_limit, daily_contact_limit')
+      .eq('organization_id', organizationId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    return {
+      leadSearch: positiveInt((data as any)?.daily_search_limit, 3),
+      enrich: positiveInt((data as any)?.daily_enrich_limit, 10),
+      research: positiveInt((data as any)?.daily_investigate_limit, 5),
+      contact: positiveInt((data as any)?.daily_contact_limit, 3),
+    };
+  } catch {
+    return {
+      leadSearch: 3,
+      enrich: 10,
+      research: 5,
+      contact: 3,
+    };
+  }
 }
 
 type ContactQuotaContext = {
@@ -150,6 +191,32 @@ async function resolveUserScopedQuotaContext(params: { userId: string; fallbackL
 
 async function resolveContactQuotaContext(params: { userId: string; fallbackLimit: number }) {
   return resolveUserScopedQuotaContext({ ...params, resource: 'contact' });
+}
+
+export async function getEffectiveDailyQuotaLimits(params: { userId: string; organizationId?: string }): Promise<EffectiveDailyQuotaLimits> {
+  const organizationId = await resolveOrganizationIdForQuota(params.userId, params.organizationId);
+  const missionDefaults = await resolveMissionQuotaDefaults(organizationId);
+  const enrichQuota = await resolveUserScopedQuotaContext({
+    userId: params.userId,
+    fallbackLimit: missionDefaults.enrich,
+    resource: 'enrich',
+  });
+  const researchQuota = await resolveUserScopedQuotaContext({
+    userId: params.userId,
+    fallbackLimit: missionDefaults.research,
+    resource: 'investigate',
+  });
+  const contactQuota = await resolveContactQuotaContext({
+    userId: params.userId,
+    fallbackLimit: missionDefaults.contact,
+  });
+
+  return {
+    leadSearch: missionDefaults.leadSearch,
+    enrich: enrichQuota.limit,
+    research: researchQuota.limit,
+    contact: contactQuota.limit,
+  };
 }
 
 async function countContactsToday(params: { userId: string; organizationId: string; dayKey: string; scope: ContactQuotaContext['scope'] }) {

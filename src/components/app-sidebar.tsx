@@ -19,7 +19,7 @@ import {
   SidebarTrigger
 } from '@/components/ui/sidebar';
 import {
-  User, Search, Send, Share2, Briefcase, Settings, Table as TableIcon, Users, MailCheck, Mail, LayoutDashboard, Building2, LogOut, Ban, Shield, LayoutGrid, Bot
+  User, Search, Send, Share2, Briefcase, Settings, Table as TableIcon, Users, MailCheck, Mail, LayoutDashboard, Building2, LogOut, Ban, Shield, LayoutGrid, Bot, Sparkles
 } from 'lucide-react';
 import Logo from './logo';
 import { useAuth } from '@/context/AuthContext';
@@ -33,6 +33,7 @@ const navSections = [
     label: 'Centro de mando',
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+      { href: '/suplia', icon: Sparkles, label: 'SUPL.IA' },
       { href: '/antonia', icon: Bot, label: 'Agente ANTON.IA' },
       { href: '/profile', icon: User, label: 'Mi Perfil de Empresa' },
     ],
