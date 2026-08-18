@@ -5,9 +5,77 @@ type StructuredOptions<T extends z.ZodTypeAny> = {
   schema: T;
   temperature?: number;
   openAiModel?: string;
+  openAiModels?: string[];
+};
+
+type StructuredProvider = 'openai' | 'glm';
+
+type StructuredProviderConfig = {
+  provider: StructuredProvider;
+  displayName: string;
+  apiKey: string;
+  baseUrl: string;
+  defaultModel: string;
+};
+
+export type StructuredTelemetry = {
+  modelName: string;
+  usage?: Record<string, unknown> | null;
+  durationMs: number;
+};
+
+export type StructuredResult<T extends z.ZodTypeAny> = {
+  data: z.infer<T>;
+  telemetry: StructuredTelemetry;
 };
 
 const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const DEFAULT_GLM_MODEL = process.env.GLM_MODEL || 'glm-5.2';
+const DEFAULT_GLM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
+
+function env(name: string) {
+  return String(process.env[name] || '').trim();
+}
+
+function getStructuredProvider(): StructuredProvider {
+  const provider = (env('SUPLIA_AI_PROVIDER') || env('AI_PROVIDER')).toLowerCase();
+  if (provider === 'glm' || provider === 'zhipu' || provider === 'bigmodel' || provider === 'zai' || provider === 'z.ai') {
+    return 'glm';
+  }
+  return 'openai';
+}
+
+function normalizeBaseUrl(baseUrl: string) {
+  return String(baseUrl || '').trim().replace(/\/+$/g, '');
+}
+
+function chatCompletionsUrl(baseUrl: string) {
+  const normalized = normalizeBaseUrl(baseUrl);
+  return normalized.endsWith('/chat/completions') ? normalized : `${normalized}/chat/completions`;
+}
+
+function getStructuredProviderConfig(): StructuredProviderConfig {
+  const provider = getStructuredProvider();
+
+  if (provider === 'glm') {
+    return {
+      provider,
+      displayName: 'GLM',
+      apiKey: env('GLM_API_KEY') || env('ZHIPU_API_KEY') || env('BIGMODEL_API_KEY'),
+      baseUrl: env('GLM_BASE_URL') || env('ZHIPU_BASE_URL') || env('BIGMODEL_BASE_URL') || DEFAULT_GLM_BASE_URL,
+      defaultModel: env('SUPLIA_GLM_MODEL') || env('GLM_MODEL') || DEFAULT_GLM_MODEL,
+    };
+  }
+
+  return {
+    provider,
+    displayName: 'OpenAI',
+    apiKey: env('OPENAI_API_KEY'),
+    baseUrl: env('OPENAI_BASE_URL') || DEFAULT_OPENAI_BASE_URL,
+    defaultModel: env('OPENAI_MODEL') || DEFAULT_OPENAI_MODEL,
+  };
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -72,17 +140,18 @@ function parseJsonFromModelText(raw: string): unknown {
   }
 }
 
-async function tryOpenAI<T extends z.ZodTypeAny>(
+async function tryChatCompletions<T extends z.ZodTypeAny>(
   opts: StructuredOptions<T>,
-  apiKey: string
-): Promise<z.infer<T>> {
-  const model = opts.openAiModel || DEFAULT_OPENAI_MODEL;
+  config: StructuredProviderConfig
+): Promise<StructuredResult<T>> {
+  const model = opts.openAiModel || config.defaultModel;
   const temperature = opts.temperature ?? 0.3;
+  const startedAt = Date.now();
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetch(chatCompletionsUrl(config.baseUrl), {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${apiKey}`,
+      'Authorization': `Bearer ${config.apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -105,23 +174,54 @@ async function tryOpenAI<T extends z.ZodTypeAny>(
 
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
-    throw new Error(`OPENAI_HTTP_${res.status}:${txt.slice(0, 400)}`);
+    throw new Error(`${config.displayName.toUpperCase()}_HTTP_${res.status}:${txt.slice(0, 400)}`);
   }
 
   const payload = await res.json();
   const content = normalizeContent(payload?.choices?.[0]?.message?.content);
   const parsed = parseJsonFromModelText(content);
-  return opts.schema.parse(parsed);
+  return {
+    data: opts.schema.parse(parsed),
+    telemetry: {
+      modelName: model,
+      usage: payload?.usage || null,
+      durationMs: Date.now() - startedAt,
+    },
+  };
 }
 
 export async function generateStructured<T extends z.ZodTypeAny>(
   opts: StructuredOptions<T>
 ): Promise<z.infer<T>> {
-  const openaiKey = String(process.env.OPENAI_API_KEY || '').trim();
+  const result = await generateStructuredWithTelemetry(opts);
+  return result.data;
+}
 
-  if (!openaiKey) {
-    throw new Error('Missing AI provider credentials. Set OPENAI_API_KEY to use OpenAI.');
+export async function generateStructuredWithTelemetry<T extends z.ZodTypeAny>(
+  opts: StructuredOptions<T>
+): Promise<StructuredResult<T>> {
+  const config = getStructuredProviderConfig();
+
+  if (!config.apiKey) {
+    const keyName = config.provider === 'glm' ? 'GLM_API_KEY' : 'OPENAI_API_KEY';
+    throw new Error(`Missing AI provider credentials. Set ${keyName} to use ${config.displayName}.`);
   }
 
-  return withRetries(() => tryOpenAI(opts, openaiKey), 3);
+  const models = Array.from(new Set([
+    ...(opts.openAiModels || []),
+    opts.openAiModel,
+    config.defaultModel,
+  ].map((model) => String(model || '').trim()).filter(Boolean)));
+
+  let lastError: any;
+  for (const model of models) {
+    try {
+      return await withRetries(() => tryChatCompletions({ ...opts, openAiModel: model }, config), 3);
+    } catch (error) {
+      lastError = error;
+      console.warn(`[${config.displayName}] Structured generation failed with ${model}:`, error);
+    }
+  }
+
+  throw lastError;
 }

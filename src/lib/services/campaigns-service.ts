@@ -1,9 +1,8 @@
 import { supabase } from '@/lib/supabase';
-import { contactedLeadsStorage } from './contacted-leads-service';
 import { organizationService } from './organization-service';
-import { activityLogService } from './activity-log-service';
 import type { CampaignSettings } from '@/lib/campaign-settings';
 import { inferCampaignType, normalizeCampaignSettings, type CampaignRunStatus, type CampaignType } from '@/lib/campaign-settings';
+import { resolveNewCampaignStatus } from '@/lib/campaign-qa';
 
 // Constants for table names
 const TABLE_CAMPAIGNS = 'campaigns';
@@ -98,10 +97,8 @@ export const campaignsStorage = {
 
             const { data: campaigns, error: errC } = await query;
 
-            if (errC || !campaigns) {
-                console.error('Error fetching campaigns:', errC);
-                return [];
-            }
+            if (errC) throw errC;
+            if (!campaigns) return [];
 
             // Fetch steps
             const campaignIds = campaigns.map(c => c.id);
@@ -114,25 +111,24 @@ export const campaignsStorage = {
                     .in('campaign_id', campaignIds)
                     .order('order_index', { ascending: true });
 
-                if (!errS && steps) {
-                    steps.forEach((s: any) => {
-                        if (!stepsByCampaign[s.campaign_id]) stepsByCampaign[s.campaign_id] = [];
-                        stepsByCampaign[s.campaign_id].push(s);
-                    });
-                }
+                if (errS) throw errS;
+                (steps || []).forEach((s: any) => {
+                    if (!stepsByCampaign[s.campaign_id]) stepsByCampaign[s.campaign_id] = [];
+                    stepsByCampaign[s.campaign_id].push(s);
+                });
             }
 
             return campaigns.map(c => mapRowToCampaign(c, stepsByCampaign[c.id] || []));
         } catch (err) {
             console.error('Unexpected error fetching campaigns:', err);
-            return [];
+            throw new Error('No se pudieron cargar las campañas.', { cause: err });
         }
     },
 
     async add(input: Partial<Campaign>): Promise<Campaign | null> {
         try {
             const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return null;
+            if (!user) throw new Error('Debes iniciar sesión para guardar la campaña.');
 
             const orgId = await organizationService.getCurrentOrganizationId();
 
@@ -144,7 +140,8 @@ export const campaignsStorage = {
                     organization_id: orgId,
                     campaign_type: input.campaignType || inferCampaignType({ settings: input.settings }),
                     name: input.name,
-                    status: input.isPaused ? 'paused' : 'active',
+                    // Safe by default: creating a campaign never activates delivery implicitly.
+                    status: resolveNewCampaignStatus(),
                     excluded_lead_ids: input.excludedLeadIds || [],
                     settings: input.settings || {},
                     sent_records: input.sentRecords || {}
@@ -153,8 +150,7 @@ export const campaignsStorage = {
                 .single();
 
             if (campError || !campData) {
-                console.error('Error adding campaign:', campError);
-                return null;
+                throw campError || new Error('La campaña no fue creada.');
             }
 
             // 2. Insert Steps
@@ -175,14 +171,19 @@ export const campaignsStorage = {
                     .insert(stepsPayload);
 
                 if (stepsError) {
-                    console.error('Error adding steps:', stepsError);
+                    // Avoid leaving a campaign that looks saved but has no sequence.
+                    await supabase.from(TABLE_CAMPAIGNS).delete().eq('id', campData.id);
+                    throw stepsError;
                 }
             }
 
-            return await this.getById(campData.id);
+            const created = await this.getById(campData.id);
+            if (!created) throw new Error('No se pudo confirmar la campaña guardada.');
+            return created;
         } catch (err) {
             console.error('Error in add campaign:', err);
-            return null;
+            if (err instanceof Error) throw err;
+            throw new Error('No se pudo guardar la campaña.', { cause: err });
         }
     },
 
@@ -196,17 +197,21 @@ export const campaignsStorage = {
             if (patch.settings !== undefined) updateData.settings = patch.settings;
             if (patch.sentRecords !== undefined) updateData.sent_records = patch.sentRecords;
 
-            const { error } = await supabase
+            const { data: updatedCampaign, error } = await supabase
                 .from(TABLE_CAMPAIGNS)
                 .update(updateData)
-                .eq('id', id);
+                .eq('id', id)
+                .select('id')
+                .single();
 
             if (error) throw error;
+            if (!updatedCampaign) throw new Error('La campaña no existe o no se pudo actualizar.');
 
             // If steps are provided, replace them
             if (patch.steps) {
                 // Delete old steps
-                await supabase.from(TABLE_STEPS).delete().eq('campaign_id', id);
+                const { error: deleteStepsError } = await supabase.from(TABLE_STEPS).delete().eq('campaign_id', id);
+                if (deleteStepsError) throw deleteStepsError;
 
                 // Insert new steps
                 const stepsPayload = patch.steps.map((s, idx) => ({
@@ -219,13 +224,19 @@ export const campaignsStorage = {
                     attachments: s.attachments || [],
                     variant_b: s.variantB || null
                 }));
-                await supabase.from(TABLE_STEPS).insert(stepsPayload);
+                if (stepsPayload.length > 0) {
+                    const { error: insertStepsError } = await supabase.from(TABLE_STEPS).insert(stepsPayload);
+                    if (insertStepsError) throw insertStepsError;
+                }
             }
 
-            return this.getById(id);
+            const updated = await this.getById(id);
+            if (!updated) throw new Error('No se pudo confirmar la campaña actualizada.');
+            return updated;
         } catch (e) {
             console.error("Error update", e);
-            return null;
+            if (e instanceof Error) throw e;
+            throw new Error('No se pudo actualizar la campaña.', { cause: e });
         }
     },
 
@@ -236,7 +247,11 @@ export const campaignsStorage = {
 
     async remove(id: string): Promise<number> {
         const { error } = await supabase.from(TABLE_CAMPAIGNS).delete().eq('id', id);
-        return error ? 0 : 1;
+        if (error) {
+            console.error('Error removing campaign:', error);
+            throw new Error('No se pudo eliminar la campaña.', { cause: error });
+        }
+        return 1;
     },
 
     async togglePause(id: string, paused: boolean): Promise<Campaign | null> {

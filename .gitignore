@@ -1,5 +1,7 @@
 .env*
 !.env.example
+.playwright-mcp/
+suplia-claude-*.png
 service-account.json
 *.secret.json
 
@@ -7,13 +9,17 @@ service-account.json
 .firebase/
 functions/.webpack/
 .next/
+.next-build/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
 # Artefactos
 *.log
+*.resolved
 .DS_Store
 node_modules
+firepit-log.txt
+scripts/*report.json
 
 # Local backup artifacts
 .deploy_safe/

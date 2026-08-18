@@ -2,39 +2,39 @@ import Link from 'next/link';
 import { ArrowLeft, Shield } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { legalConfig } from '@/lib/legal-config';
 
 export default function PrivacyPolicyPage() {
   const contactEmail = legalConfig.privacyContactEmail;
 
   return (
-    <div className="min-h-screen bg-background px-4 py-10 md:px-10">
+    <main className="min-h-screen bg-background px-4 py-10 md:px-10">
       <div className="mx-auto max-w-4xl">
         <div className="mb-6 flex flex-wrap items-center gap-3">
-          <Link href="/login">
-            <Button variant="ghost" className="gap-2">
+          <Button asChild variant="ghost" className="gap-2">
+            <Link href="/login">
               <ArrowLeft className="h-4 w-4" />
               Volver a acceso
-            </Button>
-          </Link>
-          <Link href="/privacy/request">
-            <Button variant="secondary" className="gap-2">
+            </Link>
+          </Button>
+          <Button asChild variant="secondary" className="gap-2">
+            <Link href="/privacy/request">
               <Shield className="h-4 w-4" />
               Solicitar derechos
-            </Button>
-          </Link>
-          <Link href="/privacy/extension">
-            <Button variant="outline" className="gap-2">
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="gap-2">
+            <Link href="/privacy/extension">
               <Shield className="h-4 w-4" />
               Ver politica de la extension
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-3xl font-bold">Politica de Privacidad - Plataforma {legalConfig.productName}</CardTitle>
+            <h1 className="text-3xl font-bold">Politica de Privacidad - Plataforma {legalConfig.productName}</h1>
             <p className="text-muted-foreground">Ultima actualizacion: {legalConfig.lastUpdatedLabel}</p>
           </CardHeader>
           <CardContent className="prose max-w-none space-y-5 dark:prose-invert">
@@ -157,6 +157,6 @@ export default function PrivacyPolicyPage() {
           &copy; {new Date().getFullYear()} {legalConfig.productName}. Todos los derechos reservados.
         </div>
       </div>
-    </div>
+    </main>
   );
 }

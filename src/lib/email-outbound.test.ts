@@ -47,3 +47,42 @@ test('validateOutboundEmail requires recipient subject body and unsubscribe when
   assert.equal(result.ok, true);
   assert.equal(result.errors.length, 0);
 });
+
+test('validateOutboundEmail blocks unresolved placeholders', () => {
+  const result = validateOutboundEmail({
+    to: 'lead@example.com',
+    subject: 'Hola [Nombre del Lead]',
+    text: 'Mi nombre es [Tu Nombre]',
+    requireUnsubscribe: true,
+    unsubscribeUrl: 'https://app.example.com/unsubscribe?x=1',
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(' '), /unresolved placeholders/i);
+});
+
+test('validateOutboundEmail blocks null-like content', () => {
+  const result = validateOutboundEmail({
+    to: 'lead@example.com',
+    subject: 'null',
+    text: 'undefined',
+    requireUnsubscribe: true,
+    unsubscribeUrl: 'https://app.example.com/unsubscribe?x=1',
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(' '), /missing email subject|missing email content/i);
+});
+
+test('validateOutboundEmail blocks empty html wrappers', () => {
+  const result = validateOutboundEmail({
+    to: 'lead@example.com',
+    subject: 'Hola',
+    html: '<div><br></div>',
+    requireUnsubscribe: true,
+    unsubscribeUrl: 'https://app.example.com/unsubscribe?x=1',
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(' '), /missing email content/i);
+});

@@ -11,7 +11,6 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { sendEmail } from '@/lib/outlook-email-service';
-import { getCompanyProfile } from '@/lib/data';
 import type { EnrichedLead, EnrichedOppLead, StyleProfile } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
@@ -28,6 +27,16 @@ import { getFirstNameSafe } from '@/lib/template';
 import { sendGmailEmail } from '@/lib/gmail-email-service';
 import { styleProfilesStorage } from '@/lib/style-profiles-storage';
 import { restyleDraftWithProfile } from '@/lib/email-style-restyle';
+import { profileService, type Profile } from '@/lib/services/profile-service';
+import { buildEffectiveCompanyProfile } from '@/lib/signature-placeholders';
+import { ContactabilityStatusCard } from '@/components/commercial/ContactabilityStatusCard';
+import { CampaignQaPanel } from '@/components/commercial/CampaignQaPanel';
+import { useContactability } from '@/hooks/use-contactability';
+import { assessCampaignQa } from '@/lib/campaign-qa';
+import { resolveManualEmailOperation, type ManualEmailOperation } from '@/lib/manual-send-idempotency';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Switch } from '@/components/ui/switch';
+import { ArrowLeft, ChevronDown, FileText, Loader2, RefreshCw, SendHorizontal, Settings2 } from 'lucide-react';
 
 type AnyLead = EnrichedLead | EnrichedOppLead | any;
 
@@ -60,6 +69,8 @@ function ComposeInner() {
   const [draftSource, setDraftSource] = useState<'investigation' | 'style'>('investigation');
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
   const [selectedStyleName, setSelectedStyleName] = useState<string>('');
+  const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
+  const [sendOperation, setSendOperation] = useState<ManualEmailOperation | null>(null);
 
   function readComposeBuffer(leadId: string): AnyLead | null {
     try {
@@ -136,9 +147,30 @@ function ComposeInner() {
     setSelectedStyleName(prev => prev || (list[0]?.name || ''));
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadCurrentProfile() {
+      try {
+        const profile = await profileService.getCurrentProfile();
+        if (!active) return;
+        setCurrentProfile(profile);
+      } catch (error) {
+        if (!active) return;
+        console.error('No se pudo cargar el perfil actual para compose', error);
+        setCurrentProfile(null);
+      }
+    }
+
+    loadCurrentProfile();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const buildBaseDraftForLead = useCallback((leadObj: AnyLead, opts?: { forceRegenerate?: boolean }) => {
-    const company = getCompanyProfile() || {};
-    const sender = buildSenderInfo();
+    const company = buildEffectiveCompanyProfile(currentProfile);
+    const sender = buildSenderInfo(currentProfile);
     const leadData = {
       firstName: (leadObj?.fullName || '').split(' ')[0] || '',
       name: leadObj?.fullName || '',
@@ -191,7 +223,7 @@ function ComposeInner() {
       leadData,
       company,
     };
-  }, [sp]);
+  }, [currentProfile, sp]);
 
   const buildDraftForLead = useCallback(async (leadObj: AnyLead, opts?: { forceRegenerate?: boolean }) => {
     const base = buildBaseDraftForLead(leadObj, opts);
@@ -231,6 +263,8 @@ function ComposeInner() {
   const [usePixel, setUsePixel] = useState(true);
   const [useReadReceipt, setUseReadReceipt] = useState(false);
   const [useLinkTracking, setUseLinkTracking] = useState(false);
+  const [sendProvider, setSendProvider] = useState<'outlook' | 'gmail'>('outlook');
+  const [showDeliveryOptions, setShowDeliveryOptions] = useState(false);
 
   useEffect(() => {
     if (!lead) return;
@@ -246,16 +280,38 @@ function ComposeInner() {
     return () => { cancelled = true; };
   }, [lead, buildDraftForLead, toast]);
 
-  // Helper to inject link tracking
-  function rewriteLinksForTracking(html: string, trackingId: string): string {
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    // Unify regex with the robust one from EmailTestPage
-    return html.replace(/href=(["'])(http[^"']+)\1/gi, (match: string, quote: string, url: string) => {
-      if (url.includes('/api/tracking/click')) return match;
-      const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
-      return `href=${quote}${trackingUrl}${quote}`;
-    });
-  }
+  const { email: composeEmail } = lead ? extractPrimaryEmail(lead) : { email: '' };
+  const contactability = useContactability(composeEmail);
+  const campaignQa = assessCampaignQa({
+    email: composeEmail,
+    subject,
+    body,
+    usePixel,
+    useLinkTracking,
+    useReadReceipt,
+    contactability: contactability.result,
+    contactabilityLoading: Boolean(composeEmail) && contactability.loading,
+    contactabilityError: contactability.error,
+  });
+  const campaignQaBlocksSend = campaignQa.status === 'blocked';
+  const contactabilityChecking = Boolean(composeEmail) && contactability.loading;
+
+  const canContinueWithContact = () => {
+    if (contactabilityChecking) {
+      toast({ title: 'Verificando contacto', description: 'Espera unos segundos mientras revisamos si este email puede recibir mensajes.' });
+      return false;
+    }
+    if (campaignQaBlocksSend) {
+      const firstBlockingCheck = campaignQa.checks.find((check) => check.severity === 'blocked');
+      toast({
+        variant: 'destructive',
+        title: 'Revisa el QA antes de enviar',
+        description: firstBlockingCheck?.message || 'Hay un bloqueo activo en este correo.',
+      });
+      return false;
+    }
+    return true;
+  };
 
   const regenerate = async () => {
     if (!lead) return;
@@ -276,39 +332,36 @@ function ComposeInner() {
       toast({ variant: 'destructive', title: 'Sin email', description: 'Este lead no tiene email revelado.' });
       return;
     }
+    if (!canContinueWithContact()) return;
     setIsLoading(true);
     try {
-      // 1. Generate ID upfront to create pixel URL
-      const trackingId = uuid();
+      const researchSnapshotId = String(findReportForLead({
+        leadId: String((lead as any).id || ''),
+        email,
+      })?.raw?.research_snapshot_id || '').trim() || null;
+      const operation = resolveManualEmailOperation(sendOperation, {
+        scope: 'manual-compose',
+        recipientId: String((lead as any).id || ''),
+        email,
+        subject,
+        body,
+        provider: 'outlook',
+        deliveryOptions: { pixel: usePixel, links: useLinkTracking, readReceipt: useReadReceipt },
+      }, uuid);
+      setSendOperation(operation);
+      const trackingId = operation.trackingId;
       let finalHtmlBody = body.replace(/\n/g, '<br>');
-
-      // 2. Rewrite Links if enabled
-      if (useLinkTracking) {
-        finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
-      }
-
-      // 3. Inject Pixel if enabled
-      if (usePixel) {
-        // Use window.location.origin to get the current domain
-        const origin = typeof window !== 'undefined' ? window.location.origin : '';
-        let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-
-        // OPTIMIZATION: Redirect to logo if available
-        const profile = getCompanyProfile();
-        if (profile?.logo && profile.logo.startsWith('http')) {
-          pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
-        }
-
-        // FIX: Removed display:none to prevent blocking by email clients
-        const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
-        finalHtmlBody += `\n<br>${trackingPixel}`;
-      }
 
       const res = await sendEmail({
         to: email,
         subject,
         htmlBody: finalHtmlBody,
         requestReceipts: useReadReceipt, // Pass new option
+        leadId: String((lead as any).id || ''),
+        researchSnapshotId,
+        idempotencyKey: operation.idempotencyKey,
+        trackingId,
+        tracking: { pixel: usePixel, linkTracking: useLinkTracking },
       });
 
       // Incrementa espejo local de cuota
@@ -338,9 +391,10 @@ function ComposeInner() {
       }
 
       toast({ title: 'Enviado con Outlook', description: `Correo enviado a ${(lead as any).fullName}.` });
+      setSendOperation(null);
       router.back();
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error al enviar con Outlook', description: e.message || 'Outlook falló' });
+      toast({ variant: 'destructive', title: 'No se pudo enviar con Outlook', description: e?.message || 'Revisa la conexion y vuelve a intentarlo.' });
     } finally {
       setIsLoading(false);
     }
@@ -352,37 +406,35 @@ function ComposeInner() {
       toast({ variant: 'destructive', title: 'Sin email', description: 'Este lead no tiene email revelado.' });
       return;
     }
+    if (!canContinueWithContact()) return;
     setIsLoading(true);
     try {
-      // 1. Generate ID upfront to create pixel URL
-      const trackingId = uuid();
+      const researchSnapshotId = String(findReportForLead({
+        leadId: String((lead as any).id || ''),
+        email,
+      })?.raw?.research_snapshot_id || '').trim() || null;
+      const operation = resolveManualEmailOperation(sendOperation, {
+        scope: 'manual-compose',
+        recipientId: String((lead as any).id || ''),
+        email,
+        subject,
+        body,
+        provider: 'gmail',
+        deliveryOptions: { pixel: usePixel, links: useLinkTracking, readReceipt: false },
+      }, uuid);
+      setSendOperation(operation);
+      const trackingId = operation.trackingId;
       let finalHtmlBody = body.replace(/\n/g, '<br>');
-
-      // 2. Rewrite Links if enabled
-      if (useLinkTracking) {
-        finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
-      }
-
-      // 3. Inject Pixel if enabled
-      if (usePixel) {
-        const origin = typeof window !== 'undefined' ? window.location.origin : '';
-        let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-
-        // OPTIMIZATION: Redirect to logo
-        const profile = getCompanyProfile();
-        if (profile?.logo && profile.logo.startsWith('http')) {
-          pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
-        }
-
-        // FIX: Removed display:none
-        const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
-        finalHtmlBody += `\n<br>${trackingPixel}`;
-      }
 
       const result = await sendGmailEmail({
         to: email,
         subject: subject,
         html: finalHtmlBody,
+        leadId: String((lead as any).id || ''),
+        researchSnapshotId,
+        idempotencyKey: operation.idempotencyKey,
+        trackingId,
+        tracking: { pixel: usePixel, linkTracking: useLinkTracking },
       });
 
       Quota.incClientQuota('contact');
@@ -397,6 +449,8 @@ function ComposeInner() {
         sentAt: new Date().toISOString(),
         status: 'sent',
         provider: 'gmail',
+        messageId: result.id,
+        threadId: result.threadId,
         lastUpdateAt: new Date().toISOString(),
       });
 
@@ -407,9 +461,10 @@ function ComposeInner() {
         await enrichedLeadsStorage.removeById((lead as any).id);
       }
       toast({ title: 'Enviado con Gmail', description: `Correo enviado a ${(lead as any).fullName}.` });
+      setSendOperation(null);
       router.back();
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error al enviar con Gmail', description: e.message || 'Gmail falló' });
+      toast({ variant: 'destructive', title: 'No se pudo enviar con Gmail', description: e?.message || 'Revisa la conexion y vuelve a intentarlo.' });
     } finally {
       setIsLoading(false);
     }
@@ -417,124 +472,139 @@ function ComposeInner() {
 
   if (!lead) return <div className="p-6">Lead no encontrado. Vuelve a la lista de guardados.</div>;
 
-  const { email: displayEmail } = extractPrimaryEmail(lead);
+  const displayEmail = composeEmail;
+
+  const send = sendProvider === 'outlook' ? doSendOutlook : doSendGmail;
+  const isBlocked = isLoading || contactabilityChecking || campaignQaBlocksSend;
 
   return (
-    <div className="p-6 container mx-auto">
-      <Card>
-        <CardHeader>
-          <CardTitle>Contactar a {(lead as any).fullName}</CardTitle>
-          <CardDescription>
-            {(lead as any).title} en {(lead as any).companyName}
-            {displayEmail ? <span className="text-sm text-muted-foreground"> · {displayEmail}</span> : null}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {/* Fuente del borrador y selector de estilo */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <main className="mx-auto w-full max-w-6xl space-y-4 px-4 py-5 sm:px-6 sm:py-6">
+      <header className="flex flex-col gap-4 border-b border-border/60 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 gap-3">
+          <Button type="button" variant="outline" size="icon" className="mt-0.5 shrink-0 rounded-full" onClick={() => router.back()} aria-label="Volver a leads enriquecidos">
+            <ArrowLeft className="size-4" />
+          </Button>
+          <div className="min-w-0 space-y-1">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Nuevo contacto</p>
+            <h1 className="truncate text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">{(lead as any).fullName}</h1>
+            <p className="truncate text-sm text-muted-foreground">
+              {(lead as any).title || 'Sin cargo'}{(lead as any).companyName ? ` · ${(lead as any).companyName}` : ''}{displayEmail ? ` · ${displayEmail}` : ''}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 rounded-full border border-border/70 bg-muted/30 p-1" role="group" aria-label="Proveedor de envío">
+          {(['outlook', 'gmail'] as const).map((provider) => (
+            <Button
+              key={provider}
+              type="button"
+              size="sm"
+              variant={sendProvider === provider ? 'secondary' : 'ghost'}
+              className="h-8 rounded-full px-3 capitalize"
+              aria-pressed={sendProvider === provider}
+              onClick={() => setSendProvider(provider)}
+            >
+              {provider}
+            </Button>
+          ))}
+        </div>
+      </header>
+
+      <div className="grid gap-2">
+        <ContactabilityStatusCard
+          compact
+          email={displayEmail}
+          result={contactability.result}
+          loading={contactability.loading}
+          error={contactability.error}
+          onRetry={contactability.refresh}
+        />
+        <CampaignQaPanel result={campaignQa} compact />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_290px]">
+        <Card className="overflow-hidden border-border/60 shadow-[0_20px_60px_-48px_rgba(15,23,42,0.32)]">
+          <CardHeader className="flex-row items-center justify-between gap-3 border-b border-border/60 py-4">
             <div>
-              <div className="text-xs text-muted-foreground mb-1">Fuente del borrador</div>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => setDraftSource('investigation')} />
-                  Investigación (n8n)
-                </label>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="draft-source" value="style" checked={draftSource === 'style'} onChange={() => {
-                    setDraftSource('style');
-                    if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
-                  }} />
-                  Estilo (Email Studio)
-                </label>
-              </div>
+              <CardTitle className="text-base">Borrador</CardTitle>
+              <CardDescription className="mt-1">Revisa el mensaje antes de enviarlo.</CardDescription>
             </div>
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Perfil de estilo</div>
-              <select
-                className="h-9 w-full rounded-md border bg-background px-2 text-sm disabled:opacity-50"
-                disabled={draftSource !== 'style' || styleProfiles.length === 0}
-                value={selectedStyleName}
-                onChange={(e) => setSelectedStyleName(e.target.value)}
-              >
-                {styleProfiles.length === 0 ? <option value="">(No hay estilos guardados)</option> :
-                  styleProfiles.map(p => <option key={p.name} value={p.name}>{p.name}</option>)
-                }
-              </select>
-            </div>
-            <div className="flex items-end">
-              <Button type="button" variant="secondary" onClick={regenerate} disabled={isRegenerating || isLoading} title="Regenerar usando la fuente y/o estilo seleccionados">
-                {isRegenerating ? 'Regenerando…' : 'Regenerar borrador'}
-              </Button>
-            </div>
-          </div>
-
-          {/* Tracking Options - NEW SECTION */}
-          <div className="border border-border/50 rounded-md p-3 bg-muted/20">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Inyecta una imagen invisible para detectar apertura en tiempo real">
-                  <input
-                    type="checkbox"
-                    checked={usePixel}
-                    onChange={(e) => setUsePixel(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                  />
-                  Activar Tracking Pixel
-                  <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded ml-1">Recomendado</span>
-                </label>
-                <p className="text-xs text-muted-foreground ml-6">
-                  Inserta un píxel invisible. Sabrás exactamente cuándo abren tu correo sin que el destinatario lo note.
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Reescribe enlaces para saber si el usuario hizo clic">
-                  <input
-                    type="checkbox"
-                    checked={useLinkTracking}
-                    onChange={(e) => setUseLinkTracking(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                  />
-                  Track Link Clicks
-                </label>
-                <p className="text-xs text-muted-foreground ml-6">
-                  Convierte automáticamente cualquier link en el cuerpo (ej. tu web) en un enlace rastreable.
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Solicita confirmación de lectura estándar (puede ser bloqueado por el usuario)">
-                  <input
-                    type="checkbox"
-                    checked={useReadReceipt}
-                    onChange={(e) => setUseReadReceipt(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                  />
-                  Solicitar Confirmación
-                </label>
-                <p className="text-xs text-muted-foreground ml-6">
-                  Pide una confirmación formal. El destinatario verá una ventana emergente y podría rechazarla.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Asunto" />
-          <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={14} className="font-mono text-sm" />
-          <div className="flex gap-2">
-            <Button onClick={doSendOutlook} disabled={isLoading}>
-              {isLoading ? 'Enviando...' : 'Enviar con Outlook'}
+            <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={regenerate} disabled={isRegenerating || isLoading}>
+              {isRegenerating ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <RefreshCw data-icon="inline-start" />}
+              Regenerar
             </Button>
-            <Button onClick={doSendGmail} disabled={isLoading}>
-              {isLoading ? 'Enviando...' : 'Enviar con Gmail'}
-            </Button>
-            <Button variant="outline" onClick={() => router.back()}>
-              Volver
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+          </CardHeader>
+          <CardContent className="space-y-4 p-4 sm:p-5">
+            <div className="space-y-2">
+              <label htmlFor="compose-subject" className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Asunto</label>
+              <Input id="compose-subject" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Asunto" className="h-11" />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="compose-body" className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Mensaje</label>
+              <Textarea id="compose-body" value={body} onChange={(e) => setBody(e.target.value)} rows={16} className="min-h-[390px] resize-y text-[15px] leading-7" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+          <Card className="border-border/60">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Origen del borrador</CardTitle>
+              <CardDescription>Elige cómo preparar el mensaje.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 rounded-xl border border-border/60 bg-muted/30 p-1">
+                <Button type="button" size="sm" variant={draftSource === 'investigation' ? 'secondary' : 'ghost'} className="rounded-lg" onClick={() => setDraftSource('investigation')}>Investigación</Button>
+                <Button type="button" size="sm" variant={draftSource === 'style' ? 'secondary' : 'ghost'} className="rounded-lg" onClick={() => {
+                  setDraftSource('style');
+                  if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
+                }}>Estilo</Button>
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="compose-style" className="text-xs font-medium text-muted-foreground">Perfil de estilo</label>
+                <select
+                  id="compose-style"
+                  className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={draftSource !== 'style' || styleProfiles.length === 0}
+                  value={selectedStyleName}
+                  onChange={(e) => setSelectedStyleName(e.target.value)}
+                >
+                  {styleProfiles.length === 0 ? <option value="">No hay estilos guardados</option> : styleProfiles.map((profile) => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
+                </select>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Collapsible open={showDeliveryOptions} onOpenChange={setShowDeliveryOptions}>
+            <Card className="border-border/60">
+              <CollapsibleTrigger asChild>
+                <Button type="button" variant="ghost" className="flex h-auto w-full items-center justify-between rounded-xl px-4 py-3 text-left hover:bg-muted/50">
+                  <span className="flex items-center gap-2 text-sm font-medium"><Settings2 className="size-4 text-muted-foreground" />Opciones de seguimiento</span>
+                  <ChevronDown className={`size-4 text-muted-foreground transition-transform ${showDeliveryOptions ? 'rotate-180' : ''}`} />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent className="space-y-4 border-t border-border/60 pt-4">
+                  <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium">Detectar aperturas</p><p className="text-xs text-muted-foreground">Usa un píxel de seguimiento.</p></div><Switch checked={usePixel} onCheckedChange={setUsePixel} aria-label="Detectar aperturas" /></div>
+                  <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium">Medir clics</p><p className="text-xs text-muted-foreground">Hace rastreables los enlaces.</p></div><Switch checked={useLinkTracking} onCheckedChange={setUseLinkTracking} aria-label="Medir clics" /></div>
+                  <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium">Solicitar confirmación</p><p className="text-xs text-muted-foreground">El destinatario puede rechazarla.</p></div><Switch checked={useReadReceipt} onCheckedChange={setUseReadReceipt} aria-label="Solicitar confirmación de lectura" /></div>
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+        </aside>
+      </div>
+
+      <footer className="sticky bottom-3 z-10 flex flex-col gap-3 rounded-2xl border border-border/60 bg-background/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs text-muted-foreground">El mensaje se enviará por {sendProvider === 'outlook' ? 'Outlook' : 'Gmail'}.</p>
+        <div className="flex gap-2">
+          <Button type="button" variant="outline" onClick={() => router.back()}>Cancelar</Button>
+          <Button type="button" onClick={send} disabled={isBlocked}>
+            {isLoading ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <SendHorizontal data-icon="inline-start" />}
+            {isLoading ? 'Enviando…' : contactabilityChecking ? 'Verificando…' : `Enviar con ${sendProvider === 'outlook' ? 'Outlook' : 'Gmail'}`}
+          </Button>
+        </div>
+      </footer>
+    </main>
   );
 }
 

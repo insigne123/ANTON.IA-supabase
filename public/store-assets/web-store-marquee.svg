@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="560" viewBox="0 0 1400 560" role="img" aria-label="Anton.IA Automation marketing banner">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#07111f"/><stop offset="0.55" stop-color="#0d1d35"/><stop offset="1" stop-color="#123961"/></linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7dd3fc"/><stop offset="1" stop-color="#2563eb"/></linearGradient>
+  </defs>
+  <rect width="1400" height="560" fill="url(#bg)"/>
+  <circle cx="1190" cy="95" r="220" fill="#2563eb" opacity="0.16"/>
+  <circle cx="1250" cy="520" r="270" fill="#38bdf8" opacity="0.08"/>
+  <circle cx="105" cy="92" r="34" fill="url(#blue)"/>
+  <path d="M90 107V77h10l13 18V77h10v30h-10l-13-18v18z" fill="#eff6ff"/>
+  <text x="158" y="103" fill="#f8fafc" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="700">ANTON.IA Automation</text>
+  <text x="102" y="226" fill="#f8fafc" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700">Mensajes de LinkedIn</text>
+  <text x="102" y="294" fill="#f8fafc" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700">con contexto y control.</text>
+  <text x="105" y="352" fill="#bed0e5" font-family="Arial, Helvetica, sans-serif" font-size="24">La extension prepara el mensaje directo que revisaste</text>
+  <text x="105" y="386" fill="#bed0e5" font-family="Arial, Helvetica, sans-serif" font-size="24">y lo registra solo cuando LinkedIn confirma el envio.</text>
+  <rect x="105" y="430" width="250" height="42" rx="21" fill="#13375f" stroke="#3b82f6"/>
+  <text x="130" y="458" fill="#dbeafe" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700">REVISA CADA MENSAJE</text>
+  <rect x="858" y="140" width="412" height="316" rx="24" fill="#091322" stroke="#3b5579"/>
+  <rect x="882" y="166" width="364" height="44" rx="12" fill="#11243c"/>
+  <circle cx="908" cy="188" r="10" fill="#2563eb"/>
+  <text x="928" y="194" fill="#e2e8f0" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700">Mensaje directo</text>
+  <text x="882" y="248" fill="#f8fafc" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="700">Revisa antes de enviar</text>
+  <rect x="882" y="270" width="364" height="65" rx="12" fill="#0b2a31" stroke="#176b63"/>
+  <text x="904" y="298" fill="#d1fae5" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="700">Personalizacion encontrada</text>
+  <text x="904" y="320" fill="#a7f3d0" font-family="Arial, Helvetica, sans-serif" font-size="12">Basada en una senal del perfil.</text>
+  <rect x="882" y="354" width="364" height="73" rx="12" fill="#0b1627" stroke="#334a69"/>
+  <text x="904" y="383" fill="#dbeafe" font-family="Arial, Helvetica, sans-serif" font-size="13">Hola Marta, me llamo la atencion...</text>
+  <rect x="1060" y="445" width="186" height="38" rx="19" fill="url(#blue)"/>
+  <text x="1094" y="470" fill="#eff6ff" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700">Enviar directo</text>
+</svg>

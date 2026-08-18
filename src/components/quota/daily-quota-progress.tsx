@@ -5,9 +5,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { QUOTA_KINDS, type QuotaKind, getClientQuota, getClientLimit, onQuotaChange, setClientQuota } from '@/lib/quota-client';
+import { QUOTA_KINDS, type QuotaKind, getClientQuota, getClientLimit, onQuotaChange, setClientQuotaSnapshot } from '@/lib/quota-client';
+import { DEFAULT_DAILY_QUOTA_LIMITS } from '@/lib/daily-quota-limits';
 import { cn } from '@/lib/utils';
-import { FlaskConical, Search, Users, Sparkles } from 'lucide-react';
+import { AlertCircle, FlaskConical, Loader2, Search, Users, Sparkles } from 'lucide-react';
 
 type Props = {
   className?: string;
@@ -15,6 +16,8 @@ type Props = {
   kinds?: QuotaKind[];
   /** Modo compacto: sin Card wrapper */
   compact?: boolean;
+  /** Resumen horizontal para superficies con poco alto */
+  summary?: boolean;
   /** Título opcional */
   title?: string;
   /** Forzar sync con servidor al cargar (default: true) */
@@ -24,6 +27,7 @@ type Props = {
 type Row = {
   kind: QuotaKind;
   label: string;
+  shortLabel: string;
   icon: JSX.Element;
   count: number;
   limit: number;
@@ -34,19 +38,25 @@ function nextResetLocalString(): string {
   // próximo inicio de día UTC en hora local
   const now = new Date();
   const nextUtcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
-  return nextUtcMidnight.toLocaleString();
+  return nextUtcMidnight.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function toRows(kinds: QuotaKind[]): Row[] {
-  const quota = getClientQuota();
+function toRows(kinds: QuotaKind[], useClientSnapshot: boolean): Row[] {
+  const quota = useClientSnapshot ? getClientQuota() : null;
   return kinds.map((k) => {
-    const count = quota[k] || 0;
-    const limit = getClientLimit(k);
+    const count = quota?.[k] || 0;
+    const limit = useClientSnapshot ? getClientLimit(k) : DEFAULT_DAILY_QUOTA_LIMITS[k];
     const pct = Math.max(0, Math.min(100, Math.round((count / Math.max(1, limit)) * 100)));
     const label =
       k === 'leadSearch' ? 'Búsqueda de Leads' :
       k === 'enrich'     ? 'Enriquecimiento' :
       k === 'research'   ? 'Investigación' :
+      k === 'contact'    ? 'Contactos' : k;
+
+    const shortLabel =
+      k === 'leadSearch' ? 'Búsquedas' :
+      k === 'enrich'     ? 'Enriquecer' :
+      k === 'research'   ? 'Investigar' :
       k === 'contact'    ? 'Contactos' : k;
 
     const icon =
@@ -55,14 +65,16 @@ function toRows(kinds: QuotaKind[]): Row[] {
       k === 'research'   ? <FlaskConical className="h-4 w-4" aria-hidden="true" /> :
       <Users className="h-4 w-4" aria-hidden="true" />;
 
-    return { kind: k, label, icon, count, limit, pct };
+    return { kind: k, label, shortLabel, icon, count, limit, pct };
   });
 }
 
-export default function DailyQuotaProgress({ className, kinds, compact, title = 'Uso diario', syncServer = true }: Props) {
+export default function DailyQuotaProgress({ className, kinds, compact, summary, title = 'Uso diario', syncServer = true }: Props) {
   const [tick, setTick] = useState(0);
   const [resetDateStr, setResetDateStr] = useState<string>('');
-  const ks = kinds && kinds.length ? kinds : QUOTA_KINDS;
+  const [clientReady, setClientReady] = useState(false);
+  const [syncState, setSyncState] = useState<'loading' | 'ready' | 'error'>(syncServer ? 'loading' : 'ready');
+  const ks = useMemo(() => kinds && kinds.length ? kinds : QUOTA_KINDS, [kinds]);
 
   useEffect(() => {
     // Suscribirse a cambios de cuota en este tab
@@ -72,13 +84,17 @@ export default function DailyQuotaProgress({ className, kinds, compact, title = 
 
     // Calcular la fecha del lado cliente para evitar hydration mismatch
     setResetDateStr(nextResetLocalString());
+    setClientReady(true);
 
     return () => { off(); clearInterval(id); };
   }, []);
 
   // Sync con servidor: lee /api/quota/status y actualiza el espejo local para los recursos visibles
   useEffect(() => {
-    if (!syncServer) return;
+    if (!syncServer) {
+      setSyncState('ready');
+      return;
+    }
     const abort = new AbortController();
     (async () => {
       try {
@@ -87,7 +103,7 @@ export default function DailyQuotaProgress({ className, kinds, compact, title = 
           cache: 'no-store',
           signal: abort.signal,
         });
-        if (!res.ok) return;
+        if (!res.ok) throw new Error('Quota status request failed');
         const data = await res.json();
         const statuses: Array<{ resource: string; count: number; limit: number; dayKey: string }> = data?.statuses || [];
         // Refleja exactamente lo que ve el servidor para evitar que queden contadores viejos en localStorage.
@@ -96,22 +112,65 @@ export default function DailyQuotaProgress({ className, kinds, compact, title = 
           const s = map.get(k);
           if (!s) continue;
           const local = getClientQuota()[k] || 0;
-          if (s.count !== local) {
-            setClientQuota(k, s.count);
+          const localLimit = getClientLimit(k);
+          if (s.count !== local || s.limit !== localLimit) {
+            setClientQuotaSnapshot(k, { count: s.count, limit: s.limit });
           }
         }
-      } catch { /* ignore */ }
-      finally { setTick(x => x + 1); }
+        if (!abort.signal.aborted) setSyncState('ready');
+      } catch (error) {
+        if (!abort.signal.aborted) setSyncState('error');
+      }
+      finally {
+        if (!abort.signal.aborted) setTick(x => x + 1);
+      }
     })();
     return () => abort.abort();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // sólo al montar
+  }, [ks, syncServer]);
 
 
   const rows = useMemo(() => {
     void tick;
-    return toRows(ks);
-  }, [tick, ks]);
+    return toRows(ks, clientReady);
+  }, [clientReady, tick, ks]);
+
+  if (summary) {
+    return (
+      <Card className={cn('overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_10px_28px_-26px_rgba(15,23,42,0.28)]', className)} aria-busy={syncState === 'loading'}>
+        <CardContent className="flex flex-col gap-3 p-3 sm:p-4 lg:flex-row lg:items-center lg:gap-5">
+          <div className="min-w-0 lg:w-40 lg:shrink-0">
+            <CardTitle className="text-sm">{title}</CardTitle>
+            <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground" aria-live="polite">
+              {syncState === 'loading' ? (
+                <><Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> Actualizando uso</>
+              ) : syncState === 'error' ? (
+                <><AlertCircle className="h-3 w-3 text-amber-600 dark:text-amber-300" aria-hidden="true" /> Mostrando datos guardados</>
+              ) : (
+                <>Se reinicia a las {resetDateStr || '—'}</>
+              )}
+            </div>
+          </div>
+
+          <div className="grid min-w-0 flex-1 grid-cols-2 gap-x-5 gap-y-3 lg:grid-cols-4">
+            {rows.map((row) => (
+              <div key={row.kind} className="min-w-0">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                    <span className="shrink-0 [&>svg]:h-3.5 [&>svg]:w-3.5">{row.icon}</span>
+                    <span className="truncate">{row.shortLabel}</span>
+                  </span>
+                  <span className={cn('shrink-0 font-medium tabular-nums', row.pct >= 100 && 'text-destructive')}>
+                    {row.count}/{row.limit}
+                  </span>
+                </div>
+                <Progress className="mt-1.5 h-1.5" value={row.pct} aria-label={`${row.label}: ${row.count} de ${row.limit}`} />
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const content = (
     <div className={cn('space-y-3', compact && 'rounded-[24px] border border-border/60 bg-card/65 p-4 shadow-[0_8px_24px_-20px_rgba(15,23,42,0.16)]')}>

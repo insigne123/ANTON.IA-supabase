@@ -3,10 +3,11 @@ import { z } from 'genkit';
 import { getOpenAiModelForTier, getOpenAiModelsForTier, type OpenAiModelTier } from '@/ai/model-router';
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
 import type { AuthContext } from '@/lib/server/auth-utils';
-import { buildSupliaContext } from '@/lib/server/suplia-context';
+import { buildSupliaContext, formatContextBrief, getWinningSubjects } from '@/lib/server/suplia-context';
 import { buildOpenAiTelemetry } from '@/lib/server/suplia-observability';
 import { runSupliaTool } from '@/lib/server/suplia-tool-runner';
 import { buildGmailMailboxQuery, extractGmailMailboxTopic } from '@/lib/gmail-mailbox-helpers';
+import { cleanDomain } from '@/lib/commercial-intelligence';
 import type { SupliaArtifactType } from '@/lib/suplia/types';
 
 export type SupliaAgentName =
@@ -107,6 +108,17 @@ const IcpStrategySchema = z.object({
       peopleSearchPages: z.number().default(1),
     }).default({ companySearches: 1, peopleSearchPages: 1 }),
   }),
+  researchPlan: z.object({
+    publicResearchTools: z.array(z.enum(['research.similarweb', 'research.whois'])).default(['research.similarweb', 'research.whois']),
+    premiumResearchTools: z.array(z.enum([
+      'research.brand',
+      'research.brand_mentions',
+      'research.serp_company_news',
+      'research.serp_competitors',
+      'research.serp_jobs_signals',
+    ])).default([]),
+    targetSignals: z.array(z.string()).default([]),
+  }).default({ publicResearchTools: ['research.similarweb', 'research.whois'], premiumResearchTools: [], targetSignals: [] }),
   reusableMemoryCandidates: z.array(z.string()).default([]),
 });
 
@@ -167,6 +179,10 @@ function leadCompany(lead: any) {
   return String(lead?.companyName || lead?.company || lead?.sourcePayload?.companyName || lead?.sourcePayload?.company || 'Empresa').trim();
 }
 
+function getCandidateDomain(company: Record<string, any>) {
+  return cleanDomain(company.primary_domain || company.companyDomain || company.domain || company.website_url || company.website || company.url || '');
+}
+
 async function runInternalTool(execution: SupliaAgentExecution, toolName: string, input: Record<string, unknown>, modelTier: OpenAiModelTier = 'orchestrator') {
   const { output } = await runSupliaTool({
     auth: execution.auth,
@@ -208,7 +224,11 @@ function formatIcpContent(strategy: z.infer<typeof IcpStrategySchema>) {
 
   const queries = strategy.searchPlan.companyQueries.join(', ') || 'No definido';
   const roles = strategy.searchPlan.peopleTitles.join(', ') || 'No definido';
-  return `${strategy.summary}\n\nSegmentos:\n${segments || 'No definido'}\n\nBusqueda propuesta:\nEmpresas: ${queries}\nRoles: ${roles}\nMax empresas: ${strategy.searchPlan.maxCompanies}`;
+  const researchPlan = (strategy as any).researchPlan || {};
+  const publicResearch = asTextList(researchPlan.publicResearchTools).join(', ') || 'SimilarWeb + WHOIS publico cuando exista dominio';
+  const premiumResearch = asTextList(researchPlan.premiumResearchTools).join(', ') || 'Solo bajo aprobacion si aporta senales adicionales';
+  const targetSignals = asTextList(researchPlan.targetSignals).join(', ') || 'trafico, antiguedad del dominio, noticias, contratacion o reviews';
+  return `${strategy.summary}\n\nSegmentos:\n${segments || 'No definido'}\n\nBusqueda propuesta:\nEmpresas: ${queries}\nRoles: ${roles}\nMax empresas: ${strategy.searchPlan.maxCompanies}\n\nResearch propuesto:\nPublico automatico: ${publicResearch}\nPremium aprobable: ${premiumResearch}\nSenales objetivo: ${targetSignals}`;
 }
 
 function fallbackPlan(goal: string): z.infer<typeof PlannerSchema> {
@@ -252,6 +272,11 @@ function fallbackIcp(goal: string): z.infer<typeof IcpStrategySchema> {
       maxPeoplePerCompany: 3,
       estimatedCreditUse: { companySearches: 1, peopleSearchPages: 1 },
     },
+    researchPlan: {
+      publicResearchTools: ['research.similarweb', 'research.whois'],
+      premiumResearchTools: ['research.serp_company_news', 'research.serp_jobs_signals'],
+      targetSignals: ['trafico web direccional', 'antiguedad del dominio', 'noticias recientes', 'contratacion o crecimiento'],
+    },
     reusableMemoryCandidates: [],
   };
 }
@@ -288,6 +313,7 @@ async function runPlanner(execution: SupliaAgentExecution): Promise<SupliaAgentR
   }
 
   const context = await buildSupliaContext(execution.auth);
+  const contextBrief = formatContextBrief(context);
   const goal = safeText(execution.job.goal);
   const prompt = `
 Eres el subagente planner de SUPL.IA. Crea un plan operativo breve, verificable y seguro.
@@ -303,7 +329,7 @@ Objetivo del usuario:
 ${goal}
 
 Contexto de app:
-${JSON.stringify(context).slice(0, 5000)}
+${contextBrief}
 `;
 
   let plan: z.infer<typeof PlannerSchema>;
@@ -345,19 +371,24 @@ ${JSON.stringify(context).slice(0, 5000)}
 
 async function runIcpStrategist(execution: SupliaAgentExecution): Promise<SupliaAgentResult> {
   const context = await buildSupliaContext(execution.auth);
+  const contextBrief = formatContextBrief(context);
   const goal = safeText(execution.job.goal);
   const previousPlannerOutput = findPreviousOutput(execution.previousSteps, 'planner');
   const plannerOutput = Object.keys(previousPlannerOutput).length > 0
     ? previousPlannerOutput
     : ((execution.job.input_payload || {}).approvedPlan || {});
   const prompt = `
-Eres el subagente icp-strategist de SUPL.IA. Define el ICP y un search plan antes de consumir creditos.
+Eres un estratega de demanda B2B senior dentro de SUPL.IA. Defines el ICP y un search plan accionable ANTES de gastar creditos.
 
 Reglas:
 - No ejecutes busquedas externas.
-- Propón segmentos, roles y criterios concretos.
+- Propón 1 a 3 segmentos concretos con industria, tamano, geografia y razon.
+- Lista senales de compra observables: crecimiento, vacantes, licitaciones, cambios de stack, fiscalizaciones o actividad digital.
+- Define decisores e influenciadores con motivacion real.
 - Si faltan datos, usa supuestos explicitamente conservadores.
 - Excluye contactos riesgosos: unsubscribes, dominios bloqueados y contactados recientes.
+- Cada segmento y criterio debe traer una razon verificable. No inventes cifras ni nombres.
+- Incluye researchPlan: por defecto usa SimilarWeb publico y WHOIS sin aprobacion cuando exista dominio; sugiere research premium solo si aportaria una senal concreta.
 - Devuelve JSON estricto.
 
 Objetivo del usuario:
@@ -367,7 +398,7 @@ Plan previo:
 ${JSON.stringify(plannerOutput).slice(0, 5000)}
 
 Contexto de app:
-${JSON.stringify(context).slice(0, 5000)}
+${contextBrief}
 `;
 
   let strategy: z.infer<typeof IcpStrategySchema>;
@@ -411,7 +442,7 @@ ${JSON.stringify(context).slice(0, 5000)}
       {
         type: 'search_plan',
         title: 'Search plan aprobable',
-        content: `Proveedor sugerido: ${strategy.searchPlan.provider}\nEmpresas: ${strategy.searchPlan.companyQueries.join(', ') || 'No definido'}\nRoles: ${strategy.searchPlan.peopleTitles.join(', ') || 'No definido'}\nMax empresas: ${strategy.searchPlan.maxCompanies}`,
+        content: `Proveedor sugerido: ${strategy.searchPlan.provider}\nEmpresas: ${strategy.searchPlan.companyQueries.join(', ') || 'No definido'}\nRoles: ${strategy.searchPlan.peopleTitles.join(', ') || 'No definido'}\nMax empresas: ${strategy.searchPlan.maxCompanies}\nResearch publico: ${(strategy.researchPlan?.publicResearchTools || []).join(', ') || 'research.similarweb, research.whois'}\nResearch premium aprobable: ${(strategy.researchPlan?.premiumResearchTools || []).join(', ') || 'No definido'}`,
         data: { searchPlan: strategy.searchPlan },
       },
     ],
@@ -530,8 +561,37 @@ async function runCompanyScorer(execution: SupliaAgentExecution): Promise<Suplia
   const candidates = asArray((searchResult as any).candidates);
 
   const deduped = await runInternalTool(execution, 'prospecting.dedupe_against_crm', { companies: candidates }, 'fast');
+  const dedupedCompanies = asArray((deduped as any).companies);
+  const companiesWithResearch: any[] = [];
+
+  for (const company of dedupedCompanies.slice(0, 8)) {
+    const record = asRecord(company);
+    const domain = getCandidateDomain(record as any);
+    if (!domain) {
+      companiesWithResearch.push(company);
+      continue;
+    }
+
+    const [similarweb, whois] = await Promise.all([
+      runInternalTool(execution, 'research.similarweb', { domain }, 'fast').catch((error: any) => ({ status: 'unavailable', domain, warnings: [error?.message || 'similarweb_failed'] })),
+      runInternalTool(execution, 'research.whois', { domain }, 'fast').catch((error: any) => ({ status: 'unavailable', domain, warnings: [error?.message || 'whois_failed'] })),
+    ]);
+    companiesWithResearch.push({
+      ...company,
+      domain,
+      primary_domain: (record as any).primary_domain || domain,
+      research: { similarweb, whois },
+      similarweb,
+      whois,
+    });
+  }
+
+  if (dedupedCompanies.length > companiesWithResearch.length) {
+    companiesWithResearch.push(...dedupedCompanies.slice(companiesWithResearch.length));
+  }
+
   const scored = await runInternalTool(execution, 'prospecting.score_companies', {
-    companies: asArray((deduped as any).companies),
+    companies: companiesWithResearch,
     strategy,
     limit: 10,
   }, 'fast');
@@ -542,13 +602,13 @@ async function runCompanyScorer(execution: SupliaAgentExecution): Promise<Suplia
 
   return {
     status: 'completed',
-    output: { ...scored, dedupeSummary: (deduped as any).summary, topCompanies },
-    reasoningSummary: `Se puntuaron ${topCompanies.length} empresas contra el ICP.`,
+    output: { ...scored, dedupeSummary: (deduped as any).summary, topCompanies, researchSummary: { publicResearchAttempted: companiesWithResearch.filter((company) => company?.research).length } },
+    reasoningSummary: `Se puntuaron ${topCompanies.length} empresas contra el ICP usando research publico cuando hubo dominio.`,
     artifacts: [{
       type: 'company_shortlist',
       title: `Empresas priorizadas (${topCompanies.length})`,
       content,
-      data: { scored, dedupe: deduped },
+      data: { scored, dedupe: deduped, research: { publicResearchAttempted: companiesWithResearch.filter((company) => company?.research).length } },
     }],
   };
 }
@@ -620,10 +680,12 @@ async function runCopywriter(execution: SupliaAgentExecution): Promise<SupliaAge
   const enrichmentResult = findPreviousResult(execution.previousSteps, 'enrichment_approval');
   const fallbackLeads = asArray((findPreviousOutput(execution.previousSteps, 'lead_scoring') as any).topLeads);
   const leads = asArray((enrichmentResult as any).items).length ? asArray((enrichmentResult as any).items) : fallbackLeads;
+  const winners = await getWinningSubjects(execution.auth, 5);
   const previews = await runInternalTool(execution, 'email.bulk_variant_preview', {
     leads: leads.slice(0, 8),
     offerSummary: goal,
     cta: 'te parece si lo revisamos 15 minutos esta semana?',
+    winningSubjects: winners.map((winner) => winner.subject),
     limit: 8,
   }, 'balanced');
   const samples = asArray((previews as any).previews);

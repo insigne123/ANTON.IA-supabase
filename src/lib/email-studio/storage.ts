@@ -1,4 +1,5 @@
 import { EmailTemplate } from '@/lib/types';
+import { getBrowserStorage } from '@/lib/browser-storage';
 
 const KEY = 'leadflow-email-templates';
 
@@ -46,10 +47,11 @@ Saludos,`,
 ];
 
 export function getTemplates(): EmailTemplate[] {
-  if (typeof window === 'undefined') return seed;
-  const raw = localStorage.getItem(KEY);
+  const storage = getBrowserStorage();
+  if (!storage) return seed;
+  const raw = storage.getItem(KEY);
   if (!raw) {
-    localStorage.setItem(KEY, JSON.stringify(seed));
+    storage.setItem(KEY, JSON.stringify(seed));
     return seed;
   }
   try {
@@ -61,8 +63,9 @@ export function getTemplates(): EmailTemplate[] {
 }
 
 export function saveTemplates(list: EmailTemplate[]) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(KEY, JSON.stringify(list));
+  const storage = getBrowserStorage();
+  if (!storage) return;
+  storage.setItem(KEY, JSON.stringify(list));
 }
 
 export function upsertTemplate(t: EmailTemplate) {

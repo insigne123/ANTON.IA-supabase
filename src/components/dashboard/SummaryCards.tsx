@@ -3,8 +3,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Users, Send, MailCheck, Briefcase } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { AlertCircle, Users, Send, MailCheck, UserCheck } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
 import { countUniqueReplyContacts } from '@/lib/antonia-reply-metrics';
 // Imports removed: Storage services are no longer used for counts to improve performance.
 
@@ -14,7 +16,6 @@ type Summary = {
   replied: number;
   activeCampaigns: number;
   enrichedLeads: number;
-  savedOpps: number;
 };
 
 export default function SummaryCards() {
@@ -23,11 +24,16 @@ export default function SummaryCards() {
     replied: 0,
     activeCampaigns: 0,
     enrichedLeads: 0,
-    savedOpps: 0,
   });
+  const [loading, setLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
+      setLoading(true);
+      setHasError(false);
       try {
         // [P2-PERF-001] Optimized Count Queries (HEAD request)
         // Instead of downloading all rows (approx 2MB+ json), we just get the count (kB).
@@ -37,7 +43,7 @@ export default function SummaryCards() {
         // Services usually use `organization_id`.
 
         const { data: { user } } = await import('@/lib/supabase').then(m => m.supabase.auth.getUser());
-        if (!user) return;
+        if (!user) throw new Error('No active session');
 
         const supabase = (await import('@/lib/supabase')).supabase;
         const orgService = (await import('@/lib/services/organization-service')).organizationService;
@@ -49,7 +55,6 @@ export default function SummaryCards() {
           repliedRes,
           campaignsRes,
           enrichedRes,
-          oppsRes,
           repliedSignalRes,
           replyRowsRes,
         ] = await Promise.all([
@@ -76,13 +81,6 @@ export default function SummaryCards() {
             .select('*', { count: 'exact', head: true })
             .eq('organization_id', orgId),
 
-          // 5. Saved Opportunities
-          // Note: service does not use orgId yet (legacy?), uses user_id implicitly via RLS?
-          // Checking service: it inserts with user_id. RLS likely filters by user_id for now.
-          supabase.from('opportunities')
-            .select('*', { count: 'exact', head: true })
-          // .eq('user_id', user.id) // Redundant if RLS enabled, but safe.
-          ,
           supabase.from('contacted_leads')
             .select('id, lead_id, email, replied_at, reply_intent, last_reply_text')
             .eq('organization_id', orgId),
@@ -91,44 +89,72 @@ export default function SummaryCards() {
             .eq('organization_id', orgId)
         ]);
 
-        const repliedCount = countUniqueReplyContacts((repliedSignalRes as any)?.data || [], (replyRowsRes as any)?.data || []);
+        const results = [contactedRes, repliedRes, campaignsRes, enrichedRes, repliedSignalRes, replyRowsRes];
+        if (results.some((result) => result.error)) {
+          throw new Error('One or more dashboard metrics could not be loaded');
+        }
 
-        setSummary({
-          contacted: contactedRes.count || 0,
-          replied: repliedCount || repliedRes.count || 0,
-          activeCampaigns: campaignsRes.count || 0,
-          enrichedLeads: enrichedRes.count || 0,
-          savedOpps: oppsRes.count || 0,
-        });
+        const repliedCount = countUniqueReplyContacts(repliedSignalRes.data || [], replyRowsRes.data || []);
+
+        if (!cancelled) {
+          setSummary({
+            contacted: contactedRes.count || 0,
+            replied: repliedCount || repliedRes.count || 0,
+            activeCampaigns: campaignsRes.count || 0,
+            enrichedLeads: enrichedRes.count || 0,
+          });
+        }
 
       } catch (error) {
         console.error("Error loading summary cards:", error);
+        if (!cancelled) setHasError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     }
     load();
+    return () => { cancelled = true; };
   }, []);
 
-  const cardItems = [
+  const metrics = [
     { title: 'Contactados', value: summary.contacted, icon: Send },
     { title: 'Respuestas', value: summary.replied, icon: MailCheck },
     { title: 'Campañas activas', value: summary.activeCampaigns, icon: Users },
-    { title: 'Oportunidades', value: summary.savedOpps, icon: Briefcase },
+    { title: 'Leads enriquecidos', value: summary.enrichedLeads, icon: UserCheck },
   ];
 
+  if (hasError) {
+    return (
+      <Alert className="rounded-2xl border-amber-200 bg-amber-50/70 py-3 text-amber-950 shadow-none dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+        <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+        <AlertDescription className="text-sm text-amber-800 dark:text-amber-100/80">
+          No pudimos actualizar el resumen. Tus acciones y el uso diario siguen disponibles.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-      {cardItems.map((item, i) => (
-        <Card key={i} className="overflow-hidden rounded-[24px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">{item.title}</CardTitle>
-            <item.icon className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-semibold tracking-tight">{item.value}</div>
-            <p className="text-xs text-muted-foreground">Total acumulado</p>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+    <Card
+      aria-busy={loading}
+      aria-label="Resumen general"
+      className="overflow-hidden rounded-2xl border-border/60 bg-border/60 shadow-[0_12px_28px_-26px_rgba(15,23,42,0.28)]"
+    >
+      <CardContent className="grid grid-cols-2 gap-px p-0 md:grid-cols-4">
+        {metrics.map((metric) => (
+          <div key={metric.title} className="min-w-0 bg-card px-4 py-3.5 dark:bg-card/90 sm:px-5">
+            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <metric.icon className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="truncate">{metric.title}</span>
+            </div>
+            {loading ? (
+              <Skeleton className="mt-2 h-7 w-14" />
+            ) : (
+              <div className="mt-1 text-2xl font-semibold leading-7 tracking-tight tabular-nums">{metric.value.toLocaleString('es')}</div>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }

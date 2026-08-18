@@ -20,7 +20,7 @@ function walk(dir) {
       const ext = extname(full).toLowerCase();
       if (!ALLOWED_EXTS.has(ext)) continue;
       const src = readFileSync(full, 'utf8');
-      if (src.includes('```')) offenders.push(full);
+      if (src.split(/\r?\n/).some((line) => /^\s*```/.test(line))) offenders.push(full);
     }
   }
 }

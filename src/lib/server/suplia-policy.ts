@@ -196,6 +196,48 @@ const POLICIES: Record<string, SupliaPolicy> = {
     approvalKind: 'none',
     approvalReason: 'Scoring interno de leads contra ICP sin proveedores externos.',
   },
+  'research.similarweb': {
+    riskLevel: 'low',
+    requiresApproval: false,
+    approvalKind: 'none',
+    approvalReason: 'Consulta publica gratuita de trafico estimado del dominio. Solo lectura.',
+  },
+  'research.whois': {
+    riskLevel: 'low',
+    requiresApproval: false,
+    approvalKind: 'none',
+    approvalReason: 'Consulta publica gratuita de WHOIS del dominio. Solo lectura.',
+  },
+  'research.brand': {
+    riskLevel: 'medium',
+    requiresApproval: true,
+    approvalKind: 'simple',
+    approvalReason: 'Consulta externa Brand.dev que puede consumir creditos. Muestra metadata publica de marca.',
+  },
+  'research.brand_mentions': {
+    riskLevel: 'medium',
+    requiresApproval: true,
+    approvalKind: 'simple',
+    approvalReason: 'Busqueda externa SerpAPI que puede consumir creditos. Muestra menciones publicas de marca.',
+  },
+  'research.serp_company_news': {
+    riskLevel: 'medium',
+    requiresApproval: true,
+    approvalKind: 'simple',
+    approvalReason: 'Busqueda externa SerpAPI que puede consumir creditos. Muestra noticias publicas de empresa.',
+  },
+  'research.serp_competitors': {
+    riskLevel: 'medium',
+    requiresApproval: true,
+    approvalKind: 'simple',
+    approvalReason: 'Busqueda externa SerpAPI que puede consumir creditos. Muestra informacion publica de competidores.',
+  },
+  'research.serp_jobs_signals': {
+    riskLevel: 'medium',
+    requiresApproval: true,
+    approvalKind: 'simple',
+    approvalReason: 'Busqueda externa SerpAPI que puede consumir creditos. Muestra senales publicas de contratacion.',
+  },
   'lead.enrich': {
     riskLevel: 'medium',
     requiresApproval: true,

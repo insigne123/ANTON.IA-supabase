@@ -1,6 +1,7 @@
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { isSupliaEnabled } from '@/lib/suplia/access';
 
 export type AuthContext = {
     user: any;
@@ -56,6 +57,14 @@ export async function requireAuth() {
         organizationId: member.organization_id,
         supabase
     };
+}
+
+export async function requireSupliaAuth() {
+    if (!isSupliaEnabled()) {
+        throw new AuthError('Not Found', 404);
+    }
+
+    return requireAuth();
 }
 
 export class AuthError extends Error {

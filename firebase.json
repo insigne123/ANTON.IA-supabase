@@ -6,6 +6,18 @@
       "node_modules",
       ".git",
       ".firebase",
+      ".env*",
+      ".next",
+      ".next-build",
+      ".playwright-mcp",
+      ".opencode",
+      "opencode.json",
+      "AGENTS.md",
+      "supabase/.temp",
+      "*.tsbuildinfo",
+      "suplia-claude-*.png",
+      "chrome-extension.pem",
+      "antonia-extension-v1.1.zip",
       "firebase-debug.log",
       "firebase-debug.*.log"
     ]
@@ -14,7 +26,7 @@
     "source": "functions",
     "runtime": "nodejs22",
     "predeploy": [
-      "npm --prefix \"$RESOURCE_DIR\" run build"
+      "npm --prefix functions run build"
     ]
   }
 }

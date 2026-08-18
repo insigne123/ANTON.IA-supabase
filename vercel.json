@@ -3,6 +3,14 @@
         {
             "path": "/api/cron/antonia",
             "schedule": "*/5 * * * *"
+        },
+        {
+            "path": "/api/cron/suplia",
+            "schedule": "*/2 * * * *"
+        },
+        {
+            "path": "/api/cron/outbound-reconciliation",
+            "schedule": "*/5 * * * *"
         }
     ]
 }

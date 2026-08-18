@@ -6,6 +6,7 @@ import { detectDeliveryFailure } from '@/lib/delivery-failure-detector';
 import { notificationService } from '@/lib/services/notification-service';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { maybeEscalateReplyReviewFromContactedId } from '@/lib/server/antonia-reply-escalation';
+import { shouldGloballySuppressReply } from '@/lib/contact-history-guard';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -118,14 +119,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: updateError.message || 'Failed to update classification' }, { status: 500 });
     }
 
-    if ((intent === 'unsubscribe' || intent === 'negative') && row.email) {
+    if (shouldGloballySuppressReply(replyClassification) && row.email) {
       await supabase
         .from('unsubscribed_emails')
         .upsert({
           email: row.email,
           user_id: row.user_id || user.id,
           organization_id: row.organization_id || null,
-          reason: `reply:${intent}`,
+          reason: 'reply:unsubscribe',
         }, { onConflict: 'email,user_id,organization_id' } as any);
     }
 

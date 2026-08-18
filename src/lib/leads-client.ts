@@ -5,6 +5,7 @@ import type {
   LeadSearchResponse,
   LeadsSearchParams,
   LinkedInProfileSearchRequest,
+  Lead,
 } from '@/lib/schemas/leads';
 
 const PATH = '/api/leads/search';
@@ -13,6 +14,15 @@ const PROFILE_STATUS_PATH = '/api/leads/profile-status';
 type SearchPayload = LeadsSearchParams | LinkedInProfileSearchRequest | CompanyNameSearchRequest;
 
 function extractSearchErrorMessage(json: any, status: number): string {
+  if (status === 429 && json?.error === 'DAILY_SEARCH_QUOTA_EXCEEDED') {
+    const count = Number(json?.count);
+    const limit = Number(json?.limit);
+    if (Number.isFinite(count) && Number.isFinite(limit)) {
+      return `Alcanzaste el límite diario de búsquedas (${count}/${limit}). Vuelve a intentarlo después del reinicio.`;
+    }
+    return 'Alcanzaste el límite diario de búsquedas. Vuelve a intentarlo después del reinicio.';
+  }
+
   const raw = String(json?.message || json?.error || `HTTP_${status}`);
 
   if (json?.error === 'PROFILE_SEARCH_BACKEND_MISMATCH') {
@@ -116,16 +126,7 @@ export async function getLinkedInProfileStatuses(
 export async function getLinkedInProfileLead(
   recordId: string,
   signal?: AbortSignal,
-): Promise<{
-  id: string;
-  linkedin_url?: string | null;
-  email?: string | null;
-  email_status?: string | null;
-  primary_phone?: string | null;
-  phone_numbers?: any[] | null;
-  enrichment_status?: string | null;
-  updated_at?: string | null;
-} | null> {
+): Promise<Lead | null> {
   const normalizedId = String(recordId || '').trim();
   if (!normalizedId) return null;
 
@@ -140,7 +141,11 @@ export async function getLinkedInProfileLead(
     throw new Error(String(json?.message || json?.error || `HTTP_${res.status}`));
   }
 
-  return json?.lead || null;
+  if (json?.lead) return json.lead;
+  if (json && typeof json === 'object' && String((json as any)?.id || '').trim()) {
+    return json as any;
+  }
+  return null;
 }
 
 export type {

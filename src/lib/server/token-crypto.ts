@@ -1,14 +1,23 @@
 import crypto from 'crypto';
 
 const ENCRYPTED_PREFIX = 'enc:v1';
-const TOKEN_SECRET_CANDIDATES = Array.from(new Set([
-  String(process.env.TOKEN_ENCRYPTION_SECRET || '').trim(),
-  String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim(),
-  String(process.env.INTERNAL_API_SECRET || '').trim(),
-  'anton-ia-token-secret',
-].filter(Boolean)));
+const LEGACY_TOKEN_SECRET = 'anton-ia-token-secret';
 
-function getKey(secret = TOKEN_SECRET_CANDIDATES[0]) {
+function getConfiguredTokenSecrets() {
+  return Array.from(new Set([
+    String(process.env.TOKEN_ENCRYPTION_SECRET || '').trim(),
+    String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim(),
+    String(process.env.INTERNAL_API_SECRET || '').trim(),
+  ].filter(Boolean)));
+}
+
+function getPrimaryTokenSecret() {
+  const [secret] = getConfiguredTokenSecrets();
+  if (!secret) throw new Error('TOKEN_ENCRYPTION_SECRET, SUPABASE_SERVICE_ROLE_KEY, or INTERNAL_API_SECRET is required.');
+  return secret;
+}
+
+function getKey(secret: string) {
   return crypto.createHash('sha256').update(secret).digest();
 }
 
@@ -32,7 +41,7 @@ export function encryptStoredToken(refreshToken: string) {
   if (isEncryptedStoredToken(plain)) return plain;
 
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', getKey(), iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', getKey(getPrimaryTokenSecret()), iv);
   const encrypted = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
 
@@ -52,7 +61,8 @@ export function decryptStoredToken(refreshToken: string | null | undefined) {
     const tag = fromBase64Url(parts[2]);
     const encrypted = fromBase64Url(parts[3]);
 
-    for (const secret of TOKEN_SECRET_CANDIDATES) {
+    // Retain the retired literal only for decrypting records written by older releases.
+    for (const secret of [...getConfiguredTokenSecrets(), LEGACY_TOKEN_SECRET]) {
       try {
         const decipher = crypto.createDecipheriv('aes-256-gcm', getKey(secret), iv);
         decipher.setAuthTag(tag);

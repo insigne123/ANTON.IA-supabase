@@ -6,9 +6,19 @@ import { sendGmail, sendOutlook } from '@/lib/server-email-sender';
 import { normalizeConnectedEmailProvider, type ConnectedEmailProvider } from '@/lib/email-provider';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
-import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
+import { getEffectiveDailyQuotaLimits, reserveOutboundContactQuota } from '@/lib/server/daily-quota-store';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { buildThreadKey, safeInsertEmailEvent } from '@/lib/email-observability';
+import {
+  createLegacyReadyEmailDraftV1,
+  createMessagingSendMetadataV1,
+  deterministicMessagingUuid,
+} from '@/lib/messaging-contracts';
+import { ensureMessagingDraftV1 } from '@/lib/server/messaging-drafts';
+import { dispatchOutboundMessage, OutboundPreProviderDeferredError } from '@/lib/server/outbound-dispatch';
+import { prepareOutboundEmail } from '@/lib/email-outbound';
+import { SupliaRuntimeError } from '@/lib/suplia/runtime';
+import { SupliaRecipientDeliveryError } from '@/lib/server/suplia-bulk-send-outcomes';
 
 export type SupliaEmailPayload = {
   to?: unknown;
@@ -24,6 +34,13 @@ export type SupliaEmailPayload = {
 
 function asText(value: unknown) {
   return String(value || '').trim();
+}
+
+export function parseRequestedSupliaProvider(value: unknown): ConnectedEmailProvider | null {
+  const rawProvider = asText(value);
+  const provider = normalizeConnectedEmailProvider(rawProvider);
+  if (rawProvider && !provider) throw new SupliaRecipientDeliveryError('rejected', `Proveedor de email no soportado: ${rawProvider}.`);
+  return provider;
 }
 
 async function getRefreshToken(supabase: any, userId: string, requestedProvider?: ConnectedEmailProvider | null) {
@@ -56,6 +73,67 @@ async function refreshAccessToken(provider: ConnectedEmailProvider, refreshToken
   return refreshed.access_token as string;
 }
 
+export async function persistSupliaSentHistory(input: {
+  admin: any;
+  dispatchId: string;
+  organizationId: string;
+  contactedPayload: Record<string, any>;
+  eventPayload: Record<string, any>;
+}) {
+  const deterministicContactedId = deterministicMessagingUuid(`suplia:contacted:${input.dispatchId}`);
+  const sentEventId = deterministicMessagingUuid(`suplia:email-event:sent:${input.dispatchId}`);
+  const { data: existingContacted, error: existingContactedError } = await input.admin
+    .from('contacted_leads')
+    .select('id')
+    .eq('organization_id', input.organizationId)
+    .contains('data', { dispatchId: input.dispatchId })
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (existingContactedError) throw existingContactedError;
+  const contactedId = existingContacted?.id || deterministicContactedId;
+
+  if (!existingContacted) {
+    const { error: contactedError } = await input.admin
+      .from('contacted_leads')
+      .upsert({
+        ...input.contactedPayload,
+        id: contactedId,
+        data: { ...(input.contactedPayload.data || {}), dispatchId: input.dispatchId },
+      }, { onConflict: 'id', ignoreDuplicates: true });
+    if (contactedError) throw contactedError;
+  }
+
+  const { data: persistedContacted, error: persistedContactedError } = await input.admin
+    .from('contacted_leads')
+    .select('id, provider, email, subject, message_id, thread_id, conversation_id, internet_message_id, thread_key, sent_at, created_at')
+    .eq('id', contactedId)
+    .single();
+  if (persistedContactedError) throw persistedContactedError;
+
+  const { data: existingSentEvent, error: existingSentEventError } = await input.admin
+    .from('email_events')
+    .select('id')
+    .eq('organization_id', input.organizationId)
+    .eq('event_type', 'sent')
+    .eq('event_source', 'suplia')
+    .contains('meta', { dispatchId: input.dispatchId })
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (existingSentEventError) throw existingSentEventError;
+  if (!existingSentEvent) {
+    await safeInsertEmailEvent(input.admin, {
+      ...input.eventPayload,
+      id: sentEventId,
+      contacted_id: contactedId,
+      meta: { ...(input.eventPayload.meta || {}), dispatchId: input.dispatchId },
+    });
+  }
+
+  return persistedContacted;
+}
+
 export async function sendSupliaEmail(input: {
   supabase: any;
   userId: string;
@@ -68,14 +146,14 @@ export async function sendSupliaEmail(input: {
   const subject = asText(input.payload.subject);
   const htmlBody = asText(input.payload.htmlBody || input.payload.textBody);
   const textBody = asText(input.payload.textBody);
-  const requestedProvider = normalizeConnectedEmailProvider(asText(input.payload.provider));
+  const requestedProvider = parseRequestedSupliaProvider(input.payload.provider);
 
-  if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new Error('El destinatario no es un email valido.');
-  if (!subject) throw new Error('Falta el asunto del email.');
-  if (!htmlBody) throw new Error('Falta el cuerpo del email.');
+  if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new SupliaRecipientDeliveryError('rejected', 'El destinatario no es un email valido.');
+  if (!subject) throw new SupliaRecipientDeliveryError('rejected', 'Falta el asunto del email.');
+  if (!htmlBody) throw new SupliaRecipientDeliveryError('rejected', 'Falta el cuerpo del email.');
 
   const suppressed = await isEmailSuppressedForScope(to, { userId: input.userId, organizationId: input.organizationId });
-  if (suppressed) throw new Error('El destinatario esta dado de baja o bloqueado por privacidad.');
+  if (suppressed) throw new SupliaRecipientDeliveryError('rejected', 'El destinatario esta dado de baja o bloqueado por privacidad.');
 
   const domain = to.split('@')[1]?.trim().toLowerCase();
   if (domain) {
@@ -86,17 +164,8 @@ export async function sendSupliaEmail(input: {
       .eq('domain', domain)
       .maybeSingle();
     if (error) throw error;
-    if (blockedDomain) throw new Error(`El dominio ${domain} esta bloqueado por la organizacion.`);
+    if (blockedDomain) throw new SupliaRecipientDeliveryError('rejected', `El dominio ${domain} esta bloqueado por la organizacion.`);
   }
-
-  const quotaLimits = await getEffectiveDailyQuotaLimits({ userId: input.userId, organizationId: input.organizationId });
-  const quota = await checkAndConsumeDailyQuota({
-    userId: input.userId,
-    organizationId: input.organizationId,
-    resource: 'contact',
-    limit: quotaLimits.contact,
-  });
-  if (!quota.allowed) throw new Error(`Cuota diaria de contactos excedida. Usado ${quota.count}/${quota.limit}.`);
 
   const { provider, refreshToken } = await getRefreshToken(input.supabase, input.userId, requestedProvider);
   const accessToken = await refreshAccessToken(provider, refreshToken);
@@ -104,20 +173,99 @@ export async function sendSupliaEmail(input: {
 
   const unsubscribeUrl = generateUnsubscribeLink(to, input.userId, input.organizationId);
   const providerLabel = provider === 'google' ? 'gmail' : 'outlook';
-  const result = provider === 'google'
-    ? await sendGmail(accessToken, to, subject, htmlBody, { textBody: textBody || undefined, unsubscribeUrl })
-    : await sendOutlook(accessToken, to, subject, htmlBody, { textBody: textBody || undefined, unsubscribeUrl });
+  const prepared = prepareOutboundEmail({ html: htmlBody, text: textBody || undefined, unsubscribeUrl });
+  const requestedAt = new Date().toISOString();
+  const idempotencyKey = `suplia:${input.actionId || input.conversationId || randomUUID()}:${to}`;
+  const draft = createLegacyReadyEmailDraftV1({
+    organizationId: input.organizationId,
+    userId: input.userId,
+    idempotencyKey,
+    requestedAt,
+    leadRef: asText(input.payload.leadId) || to,
+    displayName: asText(input.payload.recipientName) || null,
+    to,
+    subject,
+    text: prepared.text,
+    html: prepared.html,
+  });
+  await ensureMessagingDraftV1(draft);
+  const messagingMetadata = createMessagingSendMetadataV1(draft, { idempotencyKey, provider: providerLabel, requestedAt });
+  const dispatchResult = await dispatchOutboundMessage({
+    draft,
+    metadata: messagingMetadata,
+    provider: {
+      async send({ dispatchId }) {
+        let quota;
+        try {
+          const quotaLimits = await getEffectiveDailyQuotaLimits({ userId: input.userId, organizationId: input.organizationId });
+          quota = await reserveOutboundContactQuota({
+            dispatchId,
+            userId: input.userId,
+            organizationId: input.organizationId,
+            limit: quotaLimits.contact,
+          });
+        } catch (error) {
+          throw new OutboundPreProviderDeferredError(
+            'Contact quota could not be reserved. The provider was not invoked.',
+            { code: 'quota_reservation_unavailable', cause: error },
+          );
+        }
+        if (!quota.allowed) {
+          return { outcome: 'deferred' as const, code: 'daily_quota_exceeded', message: `Cuota diaria de contactos excedida. Usado ${quota.count}/${quota.limit}.` };
+        }
+        const result = provider === 'google'
+          ? await sendGmail(accessToken, to, subject, prepared.html, { textBody: prepared.text, unsubscribeUrl, idempotencyKey })
+          : await sendOutlook(accessToken, to, subject, prepared.html, { textBody: prepared.text, unsubscribeUrl, idempotencyKey });
+        const providerMessageId = String((result as any)?.id || (result as any)?.messageId || (result as any)?.internetMessageId || '').trim();
+        return { outcome: 'accepted' as const, providerMessageId, response: result as Record<string, unknown> };
+      },
+    },
+  });
+  if (dispatchResult.status === 'deferred') {
+    const current = new Date();
+    const retryAtMs = Date.parse(dispatchResult.retry?.retryAt || '');
+    const retryAfterMs = dispatchResult.retry?.retryAfterMs
+      ?? (Number.isFinite(retryAtMs)
+        ? Math.max(0, retryAtMs - current.getTime())
+        : Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate() + 1) - current.getTime());
+    throw new SupliaRuntimeError('deferred', dispatchResult.dispatch.errorMessage || 'El envío fue diferido.', {
+      retryAfterMs,
+      metadata: {
+        status: 'deferred',
+        code: dispatchResult.dispatch.errorCode || 'daily_quota_exceeded',
+        dispatchId: dispatchResult.dispatch.id,
+        retryAt: dispatchResult.retry?.retryAt || new Date(current.getTime() + retryAfterMs).toISOString(),
+        retry: dispatchResult.retry,
+      },
+    });
+  }
+  if (dispatchResult.status === 'failed') {
+    throw new SupliaRecipientDeliveryError('rejected', dispatchResult.dispatch.errorMessage || 'El proveedor rechazo el envio.', {
+      status: dispatchResult.status,
+      code: dispatchResult.dispatch.errorCode,
+      dispatchId: dispatchResult.dispatch.id,
+    });
+  }
+  if (dispatchResult.status !== 'sent') {
+    throw new SupliaRecipientDeliveryError('unknown', dispatchResult.dispatch.errorMessage || `El envío quedó ${dispatchResult.status}.`, {
+      status: dispatchResult.status,
+      code: dispatchResult.dispatch.errorCode || 'delivery_outcome_unknown',
+      dispatchId: dispatchResult.dispatch.id,
+      requiresReconciliation: true,
+    });
+  }
+  const result = dispatchResult.dispatch.providerResponse || {};
 
   const messageId = String((result as any)?.id || (result as any)?.messageId || '').trim() || null;
   const threadId = String((result as any)?.threadId || '').trim() || null;
   const conversationId = String((result as any)?.conversationId || '').trim() || null;
   const internetMessageId = String((result as any)?.internetMessageId || '').trim() || null;
   const threadKey = buildThreadKey({ provider: providerLabel, threadId, conversationId, internetMessageId, messageId });
-  const sentAt = new Date().toISOString();
-  const contactedId = randomUUID();
+  const dispatchId = dispatchResult.dispatch.id;
+  const sentAt = dispatchResult.dispatch.completedAt || new Date().toISOString();
+  const admin = getSupabaseAdminClient();
 
   const contactedPayload = {
-    id: contactedId,
     user_id: input.userId,
     organization_id: input.organizationId,
     lead_id: asText(input.payload.leadId) || null,
@@ -142,41 +290,51 @@ export async function sendSupliaEmail(input: {
       source: 'suplia',
       supliaConversationId: input.conversationId || null,
       supliaActionId: input.actionId || null,
+      draftId: draft.draftId,
+      draftVersionId: draft.versionId,
+      contentHash: messagingMetadata.contentHash,
+      dispatchId,
     },
   };
 
-  const { error: contactedError } = await getSupabaseAdminClient().from('contacted_leads').insert(contactedPayload as any);
-  if (contactedError) throw contactedError;
-
-  await safeInsertEmailEvent(getSupabaseAdminClient(), {
-    organization_id: input.organizationId,
-    contacted_id: contactedId,
-    lead_id: asText(input.payload.leadId) || null,
-    provider: providerLabel,
-    event_type: 'sent',
-    event_source: 'suplia',
-    event_at: sentAt,
-    thread_key: threadKey,
-    message_id: messageId,
-    internet_message_id: internetMessageId,
-    meta: {
-      subject,
-      to,
-      supliaConversationId: input.conversationId || null,
-      supliaActionId: input.actionId || null,
+  const persistedContacted = await persistSupliaSentHistory({
+    admin,
+    dispatchId,
+    organizationId: input.organizationId,
+    contactedPayload,
+    eventPayload: {
+      organization_id: input.organizationId,
+      lead_id: asText(input.payload.leadId) || null,
+      provider: providerLabel,
+      event_type: 'sent',
+      event_source: 'suplia',
+      event_at: sentAt,
+      thread_key: threadKey,
+      message_id: messageId,
+      internet_message_id: internetMessageId,
+      meta: {
+        subject,
+        to,
+        supliaConversationId: input.conversationId || null,
+        supliaActionId: input.actionId || null,
+        draftId: draft.draftId,
+        draftVersionId: draft.versionId,
+        contentHash: messagingMetadata.contentHash,
+        dispatchId,
+      },
     },
   });
 
   return {
-    contactedId,
-    provider: providerLabel,
-    to,
-    subject,
-    messageId,
-    threadId,
-    conversationId,
-    internetMessageId,
-    threadKey,
-    sentAt,
+    contactedId: persistedContacted.id,
+    provider: persistedContacted.provider || providerLabel,
+    to: persistedContacted.email || to,
+    subject: persistedContacted.subject || subject,
+    messageId: persistedContacted.message_id || messageId,
+    threadId: persistedContacted.thread_id || threadId,
+    conversationId: persistedContacted.conversation_id || conversationId,
+    internetMessageId: persistedContacted.internet_message_id || internetMessageId,
+    threadKey: persistedContacted.thread_key || threadKey,
+    sentAt: persistedContacted.sent_at || persistedContacted.created_at || sentAt,
   };
 }

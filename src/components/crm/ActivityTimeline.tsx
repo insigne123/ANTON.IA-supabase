@@ -3,7 +3,7 @@
 import { Activity } from '@/lib/crm-types';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Mail, Phone, FileText, CheckCircle, Reply } from 'lucide-react';
+import { Mail, Phone, FileText, CheckCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -31,8 +31,8 @@ export function ActivityTimeline({ activities }: Props) {
                 <div key={act.id} className="relative">
                     <span className={cn(
                         "absolute -left-[25px] top-1 bg-background border-2 rounded-full p-1 text-muted-foreground",
-                        act.type === 'email' ? 'border-blue-200 text-blue-500' :
-                            act.type === 'note' ? 'border-yellow-200 text-yellow-500' : 'border-gray-200'
+                        act.type === 'email' ? 'border-sky-200 text-sky-600 dark:border-sky-500/30 dark:text-sky-300' :
+                            act.type === 'note' ? 'border-amber-200 text-amber-600 dark:border-amber-500/30 dark:text-amber-300' : 'border-border'
                     )}>
                         <ActivityIcon type={act.type} />
                     </span>
@@ -44,7 +44,7 @@ export function ActivityTimeline({ activities }: Props) {
                             </span>
                         </div>
                         {act.description && (
-                            <div className="text-sm text-gray-700 bg-muted/30 p-2 rounded-md whitespace-pre-wrap">
+                            <div className="whitespace-pre-wrap rounded-md bg-muted/30 p-2 text-sm text-foreground/80">
                                 {act.description}
                             </div>
                         )}

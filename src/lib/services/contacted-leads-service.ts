@@ -64,6 +64,7 @@ function mapRowToContactedLead(row: any): ContactedLead {
         replySummary: row.reply_summary,
         campaignFollowupAllowed: row.campaign_followup_allowed,
         campaignFollowupReason: row.campaign_followup_reason,
+        data: row.data || null,
     };
 }
 
@@ -105,6 +106,7 @@ function mapContactedLeadToRow(item: ContactedLead, userId: string, organization
         last_event_at: item.lastEventAt || item.sentAt || new Date().toISOString(),
         preflight_status: item.preflightStatus || 'ok',
         preflight_reason: item.preflightReason || null,
+        data: item.data || null,
         last_reply_text: item.lastReplyText,
         reply_preview: item.replyPreview,
         ...(item.replyMessageId ? { reply_message_id: item.replyMessageId } : {}),
@@ -141,6 +143,7 @@ function mapPatchToRow(patch: Partial<ContactedLead>) {
     if (patch.lastEventAt) updateData.last_event_at = patch.lastEventAt;
     if (patch.preflightStatus) updateData.preflight_status = patch.preflightStatus;
     if (patch.preflightReason) updateData.preflight_reason = patch.preflightReason;
+    if (patch.data !== undefined) updateData.data = patch.data;
     if (patch.followUpCount !== undefined) updateData.follow_up_count = patch.followUpCount;
     if (patch.lastFollowUpAt) updateData.last_follow_up_at = patch.lastFollowUpAt;
     if (patch.lastStepIdx !== undefined) updateData.last_step_idx = patch.lastStepIdx;

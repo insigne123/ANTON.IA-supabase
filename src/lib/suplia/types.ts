@@ -73,6 +73,7 @@ export type SupliaArtifactType =
   | 'crm_summary'
   | 'note'
   | 'tool_result'
+  | 'company_research'
   | 'company_shortlist'
   | 'person_shortlist'
   | 'campaign_draft'

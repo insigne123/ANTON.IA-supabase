@@ -147,10 +147,11 @@ function UnsubscribeContent() {
 
 export default function UnsubscribePage() {
     return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <main className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+            <h1 className="sr-only">Gestionar baja de suscripcion</h1>
             <Suspense fallback={<div>Cargando...</div>}>
                 <UnsubscribeContent />
             </Suspense>
-        </div>
+        </main>
     );
 }

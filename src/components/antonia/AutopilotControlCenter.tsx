@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bot, Flame, Gauge, Loader2, RefreshCw, ShieldCheck, Siren, Sparkles, Waves } from 'lucide-react';
+import { AlertTriangle, Bot, Flame, Gauge, Loader2, PauseCircle, RefreshCw, ShieldCheck, Siren, Sparkles, Waves } from 'lucide-react';
 
 import type { AntoniaConfig } from '@/lib/types';
 import { approvalModeLabel, autopilotModeLabel } from '@/lib/antonia-autopilot';
+import { getTrustCenterCopy, getTrustCenterTone, type TrustCenterTone } from '@/lib/commercial-intelligence';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -49,6 +50,18 @@ const metricCards = [
   { key: 'contactsToday', label: 'Contactos hoy', icon: Sparkles },
 ] as const;
 
+function trustToneClasses(tone: TrustCenterTone) {
+  if (tone === 'healthy') return 'border-emerald-200 bg-emerald-50/80 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100';
+  if (tone === 'attention') return 'border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100';
+  return 'border-slate-200 bg-slate-50 text-slate-950 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100';
+}
+
+function TrustToneIcon({ tone }: { tone: TrustCenterTone }) {
+  if (tone === 'healthy') return <ShieldCheck className="h-5 w-5" />;
+  if (tone === 'attention') return <AlertTriangle className="h-5 w-5" />;
+  return <PauseCircle className="h-5 w-5" />;
+}
+
 export function AutopilotControlCenter({
   config,
   onUpdateConfig,
@@ -84,6 +97,14 @@ export function AutopilotControlCenter({
   }, [fetchOverview]);
 
   const effectiveConfig = useMemo(() => config || overview?.config || null, [config, overview?.config]);
+
+  const trustTone = useMemo(() => getTrustCenterTone({
+    autopilotEnabled: effectiveConfig?.autopilotEnabled,
+    openExceptions: overview?.summary.openExceptions || 0,
+    approvalsPending: overview?.summary.approvalsPending || 0,
+    tasksProcessing: overview?.summary.tasksProcessing || 0,
+  }), [effectiveConfig?.autopilotEnabled, overview?.summary.approvalsPending, overview?.summary.openExceptions, overview?.summary.tasksProcessing]);
+  const trustCopy = useMemo(() => getTrustCenterCopy(trustTone), [trustTone]);
 
   const modeBadgeVariant = effectiveConfig?.autopilotMode === 'full_auto'
     ? 'default'
@@ -124,6 +145,35 @@ export function AutopilotControlCenter({
             {effectiveConfig?.replyAutopilotMode && (
               <Badge variant="secondary">Reply {effectiveConfig.replyAutopilotMode}</Badge>
             )}
+          </div>
+
+          <div className={`rounded-2xl border p-4 ${trustToneClasses(trustTone)}`}>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex gap-3">
+                <div className="mt-0.5 rounded-full bg-background/60 p-2 text-current">
+                  <TrustToneIcon tone={trustTone} />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">Trust Center</p>
+                  <h3 className="mt-1 text-base font-semibold tracking-tight">{trustCopy.label}</h3>
+                  <p className="mt-1 max-w-2xl text-sm opacity-80">{trustCopy.description}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center text-xs sm:min-w-[300px]">
+                <div className="rounded-xl bg-background/55 px-3 py-2">
+                  <p className="font-semibold">{overview?.summary.approvalsPending ?? 0}</p>
+                  <p className="opacity-75">Aprobaciones</p>
+                </div>
+                <div className="rounded-xl bg-background/55 px-3 py-2">
+                  <p className="font-semibold">{overview?.summary.openExceptions ?? 0}</p>
+                  <p className="opacity-75">Excepciones</p>
+                </div>
+                <div className="rounded-xl bg-background/55 px-3 py-2">
+                  <p className="font-semibold">{overview?.summary.hotLeads ?? 0}</p>
+                  <p className="opacity-75">Calientes</p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

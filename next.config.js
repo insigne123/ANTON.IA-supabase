@@ -1,10 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // ❗️IMPORTANTE: no mezclar objetos de Genkit en el config de Next.
-  // Cualquier integración de Genkit debe ir en rutas (API) vía @genkit-ai/next.
-
-  /* config options here */
-  /* config options here */
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   images: {
     remotePatterns: [
       {
@@ -23,10 +19,19 @@ const nextConfig = {
   // Válido en Next 15 para evitar bundlear dependencias pesadas en server.
   serverExternalPackages: [
     'genkit',
-    '@genkit-ai/googleai',
     '@genkit-ai/core',
     'apify-client', // evita que Webpack intente resolverlo para el cliente
   ],
+
+  async redirects() {
+    return [
+      {
+        source: '/favicon.ico',
+        destination: '/icon.png',
+        permanent: true,
+      },
+    ];
+  },
 
   webpack(config, { isServer }) {
     // Ignorar módulos opcionales que no existen en el cliente

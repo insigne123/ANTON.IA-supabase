@@ -11,10 +11,12 @@ import {
 } from "@/lib/schemas/leads";
 import { normalizeFromN8N } from "@/lib/normalizers/n8n";
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
+import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 import { enrichPersonWithPDL, pickPdlEmail, pickPdlPhones, searchCompaniesWithPDL, searchPeopleWithPDL } from '@/lib/providers/pdl';
 import { isPdlFallbackEnabled, resolveLeadProvider, resolveOrganizationIdForUser } from '@/lib/server/provider-routing';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { partitionLinkedInProfileLeads } from '@/lib/linkedin-profile-result';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -79,9 +81,15 @@ function mapFlexibleLead(raw: any, index: number) {
       String(raw?.linkedin_url || raw?.linkedinUrl || raw?.linkedin_profile_url || '').trim() ||
       String(email || '').trim() ||
       `lead-${index + 1}`,
+    name: fullName || undefined,
     first_name: String(raw?.first_name || split.firstName || '').trim() || undefined,
     last_name: String(raw?.last_name || split.lastName || '').trim() || undefined,
     email: String(email || '').trim() || undefined,
+    org_name: String(raw?.org_name || raw?.organization_name || raw?.job_company_name || '').trim() || undefined,
+    organization_name: String(raw?.organization_name || raw?.org_name || raw?.job_company_name || '').trim() || undefined,
+    organization_id: String(organization?.id || raw?.organization_id || '').trim() || undefined,
+    organization_website: String(raw?.organization_website || organization?.website_url || raw?.organization_website_url || raw?.job_company_website || raw?.website_url || '').trim() || undefined,
+    industry: String(raw?.industry || organization?.industry || raw?.organization_industry || raw?.job_company_industry || '').trim() || undefined,
     title: String(raw?.title || raw?.job_title || raw?.headline || '').trim() || undefined,
     organization: {
       id: String(organization?.id || raw?.organization_id || '').trim() || undefined,
@@ -103,6 +111,12 @@ function mapFlexibleLead(raw: any, index: number) {
       String(raw?.photo_url || raw?.photoUrl || raw?.profile_photo_url || raw?.image_url || '').trim() || undefined,
     email_status: String(raw?.email_status || (email ? 'verified' : 'unknown')).trim() || undefined,
     apollo_id: String(raw?.apollo_id || raw?.apolloId || raw?.id || raw?.person_id || '').trim() || undefined,
+    city: String(raw?.city || '').trim() || undefined,
+    state: String(raw?.state || '').trim() || undefined,
+    country: String(raw?.country || '').trim() || undefined,
+    headline: String(raw?.headline || '').trim() || undefined,
+    seniority: String(raw?.seniority || '').trim() || undefined,
+    departments: Array.isArray(raw?.departments) ? raw.departments : undefined,
     primary_phone:
       String(raw?.primary_phone || raw?.primaryPhone || raw?.mobile_phone || raw?.work_phone || '').trim() || undefined,
     phone_numbers: Array.isArray(raw?.phone_numbers)
@@ -111,6 +125,22 @@ function mapFlexibleLead(raw: any, index: number) {
         ? raw.phoneNumbers
         : undefined,
     enrichment_status: String(raw?.enrichment_status || raw?.enrichmentStatus || '').trim() || undefined,
+    organization_domain: cleanDomain(
+      raw?.organization_domain ||
+      organization?.primary_domain ||
+      organization?.domain ||
+      raw?.job_company_website ||
+      raw?.website_url,
+    ),
+    organization_industry: String(raw?.organization_industry || organization?.industry || raw?.job_company_industry || '').trim() || undefined,
+    organization_size: typeof raw?.organization_size === 'number'
+      ? raw.organization_size
+      : typeof raw?.organization?.estimated_num_employees === 'number'
+        ? raw.organization.estimated_num_employees
+        : undefined,
+    page: typeof raw?.page === 'number' ? raw.page : undefined,
+    batch_run_id: String(raw?.batch_run_id || '').trim() || undefined,
+    updated_at: String(raw?.updated_at || '').trim() || undefined,
   };
 }
 
@@ -154,6 +184,7 @@ function pickLeadSearchMeta(json: unknown) {
     search_mode: source.search_mode,
     company_name: source.company_name,
     leads_count: source.leads_count,
+    warnings: Array.isArray(source.warnings) ? source.warnings : undefined,
     requested_reveal: source.requested_reveal,
     applied_reveal: source.applied_reveal,
     effective_reveal: source.effective_reveal,
@@ -426,6 +457,39 @@ async function resolveSearchUserId(req: NextRequest) {
   }
 
   return { userId: user.id };
+}
+
+async function reserveLeadSearchQuota(userId: string, organizationId?: string | null) {
+  const resolvedOrganizationId = organizationId || await resolveOrganizationIdForUser(userId);
+  if (!resolvedOrganizationId) {
+    return {
+      error: NextResponse.json({ error: 'ORGANIZATION_REQUIRED' }, { status: 403 }),
+    };
+  }
+
+  const limits = await getEffectiveDailyQuotaLimits({ userId, organizationId: resolvedOrganizationId });
+  const quota = await checkAndConsumeDailyQuota({
+    userId,
+    organizationId: resolvedOrganizationId,
+    resource: 'search',
+    limit: limits.leadSearch,
+  });
+
+  if (!quota.allowed) {
+    return {
+      error: NextResponse.json({
+        error: 'DAILY_SEARCH_QUOTA_EXCEEDED',
+        count: quota.count,
+        limit: quota.limit,
+        retryAt: quota.resetAtISO,
+      }, {
+        status: 429,
+        headers: { 'Cache-Control': 'private, no-store, max-age=0' },
+      }),
+    };
+  }
+
+  return { organizationId: resolvedOrganizationId, quota };
 }
 
 function buildPeopleSearchLeadRow(person: any, options: {
@@ -863,6 +927,15 @@ async function callApolloProfileSearch(
   }
 }
 
+function looksLikeSingleLeadPayload(payload: any) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  return Boolean(
+    String(payload?.id || '').trim() ||
+    String(payload?.linkedin_url || '').trim() ||
+    String(payload?.email || '').trim()
+  );
+}
+
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -898,8 +971,6 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
       }
 
       const raw = await res.text();
-      console.log("Raw Response from Service:", raw);
-
       if (!raw || !raw.trim()) {
         throw new Error("SERVICE_EMPTY_BODY");
       }
@@ -926,6 +997,19 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
           },
           { status: 502 },
         );
+      }
+
+      if (payload?.search_mode === 'linkedin_profile') {
+        const { profileLeads, trackingIds } = partitionLinkedInProfileLeads(normalized.leads);
+        return NextResponse.json({
+          ...normalized,
+          ...responseMeta,
+          ...(meta || {}),
+          count: profileLeads.length,
+          leads_count: profileLeads.length,
+          leads: profileLeads,
+          ...(trackingIds.length > 0 ? { profile_tracking_ids: trackingIds } : {}),
+        }, { status: 200 });
       }
 
       return NextResponse.json({ ...normalized, ...responseMeta, ...(meta || {}) }, { status: 200 });
@@ -1303,7 +1387,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'PROFILE_RECORD_FETCH_ERROR', message: String(json?.message || json?.error || raw || `HTTP_${response.status}`) }, { status: response.status === 200 ? 500 : response.status });
     }
 
-    return NextResponse.json(json || { lead: null }, { status: 200, headers: { 'Cache-Control': 'no-store' } });
+    const payload = json || { lead: null };
+    if (payload?.lead || payload?.error) {
+      return NextResponse.json(payload, { status: 200, headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    if (looksLikeSingleLeadPayload(payload)) {
+      return NextResponse.json(
+        { lead: mapFlexibleLead(payload, 0) },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    return NextResponse.json({ lead: null }, { status: 200, headers: { 'Cache-Control': 'no-store' } });
   } catch (error: any) {
     return NextResponse.json({ error: 'PROFILE_RECORD_FETCH_ERROR', message: error?.message || 'Unknown error' }, { status: 500 });
   }
@@ -1330,6 +1426,8 @@ export async function POST(req: NextRequest) {
           profileReq.linkedin_url || profileReq.linkedin_profile_url || profileReq.linkedinUrl || ''
         ).trim();
         const organizationId = await resolveOrganizationIdForUser(userId);
+        const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
+        if ('error' in quotaReservation) return quotaReservation.error;
         const requestedProvider = String((body as any)?.provider || '').trim().toLowerCase();
         const profilePayload = {
           user_id: userId,
@@ -1348,12 +1446,17 @@ export async function POST(req: NextRequest) {
         });
         response.headers.set('x-search-mode', 'linkedin_profile');
         response.headers.set('x-provider-used', 'backend-antonia');
+        response.headers.set('x-quota-count', String(quotaReservation.quota.count));
+        response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
         return response;
       }
 
       const companyParsed = CompanyNameSearchRequestSchema.safeParse(body);
       if (companyParsed.success) {
         const companyReq = companyParsed.data;
+        const organizationId = await resolveOrganizationIdForUser(userId);
+        const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
+        if ('error' in quotaReservation) return quotaReservation.error;
         const organizationDomains = normalizeDomainList([
           ...(companyReq.organization_domains || []),
           ...(companyReq.organizationDomains || []),
@@ -1376,12 +1479,17 @@ export async function POST(req: NextRequest) {
           selected_organization_id: String(companyReq.selected_organization_id || '').trim() || undefined,
           selected_organization_name: String(companyReq.selected_organization_name || '').trim() || undefined,
           selected_organization_domain: normalizeDomainList([companyReq.selected_organization_domain])[0] || undefined,
+          selected_organization_website: String(companyReq.selected_organization_website || '').trim() || undefined,
+          selected_organization_industry: String(companyReq.selected_organization_industry || '').trim() || undefined,
+          selected_organization_size: companyReq.selected_organization_size ?? undefined,
         };
         const response = await callLeadSearchService(companyPayload, {
           search_mode: 'company_name',
           company_name: companyPayload.company_name || companyPayload.selected_organization_name,
         });
         response.headers.set('x-search-mode', 'company_name');
+        response.headers.set('x-quota-count', String(quotaReservation.quota.count));
+        response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
         return response;
       }
 
@@ -1420,6 +1528,15 @@ export async function POST(req: NextRequest) {
     let fallbackApplied = false;
     let fallbackReason: string | undefined;
 
+    if (USE_APIFY) {
+      const url = new URL(req.url);
+      url.pathname = "/api/leads/apify";
+      return NextResponse.redirect(url, 307);
+    }
+
+    const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
+    if ('error' in quotaReservation) return quotaReservation.error;
+
     if (providerDecision.provider === 'pdl') {
       try {
         const response = await callPdlLeadSearch(currentParams, {
@@ -1430,6 +1547,8 @@ export async function POST(req: NextRequest) {
           fallbackApplied: false,
         });
         response.headers.set('x-provider-used', 'pdl');
+        response.headers.set('x-quota-count', String(quotaReservation.quota.count));
+        response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
         return response;
       } catch (error: any) {
         if (!isPdlFallbackEnabled()) {
@@ -1449,17 +1568,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (USE_APIFY) {
-      const url = new URL(req.url);
-      url.pathname = "/api/leads/apify";
-      return NextResponse.redirect(url, 307);
-    }
-
-    console.log("Current Params from request:", currentParams);
-    console.log("Authenticated User ID:", userId);
-
     const newPayload = {
       user_id: userId || undefined,
+      search_mode: 'batch',
       industry_keywords: currentParams.industry_keywords,
       company_location: currentParams.company_location,
       titles: Array.isArray(currentParams.titles)
@@ -1468,12 +1579,10 @@ export async function POST(req: NextRequest) {
       seniorities: Array.isArray(currentParams.seniorities) ? currentParams.seniorities : [],
       employee_range: currentParams.employee_ranges,
       employee_ranges: currentParams.employee_ranges,
-      max_results: 100,
+      max_results: currentParams.max_results,
     };
 
     if (!newPayload.titles) newPayload.titles = [];
-
-    console.log("Outgoing Payload to Service:", JSON.stringify(newPayload, null, 2));
 
     const response = await callLeadSearchService(newPayload, {
       providerRequested: providerDecision.requestedProvider,
@@ -1484,6 +1593,8 @@ export async function POST(req: NextRequest) {
       fallbackReason,
     });
     response.headers.set('x-provider-used', 'apollo');
+    response.headers.set('x-quota-count', String(quotaReservation.quota.count));
+    response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
     return response;
   } catch (error: any) {
     console.error('[leads/search] Unhandled route error:', error);

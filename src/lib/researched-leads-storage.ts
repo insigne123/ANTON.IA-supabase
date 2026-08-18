@@ -1,7 +1,10 @@
 // src/lib/researched-leads-storage.ts
 // Marca qué leads ya fueron investigados (por ref). Permite marcar, desmarcar y limpiar todo.
 
-const KEY = 'leadflow-researched-leads';
+import { getBrowserStorage } from './browser-storage';
+
+const LEGACY_KEY = 'leadflow-researched-leads';
+let activeScope = '';
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_REFS = 5000;
 
@@ -11,14 +14,27 @@ type ResearchedLeadCacheState = {
   refs: string[];
 };
 
+function keyForScope() {
+  return activeScope ? `${LEGACY_KEY}:${activeScope}` : '';
+}
+
+export function setResearchedLeadsStorageScope(userId?: string | null) {
+  activeScope = String(userId || '').trim().toLowerCase();
+}
+
 function normalizeRef(ref: string): string {
   return String(ref || '').trim().toLowerCase();
 }
 
 function getAll(): string[] {
-  if (typeof window === 'undefined') return [];
+  const storage = getBrowserStorage();
+  const key = keyForScope();
+  if (!storage || !key) return [];
   try {
-    const raw = localStorage.getItem(KEY);
+    const scopedRaw = storage.getItem(key);
+    const legacyRaw = scopedRaw == null ? storage.getItem(LEGACY_KEY) : null;
+    const raw = scopedRaw ?? legacyRaw;
+    if (legacyRaw != null) storage.removeItem(LEGACY_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
 
     if (Array.isArray(parsed)) {
@@ -30,7 +46,7 @@ function getAll(): string[] {
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.refs)) {
       const ts = Date.parse(String(parsed.updatedAt || ''));
       if (Number.isFinite(ts) && Date.now() - ts > CACHE_TTL_MS) {
-        localStorage.removeItem(KEY);
+        storage.removeItem(key);
         return [];
       }
 
@@ -45,7 +61,9 @@ function getAll(): string[] {
 }
 
 function setAll(refs: string[]) {
-  if (typeof window === 'undefined') return;
+  const storage = getBrowserStorage();
+  const key = keyForScope();
+  if (!storage || !key) return;
   // Guardamos siempre normalizado
   const uniq = Array.from(new Set((refs || []).filter(Boolean).map(normalizeRef))).slice(0, MAX_REFS);
   const payload: ResearchedLeadCacheState = {
@@ -53,7 +71,7 @@ function setAll(refs: string[]) {
     updatedAt: new Date().toISOString(),
     refs: uniq,
   };
-  localStorage.setItem(KEY, JSON.stringify(payload));
+  storage.setItem(key, JSON.stringify(payload));
 }
 
 /** Devuelve true si la ref está marcada como investigada. */

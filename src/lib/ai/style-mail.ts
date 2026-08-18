@@ -5,7 +5,7 @@
 
 import { ensureSubjectPrefix } from "@/lib/outreach-templates";
 import { renderTemplate } from "@/lib/template";
-import { applySignaturePlaceholders, buildSenderInfo } from "@/lib/signature-placeholders";
+import { applySignaturePlaceholders, buildSenderInfo, type CompanyProfileInfo, type SenderInfo } from "@/lib/signature-placeholders";
 import type { StyleProfile } from "@/lib/types";
 
 export type LeadInput = {
@@ -26,6 +26,11 @@ export type ResearchInput = {
   talkTracks?: string[];
   emailDraft?: { subject?: string; body?: string };
   company?: { name?: string; domain?: string };
+};
+
+type GenerateMailOptions = {
+  sender?: SenderInfo;
+  companyProfile?: CompanyProfileInfo;
 };
 
 function htmlToPlainParas(htmlOrText: string): string {
@@ -59,10 +64,20 @@ function htmlToPlainParas(htmlOrText: string): string {
 export function generateMailFromStyle(
   profile: StyleProfile,
   report: ResearchInput | null,
-  lead: LeadInput
+  lead: LeadInput,
+  options: GenerateMailOptions = {}
 ): { subject: string; body: string } {
-  const sender = buildSenderInfo();
+  const sender = options.sender || buildSenderInfo();
   const companyName = lead.companyName || report?.company?.name || "";
+  const companyProfile = {
+    name: options.companyProfile?.name || sender.company || '',
+    sector: options.companyProfile?.sector || '',
+    description: options.companyProfile?.description || '',
+    services: options.companyProfile?.services || '',
+    valueProposition: options.companyProfile?.valueProposition || '',
+    website: options.companyProfile?.website || sender.website || '',
+    domain: options.companyProfile?.domain || '',
+  };
   const leadFirstName = (lead.fullName || "").split(" ")[0] || "";
   const ctaLabel = (profile as any)?.cta?.label as string | undefined;
   const ctaDur = (profile as any)?.cta?.duration as string | undefined;
@@ -87,6 +102,7 @@ export function generateMailFromStyle(
       name: companyName,
       domain: lead.companyDomain || report?.company?.domain || "",
     },
+    companyProfile,
     sender,
     cta: {
       label: ctaLabel || '',

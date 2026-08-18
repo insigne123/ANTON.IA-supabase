@@ -18,6 +18,24 @@ export type CampaignQaResult = {
   reviewCount: number;
 };
 
+export type CampaignDraftReadinessInput = {
+  name?: string | null;
+  campaignType?: 'reconnection' | 'follow_up';
+  steps?: Array<{ subject?: string | null; bodyHtml?: string | null }>;
+  offerName?: string | null;
+  offerSummary?: string | null;
+  hasActiveAudienceSegment?: boolean;
+};
+
+export type CampaignDraftReadiness = {
+  ready: boolean;
+  issues: string[];
+};
+
+export function resolveNewCampaignStatus(): 'paused' {
+  return 'paused';
+}
+
 type CampaignQaInput = {
   email?: string | null;
   subject?: string | null;
@@ -63,6 +81,38 @@ function countRiskyPhrases(value: string) {
 
 function push(checks: CampaignQaCheck[], check: CampaignQaCheck) {
   checks.push(check);
+}
+
+/**
+ * Drafts may be persisted while incomplete. This check is intentionally kept
+ * separate from saving so review/activation can be strict without risking the
+ * user's work.
+ */
+export function assessCampaignDraftReadiness(input: CampaignDraftReadinessInput): CampaignDraftReadiness {
+  const issues: string[] = [];
+  const steps = input.steps || [];
+
+  if (!String(input.name || '').trim()) issues.push('Agrega un nombre a la campaña.');
+  if (steps.length === 0) issues.push('Agrega al menos un mensaje.');
+
+  steps.forEach((step, index) => {
+    if (!String(step.subject || '').trim()) issues.push(`Completa el asunto del paso ${index + 1}.`);
+    if (!String(step.bodyHtml || '').replace(/<[^>]*>/g, '').trim()) issues.push(`Completa el mensaje del paso ${index + 1}.`);
+  });
+
+  if (
+    input.campaignType === 'reconnection' &&
+    !String(input.offerName || '').trim() &&
+    !String(input.offerSummary || '').trim()
+  ) {
+    issues.push('Describe la propuesta que quieres presentar.');
+  }
+
+  if (input.campaignType === 'reconnection' && input.hasActiveAudienceSegment === false) {
+    issues.push('Selecciona al menos un segmento de audiencia.');
+  }
+
+  return { ready: issues.length === 0, issues };
 }
 
 export function assessCampaignQa(input: CampaignQaInput): CampaignQaResult {

@@ -1,7 +1,7 @@
 
 import { supabase } from '@/lib/supabase';
 import type { UnifiedRow, ColumnDef } from '@/lib/unified-sheet-types';
-import { defaultColumns } from '@/lib/unified-sheet-storage'; // Reusing defaultColumns for now
+import { loadColumns, saveColumns } from '@/lib/unified-sheet-storage';
 
 // Table: unified_crm_data
 // Columns: id (text, PK), stage (text), owner (text), notes (text), updated_at (timestamptz)
@@ -15,11 +15,11 @@ export const unifiedSheetService = {
     // Keeping columns in localStorage for now as it is UI preference.
     // If needed, we can migrate this to a 'user_settings' table later.
     loadColumns: (): ColumnDef[] => {
-        return require('@/lib/unified-sheet-storage').loadColumns();
+        return loadColumns();
     },
 
     saveColumns: (cols: ColumnDef[]) => {
-        return require('@/lib/unified-sheet-storage').saveColumns(cols);
+        return saveColumns(cols);
     },
 
     // --- Custom Data (Business Data) ---
@@ -37,7 +37,17 @@ export const unifiedSheetService = {
                 console.error('[unified-sheet-service] getCustom error:', error);
                 return undefined;
             }
-            return data as CustomData;
+            return {
+                stage: data.stage,
+                owner: data.owner,
+                notes: data.notes,
+                nextAction: data.next_action,
+                nextActionType: data.next_action_type,
+                nextActionDueAt: data.next_action_due_at,
+                autopilotStatus: data.autopilot_status,
+                lastAutopilotEvent: data.last_autopilot_event,
+                meetingLink: data.meeting_link,
+            };
         } catch (err) {
             console.error('[unified-sheet-service] getCustom unexpected error:', err);
             return undefined;
@@ -46,11 +56,12 @@ export const unifiedSheetService = {
 
     async setCustom(gid: string, patch: CustomData): Promise<void> {
         try {
-            // Upsert
-            const { data: { user } } = await supabase.auth.getUser();
-            const orgId = await require('./organization-service').organizationService.getCurrentOrganizationId();
+            const { data: { user }, error: authError } = await supabase.auth.getUser();
+            if (authError) throw authError;
+            if (!user) throw new Error('Debes iniciar sesión para guardar cambios.');
 
-            if (!user) return;
+            const orgId = await require('./organization-service').organizationService.getCurrentOrganizationId();
+            if (!orgId) throw new Error('No se encontró una organización activa.');
 
             const { error } = await supabase
                 .from(TABLE_NAME)
@@ -63,9 +74,11 @@ export const unifiedSheetService = {
 
             if (error) {
                 console.error('[unified-sheet-service] setCustom error:', error);
+                throw error;
             }
         } catch (err) {
             console.error('[unified-sheet-service] setCustom unexpected error:', err);
+            throw err;
         }
     },
 

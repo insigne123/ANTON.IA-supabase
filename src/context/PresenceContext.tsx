@@ -4,7 +4,6 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { usePathname } from 'next/navigation';
-import { organizationService } from '@/lib/services/organization-service';
 
 type PresenceUser = {
     userId: string;
@@ -22,22 +21,16 @@ type PresenceContextType = {
 const PresenceContext = createContext<PresenceContextType>({ onlineUsers: [] });
 
 export function PresenceProvider({ children }: { children: React.ReactNode }) {
-    const { user } = useAuth();
+    const { user, organizationId } = useAuth();
     const pathname = usePathname();
     const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([]);
-    const [orgId, setOrgId] = useState<string | null>(null);
+    const orgId = organizationId;
     const pathnameRef = useRef(pathname);
+    const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
     useEffect(() => {
         pathnameRef.current = pathname;
     }, [pathname]);
-
-    // Fetch Org ID once
-    useEffect(() => {
-        if (user) {
-            organizationService.getCurrentOrganizationId().then(setOrgId);
-        }
-    }, [user]);
 
     useEffect(() => {
         if (!user || !orgId) return;
@@ -49,6 +42,7 @@ export function PresenceProvider({ children }: { children: React.ReactNode }) {
                 },
             },
         });
+        channelRef.current = channel;
 
         channel
             .on('presence', { event: 'sync' }, () => {
@@ -80,6 +74,7 @@ export function PresenceProvider({ children }: { children: React.ReactNode }) {
             });
 
         return () => {
+            channelRef.current = null;
             supabase.removeChannel(channel);
         };
     }, [user, orgId]);
@@ -88,10 +83,8 @@ export function PresenceProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         if (!user || !orgId) return;
 
-        // We need to re-track with new path
-        // Note: 'track' updates the state for this key
-        const channel = supabase.channel(`presence:${orgId}`);
-        channel.track({
+        // Re-track on the active subscribed channel so route changes update presence.
+        channelRef.current?.track({
             userId: user.id,
             email: user.email!,
             fullName: user.user_metadata?.full_name,

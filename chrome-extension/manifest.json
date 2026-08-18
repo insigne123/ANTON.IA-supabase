@@ -1,22 +1,16 @@
 {
     "manifest_version": 3,
     "name": "Anton.IA Automation",
-    "version": "2.9",
+    "version": "3.1",
     "description": "Automatización segura de LinkedIn para Anton.IA",
-    "permissions": [
-        "activeTab",
-        "tabs",
-        "scripting"
-    ],
+    "permissions": ["tabs"],
     "host_permissions": [
         "https://www.linkedin.com/*",
         "http://localhost:3000/*",
         "http://127.0.0.1:3000/*",
         "http://localhost:9003/*",
         "http://127.0.0.1:9003/*",
-        "https://*.vercel.app/*",
-        "https://*.hosted.app/*",
-        "https://*.us-central1.hosted.app/*",
+        "https://app.antonia.ai/*",
         "https://studio--leadflowai-3yjcy.us-central1.hosted.app/*"
     ],
     "background": {
@@ -37,9 +31,7 @@
                 "http://127.0.0.1:3000/*",
                 "http://localhost:9003/*",
                 "http://127.0.0.1:9003/*",
-                "https://*.vercel.app/*",
-                "https://*.hosted.app/*",
-                "https://*.us-central1.hosted.app/*",
+                "https://app.antonia.ai/*",
                 "https://studio--leadflowai-3yjcy.us-central1.hosted.app/*"
             ],
             "js": [
@@ -63,9 +55,7 @@
             "http://127.0.0.1:3000/*",
             "http://localhost:9003/*",
             "http://127.0.0.1:9003/*",
-            "https://*.vercel.app/*",
-            "https://*.hosted.app/*",
-            "https://*.us-central1.hosted.app/*",
+            "https://app.antonia.ai/*",
             "https://studio--leadflowai-3yjcy.us-central1.hosted.app/*"
         ]
     }

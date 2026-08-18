@@ -1,170 +1,150 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { PageHeader } from '@/components/page-header';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertCircle, Focus, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+
 import { KanbanBoard } from '@/components/crm/KanbanBoard';
-import { buildUnifiedRows } from '@/lib/unified-sheet-data';
-import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
-import type { UnifiedRow } from '@/lib/unified-sheet-types';
-import type { PipelineStage } from '@/lib/crm-types';
-import { useToast } from '@/hooks/use-toast';
-import { RotateCw, LayoutGrid, List } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-
-import { SmartAlerts } from '@/components/crm/SmartAlerts';
-
 import { LeadDetailDrawer } from '@/components/crm/LeadDetailDrawer';
+import { SmartAlerts } from '@/components/crm/SmartAlerts';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
+import type { PipelineStage } from '@/lib/crm-types';
+import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
+import { buildUnifiedRows } from '@/lib/unified-sheet-data';
+import type { UnifiedRow } from '@/lib/unified-sheet-types';
 
 export default function CRMPage() {
     const { toast } = useToast();
     const [rows, setRows] = useState<UnifiedRow[]>([]);
+    const rowsRef = useRef<UnifiedRow[]>([]);
     const [loading, setLoading] = useState(true);
-    const [selectedLead, setSelectedLead] = useState<UnifiedRow | null>(null);
-    const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+    const [focusMode, setFocusMode] = useState(false);
+    const [focusedStage, setFocusedStage] = useState<PipelineStage>('contacted');
+    const [movingLeadIds, setMovingLeadIds] = useState<Set<string>>(new Set());
 
-    // Todo: Switcher for List View vs Board View (future)
-    const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
-    const [focusMode, setFocusMode] = useState(false); // New Focus Mode state
-    const [focusedStage, setFocusedStage] = useState<PipelineStage>('contacted'); // Default for Focus Mode
+    useEffect(() => {
+        rowsRef.current = rows;
+    }, [rows]);
 
     const loadData = useCallback(async () => {
         setLoading(true);
+        setLoadError(null);
         try {
             const data = await buildUnifiedRows();
+            rowsRef.current = data;
             setRows(data);
-        } catch (e) {
-            console.error(e);
-            toast({ variant: 'destructive', title: 'Error cargando CRM' });
+        } catch (error) {
+            console.error('[crm] load error', error);
+            setLoadError('No pudimos cargar el pipeline. Revisa tu conexión e inténtalo de nuevo.');
         } finally {
             setLoading(false);
         }
-    }, [toast]);
+    }, []);
 
     useEffect(() => {
-        loadData();
+        void loadData();
     }, [loadData]);
 
-    const handleLeadMove = async (leadId: string, newStage: PipelineStage) => {
-        // 1. Optimistic Update
-        setRows(prev => prev.map(r =>
-            r.gid === leadId
-                ? { ...r, stage: newStage }
-                : r
-        ));
+    async function handleLeadMove(leadId: string, newStage: PipelineStage) {
+        const previousStage = rowsRef.current.find((row) => row.gid === leadId)?.stage;
+        if (previousStage === newStage || movingLeadIds.has(leadId)) return;
 
-        // 2. Persist
+        setMovingLeadIds((current) => new Set(current).add(leadId));
+        rowsRef.current = rowsRef.current.map((row) => row.gid === leadId ? { ...row, stage: newStage } : row);
+        setRows((current) => current.map((row) => row.gid === leadId ? { ...row, stage: newStage } : row));
+
         try {
             await unifiedSheetService.setCustom(leadId, { stage: newStage });
-        } catch (e) {
-            console.error('Error saving stage:', e);
-            toast({ variant: 'destructive', title: 'Error al guardar cambio' });
-            // Revert? (Optional, usually strict revert is better but complex for brevity here)
+        } catch (error) {
+            console.error('[crm] stage save error', error);
+            rowsRef.current = rowsRef.current.map((row) => row.gid === leadId ? { ...row, stage: previousStage } : row);
+            setRows((current) => current.map((row) => row.gid === leadId ? { ...row, stage: previousStage } : row));
+            toast({
+                variant: 'destructive',
+                title: 'No se guardó el cambio de etapa',
+                description: 'Restauramos la etapa anterior para mantener el pipeline consistente.',
+            });
+        } finally {
+            setMovingLeadIds((current) => {
+                const next = new Set(current);
+                next.delete(leadId);
+                return next;
+            });
         }
-    };
+    }
 
-    const handleLeadClick = (lead: UnifiedRow) => {
-        setSelectedLead(lead);
-    };
-
-    const stageSummary = {
-        contacted: rows.filter((row) => row.stage === 'contacted').length,
-        engaged: rows.filter((row) => row.stage === 'engaged').length,
-        meeting: rows.filter((row) => row.stage === 'meeting').length,
-        closedLost: rows.filter((row) => row.stage === 'closed_lost').length,
-        automated: rows.filter((row) => Boolean(row.lastAutopilotEvent || row.autopilotStatus)).length,
-    };
+    const selectedLead = rows.find((row) => row.gid === selectedLeadId) ?? null;
 
     return (
-        <div className="flex flex-col h-[calc(100vh-65px)] overflow-hidden">
-            <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 p-4 pb-2">
-                <div className="flex items-center justify-between mb-2">
-                    <div>
-                        <h1 className="text-xl font-bold tracking-tight">CRM / Pipeline</h1>
-                        <p className="text-sm text-muted-foreground">Gestiona tus leads visualmente y toma acción.</p>
-                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                            <Badge variant="outline">Automatización por eventos activa</Badge>
-                            {focusMode ? <Badge className="bg-amber-100 text-amber-900 hover:bg-amber-100">Modo foco en {focusedStage}</Badge> : null}
-                        </div>
+        <div className="flex h-[calc(100dvh-5rem)] min-h-[480px] min-w-0 flex-col overflow-hidden bg-background md:h-[calc(100dvh-5.5rem)]">
+            <header className="border-b border-border/70 bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:px-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                        <h1 className="text-xl font-semibold tracking-tight">Pipeline</h1>
+                        <p className="mt-0.5 text-sm text-muted-foreground">Prioriza oportunidades y mueve cada lead a su siguiente etapa.</p>
+                        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Sparkles className="h-3.5 w-3.5" />
+                            Las etapas pueden actualizarse cuando se registran eventos de contacto; revisa cada cambio antes de actuar.
+                        </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" disabled>
-                            <List className="h-4 w-4 mr-2" /> Lista
-                        </Button>
+                    <div className="flex shrink-0 items-center gap-2">
                         <Button
-                            variant={focusMode ? "default" : "outline"}
+                            variant={focusMode ? 'secondary' : 'outline'}
                             size="sm"
-                            onClick={() => setFocusMode(!focusMode)}
-                            className={focusMode ? "bg-amber-600 hover:bg-amber-700" : ""}
+                            onClick={() => setFocusMode((current) => !current)}
+                            aria-pressed={focusMode}
                         >
-                            {focusMode ? '🎯 Modo Normal' : '🎯 Modo Foco'}
+                            <Focus className="h-4 w-4" /> {focusMode ? 'Ver todo' : 'Enfocar etapa'}
                         </Button>
-                        <Button variant="secondary" size="sm">
-                            <LayoutGrid className="h-4 w-4 mr-2" /> Tablero
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => loadData()}>
-                            <RotateCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => void loadData()} disabled={loading} aria-label="Actualizar pipeline">
+                            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                         </Button>
                     </div>
                 </div>
-            </div>
+            </header>
 
-            {/* Smart Alerts */}
-            <div className="mb-6">
-                <SmartAlerts
-                    leads={rows}
-                    onAlertClick={(stage) => {
-                        setFocusedStage(stage as PipelineStage);
-                        setFocusMode(true);
-                    }}
-                />
-            </div>
+            {!loading && <SmartAlerts leads={rows} onAlertClick={(stage) => { setFocusedStage(stage); setFocusMode(true); }} />}
 
-            <div className="mb-4 grid gap-3 px-4 md:grid-cols-2 xl:grid-cols-5">
-                <div className="rounded-xl border bg-background p-4">
-                    <div className="text-xs uppercase text-muted-foreground">Contactados</div>
-                    <div className="mt-1 text-2xl font-semibold">{stageSummary.contacted}</div>
-                </div>
-                <div className="rounded-xl border bg-background p-4">
-                    <div className="text-xs uppercase text-muted-foreground">Engaged</div>
-                    <div className="mt-1 text-2xl font-semibold">{stageSummary.engaged}</div>
-                </div>
-                <div className="rounded-xl border bg-background p-4">
-                    <div className="text-xs uppercase text-muted-foreground">Meeting</div>
-                    <div className="mt-1 text-2xl font-semibold">{stageSummary.meeting}</div>
-                </div>
-                <div className="rounded-xl border bg-background p-4">
-                    <div className="text-xs uppercase text-muted-foreground">Closed lost</div>
-                    <div className="mt-1 text-2xl font-semibold">{stageSummary.closedLost}</div>
-                </div>
-                <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-                    <div className="text-xs uppercase text-muted-foreground">Movidos por ANTONIA</div>
-                    <div className="mt-1 text-2xl font-semibold">{stageSummary.automated}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">Se actualizan automaticamente segun envio, aperturas, clicks y replies.</div>
-                </div>
-            </div>
+            {loadError && (
+                <Alert variant="destructive" className="m-4 mb-0 w-auto">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Pipeline no disponible</AlertTitle>
+                    <AlertDescription className="flex flex-wrap items-center justify-between gap-3"><span>{loadError}</span><Button variant="outline" size="sm" onClick={() => void loadData()}>Reintentar</Button></AlertDescription>
+                </Alert>
+            )}
 
-            {/* Kanban Board */}
-            <div className="flex-1 min-h-0">
+            <main className="min-h-0 flex-1">
                 {loading && rows.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-muted-foreground">Cargando pipeline...</div>
+                    <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground" aria-live="polite">
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                        Cargando pipeline…
+                    </div>
+                ) : rows.length === 0 && !loadError ? (
+                    <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+                        <p className="font-medium">Aún no hay leads en el pipeline</p>
+                        <p className="max-w-sm text-sm text-muted-foreground">Cuando guardes o contactes leads, aparecerán aquí para que puedas organizar su avance.</p>
+                    </div>
                 ) : (
                     <KanbanBoard
                         leads={rows}
-                        onLeadMove={handleLeadMove}
-                        onLeadClick={handleLeadClick}
+                        onLeadMove={(leadId, stage) => void handleLeadMove(leadId, stage)}
+                        onLeadClick={(lead) => setSelectedLeadId(lead.gid)}
+                        movingLeadIds={movingLeadIds}
                         focusMode={focusMode}
                         setFocusMode={setFocusMode}
                         focusedStage={focusedStage}
                         setFocusedStage={setFocusedStage}
                     />
                 )}
-            </div>
+            </main>
 
             <LeadDetailDrawer
                 lead={selectedLead}
-                open={!!selectedLead}
-                onOpenChange={(v) => !v && setSelectedLead(null)}
+                open={Boolean(selectedLead)}
+                onOpenChange={(open) => { if (!open) setSelectedLeadId(null); }}
             />
         </div>
     );

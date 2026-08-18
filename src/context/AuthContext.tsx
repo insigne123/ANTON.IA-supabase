@@ -1,18 +1,24 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { setLeadResearchStorageScope } from '@/lib/lead-research-storage';
+import { setEmailDraftStorageScope } from '@/lib/email-drafts-storage';
+import { setResearchedLeadsStorageScope } from '@/lib/researched-leads-storage';
+import { organizationService } from '@/lib/services/organization-service';
 
 interface AuthContextType {
     user: User | null;
     session: Session | null;
+    organizationId: string | null;
     loading: boolean;
     error: string | null;
     signInWithGoogle: (nextPath?: string) => Promise<void>;
     signInWithPassword: (email: string, password: string) => Promise<void>;
     signUpWithPassword: (email: string, password: string) => Promise<void>;
     signOut: () => Promise<void>;
+    refreshOrganization: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,28 +26,62 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [session, setSession] = useState<Session | null>(null);
+    const [organizationId, setOrganizationId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const sessionRef = useRef<Session | null>(null);
+    const scopeRequestRef = useRef(0);
+
+    const applySessionScope = useCallback(async (nextSession: Session | null, forceScopeRefresh = false) => {
+        const requestId = ++scopeRequestRef.current;
+        const previousUserId = sessionRef.current?.user?.id || null;
+        sessionRef.current = nextSession;
+        const userId = nextSession?.user?.id || null;
+
+        if (forceScopeRefresh || previousUserId !== userId) {
+            setLeadResearchStorageScope(null, null);
+        }
+        setEmailDraftStorageScope(userId);
+        setResearchedLeadsStorageScope(userId);
+        setLoading(true);
+
+        const nextOrganizationId = userId
+            ? await organizationService.getCurrentOrganizationId(userId)
+            : null;
+        if (requestId !== scopeRequestRef.current) return;
+
+        setLeadResearchStorageScope(userId, nextOrganizationId);
+        setSession(nextSession);
+        setUser(nextSession?.user ?? null);
+        setOrganizationId(nextOrganizationId);
+        setLoading(false);
+    }, []);
+
+    const refreshOrganization = useCallback(async () => {
+        await applySessionScope(sessionRef.current, true);
+    }, [applySessionScope]);
 
     useEffect(() => {
         // Check active session
         supabase.auth.getSession().then(({ data: { session } }) => {
-            setSession(session);
-            setUser(session?.user ?? null);
-            setLoading(false);
+            void applySessionScope(session);
         });
 
         // Listen for changes
         const {
             data: { subscription },
         } = supabase.auth.onAuthStateChange((_event, session) => {
-            setSession(session);
-            setUser(session?.user ?? null);
-            setLoading(false);
+            window.setTimeout(() => void applySessionScope(session), 0);
+        });
+        const unsubscribeOrganization = organizationService.subscribeToCurrentOrganizationChanges(() => {
+            window.setTimeout(() => void applySessionScope(sessionRef.current, true), 0);
         });
 
-        return () => subscription.unsubscribe();
-    }, []);
+        return () => {
+            subscription.unsubscribe();
+            unsubscribeOrganization();
+        };
+    }, [applySessionScope]);
 
     const signInWithGoogle = async (nextPath?: string) => {
         setError(null);
@@ -93,8 +133,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, session, loading, error, signInWithGoogle, signInWithPassword, signUpWithPassword, signOut }}>
-            {children}
+        <AuthContext.Provider value={{ user, session, organizationId, loading, error, signInWithGoogle, signInWithPassword, signUpWithPassword, signOut, refreshOrganization }}>
+            <Fragment key={`${user?.id || 'anonymous'}:${organizationId || 'personal'}`}>
+                {children}
+            </Fragment>
         </AuthContext.Provider>
     );
 }

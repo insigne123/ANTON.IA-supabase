@@ -79,6 +79,7 @@ export default function GmailConnectPage() {
             <ul className="list-disc pl-5 mt-2 space-y-1">
               <li>Envío de correos manuales desde la plataforma.</li>
               <li><strong>Envío automático</strong> de campañas en segundo plano (24/7).</li>
+              <li>Lectura de hilos para detectar respuestas cuando sincronizas la bandeja.</li>
               <li>Almacenamiento seguro de credenciales (Refresh Token).</li>
             </ul>
           </div>

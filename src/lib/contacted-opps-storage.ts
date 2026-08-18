@@ -1,4 +1,5 @@
 import type { ContactedOpportunity } from './types';
+import { getBrowserStorage } from './browser-storage';
 const KEY = 'leadflow-contacted-opportunities';
 
 function sanitize(items: any[]): ContactedOpportunity[] {
@@ -11,14 +12,20 @@ function sanitize(items: any[]): ContactedOpportunity[] {
 
 export const contactedOppsStorage = {
   get(): ContactedOpportunity[] {
-    if (typeof window === 'undefined') return [];
-    const raw = localStorage.getItem(KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return sanitize(parsed);
+    const storage = getBrowserStorage();
+    if (!storage) return [];
+    try {
+      const raw = storage.getItem(KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return sanitize(parsed);
+    } catch {
+      return [];
+    }
   },
   set(items: ContactedOpportunity[]) {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(KEY, JSON.stringify(items));
+    const storage = getBrowserStorage();
+    if (!storage) return;
+    storage.setItem(KEY, JSON.stringify(items));
   },
   add(item: ContactedOpportunity) {
     const all = this.get();

@@ -1,167 +1,208 @@
-
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { getEnrichedLeads } from '@/lib/services/enriched-leads-service';
-import { findReportForLead } from '@/lib/lead-research-storage';
-import { campaignsStorage } from '@/lib/campaigns-storage';
-import { computeEligibilityForCampaign } from '@/lib/campaign-eligibility';
-import { crmService } from '@/lib/services/crm-service';
-import { UnifiedRow } from '@/lib/unified-sheet-types';
-import { differenceInDays } from 'date-fns';
-import { AlertCircle, Lightbulb, ArrowRight, CheckCircle2 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { AlertCircle, ArrowRight, LayoutGrid, MailPlus, Search } from 'lucide-react';
 
-type ReadyToContactLead = {
-  id: string;
-  name: string;
-  company: string;
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { computeEligibilityForCampaign } from '@/lib/campaign-eligibility';
+import { campaignsStorage } from '@/lib/services/campaigns-service';
+import { buildUnifiedRows } from '@/lib/unified-sheet-data';
+
+type DashboardInsights = {
+  activePipeline: number;
+  activeCampaigns: number;
+  dueActions: number;
+  eligibleFollowUps: number;
+  readyLeads: number;
 };
 
+type NextAction = {
+  title: string;
+  description: string;
+  href: string;
+  icon: LucideIcon;
+};
+
+const INITIAL_INSIGHTS: DashboardInsights = {
+  activePipeline: 0,
+  activeCampaigns: 0,
+  dueActions: 0,
+  eligibleFollowUps: 0,
+  readyLeads: 0,
+};
+
+const CLOSED_STAGES = new Set(['closed_won', 'closed_lost']);
+const ACTIVE_STAGES = new Set(['contacted', 'engaged', 'meeting', 'negotiation']);
+
 export default function NextStepsWidget() {
-  const [readyLeads, setReadyLeads] = useState<ReadyToContactLead[]>([]);
-  const [staleLeads, setStaleLeads] = useState<UnifiedRow[]>([]);
-  const [eligibleCampaignLeads, setEligibleCampaignLeads] = useState<number>(0);
-  const [mounted, setMounted] = useState(false);
+  const [insights, setInsights] = useState<DashboardInsights>(INITIAL_INSIGHTS);
+  const [loading, setLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-    async function load() {
-      try {
-        const enrichedPromise = getEnrichedLeads();
-        const campaignsPromise = campaignsStorage.get();
-        // Fetch CRM leads for pending alerts
-        const crmPromise = crmService.getAllUnifiedRows();
+    let cancelled = false;
 
-        const [enriched, campaigns, crmRows] = await Promise.all([
-          enrichedPromise.catch(() => []),
-          campaignsPromise.catch(() => []),
-          crmPromise.catch(() => [])
+    async function load() {
+      setLoading(true);
+      setHasError(false);
+
+      try {
+        const [rows, campaigns] = await Promise.all([
+          buildUnifiedRows(),
+          campaignsStorage.get(),
         ]);
 
-        // 1. Leads listos para contactar (Enriquecidos con reporte)
-        const ready = (enriched || [])
-          .filter(lead => !!findReportForLead({ leadId: lead.id, companyDomain: lead.companyDomain, companyName: lead.companyName }))
-          .slice(0, 5)
-          .map(lead => ({ id: lead.id, name: lead.fullName, company: lead.companyName || 'N/A' }));
+        const now = Date.now();
+        const activeCampaigns = campaigns.filter((campaign) => !campaign.isPaused);
+        const eligibilityCounts = await Promise.all(
+          activeCampaigns.map((campaign) =>
+            computeEligibilityForCampaign(campaign)
+              .then((eligibleRows) => eligibleRows.length)
+              .catch(() => 0)
+          )
+        );
 
-        setReadyLeads(ready);
+        const dueActions = rows.filter((row) => {
+          if (!row.nextActionDueAt || CLOSED_STAGES.has(String(row.stage || ''))) return false;
+          const dueAt = new Date(row.nextActionDueAt).getTime();
+          return Number.isFinite(dueAt) && dueAt <= now;
+        }).length;
 
-        // 2. Leads pendientes/estancados (Lógica de SmartAlerts)
-        const stale = crmRows.filter(l =>
-          l.stage === 'contacted' &&
-          l.updatedAt &&
-          differenceInDays(new Date(), new Date(l.updatedAt)) > 3
-        ).slice(0, 5); // Mostrar max 5
+        const readyLeadIds = new Set(
+          rows
+            .filter((row) => row.kind === 'lead_enriched' && Boolean(row.email || row.hasEmail))
+            .map((row) => row.sourceId)
+        );
 
-        setStaleLeads(stale);
-
-        // 3. Campañas
-        const promises = (campaigns || []).map(c => {
-          const isPaused = c.status === 'paused';
-          if (!isPaused) {
-            const serviceCampaign: any = {
-              ...c,
-              isPaused: false,
-              excludedLeadIds: c.excludeLeadIds || []
-            };
-            return computeEligibilityForCampaign(serviceCampaign).then(rows => rows.length).catch(() => 0);
-          }
-          return Promise.resolve(0);
-        });
-
-        Promise.all(promises).then(counts => {
-          const total = counts.reduce((a, b) => a + b, 0);
-          setEligibleCampaignLeads(total);
-        });
-      } catch (e) {
-        console.error("Error loading next steps widget", e);
+        if (!cancelled) {
+          setInsights({
+            activePipeline: rows.filter((row) => ACTIVE_STAGES.has(String(row.stage || ''))).length,
+            activeCampaigns: activeCampaigns.length,
+            dueActions,
+            eligibleFollowUps: eligibilityCounts.reduce((total, count) => total + count, 0),
+            readyLeads: readyLeadIds.size,
+          });
+        }
+      } catch (error) {
+        console.error('Error loading dashboard next steps:', error);
+        if (!cancelled) setHasError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     }
+
     load();
+    return () => { cancelled = true; };
   }, []);
 
-  if (!mounted) return null;
+  const actions = useMemo<NextAction[]>(() => {
+    const crmAction: NextAction = insights.dueActions > 0
+      ? {
+          title: `Revisa ${insights.dueActions.toLocaleString('es')} ${insights.dueActions === 1 ? 'tarea vencida' : 'tareas vencidas'}`,
+          description: 'Hay próximos pasos del CRM que ya requieren atención.',
+          href: '/crm',
+          icon: AlertCircle,
+        }
+      : insights.activePipeline > 0
+        ? {
+            title: `Continúa ${insights.activePipeline.toLocaleString('es')} ${insights.activePipeline === 1 ? 'conversación activa' : 'conversaciones activas'}`,
+            description: 'Revisa los leads que ya avanzan por tu pipeline.',
+            href: '/crm',
+            icon: LayoutGrid,
+          }
+        : {
+            title: 'Organiza tu pipeline',
+            description: 'Prioriza los leads que necesitan seguimiento.',
+            href: '/crm',
+            icon: LayoutGrid,
+          };
+
+    const campaignAction: NextAction = insights.eligibleFollowUps > 0
+      ? {
+          title: `Envía ${insights.eligibleFollowUps.toLocaleString('es')} ${insights.eligibleFollowUps === 1 ? 'seguimiento pendiente' : 'seguimientos pendientes'}`,
+          description: 'Estos contactos ya cumplen las condiciones de campaña.',
+          href: '/campaigns',
+          icon: MailPlus,
+        }
+      : insights.activeCampaigns > 0
+        ? {
+            title: 'Revisa tus campañas activas',
+            description: 'Confirma los próximos envíos y su secuencia.',
+            href: '/campaigns',
+            icon: MailPlus,
+          }
+        : {
+            title: 'Prepara una campaña',
+            description: 'Convierte tus leads seleccionados en una secuencia.',
+            href: '/campaigns',
+            icon: MailPlus,
+          };
+
+    const leadAction: NextAction = insights.readyLeads > 0
+      ? {
+          title: `${insights.readyLeads.toLocaleString('es')} ${insights.readyLeads === 1 ? 'lead listo' : 'leads listos'} para contactar`,
+          description: 'Ya tienen email y datos enriquecidos disponibles.',
+          href: '/saved/leads/enriched',
+          icon: Search,
+        }
+      : {
+          title: 'Encuentra nuevos leads',
+          description: 'Inicia una búsqueda para ampliar tu pipeline.',
+          href: '/search',
+          icon: Search,
+        };
+
+    return [crmAction, campaignAction, leadAction];
+  }, [insights]);
 
   return (
-    <Card className="overflow-hidden rounded-[24px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Lightbulb className="h-5 w-5 text-primary" />
-          <span>Próximos pasos</span>
-        </CardTitle>
-        <CardDescription>Lo más importante para avanzar hoy.</CardDescription>
+    <Card className="h-full overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_12px_32px_-28px_rgba(15,23,42,0.3)]">
+      <CardHeader className="space-y-1 px-5 pb-2 pt-4">
+        <CardTitle className="text-base">Próximos pasos</CardTitle>
+        <CardDescription>Las tres acciones más útiles para avanzar hoy.</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6">
-
-        {/* Sección: Alertas CRM (Leads Desatendidos) */}
-        {staleLeads.length > 0 && (
-          <div className="space-y-3 border-b pb-4">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 text-orange-500" />
-              <h4 className="text-sm font-semibold text-orange-700">Leads sin respuesta (+3 días)</h4>
-            </div>
-
-            <div className="space-y-2">
-              {staleLeads.map(lead => (
-                <div key={lead.gid} className="flex items-center justify-between bg-orange-50 p-2 rounded border border-orange-100">
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-gray-800">{lead.name || 'Sin nombre'}</span>
-                    <span className="text-xs text-gray-500">{lead.company}</span>
-                  </div>
-                  <Button variant="ghost" size="sm" className="h-7 text-xs text-orange-700 hover:bg-orange-100 hover:text-orange-800" asChild>
-                    <Link href="/crm">Ver en CRM</Link>
-                  </Button>
+      <CardContent className="px-3 pb-3 pt-1" aria-busy={loading}>
+        {loading ? (
+          <div className="space-y-1" aria-label="Cargando próximos pasos">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={index} className="flex min-h-16 items-center gap-3 px-2">
+                <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton className="h-4 w-3/5" />
+                  <Skeleton className="h-3 w-4/5" />
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Sección: Campañas */}
-        {eligibleCampaignLeads > 0 && (
-          <div className="flex items-center justify-between rounded-lg border bg-accent/50 p-3">
-            <div>
-              <p className="text-sm font-semibold">Seguimientos de campaña</p>
-              <p className="text-xs text-muted-foreground">{eligibleCampaignLeads} lead(s) pueden recibir seguimiento hoy.</p>
-            </div>
-            <Button size="sm" asChild>
-              <Link href="/campaigns">
-                Ver y Enviar <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
-          </div>
-        )}
-
-        {/* Sección: Leads Listos */}
-        {readyLeads.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-sm font-semibold">Listos para primer contacto</p>
-            {readyLeads.map(lead => (
-              <div key={lead.id} className="flex items-center justify-between text-sm">
-                <p>
-                  <span className="font-medium">{lead.name}</span>
-                  <span className="text-muted-foreground"> en {lead.company}</span>
-                </p>
-                <Button variant="outline" size="sm" asChild>
-                  <Link href={`/contact/compose?id=${lead.id}`}>Contactar</Link>
-                </Button>
               </div>
             ))}
-            <Link href="/saved/leads/enriched" className="mt-2 flex items-center text-xs text-primary hover:underline">
-              Ver todos los leads enriquecidos <ArrowRight className="ml-1 h-3 w-3" />
-            </Link>
           </div>
-        )}
-
-        {readyLeads.length === 0 && eligibleCampaignLeads === 0 && staleLeads.length === 0 && (
-          <div className="flex flex-col items-center justify-center text-center p-6 bg-muted/30 rounded-lg">
-            <CheckCircle2 className="h-8 w-8 text-green-500 mb-2" />
-            <p className="font-medium">¡Todo al día!</p>
-            <p className="text-sm text-muted-foreground">No hay acciones sugeridas por ahora.</p>
+        ) : hasError ? (
+          <div role="alert" className="m-1 flex min-h-[176px] flex-col items-center justify-center rounded-xl border border-amber-200 bg-amber-50/70 px-5 text-center dark:border-amber-500/30 dark:bg-amber-500/10">
+            <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+            <p className="mt-2 text-sm font-medium">No pudimos actualizar tus próximos pasos</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">Puedes continuar desde Buscar leads, CRM o Campañas.</p>
           </div>
+        ) : (
+          <ol className="divide-y divide-border/60">
+            {actions.map((action) => (
+              <li key={action.href}>
+                <Link
+                  href={action.href}
+                  className="group flex min-h-16 items-center gap-3 rounded-xl px-2.5 py-2 transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors group-hover:text-foreground">
+                    <action.icon className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{action.title}</span>
+                    <span className="mt-0.5 block line-clamp-1 text-xs text-muted-foreground">{action.description}</span>
+                  </span>
+                  <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden="true" />
+                </Link>
+              </li>
+            ))}
+          </ol>
         )}
       </CardContent>
     </Card>

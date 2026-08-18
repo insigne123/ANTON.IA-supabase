@@ -27,7 +27,8 @@ function mapRowToLead(row: any): Lead {
         country: row.country,
         city: row.city,
         apolloId: row.apollo_id,
-    };
+        createdAt: row.created_at,
+    } as Lead;
 }
 
 // Helper to map Lead type to DB row
@@ -79,7 +80,7 @@ export const supabaseService = {
 
         if (error) {
             console.error('Error fetching leads:', error);
-            return [];
+            throw error;
         }
 
         return (data || []).map(mapRowToLead);
@@ -92,7 +93,7 @@ export const supabaseService = {
 
     async addLeadsDedup(items: Lead[]): Promise<{ addedCount: number; duplicateCount: number }> {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return { addedCount: 0, duplicateCount: 0 };
+        if (!user) throw new Error('No hay una sesión activa para guardar leads.');
 
         const orgId = await organizationService.getCurrentOrganizationId();
 
@@ -119,7 +120,7 @@ export const supabaseService = {
             const { error } = await supabase.from(TABLE).insert(toInsert);
             if (error) {
                 console.error('Error adding leads:', error);
-                return { addedCount: 0, duplicateCount }; // Or throw
+                throw error;
             }
 
             // Log activity for each new lead
@@ -150,7 +151,7 @@ export const supabaseService = {
 
         if (error) {
             console.error('Error removing leads:', error);
-            return 0;
+            throw error;
         }
 
         return toRemove.length;

@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { applyStyleToDraft } from '@/ai/flows/apply-style-to-draft';
+import { requestAuthErrorResponse, requireSessionRequestAuth } from '@/lib/server/request-auth';
 
 export async function POST(req: Request) {
   try {
+    await requireSessionRequestAuth();
     const body = await req.json();
 
     if (!body?.baseSubject && !body?.baseBody) {
@@ -25,6 +27,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json(draft);
   } catch (e: any) {
+    const authResponse = requestAuthErrorResponse(e);
+    if (authResponse) return authResponse;
     return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 });
   }
 }

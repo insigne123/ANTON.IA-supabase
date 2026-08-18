@@ -1,14 +1,23 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import { notificationService } from '@/lib/services/notification-service';
-import { findPriorReplyMatch } from '@/lib/contact-history-guard';
+import { findPriorReplyMatch, shouldPermanentlySuppressContact } from '@/lib/contact-history-guard';
 import { generateCampaignFlow } from '@/ai/flows/generate-campaign';
 import { assessLeadMissionFit, decideAutopilotContactAction, scoreLeadForMission } from '@/lib/antonia-autopilot';
 import { getLeadResearchAutoContactBlockReason, getLeadResearchStatus, isLeadResearchReadyForAutoContact } from '@/lib/lead-research';
 import { syncLeadAutopilotToCrm } from '@/lib/server/crm-autopilot';
-import { getDailyQuotaStatus, getUserScopedAntoniaQuotaStatus } from '@/lib/server/daily-quota-store';
+import { getDailyQuotaStatus } from '@/lib/server/daily-quota-store';
 import { createAntoniaException } from '@/lib/server/antonia-exceptions';
 import { ensureLeadResearchReport } from '@/lib/server/lead-research-reports';
+import { buildThreadKey } from '@/lib/email-observability';
+import {
+    classifyContactSendFailure,
+    isReplayedContactSend,
+    isRetryableContactSendException,
+    isSuccessfulContactSend,
+    parseContactSendResponseBody,
+    shouldAppendContactedLead,
+} from '@/lib/contact-send-response';
 import * as uuid from 'uuid';
 
 // [FIX #2] Initialize at runtime, not module-load (secrets may not be available at build time)
@@ -81,6 +90,364 @@ function getNextUtcDayStartIso() {
     const now = new Date();
     const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 5));
     return next.toISOString();
+}
+
+const TASK_STUCK_TIMEOUT_MINUTES = 35;
+const TASK_AUTO_RETRY_DELAYS_MINUTES = [5, 20];
+const TASK_FAILURE_PATTERN_LOOKBACK_HOURS = 6;
+const TASK_FAILURE_PATTERN_THRESHOLD = 3;
+const SEARCH_FETCH_TIMEOUT_MS = 2 * 60 * 1000;
+const ENRICH_FETCH_TIMEOUT_MS = 4 * 60 * 1000;
+const CONTACT_SEND_TIMEOUT_MS = 90 * 1000;
+
+class MissionPausedError extends Error {
+    missionId: string;
+    missionStatus: string;
+
+    constructor(missionId: string, missionStatus: string, context: string) {
+        super(`Mission ${missionId} is ${missionStatus} during ${context}`);
+        this.name = 'MissionPausedError';
+        this.missionId = missionId;
+        this.missionStatus = missionStatus;
+    }
+}
+
+function normalizeTaskErrorMessage(error: unknown) {
+    return String(error || 'unknown_task_error')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 500);
+}
+
+function getTaskRetryDelayMinutes(retryCount: number) {
+    if (retryCount <= 0) return TASK_AUTO_RETRY_DELAYS_MINUTES[0];
+    return TASK_AUTO_RETRY_DELAYS_MINUTES[Math.min(retryCount - 1, TASK_AUTO_RETRY_DELAYS_MINUTES.length - 1)];
+}
+
+function getTaskRetryScheduledFor(retryCount: number) {
+    return new Date(Date.now() + getTaskRetryDelayMinutes(retryCount) * 60 * 1000).toISOString();
+}
+
+async function touchTaskHeartbeat(supabase: any, taskId?: string | null) {
+    if (!taskId) return;
+    const nowIso = new Date().toISOString();
+    const { error } = await supabase
+        .from('antonia_tasks')
+        .update({ heartbeat_at: nowIso, updated_at: nowIso })
+        .eq('id', taskId)
+        .eq('status', 'processing');
+
+    if (error) {
+        console.warn('[Cron] Failed to update task heartbeat:', taskId, error.message || error);
+    }
+}
+
+async function assertMissionIsActive(supabase: any, missionId?: string | null, context: string = 'task_execution') {
+    if (!missionId) return;
+
+    const { data: mission, error } = await supabase
+        .from('antonia_missions')
+        .select('status')
+        .eq('id', missionId)
+        .maybeSingle();
+
+    if (error) {
+        throw new Error(`mission_status_check_failed:${error.message || error}`);
+    }
+
+    const missionStatus = String(mission?.status || '').trim().toLowerCase();
+    if (missionStatus && missionStatus !== 'active') {
+        throw new MissionPausedError(String(missionId), missionStatus, context);
+    }
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number, label: string) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        return await fetch(url, { ...init, signal: controller.signal });
+    } catch (error: any) {
+        if (error?.name === 'AbortError') {
+            throw new Error(`${label}_timeout_after_${Math.round(timeoutMs / 1000)}s`);
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+async function pauseMissionProspecting(supabase: any, missionId: string, reason: string, details: Record<string, any> = {}) {
+    const nowIso = new Date().toISOString();
+
+    const { data: mission } = await supabase
+        .from('antonia_missions')
+        .update({ status: 'paused', updated_at: nowIso })
+        .eq('id', missionId)
+        .eq('status', 'active')
+        .select('id, organization_id')
+        .maybeSingle();
+
+    await supabase
+        .from('antonia_tasks')
+        .update({
+            status: 'completed',
+            result: {
+                skipped: true,
+                reason: 'mission_paused',
+                source: reason,
+            },
+            error_message: null,
+            processing_started_at: null,
+            heartbeat_at: null,
+            updated_at: nowIso,
+        } as any)
+        .eq('mission_id', missionId)
+        .eq('status', 'pending')
+        .in('type', ['GENERATE_CAMPAIGN', 'SEARCH', 'ENRICH', 'INVESTIGATE', 'CONTACT', 'CONTACT_INITIAL', 'CONTACT_CAMPAIGN']);
+
+    if (mission?.organization_id) {
+        await supabase.from('antonia_logs').insert({
+            mission_id: missionId,
+            organization_id: mission.organization_id,
+            level: 'warning',
+            message: `Mission paused automatically: ${reason}`,
+            details: {
+                source: reason,
+                ...details,
+            },
+            created_at: nowIso,
+        });
+    }
+
+    return Boolean(mission);
+}
+
+async function maybePauseMissionForRepeatedFailures(supabase: any, task: any, errorMessage: string) {
+    if (!task?.mission_id) return false;
+
+    const lookbackIso = new Date(Date.now() - TASK_FAILURE_PATTERN_LOOKBACK_HOURS * 60 * 60 * 1000).toISOString();
+    const { count } = await supabase
+        .from('antonia_tasks')
+        .select('*', { count: 'exact', head: true })
+        .eq('mission_id', task.mission_id)
+        .eq('type', task.type)
+        .eq('status', 'failed')
+        .gte('updated_at', lookbackIso);
+
+    if ((count || 0) < TASK_FAILURE_PATTERN_THRESHOLD) {
+        return false;
+    }
+
+    const paused = await pauseMissionProspecting(supabase, task.mission_id, 'repeated_task_failures', {
+        taskType: task.type,
+        recentFailedTasks: count || 0,
+        lookbackHours: TASK_FAILURE_PATTERN_LOOKBACK_HOURS,
+        latestError: errorMessage,
+    });
+
+    if (paused) {
+        await createAntoniaException(supabase, {
+            organizationId: task.organization_id,
+            missionId: task.mission_id,
+            taskId: task.id,
+            category: 'repeated_task_failures',
+            severity: 'critical',
+            title: 'Mision pausada por fallos repetidos',
+            description: `La tarea ${task.type} fallo ${count || 0} veces en las ultimas ${TASK_FAILURE_PATTERN_LOOKBACK_HOURS} horas.`,
+            dedupeKey: `mission_repeated_failures_${task.mission_id}_${task.type}`,
+            payload: {
+                taskType: task.type,
+                recentFailedTasks: count || 0,
+                latestError: errorMessage,
+            },
+        });
+    }
+
+    return paused;
+}
+
+async function rescheduleTaskAfterFailure(
+    supabase: any,
+    task: any,
+    rawErrorMessage: string,
+    source: 'task_failure' | 'stuck_watchdog',
+    failureDetails?: Record<string, any>
+) {
+    const nowIso = new Date().toISOString();
+    const errorMessage = normalizeTaskErrorMessage(rawErrorMessage);
+    const nextRetryCount = Number(task?.retry_count || 0) + 1;
+
+    if (nextRetryCount > TASK_AUTO_RETRY_DELAYS_MINUTES.length) {
+        await supabase.from('antonia_tasks').update({
+            status: 'failed',
+            retry_count: nextRetryCount,
+            result: {
+                skipped: true,
+                reason: 'auto_retry_exhausted',
+                source,
+                retryCount: nextRetryCount,
+                ...(failureDetails ? { failure: failureDetails } : {}),
+            },
+            error_message: errorMessage,
+            processing_started_at: null,
+            heartbeat_at: null,
+            updated_at: nowIso,
+        }).eq('id', task.id);
+
+        await supabase.from('antonia_logs').insert({
+            mission_id: task.mission_id,
+            organization_id: task.organization_id,
+            level: 'error',
+            message: `Task ${task.type} marked as failed after exhausting automatic retries.`,
+            details: {
+                taskId: task.id,
+                retryCount: nextRetryCount,
+                source,
+                errorMessage,
+                ...(failureDetails ? { failure: failureDetails } : {}),
+            },
+            created_at: nowIso,
+        });
+
+        await createAntoniaException(supabase, {
+            organizationId: task.organization_id,
+            missionId: task.mission_id,
+            taskId: task.id,
+            category: source === 'stuck_watchdog' ? 'stuck_task_failed' : 'task_retry_exhausted',
+            severity: 'high',
+            title: source === 'stuck_watchdog' ? 'Tarea estancada marcada como fallida' : 'Tarea marcada como fallida por reintentos agotados',
+            description: errorMessage,
+            dedupeKey: `task_failure_${task.id}`,
+            payload: {
+                retryCount: nextRetryCount,
+                taskType: task.type,
+                source,
+                ...(failureDetails ? { failure: failureDetails } : {}),
+            },
+        });
+
+        await maybePauseMissionForRepeatedFailures(supabase, task, errorMessage);
+        return { final: true, retryCount: nextRetryCount };
+    }
+
+    const scheduledFor = getTaskRetryScheduledFor(nextRetryCount);
+    await supabase.from('antonia_tasks').update({
+        status: 'pending',
+        retry_count: nextRetryCount,
+        scheduled_for: scheduledFor,
+        result: {
+            skipped: true,
+            reason: 'auto_retry_scheduled',
+            source,
+            retryCount: nextRetryCount,
+            scheduledFor,
+            ...(failureDetails ? { failure: failureDetails } : {}),
+        },
+        error_message: errorMessage,
+        processing_started_at: null,
+        heartbeat_at: null,
+        updated_at: nowIso,
+    }).eq('id', task.id);
+
+    await supabase.from('antonia_logs').insert({
+        mission_id: task.mission_id,
+        organization_id: task.organization_id,
+        level: 'warning',
+        message: `Task ${task.type} scheduled for retry #${nextRetryCount}.`,
+        details: {
+            taskId: task.id,
+            retryCount: nextRetryCount,
+            scheduledFor,
+            source,
+            errorMessage,
+            ...(failureDetails ? { failure: failureDetails } : {}),
+        },
+        created_at: nowIso,
+    });
+
+    return { final: false, retryCount: nextRetryCount, scheduledFor };
+}
+
+async function rescueStuckTasks(supabase: any) {
+    const cutoffIso = new Date(Date.now() - TASK_STUCK_TIMEOUT_MINUTES * 60 * 1000).toISOString();
+    const { data: stuckTasks, error } = await supabase
+        .from('antonia_tasks')
+        .select('id, mission_id, organization_id, type, retry_count, updated_at, processing_started_at, heartbeat_at')
+        .eq('status', 'processing')
+        .or(`and(heartbeat_at.is.null,processing_started_at.lt.${cutoffIso}),heartbeat_at.lt.${cutoffIso}`)
+        .order('processing_started_at', { ascending: true })
+        .limit(25);
+
+    if (error) {
+        console.error('[Cron] Failed to query stuck Antonia tasks:', error);
+        return { rescuedCount: 0, stuckCount: 0 };
+    }
+
+    const tasks = stuckTasks || [];
+    for (const stuckTask of tasks) {
+        await rescheduleTaskAfterFailure(
+            supabase,
+            stuckTask,
+            `Task remained in processing beyond ${TASK_STUCK_TIMEOUT_MINUTES} minutes without heartbeat progress.`,
+            'stuck_watchdog'
+        );
+    }
+
+    return { rescuedCount: tasks.length, stuckCount: tasks.length };
+}
+
+async function insertTaskWithIdempotencyGuard(supabase: any, row: Record<string, any>) {
+    const payload: Record<string, any> = {
+        ...row,
+        created_at: row.created_at || new Date().toISOString(),
+    };
+    const { error } = await supabase.from('antonia_tasks').insert(payload);
+    if (String((error as any)?.code || '') === '23505' && payload.idempotency_key) {
+        return { inserted: false, duplicate: true };
+    }
+    if (error) throw error;
+    return { inserted: true, duplicate: false };
+}
+
+async function claimPendingTasks(supabase: any, limit: number, allowTypes: string[], workerId: string, workerSource: string) {
+    const nowIso = new Date().toISOString();
+    const { data: candidates, error } = await supabase
+        .from('antonia_tasks')
+        .select('*')
+        .eq('status', 'pending')
+        .in('type', allowTypes)
+        .or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`)
+        .order('created_at', { ascending: true })
+        .limit(Math.max(limit * 3, limit));
+
+    if (error || !candidates?.length) {
+        if (error) console.error('[Cron] Failed to fetch pending Antonia tasks:', error);
+        return [];
+    }
+
+    const claimed: any[] = [];
+    for (const candidate of candidates) {
+        if (claimed.length >= limit) break;
+        const { data: task } = await supabase
+            .from('antonia_tasks')
+            .update({
+                status: 'processing',
+                processing_started_at: nowIso,
+                heartbeat_at: nowIso,
+                worker_id: workerId,
+                worker_source: workerSource,
+                updated_at: nowIso,
+            })
+            .eq('id', candidate.id)
+            .eq('status', 'pending')
+            .select('*')
+            .maybeSingle();
+
+        if (task) claimed.push(task);
+    }
+
+    return claimed;
 }
 
 function buildResearchLeadContext(lead: any) {
@@ -296,6 +663,7 @@ async function incrementUsage(supabase: any, organizationId: string, type: 'sear
 }
 
 async function executeCampaignGeneration(task: any, supabase: any, config: any) {
+    await assertMissionIsActive(supabase, task.mission_id, 'campaign_generation_start');
     const { jobTitle, industry, campaignContext, userId, missionTitle } = task.payload;
     const generatedName = `Misión: ${missionTitle || 'Campaña Inteligente'}`;
 
@@ -339,6 +707,8 @@ async function executeCampaignGeneration(task: any, supabase: any, config: any) 
             throw new Error(`AI Generation Failed: ${error.message}`);
         }
 
+        await assertMissionIsActive(supabase, task.mission_id, 'campaign_generation_after_ai');
+
         const { data: campaignRow, error } = await supabase.from('campaigns').insert({
             organization_id: task.organization_id,
             user_id: userId,
@@ -371,7 +741,7 @@ async function executeCampaignGeneration(task: any, supabase: any, config: any) 
 
     // 3. Create SEARCH task (Chaining)
     // We pass the new campaignName to the search task
-    await supabase.from('antonia_tasks').insert({
+    await insertTaskWithIdempotencyGuard(supabase, {
         mission_id: task.mission_id,
         organization_id: task.organization_id,
         type: 'SEARCH',
@@ -380,7 +750,7 @@ async function executeCampaignGeneration(task: any, supabase: any, config: any) 
             ...task.payload,
             campaignName: generatedName, // Override/Set the campaign name
         },
-        idempotency_key: `mission_${task.mission_id}_search_${Date.now()}`, // Ensure unique from previous search attempts
+        idempotency_key: `task_${task.id}_search`,
         created_at: new Date().toISOString()
     });
 
@@ -388,6 +758,7 @@ async function executeCampaignGeneration(task: any, supabase: any, config: any) 
 }
 
 async function executeSearch(task: any, supabase: any, config: any) {
+    await assertMissionIsActive(supabase, task.mission_id, 'search_start');
     const usage = await getDailyUsage(supabase, task.organization_id);
     // User requested "busquedas diarias" to mean "executions", limiting to e.g. 3 per day.
     // Default to 3 if not set
@@ -424,14 +795,15 @@ async function executeSearch(task: any, supabase: any, config: any) {
 
     let data: any;
     try {
-        const response = await fetch(internalUrl, {
+        await touchTaskHeartbeat(supabase, task.id);
+        const response = await fetchWithTimeout(internalUrl, {
             method: 'POST',
             headers: ensureInternalHeaders({
                 'Content-Type': 'application/json',
                 'x-user-id': String(task.payload.userId || ''),
             }, 'search'),
             body: JSON.stringify(internalBody),
-        });
+        }, SEARCH_FETCH_TIMEOUT_MS, 'internal_search');
 
         if (!response.ok) {
             const txt = await response.text().catch(() => '');
@@ -452,11 +824,12 @@ async function executeSearch(task: any, supabase: any, config: any) {
             max_results: 100
         };
 
-        const response = await fetch(LEAD_SEARCH_URL, {
+        await touchTaskHeartbeat(supabase, task.id);
+        const response = await fetchWithTimeout(LEAD_SEARCH_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(searchPayload)
-        });
+        }, SEARCH_FETCH_TIMEOUT_MS, 'external_search');
 
         if (!response.ok) {
             throw new Error(`Search API failed: ${response.statusText}`);
@@ -464,6 +837,9 @@ async function executeSearch(task: any, supabase: any, config: any) {
 
         data = await response.json();
     }
+
+    await touchTaskHeartbeat(supabase, task.id);
+    await assertMissionIsActive(supabase, task.mission_id, 'search_after_fetch');
 
     const leads = Array.isArray(data?.leads)
         ? data.leads
@@ -600,7 +976,7 @@ async function executeSearch(task: any, supabase: any, config: any) {
 
             // Create enrichment task for saved leads
             if (task.payload.enrichmentLevel) {
-                await supabase.from('antonia_tasks').insert({
+                await insertTaskWithIdempotencyGuard(supabase, {
                     mission_id: task.mission_id,
                     organization_id: task.organization_id,
                     type: 'ENRICH',
@@ -611,6 +987,7 @@ async function executeSearch(task: any, supabase: any, config: any) {
                         enrichmentLevel: task.payload.enrichmentLevel,
                         campaignName: task.payload.campaignName
                     },
+                    idempotency_key: `task_${task.id}_fallback_enrich`,
                     created_at: new Date().toISOString()
                 });
             }
@@ -648,7 +1025,7 @@ async function executeSearch(task: any, supabase: any, config: any) {
             if (strandedLeads && strandedLeads.length > 0) {
                 console.log(`[Search] Found ${strandedLeads.length} stranded enriched leads. Scheduling CONTACT task.`);
 
-                await supabase.from('antonia_tasks').insert({
+                await insertTaskWithIdempotencyGuard(supabase, {
                     mission_id: task.mission_id,
                     organization_id: task.organization_id,
                     type: 'CONTACT',
@@ -667,6 +1044,7 @@ async function executeSearch(task: any, supabase: any, config: any) {
                         })),
                         campaignName: task.payload.campaignName
                     },
+                    idempotency_key: `task_${task.id}_recover_contact`,
                     created_at: new Date().toISOString()
                 });
 
@@ -691,7 +1069,7 @@ async function executeSearch(task: any, supabase: any, config: any) {
 
     // Create ENRICH task for new leads found
     if (task.payload.enrichmentLevel && acceptedLeadCount > 0) {
-        await supabase.from('antonia_tasks').insert({
+        await insertTaskWithIdempotencyGuard(supabase, {
             mission_id: task.mission_id,
             organization_id: task.organization_id,
             type: 'ENRICH',
@@ -702,6 +1080,7 @@ async function executeSearch(task: any, supabase: any, config: any) {
                 enrichmentLevel: task.payload.enrichmentLevel,
                 campaignName: task.payload.campaignName
             },
+            idempotency_key: `task_${task.id}_enrich`,
             created_at: new Date().toISOString()
         });
     }
@@ -714,38 +1093,18 @@ async function executeSearch(task: any, supabase: any, config: any) {
 }
 
 async function executeEnrichment(task: any, supabase: any, config: any) {
+    await assertMissionIsActive(supabase, task.mission_id, 'enrichment_start');
     const { leads, enrichmentLevel, userId } = task.payload;
     const isDeep = enrichmentLevel === 'deep';
 
-    // Determine which limit applies
-    const usageKey = isDeep ? 'leads_investigated' : 'leads_enriched';
-    const usageType = isDeep ? 'investigate' : 'enrich';
-
-    const usage = await getDailyUsage(supabase, task.organization_id);
-    const quota = await getUserScopedAntoniaQuotaStatus({
-        userId,
-        organizationId: task.organization_id,
-        resource: isDeep ? 'investigate' : 'enrich',
-        limit: isDeep ? (config.daily_investigate_limit || 20) : (config.daily_enrich_limit || 50),
-        organizationCount: usage[usageKey],
-    });
-    const limit = quota.limit;
-    const currentUsage = quota.count;
-
-    if (currentUsage >= limit) {
-        const retryAt = getNextUtcDayStartIso();
-        console.log(`[Limit] Daily ${isDeep ? 'investigate' : 'enrich'} limit reached (${currentUsage}/${limit}). Re-scheduling for ${retryAt}`);
-        return { skipped: true, reason: 'daily_limit_reached', retryAt };
-    }
-
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const capacity = limit - currentUsage;
+    const batchLimit = isDeep ? (config.daily_investigate_limit || 20) : (config.daily_enrich_limit || 50);
 
     // FETCH LEADS FROM QUEUE if not provided in payload
     let leadsToProcess = leads || [];
 
     if (leadsToProcess.length === 0 || task.payload.source === 'queue') {
-        console.log(`[Enrich] Fetching leads from queue for Mission ${task.mission_id} (Capacity: ${capacity})`);
+        console.log(`[Enrich] Fetching leads from queue for Mission ${task.mission_id} (Batch limit: ${batchLimit})`);
 
         const { data: queuedLeads, error: queueError } = await supabase
             .from('leads')
@@ -754,7 +1113,7 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
             .eq('status', 'saved')
             // .is('email', null) // Optional: only process those without email? 
             // Better to rely on 'saved' status vs 'enriched' status
-            .limit(capacity);
+            .limit(batchLimit);
 
         if (queueError) {
             console.error('[Enrich] Error fetching from queue:', queueError);
@@ -799,34 +1158,43 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
             apolloId: l.apolloId
         })),
         revealEmail: true,
-        revealPhone: revealPhone
+        revealPhone: revealPhone,
+        mode: isDeep ? 'deep' : 'normal',
+        tableName: 'enriched_leads'
     };
 
     const enrichUrl = `${appUrl}/api/opportunities/enrich-apollo`;
 
-    const response = await fetch(enrichUrl, {
+    await touchTaskHeartbeat(supabase, task.id);
+    const response = await fetchWithTimeout(enrichUrl, {
         method: 'POST',
         headers: ensureInternalHeaders({
             'Content-Type': 'application/json',
-            'x-user-id': userId
+            'x-user-id': userId,
+            'x-organization-id': task.organization_id,
+            'Idempotency-Key': `antonia-task:${task.id}:enrich`,
         }, 'enrich'),
         body: JSON.stringify(enrichPayload)
-    });
+    }, ENRICH_FETCH_TIMEOUT_MS, 'enrich_apollo');
 
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 429) {
+        const retryAt = String(data?.retryAt || '').trim() || getNextUtcDayStartIso();
+        console.log(`[Limit] Enrichment endpoint denied ${isDeep ? 'investigate' : 'enrich'} quota. Re-scheduling for ${retryAt}`);
+        return { skipped: true, reason: 'daily_limit_reached', retryAt };
+    }
     if (!response.ok) {
-        // Silently fail enrichment? Or throw?
-        throw new Error(`Enrichment API failed: ${response.statusText}`);
+        throw new Error(`Enrichment API failed: ${response.status} ${String(data?.error || response.statusText)}`);
     }
 
-    const data = await response.json();
     if (data?.error) {
         throw new Error(`Enrichment logical error: ${String(data.error)}`);
     }
+    await touchTaskHeartbeat(supabase, task.id);
+    await assertMissionIsActive(supabase, task.mission_id, 'enrichment_after_fetch');
     const enriched = data.enriched || [];
 
     if (enriched.length > 0) {
-        await incrementUsage(supabase, task.organization_id, usageType, enriched.length);
-
         // [P2-LOGIC-002] Fix Consistency: Insert into 'enriched_leads' table so they appear in UI
         const rowsToInsert = enriched.map((l: any) => ({
             id: l.id || l.clientRef || uuid.v4(), // Use existing ID or generate
@@ -874,7 +1242,7 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
     }
 
     if (task.payload.campaignName && enriched.length > 0) {
-        await supabase.from('antonia_tasks').insert({
+        await insertTaskWithIdempotencyGuard(supabase, {
             mission_id: task.mission_id,
             organization_id: task.organization_id,
             type: 'CONTACT',
@@ -884,6 +1252,7 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
                 enrichedLeads: enriched,
                 campaignName: task.payload.campaignName
             },
+            idempotency_key: `task_${task.id}_contact`,
             created_at: new Date().toISOString()
         });
     }
@@ -892,6 +1261,7 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
 }
 
 async function executeContact(task: any, supabase: any) {
+    await assertMissionIsActive(supabase, task.mission_id, 'contact_start');
     const { enrichedLeads, campaignName } = task.payload;
 
     // 1. Validation
@@ -1042,6 +1412,7 @@ async function executeContact(task: any, supabase: any) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'http://localhost:3000';
 
     const contactedLeads: any[] = [];
+    const contactResults: any[] = [];
     const errors: any[] = [];
 
     const candidateEmails = [...new Set(
@@ -1055,7 +1426,7 @@ async function executeContact(task: any, supabase: any) {
     if (candidateEmails.length > 0) {
         const { data } = await supabase
             .from('contacted_leads')
-            .select('lead_id, email, status, replied_at, reply_intent, last_reply_text, name, company, mission_id')
+            .select('id, lead_id, email, status, replied_at, reply_intent, last_reply_text, name, company, mission_id, sent_at, delivery_status, bounce_category, bounce_reason, evaluation_status, campaign_followup_reason, data')
             .eq('organization_id', task.organization_id)
             .in('email', candidateEmails);
         priorReplyMatches.push(...(data || []));
@@ -1064,7 +1435,7 @@ async function executeContact(task: any, supabase: any) {
     if (candidateLeadIds.length > 0) {
         const { data } = await supabase
             .from('contacted_leads')
-            .select('lead_id, email, status, replied_at, reply_intent, last_reply_text, name, company, mission_id')
+            .select('id, lead_id, email, status, replied_at, reply_intent, last_reply_text, name, company, mission_id, sent_at, delivery_status, bounce_category, bounce_reason, evaluation_status, campaign_followup_reason, data')
             .eq('organization_id', task.organization_id)
             .in('lead_id', candidateLeadIds);
         priorReplyMatches.push(...(data || []));
@@ -1072,6 +1443,8 @@ async function executeContact(task: any, supabase: any) {
 
     // 3. Process each lead
     for (const lead of leadsToContact) { // [FIX #8] use capped list
+        await assertMissionIsActive(supabase, task.mission_id, 'contact_loop');
+        await touchTaskHeartbeat(supabase, task.id);
         const leadDb = lead?.id ? leadMap.get(String(lead.id)) : null;
         const leadContext = {
             ...lead,
@@ -1099,6 +1472,7 @@ async function executeContact(task: any, supabase: any) {
         }, priorReplyMatches as any[]);
 
         if (priorReply) {
+            const permanentSuppression = shouldPermanentlySuppressContact(priorReply);
             await createAntoniaException(supabase, {
                 organizationId: task.organization_id,
                 missionId: task.mission_id,
@@ -1106,29 +1480,39 @@ async function executeContact(task: any, supabase: any) {
                 leadId: leadContext.id || null,
                 category: 'reply_guardrail',
                 severity: 'high',
-                title: 'Contacto bloqueado: lead ya habia respondido',
-                description: `${leadContext.email || leadContext.fullName || 'Lead'} ya tiene una respuesta previa registrada y ANTONIA no volvera a contactarlo automaticamente.`,
+                title: permanentSuppression ? 'Contacto bloqueado permanentemente' : 'Contacto bloqueado: existe historial previo',
+                description: permanentSuppression
+                    ? `${leadContext.email || leadContext.fullName || 'Lead'} tiene una baja o falla permanente registrada.`
+                    : `${leadContext.email || leadContext.fullName || 'Lead'} tiene una respuesta o falla temporal registrada; ANTONIA omitio este envio para evitar continuar el hilo a ciegas.`,
                 dedupeKey: `reply_guardrail_${task.organization_id}_${leadContext.email || leadContext.id}`,
-                payload: { lead: leadContext, priorReply },
+                payload: { lead: leadContext, priorReply, permanentSuppression },
             });
             await syncLeadAutopilotToCrm(supabase, {
                 organizationId: task.organization_id,
                 leadId: leadContext.id || null,
-                stage: 'engaged',
-                notes: 'Contacto bloqueado porque el lead ya respondio anteriormente',
-                nextAction: 'Revisar la conversacion existente antes de volver a escribir',
-                nextActionType: 'prior_reply_guardrail',
+                stage: permanentSuppression ? 'closed_lost' : 'engaged',
+                notes: permanentSuppression
+                    ? 'Contacto suprimido por baja o falla de entrega permanente'
+                    : 'Envio omitido porque existe una respuesta o falla temporal previa',
+                nextAction: permanentSuppression
+                    ? 'Mantener al contacto fuera de futuras automatizaciones'
+                    : 'Revisar el historial antes de decidir cualquier nuevo contacto',
+                nextActionType: permanentSuppression ? 'do_not_contact' : 'prior_reply_guardrail',
                 nextActionDueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-                autopilotStatus: 'reply_guardrail',
-                lastAutopilotEvent: 'reply_guardrail',
+                autopilotStatus: permanentSuppression ? 'do_not_contact' : 'action_required',
+                lastAutopilotEvent: permanentSuppression ? 'permanent_suppression' : 'prior_reply_guardrail',
             });
-            if (leadContext.id) {
+            if (leadContext.id && permanentSuppression) {
                 await supabase
                     .from('leads')
                     .update({ status: 'do_not_contact', updated_at: new Date().toISOString() } as any)
                     .eq('id', leadContext.id);
             }
-            errors.push({ email: leadContext.email, error: 'Lead ya habia respondido anteriormente' });
+            errors.push({
+                email: leadContext.email,
+                error: permanentSuppression ? 'Contacto suprimido permanentemente' : 'Existe historial previo; envio omitido',
+                permanentSuppression,
+            });
             continue;
         }
 
@@ -1367,7 +1751,7 @@ async function executeContact(task: any, supabase: any) {
                 `(${schedule.timeZone}, match:${schedule.matchedBy}, location:"${schedule.location}", reason:${schedule.reason})`
             );
 
-            await supabase.from('antonia_tasks').insert({
+            await insertTaskWithIdempotencyGuard(supabase, {
                 mission_id: task.mission_id,
                 organization_id: task.organization_id,
                 type: 'CONTACT',
@@ -1398,11 +1782,12 @@ async function executeContact(task: any, supabase: any) {
                 .replace('{{lead.name}}', leadContext.fullName || '')
                 .replace('{{company}}', leadContext.companyName || 'tu empresa');
 
-            const response = await fetch(`${appUrl}/api/contact/send`, {
+            const response = await fetchWithTimeout(`${appUrl}/api/contact/send`, {
                 method: 'POST',
                 headers: ensureInternalHeaders({
                     'Content-Type': 'application/json',
-                    'x-user-id': task.payload.userId
+                    'x-user-id': task.payload.userId,
+                    'x-organization-id': task.organization_id,
                 }, 'contact'),
                 body: JSON.stringify({
                     to: leadContext.email,
@@ -1411,19 +1796,25 @@ async function executeContact(task: any, supabase: any) {
                     leadId: leadContext.id,
                     campaignId: campaign?.id,
                     missionId: task.mission_id,
+                    taskId: task.id,
                     userId: task.payload.userId,
+                    idempotencyKey: `antonia:${task.id}:${leadContext.id || leadContext.email}:initial`,
                     isHtml: true,
                     tracking: campaign?.settings?.tracking
                 })
-            });
+            }, CONTACT_SEND_TIMEOUT_MS, 'contact_send');
 
-            if (!response.ok) {
-                const errorText = await response.text().catch(() => '');
-                const lower = errorText.toLowerCase();
-                const isUnsub = response.status === 409 || lower.includes('unsub');
-                const isBlocked = response.status === 403 || lower.includes('domain');
+            const responseText = await response.text().catch(() => '');
+            const responseData: any = parseContactSendResponseBody(responseText);
+            if (!isSuccessfulContactSend(response.status, responseData)) {
+                const failure = classifyContactSendFailure(response.status, responseData);
+                const responseMessage = typeof responseData.error === 'string'
+                    ? responseData.error
+                    : responseText || 'Empty response';
+                const isUnsub = failure.complianceReason === 'unsubscribed';
+                const isBlocked = failure.complianceReason === 'domain_blocked';
 
-                if (isUnsub || isBlocked) {
+                if (failure.shouldMarkDoNotContact) {
                     await createAntoniaException(supabase, {
                         organizationId: task.organization_id,
                         missionId: task.mission_id,
@@ -1434,7 +1825,12 @@ async function executeContact(task: any, supabase: any) {
                         title: isUnsub ? 'Contacto frenado por unsubscribe' : 'Contacto frenado por dominio bloqueado',
                         description: `ANTONIA detuvo el contacto a ${leadContext.email}.`,
                         dedupeKey: `compliance_${task.mission_id}_${leadContext.id || leadContext.email}_${isUnsub ? 'unsub' : 'blocked'}`,
-                        payload: { lead: leadContext, campaignName, responseStatus: response.status },
+                        payload: {
+                            lead: leadContext,
+                            campaignName,
+                            responseStatus: response.status,
+                            responseCode: failure.code,
+                        },
                     });
 
                     await syncLeadAutopilotToCrm(supabase, {
@@ -1466,7 +1862,7 @@ async function executeContact(task: any, supabase: any) {
                         .eq('id', leadContext.id);
                 }
 
-                if (!isUnsub && !isBlocked) {
+                if (!failure.shouldMarkDoNotContact) {
                     await createAntoniaException(supabase, {
                         organizationId: task.organization_id,
                         missionId: task.mission_id,
@@ -1474,66 +1870,134 @@ async function executeContact(task: any, supabase: any) {
                         leadId: leadContext.id || null,
                         category: 'send_failed',
                         severity: 'medium',
-                        title: 'Fallo enviando contacto',
-                        description: `API ${response.status}: ${errorText.slice(0, 160)}`,
+                        title: failure.outcomeUnknown ? 'Estado de envio no confirmado' : 'Fallo enviando contacto',
+                        description: `API ${response.status}${failure.code ? ` ${failure.code}` : ''}: ${responseMessage.slice(0, 160)}`,
                         dedupeKey: `send_fail_${task.id}_${leadContext.id || leadContext.email}_${response.status}`,
-                        payload: { lead: leadContext, campaignName, responseStatus: response.status, errorText: errorText.slice(0, 500) },
+                        payload: {
+                            lead: leadContext,
+                            campaignName,
+                            responseStatus: response.status,
+                            responseCode: failure.code,
+                            retryable: failure.retryable,
+                            outcomeUnknown: failure.outcomeUnknown,
+                            dailyQuotaExceeded: failure.dailyQuotaExceeded,
+                            outboundConflict: failure.outboundConflict,
+                            dispatchId: responseData.dispatchId || null,
+                            errorText: responseMessage.slice(0, 500),
+                        },
                     });
                     await syncLeadAutopilotToCrm(supabase, {
                         organizationId: task.organization_id,
                         leadId: leadContext.id || null,
                         stage: 'qualified',
-                        notes: `Fallo de envio: API ${response.status}`,
+                        notes: failure.outcomeUnknown
+                            ? `Estado de envio no confirmado: ${failure.code || `API ${response.status}`}`
+                            : `Fallo de envio: ${failure.code || `API ${response.status}`}`,
                         nextAction: 'Revisar canal, provider o plantilla antes de reintentar',
                         nextActionType: 'send_failure_review',
                         nextActionDueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-                        autopilotStatus: 'send_failed',
-                        lastAutopilotEvent: 'send_failed',
+                        autopilotStatus: failure.outcomeUnknown ? 'send_outcome_unknown' : 'send_failed',
+                        lastAutopilotEvent: failure.outcomeUnknown ? 'send_outcome_unknown' : 'send_failed',
                     });
                 }
 
-                errors.push({ email: leadContext.email, error: `API ${response.status}: ${errorText.slice(0, 160)}` });
+                errors.push({
+                    email: leadContext.email,
+                    error: `API ${response.status}${failure.code ? ` ${failure.code}` : ''}: ${responseMessage.slice(0, 160)}`,
+                    status: response.status,
+                    code: failure.code,
+                    retryable: failure.retryable,
+                    outcomeUnknown: failure.outcomeUnknown,
+                    dailyQuotaExceeded: failure.dailyQuotaExceeded,
+                    outboundConflict: failure.outboundConflict,
+                    dispatchId: responseData.dispatchId || null,
+                });
                 continue;
             }
 
-            const resData = await response.json();
-            const sentAt = new Date().toISOString();
+            const resData = responseData;
+            const isReplayed = isReplayedContactSend(resData);
+            const existingContact = isReplayed && resData.dispatchId
+                ? priorReplyMatches.find((row: any) => row?.data?.dispatchId === resData.dispatchId)
+                : null;
+            const sentAt = existingContact?.sent_at || new Date().toISOString();
 
-            contactedLeads.push({
-                user_id: task.payload.userId, // [FIX #5] add user_id required by RLS
-                organization_id: task.organization_id,
-                lead_id: leadContext.id,
-                mission_id: task.mission_id,
+            contactResults.push({
                 name: leadContext.fullName,
                 email: leadContext.email,
                 company: leadContext.companyName,
-                role: leadContext.title,
-                status: 'sent',
-                provider: resData.provider || 'unknown',
-                subject: personalizedSubject,
-                sent_at: sentAt,
-                created_at: sentAt
+                status: isReplayed ? 'replayed' : 'sent',
+                contactedId: existingContact?.id || null,
             });
 
-            if (campaign?.id && campaignSentRecords && leadContext?.id) {
-                campaignSentRecords[String(leadContext.id)] = { lastStepIdx: 0, lastSentAt: new Date().toISOString() };
-                campaignDirty = true;
+            if (shouldAppendContactedLead(response.status, responseData)) {
+                contactedLeads.push({
+                    ...(resData.trackingId ? { id: resData.trackingId } : {}),
+                    user_id: task.payload.userId, // [FIX #5] add user_id required by RLS
+                    organization_id: task.organization_id,
+                    lead_id: leadContext.id,
+                    mission_id: task.mission_id,
+                    campaign_id: campaign.id,
+                    name: leadContext.fullName,
+                    email: leadContext.email,
+                    company: leadContext.companyName,
+                    role: leadContext.title,
+                    status: 'sent',
+                    provider: resData.provider || 'unknown',
+                    subject: personalizedSubject,
+                    message_id: resData.messageId || null,
+                    thread_id: resData.threadId || null,
+                    conversation_id: resData.conversationId || null,
+                    internet_message_id: resData.internetMessageId || null,
+                    thread_key: buildThreadKey({
+                        provider: resData.provider || 'unknown',
+                        threadId: resData.threadId,
+                        conversationId: resData.conversationId,
+                        internetMessageId: resData.internetMessageId,
+                        messageId: resData.messageId,
+                    }),
+                    lifecycle_state: 'sent',
+                    last_event_type: 'sent',
+                    last_event_at: sentAt,
+                    sent_at: sentAt,
+                    created_at: sentAt,
+                    data: {
+                        campaign_id: campaign.id,
+                        draftId: resData.draftId || null,
+                        draftVersionId: resData.draftVersionId || null,
+                        contentHash: resData.contentHash || null,
+                        dispatchId: resData.dispatchId || null,
+                    },
+                });
             }
 
-            await syncLeadAutopilotToCrm(supabase, {
-                organizationId: task.organization_id,
-                leadId: leadContext.id || null,
-                stage: 'contacted',
-                notes: `Primer contacto enviado via ${resData.provider || 'unknown'}`,
-                nextAction: 'Esperar senales de apertura o respuesta para decidir follow-up',
-                nextActionType: 'wait_for_reply',
-                nextActionDueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-                autopilotStatus: 'contacted',
-                lastAutopilotEvent: 'contact_sent',
-            });
+            if (campaign?.id && campaignSentRecords && leadContext?.id) {
+                const leadKey = String(leadContext.id);
+                const existingSentRecord = campaignSentRecords[leadKey];
+                if (!isReplayed || !existingSentRecord || Number(existingSentRecord.lastStepIdx) < 0) {
+                    campaignSentRecords[leadKey] = { lastStepIdx: 0, lastSentAt: sentAt };
+                    campaignDirty = true;
+                }
+            }
+
+            if (!isReplayed) {
+                await syncLeadAutopilotToCrm(supabase, {
+                    organizationId: task.organization_id,
+                    leadId: leadContext.id || null,
+                    stage: 'contacted',
+                    notes: `Primer contacto enviado via ${resData.provider || 'unknown'}`,
+                    nextAction: 'Esperar senales de apertura o respuesta para decidir follow-up',
+                    nextActionType: 'wait_for_reply',
+                    nextActionDueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+                    autopilotStatus: 'contacted',
+                    lastAutopilotEvent: 'contact_sent',
+                });
+            }
+            await touchTaskHeartbeat(supabase, task.id);
 
         } catch (err: any) {
             console.error(`[Contact] Failed to send to ${leadContext.email}:`, err);
+            const retryable = isRetryableContactSendException(err);
             await createAntoniaException(supabase, {
                 organizationId: task.organization_id,
                 missionId: task.mission_id,
@@ -1544,7 +2008,13 @@ async function executeContact(task: any, supabase: any) {
                 title: 'Fallo inesperado enviando contacto',
                 description: err.message || 'Unexpected send failure',
                 dedupeKey: `send_fail_${task.id}_${leadContext.id || leadContext.email}_unexpected`,
-                payload: { lead: leadContext, campaignName, error: err.message || String(err) },
+                payload: {
+                    lead: leadContext,
+                    campaignName,
+                    error: err.message || String(err),
+                    retryable,
+                    outcomeUnknown: retryable,
+                },
             });
             await syncLeadAutopilotToCrm(supabase, {
                 organizationId: task.organization_id,
@@ -1554,23 +2024,22 @@ async function executeContact(task: any, supabase: any) {
                 nextAction: 'Revisar error y reintentar contacto',
                 nextActionType: 'send_failure_review',
                 nextActionDueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-                autopilotStatus: 'send_failed',
-                lastAutopilotEvent: 'send_failed',
+                autopilotStatus: retryable ? 'send_outcome_unknown' : 'send_failed',
+                lastAutopilotEvent: retryable ? 'send_outcome_unknown' : 'send_failed',
             });
-            errors.push({ email: leadContext.email, error: err.message });
+            errors.push({
+                email: leadContext.email,
+                error: err.message || String(err),
+                code: String(err?.code || 'CONTACT_SEND_EXCEPTION'),
+                retryable,
+                outcomeUnknown: retryable,
+            });
             // Optionally insert as failed contact?
         }
     }
 
     if (contactedLeads.length > 0) {
         await supabase.from('contacted_leads').insert(contactedLeads);
-
-        if (campaign?.id && campaignDirty && campaignSentRecords) {
-            await supabase
-                .from('campaigns')
-                .update({ sent_records: campaignSentRecords, updated_at: new Date().toISOString() })
-                .eq('id', campaign.id);
-        }
 
         // Update leads status to 'contacted' to remove from queue
         // We only update the ones that were successfully SENT
@@ -1586,11 +2055,39 @@ async function executeContact(task: any, supabase: any) {
         await incrementUsage(supabase, task.organization_id, 'contact', contactedLeads.length);
     }
 
-    console.log(`[Contact] Successfully sent ${contactedLeads.length} emails. Failed: ${errors.length}`);
+    if (campaign?.id && campaignDirty && campaignSentRecords) {
+        await supabase
+            .from('campaigns')
+            .update({ sent_records: campaignSentRecords, updated_at: new Date().toISOString() })
+            .eq('id', campaign.id);
+    }
+
+    const replayedCount = contactResults.filter((result) => result.status === 'replayed').length;
+    const retryableErrors = errors.filter((error) => error.retryable === true);
+    console.log(`[Contact] Successfully sent ${contactedLeads.length} emails. Replayed: ${replayedCount}. Failed: ${errors.length}`);
+
+    if (retryableErrors.length > 0) {
+        const retryError: any = new Error(
+            `Retryable contact send failure: ${retryableErrors.map((error) => error.code || 'UNKNOWN').join(', ')}`
+        );
+        retryError.code = retryableErrors[0]?.code || 'CONTACT_SEND_RETRYABLE';
+        retryError.retryable = true;
+        retryError.outcomeUnknown = retryableErrors.some((error) => error.outcomeUnknown === true);
+        retryError.result = {
+            contactedCount: contactedLeads.length,
+            replayedCount,
+            contactedList: contactResults,
+            errors,
+            retryable: true,
+            outcomeUnknown: retryError.outcomeUnknown,
+        };
+        throw retryError;
+    }
 
     return {
         contactedCount: contactedLeads.length,
-        contactedList: contactedLeads.map(c => ({ name: c.name, email: c.email, status: 'sent', company: c.company })),
+        replayedCount,
+        contactedList: contactResults,
         errors
     };
 }
@@ -1890,9 +2387,12 @@ async function processTask(task: any, supabase: any) {
         .eq('organization_id', task.organization_id)
         .single();
 
+    const startedAt = new Date().toISOString();
     await supabase.from('antonia_tasks').update({
         status: 'processing',
-        processing_started_at: new Date().toISOString()
+        processing_started_at: startedAt,
+        heartbeat_at: startedAt,
+        updated_at: startedAt,
     }).eq('id', task.id);
 
     try {
@@ -1931,6 +2431,7 @@ async function processTask(task: any, supabase: any) {
                 status: 'pending',
                 scheduled_for: retryAt,
                 processing_started_at: null,
+                heartbeat_at: null,
                 result,
                 error_message: null,
                 updated_at: new Date().toISOString()
@@ -1951,6 +2452,8 @@ async function processTask(task: any, supabase: any) {
             status: 'completed',
             result: result,
             error_message: null,
+            processing_started_at: null,
+            heartbeat_at: null,
             updated_at: new Date().toISOString()
         }).eq('id', task.id);
 
@@ -1995,25 +2498,47 @@ async function processTask(task: any, supabase: any) {
         }
 
     } catch (e: any) {
+        if (e instanceof MissionPausedError) {
+            const nowIso = new Date().toISOString();
+            await supabase.from('antonia_tasks').update({
+                status: 'completed',
+                result: {
+                    skipped: true,
+                    reason: 'mission_paused',
+                    missionStatus: e.missionStatus,
+                },
+                error_message: null,
+                processing_started_at: null,
+                heartbeat_at: null,
+                updated_at: nowIso,
+            }).eq('id', task.id);
+
+            await supabase.from('antonia_logs').insert({
+                mission_id: task.mission_id,
+                organization_id: task.organization_id,
+                level: 'warning',
+                message: `Task ${task.type} skipped because mission is ${e.missionStatus}.`,
+                details: {
+                    taskId: task.id,
+                    missionStatus: e.missionStatus,
+                },
+                created_at: nowIso,
+            });
+
+            return;
+        }
+
         console.error(`[Worker] Task ${task.id} Failed`, e);
-        // Backup worker should not permanently fail tasks.
-        // We return them to the queue so Firebase (primary) can process.
-        const scheduledFor = new Date(Date.now() + 2 * 60 * 1000).toISOString();
-        await supabase.from('antonia_tasks').update({
-            status: 'pending',
-            scheduled_for: scheduledFor,
-            error_message: `[next-backup] ${e.message}`,
-            updated_at: new Date().toISOString()
-        }).eq('id', task.id);
-
-        await supabase.from('antonia_logs').insert({
-            mission_id: task.mission_id,
-            organization_id: task.organization_id,
-            level: 'error',
-            message: `Task ${task.type} failed: ${e.message}`
-        });
-
-        // Don't send alerts from backup worker to avoid duplicate/noisy notifications.
+        const failureDetails = e?.retryable === true && e?.result && typeof e.result === 'object'
+            ? { code: e.code || null, retryable: true, outcomeUnknown: e.outcomeUnknown === true, result: e.result }
+            : undefined;
+        await rescheduleTaskAfterFailure(
+            supabase,
+            task,
+            `[next-backup] ${e?.message || 'unknown_error'}`,
+            'task_failure',
+            failureDetails
+        );
     }
 }
 
@@ -2065,6 +2590,11 @@ export async function GET(request: Request) {
         });
     }
 
+    const stuckRescue = await rescueStuckTasks(supabase);
+    if (stuckRescue.rescuedCount > 0) {
+        console.warn(`[Cron] Rescued ${stuckRescue.rescuedCount} stuck Antonia task(s) before scheduling.`);
+    }
+
     // STEP 1: Schedule daily tasks for active missions (runs once per day check)
     try {
         const { data: scheduledMissions, error: scheduleError } = await supabase
@@ -2100,24 +2630,26 @@ export async function GET(request: Request) {
         console.error('[Cron] Failed to process campaigns:', e);
     }
 
-    // STEP 1.35: Run privacy retention cleanup for auxiliary data.
-    try {
-        const retentionUrl = new URL('/api/cron/privacy-retention', request.url);
-        const retentionResponse = await fetch(retentionUrl.toString(), {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${cronSecret}`,
-                'x-cron-secret': cronSecret,
-            },
-            cache: 'no-store',
-        });
+    // Retention is destructive and must be enabled separately from normal task processing.
+    if (String(process.env.ANTONIA_PRIVACY_RETENTION_ENABLED || 'false').toLowerCase() === 'true') {
+        try {
+            const retentionUrl = new URL('/api/cron/privacy-retention', request.url);
+            const retentionResponse = await fetch(retentionUrl.toString(), {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${cronSecret}`,
+                    'x-cron-secret': cronSecret,
+                },
+                cache: 'no-store',
+            });
 
-        if (!retentionResponse.ok) {
-            const text = await retentionResponse.text().catch(() => '');
-            console.error('[Cron] Privacy retention returned non-2xx:', retentionResponse.status, text.slice(0, 400));
+            if (!retentionResponse.ok) {
+                const text = await retentionResponse.text().catch(() => '');
+                console.error('[Cron] Privacy retention returned non-2xx:', retentionResponse.status, text.slice(0, 400));
+            }
+        } catch (e) {
+            console.error('[Cron] Failed to run privacy retention:', e);
         }
-    } catch (e) {
-        console.error('[Cron] Failed to run privacy retention:', e);
     }
 
     // STEP 1.5: Trigger Firebase primary worker if configured
@@ -2169,27 +2701,12 @@ export async function GET(request: Request) {
     // This avoids two workers producing divergent behavior.
     const enableBackup = forceBackupProcessing || String(process.env.ANTONIA_NEXT_BACKUP_PROCESSING || 'false') === 'true';
 
-    const now = new Date().toISOString();
     const allowTypes = ['GENERATE_CAMPAIGN', 'SEARCH', 'ENRICH', 'CONTACT', 'REPORT', 'GENERATE_REPORT'];
+    const workerId = `next-backup-${Date.now()}`;
 
-    const { data: tasks, error } = enableBackup
-        ? await supabase
-            .from('antonia_tasks')
-            .update({
-                status: 'processing',
-                processing_started_at: now
-            })
-            .eq('status', 'pending')
-            .in('type', allowTypes)
-            .or(`scheduled_for.is.null,scheduled_for.lte.${now}`)
-            .select('*')
-            // Keep very low to avoid timeouts (Firebase worker is primary)
-            .limit(1)
-        : { data: [], error: null } as any;
-
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    const tasks = enableBackup
+        ? await claimPendingTasks(supabase, 1, allowTypes, workerId, 'next-backup')
+        : [];
 
     if (!enableBackup) {
         if (firebaseForwardFailure) {
@@ -2205,10 +2722,10 @@ export async function GET(request: Request) {
     }
 
     if (!tasks || tasks.length === 0) {
-        return NextResponse.json({ message: 'No executable tasks found' });
+        return NextResponse.json({ message: 'No executable tasks found', rescuedStuckTasks: stuckRescue.rescuedCount });
     }
 
     await Promise.all(tasks.map((t: any) => processTask(t, supabase)));
 
-    return NextResponse.json({ processed: tasks.length, tasks: tasks.map((t: any) => t.id) });
+    return NextResponse.json({ processed: tasks.length, tasks: tasks.map((t: any) => t.id), rescuedStuckTasks: stuckRescue.rescuedCount });
 }

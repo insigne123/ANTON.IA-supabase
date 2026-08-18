@@ -135,7 +135,8 @@ export default function UnsubscribesPage() {
                     to: testEmail,
                     subject: 'Test de Bloqueo Antonia',
                     htmlBody: '<p>Este es un correo de prueba para verificar bloqueos.</p>',
-                    organizationId: orgId // Send the organization ID
+                    organizationId: orgId,
+                    idempotencyKey: `unsubscribe-block-test:${testEmail.trim().toLowerCase()}`,
                 })
             });
 

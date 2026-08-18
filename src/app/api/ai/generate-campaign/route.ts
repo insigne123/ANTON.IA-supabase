@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateCampaignFlow } from '@/ai/flows/generate-campaign';
-import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
+import { requestAuthErrorResponse, requireSessionOrTrustedInternalRequest } from '@/lib/server/request-auth';
 
 export async function POST(req: NextRequest) {
     try {
-        await requireAuth();
+        await requireSessionOrTrustedInternalRequest(req);
 
         const {
             goal,
@@ -44,7 +44,8 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json(out);
     } catch (e: any) {
-        if (e?.name === 'AuthError') return handleAuthError(e);
+        const authResponse = requestAuthErrorResponse(e);
+        if (authResponse) return authResponse;
         console.error('Error generating campaign:', e);
         return NextResponse.json({ error: e?.message || 'AI error' }, { status: 500 });
     }

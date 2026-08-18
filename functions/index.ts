@@ -8,13 +8,35 @@ import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import { buildAntoniaDailyDashboardHtml, type AntoniaDailyMissionRow } from './report-email';
+import { getMessagingOutcomeEffects } from './messaging-outcome';
+import { getResearchReadinessBlockReason, hasMeaningfulResearchEvidence } from './research-readiness';
+import { getCampaignReference, getCurrentCampaignFollowUp } from './campaign-followup';
+import { findPriorReplyMatchForLead, shouldPermanentlySuppressContact } from './contact-history-guard';
+import {
+    buildFirebaseLeadResearchRequestKey,
+    claimLeadResearchRequest,
+    completeLeadResearchRequestSubmission,
+    consumeLeadResearchRequestQuota,
+    failLeadResearchRequest,
+    failSubmittedLeadResearchRequest,
+    markLeadResearchRequestSubmitting,
+    markLeadResearchRequestUnknown,
+    persistLeadResearchTerminalResult,
+    releaseLeadResearchRequest,
+} from './lead-research-request';
 
 // NOTE: Keep defaults for backwards compatibility, but prefer env vars in production.
 const DEFAULT_APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
 const DEFAULT_LEAD_SEARCH_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search';
 const DEFAULT_LEAD_RESEARCH_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-research';
 const DISABLE_EXTERNAL_SEARCH_FALLBACK = String(process.env.LEADS_DISABLE_EXTERNAL_FALLBACK || 'false').toLowerCase() === 'true';
-const USE_N8N_RESEARCH_ONLY = String(process.env.LEAD_RESEARCH_USE_N8N || 'true').toLowerCase() === 'true';
+const USE_N8N_RESEARCH_ONLY = String(process.env.LEAD_RESEARCH_USE_N8N || 'false').toLowerCase() === 'true';
+
+function isLikelyN8nWebhookUrl(value?: string | null) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return false;
+    return raw.includes('/webhook/') || raw.includes('.n8n.cloud');
+}
 
 function getAppUrl(): string {
     return (
@@ -30,7 +52,11 @@ function getLeadSearchUrl(): string {
 }
 
 function getLeadResearchUrl(): string {
-    return process.env.ANTONIA_LEAD_RESEARCH_URL || process.env.LEAD_RESEARCH_URL || DEFAULT_LEAD_RESEARCH_URL;
+    const configured = process.env.ANTONIA_LEAD_RESEARCH_URL || process.env.LEAD_RESEARCH_URL || '';
+    if (configured && !isLikelyN8nWebhookUrl(configured)) {
+        return configured;
+    }
+    return DEFAULT_LEAD_RESEARCH_URL;
 }
 
 function cleanDomain(value?: string | null): string {
@@ -76,6 +102,116 @@ function sanitizeCompanyName(value?: string | null, domain?: string | null, emai
     return company;
 }
 
+function titleizeToken(value?: string | null): string {
+    return String(value || '')
+        .trim()
+        .split(/[-_.\s]+/)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+        .join(' ')
+        .trim();
+}
+
+function safeDecodeComponent(value?: string | null): string {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+        return decodeURIComponent(raw);
+    } catch {
+        return raw;
+    }
+}
+
+function safeDecodeUriValue(value?: string | null): string {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+        return decodeURI(raw);
+    } catch {
+        return raw;
+    }
+}
+
+function inferNameFromEmailOrLinkedin(email?: string | null, linkedinUrl?: string | null): { fullName: string; firstName: string; lastName: string } | null {
+    const emailLocal = String(email || '').trim().split('@')[0] || '';
+    const emailTokens = emailLocal.split(/[._-]+/).filter(Boolean);
+    if (emailTokens.length >= 2) {
+        const firstName = titleizeToken(emailTokens[0]);
+        const lastName = titleizeToken(emailTokens.slice(1).join(' '));
+        if (firstName && lastName) {
+            return { fullName: `${firstName} ${lastName}`.trim(), firstName, lastName };
+        }
+    }
+
+    const linkedin = safeDecodeUriValue(linkedinUrl);
+    if (linkedin) {
+        const slug = safeDecodeComponent(linkedin.replace(/\?.*$/, '').replace(/\/$/, '').split('/').pop() || '');
+        const cleaned = slug.replace(/-[0-9a-f]{4,}$/i, '');
+        const tokens = cleaned.split('-').filter(Boolean);
+        if (tokens.length >= 2) {
+            const firstName = titleizeToken(tokens[0]);
+            const lastName = titleizeToken(tokens.slice(1).join(' '));
+            if (firstName && lastName) {
+                return { fullName: `${firstName} ${lastName}`.trim(), firstName, lastName };
+            }
+        }
+    }
+
+    return null;
+}
+
+function resolveLeadIdentity(lead: any) {
+    const rawFullName = String(lead?.fullName || lead?.full_name || lead?.name || '').trim();
+    const masked = /\*{2,}/.test(rawFullName);
+    const inferred = inferNameFromEmailOrLinkedin(lead?.email, lead?.linkedinUrl || lead?.linkedin_url);
+    const fallbackFirstName = safeFirstName(rawFullName || inferred?.fullName || '');
+    const fallbackLastName = String(lead?.last_name || lead?.lastName || '').trim();
+
+    if ((!rawFullName || masked) && inferred) {
+        return inferred;
+    }
+
+    return {
+        fullName: rawFullName,
+        firstName: String(lead?.first_name || lead?.firstName || fallbackFirstName).trim(),
+        lastName: fallbackLastName,
+    };
+}
+
+function normalizeCompanyCompare(value?: string | null) {
+    return String(value || '')
+        .toLowerCase()
+        .normalize('NFKD')
+        .replace(/\p{Diacritic}/gu, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+function isResearchCompanyMismatch(target: { name?: string | null; domain?: string | null }, research: any) {
+    const targetDomain = cleanDomain(target?.domain);
+    const targetName = normalizeCompanyCompare(target?.name);
+    const researchCompany = research?.company || {};
+    const researchDomain = cleanDomain(researchCompany?.domain || research?.company_domain || research?.domain || '');
+    const researchName = normalizeCompanyCompare(researchCompany?.name || research?.company_name || research?.companyName || '');
+
+    if (targetDomain && researchDomain) {
+        return targetDomain !== researchDomain;
+    }
+
+    if (targetName && researchName) {
+        return !(targetName.includes(researchName) || researchName.includes(targetName));
+    }
+
+    return false;
+}
+
+function extractCountryFromLocation(value?: string | null) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const parts = raw.split(',').map((part) => part.trim()).filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : raw;
+}
+
 function safeFirstName(value?: string | null): string {
     const first = String(value || '').trim().split(/\s+/)[0] || '';
     return first || 'hola';
@@ -118,7 +254,11 @@ function normalizeResearchData(raw: any, lead: any) {
     const profileSummary = raw?.lead_context?.profile_summary || raw?.lead_context?.role_summary || cross?.leadContext?.profileSummary || null;
     const warnings = asStringArray(raw?.warnings || raw?.provider_warnings);
     const sources = Array.isArray(raw?.sources)
-        ? raw.sources.map((source: any) => ({ title: source?.title || source?.name || undefined, url: source?.url })).filter((source: any) => !!source.url)
+        ? raw.sources.map((source: any) => ({
+            id: source?.id || source?.source_id || undefined,
+            title: source?.title || source?.name || undefined,
+            url: source?.url,
+        })).filter((source: any) => !!source.url)
         : (Array.isArray(cross?.sources) ? cross.sources : []);
     const firstSignal = signals[0];
     const summary = truncateText(
@@ -153,39 +293,68 @@ function normalizeResearchData(raw: any, lead: any) {
 
 function hasMeaningfulResearch(raw: any): boolean {
     const normalized = normalizeResearchData(raw, {});
-    return Boolean(
-        normalized?.overview ||
-        normalized?.signals?.length ||
-        normalized?.pains?.length ||
-        normalized?.opportunities?.length ||
-        normalized?.talkTracks?.length ||
-        normalized?.subjectLines?.length ||
-        normalized?.emailDraft?.body
-    );
+    return hasMeaningfulResearchEvidence(normalized);
+}
+
+function parseResearchResponseText(text: string) {
+    if (!String(text || '').trim()) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        return { raw: text };
+    }
+}
+
+function unwrapN8nResearchResponse(responseData: any) {
+    const item = Array.isArray(responseData) ? responseData[0] : responseData;
+    const content = item?.message?.content || item?.content;
+    if (typeof content !== 'string') return item || responseData;
+
+    const normalized = content.replace(/\\\\n/g, '\n').replace(/\r\n/g, '\n');
+    const fenced = normalized.match(/```json\s*([\s\S]*?)```/);
+    const firstOpen = normalized.indexOf('{');
+    const lastClose = normalized.lastIndexOf('}');
+    const json = fenced?.[1] || (firstOpen >= 0 && lastClose > firstOpen
+        ? normalized.slice(firstOpen, lastClose + 1)
+        : normalized);
+    try {
+        return JSON.parse(json.trim());
+    } catch {
+        return item || responseData;
+    }
+}
+
+function getResearchProviderStatus(result: any, fallback = 'completed') {
+    return String(result?.status || result?.provider_status || fallback).trim().toLowerCase();
+}
+
+function isActiveResearchProviderStatus(status: string) {
+    return ['queued', 'running', 'in_progress', 'pending', 'processing'].includes(status);
+}
+
+async function pollLeadResearchProvider(reportId: string, initialResult: any) {
+    let result = initialResult;
+    for (let pollAttempt = 0; pollAttempt < 18 && isActiveResearchProviderStatus(getResearchProviderStatus(result, 'queued')); pollAttempt++) {
+        await sleep(5000);
+        const response = await fetch(`${getLeadResearchUrl().replace(/\/$/, '')}/${encodeURIComponent(reportId)}`, {
+            headers: { Accept: 'application/json' },
+        });
+        const payload = parseResearchResponseText(await response.text());
+        if (!response.ok) {
+            const error: any = new Error(payload?.message || payload?.error || `lead-research poll ${response.status}`);
+            error.status = response.status;
+            error.payload = payload;
+            throw error;
+        }
+        result = payload;
+    }
+    return result;
 }
 
 function getResearchAutoContactBlockReason(raw: any): string | null {
     const normalized = normalizeResearchData(raw, {});
     if (!normalized) return 'missing_research';
-
-    const source = String(normalized?.source || '').trim().toLowerCase();
-    if (['http_error', 'fallback', 'invalid_response'].includes(source)) {
-        return source;
-    }
-
-    const summary = String(normalized?.summary || normalized?.overview || '').trim().toLowerCase();
-    if (summary.startsWith('no se pudo completar la investigacion automatica')) {
-        return 'research_failed';
-    }
-    if (summary.startsWith('error parsing.')) {
-        return 'invalid_response';
-    }
-
-    if (!hasMeaningfulResearch(normalized)) {
-        return 'insufficient_research';
-    }
-
-    return null;
+    return getResearchReadinessBlockReason(normalized);
 }
 
 function isResearchReadyForAutoContact(raw: any): boolean {
@@ -204,9 +373,103 @@ function appendSignatureIfMissing(body: string, userSignature: string, signerNam
     return `${draft}\n\n${signature}`.trim();
 }
 
+function normalizeDraftText(value: any): string {
+    const text = String(value ?? '').trim();
+    const lowered = text.toLowerCase();
+    if (!text) return '';
+    if (['null', 'undefined', 'n/a', 'none'].includes(lowered)) return '';
+    return text;
+}
+
+function replacePlaceholderVariants(text: string, patterns: string[], value: string) {
+    let output = text;
+    for (const pattern of patterns) {
+        output = output.replace(new RegExp(pattern, 'gi'), value);
+    }
+    return output;
+}
+
+function renderLegacyDraftPlaceholders(text: string, params: {
+    leadName: string;
+    firstName: string;
+    leadTitle: string;
+    companyName: string;
+    senderName: string;
+    senderTitle: string;
+    senderCompany: string;
+    senderEmail: string;
+    senderPhone: string;
+    senderWebsite: string;
+}) {
+    let output = normalizeDraftText(text);
+    if (!output) return '';
+
+    output = replacePlaceholderVariants(output, [
+        '\\[\\s*Nombre\\s+del\\s+Lead\\s*\\]',
+        '\\[\\s*Nombre\\s+Lead\\s*\\]',
+        '\\[\\s*Lead\\s+Name\\s*\\]',
+    ], params.leadName || params.firstName || '');
+    output = replacePlaceholderVariants(output, [
+        '\\[\\s*Nombre\\s*\\]',
+        '\\[\\s*First\\s+Name\\s*\\]',
+    ], params.firstName || params.leadName || '');
+    output = replacePlaceholderVariants(output, [
+        '\\[\\s*Cargo\\s+del\\s+Lead\\s*\\]',
+        '\\[\\s*Lead\\s+Title\\s*\\]',
+    ], params.leadTitle || '');
+    output = replacePlaceholderVariants(output, [
+        '\\[\\s*Empresa\\s+del\\s+Lead\\s*\\]',
+        '\\[\\s*Nombre\\s+de\\s+la\\s+Empresa\\s*\\]',
+        '\\[\\s*Lead\\s+Company\\s*\\]',
+    ], params.companyName || '');
+    output = replacePlaceholderVariants(output, [
+        '\\[\\s*Tu\\s+Nombre\\s*\\]',
+        '\\[\\s*Mi\\s+Nombre\\s*\\]',
+        '\\[\\s*Su\\s+Nombre\\s*\\]',
+    ], params.senderName || '');
+    output = replacePlaceholderVariants(output, [
+        '\\[\\s*Tu\\s+Cargo\\s*\\]',
+        '\\[\\s*Mi\\s+Cargo\\s*\\]',
+        '\\[\\s*Su\\s+Cargo\\s*\\]',
+    ], params.senderTitle || '');
+    output = replacePlaceholderVariants(output, [
+        '\\[\\s*Tu\\s+Compa(?:ñ|n)[ií]a\\s*\\]',
+        '\\[\\s*Mi\\s+Compa(?:ñ|n)[ií]a\\s*\\]',
+        '\\[\\s*Tu\\s+Empresa\\s*\\]',
+        '\\[\\s*Mi\\s+Empresa\\s*\\]',
+        '\\[\\s*Su\\s+Empresa\\s*\\]',
+    ], params.senderCompany || '');
+    output = replacePlaceholderVariants(output, [
+        '\\[\\s*Tu\\s+Correo(?:\\s+Electr[oó]nico)?\\s*\\]',
+        '\\[\\s*Mi\\s+Correo(?:\\s+Electr[oó]nico)?\\s*\\]',
+        '\\[\\s*Su\\s+Correo(?:\\s+Electr[oó]nico)?\\s*\\]',
+    ], params.senderEmail || '');
+    output = replacePlaceholderVariants(output, [
+        '\\[\\s*Tu\\s+Tel[eé]fono\\s*\\]',
+        '\\[\\s*Mi\\s+Tel[eé]fono\\s*\\]',
+        '\\[\\s*Su\\s+Tel[eé]fono\\s*\\]',
+    ], params.senderPhone || '');
+    output = replacePlaceholderVariants(output, [
+        '\\[\\s*Tu\\s+Sitio\\s+Web\\s*\\]',
+        '\\[\\s*Mi\\s+Sitio\\s+Web\\s*\\]',
+        '\\[\\s*Su\\s+Sitio\\s+Web\\s*\\]',
+    ], params.senderWebsite || '');
+
+    return output;
+}
+
+function hasMalformedDraftContent(value: string): boolean {
+    const text = normalizeDraftText(value);
+    if (!text) return true;
+    if (/\{\{[^}]+\}\}/.test(text)) return true;
+    if (/\[\s*(?:nombre(?:\s+del\s+lead)?|lead\s+name|cargo(?:\s+del\s+lead)?|lead\s+title|empresa(?:\s+del\s+lead)?|lead\s+company|tu\s+nombre|mi\s+nombre|su\s+nombre|tu\s+cargo|mi\s+cargo|su\s+cargo|tu\s+compa(?:ñ|n)[ií]a|mi\s+compa(?:ñ|n)[ií]a|tu\s+empresa|mi\s+empresa|su\s+empresa|tu\s+correo(?:\s+electr[oó]nico)?|mi\s+correo(?:\s+electr[oó]nico)?|su\s+correo(?:\s+electr[oó]nico)?|tu\s+tel[eé]fono|mi\s+tel[eé]fono|su\s+tel[eé]fono|tu\s+sitio\s+web|mi\s+sitio\s+web|su\s+sitio\s+web)\s*\]/i.test(text)) return true;
+    if (/\b(?:null|undefined)\b/i.test(text)) return true;
+    return false;
+}
+
 function buildFallbackSubject(companyName: string, researchData: any): string {
-    return researchData?.subjectLines?.[0]
-        || researchData?.emailDraft?.subject
+    return normalizeDraftText(researchData?.subjectLines?.[0])
+        || normalizeDraftText(researchData?.emailDraft?.subject)
         || `Ideas para ${companyName}`;
 }
 
@@ -249,11 +512,49 @@ Saludos,`;
 
 function withInternalApiSecret(headers: Record<string, string>): Record<string, string> {
     const secret = String(process.env.INTERNAL_API_SECRET || '').trim();
-    if (!secret) return headers;
+    if (!secret) {
+        throw new Error('INTERNAL_API_SECRET is required for internal app requests');
+    }
     return {
         ...headers,
         'x-internal-api-secret': secret,
     };
+}
+
+function parseContactApiBody(raw: string): Record<string, any> {
+    try {
+        const parsed = JSON.parse(String(raw || ''));
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+function isRetryableContactApiFailure(status: number, code?: string | null) {
+    const normalizedCode = String(code || '').trim().toUpperCase();
+    return normalizedCode === 'OUTBOUND_UNKNOWN'
+        || [202, 408, 425, 429, 500, 502, 503, 504].includes(status);
+}
+
+function isRetryableContactException(error: any) {
+    if (error?.retryable === true) return true;
+    const details = `${String(error?.message || '')} ${String(error?.code || '')}`.toLowerCase();
+    return ['econnreset', 'etimedout', 'enotfound', 'econnrefused', 'timeout', 'network', 'fetch failed']
+        .some((pattern) => details.includes(pattern));
+}
+
+function createContactApiError(params: {
+    status: number;
+    code?: string | null;
+    message: string;
+    result?: Record<string, any>;
+}) {
+    const error: any = new Error(`Contact API ${params.status}${params.code ? ` ${params.code}` : ''}: ${params.message}`);
+    error.status = params.status;
+    error.code = params.code || `contact_api_${params.status}`;
+    error.retryable = isRetryableContactApiFailure(params.status, params.code);
+    if (params.result) error.result = params.result;
+    return error;
 }
 
 type LeadEventInsert = {
@@ -459,27 +760,11 @@ async function getEffectiveDailyContactQuota(
     }
 
     const readOverride = (value: any) => {
-        const limit = Number(
-            value?.daily_contact_limit
-            || value?.quota_overrides?.daily_contact_limit
-            || value?.antonia?.daily_contact_limit
-            || 0
-        );
+        const limit = Number(value?.daily_contact_limit ?? 0);
         return Number.isFinite(limit) && limit > 0 ? limit : 0;
     };
 
-    let overrideLimit = missingOverrideTable ? 0 : readOverride(overrideRow);
-    if (overrideLimit === 0) {
-        const { data: profileRow, error: profileError } = await supabase
-            .from('profiles')
-            .select('signatures')
-            .eq('id', userId)
-            .maybeSingle();
-        if (profileError) {
-            throw profileError;
-        }
-        overrideLimit = readOverride((profileRow as any)?.signatures);
-    }
+    const overrideLimit = missingOverrideTable ? 0 : readOverride(overrideRow);
 
     const useUserQuota = Number.isFinite(overrideLimit) && overrideLimit > 0;
     const effectiveLimit = useUserQuota ? overrideLimit : Math.max(0, Number(fallbackLimit) || 0);
@@ -506,13 +791,13 @@ async function getEffectiveLeadProcessingQuota(
         resource: 'enrich' | 'investigate';
         organizationCount: number;
     }
-): Promise<{ limit: number; used: number }> {
+): Promise<{ limit: number; used: number; scope: 'organization' | 'user' }> {
     const today = new Date().toISOString().split('T')[0];
     const { userId, organizationId, fallbackLimit, resource, organizationCount } = params;
 
     const { data: overrideRow, error: overrideError } = await supabase
         .from('user_quota_overrides')
-        .select('*')
+        .select('daily_enrich_limit, daily_investigate_limit')
         .eq('user_id', userId)
         .maybeSingle();
 
@@ -524,44 +809,76 @@ async function getEffectiveLeadProcessingQuota(
 
     const readOverride = (value: any) => {
         const overrideKey = resource === 'investigate' ? 'daily_investigate_limit' : 'daily_enrich_limit';
-        const limit = Number(
-            value?.[overrideKey]
-            || value?.quota_overrides?.[overrideKey]
-            || value?.antonia?.[overrideKey]
-            || 0
-        );
+        const limit = Number(value?.[overrideKey] ?? 0);
         return Number.isFinite(limit) && limit > 0 ? limit : 0;
     };
 
-    let overrideLimit = missingOverrideTable ? 0 : readOverride(overrideRow);
-    if (overrideLimit === 0) {
-        const { data: profileRow, error: profileError } = await supabase
-            .from('profiles')
-            .select('signatures')
-            .eq('id', userId)
-            .maybeSingle();
-        if (profileError) {
-            throw profileError;
-        }
-        overrideLimit = readOverride((profileRow as any)?.signatures);
-    }
+    const overrideLimit = missingOverrideTable ? 0 : readOverride(overrideRow);
 
     const useUserQuota = Number.isFinite(overrideLimit) && overrideLimit > 0;
     const effectiveLimit = useUserQuota ? overrideLimit : Math.max(0, Number(fallbackLimit) || 0);
 
     if (!useUserQuota) {
-        return { limit: effectiveLimit, used: Math.max(0, Number(organizationCount || 0)) };
+        return { limit: effectiveLimit, used: Math.max(0, Number(organizationCount || 0)), scope: 'organization' };
+    }
+
+    const { data: usageBucket, error: usageError } = await supabase
+        .from('antonia_user_daily_usage')
+        .select('usage_count')
+        .eq('organization_id', organizationId)
+        .eq('user_id', userId)
+        .eq('date', today)
+        .eq('resource', resource)
+        .maybeSingle();
+    if (usageError) throw usageError;
+    if (usageBucket) {
+        return { limit: effectiveLimit, used: Math.max(0, Number(usageBucket.usage_count || 0)), scope: 'user' };
     }
 
     const timestampColumn = resource === 'enrich' ? 'last_enriched_at' : 'last_investigated_at';
-    const { count } = await supabase
+    const { count, error: countError } = await supabase
         .from('leads')
         .select('*', { count: 'exact', head: true })
         .eq('organization_id', organizationId)
         .eq('user_id', userId)
         .gte(timestampColumn, `${today}T00:00:00Z`);
+    if (countError) throw countError;
 
-    return { limit: effectiveLimit, used: count || 0 };
+    return { limit: effectiveLimit, used: count || 0, scope: 'user' };
+}
+
+async function consumeLeadProcessingQuota(
+    supabase: SupabaseClient,
+    params: {
+        userId: string;
+        organizationId: string;
+        resource: 'enrich' | 'investigate';
+        scope: 'organization' | 'user';
+        limit: number;
+        count?: number;
+    }
+) {
+    const requestedCount = Math.max(1, Math.trunc(Number(params.count || 1)));
+    const { data, error } = await supabase.rpc('consume_antonia_daily_quota_v1', {
+        p_organization_id: params.organizationId,
+        p_user_id: params.userId,
+        p_scope: params.scope,
+        p_resource: params.resource,
+        p_requested_count: requestedCount,
+        p_limit: params.limit,
+    } as any);
+    if (error) throw error;
+
+    const result = data as { allowed?: boolean; count?: number; limit?: number } | null;
+    if (!result || typeof result.allowed !== 'boolean' || !Number.isFinite(Number(result.count))) {
+        throw new Error('Invalid atomic quota response');
+    }
+
+    return {
+        allowed: result.allowed,
+        count: Number(result.count),
+        limit: Number(result.limit ?? params.limit),
+    };
 }
 
 function sleep(ms: number) {
@@ -868,6 +1185,109 @@ async function getTaskUserId(task: any, supabase: SupabaseClient): Promise<strin
     throw new Error(`Failed to recover userId for task ${task.id}`);
 }
 
+async function resolveCampaign(
+    supabase: SupabaseClient,
+    params: { organizationId: string; userId: string; missionId?: string | null; campaignId?: string | null; campaignName?: string | null }
+) {
+    const campaignId = String(params.campaignId || '').trim();
+    const campaignName = String(params.campaignName || '').trim();
+
+    if (campaignId) {
+        const { data, error } = await supabase
+            .from('campaigns')
+            .select('*')
+            .eq('id', campaignId)
+            .eq('organization_id', params.organizationId)
+            .eq('user_id', params.userId)
+            .maybeSingle();
+        if (error) throw error;
+        if (data) return data;
+        return null;
+    }
+
+    if (campaignName) {
+        const { data, error } = await supabase
+            .from('campaigns')
+            .select('*')
+            .eq('name', campaignName)
+            .eq('organization_id', params.organizationId)
+            .eq('user_id', params.userId)
+            .maybeSingle();
+        if (error) throw error;
+        if (data) return data;
+        return null;
+    }
+
+    const missionId = String(params.missionId || '').trim();
+    if (missionId) {
+        const { data: mission, error: missionError } = await supabase
+            .from('antonia_missions')
+            .select('params')
+            .eq('id', missionId)
+            .eq('organization_id', params.organizationId)
+            .eq('user_id', params.userId)
+            .maybeSingle();
+        if (missionError) throw missionError;
+
+        const missionReference = getCampaignReference({ taskPayload: mission?.params || {} });
+        if (missionReference.campaignId || missionReference.campaignName) {
+            return resolveCampaign(supabase, {
+                organizationId: params.organizationId,
+                userId: params.userId,
+                campaignId: missionReference.campaignId,
+                campaignName: missionReference.campaignName,
+            });
+        }
+
+        const { data, error } = await supabase
+            .from('campaigns')
+            .select('*')
+            .eq('organization_id', params.organizationId)
+            .eq('user_id', params.userId)
+            .contains('settings', { missionId })
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (error) throw error;
+        if (data) return data;
+    }
+
+    return null;
+}
+
+function findOriginatingContactedLead(lead: any, rows: any[]) {
+    const contactedLeadId = String(lead?.contactedLeadId || lead?.contacted_lead_id || '').trim();
+    if (contactedLeadId) {
+        return rows.find((row: any) => String(row?.id || '').trim() === contactedLeadId) || null;
+    }
+
+    const leadId = String(lead?.id || '').trim().toLowerCase();
+    const email = String(lead?.email || '').trim().toLowerCase();
+    return rows.find((row: any) => {
+        const rowLeadId = String(row?.lead_id || '').trim().toLowerCase();
+        const rowEmail = String(row?.email || '').trim().toLowerCase();
+        return (leadId && rowLeadId === leadId) || (email && rowEmail === email);
+    }) || null;
+}
+
+function getCampaignStepRetryAt(contactedLead: any, step: any, lastSentAt?: string | null) {
+    const offsetDays = Math.max(0, Number(step?.offset_days ?? step?.offsetDays ?? 0) || 0);
+    const lastAt = lastSentAt
+        || contactedLead?.last_follow_up_at
+        || contactedLead?.last_interaction_at
+        || contactedLead?.sent_at;
+    if (!lastAt) return null;
+
+    const lastAtMs = new Date(lastAt).getTime();
+    if (!Number.isFinite(lastAtMs)) return null;
+    const dueAtMs = lastAtMs + offsetDays * 24 * 60 * 60 * 1000;
+    return dueAtMs > Date.now() ? new Date(dueAtMs).toISOString() : null;
+}
+
+function isConfirmedContactProvider(provider: any) {
+    return ['gmail', 'google', 'outlook'].includes(String(provider || '').trim().toLowerCase());
+}
+
 async function executeCampaignGeneration(task: any, supabase: SupabaseClient, taskConfig: any) {
     let { jobTitle, industry, campaignContext, userId, missionTitle } = task.payload;
 
@@ -884,9 +1304,11 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
         .from('campaigns')
         .select('id, name, sent_records')
         .eq('organization_id', task.organization_id)
+        .eq('user_id', userId)
         .eq('name', generatedName)
         .maybeSingle();
 
+    let resolvedCampaignId = existing?.id || null;
     let subjectPreview = '';
     let bodyPreview = '';
 
@@ -904,7 +1326,11 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
             const appUrl = getAppUrl();
             const aiRes = await fetch(`${appUrl}/api/ai/generate-campaign`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: withInternalApiSecret({
+                    'Content-Type': 'application/json',
+                    'x-user-id': userId,
+                    'x-organization-id': task.organization_id,
+                }),
                 body: JSON.stringify({
                     jobTitle,
                     industry,
@@ -969,6 +1395,7 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
         if (campaignErr || !campaignRow) {
             throw new Error(`Failed to create campaign: ${campaignErr?.message || 'unknown error'}`);
         }
+        resolvedCampaignId = campaignRow.id;
 
         const stepsPayload = steps.map((s, idx) => ({
             campaign_id: campaignRow.id,
@@ -1008,6 +1435,7 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
         payload: {
             ...task.payload,
             userId: userId, // Ensure we use the recovered userId
+            campaignId: resolvedCampaignId,
             campaignName: generatedName
         },
         created_at: new Date().toISOString()
@@ -1015,6 +1443,7 @@ async function executeCampaignGeneration(task: any, supabase: SupabaseClient, ta
 
     return {
         campaignGenerated: true,
+        campaignId: resolvedCampaignId,
         campaignName: generatedName,
         subjectPreview,
         bodyPreview: bodyPreview ? bodyPreview.substring(0, 150) + '...' : ''
@@ -1025,6 +1454,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
     const { jobTitle, location, industry, keywords, companySize } = task.payload || {};
     const userId = await getTaskUserId(task, supabase);
     const nowIso = new Date().toISOString();
+    let missionApplyIcpFilter = true;
 
     await safeHeartbeatTask(supabase, task.id, {
         progress_current: null,
@@ -1043,11 +1473,12 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
     try {
         const { data: mission } = await supabase
             .from('antonia_missions')
-            .select('daily_search_limit')
+            .select('daily_search_limit, params')
             .eq('id', task.mission_id)
             .maybeSingle();
 
         const missionLimit = Math.min(5, Math.max(1, Number(mission?.daily_search_limit || 1)));
+        missionApplyIcpFilter = mission?.params?.applyIcpFilter !== false;
         const d = new Date();
         const todayStartUtc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0)).toISOString();
         const { count: missionSearchesToday } = await supabase
@@ -1098,6 +1529,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
             headers: withInternalApiSecret({
                 'Content-Type': 'application/json',
                 'x-user-id': userId,
+                'x-organization-id': task.organization_id,
             }),
             body: JSON.stringify(internalBody)
         });
@@ -1192,6 +1624,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
         const leadsToInsert = leads
             .filter((l: any) => !l.apolloId || !existingApollo.has(String(l.apolloId)))
             .filter((l: any) => {
+                if (!missionApplyIcpFilter) return true;
                 const fit = assessLegacySearchLeadFit(l, task.payload || {});
                 if (fit.allow) return true;
                 blockedCount += 1;
@@ -1305,6 +1738,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
                     userId: userId,
                     leads: leadsForEnrich,
                     enrichmentLevel: task.payload.enrichmentLevel,
+                    campaignId: task.payload.campaignId,
                     campaignName: task.payload.campaignName,
                     source: 'search_inserted'
                 },
@@ -1375,6 +1809,8 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
                 payload: {
                     userId: userId,
                     leads: uncontactedLeads.slice(0, 10), // Process in batches
+                    campaignId: task.payload.campaignId,
+                    campaignName: task.payload.campaignName,
                     source: 'reused_from_previous_searches'
                 },
                 created_at: new Date().toISOString()
@@ -1480,7 +1916,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
         return { skipped: true, reason: 'daily_limit_reached', retryAt };
     }
 
-    let { leads, enrichmentLevel, campaignName } = task.payload;
+    let { leads, enrichmentLevel, campaignId, campaignName } = task.payload;
 
     console.log(`[ENRICH] Task payload: `, JSON.stringify({
         leadsCount: leads?.length || 0,
@@ -1601,12 +2037,14 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
             method: 'POST',
             headers: withInternalApiSecret({
                 'Content-Type': 'application/json',
-                'x-user-id': userId
+                'x-user-id': userId,
+                'x-organization-id': task.organization_id,
             }),
                 body: JSON.stringify({
                     leads: leadsFormatted,
                     revealEmail: true,
-                    revealPhone
+                    revealPhone,
+                    tableName: 'enriched_leads'
                 })
             });
 
@@ -1727,6 +2165,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
                     payload: {
                         userId: userId,
                         leads: leadsEligible,
+                        campaignId: campaignId,
                         campaignName: campaignName,
                         dryRun: task.payload.dryRun
                     },
@@ -1799,21 +2238,14 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
     console.log(`[INVESTIGATE] 🔍 QUOTA CHECK: `, {
         organization_id: task.organization_id,
         mission_id: task.mission_id,
+        scope: quota.scope,
         current_investigated: quota.used,
         limit: limit,
         remaining: limit - quota.used,
         will_skip: quota.used >= limit
     });
 
-    if (quota.used >= limit) {
-        const retryAt = getNextUtcDayStartIso();
-        console.log(`[INVESTIGATE] ⚠️ Daily limit reached(${quota.used} / ${limit}). Re-scheduling for ${retryAt}`);
-        return { skipped: true, reason: 'daily_limit_reached', retryAt };
-    }
-
-    let { leads, campaignName } = task.payload;
-
-    const remaining = Math.max(0, limit - quota.used);
+    let { leads, campaignId, campaignName } = task.payload;
 
     if (!Array.isArray(leads) || leads.length === 0) {
         console.log('[INVESTIGATE] No leads in payload. Fetching from DB (status=enriched, not contacted)...');
@@ -1832,7 +2264,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
             .eq('status', 'enriched')
             .not('email', 'is', null)
             .order('created_at', { ascending: false })
-            .limit(Math.min(remaining, 50));
+            .limit(50);
 
         if (contactedIds.length > 0) {
             q = q.not('id', 'in', `(${contactedIds.join(',')})`);
@@ -1851,28 +2283,9 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         return { skipped: true, reason: 'no_leads' };
     }
 
-    const leadsToInvestigate = leads.slice(0, remaining);
-
-    if (Array.isArray(leads) && leads.length > leadsToInvestigate.length) {
-        const deferred = leads.slice(leadsToInvestigate.length);
-        await safeInsertLeadEvents(
-            supabase,
-            deferred
-                .filter((l: any) => !!l?.id)
-                .map((l: any) => ({
-                    organization_id: task.organization_id,
-                    mission_id: task.mission_id,
-                    task_id: task.id,
-                    lead_id: String(l.id),
-                    event_type: 'lead_investigate_skipped',
-                    stage: 'investigate',
-                    outcome: 'deferred_by_quota',
-                    message: 'Investigacion diferida por cuota diaria',
-                    meta: { remainingCapacity: remaining },
-                    created_at: new Date().toISOString(),
-                }))
-        );
-    }
+    const leadsToInvestigate = leads.slice(0, 50);
+    let deferredLeadsForQuota = leads.slice(leadsToInvestigate.length);
+    let quotaCount = quota.used;
 
     const attemptAt = new Date().toISOString();
     await safeHeartbeatTask(supabase, task.id, {
@@ -1880,23 +2293,6 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         progress_total: leadsToInvestigate.length,
         progress_label: `Investigando ${leadsToInvestigate.length} lead(s)...`
     });
-
-    await safeInsertLeadEvents(
-        supabase,
-        leadsToInvestigate
-            .filter((l: any) => !!l?.id)
-            .map((l: any) => ({
-                organization_id: task.organization_id,
-                mission_id: task.mission_id,
-                task_id: task.id,
-                lead_id: String(l.id),
-                event_type: 'lead_investigate_started',
-                stage: 'investigate',
-                outcome: 'started',
-                message: 'Investigacion iniciada',
-                created_at: attemptAt,
-            }))
-    );
 
     // Restore appUrl if missing (it seems present in line 354, but good to be sure or just define leadsToInvestigate)
     console.log(`[INVESTIGATE] Investigating ${leadsToInvestigate.length} leads`);
@@ -1959,366 +2355,427 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 lead.companyDomain || lead.company_domain || lead.company_website,
                 lead.email,
             );
-
-            console.log(`[INVESTIGATE] Investigating lead: `, {
-                name: lead.fullName || lead.full_name || lead.name,
-                company: safeCompanyName
+            const identity = resolveLeadIdentity(lead);
+            const companyDomain = cleanDomain(lead.companyDomain || lead.company_domain || lead.company_website);
+            const companyWebsite = companyDomain ? `https://${companyDomain}` : null;
+            const normalizedLinkedinUrl = safeDecodeUriValue(lead.linkedinUrl || lead.linkedin_url);
+            const leadRef = String(
+                lead.id || lead.email || normalizedLinkedinUrl || `${identity.fullName || lead.fullName || lead.full_name || lead.name || ''}|${safeCompanyName}`
+            ).trim();
+            const researchRequestIdempotencyKey = buildFirebaseLeadResearchRequestKey({
+                organizationId: task.organization_id,
+                userId,
+                taskId: task.id,
+                leadRef,
             });
+            const owner = {
+                scopeKey: String(task.organization_id),
+                organizationId: String(task.organization_id),
+                userId,
+            };
+            const leadIdentity = {
+                leadRef,
+                leadId: lead.id || null,
+                email: lead.email || null,
+                companyName: safeCompanyName,
+                companyDomain: companyDomain || null,
+            };
 
-            let leadResearchError: any = USE_N8N_RESEARCH_ONLY ? new Error('n8n_research_forced') : null;
-
-            if (!USE_N8N_RESEARCH_ONLY) try {
-                const companyDomain = cleanDomain(lead.companyDomain || lead.company_domain || lead.company_website);
-                const leadResearchPayload = {
-                    user_id: userId,
-                    organization_id: task.organization_id,
-                    lead_ref: lead.id || lead.email || lead.linkedinUrl || lead.linkedin_url || `${lead.fullName || lead.full_name || lead.name || ''}|${safeCompanyName}`,
+            const leadResearchPayload = {
+                user_id: userId,
+                organization_id: task.organization_id,
+                idempotency_key: researchRequestIdempotencyKey,
+                lead_ref: leadRef,
+                lead: {
+                    id: lead.id,
+                    apollo_id: lead.apolloId || lead.apollo_id || lead.id || null,
+                    full_name: identity.fullName || null,
+                    first_name: identity.firstName || null,
+                    last_name: identity.lastName || null,
+                    title: lead.title || null,
+                    headline: lead.headline || null,
+                    email: lead.email || null,
+                    phone: lead.primaryPhone || null,
+                    linkedin_url: normalizedLinkedinUrl || null,
+                    location: lead.location || null,
+                    city: lead.city || null,
+                    country: lead.country || null,
+                    seniority: lead.seniority || null,
+                    department: Array.isArray(lead.departments) ? lead.departments[0] : null,
+                },
+                company: {
+                    name: safeCompanyName,
+                    domain: companyDomain || null,
+                    website_url: companyWebsite,
+                    linkedin_url: lead.companyLinkedinUrl || lead.company_linkedin_url || null,
+                    industry: lead.organizationIndustry || lead.industry || null,
+                    size: lead.organizationSize || null,
+                },
+                seller_context: {
+                    company_name: userCompanyProfile.name,
+                    company_domain: cleanDomain(userProfile?.company_domain),
+                    sector: userCompanyProfile.sector,
+                    description: userCompanyProfile.description,
+                    services: asStringArray(userCompanyProfile.services),
+                    value_proposition: userCompanyProfile.valueProposition,
+                    proof_points: asStringArray(profileExtended.proofPoints || profileExtended.proof_points),
+                    target_market: asStringArray(profileExtended.targetMarket || profileExtended.target_market),
+                },
+                user_context: {
+                    id: userContext.id,
+                    name: userContext.name,
+                    job_title: userContext.jobTitle,
+                },
+                options: {
+                    language: 'es',
+                    depth: 'standard',
+                    include_outreach_pack: true,
+                    include_company_research: true,
+                    include_lead_research: true,
+                    include_recent_signals: true,
+                    include_call_prep: true,
+                    include_competitive_context: true,
+                    include_raw_sources: true,
+                    max_sources: 15,
+                    force_refresh: true,
+                },
+            };
+            const n8nPayload = {
+                idempotency_key: researchRequestIdempotencyKey,
+                companies: [{
+                    leadRef,
+                    targetCompany: {
+                        name: safeCompanyName || null,
+                        domain: companyDomain || null,
+                        linkedin: lead.companyLinkedinUrl || lead.company_linkedin_url || null,
+                        country: lead.country || extractCountryFromLocation(lead.location) || null,
+                        industry: lead.industry || null,
+                        website: companyWebsite,
+                    },
                     lead: {
                         id: lead.id,
-                        apollo_id: lead.apolloId || lead.apollo_id || lead.id || null,
-                        full_name: lead.fullName || lead.full_name || lead.name || null,
-                        first_name: lead.first_name || lead.firstName || safeFirstName(lead.fullName || lead.full_name || lead.name),
-                        last_name: lead.last_name || lead.lastName || null,
+                        fullName: identity.fullName || lead.fullName || lead.full_name || lead.name || null,
                         title: lead.title || null,
-                        headline: lead.headline || null,
                         email: lead.email || null,
-                        phone: lead.primaryPhone || null,
-                        linkedin_url: lead.linkedinUrl || lead.linkedin_url || null,
-                        location: lead.location || null,
-                        city: lead.city || null,
-                        country: lead.country || null,
-                        seniority: lead.seniority || null,
-                        department: Array.isArray(lead.departments) ? lead.departments[0] : null,
+                        linkedinUrl: normalizedLinkedinUrl || null,
                     },
-                    company: {
-                        name: safeCompanyName,
-                        domain: companyDomain || null,
-                        website_url: companyDomain ? `https://${companyDomain}` : null,
-                        linkedin_url: lead.companyLinkedinUrl || lead.company_linkedin_url || null,
-                        industry: lead.organizationIndustry || lead.industry || null,
-                        size: lead.organizationSize || null,
-                    },
-                    seller_context: {
-                        company_name: userCompanyProfile.name,
-                        company_domain: cleanDomain(userProfile?.company_domain),
-                        sector: userCompanyProfile.sector,
-                        description: userCompanyProfile.description,
-                        services: asStringArray(userCompanyProfile.services),
-                        value_proposition: userCompanyProfile.valueProposition,
-                        proof_points: asStringArray(profileExtended.proofPoints || profileExtended.proof_points),
-                        target_market: asStringArray(profileExtended.targetMarket || profileExtended.target_market),
-                    },
-                    user_context: {
-                        id: userContext.id,
-                        name: userContext.name,
-                        job_title: userContext.jobTitle,
-                    },
-                    options: {
-                        language: 'es',
-                        depth: 'standard',
-                        include_outreach_pack: true,
-                        include_company_research: true,
-                        include_lead_research: true,
-                        include_recent_signals: true,
-                        include_call_prep: true,
-                        include_competitive_context: true,
-                        include_raw_sources: true,
-                        max_sources: 15,
-                        force_refresh: true,
-                    },
-                };
+                    meta: { leadRef },
+                }],
+                userCompanyProfile,
+                id: lead.id,
+                fullName: identity.fullName || lead.fullName || lead.full_name || lead.name || null,
+                title: lead.title || null,
+                email: lead.email || null,
+                linkedinUrl: normalizedLinkedinUrl || null,
+                companyName: safeCompanyName || null,
+                companyDomain: companyDomain || null,
+                userContext,
+                use_social_context: false,
+            };
+            const requestPayload = USE_N8N_RESEARCH_ONLY ? n8nPayload : leadResearchPayload;
+            const claim = await claimLeadResearchRequest(supabase, {
+                ...owner,
+                ...leadIdentity,
+                requestIdempotencyKey: researchRequestIdempotencyKey,
+                requestPayload,
+            });
+            let requestJob = claim.job;
+            let claimToken = claim.claimToken;
 
-                const startResponse = await fetch(getLeadResearchUrl(), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json',
-                    },
-                    body: JSON.stringify(leadResearchPayload),
-                });
+            if (!claim.claimed && ['pre_provider', 'provider_submitting'].includes(requestJob.requestClaimState)) {
+                console.log(`[INVESTIGATE] Reusing in-flight claim for ${lead.email || safeCompanyName}`);
+                continue;
+            }
+            if (requestJob.requestClaimState === 'provider_unknown' || requestJob.requestClaimState === 'provider_failed') {
+                console.warn(`[INVESTIGATE] Reusing terminal request failure for ${lead.email || safeCompanyName}: ${requestJob.errorCode || requestJob.requestClaimState}`);
+                continue;
+            }
 
-                const startText = await startResponse.text();
-                let leadResearchResult: any = null;
-                try {
-                    leadResearchResult = JSON.parse(startText);
-                } catch {
-                    leadResearchResult = { raw: startText };
-                }
-
-                if (!startResponse.ok) {
-                    throw new Error(leadResearchResult?.message || leadResearchResult?.error || `lead-research http ${startResponse.status}`);
-                }
-
-                const reportId = String(leadResearchResult?.report_id || '').trim();
-                if (reportId && ['queued', 'in_progress'].includes(String(leadResearchResult?.status || ''))) {
-                    for (let pollAttempt = 0; pollAttempt < 18; pollAttempt++) {
-                        await sleep(5000);
-                        const pollResponse = await fetch(`${getLeadResearchUrl().replace(/\/$/, '')}/${encodeURIComponent(reportId)}`, {
-                            headers: { Accept: 'application/json' },
-                        });
-                        const pollText = await pollResponse.text();
-                        try {
-                            leadResearchResult = JSON.parse(pollText);
-                        } catch {
-                            leadResearchResult = { raw: pollText };
-                        }
-                        if (!pollResponse.ok) {
-                            throw new Error(leadResearchResult?.message || leadResearchResult?.error || `lead-research poll ${pollResponse.status}`);
-                        }
-                        if (['completed', 'partial', 'insufficient_data', 'failed'].includes(String(leadResearchResult?.status || ''))) {
-                            break;
-                        }
-                    }
-                }
-
-                const normalizedLeadResearch = normalizeResearchData(leadResearchResult, { ...lead, companyName: safeCompanyName });
-                const leadResearchStatus = String(leadResearchResult?.status || '').trim().toLowerCase();
-                if (leadResearchStatus === 'completed' && isResearchReadyForAutoContact(normalizedLeadResearch)) {
-                    investigatedLeads.push({ ...lead, companyName: safeCompanyName, research: normalizedLeadResearch });
-
+            let providerReportId = requestJob.providerReportId;
+            let providerStatus = getResearchProviderStatus(requestJob.resultPayload || requestJob.requestPayload, requestJob.status);
+            let providerResult: any = requestJob.resultPayload;
+            if (!claim.claimed && requestJob.requestClaimState === 'submitted' && ['completed', 'partial'].includes(requestJob.status)) {
+                const reusedResearch = normalizeResearchData(providerResult, { ...lead, companyName: safeCompanyName });
+                if (isResearchReadyForAutoContact(reusedResearch)) {
+                    investigatedLeads.push({ ...lead, companyName: safeCompanyName, research: reusedResearch });
                     if (lead?.id) {
-                        await supabase
-                            .from('leads')
+                        await supabase.from('leads')
                             .update({ last_investigated_at: attemptAt, investigation_error: null } as any)
                             .eq('id', lead.id);
                     }
-
-                    await safeInsertLeadEvents(supabase, [
-                        {
-                            organization_id: task.organization_id,
-                            mission_id: task.mission_id,
-                            task_id: task.id,
-                            lead_id: String(lead.id),
-                            event_type: 'lead_investigate_completed',
-                            stage: 'investigate',
-                            outcome: String(leadResearchResult?.status || 'completed'),
-                            message: 'Investigacion completada (lead-research)',
-                            meta: {
-                                provider: 'lead-research',
-                                reportId: reportId || null,
-                                hasOverview: Boolean(normalizedLeadResearch?.overview),
-                                warnings: normalizedLeadResearch?.warnings || [],
-                            },
-                            created_at: attemptAt,
+                } else if (lead?.id) {
+                    await supabase.from('leads')
+                        .update({
+                            last_investigated_at: attemptAt,
+                            investigation_error: getResearchAutoContactBlockReason(reusedResearch) || 'invalid_reused_research',
+                        } as any)
+                        .eq('id', lead.id);
+                }
+                continue;
+            }
+            if (requestJob.requestClaimState === 'terminal_pending') {
+                if (!claimToken || !providerReportId || !providerResult) throw new Error('LEAD_RESEARCH_TERMINAL_RECOVERY_INVALID');
+            } else if (!claim.claimed && requestJob.requestClaimState === 'submitted') {
+                if (!providerReportId) throw new Error('LEAD_RESEARCH_REPORT_ID_MISSING');
+                if (isActiveResearchProviderStatus(providerStatus)) {
+                    try {
+                        providerResult = await pollLeadResearchProvider(providerReportId, requestJob.resultPayload || { status: providerStatus });
+                    } catch (error: any) {
+                        if (error?.status) {
+                            console.warn(`[INVESTIGATE] Existing provider job poll failed for ${lead.email || safeCompanyName}: ${error.message}`);
+                            continue;
                         }
-                    ]);
+                        error.retryable = true;
+                        throw error;
+                    }
+                    providerStatus = getResearchProviderStatus(providerResult, providerStatus);
+                }
+                if (isActiveResearchProviderStatus(providerStatus)) continue;
+                if (['failed', 'cancelled', 'insufficient_data'].includes(providerStatus)) {
+                    await failSubmittedLeadResearchRequest(supabase, {
+                        ...owner,
+                        jobId: requestJob.id,
+                        providerReportId,
+                        providerStatus,
+                        resultPayload: providerResult || {},
+                    });
+                    continue;
+                }
+            } else {
+                if (!claimToken) throw new Error('LEAD_RESEARCH_REQUEST_CLAIM_TOKEN_MISSING');
+                const ownedClaim = { ...owner, jobId: requestJob.id, claimToken };
+                let reservation;
+                try {
+                    reservation = await consumeLeadResearchRequestQuota(supabase, { ...ownedClaim, limit });
+                } catch (error: any) {
+                    await releaseLeadResearchRequest(supabase, {
+                        ...ownedClaim,
+                        errorCode: 'research_quota_unavailable',
+                        errorMessage: 'Research quota could not be reserved before provider submission.',
+                    });
+                    error.retryable = true;
+                    error.code = error.code || 'QUOTA_RESERVATION_FAILED';
+                    throw error;
+                }
+                quotaCount = reservation.count;
+                if (!reservation.allowed) {
+                    await releaseLeadResearchRequest(supabase, {
+                        ...ownedClaim,
+                        errorCode: 'daily_research_quota_exceeded',
+                        errorMessage: 'Daily research quota exceeded.',
+                    });
+                    deferredLeadsForQuota = leads.slice(investigateIndex - 1);
+                    console.log(`[INVESTIGATE] Daily limit reached atomically (${reservation.count}/${reservation.limit}). Deferring ${deferredLeadsForQuota.length} lead(s).`);
+                    break;
+                }
 
-                    console.log(`[INVESTIGATE] lead-research completed for ${lead.email || safeCompanyName}`);
+                await safeInsertLeadEvents(supabase, lead?.id ? [{
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    task_id: task.id,
+                    lead_id: String(lead.id),
+                    event_type: 'lead_investigate_started',
+                    stage: 'investigate',
+                    outcome: 'started',
+                    message: 'Investigacion iniciada',
+                    meta: { quotaScope: quota.scope, quotaCount: reservation.count, quotaLimit: reservation.limit },
+                    created_at: attemptAt,
+                }] : []);
+                try {
+                    await markLeadResearchRequestSubmitting(supabase, ownedClaim);
+                } catch (error) {
+                    await releaseLeadResearchRequest(supabase, {
+                        ...ownedClaim,
+                        errorCode: 'provider_submission_not_started',
+                        errorMessage: 'Provider submission did not start.',
+                    });
+                    throw error;
+                }
+                requestJob = { ...requestJob, requestClaimState: 'provider_submitting', status: 'running' };
+
+                const providerUrl = USE_N8N_RESEARCH_ONLY
+                    ? process.env.ANTONIA_N8N_WEBHOOK_URL || process.env.N8N_RESEARCH_WEBHOOK_URL || process.env.N8N_WEBHOOK_URL || 'https://n8n.yago.cl/webhook/ANTONIA'
+                    : getLeadResearchUrl();
+                let response: Response;
+                let responseText: string;
+                try {
+                    response = await fetch(providerUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Accept: 'application/json',
+                            ...(USE_N8N_RESEARCH_ONLY ? { 'x-user-id': userId } : {}),
+                            'Idempotency-Key': researchRequestIdempotencyKey,
+                        },
+                        body: JSON.stringify(requestPayload),
+                    });
+                    responseText = await response.text();
+                } catch (error: any) {
+                    await markLeadResearchRequestUnknown(supabase, {
+                        ...ownedClaim,
+                        errorCode: 'provider_outcome_unknown',
+                        errorMessage: error?.message || 'The provider outcome is unknown and cannot be retried safely.',
+                    });
+                    console.error(`[INVESTIGATE] Provider outcome unknown for ${lead.email || safeCompanyName}; no resend`, error);
+                    continue;
+                }
+                providerResult = parseResearchResponseText(responseText);
+                if (!response.ok) {
+                    const resultPayload = providerResult && typeof providerResult === 'object' && !Array.isArray(providerResult)
+                        ? { ...providerResult, provider_http_status: response.status }
+                        : { error: responseText, provider_http_status: response.status };
+                    await failLeadResearchRequest(supabase, {
+                        ...ownedClaim,
+                        errorCode: `provider_http_${response.status}`,
+                        errorMessage: String(resultPayload.message || resultPayload.error || `Provider returned HTTP ${response.status}`),
+                        resultPayload,
+                    });
                     continue;
                 }
 
-                leadResearchError = new Error(`lead-research returned ${leadResearchStatus || 'empty_result'}`);
-            } catch (lrErr: any) {
-                leadResearchError = lrErr;
+                if (USE_N8N_RESEARCH_ONLY) {
+                    const unwrapped = unwrapN8nResearchResponse(providerResult);
+                    providerResult = unwrapped && typeof unwrapped === 'object' && !Array.isArray(unwrapped)
+                        ? { ...unwrapped, status: getResearchProviderStatus(unwrapped, 'completed') }
+                        : { result: unwrapped, status: 'completed' };
+                    providerReportId = researchRequestIdempotencyKey;
+                    providerStatus = 'completed';
+                } else {
+                    providerReportId = String(providerResult?.report_id || '').trim();
+                    providerStatus = getResearchProviderStatus(providerResult, 'queued');
+                    if (!providerReportId) {
+                        await markLeadResearchRequestUnknown(supabase, {
+                            ...ownedClaim,
+                            errorCode: 'invalid_provider_response',
+                            errorMessage: 'Provider accepted the request without returning a report ID.',
+                        });
+                        continue;
+                    }
+                    if (isActiveResearchProviderStatus(providerStatus)) {
+                        await completeLeadResearchRequestSubmission(supabase, {
+                            ...ownedClaim,
+                            ...leadIdentity,
+                            providerReportId,
+                            providerStatus,
+                            requestPayload,
+                        });
+                        requestJob = { ...requestJob, requestClaimState: 'submitted', providerReportId, status: 'running' };
+                        claimToken = null;
+                        try {
+                            providerResult = await pollLeadResearchProvider(providerReportId, providerResult);
+                        } catch (error: any) {
+                            if (error?.status) {
+                                error.retryable = true;
+                            }
+                            throw error;
+                        }
+                        providerStatus = getResearchProviderStatus(providerResult, providerStatus);
+                    }
+                }
             }
 
-            if (USE_N8N_RESEARCH_ONLY) {
-                console.log(`[INVESTIGATE] Using legacy N8N research flow for ${lead.email || safeCompanyName}`);
-            } else {
-                console.warn(`[INVESTIGATE] Falling back to N8N for ${lead.email || safeCompanyName}:`, leadResearchError?.message || leadResearchError);
+            const normalizedResearchResult = USE_N8N_RESEARCH_ONLY ? unwrapN8nResearchResponse(providerResult) : providerResult;
+            const normalizedLeadResearch = normalizeResearchData(normalizedResearchResult, { ...lead, companyName: safeCompanyName });
+            const researchMismatch = isResearchCompanyMismatch({ name: safeCompanyName, domain: companyDomain }, normalizedLeadResearch);
+            const researchFailureReason = getResearchAutoContactBlockReason(normalizedLeadResearch);
+            if (['failed', 'cancelled', 'insufficient_data'].includes(providerStatus)) {
+                if (requestJob.requestClaimState === 'submitted' && providerReportId) {
+                    await failSubmittedLeadResearchRequest(supabase, {
+                        ...owner,
+                        jobId: requestJob.id,
+                        providerReportId,
+                        providerStatus,
+                        resultPayload: providerResult || {},
+                    });
+                }
+                continue;
             }
-
-            // Construct specific N8N payload structure
-            const n8nPayload = {
-                companies: [
-                    {
-                        leadRef: lead.id,
-                        targetCompany: {
-                            name: safeCompanyName,
-                            domain: lead.companyDomain || lead.company_domain || lead.company_website,
-                            linkedin: null, // Populate if available
-                            country: lead.location || null,
-                            industry: lead.industry || "—",
-                            website: lead.website || lead.company_website || null
-                        },
-                        lead: {
-                            id: lead.id,
-                            fullName: lead.fullName || lead.full_name || lead.name,
-                            title: lead.title,
-                            email: lead.email,
-                            linkedinUrl: lead.linkedinUrl || lead.linkedin_url
-                        },
-                        meta: {
-                            leadRef: lead.id
-                        }
-                    }
-                ],
-                userCompanyProfile: userCompanyProfile,
-                id: lead.id,
-                fullName: lead.fullName || lead.full_name || lead.name, // Redundant but requested in top level
-                title: lead.title,
-                email: lead.email,
-                linkedinUrl: lead.linkedinUrl || lead.linkedin_url,
-                companyName: safeCompanyName,
-                companyDomain: lead.companyDomain || lead.company_domain || lead.company_website,
-                userContext: userContext
-            };
-
-            // 🚀 Call N8N directly (URL configurable via env)
-            const N8N_WEBHOOK_URL = process.env.ANTONIA_N8N_WEBHOOK_URL || process.env.N8N_RESEARCH_WEBHOOK_URL || process.env.N8N_WEBHOOK_URL || "https://nicogun.app.n8n.cloud/webhook/ANTONIA";
-
-            const response = await fetch(N8N_WEBHOOK_URL, {
-                method: 'POST',
-                headers: withInternalApiSecret({
-                    'Content-Type': 'application/json',
-                    'x-user-id': userId
-                }),
-                body: JSON.stringify(n8nPayload)
-            });
-
-            console.log(`[INVESTIGATE] API response status: ${response.status} `);
-
-            if (response.ok) {
-                // The N8N workflow returns an array, we need to extract the first item's message content if it matches the structure
-                const responseData = await response.json();
-
-                // --- DEBUGGING LOG ---
-                console.log(`[INVESTIGATE] Raw N8N Response for ${lead.email}: `, JSON.stringify(responseData).substring(0, 500));
-                // ---------------------
-
-                // Handle different response shapes (Array vs Object)
-                let item = null;
-                if (Array.isArray(responseData) && responseData.length > 0) {
-                    item = responseData[0];
-                } else if (responseData && typeof responseData === 'object') {
-                    item = responseData;
+            if (isActiveResearchProviderStatus(providerStatus)) continue;
+            if (!providerReportId) throw new Error('LEAD_RESEARCH_REPORT_ID_MISSING');
+            if (researchMismatch || (providerStatus === 'partial'
+                ? !hasMeaningfulResearch(normalizedLeadResearch)
+                : Boolean(researchFailureReason))) {
+                const failureReason = researchMismatch ? 'research_company_mismatch' : researchFailureReason || 'invalid_response';
+                const resultPayload = {
+                    ...(providerResult && typeof providerResult === 'object' && !Array.isArray(providerResult) ? providerResult : {}),
+                    provider_status: 'failed',
+                    error: failureReason,
+                };
+                if (requestJob.requestClaimState === 'provider_submitting' && claimToken) {
+                    await failLeadResearchRequest(supabase, {
+                        ...owner,
+                        jobId: requestJob.id,
+                        claimToken,
+                        errorCode: failureReason,
+                        errorMessage: `Research result is not reusable: ${failureReason}`,
+                        resultPayload,
+                    });
+                } else if (requestJob.requestClaimState === 'submitted') {
+                    await failSubmittedLeadResearchRequest(supabase, {
+                        ...owner,
+                        jobId: requestJob.id,
+                        providerReportId,
+                        providerStatus: failureReason,
+                        resultPayload,
+                    });
                 }
-
-                let researchData = null;
-
-                if (item && item.message && item.message.content) {
-                    // Extract JSON from markdown code block if present
-                    let content = item.message.content;
-
-                    // Normalize newlines - N8N returns DOUBLE-escaped newlines (\\n as literal string)
-                    content = content.replace(/\\\\n/g, '\n').replace(/\r\n/g, '\n');
-
-                    let jsonStr = null;
-
-                    // Strategy 1: Simple Regex for code blocks
-                    const match = content.match(/```json\s*([\s\S]*?)```/);
-                    if (match) {
-                        jsonStr = match[1];
-                    } else {
-                        // Strategy 2: Brute force find first '{' and last '}'
-                        const firstOpen = content.indexOf('{');
-                        const lastClose = content.lastIndexOf('}');
-
-                        if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
-                            jsonStr = content.substring(firstOpen, lastClose + 1);
-                        }
-                    }
-
-                    if (jsonStr) {
-                        try {
-                            researchData = JSON.parse(jsonStr.trim());
-                            console.log('[INVESTIGATE] Successfully parsed JSON via ' + (match ? 'regex' : 'brute-force'));
-                        } catch (err) {
-                            console.error('[INVESTIGATE] Failed to parse extracted JSON:', err);
-                            researchData = item; // Fallback to raw item
-                        }
-                    } else {
-                        try {
-                            researchData = JSON.parse(content);
-                            console.log('[INVESTIGATE] Successfully parsed raw JSON content');
-                        } catch (e) {
-                            researchData = item; // Fallback to raw item
-                        }
-                    }
-                } else {
-                    // Fallback to raw item if structure doesn't match
-                    researchData = item || responseData;
-                }
-
-
-                researchData = normalizeResearchData(researchData, { ...lead, companyName: safeCompanyName });
-
-                const researchFailureReason = getResearchAutoContactBlockReason(researchData);
-
-                if (!researchFailureReason) {
-                    investigatedLeads.push({ ...lead, companyName: safeCompanyName, research: researchData });
-                    console.log(`[INVESTIGATE] Successfully investigated lead`);
-
-                    if (lead?.id) {
-                        await supabase
-                            .from('leads')
-                            .update({ last_investigated_at: attemptAt, investigation_error: null } as any)
-                            .eq('id', lead.id);
-                    }
-
-                    await safeInsertLeadEvents(supabase, [
-                        {
-                            organization_id: task.organization_id,
-                            mission_id: task.mission_id,
-                            task_id: task.id,
-                            lead_id: String(lead.id),
-                            event_type: 'lead_investigate_completed',
-                            stage: 'investigate',
-                            outcome: 'completed',
-                            message: 'Investigacion completada',
-                            meta: {
-                                hasOverview: Boolean(researchData?.overview),
-                            },
-                            created_at: attemptAt,
-                        }
-                    ]);
-                } else {
-                    console.warn(`[INVESTIGATE] Blocking contact for ${lead.email || safeCompanyName}: ${researchFailureReason}`);
-
-                    if (lead?.id) {
-                        await supabase
-                            .from('leads')
-                            .update({ last_investigated_at: attemptAt, investigation_error: researchFailureReason } as any)
-                            .eq('id', lead.id);
-                    }
-
-                    await safeInsertLeadEvents(supabase, [
-                        {
-                            organization_id: task.organization_id,
-                            mission_id: task.mission_id,
-                            task_id: task.id,
-                            lead_id: String(lead.id),
-                            event_type: 'lead_investigate_failed',
-                            stage: 'investigate',
-                            outcome: researchFailureReason,
-                            message: 'Investigacion incompleta o invalida',
-                            meta: {
-                                source: researchData?.source || null,
-                                hasOverview: Boolean(researchData?.overview),
-                            },
-                            created_at: attemptAt,
-                        }
-                    ]);
-                }
-
-            } else {
-                const errorText = await response.text();
-                console.error(`[INVESTIGATE] API error: ${response.status} - ${errorText} `);
-
                 if (lead?.id) {
-                    await supabase
-                        .from('leads')
-                        .update({ last_investigated_at: attemptAt, investigation_error: `http_${response.status}` } as any)
+                    await supabase.from('leads')
+                        .update({ last_investigated_at: attemptAt, investigation_error: failureReason } as any)
                         .eq('id', lead.id);
                 }
-
-                await safeInsertLeadEvents(supabase, [
-                    {
-                        organization_id: task.organization_id,
-                        mission_id: task.mission_id,
-                        task_id: task.id,
-                        lead_id: String(lead.id),
-                        event_type: 'lead_investigate_failed',
-                        stage: 'investigate',
-                        outcome: `http_${response.status}`,
-                        message: 'Investigacion fallo (HTTP)',
-                        meta: { error: errorText.slice(0, 800) },
-                        created_at: attemptAt,
-                    }
-                ]);
+                continue;
             }
 
+            try {
+                await persistLeadResearchTerminalResult(supabase, {
+                    ...owner,
+                    ...leadIdentity,
+                    job: requestJob,
+                    claimToken,
+                    requestIdempotencyKey: researchRequestIdempotencyKey,
+                    provider: USE_N8N_RESEARCH_ONLY ? 'n8n' : 'lead-research',
+                    providerReportId,
+                    providerStatus: providerStatus === 'partial' ? 'partial' : 'completed',
+                    requestPayload,
+                    resultPayload: normalizedResearchResult || {},
+                });
+            } catch (error: any) {
+                error.retryable = true;
+                throw error;
+            }
+
+            if (!researchFailureReason && !researchMismatch) {
+                investigatedLeads.push({ ...lead, companyName: safeCompanyName, research: normalizedLeadResearch });
+                if (lead?.id) {
+                    await supabase.from('leads')
+                        .update({ last_investigated_at: attemptAt, investigation_error: null } as any)
+                        .eq('id', lead.id);
+                }
+                await safeInsertLeadEvents(supabase, [{
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    task_id: task.id,
+                    lead_id: String(lead.id),
+                    event_type: 'lead_investigate_completed',
+                    stage: 'investigate',
+                    outcome: providerStatus,
+                    message: 'Investigacion completada',
+                    meta: { provider: USE_N8N_RESEARCH_ONLY ? 'n8n' : 'lead-research', reportId: providerReportId },
+                    created_at: attemptAt,
+                }]);
+            } else {
+                const finalReason = researchMismatch ? 'research_company_mismatch' : researchFailureReason;
+                if (lead?.id) {
+                    await supabase.from('leads')
+                        .update({ last_investigated_at: attemptAt, investigation_error: finalReason } as any)
+                        .eq('id', lead.id);
+                }
+            }
         } catch (e) {
+            if ((e as any)?.code === 'QUOTA_RESERVATION_FAILED' || (e as any)?.retryable === true) {
+                throw e;
+            }
             console.error('[INVESTIGATE] Failed to investigate lead:', e);
 
             if (lead?.id) {
@@ -2345,7 +2802,27 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         }
     }
 
-    await incrementUsage(supabase, task.organization_id, 'investigate', investigatedLeads.length, task.id);
+    if (deferredLeadsForQuota.length > 0) {
+        await safeInsertLeadEvents(
+            supabase,
+            deferredLeadsForQuota
+                .filter((lead: any) => !!lead?.id)
+                .map((lead: any) => ({
+                    organization_id: task.organization_id,
+                    mission_id: task.mission_id,
+                    task_id: task.id,
+                    lead_id: String(lead.id),
+                    event_type: 'lead_investigate_skipped',
+                    stage: 'investigate',
+                    outcome: 'deferred_by_quota',
+                    message: 'Investigacion diferida por cuota diaria',
+                    meta: { quotaScope: quota.scope, quotaCount, quotaLimit: limit },
+                    created_at: new Date().toISOString(),
+                }))
+        );
+
+        task.payload = { ...task.payload, userId, leads: deferredLeadsForQuota };
+    }
 
     // Chain to CONTACT if we have investigated leads
     if (investigatedLeads.length > 0) {
@@ -2365,6 +2842,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 payload: {
                     userId: userId,
                     leads: [lead],
+                    campaignId: campaignId,
                     campaignName: campaignName,
                     dryRun: task.payload.dryRun // Pass dryRun flag
                 },
@@ -2380,6 +2858,19 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
         progress_label: `Investigación completada: ${investigatedLeads.length} lead(s)`
     });
 
+    if (deferredLeadsForQuota.length > 0) {
+        return {
+            skipped: true,
+            reason: 'daily_limit_reached',
+            retryAt: getNextUtcDayStartIso(),
+            investigatedCount: investigatedLeads.length,
+            deferredCount: deferredLeadsForQuota.length,
+            quotaCount,
+            limit,
+            scope: quota.scope,
+        };
+    }
+
     return {
         investigatedCount: investigatedLeads.length,
         investigations: investigatedLeads.map((l: any) => ({
@@ -2393,30 +2884,6 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 }
 
 // --- 4. EXECUTE INITIAL CONTACT (Personalized) ---
-function hasPriorReplyHistory(row: any) {
-    const intent = String(row?.reply_intent || row?.replyIntent || '').trim().toLowerCase();
-    return Boolean(
-        row?.replied_at ||
-        row?.repliedAt ||
-        row?.status === 'replied' ||
-        row?.last_reply_text ||
-        ['meeting_request', 'positive', 'negative', 'unsubscribe', 'auto_reply', 'neutral', 'delivery_failure'].includes(intent)
-    );
-}
-
-function findPriorReplyMatchForLead(lead: any, rows: any[]) {
-    const leadId = String(lead?.id || '').trim().toLowerCase();
-    const email = String(lead?.email || '').trim().toLowerCase();
-    for (const row of rows || []) {
-        if (!hasPriorReplyHistory(row)) continue;
-        const rowLeadId = String(row?.lead_id || '').trim().toLowerCase();
-        const rowEmail = String(row?.email || '').trim().toLowerCase();
-        if (leadId && rowLeadId && leadId === rowLeadId) return row;
-        if (email && rowEmail && email === rowEmail) return row;
-    }
-    return null;
-}
-
 async function executeInitialContact(task: any, supabase: SupabaseClient) {
     // Get mission limits
     const { data: mission } = await supabase
@@ -2439,7 +2906,8 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
         return { skipped: true, reason: 'daily_limit_reached', retryAt };
     }
 
-    const { leads, campaignName, dryRun } = task.payload;
+    const { leads, campaignId, campaignName, dryRun } = task.payload;
+    const dryRunEffects = getMessagingOutcomeEffects({ dryRun: Boolean(dryRun), outcome: 'sent' });
     const leadsList = Array.isArray(leads) ? leads : [];
     // If dryRun, we don't consume daily limit? Or do we? 
     // User wants to "test", usually tests shouldn't burn quota, but for safety let's assume they might?
@@ -2451,13 +2919,18 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
     let campaignRef: any = null;
     let campaignSentRecords: Record<string, any> | null = null;
     let campaignDirty = false;
-    if (campaignName) {
-        const { data: camp } = await supabase
+    if (campaignId || campaignName) {
+        let campaignQuery = supabase
             .from('campaigns')
             .select('id, sent_records, settings')
             .eq('organization_id', task.organization_id)
-            .eq('name', campaignName)
-            .maybeSingle();
+            .eq('user_id', userId);
+
+        campaignQuery = campaignId
+            ? campaignQuery.eq('id', campaignId)
+            : campaignQuery.eq('name', campaignName);
+
+        const { data: camp } = await campaignQuery.maybeSingle();
 
         if (camp?.id) {
             campaignRef = camp as any;
@@ -2526,10 +2999,12 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
                 });
 
                 // Make it non-eligible for future pipeline runs
-                await supabase
-                    .from('leads')
-                    .update({ status: 'do_not_contact' } as any)
-                    .eq('id', leadId);
+                if (dryRunEffects.allowLeadStatusMutation) {
+                    await supabase
+                        .from('leads')
+                        .update({ status: 'do_not_contact' } as any)
+                        .eq('id', leadId);
+                }
             }
             continue;
         }
@@ -2548,7 +3023,7 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
     if (candidateEmails.length > 0) {
         const { data } = await supabase
             .from('contacted_leads')
-            .select('lead_id, email, status, replied_at, reply_intent, last_reply_text, name, company, mission_id')
+            .select('lead_id, email, status, replied_at, reply_intent, last_reply_text, name, company, mission_id, delivery_status, bounce_category, bounce_reason, evaluation_status, campaign_followup_reason')
             .eq('organization_id', task.organization_id)
             .in('email', candidateEmails);
         priorReplyRows.push(...(data || []));
@@ -2557,7 +3032,7 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
     if (candidateLeadIds.length > 0) {
         const { data } = await supabase
             .from('contacted_leads')
-            .select('lead_id, email, status, replied_at, reply_intent, last_reply_text, name, company, mission_id')
+            .select('lead_id, email, status, replied_at, reply_intent, last_reply_text, name, company, mission_id, delivery_status, bounce_category, bounce_reason, evaluation_status, campaign_followup_reason')
             .eq('organization_id', task.organization_id)
             .in('lead_id', candidateLeadIds);
         priorReplyRows.push(...(data || []));
@@ -2592,34 +3067,25 @@ async function executeInitialContact(task: any, supabase: SupabaseClient) {
         progress_label: `Contactando ${leadsToContact.length} lead(s)...`
     });
 
-    await safeInsertLeadEvents(
-        supabase,
-        leadsToContact
-            .filter((l: any) => !!l?.id)
-            .map((l: any) => ({
-                organization_id: task.organization_id,
-                mission_id: task.mission_id,
-                task_id: task.id,
-                lead_id: String(l.id),
-                event_type: 'lead_contact_started',
-                stage,
-                outcome: 'started',
-                message: 'Contacto iniciado',
-                meta: { dryRun: Boolean(dryRun) },
-                created_at: attemptAt,
-            }))
-    );
-
     // Fetch user's email signature from profiles
     const { data: profile } = await supabase
         .from('profiles')
-        .select('signatures, full_name, job_title, company_name, company_domain')
+        .select('signatures, full_name, job_title, company_name, company_domain, email')
         .eq('id', userId)
         .single();
+
+    const { data: authUserData } = await supabase.auth.admin.getUserById(userId).catch(() => ({ data: { user: null } as any }));
 
     const profileExtended = profile?.signatures?.profile_extended || {};
     const senderCompanyName = profile?.company_name || profileExtended.companyName || 'nuestro equipo';
     const senderValueProp = profileExtended.valueProposition || profileExtended.value_proposition || '';
+    const senderName = String(profile?.full_name || '').trim();
+    const senderTitle = String(profile?.job_title || '').trim();
+    const senderEmail = String(profile?.email || authUserData?.user?.email || '').trim();
+    const senderPhone = String(profileExtended.phone || '').trim();
+    const senderWebsite = String(profile?.company_domain || '').trim()
+        ? (String(profile.company_domain).startsWith('http') ? String(profile.company_domain).trim() : `https://${String(profile.company_domain).trim()}`)
+        : '';
 
     // Get the signature for the provider being used (google or outlook)
     // Signatures are stored as: { google: "...", outlook: "..." }
@@ -2683,6 +3149,7 @@ Saludos,`;
         try {
             const priorReply = findPriorReplyMatchForLead(lead, priorReplyRows);
             if (priorReply) {
+                const permanentSuppression = shouldPermanentlySuppressContact(priorReply);
                 console.warn(`[CONTACT] Guardrail blocked ${lead.email || lead.id} because the lead already replied in a previous thread.`);
                 if (lead?.id) {
                     await safeInsertLeadEvents(supabase, [
@@ -2695,14 +3162,16 @@ Saludos,`;
                             stage,
                             outcome: 'prior_reply_guardrail',
                             message: 'Contacto bloqueado: el lead ya habia respondido antes',
-                            meta: { priorReply },
+                            meta: { priorReply, permanentSuppression },
                             created_at: attemptAt,
                         }
                     ]);
-                    await supabase
-                        .from('leads')
-                        .update({ status: 'do_not_contact', updated_at: new Date().toISOString() } as any)
-                        .eq('id', lead.id);
+                    if (dryRunEffects.allowLeadStatusMutation && permanentSuppression) {
+                        await supabase
+                            .from('leads')
+                            .update({ status: 'do_not_contact', updated_at: new Date().toISOString() } as any)
+                            .eq('id', lead.id);
+                    }
                 }
                 continue;
             }
@@ -2740,19 +3209,23 @@ Saludos,`;
                 || researchData?.overview
                 || 'estan impulsando iniciativas relevantes que valdria la pena conversar.'
             );
-            const preferredDraft = researchData?.emailDraft && researchData.emailDraft.subject && researchData.emailDraft.body
-                ? researchData.emailDraft
+            const preferredDraftSubject = normalizeDraftText(researchData?.emailDraft?.subject);
+            const preferredDraftBody = normalizeDraftText(researchData?.emailDraft?.body);
+            const preferredDraft = preferredDraftSubject && preferredDraftBody
+                ? { subject: preferredDraftSubject, body: preferredDraftBody }
                 : null;
 
             // Determine Subject and Body
             // Priority 1: Use Draft from Research
             let finalSubject = defaultSubject;
             let finalBody = defaultBody;
+            let usedPreferredDraft = false;
 
             if (preferredDraft) {
                 console.log(`[CONTACT] Using AI Generated Draft for ${lead.email}`);
                 finalSubject = preferredDraft.subject;
                 finalBody = appendSignatureIfMissing(preferredDraft.body, userSignature, profile?.full_name);
+                usedPreferredDraft = true;
 
             } else {
                 console.log(`[CONTACT] Using enriched fallback template for ${lead.email}`);
@@ -2769,18 +3242,88 @@ Saludos,`;
 
             // Replace template variables (Applicable to both Default and Drafts if they use {{}} syntax, though N8N drafts usually come resolved)
             // We should still run replacement just in case the draft uses placeholders
-            const personalizedSubject = finalSubject
-                .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || lead.name || 'there')
-                .replace(/\{\{company\}\}/g, safeCompanyName || 'your company')
-                .replace(/\{\{firstName\}\}/g, firstName);
+            const renderDraft = (subjectInput: string, bodyInput: string) => {
+                const baseSubject = renderLegacyDraftPlaceholders(subjectInput, {
+                    leadName: lead.fullName || lead.full_name || lead.name || '',
+                    firstName,
+                    leadTitle: lead.title || '',
+                    companyName: safeCompanyName,
+                    senderName,
+                    senderTitle,
+                    senderCompany: senderCompanyName,
+                    senderEmail,
+                    senderPhone,
+                    senderWebsite,
+                });
+                const baseBody = renderLegacyDraftPlaceholders(bodyInput, {
+                    leadName: lead.fullName || lead.full_name || lead.name || '',
+                    firstName,
+                    leadTitle: lead.title || '',
+                    companyName: safeCompanyName,
+                    senderName,
+                    senderTitle,
+                    senderCompany: senderCompanyName,
+                    senderEmail,
+                    senderPhone,
+                    senderWebsite,
+                });
 
-            const personalizedBody = finalBody
-                .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || lead.name || 'there')
-                .replace(/\{\{company\}\}/g, safeCompanyName || 'your company')
-                .replace(/\{\{firstName\}\}/g, firstName)
-                .replace(/\{\{title\}\}/g, lead.title || 'your role')
-                .replace(/\{\{research\.summary\}\}/g, researchSummary)
-                .replace(/\{\{email\}\}/g, lead.email || '');
+                return {
+                    subject: baseSubject
+                        .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || lead.name || 'there')
+                        .replace(/\{\{company\}\}/g, safeCompanyName || 'your company')
+                        .replace(/\{\{firstName\}\}/g, firstName)
+                        .trim(),
+                    body: baseBody
+                        .replace(/\{\{name\}\}/g, lead.fullName || lead.full_name || lead.name || 'there')
+                        .replace(/\{\{company\}\}/g, safeCompanyName || 'your company')
+                        .replace(/\{\{firstName\}\}/g, firstName)
+                        .replace(/\{\{title\}\}/g, lead.title || 'your role')
+                        .replace(/\{\{research\.summary\}\}/g, researchSummary)
+                        .replace(/\{\{email\}\}/g, lead.email || '')
+                        .trim(),
+                };
+            };
+
+            let { subject: personalizedSubject, body: personalizedBody } = renderDraft(finalSubject, finalBody);
+
+            if (usedPreferredDraft && (hasMalformedDraftContent(personalizedSubject) || hasMalformedDraftContent(personalizedBody))) {
+                console.warn(`[CONTACT] Preferred draft malformed for ${lead.email}. Falling back to safe template.`);
+                finalSubject = buildFallbackSubject(safeCompanyName, researchData);
+                finalBody = buildFallbackBody({
+                    firstName,
+                    companyName: safeCompanyName,
+                    researchData,
+                    senderCompanyName,
+                    senderValueProp,
+                    userSignature,
+                });
+                ({ subject: personalizedSubject, body: personalizedBody } = renderDraft(finalSubject, finalBody));
+            }
+
+            if (hasMalformedDraftContent(personalizedSubject) || hasMalformedDraftContent(personalizedBody)) {
+                console.warn(`[CONTACT] Blocking malformed draft for ${lead.email}`);
+                if (lead?.id) {
+                    await safeInsertLeadEvents(supabase, [
+                        {
+                            organization_id: task.organization_id,
+                            mission_id: task.mission_id,
+                            task_id: task.id,
+                            lead_id: String(lead.id),
+                            event_type: 'lead_contact_blocked',
+                            stage,
+                            outcome: 'invalid_template',
+                            message: 'Contacto bloqueado: plantilla malformada',
+                            meta: {
+                                subjectPreview: personalizedSubject.slice(0, 160),
+                                bodyPreview: personalizedBody.slice(0, 400),
+                            },
+                            created_at: attemptAt,
+                        }
+                    ]);
+                }
+                continue;
+            }
 
             // Validate and clean unreplaced variables
             const unreplacedVars = personalizedBody.match(/\{\{[^}]+\}\}/g);
@@ -2800,44 +3343,6 @@ Saludos,`;
                 console.log(`[DRY_RUN] 📝 Body Preview: ${cleanedBody.substring(0, 200)}...`);
                 console.log(`[DRY_RUN] 📝 Full Body Length: ${cleanedBody.length}`);
 
-                // Simulate success
-                contactedCount++;
-                console.log(`[CONTACT] Dry Run success for ${lead.email}`);
-
-                const sentAt = new Date().toISOString();
-
-                await supabase.from('contacted_leads').insert({
-                    user_id: userId,
-                    organization_id: task.organization_id,
-                    mission_id: task.mission_id,
-                    lead_id: lead.id,
-
-                    // Store display fields for UI/analytics
-                    name: lead.fullName || lead.full_name || lead.name || '',
-                    email: lead.email,
-                    company: safeCompanyName,
-                    role: lead.title || '',
-                    industry: lead.industry || null,
-                    city: lead.city || null,
-                    country: lead.country || null,
-
-                    status: 'sent',
-                    subject: personalizedSubject,
-                    provider: 'gmail',
-                    sent_at: sentAt,
-
-                    // Seed evaluation fields so the heartbeat can pick it up
-                    evaluation_status: 'pending',
-                    last_interaction_at: sentAt,
-                    engagement_score: 0,
-                    last_update_at: sentAt,
-                } as any);
-
-                if (campaignRef && campaignSentRecords && lead?.id) {
-                    campaignSentRecords[String(lead.id)] = { lastStepIdx: 0, lastSentAt: sentAt };
-                    campaignDirty = true;
-                }
-
                 if (lead?.id) {
                     await safeInsertLeadEvents(supabase, [
                         {
@@ -2845,24 +3350,16 @@ Saludos,`;
                             mission_id: task.mission_id,
                             task_id: task.id,
                             lead_id: String(lead.id),
-                            event_type: 'lead_contact_sent',
+                            event_type: 'lead_contact_dry_run',
                             stage,
-                            outcome: 'sent',
-                            message: 'Contacto enviado (dry run)',
+                            outcome: dryRunEffects.receiptStatus,
+                            message: 'Contacto simulado (dry run)',
                             meta: { dryRun: true },
                             created_at: attemptAt,
                         }
                     ]);
                 }
 
-                // Mark lead as contacted so it leaves the enriched queue
-                if (lead.id) {
-                    const { error: leadUpdateErr } = await supabase
-                        .from('leads')
-                        .update({ status: 'contacted' })
-                        .eq('id', lead.id);
-                    if (leadUpdateErr) console.error('[CONTACT] Failed to update lead status to contacted (dry_run):', lead.id, leadUpdateErr);
-                }
                 continue; // Skip the rest of the loop (actual fetch)
             }
 
@@ -2870,34 +3367,48 @@ Saludos,`;
                 method: 'POST',
                 headers: withInternalApiSecret({
                     'Content-Type': 'application/json',
-                    'x-user-id': userId
+                    'x-user-id': userId,
+                    'x-organization-id': task.organization_id,
                 }),
                 body: JSON.stringify({
                     to: lead.email,
                     subject: personalizedSubject,
                     body: cleanedBody, // Use cleaned body instead of personalizedBody
                     leadId: lead.id,
-                    campaignId: null,
+                    campaignId: campaignRef?.id || null,
                     missionId: task.mission_id,
+                    taskId: task.id,
                     userId: userId,
+                    idempotencyKey: campaignRef?.id
+                        ? `campaign:${campaignRef.id}:${lead.id || lead.email}:step:0`
+                        : `antonia:${task.id}:${lead.id || lead.email}:initial`,
                     tracking: campaignRef?.settings?.tracking
                 })
             });
 
             console.log(`[CONTACT] API response status: ${response.status} `);
 
-            if (response.ok) {
-                contactedCount++;
-                const resData = await response.json();
+            const responseText = await response.text().catch(() => '');
+            const resData = parseContactApiBody(responseText);
+            if (response.ok && resData.success === true) {
+                const isReplayed = resData.replayed === true;
+                lead.replayed = isReplayed;
+                if (!isReplayed) contactedCount += dryRunEffects.contactedCountDelta;
                 console.log(`[CONTACT] Successfully contacted lead via ${resData.provider} `);
 
                 const sentAt = new Date().toISOString();
 
-                await supabase.from('contacted_leads').insert({
+                if (isReplayed && dryRunEffects.updateCampaignSentRecords && campaignRef && campaignSentRecords && lead?.id) {
+                    campaignSentRecords[String(lead.id)] = { lastStepIdx: 0, lastSentAt: sentAt };
+                    campaignDirty = true;
+                }
+
+                if (!isReplayed && dryRunEffects.insertContactedLead) await supabase.from('contacted_leads').insert({
                     user_id: userId,
                     organization_id: task.organization_id,
                     mission_id: task.mission_id,
                     lead_id: lead.id,
+                    campaign_id: campaignRef?.id || null,
 
                     name: lead.fullName || lead.full_name || lead.name || '',
                     email: lead.email,
@@ -2916,14 +3427,15 @@ Saludos,`;
                     last_interaction_at: sentAt,
                     engagement_score: 0,
                     last_update_at: sentAt,
+                    data: campaignRef?.id ? { campaign_id: campaignRef.id } : {},
                 } as any);
 
-                if (campaignRef && campaignSentRecords && lead?.id) {
+                if (!isReplayed && dryRunEffects.updateCampaignSentRecords && campaignRef && campaignSentRecords && lead?.id) {
                     campaignSentRecords[String(lead.id)] = { lastStepIdx: 0, lastSentAt: sentAt };
                     campaignDirty = true;
                 }
 
-                if (lead.id) {
+                if (!isReplayed && dryRunEffects.markLeadContacted && lead.id) {
                     const { error: leadUpdateErr } = await supabase
                         .from('leads')
                         .update({ status: 'contacted' })
@@ -2931,7 +3443,7 @@ Saludos,`;
                     if (leadUpdateErr) console.error('[CONTACT] Failed to update lead status to contacted:', lead.id, leadUpdateErr);
                 }
 
-                if (lead?.id) {
+                if (!isReplayed && lead?.id) {
                     await safeInsertLeadEvents(supabase, [
                         {
                             organization_id: task.organization_id,
@@ -2948,15 +3460,15 @@ Saludos,`;
                     ]);
                 }
             } else {
-                const errorText = await response.text();
+                const errorText = responseText || resData.error || 'Empty response';
                 console.error(`[CONTACT] API error: ${response.status} - ${errorText} `);
 
                 // Track error for reporting
                 lead.error = `API Error ${response.status}: ${errorText.substring(0, 100)} `;
 
-                const lower = String(errorText || '').toLowerCase();
-                const isUnsub = response.status === 409 || lower.includes('unsub');
-                const isBlockedDomain = response.status === 403 || lower.includes('domain blocked') || lower.includes('blocked');
+                const responseCode = String(resData.code || '').trim().toUpperCase();
+                const isUnsub = responseCode === 'RECIPIENT_UNSUBSCRIBED';
+                const isBlockedDomain = responseCode === 'DOMAIN_BLOCKED';
 
                 if (lead?.id) {
                     if (isUnsub || isBlockedDomain) {
@@ -2976,7 +3488,7 @@ Saludos,`;
                                 stage,
                                 outcome: isUnsub ? 'unsubscribed' : 'domain_blocked',
                                 message: isUnsub ? 'Contacto bloqueado: destinatario dado de baja' : 'Contacto bloqueado: dominio excluido',
-                                meta: { status: response.status, error: errorText.slice(0, 800) },
+                                meta: { status: response.status, code: responseCode || null, error: errorText.slice(0, 800) },
                                 created_at: attemptAt,
                             }
                         ]);
@@ -2991,18 +3503,37 @@ Saludos,`;
                                 stage,
                                 outcome: `api_${response.status}`,
                                 message: 'Fallo enviando contacto',
-                                meta: { status: response.status, error: errorText.slice(0, 800) },
+                                meta: { status: response.status, code: responseCode || null, error: errorText.slice(0, 800) },
                                 created_at: attemptAt,
                             }
                         ]);
                     }
+                }
+
+                if (isRetryableContactApiFailure(response.status, responseCode)) {
+                    const retryError = createContactApiError({
+                        status: response.status,
+                        code: responseCode,
+                        message: String(resData.error || errorText).slice(0, 800),
+                        result: {
+                            contactedCount,
+                            contactedList: leadsToContact.map((item: any) => ({
+                                leadId: item.id || null,
+                                email: item.email || null,
+                                status: item.error ? 'failed' : 'pending',
+                                error: item.error || null,
+                            })),
+                        },
+                    });
+                    retryError.recorded = true;
+                    throw retryError;
                 }
             }
         } catch (e: any) {
             console.error('[CONTACT] Failed to contact lead:', e);
             lead.error = `Exception: ${e.message} `;
 
-            if (lead?.id) {
+            if (lead?.id && !e?.recorded) {
                 await safeInsertLeadEvents(supabase, [
                     {
                         organization_id: task.organization_id,
@@ -3018,14 +3549,30 @@ Saludos,`;
                     }
                 ]);
             }
+            if (isRetryableContactException(e)) {
+                const retryError: any = e && typeof e === 'object' ? e : new Error(String(e));
+                retryError.retryable = true;
+                retryError.result = retryError.result || {
+                    contactedCount,
+                    contactedList: leadsToContact.map((item: any) => ({
+                        leadId: item.id || null,
+                        email: item.email || null,
+                        status: item.error ? 'failed' : 'pending',
+                        error: item.error || null,
+                    })),
+                };
+                throw retryError;
+            }
         }
     }
 
-    if (campaignRef && campaignDirty && campaignSentRecords) {
+    if (!dryRun && campaignRef && campaignDirty && campaignSentRecords) {
         const { error: campErr } = await supabase
             .from('campaigns')
             .update({ sent_records: campaignSentRecords, updated_at: new Date().toISOString() })
-            .eq('id', campaignRef.id);
+            .eq('id', campaignRef.id)
+            .eq('organization_id', task.organization_id)
+            .eq('user_id', userId);
         if (campErr) {
             console.warn('[CONTACT] Failed to update campaign sent_records:', campErr);
         }
@@ -3046,7 +3593,8 @@ Saludos,`;
             name: l.fullName || l.full_name || l.name,
             email: l.email,
             company: l.companyName || l.company_name || l.company,
-            status: l.error ? 'failed' : 'sent',
+            status: l.error ? 'failed' : l.replayed ? 'replayed' : 'sent',
+            ...(dryRun ? { status: 'dry_run' } : {}),
             error: l.error || null
         }))
     };
@@ -3057,6 +3605,16 @@ async function executeEvaluate(task: any, supabase: SupabaseClient) {
     // In a real scenario, this task would receive specific leads to evaluate
     // For now, let's assume the payload contains the leads to evaluate
     const { leads } = task.payload;
+    const userId = await getTaskUserId(task, supabase);
+    const { data: mission, error: missionError } = await supabase
+        .from('antonia_missions')
+        .select('params')
+        .eq('id', task.mission_id)
+        .eq('organization_id', task.organization_id)
+        .eq('user_id', userId)
+        .maybeSingle();
+    if (missionError) throw missionError;
+    const campaignPayload = { ...(mission?.params || {}), ...(task.payload || {}) };
     let qualifiedCount = 0;
 
     for (const lead of leads) {
@@ -3066,14 +3624,26 @@ async function executeEvaluate(task: any, supabase: SupabaseClient) {
             .select('*')
             .eq('lead_id', lead.id);
 
-        const { data: contactedLead } = await supabase
+        const { data: contactedLead, error: contactedLeadError } = await supabase
             .from('contacted_leads')
-            .select('engagement_score')
+            .select('id, lead_id, email, campaign_id, data, engagement_score')
             .eq('lead_id', lead.id)
             .eq('mission_id', task.mission_id)
+            .eq('organization_id', task.organization_id)
+            .eq('user_id', userId)
             .order('sent_at', { ascending: false })
             .limit(1)
             .maybeSingle();
+
+        if (contactedLeadError) {
+            throw contactedLeadError;
+        }
+        if (!contactedLead?.id) {
+            const error: any = new Error(`Originating contacted lead not found for evaluation lead ${lead.id || lead.email}`);
+            error.code = 'CONTACTED_LEAD_NOT_FOUND';
+            error.result = { evaluatedCount: 0, qualifiedCount, failedLeadId: lead.id || null };
+            throw error;
+        }
 
         const score = contactedLead?.engagement_score || 0;
         const hasReplied = interactions?.some((i: any) => i.type === 'reply');
@@ -3094,25 +3664,56 @@ async function executeEvaluate(task: any, supabase: SupabaseClient) {
             newStatus = 'qualified';
             qualifiedCount++;
 
-            // Trigger Campaign Follow-up
-            await supabase.from('antonia_tasks').insert({
-                mission_id: task.mission_id,
-                organization_id: task.organization_id,
-                type: 'CONTACT_CAMPAIGN',
-                status: 'pending',
-                payload: {
-                    leads: [lead],
-                    userId: task.payload.userId,
-                    campaignName: task.payload.campaignName
-                }
+            const campaignReference = getCampaignReference({ contactedLead, lead, taskPayload: campaignPayload });
+            const campaign = await resolveCampaign(supabase, {
+                organizationId: task.organization_id,
+                userId,
+                missionId: task.mission_id,
+                campaignId: campaignReference.campaignId,
+                campaignName: campaignReference.campaignName,
             });
-            console.log(`[EVALUATE] Lead qualified! Created CONTACT_CAMPAIGN task.`);
+
+            if (campaign?.id && contactedLead?.id) {
+                const { error: insertError } = await supabase.from('antonia_tasks').insert({
+                    mission_id: task.mission_id,
+                    organization_id: task.organization_id,
+                    type: 'CONTACT_CAMPAIGN',
+                    status: 'pending',
+                    payload: {
+                        leads: [{ ...lead, contactedLeadId: contactedLead.id }],
+                        userId,
+                        campaignId: campaign.id,
+                        campaignName: campaign.name,
+                    },
+                    idempotency_key: `campaign_followup_${campaign.id}_${contactedLead.id}`,
+                    created_at: new Date().toISOString(),
+                });
+                if (insertError && String((insertError as any)?.code || '') !== '23505') {
+                    throw insertError;
+                }
+                console.log(`[EVALUATE] Lead qualified. CONTACT_CAMPAIGN ${insertError ? 'already exists' : 'created'} for campaign ${campaign.id}.`);
+            } else {
+                const error: any = new Error(`Qualified lead ${lead.email || lead.id} has no resolvable originating campaign`);
+                error.code = 'CAMPAIGN_NOT_FOUND';
+                error.result = {
+                    evaluatedCount: 0,
+                    qualifiedCount,
+                    failedLeadId: lead.id || null,
+                    campaignReference,
+                    followUpCreated: false,
+                };
+                throw error;
+            }
         }
 
         // Update status
-        await supabase.from('contacted_leads').update({
+        const { error: evaluationUpdateError } = await supabase.from('contacted_leads').update({
             evaluation_status: newStatus
-        }).eq('lead_id', lead.id).eq('mission_id', task.mission_id);
+        })
+            .eq('id', contactedLead.id)
+            .eq('organization_id', task.organization_id)
+            .eq('user_id', userId);
+        if (evaluationUpdateError) throw evaluationUpdateError;
     }
 
     return { evaluatedCount: leads.length, qualifiedCount };
@@ -3120,21 +3721,7 @@ async function executeEvaluate(task: any, supabase: SupabaseClient) {
 
 // --- 6. EXECUTE CONTACT CAMPAIGN (Follow-up) ---
 async function executeContactCampaign(task: any, supabase: SupabaseClient) {
-    // This function sends the actual campaign sequence to QUALIFIED leads
-    // Logic is similar to legacy executeContact but specific to campaigns
-
-    // Reuse legacy logic for now, but ensure we mark as completed
-    const result = await executeLegacyContact(task, supabase);
-
-    // Complete the mission for this lead
-    // Note: If we have multiple tasks per mission, we might need smarter completion logic
-    // For single-flow missions, this is fine
-    await supabase
-        .from('antonia_missions')
-        .update({ status: 'completed', updated_at: new Date().toISOString() })
-        .eq('id', task.mission_id);
-
-    return result;
+    return executeLegacyContact(task, supabase);
 }
 
 // Reuse legacy contact logic helper
@@ -4213,14 +4800,19 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
         for (const to of targetEmails) {
             await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
-                headers: withInternalApiSecret({ 'Content-Type': 'application/json', 'x-user-id': userId }),
+                headers: withInternalApiSecret({
+                    'Content-Type': 'application/json',
+                    'x-user-id': userId,
+                    'x-organization-id': organizationId,
+                }),
                 body: JSON.stringify({
                     to,
                     subject,
                     body: htmlContent,
                     isHtml: true,
                     userId,
-                    missionId
+                    missionId,
+                    idempotencyKey: `report:${report.id}:${to}`
                 })
             });
         }
@@ -4232,63 +4824,148 @@ async function executeReportGeneration(task: any, supabase: SupabaseClient) {
 }
 
 async function executeLegacyContact(task: any, supabase: SupabaseClient) {
-    const { leads, userId, campaignName } = task.payload;
+    const { leads } = task.payload || {};
+    const userId = await getTaskUserId(task, supabase);
     const appUrl = getAppUrl();
     let contactedCount = 0;
     const attemptAt = new Date().toISOString();
     const stage = 'contact';
     const leadList = Array.isArray(leads) ? leads : [];
+    const leadResults: Array<{ leadId: string | null; contactedLeadId?: string | null; email: string | null; status: 'sent' | 'replayed' | 'skipped' | 'failed'; code?: string | null; error?: string | null }> = [];
+
+    if (leadList.length === 0) {
+        return {
+            contactedCount: 0,
+            failedCount: 0,
+            skippedCount: 0,
+            replayedCount: 0,
+            totalCount: 0,
+            leads: [],
+            skipped: true,
+            reason: 'no_leads',
+        };
+    }
 
     const candidateEmails = [...new Set(leadList.map((lead: any) => String(lead?.email || '').trim().toLowerCase()).filter(Boolean))];
     const candidateLeadIds = [...new Set(leadList.map((lead: any) => String(lead?.id || '').trim()).filter(Boolean))];
-    const priorReplyRows: any[] = [];
+    const candidateContactedLeadIds = [...new Set(leadList.map((lead: any) => String(lead?.contactedLeadId || lead?.contacted_lead_id || '').trim()).filter(Boolean))];
+    const contactedRows: any[] = [];
+    const contactedSelect = 'id, lead_id, email, status, replied_at, reply_intent, last_reply_text, name, company, mission_id, provider, campaign_id, data, sent_at, last_follow_up_at, last_interaction_at, last_step_idx, follow_up_count, delivery_status, bounce_category, bounce_reason, evaluation_status, campaign_followup_reason';
 
     if (candidateEmails.length > 0) {
-        const { data } = await supabase
+        const { data, error } = await supabase
             .from('contacted_leads')
-            .select('lead_id, email, status, replied_at, reply_intent, last_reply_text, name, company, mission_id')
+            .select(contactedSelect)
             .eq('organization_id', task.organization_id)
+            .eq('user_id', userId)
+            .eq('mission_id', task.mission_id)
             .in('email', candidateEmails);
-        priorReplyRows.push(...(data || []));
+        if (error) throw error;
+        contactedRows.push(...(data || []));
     }
 
     if (candidateLeadIds.length > 0) {
-        const { data } = await supabase
+        const { data, error } = await supabase
             .from('contacted_leads')
-            .select('lead_id, email, status, replied_at, reply_intent, last_reply_text, name, company, mission_id')
+            .select(contactedSelect)
             .eq('organization_id', task.organization_id)
+            .eq('user_id', userId)
+            .eq('mission_id', task.mission_id)
             .in('lead_id', candidateLeadIds);
-        priorReplyRows.push(...(data || []));
+        if (error) throw error;
+        contactedRows.push(...(data || []));
     }
 
-    // Fetch Campaign
-    const { data: campaign } = await supabase
-        .from('campaigns')
-        .select('*')
-        .eq('organization_id', task.organization_id)
-        .eq('name', campaignName)
-        .maybeSingle();
+    if (candidateContactedLeadIds.length > 0) {
+        const { data, error } = await supabase
+            .from('contacted_leads')
+            .select(contactedSelect)
+            .eq('organization_id', task.organization_id)
+            .eq('user_id', userId)
+            .eq('mission_id', task.mission_id)
+            .in('id', candidateContactedLeadIds);
+        if (error) throw error;
+        contactedRows.push(...(data || []));
+    }
 
-    const { data: steps } = campaign?.id
-        ? await supabase
-            .from('campaign_steps')
-            .select('order_index, subject_template, body_template')
-            .eq('campaign_id', campaign.id)
-            .order('order_index', { ascending: true })
-            .limit(1)
-        : { data: null } as any;
+    const uniqueContactedRows = [...new Map(contactedRows.map((row: any) => [String(row.id), row])).values()];
+    const firstLead = leadList[0] || null;
+    const firstContactedLead = firstLead ? findOriginatingContactedLead(firstLead, uniqueContactedRows) : null;
+    const campaignReference = getCampaignReference({
+        contactedLead: firstContactedLead,
+        lead: firstLead,
+        taskPayload: task.payload,
+    });
+    const campaign = await resolveCampaign(supabase, {
+        organizationId: task.organization_id,
+        userId,
+        missionId: task.mission_id,
+        campaignId: campaignReference.campaignId,
+        campaignName: campaignReference.campaignName,
+    });
 
-    const subject = steps?.[0]?.subject_template || campaign?.settings?.subject || 'Follow up';
-    const body = steps?.[0]?.body_template || campaign?.settings?.body || 'Just checking in...';
+    if (!campaign?.id) {
+        const error: any = new Error('CONTACT_CAMPAIGN requires a concrete campaign scoped to the task organization and user');
+        error.code = 'CAMPAIGN_NOT_FOUND';
+        error.result = {
+            contactedCount: 0,
+            failedCount: leadList.length,
+            skippedCount: 0,
+            replayedCount: 0,
+            totalCount: leadList.length,
+            campaignReference,
+            leads: leadList.map((lead: any) => ({
+                leadId: lead?.id || null,
+                email: lead?.email || null,
+                status: 'failed',
+                code: 'CAMPAIGN_NOT_FOUND',
+            })),
+        };
+        throw error;
+    }
 
-    let campaignSentRecords: Record<string, any> | null = campaign?.sent_records ? { ...(campaign.sent_records || {}) } : null;
+    if (String(campaign.status || '').toLowerCase() !== 'active') {
+        return {
+            contactedCount: 0,
+            failedCount: 0,
+            skippedCount: leadList.length,
+            replayedCount: 0,
+            totalCount: leadList.length,
+            skipped: true,
+            reason: 'campaign_not_active',
+            campaignId: campaign.id,
+            campaignStatus: campaign.status || null,
+            leads: leadList.map((lead: any) => ({
+                leadId: lead?.id || null,
+                email: lead?.email || null,
+                status: 'skipped',
+                code: 'CAMPAIGN_NOT_ACTIVE',
+            })),
+        };
+    }
+
+    const { data: steps, error: stepsError } = await supabase
+        .from('campaign_steps')
+        .select('order_index, offset_days, subject_template, body_template')
+        .eq('campaign_id', campaign.id)
+        .order('order_index', { ascending: true });
+    if (stepsError) throw stepsError;
+    if (!steps?.length) {
+        const error: any = new Error(`Campaign ${campaign.id} has no campaign steps`);
+        error.code = 'CAMPAIGN_STEPS_MISSING';
+        throw error;
+    }
+
+    const campaignSentRecords: Record<string, any> = { ...(campaign.sent_records || {}) };
     let campaignDirty = false;
+    const deferredRetryTimes: string[] = [];
 
-    const { data: profile } = await supabase
+    const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('full_name')
         .eq('id', userId)
         .maybeSingle();
+    if (profileError) throw profileError;
     const senderName = profile?.full_name || 'Tu equipo';
 
     for (const lead of leadList) {
@@ -4296,8 +4973,21 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
             const currentMissionStatus = await getMissionStatus(supabase, task.mission_id);
             if (currentMissionStatus && currentMissionStatus !== 'active') {
                 console.warn(`[CONTACT_CAMPAIGN] Mission ${task.mission_id} is ${currentMissionStatus}. Stopping follow-up loop before sending to ${lead.email || lead.id}.`);
+                const remaining = leadList.slice(leadList.indexOf(lead));
+                for (const item of remaining) {
+                    leadResults.push({
+                        leadId: item?.id || null,
+                        email: item?.email || null,
+                        status: 'skipped',
+                        code: currentMissionStatus === 'paused' ? 'MISSION_PAUSED' : 'MISSION_NOT_ACTIVE',
+                    });
+                }
                 return {
                     contactedCount,
+                    failedCount: leadResults.filter((item) => item.status === 'failed').length,
+                    skippedCount: leadResults.filter((item) => item.status === 'skipped').length,
+                    totalCount: leadList.length,
+                    leads: leadResults,
                     skipped: true,
                     reason: currentMissionStatus === 'paused' ? 'mission_paused' : 'mission_not_active',
                     missionStatus: currentMissionStatus,
@@ -4305,39 +4995,142 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
                 };
             }
 
-            const priorReply = findPriorReplyMatchForLead(lead, priorReplyRows);
-            if (priorReply) {
-                console.warn(`[CONTACT_CAMPAIGN] Guardrail blocked ${lead.email || lead.id} because the lead already replied in a previous thread.`);
+            const contactedLead = findOriginatingContactedLead(lead, uniqueContactedRows);
+            if (!contactedLead?.id) {
+                leadResults.push({
+                    leadId: lead?.id || null,
+                    contactedLeadId: null,
+                    email: lead?.email || null,
+                    status: 'failed',
+                    code: 'CONTACTED_LEAD_NOT_FOUND',
+                    error: 'The originating contacted lead could not be resolved',
+                });
                 continue;
             }
 
-            console.log(`[CONTACT_CAMPAIGN] Sending campaign email to ${lead.email} `);
-
-            if (lead?.id) {
-                await safeInsertLeadEvents(supabase, [
-                    {
-                        organization_id: task.organization_id,
-                        mission_id: task.mission_id,
-                        task_id: task.id,
-                        lead_id: String(lead.id),
-                        event_type: 'lead_contact_started',
-                        stage,
-                        outcome: 'started',
-                        message: 'Seguimiento iniciado (campana)',
-                        meta: { kind: 'followup', campaignId: campaign?.id || null },
-                        created_at: attemptAt,
-                    }
-                ]);
+            const perLeadCampaignReference = getCampaignReference({ contactedLead, lead, taskPayload: task.payload });
+            if (perLeadCampaignReference.campaignId && perLeadCampaignReference.campaignId !== String(campaign.id)) {
+                leadResults.push({
+                    leadId: lead?.id || null,
+                    contactedLeadId: contactedLead.id,
+                    email: lead?.email || contactedLead.email || null,
+                    status: 'failed',
+                    code: 'CAMPAIGN_MISMATCH',
+                    error: `Originating contact belongs to campaign ${perLeadCampaignReference.campaignId}`,
+                });
+                continue;
             }
+
+            const priorReply = findPriorReplyMatchForLead(lead, uniqueContactedRows);
+            if (priorReply) {
+                const permanentSuppression = shouldPermanentlySuppressContact(priorReply);
+                console.warn(`[CONTACT_CAMPAIGN] Guardrail blocked ${lead.email || lead.id} because the lead already replied in a previous thread.`);
+                if (permanentSuppression && lead?.id) {
+                    await supabase
+                        .from('leads')
+                        .update({ status: 'do_not_contact', updated_at: new Date().toISOString() } as any)
+                        .eq('id', lead.id)
+                        .eq('organization_id', task.organization_id)
+                        .eq('user_id', userId);
+                }
+                leadResults.push({ leadId: lead?.id || null, contactedLeadId: contactedLead.id, email: lead?.email || contactedLead.email || null, status: 'skipped', code: 'PRIOR_REPLY' });
+                continue;
+            }
+
+            const email = String(lead?.email || contactedLead.email || '').trim();
+            if (!email) {
+                leadResults.push({
+                    leadId: lead?.id || null,
+                    contactedLeadId: contactedLead.id,
+                    email: null,
+                    status: 'skipped',
+                    code: 'NO_EMAIL',
+                });
+                continue;
+            }
+
+            if (!isConfirmedContactProvider(contactedLead.provider)) {
+                const result = {
+                    contactedCount,
+                    failedCount: leadResults.filter((item) => item.status === 'failed').length + 1,
+                    skippedCount: leadResults.filter((item) => item.status === 'skipped').length,
+                    replayedCount: leadResults.filter((item) => item.status === 'replayed').length,
+                    totalCount: leadList.length,
+                    leads: [...leadResults, {
+                        leadId: lead?.id || null,
+                        contactedLeadId: contactedLead.id,
+                        email,
+                        status: 'failed',
+                        code: 'PROVIDER_UNKNOWN',
+                    }],
+                };
+                const error: any = new Error(`Provider is unknown or deferred for contacted lead ${contactedLead.id}`);
+                error.code = 'OUTBOUND_UNKNOWN';
+                error.retryable = true;
+                error.result = result;
+                throw error;
+            }
+
+            const currentStep = getCurrentCampaignFollowUp({
+                campaignId: campaign.id,
+                contactedLeadId: contactedLead.id,
+                leadId: contactedLead.lead_id || lead?.id || null,
+                steps,
+                sentRecords: campaignSentRecords,
+            });
+            if (!currentStep.step) {
+                leadResults.push({
+                    leadId: lead?.id || null,
+                    contactedLeadId: contactedLead.id,
+                    email,
+                    status: 'skipped',
+                    code: 'CAMPAIGN_SEQUENCE_COMPLETE',
+                });
+                continue;
+            }
+
+            const retryAt = getCampaignStepRetryAt(
+                contactedLead,
+                currentStep.step,
+                campaignSentRecords[currentStep.sentRecordKey]?.lastSentAt,
+            );
+            if (retryAt) {
+                deferredRetryTimes.push(retryAt);
+                leadResults.push({
+                    leadId: lead?.id || null,
+                    contactedLeadId: contactedLead.id,
+                    email,
+                    status: 'skipped',
+                    code: 'CAMPAIGN_STEP_NOT_DUE',
+                });
+                continue;
+            }
+
+            const subject = String(currentStep.step.subject_template || '').trim();
+            const body = String(currentStep.step.body_template || '').trim();
+            if (!subject || !body) {
+                leadResults.push({
+                    leadId: lead?.id || null,
+                    contactedLeadId: contactedLead.id,
+                    email,
+                    status: 'failed',
+                    code: 'CAMPAIGN_STEP_INVALID',
+                    error: `Campaign step ${currentStep.stepIndex} requires subject and body templates`,
+                });
+                continue;
+            }
+
+            console.log(`[CONTACT_CAMPAIGN] Sending campaign ${campaign.id} step ${currentStep.stepIndex} to ${email}`);
 
             const response = await fetch(`${appUrl}/api/contact/send`, {
                 method: 'POST',
                 headers: withInternalApiSecret({
                     'Content-Type': 'application/json',
-                    'x-user-id': userId
+                    'x-user-id': userId,
+                    'x-organization-id': task.organization_id,
                 }),
                 body: JSON.stringify({
-                    to: lead.email,
+                    to: email,
                     subject: subject
                         .replace('{{lead.name}}', lead.fullName || lead.full_name || lead.name || '')
                         .replace('{{firstName}}', (lead.fullName || lead.full_name || lead.name || '').split(' ')[0] || '')
@@ -4351,90 +5144,200 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
                     leadId: lead.id,
                     campaignId: campaign?.id,
                     missionId: task.mission_id,
+                    taskId: task.id,
                     userId: userId,
                     metadata: { type: 'campaign_followup' },
-                    tracking: (campaign as any)?.settings?.tracking
+                    tracking: (campaign as any)?.settings?.tracking,
+                    idempotencyKey: currentStep.idempotencyKey,
                 })
             });
-            if (response.ok) {
-                contactedCount++;
-                // We don't read JSON here in legacy logic usually, but let's do it for consistency
-                // Note: fetch body might have been consumed if we are not careful? No, it's fresh response.
-                // However, let's keep it simple for legacy campaign_followup or just do same logic:
-                try {
-                    const resData = await response.json();
-                    await supabase.from('contacted_leads').insert({
-                        user_id: userId,
-                        organization_id: task.organization_id,
-                        mission_id: task.mission_id,
-                        lead_id: lead.id,
-                        status: 'sent',
-                        subject: subject, // from campaign settings above
-                        provider: resData.provider || 'unknown',
-                        sent_at: new Date().toISOString(),
-                        data: {
-                            campaign_id: campaign?.id,
-                            type: 'followup'
-                        }
-                    });
+            const responseText = await response.text().catch(() => '');
+            const resData = parseContactApiBody(responseText);
+            if (response.ok && resData.success === true) {
+                const isReplayed = resData.replayed === true;
+                if (!isConfirmedContactProvider(resData.provider)) {
+                    const error: any = new Error(`Contact API returned an unconfirmed provider for ${email}`);
+                    error.code = 'OUTBOUND_UNKNOWN';
+                    error.retryable = true;
+                    throw error;
+                }
+                if (!isReplayed) contactedCount++;
+                const sentAt = new Date().toISOString();
+                campaignSentRecords[currentStep.sentRecordKey] = { lastStepIdx: currentStep.stepIndex, lastSentAt: sentAt };
+                campaignDirty = true;
 
-                    if (campaign?.id && campaignSentRecords && lead?.id) {
-                        campaignSentRecords[String(lead.id)] = { lastStepIdx: 0, lastSentAt: new Date().toISOString() };
-                        campaignDirty = true;
-                    }
+                const alreadyRecorded = Boolean(
+                    contactedLead.last_follow_up_at
+                    && Number(contactedLead.last_step_idx) === currentStep.stepIndex
+                );
+                const { error: contactedUpdateError } = await supabase
+                    .from('contacted_leads')
+                    .update({
+                        campaign_id: campaign.id,
+                        last_follow_up_at: sentAt,
+                        last_interaction_at: sentAt,
+                        last_step_idx: currentStep.stepIndex,
+                        follow_up_count: Number(contactedLead.follow_up_count || 0) + (alreadyRecorded ? 0 : 1),
+                        message_id: resData.messageId || undefined,
+                        thread_id: resData.threadId || undefined,
+                        conversation_id: resData.conversationId || undefined,
+                        internet_message_id: resData.internetMessageId || undefined,
+                        last_update_at: sentAt,
+                    } as any)
+                    .eq('id', contactedLead.id)
+                    .eq('organization_id', task.organization_id)
+                    .eq('user_id', userId);
+                if (contactedUpdateError) {
+                    const error: any = new Error(`Failed to persist campaign follow-up: ${contactedUpdateError.message || contactedUpdateError}`);
+                    error.code = 'SIDE_EFFECT_PERSISTENCE_FAILED';
+                    error.retryable = true;
+                    throw error;
+                }
 
-                    if (lead?.id) {
-                        await supabase
-                            .from('leads')
-                            .update({ status: 'contacted' } as any)
-                            .eq('id', lead.id);
-
-                        await safeInsertLeadEvents(supabase, [
-                            {
-                                organization_id: task.organization_id,
-                                mission_id: task.mission_id,
-                                task_id: task.id,
-                                lead_id: String(lead.id),
-                                event_type: 'lead_contact_sent',
-                                stage,
-                                outcome: 'sent',
-                                message: 'Seguimiento enviado',
-                                meta: { kind: 'followup', provider: resData.provider || 'unknown', campaignId: campaign?.id || null },
-                                created_at: attemptAt,
-                            }
-                        ]);
-                    }
-                } catch (err) { console.error('Error recording contact', err); }
-            } else {
-                const errorText = await response.text().catch(() => '');
-                if (lead?.id) {
+                if (!isReplayed && lead?.id) {
                     await safeInsertLeadEvents(supabase, [
                         {
                             organization_id: task.organization_id,
                             mission_id: task.mission_id,
                             task_id: task.id,
                             lead_id: String(lead.id),
-                            event_type: 'lead_contact_failed',
+                            event_type: 'lead_contact_sent',
                             stage,
-                            outcome: `api_${response.status}`,
-                            message: 'Fallo enviando seguimiento',
-                            meta: { status: response.status, error: errorText.slice(0, 800) },
+                            outcome: 'sent',
+                            message: 'Seguimiento enviado',
+                            meta: { kind: 'followup', provider: resData.provider, campaignId: campaign.id, campaignStepIndex: currentStep.stepIndex },
                             created_at: attemptAt,
                         }
                     ]);
                 }
+                leadResults.push({
+                    leadId: lead?.id || null,
+                    contactedLeadId: contactedLead.id,
+                    email,
+                    status: isReplayed ? 'replayed' : 'sent',
+                });
+            } else {
+                const errorText = responseText || String(resData.error || 'Empty response');
+                const responseCode = String(resData.code || '').trim().toUpperCase();
+                const isUnsub = responseCode === 'RECIPIENT_UNSUBSCRIBED';
+                const isBlockedDomain = responseCode === 'DOMAIN_BLOCKED';
+                leadResults.push({
+                    leadId: lead?.id || null,
+                    contactedLeadId: contactedLead.id,
+                    email,
+                    status: isUnsub || isBlockedDomain ? 'skipped' : 'failed',
+                    code: responseCode || `HTTP_${response.status}`,
+                    error: String(resData.error || errorText).slice(0, 800),
+                });
+                if (lead?.id) {
+                    if (isUnsub || isBlockedDomain) {
+                        await supabase
+                            .from('leads')
+                            .update({ status: 'do_not_contact' } as any)
+                            .eq('id', lead.id)
+                            .eq('organization_id', task.organization_id)
+                            .eq('user_id', userId);
+                    }
+                    await safeInsertLeadEvents(supabase, [
+                        {
+                            organization_id: task.organization_id,
+                            mission_id: task.mission_id,
+                            task_id: task.id,
+                            lead_id: String(lead.id),
+                            event_type: isUnsub || isBlockedDomain ? 'lead_contact_blocked' : 'lead_contact_failed',
+                            stage,
+                            outcome: isUnsub ? 'unsubscribed' : isBlockedDomain ? 'domain_blocked' : `api_${response.status}`,
+                            message: isUnsub ? 'Seguimiento bloqueado: destinatario dado de baja' : isBlockedDomain ? 'Seguimiento bloqueado: dominio excluido' : 'Fallo enviando seguimiento',
+                            meta: { status: response.status, code: responseCode || null, error: errorText.slice(0, 800) },
+                            created_at: attemptAt,
+                        }
+                    ]);
+                }
+                if (isRetryableContactApiFailure(response.status, responseCode)) {
+                    throw createContactApiError({
+                        status: response.status,
+                        code: responseCode,
+                        message: String(resData.error || errorText).slice(0, 800),
+                        result: {
+                            contactedCount,
+                            failedCount: leadResults.filter((item) => item.status === 'failed').length,
+                            skippedCount: leadResults.filter((item) => item.status === 'skipped').length,
+                            replayedCount: leadResults.filter((item) => item.status === 'replayed').length,
+                            totalCount: leadList.length,
+                            leads: leadResults,
+                        },
+                    });
+                }
             }
-        } catch (e) { console.error(e); }
+        } catch (e: any) {
+            console.error(e);
+            if (isRetryableContactException(e)) {
+                const retryError: any = e && typeof e === 'object' ? e : new Error(String(e));
+                retryError.retryable = true;
+                retryError.result = retryError.result || {
+                    contactedCount,
+                    failedCount: leadResults.filter((item) => item.status === 'failed').length,
+                    skippedCount: leadResults.filter((item) => item.status === 'skipped').length,
+                    replayedCount: leadResults.filter((item) => item.status === 'replayed').length,
+                    totalCount: leadList.length,
+                    leads: leadResults,
+                };
+                throw retryError;
+            }
+            if (!leadResults.some((item) => item.leadId === (lead?.id || null) && item.email === (lead?.email || null))) {
+                leadResults.push({
+                    leadId: lead?.id || null,
+                    contactedLeadId: null,
+                    email: lead?.email || null,
+                    status: 'failed',
+                    code: String(e?.code || 'EXCEPTION'),
+                    error: String(e?.message || e).slice(0, 800),
+                });
+            }
+        }
     }
-    if (campaign?.id && campaignDirty && campaignSentRecords) {
+    if (campaignDirty) {
         const { error: campErr } = await supabase
             .from('campaigns')
             .update({ sent_records: campaignSentRecords, updated_at: new Date().toISOString() })
-            .eq('id', campaign.id);
-        if (campErr) console.warn('[CONTACT_CAMPAIGN] Failed to update sent_records:', campErr);
+            .eq('id', campaign.id)
+            .eq('organization_id', task.organization_id)
+            .eq('user_id', userId);
+        if (campErr) {
+            const error: any = new Error(`Failed to persist campaign sent_records: ${campErr.message || campErr}`);
+            error.code = 'CAMPAIGN_CURSOR_PERSISTENCE_FAILED';
+            error.retryable = true;
+            throw error;
+        }
     }
 
-    return { contactedCount };
+    const result = {
+        contactedCount,
+        failedCount: leadResults.filter((item) => item.status === 'failed').length,
+        skippedCount: leadResults.filter((item) => item.status === 'skipped').length,
+        replayedCount: leadResults.filter((item) => item.status === 'replayed').length,
+        totalCount: leadList.length,
+        leads: leadResults,
+    };
+
+    if (result.failedCount > 0) {
+        const error: any = new Error(`CONTACT_CAMPAIGN failed for ${result.failedCount}/${result.totalCount} lead(s)`);
+        error.code = 'CONTACT_CAMPAIGN_PARTIAL_FAILURE';
+        error.result = result;
+        throw error;
+    }
+
+    if (deferredRetryTimes.length > 0) {
+        return {
+            ...result,
+            skipped: true,
+            reason: 'campaign_step_not_due',
+            retryAt: deferredRetryTimes.sort()[0],
+            campaignId: campaign.id,
+        };
+    }
+
+    return result;
 }
 
 // Timeout wrapper to prevent tasks from hanging indefinitely
@@ -4531,18 +5434,19 @@ async function processTask(task: any, supabase: SupabaseClient): Promise<any> {
                 throw new Error(`Unknown task type: ${task.type}. Valid types are: GENERATE_CAMPAIGN, SEARCH, ENRICH, INVESTIGATE, EVALUATE, CONTACT, CONTACT_INITIAL, CONTACT_CAMPAIGN, GENERATE_REPORT`);
         }
 
-        const isDailyLimitDeferred =
+        const isScheduledDeferral =
             Boolean((result as any)?.skipped) &&
-            String((result as any)?.reason || '') === 'daily_limit_reached' &&
+            ['daily_limit_reached', 'campaign_step_not_due'].includes(String((result as any)?.reason || '')) &&
             typeof (result as any)?.retryAt === 'string' &&
             String((result as any)?.retryAt || '').trim().length > 0;
 
-        if (isDailyLimitDeferred) {
+        if (isScheduledDeferral) {
             const retryAt = String((result as any).retryAt);
             await supabase.from('antonia_tasks').update({
                 status: 'pending',
                 scheduled_for: retryAt,
                 processing_started_at: null,
+                payload: task.payload,
                 result: result,
                 error_message: null,
                 updated_at: new Date().toISOString()
@@ -4552,7 +5456,7 @@ async function processTask(task: any, supabase: SupabaseClient): Promise<any> {
                 mission_id: task.mission_id,
                 organization_id: task.organization_id,
                 level: 'warning',
-                message: `Task ${task.type} deferred until ${retryAt} by daily quota.`,
+                message: `Task ${task.type} deferred until ${retryAt}: ${(result as any).reason}.`,
                 details: result
             });
 
@@ -4586,7 +5490,7 @@ async function processTask(task: any, supabase: SupabaseClient): Promise<any> {
             'timeout', 'network', 'fetch failed'
         ];
 
-        const isRetryable = retryableErrors.some(pattern =>
+        const isRetryable = e?.retryable === true || retryableErrors.some(pattern =>
             e.message?.toLowerCase().includes(pattern.toLowerCase()) ||
             e.code?.toString().toLowerCase().includes(pattern.toLowerCase()) ||
             e.status?.toString().includes(pattern)
@@ -4606,6 +5510,7 @@ async function processTask(task: any, supabase: SupabaseClient): Promise<any> {
                 status: 'pending',
                 retry_count: retryCount + 1,
                 scheduled_for: scheduledFor,
+                result: e?.result || null,
                 error_message: `Retry ${retryCount + 1}/${maxRetries}: ${e.message}`,
                 updated_at: new Date().toISOString()
             }).eq('id', task.id);
@@ -4624,6 +5529,7 @@ async function processTask(task: any, supabase: SupabaseClient): Promise<any> {
 
             await supabase.from('antonia_tasks').update({
                 status: 'failed',
+                result: e?.result || null,
                 error_message: `${failureReason}: ${e.message}`,
                 updated_at: new Date().toISOString()
             }).eq('id', task.id);
@@ -4820,9 +5726,13 @@ async function runAntoniaTick() {
     const { data: pendingLeads } = await supabase
         .from('contacted_leads')
         .select(`
+                id,
                 lead_id, 
+                user_id,
                 organization_id, 
                 mission_id,
+                campaign_id,
+                data,
                 leads!inner ( id, email, organization_id )
             `)
         .eq('evaluation_status', 'pending')
@@ -4840,14 +5750,42 @@ async function runAntoniaTick() {
 
             const { data: mission } = await supabase
                 .from('antonia_missions')
-                .select('id, user_id, organization_id')
+                .select('id, user_id, organization_id, params')
                 .eq('id', missionId)
                 .maybeSingle();
 
             if (!mission) continue;
 
-            const leadsForMission = rows.map((pl: any) => pl.leads).filter(Boolean);
+            const leadsForMission = rows
+                .map((pl: any) => pl.leads ? {
+                    ...pl.leads,
+                    contactedLeadId: pl.id,
+                    campaignId: pl.campaign_id || pl.data?.campaign_id || pl.data?.campaignId || null,
+                } : null)
+                .filter(Boolean);
             if (leadsForMission.length === 0) continue;
+
+            const campaignIds: string[] = [...new Set<string>(rows
+                .map((row: any) => String(row.campaign_id || row.data?.campaign_id || row.data?.campaignId || '').trim())
+                .filter(Boolean))];
+
+            let campaign: any = null;
+            if (campaignIds.length === 1) {
+                campaign = await resolveCampaign(supabase, {
+                    organizationId: mission.organization_id || rows[0].organization_id,
+                    userId: mission.user_id,
+                    missionId: mission.id,
+                    campaignId: campaignIds[0] || mission.params?.campaignId || mission.params?.campaign_id,
+                });
+            } else if (campaignIds.length === 0) {
+                campaign = await resolveCampaign(supabase, {
+                    organizationId: mission.organization_id || rows[0].organization_id,
+                    userId: mission.user_id,
+                    missionId: mission.id,
+                    campaignId: mission.params?.campaignId || mission.params?.campaign_id,
+                    campaignName: mission.params?.campaignName || mission.params?.campaign_name,
+                });
+            }
 
             await supabase.from('antonia_tasks').insert({
                 mission_id: mission.id,
@@ -4857,7 +5795,8 @@ async function runAntoniaTick() {
                 payload: {
                     leads: leadsForMission,
                     userId: mission.user_id,
-                    campaignName: 'Smart Campaign'
+                    campaignId: campaign?.id || mission.params?.campaignId || mission.params?.campaign_id || null,
+                    campaignName: campaign?.name || mission.params?.campaignName || mission.params?.campaign_name || null,
                 }
             });
             console.log(`[AntoniaTick] Created EVALUATE task for Mission ${missionId}`);

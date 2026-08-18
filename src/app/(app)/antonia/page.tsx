@@ -655,11 +655,12 @@ export default function AntoniaPage() {
                             <CardContent className="py-6">
                                 {step === 1 && (
                                     <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
-                                        <h3 className="text-lg font-medium mb-4">Audiencia Objetivo</h3>
-                                        <div className="grid grid-cols-2 gap-4">
+                                        <h2 className="mb-4 text-lg font-medium">Audiencia Objetivo</h2>
+                                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                             <div className="space-y-2">
-                                                <Label>Cargo / Puesto</Label>
+                                                <Label htmlFor="mission-job-title">Cargo / Puesto</Label>
                                                 <Input
+                                                    id="mission-job-title"
                                                     placeholder="ej. Director de Marketing"
                                                     value={wizardData.jobTitle}
                                                     onChange={(e) => setWizardData({ ...wizardData, jobTitle: e.target.value })}
@@ -667,27 +668,29 @@ export default function AntoniaPage() {
                                                 />
                                             </div>
                                             <div className="space-y-2">
-                                                <Label>Ubicación</Label>
+                                                <Label htmlFor="mission-location">Ubicación</Label>
                                                 <Input
+                                                    id="mission-location"
                                                     placeholder="ej. Buenos Aires, Argentina"
                                                     value={wizardData.location}
                                                     onChange={(e) => setWizardData({ ...wizardData, location: e.target.value })}
                                                 />
                                             </div>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4">
+                                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                             <div className="space-y-2">
-                                                <Label>Industria</Label>
+                                                <Label htmlFor="mission-industry">Industria</Label>
                                                 <Input
+                                                    id="mission-industry"
                                                     placeholder="ej. SaaS, Fintech, Salud"
                                                     value={wizardData.industry}
                                                     onChange={(e) => setWizardData({ ...wizardData, industry: e.target.value })}
                                                 />
                                             </div>
                                             <div className="space-y-2">
-                                                <Label>Tamaño de Empresa</Label>
+                                                <Label htmlFor="mission-company-size">Tamaño de Empresa</Label>
                                                 <Select value={wizardData.companySize} onValueChange={(v) => setWizardData({ ...wizardData, companySize: v })}>
-                                                    <SelectTrigger>
+                                                    <SelectTrigger id="mission-company-size">
                                                         <SelectValue placeholder="Seleccionar tamaño" />
                                                     </SelectTrigger>
                                                     <SelectContent>
@@ -697,10 +700,10 @@ export default function AntoniaPage() {
                                             </div>
                                         </div>
                                         <div className="space-y-2">
-                                            <Label>Nivel de Management</Label>
+                                            <Label htmlFor="mission-seniorities">Nivel de Management</Label>
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
-                                                    <Button variant="outline" role="combobox" className="justify-between w-full">
+                                                    <Button id="mission-seniorities" variant="outline" role="combobox" className="justify-between w-full">
                                                         <span className="truncate">
                                                             {wizardData.seniorities.length === 0 ? 'Seleccionar niveles' :
                                                                 wizardData.seniorities.length === 1 ? APOLLO_SENIORITIES.find(o => o.value === wizardData.seniorities[0])?.label ?? '1 seleccionado'
@@ -731,14 +734,14 @@ export default function AntoniaPage() {
 
                                         <div className="space-y-4 border p-4 rounded-lg bg-secondary/10">
                                             <div>
-                                                <Label className="text-base font-semibold">Objetivo comercial</Label>
+                                                <h3 className="text-base font-semibold">Objetivo comercial</h3>
                                                 <p className="text-xs text-muted-foreground mt-1">Define que resultado debe perseguir ANTONIA, no solo a quien buscar.</p>
                                             </div>
-                                            <div className="grid grid-cols-2 gap-4">
+                                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                                 <div className="space-y-2">
-                                                    <Label>Outcome principal</Label>
+                                                    <Label htmlFor="mission-target-outcome">Outcome principal</Label>
                                                     <Select value={wizardData.targetOutcome} onValueChange={(v) => setWizardData({ ...wizardData, targetOutcome: v as 'meetings' | 'positive_replies' | 'pipeline' })}>
-                                                        <SelectTrigger>
+                                                        <SelectTrigger id="mission-target-outcome">
                                                             <SelectValue />
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -749,8 +752,9 @@ export default function AntoniaPage() {
                                                     </Select>
                                                 </div>
                                                 <div className="space-y-2">
-                                                    <Label>Ventana objetivo (dias)</Label>
+                                                    <Label htmlFor="mission-target-timeline">Ventana objetivo (dias)</Label>
                                                     <Input
+                                                        id="mission-target-timeline"
                                                         type="number"
                                                         min="1"
                                                         max="365"
@@ -759,10 +763,11 @@ export default function AntoniaPage() {
                                                     />
                                                 </div>
                                             </div>
-                                            <div className="grid grid-cols-2 gap-4">
+                                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                                 <div className="space-y-2">
-                                                    <Label>{wizardData.targetOutcome === 'positive_replies' ? 'Replies objetivo' : 'Reuniones objetivo'}</Label>
+                                                    <Label htmlFor="mission-target-count">{wizardData.targetOutcome === 'positive_replies' ? 'Replies objetivo' : 'Reuniones objetivo'}</Label>
                                                     <Input
+                                                        id="mission-target-count"
                                                         type="number"
                                                         min="1"
                                                         max="500"
@@ -774,8 +779,9 @@ export default function AntoniaPage() {
                                                     />
                                                 </div>
                                                 <div className="space-y-2">
-                                                    <Label>Meta de pipeline (opcional)</Label>
+                                                    <Label htmlFor="mission-target-pipeline">Meta de pipeline (opcional)</Label>
                                                     <Input
+                                                        id="mission-target-pipeline"
                                                         type="number"
                                                         min="1"
                                                         value={wizardData.targetPipelineValue}
@@ -790,12 +796,13 @@ export default function AntoniaPage() {
                                 {step === 2 && (
                                     <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
                                         <div className="mb-4 space-y-1">
-                                            <h3 className="text-lg font-medium">Cómo debe trabajar la misión</h3>
+                                            <h2 className="text-lg font-medium">Cómo debe trabajar la misión</h2>
                                             <p className="text-sm text-muted-foreground">Completa solo lo que ayude a ANTONIA a encontrar mejores prospectos y redactar mensajes más precisos.</p>
                                         </div>
                                         <div className="space-y-2">
-                                            <Label>Nombre de la Misión (Opcional)</Label>
+                                            <Label htmlFor="mission-name">Nombre de la Misión (Opcional)</Label>
                                             <Input
+                                                id="mission-name"
                                                 placeholder="Ej. Directores de Operaciones en retail Chile"
                                                 value={wizardData.missionName || ''}
                                                 onChange={(e) => setWizardData({ ...wizardData, missionName: e.target.value })}
@@ -805,10 +812,11 @@ export default function AntoniaPage() {
                                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                             <div className="space-y-2 rounded-2xl border border-border/60 bg-background/60 p-4">
                                                 <div className="space-y-1">
-                                                    <Label>Empresa o cuenta ideal</Label>
+                                                    <Label htmlFor="mission-ideal-customer-profile">Empresa o cuenta ideal</Label>
                                                     <p className="text-xs text-muted-foreground">Describe qué tipo de empresa vale la pena priorizar.</p>
                                                 </div>
                                                 <Textarea
+                                                    id="mission-ideal-customer-profile"
                                                     rows={3}
                                                     placeholder="Ej. Empresas con varias sucursales, alta rotación de personal y necesidad frecuente de reforzar equipos operativos."
                                                     value={wizardData.idealCustomerProfile}
@@ -817,10 +825,11 @@ export default function AntoniaPage() {
                                             </div>
                                             <div className="space-y-2 rounded-2xl border border-border/60 bg-background/60 p-4">
                                                 <div className="space-y-1">
-                                                    <Label>Qué valor quieres destacar</Label>
+                                                    <Label htmlFor="mission-value-proposition">Qué valor quieres destacar</Label>
                                                     <p className="text-xs text-muted-foreground">Resume el beneficio principal que ANTONIA debe usar en el outreach.</p>
                                                 </div>
                                                 <Textarea
+                                                    id="mission-value-proposition"
                                                     rows={3}
                                                     placeholder="Ej. Ayudamos a cubrir dotación más rápido y a reducir la carga operativa con outsourcing flexible."
                                                     value={wizardData.valueProposition}
@@ -830,14 +839,14 @@ export default function AntoniaPage() {
                                         </div>
                                         <div className="space-y-2 rounded-2xl border border-border/60 bg-background/60 p-4">
                                             <div className="space-y-1">
-                                                <Label>Nivel de enriquecimiento</Label>
+                                                <Label htmlFor="mission-enrichment-level">Nivel de enriquecimiento</Label>
                                                 <p className="text-xs text-muted-foreground">Elige cuánta información adicional quieres pedir por lead.</p>
                                             </div>
                                             <Select
                                                 value={wizardData.enrichmentLevel}
                                                 onValueChange={(v) => setWizardData({ ...wizardData, enrichmentLevel: v as 'basic' | 'deep' })}
                                             >
-                                                <SelectTrigger>
+                                                <SelectTrigger id="mission-enrichment-level">
                                                     <SelectValue />
                                                 </SelectTrigger>
                                                 <SelectContent>
@@ -851,10 +860,11 @@ export default function AntoniaPage() {
                                         <div className="space-y-3 rounded-2xl border border-border/60 bg-background/60 p-4">
                                             <div className="flex items-start justify-between gap-4">
                                                 <div className="space-y-1">
-                                                    <Label>Aplicar filtro ICP después del search</Label>
+                                                    <Label htmlFor="mission-apply-icp-filter">Aplicar filtro ICP después del search</Label>
                                                     <p className="text-xs text-muted-foreground">Si lo desactivas, la misión guardará los leads del search sin el segundo filtro de calificación.</p>
                                                 </div>
                                                 <Switch
+                                                    id="mission-apply-icp-filter"
                                                     checked={wizardData.applyIcpFilter}
                                                     onCheckedChange={(checked) => setWizardData({ ...wizardData, applyIcpFilter: checked })}
                                                 />
@@ -867,7 +877,7 @@ export default function AntoniaPage() {
                                         </div>
 
                                         <div className="space-y-4 rounded-2xl border border-border/60 bg-muted/10 p-5">
-                                            <Label className="text-base font-semibold">Límites Diarios de esta Misión</Label>
+                                            <h3 className="text-base font-semibold">Límites Diarios de esta Misión</h3>
                                             <p className="text-xs text-muted-foreground">Define cuánta actividad puede ejecutar la misión cada día. Empieza conservador y luego ajusta.</p>
                                             <div className="grid gap-2 md:grid-cols-4 text-xs">
                                                 <div className="rounded-lg border bg-background p-3"><span className="text-muted-foreground">Búsquedas</span><div className="mt-1 font-medium">{wizardData.dailySearchLimit} / día</div></div>
@@ -876,17 +886,17 @@ export default function AntoniaPage() {
                                                 <div className="rounded-lg border bg-background p-3"><span className="text-muted-foreground">Contacto</span><div className="mt-1 font-medium">{wizardData.dailyContactLimit} / día</div></div>
                                             </div>
 
-                                            <div className="grid grid-cols-2 gap-4">
+                                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                                 <div className="space-y-2">
                                                     <div className="flex items-center gap-2">
-                                                        <Label className="text-sm">Búsquedas por día</Label>
+                                                        <Label htmlFor="mission-daily-search-limit" className="text-sm">Búsquedas por día</Label>
                                                         <TooltipProvider>
-                                                            <Tooltip>
-                                                                <TooltipTrigger asChild>
-                                                                    <div className="cursor-help text-muted-foreground hover:text-primary">
-                                                                        <Bot className="w-3 h-3" />
-                                                                    </div>
-                                                                </TooltipTrigger>
+                                                                <Tooltip>
+                                                                    <TooltipTrigger asChild>
+                                                                    <button type="button" aria-label="Ayuda sobre búsquedas por día" className="cursor-help text-muted-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                                                        <Bot className="w-3 h-3" aria-hidden="true" />
+                                                                    </button>
+                                                                    </TooltipTrigger>
                                                                 <TooltipContent>
                                                                     <p className="max-w-xs">Número de veces que el agente buscará nuevos prospectos en LinkedIn y otras fuentes diariamente.</p>
                                                                 </TooltipContent>
@@ -894,6 +904,7 @@ export default function AntoniaPage() {
                                                         </TooltipProvider>
                                                     </div>
                                                     <Input
+                                                        id="mission-daily-search-limit"
                                                         type="number"
                                                         min="1"
                                                         max="5"
@@ -905,14 +916,14 @@ export default function AntoniaPage() {
 
                                                 <div className="space-y-2">
                                                     <div className="flex items-center gap-2">
-                                                        <Label className="text-sm">Leads a enriquecer</Label>
+                                                        <Label htmlFor="mission-daily-enrich-limit" className="text-sm">Leads a enriquecer</Label>
                                                         <TooltipProvider>
-                                                            <Tooltip>
-                                                                <TooltipTrigger asChild>
-                                                                    <div className="cursor-help text-muted-foreground hover:text-primary">
-                                                                        <Sparkles className="w-3 h-3" />
-                                                                    </div>
-                                                                </TooltipTrigger>
+                                                                <Tooltip>
+                                                                    <TooltipTrigger asChild>
+                                                                    <button type="button" aria-label="Ayuda sobre leads a enriquecer" className="cursor-help text-muted-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                                                        <Sparkles className="w-3 h-3" aria-hidden="true" />
+                                                                    </button>
+                                                                    </TooltipTrigger>
                                                                 <TooltipContent>
                                                                     <p className="max-w-xs">Cantidad máxima de personas cuyos correos electrónicos serán verificados y validados por día.</p>
                                                                 </TooltipContent>
@@ -920,6 +931,7 @@ export default function AntoniaPage() {
                                                         </TooltipProvider>
                                                     </div>
                                                     <Input
+                                                        id="mission-daily-enrich-limit"
                                                         type="number"
                                                         min="1"
                                                         max="50"
@@ -931,14 +943,14 @@ export default function AntoniaPage() {
 
                                                 <div className="space-y-2">
                                                     <div className="flex items-center gap-2">
-                                                        <Label className="text-sm">Leads a investigar</Label>
+                                                        <Label htmlFor="mission-daily-investigate-limit" className="text-sm">Leads a investigar</Label>
                                                         <TooltipProvider>
-                                                            <Tooltip>
-                                                                <TooltipTrigger asChild>
-                                                                    <div className="cursor-help text-muted-foreground hover:text-primary">
-                                                                        <Search className="w-3 h-3" />
-                                                                    </div>
-                                                                </TooltipTrigger>
+                                                                <Tooltip>
+                                                                    <TooltipTrigger asChild>
+                                                                    <button type="button" aria-label="Ayuda sobre leads a investigar" className="cursor-help text-muted-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                                                        <Search className="w-3 h-3" aria-hidden="true" />
+                                                                    </button>
+                                                                    </TooltipTrigger>
                                                                 <TooltipContent>
                                                                     <p className="max-w-xs">Cantidad de perfiles que serán analizados en profundidad (skills, actividad reciente) para personalizar mensajes.</p>
                                                                 </TooltipContent>
@@ -946,6 +958,7 @@ export default function AntoniaPage() {
                                                         </TooltipProvider>
                                                     </div>
                                                     <Input
+                                                        id="mission-daily-investigate-limit"
                                                         type="number"
                                                         min="1"
                                                         max="50"
@@ -957,14 +970,14 @@ export default function AntoniaPage() {
 
                                                 <div className="space-y-2">
                                                     <div className="flex items-center gap-2">
-                                                        <Label className="text-sm">Leads a contactar</Label>
+                                                        <Label htmlFor="mission-daily-contact-limit" className="text-sm">Leads a contactar</Label>
                                                         <TooltipProvider>
-                                                            <Tooltip>
-                                                                <TooltipTrigger asChild>
-                                                                    <div className="cursor-help text-muted-foreground hover:text-primary">
-                                                                        <FileText className="w-3 h-3" />
-                                                                    </div>
-                                                                </TooltipTrigger>
+                                                                <Tooltip>
+                                                                    <TooltipTrigger asChild>
+                                                                    <button type="button" aria-label="Ayuda sobre leads a contactar" className="cursor-help text-muted-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                                                        <FileText className="w-3 h-3" aria-hidden="true" />
+                                                                    </button>
+                                                                    </TooltipTrigger>
                                                                 <TooltipContent>
                                                                     <p className="max-w-xs">Número máximo de correos electrónicos de primer contacto que se enviarán automáticamente por día.</p>
                                                                 </TooltipContent>
@@ -972,6 +985,7 @@ export default function AntoniaPage() {
                                                         </TooltipProvider>
                                                     </div>
                                                     <Input
+                                                        id="mission-daily-contact-limit"
                                                         type="number"
                                                         min="1"
                                                         max="50"
@@ -986,10 +1000,11 @@ export default function AntoniaPage() {
                                         <div className="space-y-4 rounded-2xl border border-border/60 bg-muted/10 p-5">
                                             <div className="flex items-center justify-between">
                                                 <div className="space-y-0.5">
-                                                    <Label>Campaña inteligente</Label>
+                                                    <Label htmlFor="mission-auto-generate-campaign">Campaña inteligente</Label>
                                                     <p className="text-xs text-muted-foreground">Elige si quieres que ANTONIA genere una campaña nueva o la sume a una existente.</p>
                                                 </div>
                                                 <Switch
+                                                    id="mission-auto-generate-campaign"
                                                     checked={wizardData.autoGenerateCampaign}
                                                     onCheckedChange={(c) => setWizardData({ ...wizardData, autoGenerateCampaign: c, campaignName: c ? '' : wizardData.campaignName })}
                                                 />
@@ -999,7 +1014,9 @@ export default function AntoniaPage() {
                                                 <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
                                                     <div className="flex items-center gap-2">
                                                         <Search className="w-4 h-4 text-muted-foreground" />
+                                                        <Label htmlFor="mission-campaign-search" className="sr-only">Buscar campaña existente</Label>
                                                         <Input
+                                                            id="mission-campaign-search"
                                                             placeholder="Buscar campaña existente"
                                                             value={campaignSearch}
                                                             onChange={(e) => setCampaignSearch(e.target.value)}
@@ -1061,8 +1078,9 @@ export default function AntoniaPage() {
 
                                             {wizardData.autoGenerateCampaign && (
                                                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                                                    <Label>Contexto Adicional (Opcional)</Label>
+                                                    <Label htmlFor="mission-campaign-context">Contexto Adicional (Opcional)</Label>
                                                     <Input
+                                                        id="mission-campaign-context"
                                                         placeholder="ej. 'Sé formal y enfócate en ROI'"
                                                         value={wizardData.campaignContext || ''}
                                                         onChange={(e) => setWizardData({ ...wizardData, campaignContext: e.target.value })}
@@ -1075,7 +1093,7 @@ export default function AntoniaPage() {
 
                                 {step === 3 && (
                                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-                                        <h3 className="text-lg font-medium mb-4">Resumen de la Misión</h3>
+                                        <h2 className="mb-4 text-lg font-medium">Resumen de la Misión</h2>
                                         <div className="bg-secondary/30 p-4 rounded-lg border space-y-3">
                                             <div className="flex justify-between">
                                                 <span className="text-muted-foreground">Objetivo:</span>
@@ -1422,12 +1440,12 @@ export default function AntoniaPage() {
 
                                         <div className="grid gap-4 md:grid-cols-2">
                                             <div className="space-y-2">
-                                                <Label>Modo de trabajo</Label>
+                                                <Label htmlFor="autopilot-mode">Modo de trabajo</Label>
                                                 <Select
                                                     value={config?.autopilotMode || 'manual_assist'}
                                                     onValueChange={(value) => handleUpdateConfig('autopilotMode', value)}
                                                 >
-                                                    <SelectTrigger>
+                                                    <SelectTrigger id="autopilot-mode">
                                                         <SelectValue placeholder="Selecciona modo" />
                                                     </SelectTrigger>
                                                     <SelectContent>
@@ -1438,12 +1456,12 @@ export default function AntoniaPage() {
                                                 </Select>
                                             </div>
                                             <div className="space-y-2">
-                                                <Label>Política de aprobación</Label>
+                                                <Label htmlFor="approval-mode">Política de aprobación</Label>
                                                 <Select
                                                     value={config?.approvalMode || 'low_score_only'}
                                                     onValueChange={(value) => handleUpdateConfig('approvalMode', value)}
                                                 >
-                                                    <SelectTrigger>
+                                                    <SelectTrigger id="approval-mode">
                                                         <SelectValue placeholder="Selecciona política" />
                                                     </SelectTrigger>
                                                     <SelectContent>
@@ -1465,16 +1483,18 @@ export default function AntoniaPage() {
                                     </CardHeader>
                                     <CardContent className="space-y-5">
                                         <div className="space-y-3">
-                                            <Label>Emails de notificación</Label>
+                                            <Label htmlFor="notification-email">Emails de notificación</Label>
                                             <div className="flex gap-2">
                                                 <Input
+                                                    id="notification-email"
+                                                    type="email"
                                                     placeholder="equipo@empresa.com"
                                                     value={newEmail}
                                                     onChange={(e) => setNewEmail(e.target.value)}
                                                     onKeyDown={(e) => e.key === 'Enter' && handleAddEmail()}
                                                 />
-                                                <Button onClick={handleAddEmail} size="icon" className="shadow-none">
-                                                    <Plus className="w-4 h-4" />
+                                                <Button type="button" onClick={handleAddEmail} size="icon" className="shadow-none" aria-label="Agregar email de notificación">
+                                                    <Plus className="w-4 h-4" aria-hidden="true" />
                                                 </Button>
                                             </div>
                                             <div className="space-y-2 rounded-2xl border border-border/60 bg-background/70 p-3">
@@ -1482,12 +1502,14 @@ export default function AntoniaPage() {
                                                     <div key={email} className="flex items-center justify-between gap-3 rounded-xl bg-background px-3 py-2">
                                                         <span className="truncate text-sm">{email}</span>
                                                         <Button
+                                                            type="button"
                                                             variant="ghost"
                                                             size="sm"
                                                             onClick={() => handleRemoveEmail(email)}
                                                             className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                                                            aria-label={`Eliminar ${email}`}
                                                         >
-                                                            <Trash2 className="w-4 h-4" />
+                                                            <Trash2 className="w-4 h-4" aria-hidden="true" />
                                                         </Button>
                                                     </div>
                                                 )) : <div className="px-1 py-2 text-sm text-muted-foreground">No hay emails configurados.</div>}

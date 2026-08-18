@@ -12,6 +12,14 @@ export type SendEmailInput = {
   bcc?: string[];
   requestReceipts?: boolean;
   attachments?: Array<{ name: string; contentBytes: string; contentType?: string }>;
+  leadId?: string;
+  researchSnapshotId?: string | null;
+  idempotencyKey: string;
+  trackingId?: string;
+  tracking?: {
+    pixel?: boolean;
+    linkTracking?: boolean;
+  };
 };
 
 export type SendEmailResult = {
@@ -58,33 +66,41 @@ async function graphFetch(input: string, init?: RequestInit, needRead = false) {
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const sig = await emailSignatureStorage.get('outlook');
   const finalHtml = applySignatureHTML(input.htmlBody, sig?.html);
-  const token = await microsoftAuthService.getSendToken();
-
-  const res = await fetch('/api/outlook/send', {
+  if (input.attachments?.length) {
+    throw new Error('Los adjuntos todavia no estan disponibles en el envio idempotente de Outlook.');
+  }
+  if (input.cc?.length || input.bcc?.length) {
+    throw new Error('CC y BCC todavia no estan disponibles en el envio idempotente de Outlook.');
+  }
+  const res = await fetch('/api/providers/send', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
+      provider: 'outlook',
       to: input.to,
       subject: input.subject,
-      body: finalHtml,
-      isHtml: true,
-      attachments: input.attachments || [],
-      requestReceipts: !!input.requestReceipts,
+      htmlBody: finalHtml,
+      leadId: input.leadId,
+      researchSnapshotId: input.researchSnapshotId,
+      idempotencyKey: input.idempotencyKey,
+      trackingId: input.trackingId,
+      tracking: input.tracking,
+      requestReceipts: Boolean(input.requestReceipts),
     }),
   });
 
   const payload = await res.json().catch(() => ({}));
-  if (!res.ok || !payload?.ok) {
+  if (!res.ok || !payload?.success) {
     throw new Error(payload?.error || payload?.graph?.error?.message || `Outlook send failed (${res.status})`);
   }
 
+  const providerResponse = payload?.receipt?.providerResponse || {};
   return {
-    messageId: payload?.messageId || `sentmail:${Date.now()}`,
-    internetMessageId: payload?.internetMessageId,
-    conversationId: payload?.conversationId,
+    messageId: payload?.receipt?.providerMessageId || providerResponse?.messageId || providerResponse?.id,
+    internetMessageId: providerResponse?.internetMessageId,
+    conversationId: providerResponse?.conversationId,
   };
 }
 

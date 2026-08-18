@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { DEFAULT_DAILY_QUOTA_LIMITS } from '@/lib/daily-quota-limits';
 
 // Use a service role client for reliable quota updates (bypassing RLS if needed for atomic increments)
 // or standard client if we trust RLS. For atomic increments via RPC + security definer, service role is safest or
@@ -31,6 +32,296 @@ export type DailyQuotaResult = {
   resetAtISO: string;
 };
 
+export type EnrichmentQuotaOperationStatus = 'claimed' | 'submitted' | 'completed' | 'failed';
+
+export type EnrichmentQuotaOperationClaim = DailyQuotaResult & {
+  operationId: string;
+  status: EnrichmentQuotaOperationStatus;
+  claimed: boolean;
+  reused: boolean;
+  claimToken: string | null;
+  providerState: 'not_started' | 'processing' | 'unknown' | 'completed' | 'failed';
+  consumed: number;
+  responseStatus: number | null;
+  responsePayload: Record<string, unknown> | null;
+};
+
+function parseEnrichmentQuotaOperationResult(
+  result: Record<string, any>,
+  operationId: string,
+  reused: boolean,
+): EnrichmentQuotaOperationClaim {
+  const status = String(result.status || '') as EnrichmentQuotaOperationStatus;
+  const count = Number(result.count ?? result.quota_count_after);
+  const limit = Number(result.limit ?? result.quota_limit);
+  const providerState = String(result.provider_state || (
+    status === 'claimed'
+      ? 'not_started'
+      : status === 'submitted'
+        ? 'processing'
+        : status === 'completed'
+          ? 'completed'
+          : 'failed'
+  ));
+  if (typeof result.allowed !== 'boolean'
+    || !['claimed', 'submitted', 'completed', 'failed'].includes(status)
+    || !['not_started', 'processing', 'unknown', 'completed', 'failed'].includes(providerState)
+    || !Number.isFinite(count)
+    || !Number.isFinite(limit)) {
+    throw new Error('Invalid enrichment quota operation response');
+  }
+
+  const responsePayload = result.response_payload;
+  const responseStatus = Number(result.response_status);
+  return {
+    allowed: result.allowed,
+    count,
+    limit,
+    dayKey: String(result.day_key || result.quota_day || todayKeyUTC()),
+    resetAtISO: nextDayStartISOUTC(),
+    operationId,
+    status,
+    claimed: Boolean(result.claimed),
+    reused,
+    claimToken: typeof result.claim_token === 'string' ? result.claim_token : null,
+    providerState: providerState as EnrichmentQuotaOperationClaim['providerState'],
+    consumed: Math.max(0, Number(result.consumed ?? result.consumed_count ?? 0)),
+    responseStatus: Number.isInteger(responseStatus) && responseStatus >= 100 && responseStatus <= 599
+      ? responseStatus
+      : null,
+    responsePayload: responsePayload && typeof responsePayload === 'object' && !Array.isArray(responsePayload)
+      ? responsePayload as Record<string, unknown>
+      : null,
+  };
+}
+
+export async function getEnrichmentQuotaOperation(params: {
+  userId: string;
+  organizationId: string;
+  resource: 'enrich' | 'investigate';
+  operationId: string;
+  requestFingerprint: string;
+}) {
+  const { data, error } = await getSupabaseAdmin()
+    .from('antonia_quota_operations')
+    .select('request_fingerprint, quota_allowed, quota_count_after, quota_limit, quota_day, consumed_count, status, claimed_at, submitted_at, response_status, response_payload')
+    .eq('organization_id', params.organizationId)
+    .eq('user_id', params.userId)
+    .eq('resource', params.resource)
+    .eq('operation_id', params.operationId)
+    .maybeSingle();
+  if (error) throw error;
+  const operation = data as Record<string, any> | null;
+  if (!operation) return null;
+  if (String(operation.request_fingerprint || '') !== params.requestFingerprint) {
+    throw new Error('operation id was already used for a different enrichment request');
+  }
+  // Quota denials may become claimable after reset or a limit change; the atomic RPC decides that case.
+  if (!operation.quota_allowed && Number(operation.response_status) === 429) return null;
+  const claimedAt = Date.parse(String(operation.claimed_at || ''));
+  if (operation.status === 'claimed' && Number.isFinite(claimedAt) && claimedAt < Date.now() - 300_000) {
+    return null;
+  }
+
+  const submittedAt = Date.parse(String(operation.submitted_at || ''));
+  const providerState = operation.status === 'submitted'
+    ? (Number.isFinite(submittedAt) && submittedAt < Date.now() - 300_000 ? 'unknown' : 'processing')
+    : undefined;
+  return parseEnrichmentQuotaOperationResult({
+    ...operation,
+    allowed: Boolean(operation.quota_allowed),
+    claimed: false,
+    provider_state: providerState,
+  }, params.operationId, true);
+}
+
+type EnrichmentQuotaOperationIdentity = {
+  userId: string;
+  organizationId: string;
+  resource: 'enrich' | 'investigate';
+  operationId: string;
+  claimToken: string;
+};
+
+export async function claimEnrichmentQuotaOperation(params: {
+  userId: string;
+  organizationId?: string;
+  resource: 'enrich' | 'investigate';
+  operationId: string;
+  requestFingerprint: string;
+  limit: number;
+  count: number;
+  staleAfterSeconds?: number;
+}): Promise<EnrichmentQuotaOperationClaim> {
+  const userId = String(params.userId || '').trim();
+  const operationId = String(params.operationId || '').trim();
+  const requestFingerprint = String(params.requestFingerprint || '').trim().toLowerCase();
+  const requestedCount = Math.trunc(Number(params.count));
+  if (!userId || !operationId || operationId.length > 200 || !/^[0-9a-f]{64}$/.test(requestFingerprint)) {
+    throw new Error('Invalid enrichment quota operation identity');
+  }
+  if (!Number.isFinite(requestedCount) || requestedCount <= 0) {
+    throw new Error('Invalid enrichment quota operation count');
+  }
+
+  const organizationId = await resolveOrganizationIdForQuota(userId, params.organizationId);
+  const quota = await resolveUserScopedQuotaContext({
+    userId,
+    fallbackLimit: Math.max(0, Number(params.limit) || 0),
+    resource: params.resource,
+  });
+  const { data, error } = await (getSupabaseAdmin() as any).rpc('claim_antonia_quota_operation_v1', {
+    p_organization_id: organizationId,
+    p_user_id: userId,
+    p_scope: quota.scope,
+    p_resource: params.resource,
+    p_operation_id: operationId,
+    p_request_fingerprint: requestFingerprint,
+    p_requested_count: requestedCount,
+    p_limit: quota.limit,
+    p_stale_after_seconds: Math.max(60, Math.trunc(Number(params.staleAfterSeconds) || 300)),
+  });
+  if (error) throw error;
+
+  const result = data as Record<string, any> | null;
+  if (!result) {
+    throw new Error('Invalid enrichment quota operation claim response');
+  }
+  return parseEnrichmentQuotaOperationResult(result, operationId, Boolean(result.reused));
+}
+
+export async function markEnrichmentQuotaOperationSubmitted(params: EnrichmentQuotaOperationIdentity) {
+  const { data, error } = await (getSupabaseAdmin() as any).rpc('mark_antonia_quota_operation_submitted_v1', {
+    p_organization_id: params.organizationId,
+    p_user_id: params.userId,
+    p_resource: params.resource,
+    p_operation_id: params.operationId,
+    p_claim_token: params.claimToken,
+  });
+  if (error) throw error;
+  if (data !== true) throw new Error('Enrichment quota operation is no longer owned');
+}
+
+export async function completeEnrichmentQuotaOperation(params: EnrichmentQuotaOperationIdentity & {
+  status: Extract<EnrichmentQuotaOperationStatus, 'completed' | 'failed'>;
+  responseStatus: number;
+  responsePayload: Record<string, unknown>;
+}) {
+  const { data, error } = await (getSupabaseAdmin() as any).rpc('complete_antonia_quota_operation_v1', {
+    p_organization_id: params.organizationId,
+    p_user_id: params.userId,
+    p_resource: params.resource,
+    p_operation_id: params.operationId,
+    p_claim_token: params.claimToken,
+    p_status: params.status,
+    p_response_status: params.responseStatus,
+    p_response_payload: params.responsePayload,
+  });
+  if (error) throw error;
+  if (data !== true) throw new Error('Enrichment quota operation completion lost its claim');
+}
+
+export async function releaseEnrichmentQuotaOperation(params: EnrichmentQuotaOperationIdentity) {
+  const { data, error } = await (getSupabaseAdmin() as any).rpc('release_antonia_quota_operation_v1', {
+    p_organization_id: params.organizationId,
+    p_user_id: params.userId,
+    p_resource: params.resource,
+    p_operation_id: params.operationId,
+    p_claim_token: params.claimToken,
+  });
+  if (error) throw error;
+  return data === true;
+}
+
+export async function getContactQuotaUsage(params: { userId: string; organizationId?: string; limit: number }) {
+  const organizationId = await resolveOrganizationIdForQuota(params.userId, params.organizationId);
+  const quota = await resolveContactQuotaContext({ userId: params.userId, fallbackLimit: params.limit });
+  const dayKey = todayKeyUTC();
+  const historicalCount = await countContactsToday({
+    userId: params.userId,
+    organizationId,
+    dayKey,
+    scope: quota.scope,
+  });
+  const scopeKey = `${quota.scope}:${quota.scope === 'user' ? params.userId : organizationId}`;
+  const { data: bucket, error: bucketError } = await getSupabaseAdmin()
+    .from('outbound_contact_quota_buckets')
+    .select('baseline_count, reservation_count')
+    .eq('scope_key', scopeKey)
+    .eq('quota_day', dayKey)
+    .maybeSingle();
+  if (bucketError && !isMissingOutboundQuotaBucketsTable(bucketError)) throw bucketError;
+  const bucketRow = bucket as { baseline_count: number; reservation_count: number } | null;
+  const count = bucketRow
+    ? Math.max(0, Number(bucketRow.baseline_count || 0)) + Math.max(0, Number(bucketRow.reservation_count || 0))
+    : historicalCount;
+  return { organizationId, scope: quota.scope, historicalCount, count, limit: quota.limit };
+}
+
+export async function reserveOutboundContactQuota(params: {
+  dispatchId: string;
+  userId: string;
+  organizationId?: string;
+  limit: number;
+}) {
+  const dispatchId = String(params.dispatchId || '').trim();
+  const userId = String(params.userId || '').trim();
+  const requestedOrganizationId = String(params.organizationId || '').trim() || undefined;
+  if (!dispatchId || !userId) throw new Error('Dispatch and user are required for quota reservation');
+
+  const { data: dispatch, error: dispatchError } = await getSupabaseAdmin()
+    .from('outbound_dispatches')
+    .select('organization_id, user_id, status')
+    .eq('id', dispatchId)
+    .maybeSingle();
+  if (dispatchError) throw dispatchError;
+  const dispatchRow = dispatch as { organization_id: string; user_id: string; status: string } | null;
+  if (!dispatchRow || !['sending', 'failed'].includes(String(dispatchRow.status))) {
+    throw new Error(`Outbound dispatch ${dispatchId} is not available for quota reservation`);
+  }
+  if (String(dispatchRow.user_id) !== userId) {
+    throw new Error('Quota reservation user does not match outbound dispatch');
+  }
+  if (requestedOrganizationId && String(dispatchRow.organization_id) !== requestedOrganizationId) {
+    throw new Error('Quota reservation organization does not match outbound dispatch');
+  }
+
+  if (dispatchRow.status === 'failed') {
+    const { data: reservation, error: reservationError } = await getSupabaseAdmin()
+      .from('outbound_quota_reservations')
+      .select('organization_id, user_id')
+      .eq('dispatch_id', dispatchId)
+      .maybeSingle();
+    if (reservationError) throw reservationError;
+    const reservationRow = reservation as { organization_id: string; user_id: string } | null;
+    if (!reservationRow
+      || String(reservationRow.user_id) !== userId
+      || String(reservationRow.organization_id) !== String(dispatchRow.organization_id)) {
+      throw new Error(`Outbound dispatch ${dispatchId} has no matching quota reservation`);
+    }
+  }
+
+  const usage = await getContactQuotaUsage(params);
+  if (String(dispatchRow.organization_id) !== usage.organizationId) {
+    throw new Error('Resolved quota organization does not match outbound dispatch');
+  }
+  const { data, error } = await (getSupabaseAdmin() as any).rpc('reserve_outbound_contact_quota_v1', {
+    p_dispatch_id: dispatchId,
+    p_organization_id: usage.organizationId,
+    p_user_id: userId,
+    p_scope: usage.scope,
+    p_limit: usage.limit,
+    p_base_count: usage.historicalCount,
+  });
+  if (error) throw error;
+  const reservation = data as { allowed?: boolean; count?: number; limit?: number } | null;
+  return {
+    allowed: Boolean(reservation?.allowed),
+    count: Number(reservation?.count ?? usage.historicalCount),
+    limit: Number(reservation?.limit || usage.limit),
+  };
+}
+
 export type EffectiveDailyQuotaLimits = {
   leadSearch: number;
   enrich: number;
@@ -38,29 +329,21 @@ export type EffectiveDailyQuotaLimits = {
   contact: number;
 };
 
-// Map 'resource' string to database column name
 const RESOURCE_TO_COLUMN: Record<string, string> = {
   'leadSearch': 'leads_searched',
   'enrich': 'leads_enriched',
-  'research': 'leads_investigated', // legacy mapping
-  'contact': 'contacted_leads',     // Note: contact is special, might check another table? 
-  // For now, let's assume we track contacts in usage table too.
-  // But 'checkAndConsume' logic implies we increment usage table.
-  // Let's assume there is a 'leads_contacted' or similar?
-  // Looking at 'antonia_daily_usage' columns from 'create_atomic_quota_function.sql':
-  // leads_searched, search_runs, leads_enriched, leads_investigated. 
-  // NO 'contacts' column in usage table?
-  // Wait, 'contacted_leads' is a separate table.
-  // For simplicity and unification, we should probably add 'leads_contacted' to usage table 
-  // or handle 'contact' resource differently (query count).
-  // Given the 'quota/route.ts' counts from 'contacted_leads' table directly, 
-  // consuming 'contact' quota here strictly updates the Usage Table or just checks?
-  // If we want to unify, let's treat 'contact' as 'leads_contacted' (if it existed) 
-  // OR just return "allowed" based on limits without incrementing if we rely on DB inserts elsewhere.
-  // BUT, 'leads/route.ts' calls 'checkAndConsume'.
-  // We'll stick to 'leads_searched' etc.
-  // If unknown resource, we might error or fallback.
+  'investigate': 'leads_investigated',
+  'research': 'leads_investigated',
 };
+
+type AtomicDailyQuotaResource = 'leadSearch' | 'search' | 'enrich' | 'investigate' | 'research';
+const ATOMIC_DAILY_QUOTA_RESOURCES = new Set<AtomicDailyQuotaResource>([
+  'leadSearch',
+  'search',
+  'enrich',
+  'investigate',
+  'research',
+]);
 
 function todayKeyUTC(): string {
   return new Date().toISOString().slice(0, 10);
@@ -84,6 +367,7 @@ async function resolveOrganizationIdForQuota(userId: string, organizationId?: st
     .from('organization_members')
     .select('organization_id')
     .eq('user_id', userId)
+    .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle();
 
@@ -92,35 +376,6 @@ async function resolveOrganizationIdForQuota(userId: string, organizationId?: st
   const resolvedOrgId = (data as { organization_id?: string } | null)?.organization_id;
   if (!resolvedOrgId) throw new Error(`User ${userId} has no organization for quota`);
   return resolvedOrgId;
-}
-
-async function resolveMissionQuotaDefaults(organizationId: string): Promise<EffectiveDailyQuotaLimits> {
-  try {
-    const { data, error } = await getSupabaseAdmin()
-      .from('antonia_missions')
-      .select('daily_search_limit, daily_enrich_limit, daily_investigate_limit, daily_contact_limit')
-      .eq('organization_id', organizationId)
-      .eq('status', 'active')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) throw error;
-
-    return {
-      leadSearch: positiveInt((data as any)?.daily_search_limit, 3),
-      enrich: positiveInt((data as any)?.daily_enrich_limit, 10),
-      research: positiveInt((data as any)?.daily_investigate_limit, 5),
-      contact: positiveInt((data as any)?.daily_contact_limit, 3),
-    };
-  } catch {
-    return {
-      leadSearch: 3,
-      enrich: 10,
-      research: 5,
-      contact: 3,
-    };
-  }
 }
 
 type ContactQuotaContext = {
@@ -137,12 +392,7 @@ type UserScopedQuotaContext = {
 
 function readQuotaLimitOverride(value: any, resource: UserScopedQuotaResource) {
   const overrideKey = resource === 'research' ? 'daily_investigate_limit' : `daily_${resource}_limit`;
-  const limit = Number(
-    value?.[overrideKey]
-    || value?.quota_overrides?.[overrideKey]
-    || value?.antonia?.[overrideKey]
-    || 0
-  );
+  const limit = Number(value?.[overrideKey] ?? 0);
   return Number.isFinite(limit) && limit > 0 ? limit : 0;
 }
 
@@ -152,12 +402,20 @@ function isMissingUserQuotaOverridesTable(error: any) {
   return code === 'PGRST205' || message.includes("could not find the table 'public.user_quota_overrides'");
 }
 
+function isMissingOutboundQuotaBucketsTable(error: any) {
+  const code = String(error?.code || '').trim();
+  const message = String(error?.message || '').toLowerCase();
+  return code === 'PGRST205'
+    && message.includes("could not find the table 'public.outbound_contact_quota_buckets'");
+}
+
 async function resolveUserScopedQuotaContext(params: { userId: string; fallbackLimit: number; resource: UserScopedQuotaResource }) {
   const { userId, fallbackLimit, resource } = params;
   let overrideRow: any = null;
+  const overrideColumn = resource === 'research' ? 'daily_investigate_limit' : `daily_${resource}_limit`;
   const { data, error } = await getSupabaseAdmin()
     .from('user_quota_overrides')
-    .select('*')
+    .select(overrideColumn)
     .eq('user_id', userId)
     .maybeSingle();
 
@@ -167,17 +425,7 @@ async function resolveUserScopedQuotaContext(params: { userId: string; fallbackL
     overrideRow = data;
   }
 
-  let overrideLimit = readQuotaLimitOverride(overrideRow, resource);
-  if (overrideLimit === 0) {
-    const { data: profile, error: profileError } = await getSupabaseAdmin()
-      .from('profiles')
-      .select('signatures')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (profileError) throw profileError;
-    overrideLimit = readQuotaLimitOverride((profile as { signatures?: any } | null)?.signatures, resource);
-  }
+  const overrideLimit = readQuotaLimitOverride(overrideRow, resource);
 
   if (Number.isFinite(overrideLimit) && overrideLimit > 0) {
     return { limit: overrideLimit, scope: 'user' } satisfies UserScopedQuotaContext;
@@ -194,25 +442,26 @@ async function resolveContactQuotaContext(params: { userId: string; fallbackLimi
 }
 
 export async function getEffectiveDailyQuotaLimits(params: { userId: string; organizationId?: string }): Promise<EffectiveDailyQuotaLimits> {
-  const organizationId = await resolveOrganizationIdForQuota(params.userId, params.organizationId);
-  const missionDefaults = await resolveMissionQuotaDefaults(organizationId);
+  // A mission controls its own automated work, not the account allowance shown
+  // across the workspace. Resolve membership here so invalid callers still fail closed.
+  await resolveOrganizationIdForQuota(params.userId, params.organizationId);
   const enrichQuota = await resolveUserScopedQuotaContext({
     userId: params.userId,
-    fallbackLimit: missionDefaults.enrich,
+    fallbackLimit: DEFAULT_DAILY_QUOTA_LIMITS.enrich,
     resource: 'enrich',
   });
   const researchQuota = await resolveUserScopedQuotaContext({
     userId: params.userId,
-    fallbackLimit: missionDefaults.research,
+    fallbackLimit: DEFAULT_DAILY_QUOTA_LIMITS.research,
     resource: 'investigate',
   });
   const contactQuota = await resolveContactQuotaContext({
     userId: params.userId,
-    fallbackLimit: missionDefaults.contact,
+    fallbackLimit: DEFAULT_DAILY_QUOTA_LIMITS.contact,
   });
 
   return {
-    leadSearch: missionDefaults.leadSearch,
+    leadSearch: DEFAULT_DAILY_QUOTA_LIMITS.leadSearch,
     enrich: enrichQuota.limit,
     research: researchQuota.limit,
     contact: contactQuota.limit,
@@ -255,6 +504,31 @@ async function countUserLeadQuotaEventsToday(params: {
   return count || 0;
 }
 
+async function getUserLeadQuotaUsageToday(params: {
+  userId: string;
+  organizationId: string;
+  dayKey: string;
+  resource: Exclude<UserScopedQuotaResource, 'contact' | 'research'>;
+}) {
+  const { data, error } = await getSupabaseAdmin()
+    .from('antonia_user_daily_usage')
+    .select('usage_count')
+    .eq('organization_id', params.organizationId)
+    .eq('user_id', params.userId)
+    .eq('date', params.dayKey)
+    .eq('resource', params.resource)
+    .maybeSingle();
+
+  if (error) throw error;
+  const bucket = data as { usage_count?: number } | null;
+  if (bucket) return Math.max(0, Number(bucket.usage_count || 0));
+
+  return countUserLeadQuotaEventsToday({
+    ...params,
+    scope: 'user',
+  });
+}
+
 export async function getUserScopedAntoniaQuotaStatus(params: {
   userId: string;
   organizationId?: string;
@@ -271,22 +545,20 @@ export async function getUserScopedAntoniaQuotaStatus(params: {
   });
 
   if (params.resource === 'contact') {
-    const used = await countContactsToday({
+    const { count: used } = await getContactQuotaUsage({
       userId: params.userId,
       organizationId: orgId,
-      dayKey,
-      scope: quota.scope,
+      limit: params.limit,
     });
     return { allowed: used < quota.limit, count: used, limit: quota.limit, dayKey, resetAtISO: nextDayStartISOUTC() };
   }
 
   const used = quota.scope === 'user'
-    ? await countUserLeadQuotaEventsToday({
+    ? await getUserLeadQuotaUsageToday({
       userId: params.userId,
       organizationId: orgId,
       dayKey,
       resource: params.resource,
-      scope: quota.scope,
     })
     : Math.max(0, Number(params.organizationCount || 0));
 
@@ -299,100 +571,68 @@ export async function getUserScopedAntoniaQuotaStatus(params: {
   };
 }
 
-/**
- * Checks and consumes daily quota using Supabase.
- * Now requires organizationId instead of just userId for the DB lookup.
- * Backward compatibility: If userId is passed, we must resolve orgId.
- */
 export async function checkAndConsumeDailyQuota(
-  params: { userId: string; organizationId?: string; resource: string; limit: number; count?: number }
+  params: {
+    userId: string;
+    organizationId?: string;
+    resource: string;
+    limit: number;
+    count?: number;
+  }
 ): Promise<DailyQuotaResult> {
   const { userId, resource, limit, count = 1 } = params;
   const orgId = await resolveOrganizationIdForQuota(userId, params.organizationId);
-
   const date = todayKeyUTC();
 
-  // Decide which column to increment
-  let col = RESOURCE_TO_COLUMN[resource];
-
-  // Special handling for 'contact' if column doesn't exist in usage table
-  // The RPC `increment_daily_usage` supports: p_leads_searched, p_search_runs, p_leads_enriched, p_leads_investigated.
-  // It does NOT support contacts. 
-  // Warning: If resource is 'contact', we currently can't track it in `antonia_daily_usage` via this RPC.
-  // However, `contacted_leads` table is the source of truth for contacts.
-  // So 'consuming' contact quota might just mean "Check if we are over limit" and rely on the caller to insert into contacted_leads?
-  // OR we can add a column. For now, let's map 'contact' to a no-op increment or fail safe.
-  // Actually, leads/route.ts calls this for 'contact' resource. 
-  // Recommendation: Add `leads_contacted` to `antonia_daily_usage` and RPC.
-  // For now, I will map it to `leads_searched` just to not break compiling, but COMMENTED OUT and throwing error or handling gracefully?
-  // Better approach: If resource is 'contact', check limits against `contacted_leads` table count.
-
   if (resource === 'contact') {
-    const contactQuota = await resolveContactQuotaContext({ userId, fallbackLimit: limit });
-    const used = await countContactsToday({ userId, organizationId: orgId, dayKey: date, scope: contactQuota.scope });
+    const contactQuota = await getContactQuotaUsage({ userId, organizationId: orgId, limit });
+    const used = contactQuota.count;
 
     if (used + count > contactQuota.limit) {
       return { allowed: false, count: used, limit: contactQuota.limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
     }
 
-    // We don't "increment" a counter table for contacts, we assume the caller will insert a row in contacted_leads.
-    // So we return allowed.
     return { allowed: true, count: used + count, limit: contactQuota.limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
   }
 
-  if (!col) {
-    // Fallback or error?
-    // Maybe 'search' -> 'leads_searched'?
-    if (resource === 'search') col = 'search_runs';
-    else throw new Error(`Unknown quota resource: ${resource}`);
+  if (!ATOMIC_DAILY_QUOTA_RESOURCES.has(resource as AtomicDailyQuotaResource)) {
+    throw new Error(`Unknown quota resource: ${resource}`);
   }
 
-  // Prepare RPC params
-  const rpcParams: any = {
+  const atomicResource = resource as AtomicDailyQuotaResource;
+  let effectiveLimit = Math.max(0, Number(limit) || 0);
+
+  const quota = atomicResource === 'enrich' || atomicResource === 'investigate' || atomicResource === 'research'
+    ? await resolveUserScopedQuotaContext({
+      userId,
+      fallbackLimit: effectiveLimit,
+      resource: atomicResource,
+    })
+    : { limit: effectiveLimit, scope: 'organization' as const };
+  effectiveLimit = quota.limit;
+
+  const { data, error } = await (getSupabaseAdmin() as any).rpc('consume_antonia_daily_quota_v1', {
     p_organization_id: orgId,
-    p_date: date
-  };
+    p_user_id: userId,
+    p_scope: quota.scope,
+    p_resource: atomicResource,
+    p_requested_count: count,
+    p_limit: quota.limit,
+  });
+  if (error) throw error;
 
-  // Dynamic param based on resource
-  // p_leads_searched, p_search_runs, etc.
-  if (col === 'leads_searched') rpcParams.p_leads_searched = count;
-  if (col === 'leads_enriched') rpcParams.p_leads_enriched = count;
-  if (col === 'leads_investigated') rpcParams.p_leads_investigated = count;
-  if (col === 'search_runs') rpcParams.p_search_runs = count;
-
-  try {
-    // First, CHECK current usage (optimistic check) to avoid RPC overhead if already blocked?
-    // OR rely on RPC to fail/return? The current RPC `increment_daily_usage` just increments, it doesn't check limit.
-    // So we must READ first.
-
-    const { data: usage } = await getSupabaseAdmin()
-      .from('antonia_daily_usage')
-      .select(col)
-      .eq('organization_id', orgId)
-      .eq('date', date)
-      .maybeSingle();
-
-    const current = usage ? (usage as any)[col] || 0 : 0;
-
-    if (current + count > limit) {
-      return { allowed: false, count: current, limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
-    }
-
-    // Execute Increment
-    const { error: rpcError } = await getSupabaseAdmin().rpc('increment_daily_usage', rpcParams);
-
-    if (rpcError) {
-      console.error('Quota RPC error:', rpcError);
-      // Fail open or closed? Fail closed for safety.
-      throw rpcError;
-    }
-
-    return { allowed: true, count: current + count, limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
-
-  } catch (err) {
-    console.error('Quota check failed:', err);
-    return { allowed: false, count: -1, limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
+  const result = data as { allowed?: boolean; count?: number; limit?: number } | null;
+  if (!result || typeof result.allowed !== 'boolean' || !Number.isFinite(Number(result.count))) {
+    throw new Error('Invalid atomic quota response');
   }
+
+  return {
+    allowed: result.allowed,
+    count: Number(result.count),
+    limit: Number(result.limit ?? quota.limit),
+    dayKey: date,
+    resetAtISO: nextDayStartISOUTC(),
+  };
 }
 
 export async function getDailyQuotaStatus(
@@ -411,9 +651,37 @@ export async function getDailyQuotaStatus(
 
   if (resource === 'contact') {
     try {
-      const contactQuota = await resolveContactQuotaContext({ userId, fallbackLimit: limit });
-      const used = await countContactsToday({ userId, organizationId: orgId, dayKey: date, scope: contactQuota.scope });
+      const contactQuota = await getContactQuotaUsage({ userId, organizationId: orgId, limit });
+      const used = contactQuota.count;
       return { allowed: used < contactQuota.limit, count: used, limit: contactQuota.limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
+    } catch {
+      return { allowed: false, count: 0, limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
+    }
+  }
+
+  const userScopedResource = resource === 'research' ? 'investigate' : resource;
+  if (userScopedResource === 'enrich' || userScopedResource === 'investigate') {
+    try {
+      const quota = await resolveUserScopedQuotaContext({
+        userId,
+        fallbackLimit: limit,
+        resource: userScopedResource,
+      });
+      if (quota.scope === 'user') {
+        const count = await getUserLeadQuotaUsageToday({
+          userId,
+          organizationId: orgId,
+          dayKey: date,
+          resource: userScopedResource,
+        });
+        return {
+          allowed: count < quota.limit,
+          count,
+          limit: quota.limit,
+          dayKey: date,
+          resetAtISO: nextDayStartISOUTC(),
+        };
+      }
     } catch {
       return { allowed: false, count: 0, limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
     }

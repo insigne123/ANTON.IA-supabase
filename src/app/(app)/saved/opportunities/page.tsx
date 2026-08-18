@@ -6,6 +6,8 @@ import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { JobOpportunity, LeadFromApollo, EnrichedOppLead } from '@/lib/types';
 import { savedOpportunitiesStorage } from '@/lib/services/opportunities-service';
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
@@ -16,13 +18,15 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useRouter } from 'next/navigation';
 import { toCsv, downloadCsv } from '@/lib/csv';
-import { Download } from 'lucide-react';
+import { AlertCircle, Download, Search } from 'lucide-react';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
 
 export default function SavedOpportunitiesPage() {
     const { toast } = useToast();
     const router = useRouter();
     const [opps, setOpps] = useState<JobOpportunity[]>([]);
+    const [loadingOpps, setLoadingOpps] = useState(true);
+    const [loadError, setLoadError] = useState('');
 
     const [leadTitles, setLeadTitles] = useState('Head of Talent, HR Manager, Recruiting Lead');
     const [personLocations, setPersonLocations] = useState('');
@@ -56,7 +60,27 @@ export default function SavedOpportunitiesPage() {
     };
 
     useEffect(() => {
-        savedOpportunitiesStorage.get().then(setOpps);
+        let active = true;
+
+        async function loadOpportunities() {
+            setLoadingOpps(true);
+            setLoadError('');
+            try {
+                const saved = await savedOpportunitiesStorage.get();
+                if (!active) return;
+                setOpps(saved);
+            } catch (error) {
+                console.error('[saved/opportunities] Load failed:', error);
+                if (!active) return;
+                setOpps([]);
+                setLoadError('No pudimos cargar tus oportunidades guardadas. Intenta actualizar la vista en unos segundos.');
+            } finally {
+                if (active) setLoadingOpps(false);
+            }
+        }
+
+        loadOpportunities();
+        return () => { active = false; };
     }, []);
 
     const handleExportCsv = async () => {
@@ -117,7 +141,8 @@ export default function SavedOpportunitiesPage() {
             if (!r.ok) throw new Error(j?.error || 'No se pudo buscar empresas');
             setOrgCandidates(j.candidates || []);
         } catch (e: any) {
-            toast({ variant: 'destructive', title: 'Error', description: e.message || 'Falló la búsqueda de empresas' });
+            console.error('[saved/opportunities] Company lookup failed:', e);
+            toast({ title: 'No se pudo buscar la empresa', description: 'Revisa el nombre e intenta nuevamente.' });
         } finally {
             setOrgLoading(false);
         }
@@ -153,7 +178,8 @@ export default function SavedOpportunitiesPage() {
             setFoundLeads(data.leads || []);
             toast({ title: 'Búsqueda completada', description: `Encontrados ${data.leads?.length ?? 0} leads.` });
         } catch (e: any) {
-            toast({ variant: 'destructive', title: 'Error', description: e.message || 'Ocurrió un error' });
+            console.error('[saved/opportunities] Lead lookup failed:', e);
+            toast({ title: 'No se pudo completar la busqueda', description: 'No encontramos contactos con esos criterios. Puedes ajustar cargos o ubicacion e intentarlo otra vez.' });
         } finally {
             setLoadingLeads(false);
         }
@@ -208,7 +234,9 @@ export default function SavedOpportunitiesPage() {
                 descriptionSnippet: currentOpp?.descriptionSnippet,
                 email: e.email || undefined,
                 emailStatus: e.email ? (e.emailStatus || 'verified') : 'not_found',
+                phoneNumbers: e.phoneNumbers,
                 primaryPhone: e.primaryPhone || (e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined),
+                enrichmentStatus: e.enrichmentStatus,
             }));
             await enrichedOpportunitiesStorage.addDedup(enrichedNow);
 
@@ -217,7 +245,8 @@ export default function SavedOpportunitiesPage() {
             setOrgPickerOpen(false);
             setOpenEnrichOptions(false);
         } catch (e: any) {
-            toast({ variant: 'destructive', title: 'Error', description: e.message });
+            console.error('[saved/opportunities] Enrichment failed:', e);
+            toast({ title: 'No se pudo enriquecer ahora', description: 'La seleccion sigue disponible. Intenta nuevamente en unos segundos.' });
         } finally {
             setEnriching(false);
         }
@@ -233,8 +262,8 @@ export default function SavedOpportunitiesPage() {
                 <DailyQuotaProgress kinds={['enrich']} compact />
             </div>
 
-            <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
+            <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
+                <CardHeader className="flex flex-row items-center justify-between border-b border-border/60 bg-muted/10">
                     <div>
                         <CardTitle>Oportunidades guardadas</CardTitle>
                         <CardDescription>Empresas detectadas desde LinkedIn. Busca contactos para cada una.</CardDescription>
@@ -253,6 +282,13 @@ export default function SavedOpportunitiesPage() {
                     </div>
                 </CardHeader>
                 <CardContent>
+                    {loadError ? (
+                        <Alert className="mb-4 rounded-2xl border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                            <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+                            <AlertTitle>No pudimos mostrar la lista ahora</AlertTitle>
+                            <AlertDescription className="text-amber-800 dark:text-amber-100/80">{loadError}</AlertDescription>
+                        </Alert>
+                    ) : null}
                     <div className="rounded-md border overflow-x-auto">
                         <Table>
                             <TableHeader>
@@ -264,7 +300,16 @@ export default function SavedOpportunitiesPage() {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {opps.map(o => (
+                                {loadingOpps ? (
+                                    Array.from({ length: 4 }).map((_, index) => (
+                                        <TableRow key={index}>
+                                            <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+                                            <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                                            <TableCell><Skeleton className="h-4 w-28" /></TableCell>
+                                            <TableCell><Skeleton className="ml-auto h-8 w-28" /></TableCell>
+                                        </TableRow>
+                                    ))
+                                ) : opps.length > 0 ? opps.map(o => (
                                     <TableRow key={o.id}>
                                         <TableCell>{o.title}</TableCell>
                                         <TableCell>{o.companyName}</TableCell>
@@ -273,7 +318,22 @@ export default function SavedOpportunitiesPage() {
                                             <Button size="sm" onClick={() => openOrgPicker(o)}>Buscar contactos</Button>
                                         </TableCell>
                                     </TableRow>
-                                ))}
+                                )) : (
+                                    <TableRow>
+                                        <TableCell colSpan={4} className="h-36 text-center">
+                                            <div className="mx-auto flex max-w-md flex-col items-center gap-3 px-4">
+                                                <div className="flex h-11 w-11 items-center justify-center rounded-full border border-border/70 bg-muted/40">
+                                                    <Search className="h-5 w-5 text-muted-foreground" />
+                                                </div>
+                                                <div>
+                                                    <p className="font-medium">Aun no hay oportunidades guardadas</p>
+                                                    <p className="mt-1 text-sm text-muted-foreground">Guarda oportunidades desde la busqueda para encontrar contactos dentro de esas empresas.</p>
+                                                </div>
+                                                <Button size="sm" onClick={() => router.push('/opportunities')}>Buscar oportunidades</Button>
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
+                                )}
                             </TableBody>
                         </Table>
                     </div>
@@ -344,17 +404,23 @@ export default function SavedOpportunitiesPage() {
                     </div>
 
                     <DialogFooter className="mt-2 flex justify-between w-full">
-                        <Button onClick={findLeadsForChosen} disabled={!chosenOrg || loadingLeads}>
-                            {loadingLeads ? 'Buscando leads…' : (chosenOrg ? `Buscar leads en ${chosenOrg.primary_domain || chosenOrg.name}` : 'Elige una empresa')}
-                        </Button>
-
-                        <Button
-                            variant="secondary"
-                            disabled={Object.values(selectedLeadIds).every(v => !v) || !chosenOrg || loadingLeads}
-                            onClick={initiateEnrichment}
-                        >
-                            Enriquecer y Guardar Seleccionados
-                        </Button>
+                        {foundLeads.length > 0 ? (
+                            <>
+                                <Button variant="outline" onClick={findLeadsForChosen} disabled={!chosenOrg || loadingLeads}>
+                                    Buscar de nuevo
+                                </Button>
+                                <Button
+                                    disabled={Object.values(selectedLeadIds).every(v => !v) || !chosenOrg || loadingLeads}
+                                    onClick={initiateEnrichment}
+                                >
+                                    Enriquecer seleccionados
+                                </Button>
+                            </>
+                        ) : (
+                            <Button onClick={findLeadsForChosen} disabled={!chosenOrg || loadingLeads}>
+                                {loadingLeads ? 'Buscando leads…' : (chosenOrg ? `Buscar leads en ${chosenOrg.primary_domain || chosenOrg.name}` : 'Elige una empresa')}
+                            </Button>
+                        )}
                     </DialogFooter>
 
                     {

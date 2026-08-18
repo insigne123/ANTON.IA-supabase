@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
+import { handleAuthError, requireSupliaAuth } from '@/lib/server/auth-utils';
 import { getSupliaState, processSupliaMessage } from '@/lib/server/suplia-orchestrator';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +20,7 @@ function sseEvent(event: string, data: unknown) {
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await requireAuth();
+    const auth = await requireSupliaAuth();
     const conversationId = req.nextUrl.searchParams.get('conversationId');
     const state = await getSupliaState(auth, conversationId);
     return NextResponse.json(state);
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await requireAuth();
+    const auth = await requireSupliaAuth();
     const body = await req.json();
     const input = {
       conversationId: body?.conversationId || null,
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
           }, 1600);
 
           try {
-            const state = await processSupliaMessage(auth, input);
+            const state = await processSupliaMessage(auth, input, { onEvent: send });
             cleanup();
             send('status', { phase: 'Respuesta lista', phaseIndex: streamPhases.length - 1, at: Date.now() });
             send('final', { state });

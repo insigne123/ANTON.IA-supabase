@@ -527,66 +527,26 @@ export default function ContactedPage() {
 
   // ⬇️ Lote: verificar respuestas para todos los contactados (no 'replied')
   async function verifyAllReplies() {
-    const all = await contactedLeadsStorage.get();
-    const list = all.filter(x => x.status !== 'replied' && (x.conversationId || x.threadId));
-    if (list.length === 0) {
-      toast({ title: 'Nada que verificar', description: 'No hay hilos pendientes de respuesta.' });
-      return;
-    }
     setBulkRunning(true);
-    setBulkProgress({ done: 0, total: list.length });
-
-    let found = 0;
-    for (const it of list) {
-      try {
-        let hits;
-        if (it.provider === 'gmail' && it.threadId) {
-          hits = await gmailClient.findRepliesByThread(it.threadId);
-        } else if (it.provider === 'outlook' && it.conversationId) {
-          hits = await graphFindReplies({
-            conversationId: it.conversationId,
-            fromEmail: it.email,
-            internetMessageId: it.internetMessageId,
-            allowSystemSenders: true,
-            top: 50,
-          });
-        }
-
-        if (hits && hits.length > 0) {
-          const best = hits[0];
-          const repliedAtDate = (best as any).internalDate
-            ? new Date(Number((best as any).internalDate))
-            : (best as any).receivedDateTime
-              ? new Date((best as any).receivedDateTime)
-              : new Date();
-
-          await persistReplyDetected(it, best, repliedAtDate.toISOString());
-          try {
-            await fetch('/api/replies/classify', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contactedId: it.id,
-                text: (best as any).snippet || (best as any).bodyPreview || '',
-                subject: (best as any).subject || '',
-                from: (best as any).from?.emailAddress?.address || (best as any).from || '',
-              }),
-            });
-          } catch (e) {
-            console.warn('[contacted] classify reply failed:', e);
-          }
-          found++;
-        }
-      } catch (e: any) {
-        // continúa; log en consola
-        console.warn('verifyAllReplies error on', it.messageId, e?.message);
-      }
-      setBulkProgress(p => ({ ...p, done: p.done + 1 }));
+    setBulkProgress({ done: 0, total: 0 });
+    try {
+      const res = await fetch('/api/replies/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 500 }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'No se pudo sincronizar respuestas');
+      await refresh();
+      toast({
+        title: 'Sincronizacion completada',
+        description: `Revisados: ${data.scanned || 0}. Nuevas respuestas: ${data.synced || 0}.${data.skippedNoToken ? ' Revisa conexiones sin token.' : ''}`,
+      });
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'No se pudo sincronizar', description: e?.message || 'Intenta nuevamente en unos segundos.' });
+    } finally {
+      setBulkRunning(false);
     }
-
-    setBulkRunning(false);
-    refresh();
-    toast({ title: 'Verificación completada', description: `Nuevas respuestas: ${found}` });
   }
 
   // Lote: verificar aperturas (no respondidos)
@@ -641,145 +601,17 @@ export default function ContactedPage() {
         </Button>
       </PageHeader>
 
-      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.95fr)]">
-        <Card className="min-w-0 overflow-hidden rounded-[32px] border-border/60 bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.12),transparent_36%),linear-gradient(180deg,hsl(var(--background))_0%,hsl(var(--card)/0.94)_100%)] shadow-[0_22px_70px_-48px_rgba(15,23,42,0.32)] backdrop-blur-sm">
-          <CardHeader className="gap-6 border-b border-border/60 bg-background/55">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-              <div className="space-y-3">
-                <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground/80">Seguimiento vivo</div>
-                <div className="space-y-2">
-                  <CardTitle className="text-[2rem] leading-tight tracking-[-0.03em] sm:text-[2.4rem]">Bandeja de contactos en curso</CardTitle>
-                  <CardDescription className="max-w-2xl text-[15px] leading-7 text-muted-foreground">
-                    Esta vista prioriza los leads que aun necesitan revision. La idea es detectar senales, revisar el contexto y actuar antes de que el hilo se enfrie.
-                  </CardDescription>
-                </div>
-              </div>
-              <div className="rounded-[28px] border border-border/60 bg-background/80 px-5 py-4 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.18)] backdrop-blur-xl">
-                <div className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground/80">Pendientes sin respuesta</div>
-                <div className="mt-2 text-4xl font-semibold tracking-[-0.05em] text-foreground">{overviewStats.pending}</div>
-                <div className="mt-2 text-sm text-muted-foreground">
-                  {filteredRows.length} visibles con los filtros actuales.
-                </div>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-[24px] border border-border/60 bg-background/80 p-4 shadow-[0_14px_36px_-30px_rgba(15,23,42,0.18)]">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Abiertos</div>
-                    <div className="mt-2 text-2xl font-semibold tracking-[-0.04em]">{overviewStats.opened}</div>
-                  </div>
-                  <div className="flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary">
-                    <MailOpen className="size-5" />
-                  </div>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">Mensajes con apertura confirmada y mejor contexto para un seguimiento oportuno.</p>
-              </div>
-              <div className="rounded-[24px] border border-border/60 bg-background/80 p-4 shadow-[0_14px_36px_-30px_rgba(15,23,42,0.18)]">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Con clic</div>
-                    <div className="mt-2 text-2xl font-semibold tracking-[-0.04em]">{overviewStats.clicked}</div>
-                  </div>
-                  <div className="flex size-11 items-center justify-center rounded-full bg-sky-500/10 text-sky-700 dark:text-sky-300">
-                    <Zap className="size-5" />
-                  </div>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">Leads que interactuaron con enlaces y merecen una respuesta mas rapida.</p>
-              </div>
-              <div className="rounded-[24px] border border-border/60 bg-background/80 p-4 shadow-[0_14px_36px_-30px_rgba(15,23,42,0.18)]">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Accion requerida</div>
-                    <div className="mt-2 text-2xl font-semibold tracking-[-0.04em]">{replyStats.actionRequired}</div>
-                  </div>
-                  <div className="flex size-11 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-                    <CheckCircle2 className="size-5" />
-                  </div>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">Respuestas positivas o con reunion potencial ya detectadas en la vista de respondidos.</p>
-              </div>
-              <div className="rounded-[24px] border border-border/60 bg-background/80 p-4 shadow-[0_14px_36px_-30px_rgba(15,23,42,0.18)]">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Detenidos</div>
-                    <div className="mt-2 text-2xl font-semibold tracking-[-0.04em]">{replyStats.stopped + overviewStats.failed}</div>
-                  </div>
-                  <div className="flex size-11 items-center justify-center rounded-full bg-destructive/10 text-destructive">
-                    <CircleAlert className="size-5" />
-                  </div>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">Hilos con entrega fallida, rechazo o senales para frenar el seguimiento.</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="min-w-0 rounded-[32px] border-border/60 bg-card/80 shadow-[0_22px_70px_-48px_rgba(15,23,42,0.24)] backdrop-blur-sm">
-          <CardHeader className="gap-3 border-b border-border/60 bg-background/45">
-            <CardTitle className="text-[1.35rem] tracking-[-0.03em]">Acciones rapidas</CardTitle>
-            <CardDescription className="text-sm leading-6">Mantén el seguimiento al dia sin salir de esta vista.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5 pt-6">
-            <DailyQuotaProgress kinds={['contact']} compact />
-            <Separator className="bg-border/70" />
-            <div className="space-y-3">
-              <Button variant="secondary" className="w-full justify-center rounded-full" onClick={verifyAllReplies} disabled={bulkRunning}>
-                {bulkRunning ? (
-                  <>
-                    <Loader2 data-icon="inline-start" className="animate-spin" />
-                    Verificando {bulkProgress.done}/{bulkProgress.total}
-                  </>
-                ) : (
-                  <>
-                    <ScanSearch data-icon="inline-start" />
-                    Verificar respuestas en lote
-                  </>
-                )}
-              </Button>
-              <Button variant="outline" className="w-full justify-center rounded-full" onClick={verifyAllReads} disabled={bulkRunning}>
-                <MailOpen data-icon="inline-start" />
-                Verificar aperturas
-              </Button>
-            </div>
-            <div className="rounded-[22px] border border-border/60 bg-muted/25 p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <Sparkles className="size-5" />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium text-foreground">Ruta recomendada</div>
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    Prioriza abiertos con clic, revisa fallidos y termina el bloque con respondidos para no perder oportunidades calientes.
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-              <div className="rounded-[20px] border border-border/60 bg-background/70 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Respondidos</div>
-                <div className="mt-2 text-xl font-semibold tracking-[-0.03em]">{replyStats.totalReplied}</div>
-              </div>
-              <div className="rounded-[20px] border border-border/60 bg-background/70 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Registros de llamada</div>
-                <div className="mt-2 text-xl font-semibold tracking-[-0.03em]">{overviewStats.phone}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="mt-4 min-w-0 overflow-hidden rounded-[32px] border-border/60 bg-card/80 shadow-[0_20px_60px_-48px_rgba(15,23,42,0.24)] backdrop-blur-sm">
+      <Card className="min-w-0 overflow-hidden rounded-[28px] border-border/60 bg-card/80 shadow-[0_18px_50px_-42px_rgba(15,23,42,0.24)] backdrop-blur-sm">
         <CardHeader className="gap-5 border-b border-border/60 bg-background/45">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="space-y-2">
-              <div className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground/80">Cola activa</div>
-              <CardTitle className="text-[1.55rem] tracking-[-0.03em]">Leads en seguimiento</CardTitle>
-              <CardDescription className="max-w-2xl text-sm leading-6">
-                Usa búsqueda y filtros para quedarte con los hilos que realmente merecen revisión inmediata.
-              </CardDescription>
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle className="text-[1.35rem] tracking-[-0.03em]">Bandeja de seguimiento</CardTitle>
+                <Badge variant="secondary" className="rounded-full px-2.5 py-1 text-xs">{overviewStats.pending} pendientes</Badge>
+                {overviewStats.clicked > 0 && <Badge variant="outline" className="rounded-full border-sky-500/25 bg-sky-500/5 px-2.5 py-1 text-xs text-sky-700 dark:text-sky-300">{overviewStats.clicked} con clic</Badge>}
+                {overviewStats.failed > 0 && <Badge variant="outline" className="rounded-full border-destructive/25 bg-destructive/5 px-2.5 py-1 text-xs text-destructive">{overviewStats.failed} fallidos</Badge>}
+              </div>
+              <CardDescription className="max-w-2xl text-sm leading-6">Filtra, revisa el mensaje y decide el siguiente paso para cada conversación.</CardDescription>
             </div>
             <div className="flex w-full flex-col gap-3 lg:max-w-[360px] lg:items-end">
               <div className="relative w-full">
@@ -832,6 +664,19 @@ export default function ContactedPage() {
                   </DropdownMenu>
                 </div>
               </div>
+            </div>
+          </div>
+          <div className="flex flex-col gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <DailyQuotaProgress kinds={['contact']} compact />
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" size="sm" className="rounded-full" onClick={verifyAllReplies} disabled={bulkRunning}>
+                {bulkRunning ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <ScanSearch data-icon="inline-start" />}
+                {bulkRunning ? `Verificando ${bulkProgress.done}/${bulkProgress.total}` : 'Sincronizar respuestas'}
+              </Button>
+              <Button variant="outline" size="sm" className="rounded-full" onClick={verifyAllReads} disabled={bulkRunning}>
+                <MailOpen data-icon="inline-start" />
+                Verificar aperturas
+              </Button>
             </div>
           </div>
         </CardHeader>

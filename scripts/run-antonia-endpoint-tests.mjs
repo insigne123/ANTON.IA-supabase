@@ -38,7 +38,7 @@ const REQUEST_OVERRIDES = {
   },
   'GET /api/tracking/click': {
     query: { url: 'https://example.com' },
-    expected: [302, 307],
+    expected: [400],
   },
   'GET /api/tracking/open': {
     expected: [200],

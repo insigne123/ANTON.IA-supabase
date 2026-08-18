@@ -17,6 +17,8 @@ import { useToast } from '@/hooks/use-toast';
 import { generateMailFromStyle } from '@/lib/ai/style-mail';
 import { getEnrichedLeads } from '@/lib/services/enriched-leads-service';
 import { findReportForLead } from '@/lib/lead-research-storage';
+import { profileService, type Profile } from '@/lib/services/profile-service';
+import { buildCompanyProfileInfo, buildSenderInfo } from '@/lib/signature-placeholders';
 
 type Mode = 'leads' | 'opportunities';
 
@@ -70,6 +72,7 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [mounted, setMounted] = useState(false);
   const [sampleLeads, setSampleLeads] = useState<EnrichedLead[]>([]);
+  const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
 
   // Lead de ejemplo (de tus guardados con reporte)
   const [sampleLeadId, setSampleLeadId] = useState<string>('');
@@ -100,6 +103,29 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
     }
 
     loadSampleLeads();
+    return () => {
+      active = false;
+    };
+  }, [mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+
+    let active = true;
+
+    async function loadCurrentProfile() {
+      try {
+        const profile = await profileService.getCurrentProfile();
+        if (!active) return;
+        setCurrentProfile(profile);
+      } catch (error) {
+        if (!active) return;
+        console.error('No se pudo cargar el perfil actual para Email Studio', error);
+        setCurrentProfile(null);
+      }
+    }
+
+    loadCurrentProfile();
     return () => {
       active = false;
     };
@@ -150,6 +176,10 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
     };
   }, [selectedSampleReport]);
 
+  const senderInfo = useMemo(() => buildSenderInfo(currentProfile), [currentProfile]);
+
+  const currentCompanyProfile = useMemo(() => buildCompanyProfileInfo(currentProfile), [currentProfile]);
+
   // ======= Render preview (local, sin depender del endpoint) =======
   const recomputePreview = useCallback((s: StyleProfile) => {
     const lead = selectedSampleLead;
@@ -166,6 +196,10 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
         companyName: lead?.companyName,
         companyDomain: lead?.companyDomain,
         linkedinUrl: lead?.linkedinUrl,
+      },
+      {
+        sender: senderInfo,
+        companyProfile: currentCompanyProfile,
       }
     );
     setSubjectPreview(gen.subject);
@@ -179,8 +213,11 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
     if (!lead?.fullName || !lead?.companyName) {
       ws.push('La vista previa usa datos parciales; el mail se verá mejor con un lead de ejemplo más completo.');
     }
+    if (!currentCompanyProfile.name) {
+      ws.push('Completa tu perfil de empresa para que la vista previa muestre tu marca y propuesta real.');
+    }
     setWarnings(ws);
-  }, [selectedSampleLead, selectedSampleReport]);
+  }, [currentCompanyProfile, selectedSampleLead, selectedSampleReport, senderInfo]);
 
   // Recalcula preview cuando cambie estilo o lead de ejemplo
   useEffect(() => {
@@ -209,7 +246,8 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
           sampleData: {
             lead: selectedSampleLead,
             report: selectedSampleReport,
-            companyProfile: selectedSampleReport?.company || null,
+            companyProfile: currentCompanyProfile,
+            sender: senderInfo,
             leadId: sampleLeadId,
           }
         })
@@ -305,25 +343,24 @@ export default function ConversationalDesigner({ mode = 'leads' as Mode }) {
   ), []);
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 xl:h-[calc(100vh-140px)] min-h-[600px]">
+    <div className="grid min-h-[600px] grid-cols-1 gap-4 xl:h-[calc(100vh-205px)] xl:grid-cols-12">
       {/* Columna Izquierda: Chat IA (4 cols) */}
-      <div className="xl:col-span-4 flex flex-col gap-4 xl:h-full">
-        <Card className="flex flex-col overflow-hidden border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] shadow-[0_20px_70px_-50px_rgba(15,23,42,0.35)] h-[min(68vh,680px)] xl:h-full dark:border-slate-800 dark:bg-[linear-gradient(180deg,#020617_0%,#111827_100%)] dark:shadow-[0_20px_70px_-50px_rgba(2,6,23,0.95)]">
+      <div className="flex flex-col gap-4 xl:col-span-4 xl:h-full">
+        <Card className="flex h-[min(62vh,620px)] flex-col overflow-hidden border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] shadow-[0_20px_70px_-50px_rgba(15,23,42,0.35)] xl:h-full dark:border-slate-800 dark:bg-[linear-gradient(180deg,#020617_0%,#111827_100%)] dark:shadow-[0_20px_70px_-50px_rgba(2,6,23,0.95)]">
           <CardHeader className="border-b border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.12),_transparent_35%),linear-gradient(180deg,_rgba(248,250,252,0.95)_0%,_rgba(255,255,255,0.96)_100%)] py-4 dark:border-slate-800 dark:bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.16),_transparent_30%),linear-gradient(180deg,_rgba(15,23,42,0.96)_0%,_rgba(2,6,23,0.98)_100%)]">
-            <div className="space-y-3">
+            <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <CardTitle className="text-lg">Asistente de estilo</CardTitle>
                 <Badge variant="outline" className="rounded-full border-slate-200 bg-white/80 text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
                   chat
                 </Badge>
               </div>
-              <CardDescription className="dark:text-slate-300">Describe el cambio que quieres y revisa el resultado sin salir del editor.</CardDescription>
-              <div className="rounded-2xl border border-slate-200 bg-white/85 px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <div className="rounded-xl border border-slate-200 bg-white/85 px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
                 <div className="mb-1 flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
                   <ScanSearch className="h-3.5 w-3.5 text-sky-500 dark:text-sky-300" />
                   Contexto del lead
                 </div>
-                <div className="space-y-1 text-sm text-slate-700 dark:text-slate-200">
+                <div className="space-y-1 text-xs text-slate-700 dark:text-slate-200">
                   <p><span className="font-medium text-slate-900 dark:text-white">Pain:</span> {sampleInsight.pain}</p>
                   <p><span className="font-medium text-slate-900 dark:text-white">Valor:</span> {sampleInsight.value}</p>
                 </div>

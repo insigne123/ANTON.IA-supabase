@@ -8,17 +8,12 @@ type PageHeaderProps = {
 
 export function PageHeader({ title, description, children }: PageHeaderProps) {
   return (
-    <div className="mb-8 rounded-[28px] border border-border/60 bg-card/80 px-6 py-6 shadow-[0_10px_30px_-24px_rgba(15,23,42,0.18)] backdrop-blur-sm dark:bg-card/60 dark:shadow-[0_10px_30px_-24px_rgba(2,6,23,0.8)] md:px-7 md:py-7">
-      <div className="flex flex-col items-start justify-between gap-5 md:flex-row md:items-end">
-        <div className="space-y-3">
-          <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/80">Workspace</div>
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-[2.5rem]">
-          {title}
-          </h1>
-          <p className="max-w-2xl text-sm leading-7 text-muted-foreground sm:text-[15px]">{description}</p>
-        </div>
-        {children && <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:flex-shrink-0 md:justify-end">{children}</div>}
+    <header className="mb-5 flex flex-col gap-4 border-b border-border/60 pb-5 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0 space-y-1.5">
+        <h1 className="text-2xl font-semibold tracking-[-0.025em] text-foreground sm:text-[2rem]">{title}</h1>
+        <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>
       </div>
-    </div>
+      {children && <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-shrink-0 sm:justify-end">{children}</div>}
+    </header>
   );
 }

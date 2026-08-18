@@ -115,22 +115,18 @@ export async function resolveOrganizationIdForUser(userId: string): Promise<stri
 
   try {
     const supabase = getSupabaseAdminClient();
-    const { data } = await supabase
-      .from('organization_members')
-      .select('organization_id')
-      .eq('user_id', normalized)
-      .limit(50);
+      const { data } = await supabase
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', normalized)
+        .order('created_at', { ascending: true })
+        .limit(50);
 
     const memberships = Array.isArray(data)
       ? data.map((r: any) => String(r?.organization_id || '').trim()).filter(Boolean)
       : [];
 
     if (memberships.length === 0) return null;
-
-    const preferredOrg = String(process.env.OPENCLAW_ORG_ID || '').trim();
-    if (preferredOrg && memberships.includes(preferredOrg)) {
-      return preferredOrg;
-    }
 
     const allowed = parseOrgAllowlist(process.env.PDL_ALLOWED_ORG_IDS);
     if (allowed.size > 0) {

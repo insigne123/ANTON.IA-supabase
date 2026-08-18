@@ -2,41 +2,82 @@
 
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { LeadCard } from './LeadCard';
-import type { UnifiedRow } from '@/lib/unified-sheet-types';
+
 import type { PipelineStage } from '@/lib/crm-types';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import type { UnifiedRow } from '@/lib/unified-sheet-types';
+import { LeadCard } from './LeadCard';
 
 interface Props {
     id: PipelineStage;
     title: string;
     count: number;
     leads: UnifiedRow[];
-    colorClass: string;
+    closed?: boolean;
+    movingLeadIds?: Set<string>;
     onLeadClick?: (lead: UnifiedRow) => void;
+    onLeadMove?: (leadId: string, stage: PipelineStage) => void;
 }
 
-export function KanbanColumn({ id, title, count, leads, colorClass, onLeadClick }: Props) {
-    const { setNodeRef } = useDroppable({ id });
+const STAGE_ACCENT: Record<PipelineStage, string> = {
+    inbox: 'bg-slate-400',
+    qualified: 'bg-sky-500',
+    contacted: 'bg-indigo-500',
+    engaged: 'bg-violet-500',
+    meeting: 'bg-pink-500',
+    negotiation: 'bg-amber-500',
+    closed_won: 'bg-emerald-500',
+    closed_lost: 'bg-slate-400',
+};
+
+export function KanbanColumn({
+    id,
+    title,
+    count,
+    leads,
+    closed = false,
+    movingLeadIds = new Set(),
+    onLeadClick,
+    onLeadMove,
+}: Props) {
+    const { setNodeRef, isOver } = useDroppable({ id });
 
     return (
-        <div className="flex flex-col h-full min-w-[280px] w-[280px] bg-muted/30 rounded-lg border border-border/50">
-            {/* Header */}
-            <div className={`p-3 border-b flex items-center justify-between ${colorClass} bg-opacity-20 rounded-t-lg`}>
-                <h3 className="font-semibold text-sm">{title}</h3>
-                <span className="bg-background/50 text-xs px-2 py-0.5 rounded-full font-mono">{count}</span>
-            </div>
+        <section
+            aria-labelledby={`stage-${id}`}
+            className={`flex h-full min-h-[360px] flex-col overflow-hidden rounded-xl border transition-colors motion-reduce:transition-none ${
+                closed
+                    ? 'w-[248px] min-w-[248px] border-border/50 bg-muted/15'
+                    : 'w-[288px] min-w-[288px] border-border/70 bg-muted/25'
+            } ${isOver ? 'border-primary/50 bg-primary/5' : ''}`}
+        >
+            <header className="flex h-11 items-center justify-between border-b border-border/60 px-3">
+                <div className="flex min-w-0 items-center gap-2">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${STAGE_ACCENT[id]}`} aria-hidden="true" />
+                    <h2 id={`stage-${id}`} className={`truncate text-sm ${closed ? 'font-medium text-muted-foreground' : 'font-semibold'}`}>{title}</h2>
+                </div>
+                <span className="min-w-6 rounded-full bg-background px-1.5 py-0.5 text-center text-xs tabular-nums text-muted-foreground" aria-label={`${count} leads`}>{count}</span>
+            </header>
 
-            {/* Cards Area */}
-            <ScrollArea className="flex-1 p-2">
-                <div ref={setNodeRef} className="space-y-2 min-h-[100px]">
-                    <SortableContext items={leads.map(l => l.gid)} strategy={verticalListSortingStrategy}>
-                        {leads.map(lead => (
-                            <LeadCard key={lead.gid} lead={lead} onClick={() => onLeadClick?.(lead)} />
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                <div ref={setNodeRef} className="min-h-[160px] space-y-2 p-2.5">
+                    <SortableContext items={leads.map((lead) => lead.gid)} strategy={verticalListSortingStrategy}>
+                        {leads.map((lead) => (
+                            <LeadCard
+                                key={lead.gid}
+                                lead={lead}
+                                isSaving={movingLeadIds.has(lead.gid)}
+                                onClick={() => onLeadClick?.(lead)}
+                                onStageChange={(stage) => onLeadMove?.(lead.gid, stage)}
+                            />
                         ))}
                     </SortableContext>
+                    {leads.length === 0 && (
+                        <div className="flex min-h-28 items-center justify-center rounded-lg border border-dashed border-border/70 px-4 text-center text-xs leading-5 text-muted-foreground">
+                            Mueve un lead aquí para cambiar su etapa.
+                        </div>
+                    )}
                 </div>
-            </ScrollArea>
-        </div>
+            </div>
+        </section>
     );
 }

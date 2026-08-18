@@ -2,8 +2,8 @@
 
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, Legend } from 'recharts';
-import { Users, Send, MailOpen, MessageSquare, MousePointerClick, AlertTriangle, Ban } from 'lucide-react';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar } from 'recharts';
+import { Send, MailOpen, MessageSquare, MousePointerClick, AlertTriangle, Ban } from 'lucide-react';
 import type { ContactedLead } from '@/lib/types';
 import type { Campaign } from '@/lib/services/campaigns-service';
 
@@ -80,135 +80,101 @@ export function CampaignAnalytics({ campaign, contactedLeads }: CampaignAnalytic
     }, [campaign]);
 
     return (
-        <div className="space-y-6 animate-in fade-in duration-500">
-            {/* Top Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Enviados</CardTitle>
-                        <Send className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{metrics.totalSent}</div>
-                        <p className="text-xs text-muted-foreground">Leads contactados</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Aperturas</CardTitle>
-                        <MailOpen className="h-4 w-4 text-blue-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{metrics.opened}</div>
-                        <p className="text-xs text-muted-foreground">{metrics.openRate}% tasa de apertura</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Respuestas</CardTitle>
-                        <MessageSquare className="h-4 w-4 text-green-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{metrics.replied}</div>
-                        <p className="text-xs text-muted-foreground">{metrics.replyRate}% tasa de respuesta</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Clics</CardTitle>
-                        <MousePointerClick className="h-4 w-4 text-purple-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{metrics.clicked}</div>
-                        <p className="text-xs text-muted-foreground">{metrics.clickRate}% CTR</p>
-                    </CardContent>
-                </Card>
-            </div>
+        <div className="space-y-6 animate-in fade-in duration-300 motion-reduce:animate-none">
+            <Card className="overflow-hidden border-border/60 shadow-sm">
+                <CardHeader className="border-b border-border/60 bg-muted/15">
+                    <CardTitle className="text-lg">Resumen de rendimiento</CardTitle>
+                    <CardDescription>Resultados acumulados de esta campaña.</CardDescription>
+                </CardHeader>
+                <CardContent className="p-0">
+                    <div className="grid grid-cols-2 divide-x divide-y divide-border/60 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
+                        {[
+                            { label: 'Enviados', value: metrics.totalSent, detail: 'contactos', icon: Send },
+                            { label: 'Aperturas', value: metrics.opened, detail: `${metrics.openRate}%`, icon: MailOpen },
+                            { label: 'Respuestas', value: metrics.replied, detail: `${metrics.replyRate}%`, icon: MessageSquare },
+                            { label: 'Clics', value: metrics.clicked, detail: `${metrics.clickRate}%`, icon: MousePointerClick },
+                            { label: 'Por atender', value: metrics.actionRequired, detail: 'interesados', icon: AlertTriangle },
+                            { label: 'Detenidos', value: metrics.stopped, detail: 'no continuar', icon: Ban },
+                        ].map(({ label, value, detail, icon: Icon }) => (
+                            <div key={label} className="min-w-0 p-4 sm:p-5">
+                                <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                                    <Icon className="size-3.5" aria-hidden="true" />
+                                    {label}
+                                </div>
+                                <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
+                                <div className="mt-0.5 text-xs text-muted-foreground">{detail}</div>
+                            </div>
+                        ))}
+                    </div>
+                </CardContent>
+            </Card>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Acción requerida</CardTitle>
-                        <AlertTriangle className="h-4 w-4 text-amber-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{metrics.actionRequired}</div>
-                        <p className="text-xs text-muted-foreground">Respuestas positivas / reunión</p>
+            {metrics.totalSent === 0 ? (
+                <Card className="border-dashed border-border/70 bg-muted/10">
+                    <CardContent className="flex min-h-48 flex-col items-center justify-center px-6 py-10 text-center">
+                        <Send className="mb-3 size-5 text-muted-foreground" aria-hidden="true" />
+                        <h3 className="text-sm font-semibold">Todavía no hay actividad</h3>
+                        <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
+                            Cuando revises destinatarios y comiences los envíos, aquí verás aperturas, clics y respuestas.
+                        </p>
                     </CardContent>
                 </Card>
+            ) : (
+            <div className="grid gap-4 lg:grid-cols-2">
                 <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Detenidos</CardTitle>
-                        <Ban className="h-4 w-4 text-red-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{metrics.stopped}</div>
-                        <p className="text-xs text-muted-foreground">Negativas / unsubscribe</p>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* Charts Area */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-                <Card className="col-span-4">
                     <CardHeader>
-                        <CardTitle>Actividad Reciente</CardTitle>
-                        <CardDescription>Volumen de correos enviados por día.</CardDescription>
+                        <CardTitle className="text-lg">Actividad reciente</CardTitle>
+                        <CardDescription>Correos enviados por día.</CardDescription>
                     </CardHeader>
                     <CardContent className="pl-2">
-                        <div className="h-[300px] w-full">
-                            {timeSeriesData.length > 0 ? (
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <AreaChart data={timeSeriesData}>
-                                        <defs>
-                                            <linearGradient id="colorSent" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor="#2563eb" stopOpacity={0.8} />
-                                                <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
-                                            </linearGradient>
-                                        </defs>
-                                        <XAxis dataKey="date" stroke="#888888" fontSize={12} tickLine={false} axisLine={false} />
-                                        <YAxis stroke="#888888" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${value}`} />
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                        <Tooltip
-                                            contentStyle={{ backgroundColor: 'hsl(var(--background))', borderColor: 'hsl(var(--border))' }}
-                                            labelStyle={{ color: 'hsl(var(--foreground))' }}
-                                        />
-                                        <Area type="monotone" dataKey="sent" stroke="#2563eb" fillOpacity={1} fill="url(#colorSent)" />
-                                    </AreaChart>
-                                </ResponsiveContainer>
-                            ) : (
-                                <div className="flex h-full items-center justify-center text-muted-foreground">
-                                    Sin datos de actividad suficiente.
-                                </div>
-                            )}
+                        <div className="h-[280px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={timeSeriesData}>
+                                    <defs>
+                                        <linearGradient id="colorSent" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.35} />
+                                            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
+                                    <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+                                    <Tooltip
+                                        contentStyle={{ backgroundColor: 'hsl(var(--popover))', borderColor: 'hsl(var(--border))', borderRadius: 12 }}
+                                        labelStyle={{ color: 'hsl(var(--foreground))' }}
+                                    />
+                                    <Area type="monotone" dataKey="sent" stroke="hsl(var(--primary))" fillOpacity={1} fill="url(#colorSent)" />
+                                </AreaChart>
+                            </ResponsiveContainer>
                         </div>
                     </CardContent>
                 </Card>
 
-                <Card className="col-span-3">
+                <Card>
                     <CardHeader>
-                        <CardTitle>Rendimiento del Embudo</CardTitle>
-                        <CardDescription>Conversión relativa por etapa.</CardDescription>
+                        <CardTitle className="text-lg">Conversión</CardTitle>
+                        <CardDescription>Resultados por etapa.</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <div className="h-[300px] w-full">
+                        <div className="h-[280px] w-full">
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart layout="vertical" data={[
-                                    { name: 'Enviados', value: metrics.totalSent, fill: '#64748b' },
-                                    { name: 'Abiertos', value: metrics.opened, fill: '#3b82f6' },
-                                    { name: 'Clics', value: metrics.clicked, fill: '#8b5cf6' },
-                                    { name: 'Respuestas', value: metrics.replied, fill: '#22c55e' },
-                                ]} margin={{ left: 40 }}>
+                                    { name: 'Enviados', value: metrics.totalSent },
+                                    { name: 'Abiertos', value: metrics.opened },
+                                    { name: 'Clics', value: metrics.clicked },
+                                    { name: 'Respuestas', value: metrics.replied },
+                                ]} margin={{ left: 24 }}>
                                     <XAxis type="number" hide />
-                                    <YAxis dataKey="name" type="category" width={80} stroke="#888888" fontSize={12} tickLine={false} axisLine={false} />
-                                    <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ backgroundColor: 'hsl(var(--background))', borderColor: 'hsl(var(--border))' }} />
-                                    <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={32} />
+                                    <YAxis dataKey="name" type="category" width={82} stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                                    <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.25)' }} contentStyle={{ backgroundColor: 'hsl(var(--popover))', borderColor: 'hsl(var(--border))', borderRadius: 12 }} />
+                                    <Bar dataKey="value" fill="hsl(var(--primary))" radius={[0, 6, 6, 0]} barSize={28} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
                     </CardContent>
                 </Card>
             </div>
+            )}
         </div>
     );
 }

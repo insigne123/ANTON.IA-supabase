@@ -22,6 +22,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   Sparkles,
   Square,
   Sun,
@@ -233,6 +234,92 @@ function asTextList(value: unknown) {
   return text ? [text] : [];
 }
 
+function unwrapJsonContent(content: string) {
+  const trimmed = content.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenced?.[1]?.trim() || trimmed;
+}
+
+function parseJsonObjectText(value: unknown): Record<string, any> | null {
+  if (typeof value !== 'string') return null;
+  const normalized = unwrapJsonContent(value);
+  if (!normalized.startsWith('{') || !normalized.endsWith('}')) return null;
+  try {
+    const parsed = JSON.parse(normalized);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, any> : null;
+  } catch {
+    return null;
+  }
+}
+
+function getArtifactStructuredData(artifact: SupliaArtifact | null) {
+  if (!artifact) return {};
+  const parsedContent = parseJsonObjectText(artifact.content);
+  const data = asRecord(artifact.data);
+  return parsedContent ? { ...parsedContent, ...data } : data;
+}
+
+function pickTextField(record: Record<string, any>, fields: string[]) {
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === 'string' || typeof value === 'number') {
+      const text = cleanText(value);
+      if (text) return text;
+    }
+  }
+  return '';
+}
+
+function structuredItemToPreview(value: unknown, index: number): ArtifactPreviewItem | null {
+  if (typeof value === 'string' || typeof value === 'number') {
+    const title = cleanText(value);
+    return title ? { title } : null;
+  }
+  const record = asRecord(value);
+  if (Object.keys(record).length === 0) return null;
+  const title = pickTextField(record, ['title', 'name', 'industry', 'sector', 'segment', 'audience', 'action', 'label', 'criterion', 'signal', 'step']) || `Item ${index + 1}`;
+  const detail = pickTextField(record, ['detail', 'description', 'reason', 'why', 'summary', 'useCase', 'pain', 'criteria', 'notes']);
+  const meta = pickTextField(record, ['priority', 'status', 'source', 'score', 'channel']);
+  return { title, detail, meta };
+}
+
+function getStructuredItems(data: Record<string, any>, keys: string[], limit = 8) {
+  for (const key of keys) {
+    const value = data[key];
+    if (Array.isArray(value)) {
+      const items = value.map(structuredItemToPreview).filter(Boolean) as ArtifactPreviewItem[];
+      if (items.length > 0) return items.slice(0, limit);
+    }
+    if (typeof value === 'string' || typeof value === 'number') {
+      const text = cleanText(value);
+      const numbered = typeof value === 'string'
+        ? text.split(/\s*\(\d+\)\s*/).map((part) => part.replace(/^[:,\s]+|[;,\s]+$/g, '').trim()).filter(Boolean)
+        : [];
+      const actionItems = numbered.length > 1 && /puedo|siguiente|opciones/i.test(numbered[0] || '') ? numbered.slice(1) : numbered;
+      if (actionItems.length > 1) {
+        return actionItems.map(structuredItemToPreview).filter(Boolean).slice(0, limit) as ArtifactPreviewItem[];
+      }
+      const item = structuredItemToPreview(value, 0);
+      if (item) return [item];
+    }
+  }
+  return [];
+}
+
+function getDocumentSummary(data: Record<string, any>) {
+  return pickTextField(data, ['summary', 'resumen', 'description', 'overview', 'objective', 'goal', 'context']);
+}
+
+function hasStructuredDocumentData(data: Record<string, any>) {
+  return Boolean(
+    getDocumentSummary(data) ||
+    getStructuredItems(data, ['industries', 'topIndustries', 'priorityIndustries', 'sectores', 'segments', 'audiences', 'targets'], 1).length ||
+    getStructuredItems(data, ['triggerSignals', 'signals', 'senales', 'activationSignals'], 1).length ||
+    getStructuredItems(data, ['nextSteps', 'next_steps', 'recommendedActions', 'actions'], 1).length ||
+    getStructuredItems(data, ['criteria', 'criterios', 'icpCriteria', 'searchCriteria', 'selectionCriteria', 'fitCriteria'], 1).length
+  );
+}
+
 function formatScore(value: unknown) {
   const score = Number(value);
   if (!Number.isFinite(score)) return '';
@@ -329,6 +416,11 @@ function formatProviderLabel(provider?: unknown) {
   const value = cleanText(provider).toLowerCase();
   if (value === 'apollo') return 'Apollo';
   if (value === 'pdl') return 'People Data Labs';
+  if (value === 'serpapi') return 'SerpAPI';
+  if (value === 'brand.dev' || value === 'branddev') return 'Brand.dev';
+  if (value === 'similarweb') return 'SimilarWeb';
+  if (value === 'domaindetails') return 'DomainDetails';
+  if (value === 'externo') return 'Proveedor externo';
   if (value === 'auto') return 'Automatico segun disponibilidad';
   return value || 'Automatico segun disponibilidad';
 }
@@ -345,14 +437,37 @@ function formatCreditEstimate(value: unknown) {
   const record = asRecord(value);
   const companySearches = Number(record.companySearches || 0);
   const peopleSearchPages = Number(record.peopleSearchPages || 0);
+  const searches = Number(record.searches || 0);
+  const requests = Number(record.requests || 0);
+  const provider = cleanText(record.provider);
   const parts: string[] = [];
   if (companySearches > 0) parts.push(`${companySearches} busqueda${companySearches === 1 ? '' : 's'} de empresas`);
   if (peopleSearchPages > 0) parts.push(`${peopleSearchPages} pagina${peopleSearchPages === 1 ? '' : 's'} de contactos`);
-  return parts.length > 0 ? parts.join(' + ') : 'No informado por el proveedor';
+  if (searches > 0) parts.push(`${searches} busqueda${searches === 1 ? '' : 's'} web`);
+  if (requests > 0) parts.push(`${requests} consulta${requests === 1 ? '' : 's'} de proveedor`);
+  if (parts.length > 0) return `${parts.join(' + ')}${provider ? ` en ${formatProviderLabel(provider)}` : ''}`;
+  return provider ? `Proveedor ${formatProviderLabel(provider)}` : 'No informado por el proveedor';
 }
 
 function getActionDisplayTitle(action: SupliaPendingAction) {
   return action.actionType === 'workflow.approve_plan' ? 'Aprobar plan de trabajo' : action.title;
+}
+
+function getResearchActionLabel(actionType: string) {
+  const labels: Record<string, string> = {
+    'research.brand': 'Perfil de marca',
+    'research.brand_mentions': 'Menciones de marca',
+    'research.serp_company_news': 'Noticias de empresa',
+    'research.serp_competitors': 'Competidores',
+    'research.serp_jobs_signals': 'Senales de contratacion',
+  };
+  return labels[actionType] || actionType.replace(/^research\./, '').replace(/_/g, ' ');
+}
+
+function getResearchProvider(actionType: string) {
+  if (actionType === 'research.brand') return 'brand.dev';
+  if (actionType.startsWith('research.serp_') || actionType === 'research.brand_mentions') return 'serpapi';
+  return 'externo';
 }
 
 function getStrongConfirmationForAction(action: SupliaPendingAction) {
@@ -362,6 +477,8 @@ function getStrongConfirmationForAction(action: SupliaPendingAction) {
 
 function getArtifactText(artifact: SupliaArtifact | null) {
   if (!artifact) return '';
+  const parsedContent = parseJsonObjectText(artifact.content);
+  if (parsedContent) return JSON.stringify(getArtifactStructuredData(artifact), null, 2);
   if (artifact.content) return artifact.content;
   if (artifact.data && Object.keys(artifact.data).length > 0) return JSON.stringify(artifact.data, null, 2);
   return '';
@@ -388,6 +505,7 @@ function getArtifactLabel(type: string) {
     risk_report: 'Reporte de riesgo',
     report: 'Reporte',
     note: 'Documento',
+    company_research: 'Research de empresa',
   };
   return labels[type] || type.replace(/_/g, ' ');
 }
@@ -397,13 +515,14 @@ function getArtifactDescription(artifact: SupliaArtifact | null) {
   if (artifact.type.includes('email') || artifact.type.includes('reply')) return 'Borrador editable para revisar, copiar o convertir en accion aprobable.';
   if (artifact.type.includes('campaign')) return 'Workspace de campana. Guardar o lanzar seguira requiriendo aprobacion.';
   if (artifact.type.includes('gmail') || artifact.type.includes('mailbox')) return 'Analisis de mailbox aprobado. No modifica CRM ni envia correos.';
+  if (artifact.type === 'company_research') return 'Research de cuenta con fuentes, senales y supuestos separados antes de contactar.';
   if (artifact.type.includes('shortlist') || artifact.type === 'lead_list') return 'Lista generada para revisar y priorizar antes de actuar.';
   if (artifact.type === 'risk_report') return 'Resumen de riesgos y guardrails antes de ejecutar.';
   return 'Documento generado por SUPL.IA para iterar desde el chat.';
 }
 
 function getArtifactPreviewItems(artifact: SupliaArtifact): ArtifactPreviewItem[] {
-  const data = asRecord(artifact.data);
+  const data = getArtifactStructuredData(artifact);
   const scored = asRecord(data.scored);
 
   if (artifact.type === 'company_shortlist') {
@@ -478,6 +597,44 @@ function getArtifactFilename(artifact: SupliaArtifact) {
     .replace(/^-+|-+$/g, '')
     .slice(0, 64) || 'suplia-artifact';
   return `${base}.md`;
+}
+
+function getMemoryLabel(memory: SupliaMemory) {
+  const labels: Record<string, string> = {
+    icp_preference: 'ICP',
+    offer_context: 'Oferta',
+    compliance_rule: 'Regla',
+    preference: 'Preferencia',
+  };
+  return labels[memory.memoryType] || memory.memoryType.replace(/_/g, ' ');
+}
+
+function getMemoryStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    approved: 'aprobada',
+    proposed: 'por aprobar',
+    inferred: 'inferida',
+    rejected: 'rechazada',
+    archived: 'archivada',
+  };
+  return labels[status] || status;
+}
+
+function getMemorySummary(memory: SupliaMemory) {
+  const value = asRecord(memory.value);
+  const summary = cleanText(value.summary || value.description || value.text || value.goal || value.note);
+  if (summary) return summary;
+  const segments = asTextList(value.segments || value.segmentNames || value.roles).slice(0, 3);
+  if (segments.length > 0) return segments.join(' · ');
+  return previewJson(value, 'Sin detalle guardado');
+}
+
+function buildMemoryPrompt(memory: SupliaMemory, mode: 'use' | 'manage') {
+  const summary = getMemorySummary(memory);
+  if (mode === 'manage') {
+    return `Gestiona esta memoria de SUPL.IA sin ejecutar cambios directos hasta pedirme aprobacion.\n\nID: ${memory.id}\nTipo: ${memory.memoryType}\nClave: ${memory.key}\nEstado: ${memory.status}\nDetalle: ${summary}\n\nSi conviene archivarla o actualizarla, prepara la accion aprobable correspondiente.`;
+  }
+  return `Usa esta memoria como contexto para la siguiente respuesta.\n\nTipo: ${memory.memoryType}\nClave: ${memory.key}\nDetalle: ${summary}`;
 }
 
 function getMessageParts(message: SupliaMessage): SupliaMessagePart[] {
@@ -792,6 +949,7 @@ function AskCard({ part, answer, disabled, onSubmit }: { part: SupliaAskPart; an
                     {otherOpen[questionIndex] && (
                       <input
                         className="ask-input"
+                        aria-label={`Otra respuesta para ${question.question}`}
                         value={otherText[questionIndex] || ''}
                         onChange={(event) => setOtherText((prev) => ({ ...prev, [questionIndex]: event.target.value }))}
                         placeholder="Escribe tu respuesta..."
@@ -879,6 +1037,22 @@ function renderPayloadPreview(action: SupliaPendingAction) {
     );
   }
 
+  if (action.actionType.startsWith('research.')) {
+    const domain = cleanText(payload.domain || payload.companyDomain || payload.website || payload.url);
+    const company = cleanText(payload.company || payload.companyName || payload.keyword || payload.name);
+    const query = cleanText(payload.query);
+    const provider = cleanText(payload.provider || (payload.estimatedCreditUse && asRecord(payload.estimatedCreditUse).provider) || getResearchProvider(action.actionType));
+    return (
+      <div className="suplia-approval-detail">
+        <div><span>Investigacion</span><strong>{getResearchActionLabel(action.actionType)}</strong></div>
+        <div><span>Objetivo</span><strong>{query || company || domain || 'Sin objetivo claro'}</strong></div>
+        <div><span>Proveedor</span><strong>{formatProviderLabel(provider)}</strong></div>
+        <div><span>Creditos estimados</span><strong>{formatCreditEstimate(payload.estimatedCreditUse || { provider: provider || 'externo', requests: 1 })}</strong></div>
+        <p>Solo leera fuentes publicas. No modifica CRM, no guarda memoria y no contacta personas.</p>
+      </div>
+    );
+  }
+
   const rows: Array<[string, string]> = [];
   if (action.actionType === 'email.send') rows.push(['Para', to || 'Sin destinatario'], ['Asunto', subject || 'Sin asunto']);
   if (action.actionType === 'email.bulk_send') rows.push(['Mensajes', String(Array.isArray(payload.messages) ? payload.messages.length : payload.limit || 0)], ['Modo', payload.dryRun === false ? 'envio real' : 'dry-run']);
@@ -907,13 +1081,42 @@ function ActivityIndicator({ phaseIndex, phaseLabel, elapsedMs, onStop }: { phas
   );
 }
 
+function MemoryShelf({ memories, onUse, onManage }: { memories: SupliaMemory[]; onUse: (memory: SupliaMemory) => void; onManage: (memory: SupliaMemory) => void }) {
+  if (memories.length === 0) return null;
+  return (
+    <section className="suplia-memory-shelf" aria-label="Memoria activa de SUPL.IA">
+      <div className="suplia-memory-head">
+        <span>Memoria</span>
+        <p>Contexto que SUPL.IA puede reutilizar en decisiones futuras.</p>
+      </div>
+      <div className="suplia-memory-list">
+        {memories.map((memory) => (
+          <article key={memory.id} className={cn('suplia-memory-card', memory.status === 'proposed' && 'pending')}>
+            <div className="suplia-memory-card-top">
+              <span>{getMemoryLabel(memory)}</span>
+              <small>{getMemoryStatusLabel(memory.status)}</small>
+            </div>
+            <strong>{memory.key}</strong>
+            <p>{getMemorySummary(memory)}</p>
+            <div className="suplia-memory-actions">
+              <button type="button" onClick={() => onUse(memory)}>Usar</button>
+              <button type="button" onClick={() => onManage(memory)}>Gestionar</button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ToolRunCard({ toolRun }: { toolRun: SupliaToolRun }) {
   const results = getToolResults(toolRun);
   const query = getToolQuery(toolRun);
   const running = toolRun.status === 'running' || toolRun.status === 'queued';
   const failed = toolRun.status === 'failed';
+  const compact = !results.length && !toolRun.errorMessage && !toolRun.approvalReason;
   return (
-    <div className="suplia-tool">
+    <div className={cn('suplia-tool', compact && 'compact')}>
       <div className="suplia-tool-head">
         {running ? <div className="suplia-spinner" /> : failed ? <XCircle className="h-4 w-4 text-red-500" /> : <Globe2 className="h-4 w-4" />}
         <span>{getToolVerb(toolRun)}</span>
@@ -940,28 +1143,227 @@ function ToolRunCard({ toolRun }: { toolRun: SupliaToolRun }) {
   );
 }
 
-function MessageActions({ onRetry }: { onRetry: () => void }) {
+function MessageActions({
+  message,
+  onRetry,
+  onFeedback,
+  feedback,
+}: {
+  message: SupliaMessage;
+  onRetry: () => void;
+  onFeedback: (rating: 'up' | 'down') => void;
+  feedback?: 'up' | 'down' | null;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyMessage() {
+    try {
+      await navigator.clipboard.writeText(message.content || '');
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      // Clipboard can fail outside secure contexts; keep the UI stable.
+    }
+  }
+
   return (
     <div className="suplia-actions">
-      <button type="button" className="suplia-act" title="Copiar"><Copy className="h-4 w-4" /></button>
-      <button type="button" className="suplia-act" title="Buena"><ThumbsUp className="h-4 w-4" /></button>
-      <button type="button" className="suplia-act" title="Mala"><ThumbsDown className="h-4 w-4" /></button>
+      <button type="button" className="suplia-act" title={copied ? 'Copiado' : 'Copiar'} onClick={copyMessage}>
+        {copied ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+      </button>
+      <button
+        type="button"
+        className={cn('suplia-act', feedback === 'up' && 'text-[var(--suplia-accent)]')}
+        title="Buena respuesta"
+        aria-pressed={feedback === 'up'}
+        onClick={() => onFeedback('up')}
+      >
+        <ThumbsUp className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        className={cn('suplia-act', feedback === 'down' && 'text-[var(--suplia-accent)]')}
+        title="Mala respuesta"
+        aria-pressed={feedback === 'down'}
+        onClick={() => onFeedback('down')}
+      >
+        <ThumbsDown className="h-4 w-4" />
+      </button>
       <button type="button" className="suplia-act" title="Reintentar" onClick={onRetry}><RotateCcw className="h-4 w-4" /></button>
     </div>
   );
 }
 
-function ArtifactPreview({ artifact, text }: { artifact: SupliaArtifact; text: string }) {
-  const data = asRecord(artifact.data);
-  const items = getArtifactPreviewItems(artifact);
-  const pipelineColumns = asList(data.columnas || data.columns || data.pipeline || data.board);
-  const sequenceSteps = asList(data.pasos || data.steps || data.sequence || data.cadence);
+function StructuredDocumentSection({ title, items }: { title: string; items: ArtifactPreviewItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section className="suplia-doc-section">
+      <h2>{title}</h2>
+      <div className="suplia-doc-items">
+        {items.map((item, index) => (
+          <article key={`${title}-${item.title}-${index}`} className="suplia-doc-item">
+            <div>
+              <strong>{item.title}</strong>
+              {item.detail && <p>{item.detail}</p>}
+            </div>
+            {item.meta && <span>{item.meta}</span>}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
 
-  if (artifact.type === 'pipeline_summary' || pipelineColumns.length > 0) {
+function StructuredDocumentPreview({ artifact, data }: { artifact: SupliaArtifact; data: Record<string, any> }) {
+  const summary = getDocumentSummary(data);
+  const industries = getStructuredItems(data, ['industries', 'topIndustries', 'priorityIndustries', 'sectores', 'segments', 'audiences', 'targets'], 8);
+  const criteria = getStructuredItems(data, ['criteria', 'criterios', 'icpCriteria', 'searchCriteria', 'selectionCriteria', 'fitCriteria'], 8);
+  const signals = getStructuredItems(data, ['triggerSignals', 'signals', 'senales', 'activationSignals'], 8);
+  const nextSteps = getStructuredItems(data, ['nextSteps', 'next_steps', 'recommendedActions', 'actions'], 6);
+  const assumptions = getStructuredItems(data, ['assumptions', 'supuestos', 'risks', 'notes'], 5);
+
+  return (
+    <div className="suplia-art-preview suplia-strategy-doc">
+      <div className="suplia-doc-hero">
+        <span className="suplia-research-kicker">{getArtifactLabel(artifact.type)}</span>
+        <h1>{cleanText(data.title || artifact.title || 'Documento')}</h1>
+        <p>{summary || getArtifactDescription(artifact)}</p>
+      </div>
+      {industries.length > 0 && (
+        <section className="suplia-doc-section featured">
+          <h2>Prioridades</h2>
+          <div className="suplia-doc-priority-grid">
+            {industries.map((item, index) => (
+              <article key={`${item.title}-${index}`}>
+                <span>{String(index + 1).padStart(2, '0')}</span>
+                <strong>{item.title}</strong>
+                {item.detail && <p>{item.detail}</p>}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+      <div className="suplia-doc-grid">
+        <StructuredDocumentSection title="Criterios" items={criteria} />
+        <StructuredDocumentSection title="Senales de activacion" items={signals} />
+        <StructuredDocumentSection title="Proximos pasos" items={nextSteps} />
+        <StructuredDocumentSection title="Supuestos y notas" items={assumptions} />
+      </div>
+    </div>
+  );
+}
+
+function ArtifactPreview({ artifact, text }: { artifact: SupliaArtifact; text: string }) {
+  const data = getArtifactStructuredData(artifact);
+  const items = getArtifactPreviewItems(artifact);
+  const pipelineSource = asRecord(data.suggestions || data.followups || data.pipelineSummary);
+  const pipelineColumns = asList(data.columnas || data.columns || data.pipeline || data.board || pipelineSource.columns);
+  const pipelineTasks = asList(data.tasks || data.followupTasks || data.items || pipelineSource.items || pipelineSource.tasks).slice(0, 12);
+  const sequence = asRecord(data.sequence || data.cadence || data.flow);
+  const sequenceSteps = asList(data.pasos || data.steps || sequence.steps || data.sequence || data.cadence);
+  const emailPreviews = asList(data.previews || data.variants || data.drafts).slice(0, 8);
+
+  if (artifact.type === 'company_research') {
+    const research = asRecord(data.research || data);
+    const similarweb = asRecord(data.similarweb || research.similarweb);
+    const whois = asRecord(data.whois || research.whois);
+    const brand = asRecord(data.brand || research.brand);
+    const news = asList(data.news || data.items || research.news || research.items);
+    const mentions = asList(data.mentions || research.mentions);
+    const competitors = asList(data.competitors || research.competitors);
+    const hiringSignals = asList(data.hiringSignals || research.hiringSignals);
+    const sourceItems = [...news, ...mentions, ...competitors, ...hiringSignals].slice(0, 8);
+    const signals = asTextList(data.signals || research.signals || data.targetSignals || data.summary).slice(0, 8);
+    const domain = cleanText(data.domain || similarweb.domain || whois.domain || brand.domain);
+    const companyName = cleanText(data.companyName || data.company || brand.name || artifact.title);
+    const visits = formatScore(similarweb.visitsMonthly || similarweb.visits || data.visitsMonthly);
+    const rank = formatScore(similarweb.globalRank);
+    const registrar = cleanText(whois.registrar);
+    const industry = cleanText(brand.industry || data.industry || similarweb.category);
+
+    return (
+      <div className="suplia-art-preview suplia-company-research">
+        <div className="suplia-research-hero">
+          <div>
+            <span className="suplia-research-kicker">Research de cuenta</span>
+            <h1>{companyName || 'Empresa investigada'}</h1>
+            <p>{domain || getArtifactDescription(artifact)}</p>
+          </div>
+          <span className="suplia-art-pill">Solo lectura</span>
+        </div>
+
+        <div className="suplia-research-stats">
+          <div><span>Visitas mensuales</span><strong>{visits || 'Sin dato'}</strong></div>
+          <div><span>Ranking</span><strong>{rank || 'Sin dato'}</strong></div>
+          <div><span>Industria</span><strong>{industry || 'Sin dato'}</strong></div>
+          <div><span>Fuentes</span><strong>{sourceItems.length || 'Sin dato'}</strong></div>
+        </div>
+
+        <div className="suplia-research-grid">
+          <section>
+            <h2>Senales utiles</h2>
+            {signals.length > 0 ? (
+              <ul>{signals.map((signal, index) => <li key={`${signal}-${index}`}>{signal}</li>)}</ul>
+            ) : <p>No hay senales resumidas todavia. Usa los datos de fuente como contexto, no como conclusion.</p>}
+          </section>
+
+          <section>
+            <h2>Dominio</h2>
+            <dl>
+              <div><dt>Registrar</dt><dd>{registrar || 'Sin dato'}</dd></div>
+              <div><dt>Expira</dt><dd>{cleanText(whois.expires) || 'Sin dato'}</dd></div>
+              <div><dt>Disponibilidad</dt><dd>{typeof whois.available === 'boolean' ? (whois.available ? 'Disponible' : 'Registrado') : 'Sin dato'}</dd></div>
+            </dl>
+          </section>
+
+          <section>
+            <h2>Actividad digital</h2>
+            <dl>
+              <div><dt>Bounce</dt><dd>{cleanText(similarweb.bounceRate) || 'Sin dato'}</dd></div>
+              <div><dt>Paginas/visita</dt><dd>{cleanText(similarweb.pagesPerVisit) || 'Sin dato'}</dd></div>
+              <div><dt>Duracion visita</dt><dd>{cleanText(similarweb.avgVisitDuration) || 'Sin dato'}</dd></div>
+            </dl>
+          </section>
+
+          <section>
+            <h2>Fuentes externas</h2>
+            {sourceItems.length > 0 ? sourceItems.slice(0, 6).map((item, index) => {
+              const record = asRecord(item);
+              return <p key={`${cleanText(record.title) || 'source'}-${index}`}><strong>{cleanText(record.title) || `Fuente ${index + 1}`}</strong>{cleanText(record.snippet) ? ` - ${cleanText(record.snippet)}` : ''}</p>;
+            }) : <p>Sin fuentes externas asociadas en este artifact.</p>}
+          </section>
+        </div>
+      </div>
+    );
+  }
+
+  if (['note', 'icp_strategy', 'search_plan', 'plan', 'report', 'tool_result', 'crm_summary', 'reply_brief'].includes(artifact.type) && hasStructuredDocumentData(data)) {
+    return <StructuredDocumentPreview artifact={artifact} data={data} />;
+  }
+
+  if (artifact.type === 'pipeline_summary' || pipelineColumns.length > 0 || pipelineTasks.length > 0) {
     return (
       <div className="suplia-art-preview suplia-pipeline-preview">
         <h1>{cleanText(data.title || artifact.title || 'Seguimiento')}</h1>
-        <div className="suplia-pipeline-board">
+        {pipelineTasks.length > 0 && pipelineColumns.length === 0 ? (
+          <div className="suplia-task-list">
+            {pipelineTasks.map((task, index) => {
+              const record = asRecord(task);
+              const title = cleanText(record.title || record.email || record.leadId || record.company || record.name) || `Seguimiento ${index + 1}`;
+              const action = cleanText(record.suggestedAction || record.action || record.nextAction || record.status);
+              const reason = cleanText(record.reason || record.note || record.summary || record.lastSubject);
+              return (
+                <div key={`${title}-${index}`} className="suplia-task-card">
+                  <div>
+                    <strong>{title}</strong>
+                    {reason && <p>{reason}</p>}
+                  </div>
+                  <span>{action || 'Revisar'}</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : <div className="suplia-pipeline-board">
           {pipelineColumns.map((column, columnIndex) => {
             const record = asRecord(column);
             const leads = asList(record.leads || record.items || record.cards);
@@ -983,7 +1385,7 @@ function ArtifactPreview({ artifact, text }: { artifact: SupliaArtifact; text: s
               </div>
             );
           })}
-        </div>
+        </div>}
       </div>
     );
   }
@@ -1014,9 +1416,81 @@ function ArtifactPreview({ artifact, text }: { artifact: SupliaArtifact; text: s
     );
   }
 
+  if (artifact.type === 'risk_report') {
+    const preflight = asRecord(data.preflight || data.report || data);
+    const status = cleanText(preflight.status || data.status || 'review');
+    const blocked = formatScore(preflight.blockedCount || preflight.blocked || data.blockedCount);
+    const review = formatScore(preflight.reviewCount || preflight.warnings || data.reviewCount);
+    const sampleCount = formatScore(preflight.sampleCount || preflight.samples || data.sampleCount);
+    const risks = asList(data.risks || preflight.risks || preflight.items || preflight.messages).slice(0, 6);
+
+    return (
+      <div className="suplia-art-preview suplia-risk-preview">
+        <div className="suplia-risk-head">
+          <div>
+            <span>Preflight</span>
+            <h1>{artifact.title || 'Reporte de riesgo'}</h1>
+          </div>
+          <strong>{status}</strong>
+        </div>
+        <div className="suplia-risk-metrics">
+          <div><span>Muestras</span><strong>{sampleCount || '0'}</strong></div>
+          <div><span>Warnings</span><strong>{review || '0'}</strong></div>
+          <div><span>Bloqueos</span><strong>{blocked || '0'}</strong></div>
+        </div>
+        <div className="suplia-risk-list">
+          {risks.length > 0 ? risks.map((risk, index) => {
+            const record = asRecord(risk);
+            const label = cleanText(record.label || record.title || record.reason || record.code) || `Riesgo ${index + 1}`;
+            const detail = cleanText(record.detail || record.message || record.description || record.fix);
+            const severity = cleanText(record.severity || record.level || record.status || 'review');
+            return <div key={`${label}-${index}`}><span>{severity}</span><strong>{label}</strong>{detail && <p>{detail}</p>}</div>;
+          }) : <p>No hay riesgos detallados en este reporte. Revisa el JSON si necesitas auditoria completa.</p>}
+        </div>
+      </div>
+    );
+  }
+
+  if (artifact.type.includes('email') || artifact.type.includes('reply')) {
+    const preview = asRecord(data.preview || data.draft || data.email || data);
+    const to = cleanText(preview.to || preview.para || preview.recipient || preview.recipientName);
+    const subject = cleanText(preview.subject || preview.asunto || data.subject);
+    const body = cleanText(preview.body || preview.cuerpo || preview.textBody || preview.htmlBody || artifact.content || text);
+    return (
+      <div className="suplia-art-preview suplia-email-preview">
+        <h1>{cleanText(data.title || artifact.title || 'Borrador de correo')}</h1>
+        {emailPreviews.length > 0 ? (
+          <div className="suplia-email-stack">
+            {emailPreviews.map((draft, index) => {
+              const record = asRecord(draft);
+              const draftTo = cleanText(record.to || record.email || record.recipientName || record.company);
+              const draftSubject = cleanText(record.subject || record.asunto || `Variante ${index + 1}`);
+              const draftBody = cleanText(record.textBody || record.body || record.htmlBody || record.preview);
+              return (
+                <section key={`${draftTo}-${draftSubject}-${index}`}>
+                  <div><span>{draftTo || `Destinatario ${index + 1}`}</span><strong>{draftSubject}</strong></div>
+                  <p>{draftBody || 'Sin contenido visible.'}</p>
+                </section>
+              );
+            })}
+          </div>
+        ) : (
+          <>
+            <div className="suplia-email-header">
+              <div className="suplia-email-row"><span className="suplia-email-key">Para</span><span className="font-medium">{to || 'Sin destinatario'}</span></div>
+              <div className="suplia-email-row"><span className="suplia-email-key">Asunto</span><span className="font-medium">{subject || 'Sin asunto'}</span></div>
+            </div>
+            <div className="suplia-email-body">{body || 'Sin contenido visible.'}</div>
+          </>
+        )}
+        <div className="suplia-email-actions"><span>Enviar</span><span>Editar</span><span>Programar seguimiento</span></div>
+      </div>
+    );
+  }
+
   if (items.length > 0) {
     return (
-      <div className="suplia-art-preview">
+      <div className="suplia-art-preview suplia-list-preview">
         <h1>{cleanText(data.title || artifact.title || getArtifactLabel(artifact.type))}</h1>
         <p className="muted text-sm">{cleanText(data.subtitle || getArtifactDescription(artifact))}</p>
         <table className="suplia-leads-table">
@@ -1038,23 +1512,6 @@ function ArtifactPreview({ artifact, text }: { artifact: SupliaArtifact; text: s
             })}
           </tbody>
         </table>
-      </div>
-    );
-  }
-
-  if (artifact.type.includes('email') || artifact.type.includes('reply')) {
-    const preview = asRecord(data.preview || data.draft || data.email || data);
-    const to = cleanText(preview.to || preview.para || preview.recipient || preview.recipientName);
-    const subject = cleanText(preview.subject || preview.asunto || data.subject);
-    const body = cleanText(preview.body || preview.cuerpo || preview.textBody || artifact.content || text);
-    return (
-      <div className="suplia-art-preview suplia-email-preview">
-        <div className="suplia-email-header">
-          <div className="suplia-email-row"><span className="suplia-email-key">Para</span><span className="font-medium">{to || 'Sin destinatario'}</span></div>
-          <div className="suplia-email-row"><span className="suplia-email-key">Asunto</span><span className="font-medium">{subject || 'Sin asunto'}</span></div>
-        </div>
-        <div className="suplia-email-body">{body || 'Sin contenido visible.'}</div>
-        <div className="suplia-email-actions"><span>Enviar</span><span>Editar</span><span>Programar seguimiento</span></div>
       </div>
     );
   }
@@ -1082,6 +1539,7 @@ export function SupliaWorkspace() {
   const [editingActionId, setEditingActionId] = useState<string | null>(null);
   const [planEditText, setPlanEditText] = useState<Record<string, string>>({});
   const [strongConfirmations, setStrongConfirmations] = useState<Record<string, string>>({});
+  const [messageFeedback, setMessageFeedback] = useState<Record<string, 'up' | 'down'>>({});
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
   const [artifactCopied, setArtifactCopied] = useState(false);
   const [composerMode, setComposerMode] = useState<ComposerMode>('ask');
@@ -1110,6 +1568,10 @@ export function SupliaWorkspace() {
     [state.pendingActions]
   );
   const latestArtifacts = useMemo(() => state.artifacts.slice(0, 12), [state.artifacts]);
+  const visibleMemories = useMemo(
+    () => state.memories.filter((memory) => memory.status === 'approved' || memory.status === 'proposed').slice(0, 4),
+    [state.memories]
+  );
   const activeArtifact = useMemo(
     () => state.artifacts.find((artifact) => artifact.id === activeArtifactId) || state.artifacts[0] || null,
     [activeArtifactId, state.artifacts]
@@ -1120,6 +1582,11 @@ export function SupliaWorkspace() {
   const canMoveToOlderArtifact = activeArtifactIndex >= 0 && activeArtifactIndex < latestArtifacts.length - 1;
   const activeComposerMode = composerModes.find((mode) => mode.value === composerMode) || composerModes[0];
   const conversationGroups = useMemo(() => groupConversations(state.conversations, conversationQuery), [conversationQuery, state.conversations]);
+  const visibleToolRuns = useMemo(() => state.toolRuns.filter(isTranscriptToolRunVisible), [state.toolRuns]);
+  const runningToolCount = visibleToolRuns.filter((toolRun) => toolRun.status === 'running' || toolRun.status === 'queued').length;
+  const completedToolCount = visibleToolRuns.filter((toolRun) => toolRun.status === 'completed').length;
+  const failedToolCount = visibleToolRuns.filter((toolRun) => toolRun.status === 'failed').length;
+  const showWorkspaceStrip = state.messages.length > 0 && (activePendingActions.length > 0 || Boolean(state.activeJob) || latestArtifacts.length > 0 || visibleToolRuns.length > 0 || visibleMemories.length > 0);
   const answeredAskById = useMemo(() => {
     const answers = new Map<string, SupliaAskAnswerPayload>();
     for (const message of state.messages) {
@@ -1207,6 +1674,7 @@ export function SupliaWorkspace() {
       return;
     }
     if (action === 'scheduled') {
+      if (process.env.NEXT_PUBLIC_SUPLIA_SCHEDULED_ENABLED !== 'true') return;
       toast({ title: 'Programado', description: 'Las tareas programadas apareceran cuando SUPL.IA tenga jobs recurrentes.' });
       return;
     }
@@ -1217,6 +1685,20 @@ export function SupliaWorkspace() {
       followup: 'Revisa oportunidades sin respuesta y propone seguimiento.',
     };
     setInput(prompts[action]);
+  }
+
+  function useMemory(memory: SupliaMemory) {
+    setComposerMode('ask');
+    setInput(buildMemoryPrompt(memory, 'use'));
+    setSidebarOpen(false);
+    toast({ title: 'Memoria preparada', description: 'Revisa la instruccion antes de enviarla.' });
+  }
+
+  function manageMemory(memory: SupliaMemory) {
+    setComposerMode('approval');
+    setInput(buildMemoryPrompt(memory, 'manage'));
+    setSidebarOpen(false);
+    toast({ title: 'Gestion segura', description: 'SUPL.IA preparara cualquier cambio de memoria como aprobacion.' });
   }
 
   function toggleDictation() {
@@ -1232,7 +1714,8 @@ export function SupliaWorkspace() {
       return;
     }
     const recognition = new SpeechRecognition();
-    recognition.lang = 'es-ES';
+    const preferred = typeof navigator !== 'undefined' ? navigator.language : '';
+    recognition.lang = preferred && preferred.toLowerCase().startsWith('es') ? preferred : 'es-CL';
     recognition.interimResults = false;
     recognition.continuous = false;
     recognition.onresult = (event: any) => {
@@ -1443,6 +1926,11 @@ export function SupliaWorkspace() {
             if (parsed.event === 'start' || parsed.event === 'status') {
               if (typeof eventData.phase === 'string') setActivityPhaseLabel(eventData.phase);
               if (typeof eventData.phaseIndex === 'number') setActivityPhaseIndex(Math.max(0, Math.min(activityPhases.length - 1, eventData.phaseIndex)));
+            }
+
+            if (['tool.started', 'tool.completed', 'tool.failed', 'artifact.created', 'approval.requested', 'job.started'].includes(parsed.event)) {
+              if (typeof eventData.label === 'string') setActivityPhaseLabel(eventData.label);
+              setActivityPhaseIndex((prev) => Math.max(prev, Math.min(activityPhases.length - 1, 2)));
             }
 
             if (parsed.event === 'final') {
@@ -1703,6 +2191,40 @@ export function SupliaWorkspace() {
     sendMessage(formatAskAnswerMessage(payload), { answerToAsk: payload });
   }
 
+  async function submitFeedback(message: SupliaMessage, rating: 'up' | 'down') {
+    const current = messageFeedback[message.id] || null;
+    const next = current === rating ? null : rating;
+
+    setMessageFeedback((prev) => {
+      const copy = { ...prev };
+      if (next) copy[message.id] = next;
+      else delete copy[message.id];
+      return copy;
+    });
+
+    try {
+      if (next) {
+        const res = await fetch(`/api/suplia/messages/${message.id}/feedback`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rating: next }),
+        });
+        if (!res.ok) throw new Error('feedback failed');
+      } else {
+        const res = await fetch(`/api/suplia/messages/${message.id}/feedback`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('feedback delete failed');
+      }
+    } catch {
+      setMessageFeedback((prev) => {
+        const copy = { ...prev };
+        if (current) copy[message.id] = current;
+        else delete copy[message.id];
+        return copy;
+      });
+      toast({ variant: 'destructive', title: 'No se pudo guardar el feedback' });
+    }
+  }
+
   function renderMessagePart(part: SupliaMessagePart, message: SupliaMessage, index: number, firstTextPartIndex: number, streamingText?: string) {
     if (part.type === 'text') {
       const text = index === firstTextPartIndex && streamingText != null ? streamingText : part.text;
@@ -1782,7 +2304,7 @@ export function SupliaWorkspace() {
           <Menu className="h-4 w-4" />
         </button>
 
-        <aside className={cn('suplia-sidebar', sidebarCollapsed && 'collapsed', sidebarOpen && 'mobile-open')}>
+        <aside className={cn('suplia-sidebar', sidebarCollapsed && 'collapsed', sidebarOpen && 'mobile-open')} aria-label="Historial de conversaciones">
           <div className="suplia-sb-top">
             <button type="button" className="suplia-icon-btn" onClick={() => setSidebarCollapsed((value) => !value)} aria-label="Contraer barra lateral">
               <Menu className="h-[18px] w-[18px]" />
@@ -1805,7 +2327,7 @@ export function SupliaWorkspace() {
           </div>
 
           <div className="suplia-search-box">
-            <Input value={conversationQuery} onChange={(event) => setConversationQuery(event.target.value)} placeholder="Buscar chats" />
+            <Input aria-label="Buscar conversaciones" value={conversationQuery} onChange={(event) => setConversationQuery(event.target.value)} placeholder="Buscar chats" />
           </div>
 
           <div className="suplia-sb-section">Recientes</div>
@@ -1852,21 +2374,49 @@ export function SupliaWorkspace() {
 
         <section className="suplia-main">
           <header className="suplia-topbar">
-            <div className="suplia-model-pick static" aria-label="SUPL.IA">SUPL.IA</div>
+            <div className="suplia-top-title">
+              <div className="suplia-model-pick static" aria-label="SUPL.IA">SUPL.IA</div>
+              <span>Asistente comercial con control humano</span>
+            </div>
 
             <div className="suplia-top-right">
               {activePendingActions.length > 0 && <span className="suplia-pill-btn text-amber-700 dark:text-amber-200">{activePendingActions.length} pendiente{activePendingActions.length === 1 ? '' : 's'}</span>}
+              {visibleMemories.length > 0 && <span className="suplia-pill-btn"><Sparkles className="h-[15px] w-[15px]" />Memoria {visibleMemories.length}</span>}
               {state.activeJob && <span className="suplia-pill-btn"><Clock3 className="h-[15px] w-[15px]" />{getJobStatusLabel(state.activeJob.status, state.activeJob.progressLabel)}</span>}
+              {latestArtifacts.length > 0 && (
+                <button type="button" className="suplia-pill-btn" onClick={() => setArtifactPanelOpen(true)}>
+                  <FileText className="h-[15px] w-[15px]" />Canvas {latestArtifacts.length}
+                </button>
+              )}
             </div>
           </header>
 
+          {showWorkspaceStrip && (
+            <div className="suplia-workspace-strip" aria-label="Estado de trabajo">
+              {activePendingActions.length > 0 && <span className="suplia-status-chip warn"><CheckCircle2 className="h-3.5 w-3.5" />Requiere aprobacion</span>}
+              {state.activeJob && <span className="suplia-status-chip"><Clock3 className="h-3.5 w-3.5" />{getJobStatusLabel(state.activeJob.status, state.activeJob.progressLabel)}</span>}
+              {runningToolCount > 0 && <span className="suplia-status-chip"><Loader2 className="h-3.5 w-3.5 animate-spin" />{runningToolCount} herramienta{runningToolCount === 1 ? '' : 's'} activa{runningToolCount === 1 ? '' : 's'}</span>}
+              {completedToolCount > 0 && <span className="suplia-status-chip muted"><Globe2 className="h-3.5 w-3.5" />{completedToolCount} paso{completedToolCount === 1 ? '' : 's'} listo{completedToolCount === 1 ? '' : 's'}</span>}
+              {failedToolCount > 0 && <span className="suplia-status-chip danger"><XCircle className="h-3.5 w-3.5" />{failedToolCount} con error</span>}
+              {visibleMemories.length > 0 && <span className="suplia-status-chip muted"><Sparkles className="h-3.5 w-3.5" />{visibleMemories.length} memoria{visibleMemories.length === 1 ? '' : 's'}</span>}
+              {latestArtifacts.length > 0 && <button type="button" className="suplia-status-chip action" onClick={() => setArtifactPanelOpen(true)}><FileText className="h-3.5 w-3.5" />Abrir canvas</button>}
+            </div>
+          )}
+
+          <MemoryShelf memories={visibleMemories} onUse={useMemory} onManage={manageMemory} />
+
           <div className="suplia-scroll">
             <div className="suplia-thread">
-              {state.messages.length === 0 ? (
+              {loading && state.messages.length === 0 ? (
+                <div className="flex min-h-[48vh] items-center justify-center gap-2 text-sm text-[var(--suplia-muted)]" role="status">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Cargando conversacion
+                </div>
+              ) : state.messages.length === 0 ? (
                 <div className="suplia-empty">
                   <SupliaMark className="h-12 w-12" />
-                  <h1>Que quieres lograr?</h1>
-                  <p>Prospecta, investiga, contacta y haz seguimiento con artifacts y aprobaciones seguras.</p>
+                  <h1>Que quieres lograr hoy?</h1>
+                  <p>Describe un objetivo comercial. SUPL.IA puede investigar, redactar y preparar acciones, pero pedira aprobacion antes de consumir creditos o contactar personas.</p>
                   <div className="suplia-starters">
                     {starters.map((starter) => <button key={starter} type="button" className="suplia-starter" onClick={() => sendMessage(starter)}>{starter}</button>)}
                   </div>
@@ -1892,7 +2442,12 @@ export function SupliaWorkspace() {
                     <div className="suplia-assistant">
                       {parts.map((part, index) => renderMessagePart(part, message, index, firstTextPartIndex, streamingText))}
                     </div>
-                    <MessageActions onRetry={() => sendMessage(message.content)} />
+                    <MessageActions
+                      message={message}
+                      feedback={messageFeedback[message.id] || null}
+                      onFeedback={(rating) => submitFeedback(message, rating)}
+                      onRetry={() => sendMessage(message.content)}
+                    />
                   </div>
                 );
               })}
@@ -1903,8 +2458,9 @@ export function SupliaWorkspace() {
 
           <div className="suplia-composer-wrap">
             <form onSubmit={handleSubmit} className="suplia-composer">
-              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(event) => handleFilesSelected(event.target.files)} />
+              <input ref={fileInputRef} aria-label="Seleccionar archivos adjuntos" type="file" multiple className="hidden" onChange={(event) => handleFilesSelected(event.target.files)} />
               <Textarea
+                aria-label="Mensaje para SUPL.IA"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={(event) => {
@@ -1930,10 +2486,10 @@ export function SupliaWorkspace() {
                 </div>
               )}
               <div className="suplia-comp-row">
-                <button type="button" className="suplia-comp-tool" onClick={() => fileInputRef.current?.click()} title="Adjuntar"><Plus className="h-[17px] w-[17px]" /></button>
+                <button type="button" className="suplia-comp-tool" onClick={() => fileInputRef.current?.click()} title="Adjuntar" aria-label="Adjuntar archivo"><Plus className="h-[17px] w-[17px]" /></button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button type="button" className="suplia-comp-tool"><Mic className="h-4 w-4" /><span>Herramientas</span></button>
+                    <button type="button" className="suplia-comp-tool"><SlidersHorizontal className="h-4 w-4" /><span>Herramientas</span></button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-64 rounded-[13px]">
                     <DropdownMenuLabel>Herramientas</DropdownMenuLabel>

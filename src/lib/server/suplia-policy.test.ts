@@ -16,6 +16,16 @@ test('external search and enrichment require approval', () => {
   assert.equal(getSupliaPolicy('lead.enrich_batch').requiresApproval, true);
 });
 
+test('premium research tools require simple approval', () => {
+  for (const toolName of ['research.brand', 'research.brand_mentions', 'research.serp_company_news', 'research.serp_competitors', 'research.serp_jobs_signals']) {
+    const policy = getSupliaPolicy(toolName);
+    assert.equal(policy.riskLevel, 'medium', toolName);
+    assert.equal(policy.requiresApproval, true, toolName);
+    assert.equal(policy.approvalKind, 'simple', toolName);
+    assert.match(policy.approvalReason, /creditos/, toolName);
+  }
+});
+
 test('campaign launch, resume, reply send and bulk send are strong approvals', () => {
   for (const toolName of ['campaign.launch', 'campaign.resume', 'thread.reply_send', 'email.bulk_send']) {
     const policy = getSupliaPolicy(toolName);
@@ -25,7 +35,7 @@ test('campaign launch, resume, reply send and bulk send are strong approvals', (
 });
 
 test('safe planning, reading and compliance tools run without approval', () => {
-  for (const toolName of ['campaigns.get', 'prospecting.build_search_plan', 'compliance.preflight_campaign', 'memory.propose']) {
+  for (const toolName of ['campaigns.get', 'prospecting.build_search_plan', 'compliance.preflight_campaign', 'memory.propose', 'research.similarweb', 'research.whois']) {
     const policy = getSupliaPolicy(toolName);
     assert.equal(policy.requiresApproval, false, toolName);
     assert.equal(policy.approvalKind, 'none', toolName);

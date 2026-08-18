@@ -141,6 +141,7 @@ export async function ensureSupliaPromptConversationContext(params: {
   auth: AuthContext;
   conversation: SupliaConversation;
   messages: SupliaMessage[];
+  precomputed?: { compaction: SupliaConversationCompaction | null; overflow?: boolean };
 }): Promise<{
   promptContext: SupliaPromptConversationContext;
   compaction: SupliaConversationCompaction | null;
@@ -148,11 +149,14 @@ export async function ensureSupliaPromptConversationContext(params: {
 }> {
   const thresholdTokens = getSupliaContextCompactThresholdTokens();
   const recentMessageCount = getSupliaContextRecentMessageCount();
-  const tokenEstimate = estimateSupliaMessagesTokens(params.messages);
-  let compaction = getSupliaCompactionFromMetadata(params.conversation.metadata);
+  const freshTokenEstimate = estimateSupliaMessagesTokens(params.messages);
+  let compaction = params.precomputed?.compaction ?? getSupliaCompactionFromMetadata(params.conversation.metadata);
+  const usesPrecomputedCompaction = Boolean(params.precomputed && compaction?.compactedThroughCreatedAt);
+  const baseTokenEstimate = usesPrecomputedCompaction ? Math.max(0, Math.floor(Number(compaction?.sourceTokenEstimate || 0))) : 0;
+  const tokenEstimate = baseTokenEstimate + freshTokenEstimate;
   const telemetry: ConversationCompactionTelemetry[] = [];
 
-  if (tokenEstimate > thresholdTokens) {
+  if (tokenEstimate > thresholdTokens || params.precomputed?.overflow === true) {
     const messagesToCompact = getSupliaMessagesNeedingCompaction(params.messages, compaction, recentMessageCount);
     if (messagesToCompact.length > 0) {
       let summary = compaction?.summary || null;
@@ -170,8 +174,13 @@ export async function ensureSupliaPromptConversationContext(params: {
         summary: summary || 'Resumen de conversacion no disponible.',
         compactedThroughMessageId: lastCompacted.id,
         compactedThroughCreatedAt: lastCompacted.createdAt || null,
-        sourceMessageCount: params.messages.length,
-        sourceTokenEstimate: tokenEstimate,
+        sourceMessageCount: usesPrecomputedCompaction
+          ? Math.max(0, Math.floor(Number(compaction?.sourceMessageCount || 0))) + messagesToCompact.length
+          : params.messages.length,
+        // Accumulated estimate for messages already represented by the summary.
+        sourceTokenEstimate: usesPrecomputedCompaction
+          ? baseTokenEstimate + estimateSupliaMessagesTokens(messagesToCompact)
+          : tokenEstimate,
         updatedAt: new Date().toISOString(),
       };
 
@@ -192,6 +201,7 @@ export async function ensureSupliaPromptConversationContext(params: {
       compaction,
       thresholdTokens,
       recentMessageCount,
+      tokenEstimate,
     }),
   };
 }

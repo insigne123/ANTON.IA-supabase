@@ -292,10 +292,16 @@ export default function OpportunitiesPage() {
       if (ticket) setQuotaTicket(ticket);
 
       const enriched = Array.isArray(j.enriched) ? j.enriched : [];
+      const processedRefs = new Set<string>(
+        enriched
+          .map((entry: any) => String(entry?.clientRef || '').trim())
+          .filter(Boolean)
+      );
       // Guardar enriquecidos (dedupe) y quitar de leads locales los que ya tienen email
       const byRef = new Map(payloadLeads.map(pl => [pl.clientRef, pl]));
       const formatted = enriched.map((e: any) => ({
         id: e.id,
+        apolloId: e.apolloId,
         fullName: e.fullName,
         title: e.title,
         email: e.email,
@@ -304,12 +310,14 @@ export default function OpportunitiesPage() {
         companyName: e.companyName ?? byRef.get(e?.clientRef)?.companyName,
         companyDomain: e.companyDomain ?? byRef.get(e?.clientRef)?.companyDomain,
         createdAt: e.createdAt,
+        phoneNumbers: e.phoneNumbers,
+        primaryPhone: e.primaryPhone,
+        enrichmentStatus: e.enrichmentStatus,
       }));
-      const addRes = enrichedOpportunitiesStorage.addDedup(formatted);
+      const addRes = await enrichedOpportunitiesStorage.addDedup(formatted);
 
-      // quitar de la lista temporal los que tengan email
-      const enrichedRefs = new Set(formatted.filter((x: any) => !!x.email).map((_x: any, i: number) => enriched[i]?.clientRef).filter(Boolean));
-      const remaining = leads.filter((l: any) => !enrichedRefs.has((l as any)?.id));
+      // quitar de la lista temporal los que ya se guardaron en Enriquecidos
+      const remaining = leads.filter((l: any) => !processedRefs.has(String((l as any)?.id || '').trim()));
       setLeads(remaining);
       setSelLeadIdx({});
 

@@ -42,6 +42,8 @@ export async function POST(req: NextRequest) {
             parseBool(req.nextUrl.searchParams.get('includeDetails'));
 
         const targetUrl = new URL('/api/cron/process-campaigns', req.nextUrl.origin);
+        // The OpenClaw claim is the only organization selector accepted for this proxy.
+        targetUrl.searchParams.set('organizationId', claims.orgId);
         if (dryRun) targetUrl.searchParams.set('dryRun', 'true');
         if (includeDetails) targetUrl.searchParams.set('includeDetails', 'true');
 

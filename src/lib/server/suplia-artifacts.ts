@@ -25,6 +25,39 @@ export type SupliaArtifactUpdateInput = SupliaArtifactDraft & {
   changeSummary?: string | null;
 };
 
+function hasStructuredData(data: Record<string, unknown> | null | undefined) {
+  return Boolean(data && Object.keys(data).length > 0);
+}
+
+function unwrapJsonContent(content: string) {
+  const trimmed = content.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenced?.[1]?.trim() || trimmed;
+}
+
+function parseJsonObjectContent(content?: string | null): Record<string, unknown> | null {
+  if (!content) return null;
+  const normalized = unwrapJsonContent(content);
+  if (!normalized.startsWith('{') || !normalized.endsWith('}')) return null;
+  try {
+    const parsed = JSON.parse(normalized);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeSupliaArtifactDraft<T extends SupliaArtifactDraft>(artifact: T): T {
+  const parsedContent = parseJsonObjectContent(artifact.content);
+  if (!parsedContent) return artifact;
+
+  return {
+    ...artifact,
+    content: null,
+    data: hasStructuredData(artifact.data) ? { ...parsedContent, ...artifact.data } : parsedContent,
+  };
+}
+
 export function mapSupliaArtifactRow(row: any): SupliaArtifact {
   return {
     id: row.id,
@@ -83,10 +116,11 @@ export async function insertSupliaArtifacts(auth: AuthContext, artifacts: Suplia
   if (artifacts.length === 0) return [];
   const admin = getSupabaseAdminClient();
   const now = new Date().toISOString();
+  const normalizedArtifacts = artifacts.map(normalizeSupliaArtifactDraft);
 
   const { data, error } = await admin
     .from('suplia_artifacts')
-    .insert(artifacts.map((artifact) => ({
+    .insert(normalizedArtifacts.map((artifact) => ({
       conversation_id: artifact.conversationId,
       organization_id: auth.organizationId,
       user_id: auth.user.id,
@@ -108,7 +142,7 @@ export async function insertSupliaArtifacts(auth: AuthContext, artifacts: Suplia
   if (rows.length > 0) {
     const { error: versionError } = await admin
       .from('suplia_artifact_versions')
-      .insert(rows.map((row: any, index: number) => versionRowFromArtifact(row, artifacts[index]?.changeSummary || 'Version inicial.')));
+      .insert(rows.map((row: any, index: number) => versionRowFromArtifact(row, normalizedArtifacts[index]?.changeSummary || 'Version inicial.')));
     if (versionError) throw versionError;
   }
 
@@ -117,6 +151,8 @@ export async function insertSupliaArtifacts(auth: AuthContext, artifacts: Suplia
 
 export async function updateSupliaArtifact(auth: AuthContext, input: SupliaArtifactUpdateInput) {
   const admin = getSupabaseAdminClient();
+  const parsedContentInput = parseJsonObjectContent(input.content);
+  const normalizedInput = normalizeSupliaArtifactDraft(input);
   const { data: existing, error: existingError } = await admin
     .from('suplia_artifacts')
     .select('*')
@@ -130,13 +166,13 @@ export async function updateSupliaArtifact(auth: AuthContext, input: SupliaArtif
   const nextVersion = Number(existing.version_number || 1) + 1;
   const now = new Date().toISOString();
   const patch = {
-    type: input.type || existing.type,
-    artifact_kind: input.type || existing.artifact_kind || existing.type,
-    title: input.title || existing.title,
-    content: input.content ?? existing.content ?? null,
-    data: input.data || existing.data || {},
-    source_message_id: input.sourceMessageId || existing.source_message_id || null,
-    job_id: input.jobId || existing.job_id || null,
+    type: normalizedInput.type || existing.type,
+    artifact_kind: normalizedInput.type || existing.artifact_kind || existing.type,
+    title: normalizedInput.title || existing.title,
+    content: parsedContentInput ? null : input.content ?? existing.content ?? null,
+    data: normalizedInput.data || existing.data || {},
+    source_message_id: normalizedInput.sourceMessageId || existing.source_message_id || null,
+    job_id: normalizedInput.jobId || existing.job_id || null,
     version_number: nextVersion,
     status: 'active',
     updated_at: now,

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { Suspense, useEffect, useState, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 
@@ -9,12 +10,15 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 
-export default function OutlookConnectPage() {
+function OutlookConnectPageInner() {
   const { toast } = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [automationConnected, setAutomationConnected] = useState(false);
   const [browserReady, setBrowserReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activatingBrowser, setActivatingBrowser] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const supabase = createClientComponentClient();
 
   const checkConnection = useCallback(async () => {
@@ -44,13 +48,70 @@ export default function OutlookConnectPage() {
     checkConnection();
   }, [checkConnection]);
 
-  const handleConnect = () => {
-    const tenant = process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'common';
-    const clientId = process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID;
-    const redirectUri = `${process.env.NEXT_PUBLIC_BASE_URL}/api/auth/callback/azure`;
-    const scope = 'offline_access User.Read Mail.Send';
+  useEffect(() => {
+    const connected = searchParams.get('connected');
+    const error = searchParams.get('error');
+    const details = searchParams.get('details');
 
-    window.location.href = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&response_mode=query&scope=${scope}`;
+    if (!connected && !error) return;
+
+    if (connected === 'true') {
+      toast({
+        title: 'Outlook conectado',
+        description: 'La automatizacion ya puede usar tu cuenta. Si vas a enviar desde este navegador, activa tambien la sesion local.',
+      });
+      void checkConnection();
+    }
+
+    if (error) {
+      toast({
+        variant: 'destructive',
+        title: 'No se pudo conectar Outlook',
+        description: details || error,
+      });
+    }
+
+    router.replace('/outlook');
+  }, [checkConnection, router, searchParams, toast]);
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({
+          variant: 'destructive',
+          title: 'Sesion expirada',
+          description: 'Vuelve a iniciar sesion en ANTON.IA antes de conectar Outlook.',
+        });
+        return;
+      }
+
+      const tenant = process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'common';
+      const clientId = process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID?.trim();
+      if (!clientId) {
+        toast({
+          variant: 'destructive',
+          title: 'Configuracion incompleta',
+          description: 'Falta NEXT_PUBLIC_AZURE_AD_CLIENT_ID.',
+        });
+        return;
+      }
+
+      const redirectUri = `${window.location.origin}/api/auth/callback/azure`;
+      const authUrl = new URL(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`);
+      authUrl.search = new URLSearchParams({
+        client_id: clientId,
+        response_type: 'code',
+        redirect_uri: redirectUri,
+        response_mode: 'query',
+        scope: 'offline_access User.Read Mail.Send Mail.Read',
+      }).toString();
+
+      window.location.assign(authUrl.toString());
+    } finally {
+      setConnecting(false);
+    }
   };
 
   const handleActivateBrowser = async () => {
@@ -98,10 +159,11 @@ export default function OutlookConnectPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={handleConnect}>
+            <Button onClick={handleConnect} disabled={connecting}>
+              {connecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {automationConnected ? 'Reconectar / Actualizar permisos' : 'Conectar con Outlook'}
             </Button>
-            <Button variant="outline" onClick={handleActivateBrowser} disabled={activatingBrowser}>
+            <Button variant="outline" onClick={handleActivateBrowser} disabled={activatingBrowser || connecting}>
               {activatingBrowser ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Activar sesion en este navegador
             </Button>
@@ -112,6 +174,7 @@ export default function OutlookConnectPage() {
             <ul className="list-disc pl-5 mt-2 space-y-1">
               <li>Envio de correos manuales desde la plataforma.</li>
               <li><strong>Envio automatico</strong> de campanas en segundo plano (24/7).</li>
+              <li>Lectura de hilos para detectar respuestas y acuses cuando sincronizas la bandeja.</li>
               <li>Almacenamiento seguro de credenciales (Refresh Token).</li>
             </ul>
             <p className="mt-3 text-muted-foreground">
@@ -122,5 +185,13 @@ export default function OutlookConnectPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function OutlookConnectPage() {
+  return (
+    <Suspense fallback={<div className="container mx-auto max-w-3xl text-sm text-muted-foreground">Verificando conexion...</div>}>
+      <OutlookConnectPageInner />
+    </Suspense>
   );
 }

@@ -1,6 +1,6 @@
 import { classifyReply, extractReplyPreview } from '@/lib/reply-classifier';
 import { detectDeliveryFailure } from '@/lib/delivery-failure-detector';
-import { buildThreadKey, deriveLifecycleState, safeInsertEmailEvent } from '@/lib/email-observability';
+import { buildThreadKey } from '@/lib/email-observability';
 import { tokenService } from '@/lib/services/token-service';
 import { refreshGoogleToken, refreshMicrosoftToken } from '@/lib/server-auth-helpers';
 import { maybeEscalateReplyReviewFromContactedId } from '@/lib/server/antonia-reply-escalation';
@@ -8,6 +8,7 @@ import { notificationService } from '@/lib/services/notification-service';
 import { createAntoniaException } from '@/lib/server/antonia-exceptions';
 import { syncLeadAutopilotToCrm } from '@/lib/server/crm-autopilot';
 import { stripHtmlToText } from '@/lib/email-outbound';
+import { shouldGloballySuppressReply } from '@/lib/contact-history-guard';
 
 type ContactedRow = {
   id: string;
@@ -51,6 +52,77 @@ export type ReplySyncResult = {
   skippedNoToken: number;
   errors: Array<{ contactedId?: string; email?: string | null; provider?: string | null; error: string }>;
 };
+
+export type InboundReplyIngestionResult = {
+  inserted: boolean;
+  reason: 'inserted' | 'duplicate' | 'globally_suppressed' | 'contact_missing' | 'contact_context_mismatch';
+  eventKey: string;
+  leadResponseId?: string | null;
+  emailEventId?: string | null;
+};
+
+function normalizeInboundProvider(value: string) {
+  const provider = String(value || '').trim().toLowerCase();
+  if (provider === 'google') return 'gmail';
+  if (provider === 'microsoft') return 'outlook';
+  return provider;
+}
+
+export async function ingestInboundReply(supabase: any, input: {
+  contactedId: string;
+  recipientEmail: string;
+  provider: string;
+  messageId?: string | null;
+  internetMessageId?: string | null;
+  eventType: 'reply' | 'bounce';
+  eventSource: string;
+  eventAt: string;
+  threadKey?: string | null;
+  threadId?: string | null;
+  conversationId?: string | null;
+  subject?: string | null;
+  content?: string | null;
+  preview?: string | null;
+  classification: Record<string, unknown>;
+}): Promise<InboundReplyIngestionResult> {
+  const { data, error } = await supabase.rpc('ingest_inbound_reply_v1', {
+    p_contacted_id: input.contactedId,
+    p_recipient_email: input.recipientEmail,
+    p_provider: normalizeInboundProvider(input.provider),
+    p_message_id: input.messageId || null,
+    p_internet_message_id: input.internetMessageId || null,
+    p_event_type: input.eventType,
+    p_event_source: input.eventSource,
+    p_event_at: input.eventAt,
+    p_thread_key: input.threadKey || null,
+    p_thread_id: input.threadId || null,
+    p_conversation_id: input.conversationId || null,
+    p_subject: input.subject || null,
+    p_content: input.content || null,
+    p_preview: input.preview || null,
+    p_classification: input.classification,
+  });
+
+  if (error) throw error;
+  if (!data || typeof data !== 'object' || typeof data.inserted !== 'boolean' || typeof data.reason !== 'string') {
+    throw new Error('Invalid inbound reply ingestion result');
+  }
+  return data as InboundReplyIngestionResult;
+}
+
+export async function recordInboundUnsubscribe(supabase: any, input: {
+  contactedId: string;
+  recipientEmail: string;
+  eventKey: string;
+}) {
+  const { data, error } = await supabase.rpc('record_inbound_unsubscribe_v1', {
+    p_contacted_id: input.contactedId,
+    p_recipient_email: input.recipientEmail,
+    p_event_key: input.eventKey,
+  });
+  if (error) throw error;
+  return data as { recorded: boolean; reason: string };
+}
 
 function normalizeEmail(value?: string | null) {
   return String(value || '').trim().toLowerCase();
@@ -257,48 +329,8 @@ async function findOutlookReply(accessToken: string, row: ContactedRow): Promise
   return pickInboundCandidate(items.map(outlookMessageToReply), row, null);
 }
 
-function stripUnavailableColumns(data: any, mode: 'reply' | 'observability') {
-  const copy = { ...data };
-  if (mode === 'reply') {
-    delete copy.reply_message_id;
-    delete copy.reply_subject;
-    delete copy.reply_snippet;
-    return copy;
-  }
-  delete copy.thread_key;
-  delete copy.lifecycle_state;
-  delete copy.last_event_type;
-  delete copy.last_event_at;
-  return copy;
-}
-
-function isReplyColumnError(error: any) {
-  const text = String(error?.message || error?.details || '').toLowerCase();
-  return text.includes('reply_message_id') || text.includes('reply_subject') || text.includes('reply_snippet');
-}
-
-function isObservabilityColumnError(error: any) {
-  const text = String(error?.message || error?.details || '').toLowerCase();
-  return text.includes('thread_key') || text.includes('lifecycle_state') || text.includes('last_event_type') || text.includes('last_event_at');
-}
-
-async function updateContactedLead(supabase: any, contactedId: string, updateData: any) {
-  let payload = updateData;
-  let { error } = await supabase.from('contacted_leads').update(payload).eq('id', contactedId);
-  if (error && isReplyColumnError(error)) {
-    payload = stripUnavailableColumns(payload, 'reply');
-    ({ error } = await supabase.from('contacted_leads').update(payload).eq('id', contactedId));
-  }
-  if (error && isObservabilityColumnError(error)) {
-    payload = stripUnavailableColumns(payload, 'observability');
-    ({ error } = await supabase.from('contacted_leads').update(payload).eq('id', contactedId));
-  }
-  if (error) throw error;
-}
-
 async function recordInboundReply(supabase: any, row: ContactedRow, reply: InboundReply) {
-  const nowIso = new Date().toISOString();
-  const receivedAt = reply.receivedAt || nowIso;
+  const receivedAt = reply.receivedAt || new Date().toISOString();
   const rawText = String(reply.text || stripHtmlToText(reply.html || '') || reply.snippet || '').trim();
   const preview = extractReplyPreview(rawText || reply.html || reply.snippet || '');
   const failure = detectDeliveryFailure({ subject: reply.subject, from: reply.from, text: rawText, html: reply.html });
@@ -310,92 +342,56 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
     messageId: reply.id,
   });
 
-  const updateData: any = {
-    reply_message_id: reply.id || null,
-    reply_subject: reply.subject || null,
-    reply_preview: preview || null,
-    reply_snippet: preview || null,
-    last_reply_text: rawText.slice(0, 4000) || null,
-    last_interaction_at: receivedAt,
-    last_update_at: nowIso,
-    thread_key: threadKey,
-    thread_id: reply.threadId || row.thread_id || null,
-    conversation_id: reply.conversationId || row.conversation_id || null,
-    internet_message_id: row.internet_message_id || null,
-    last_event_type: 'reply',
-    last_event_at: receivedAt,
-    lifecycle_state: deriveLifecycleState(row.lifecycle_state || row.status, 'reply'),
-  };
-
   let classification: any = null;
   if (failure) {
-    updateData.status = 'failed';
-    updateData.replied_at = null;
-    updateData.delivery_status = failure.deliveryStatus;
-    updateData.bounced_at = receivedAt;
-    updateData.bounce_category = failure.bounceCategory;
-    updateData.bounce_reason = failure.bounceReason;
-    updateData.reply_intent = failure.replyIntent;
-    updateData.reply_sentiment = 'neutral';
-    updateData.reply_confidence = 0.98;
-    updateData.reply_summary = failure.bounceReason;
-    updateData.campaign_followup_allowed = false;
-    updateData.campaign_followup_reason = failure.campaignFollowupReason;
-    updateData.evaluation_status = failure.evaluationStatus;
-    classification = failure;
+    classification = {
+      intent: failure.replyIntent,
+      sentiment: 'neutral',
+      confidence: 0.98,
+      summary: failure.bounceReason,
+      reason: failure.campaignFollowupReason,
+      shouldContinue: false,
+      evaluationStatus: failure.evaluationStatus,
+      deliveryStatus: failure.deliveryStatus,
+      bounceCategory: failure.bounceCategory,
+      bounceReason: failure.bounceReason,
+    };
   } else {
     classification = await classifyReply(rawText || reply.snippet || '');
-    updateData.status = 'replied';
-    updateData.replied_at = receivedAt;
-    updateData.delivery_status = 'replied';
-    updateData.reply_intent = classification.intent;
-    updateData.reply_sentiment = classification.sentiment;
-    updateData.reply_confidence = classification.confidence;
-    updateData.reply_summary = classification.summary || null;
-    updateData.campaign_followup_allowed = classification.shouldContinue;
-    updateData.campaign_followup_reason = classification.reason || null;
-    updateData.evaluation_status = classification.intent === 'negative' || classification.intent === 'unsubscribe'
+    classification.evaluationStatus = classification.intent === 'negative' || classification.intent === 'unsubscribe'
       ? 'do_not_contact'
       : classification.intent === 'meeting_request' || classification.intent === 'positive'
         ? 'action_required'
         : 'pending';
   }
 
-  await updateContactedLead(supabase, row.id, updateData);
-
-  await supabase.from('lead_responses').insert({
-    lead_id: row.lead_id || null,
-    contacted_id: row.id,
-    organization_id: row.organization_id || null,
-    mission_id: row.mission_id || null,
-    email_message_id: reply.id || reply.internetMessageId || null,
-    type: failure ? 'bounce' : 'reply',
-    content: rawText || reply.html || reply.snippet || null,
-    created_at: receivedAt,
-  } as any);
-
-  await safeInsertEmailEvent(supabase, {
-    organization_id: row.organization_id || null,
-    mission_id: row.mission_id || null,
-    contacted_id: row.id,
-    lead_id: row.lead_id || null,
+  const ingestion = await ingestInboundReply(supabase, {
+    contactedId: row.id,
+    recipientEmail: normalizeEmail(row.email),
     provider: reply.provider,
-    event_type: failure ? 'bounce' : 'reply',
-    event_source: 'reply_sync',
-    event_at: receivedAt,
-    thread_key: threadKey,
-    message_id: reply.id || null,
-    internet_message_id: reply.internetMessageId || null,
-    meta: { subject: reply.subject || null, preview: preview || null },
+    messageId: reply.id,
+    internetMessageId: reply.internetMessageId,
+    eventType: failure ? 'bounce' : 'reply',
+    eventSource: 'reply_sync',
+    eventAt: receivedAt,
+    threadKey,
+    threadId: reply.threadId || row.thread_id,
+    conversationId: reply.conversationId || row.conversation_id,
+    subject: reply.subject,
+    content: rawText || reply.html || reply.snippet,
+    preview,
+    classification,
   });
 
-  if ((classification?.intent === 'unsubscribe' || classification?.intent === 'negative') && row.email) {
-    await supabase.from('unsubscribed_emails').upsert({
-      email: normalizeEmail(row.email),
-      user_id: row.user_id || null,
-      organization_id: row.organization_id || null,
-      reason: `reply:${classification.intent}`,
-    }, { onConflict: 'email,user_id,organization_id' } as any);
+  if (!ingestion.inserted) return false;
+
+  if (shouldGloballySuppressReply(classification) && row.email) {
+    const suppression = await recordInboundUnsubscribe(supabase, {
+      contactedId: row.id,
+      recipientEmail: normalizeEmail(row.email),
+      eventKey: ingestion.eventKey,
+    });
+    if (!suppression.recorded) return false;
   }
 
   if (!failure && row.organization_id && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
@@ -449,6 +445,8 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
       replySubject: reply.subject || undefined,
     }).catch((error) => console.warn('[reply-sync] escalation failed:', error));
   }
+
+  return true;
 }
 
 export async function syncRepliesForOrganization(supabase: any, input: { organizationId: string; userId?: string | null; limit?: number }): Promise<ReplySyncResult> {
@@ -505,8 +503,8 @@ export async function syncRepliesForOrganization(supabase: any, input: { organiz
         : await findOutlookReply(accessToken, row);
 
       if (!reply) continue;
-      await recordInboundReply(supabase, row, reply);
-      result.synced += 1;
+      const inserted = await recordInboundReply(supabase, row, reply);
+      if (inserted) result.synced += 1;
     } catch (err: any) {
       result.errors.push({ contactedId: row.id, email: row.email, provider: row.provider, error: err?.message || String(err) });
     }

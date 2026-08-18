@@ -70,9 +70,11 @@ Preguntar siempre:
 
 ## Skills y recursos instalados para reforzar esta metodologia
 
-- `apple-hig-designer`
-- `hig-foundations`
-- `accessibility-tester`
-- `frontend-design`
-- `ui-ux-pro-max`
-- `web-design-guidelines`
+- skill local `ui-ux-master`
+- skill local `apple-hig`
+- skill local `premium-layout-composer`
+- skill local `responsive-layout-fixer`
+- skill local `visual-regression-reviewer`
+- skill local `wcag-remediator`
+- MCP `apple-hig` para consultar HIG cuando haga falta
+- MCP `chrome-devtools` y `playwright` para validacion visual, responsive y QA

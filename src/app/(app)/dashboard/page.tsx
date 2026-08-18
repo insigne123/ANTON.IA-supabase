@@ -2,38 +2,46 @@
 // src/app/(app)/dashboard/page.tsx
 'use client';
 
+import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
+import { Button } from '@/components/ui/button';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
-import ActivityFeed from '@/components/dashboard/ActivityFeed';
 import NextStepsWidget from '@/components/dashboard/NextStepsWidget';
 import PerformanceChart from '@/components/dashboard/PerformanceChart';
-import FunnelChart from '@/components/dashboard/FunnelChart';
 import SummaryCards from '@/components/dashboard/SummaryCards';
+import { LayoutGrid, Search } from 'lucide-react';
 
 export default function DashboardPage() {
   return (
-    <div className="space-y-8">
+    <div>
       <PageHeader
         title="Dashboard"
-        description="Revisa tus métricas, detecta lo que necesita atención y sigue el siguiente paso sin perder tiempo."
-      />
+        description="Revisa el avance de esta semana y continúa con lo más importante."
+      >
+        <Button asChild className="flex-1 sm:flex-none">
+          <Link href="/search">
+            <Search aria-hidden="true" />
+            Buscar leads
+          </Link>
+        </Button>
+        <Button asChild variant="ghost" className="flex-1 text-muted-foreground sm:flex-none">
+          <Link href="/crm">
+            <LayoutGrid aria-hidden="true" />
+            Revisar CRM
+          </Link>
+        </Button>
+      </PageHeader>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="space-y-6">
-          <SummaryCards />
-          <div className="grid gap-6 lg:grid-cols-2">
-            <NextStepsWidget />
-            <PerformanceChart />
-          </div>
-        </div>
-        <DailyQuotaProgress title="Uso diario" />
-      </section>
+      <main className="space-y-4">
+        <SummaryCards />
 
-      <section className="grid gap-6 lg:grid-cols-2">
-        <FunnelChart />
-      </section>
+        <section aria-label="Trabajo recomendado y rendimiento" className="grid gap-4 xl:grid-cols-[minmax(300px,0.82fr)_minmax(0,1.35fr)]">
+          <NextStepsWidget />
+          <PerformanceChart />
+        </section>
 
-      <ActivityFeed />
+        <DailyQuotaProgress summary title="Uso diario" />
+      </main>
     </div>
   );
 }

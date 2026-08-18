@@ -127,7 +127,7 @@ export async function getEnrichedLeads(): Promise<EnrichedLead[]> {
     const { data: { user } } = await supabase.auth.getUser();
     console.log('[enriched-leads] get: user', user?.id);
 
-    if (!user) return [];
+    if (!user) throw new Error('No hay una sesión activa para cargar leads enriquecidos.');
 
     const orgId = await organizationService.getCurrentOrganizationId();
     console.log('[enriched-leads] get: orgId', orgId);
@@ -148,7 +148,7 @@ export async function getEnrichedLeads(): Promise<EnrichedLead[]> {
 
     if (error) {
         console.error('Error fetching enriched leads:', error);
-        return [];
+        throw error;
     }
     console.log('[enriched-leads] get: found', data?.length, 'rows');
 
@@ -161,7 +161,7 @@ export async function setEnrichedLeads(items: EnrichedLead[]) {
 
 export async function addEnrichedLeads(items: EnrichedLead[]) {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) throw new Error('No hay una sesión activa para guardar leads enriquecidos.');
 
     const orgId = await organizationService.getCurrentOrganizationId();
 
@@ -188,6 +188,7 @@ export async function addEnrichedLeads(items: EnrichedLead[]) {
         const { error } = await supabase.from(TABLE).insert(toInsert);
         if (error) {
             console.error('Error adding enriched leads:', error);
+            throw error;
         }
     }
 }
@@ -203,7 +204,7 @@ export async function removeWhere(pred: (e: EnrichedLead) => boolean): Promise<n
 
     if (error) {
         console.error('Error removing enriched leads:', error);
-        return 0;
+        throw error;
     }
 
     return toRemove.length;
@@ -216,7 +217,11 @@ export async function findEnrichedLeadById(id: string): Promise<EnrichedLead | u
         .eq('id', id)
         .single();
 
-    if (error || !data) return undefined;
+    if (error) {
+        if (error.code === 'PGRST116') return undefined;
+        throw error;
+    }
+    if (!data) return undefined;
     return mapRowToEnrichedLead(data);
 }
 
@@ -224,6 +229,7 @@ export async function removeEnrichedLeadById(id: string) {
     const { error } = await supabase.from(TABLE).delete().eq('id', id);
     if (error) {
         console.error('Error removing enriched lead:', error);
+        throw error;
     }
     return await getEnrichedLeads();
 }
@@ -236,7 +242,7 @@ export const enrichedLeadsStorage = {
         const { data: { user }, error: userError } = await supabase.auth.getUser();
         if (!user) {
             console.error('[enriched-leads] addDedup: No user found', userError);
-            return { addedCount: 0, duplicateCount: 0, added: [], duplicates: [] };
+            throw userError || new Error('No hay una sesión activa para guardar leads enriquecidos.');
         }
         console.log('[enriched-leads] addDedup: user', user.id);
 
@@ -279,7 +285,7 @@ export const enrichedLeadsStorage = {
             const { data: inserted, error } = await supabase.from(TABLE).insert(toInsert).select();
             if (error) {
                 console.error('Error adding enriched leads:', error);
-                return { addedCount: 0, duplicateCount: dups.length, added: [], duplicates: dups };
+                throw error;
             }
             console.log('[enriched-leads] addDedup: actual inserted', inserted?.length, inserted);
 
@@ -290,7 +296,7 @@ export const enrichedLeadsStorage = {
             } else {
                 // If success but no data returned, something is wrong (RLS blocking view?)
                 console.warn('[enriched-leads] addDedup: success but no data returned. RLS blocking select?');
-                return { addedCount: 0, duplicateCount: dups.length, added: [], duplicates: dups };
+                throw new Error('No se pudo confirmar que los leads enriquecidos se guardaron.');
             }
         }
 
@@ -314,7 +320,7 @@ export const enrichedLeadsStorage = {
         const { error } = await supabase.from(TABLE).delete().eq('id', id);
         if (error) {
             console.error('Error removing enriched lead:', error);
-            return { removed: false, remaining: 0 };
+            throw error;
         }
         // We'd need to fetch count to be accurate, but for now:
         const remaining = (await getEnrichedLeads()).length;
@@ -324,7 +330,7 @@ export const enrichedLeadsStorage = {
         // Prepare updates. Since we might have partial data, we should be careful.
         // For enrichment, we want to update phone/email if provided.
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!user) throw new Error('No hay una sesión activa para actualizar leads enriquecidos.');
         const orgId = await organizationService.getCurrentOrganizationId();
 
         for (const l of leads) {
@@ -348,7 +354,10 @@ export const enrichedLeadsStorage = {
             // But for now, let's assume `addDedup` is for NEW, and `update` is for existing.
             // We'll use `upsert` on the specific ID.
             const { error } = await supabase.from(TABLE).upsert(updateData);
-            if (error) console.error('Error updating lead:', finalId, error);
+            if (error) {
+                console.error('Error updating lead:', finalId, error);
+                throw error;
+            }
         }
     },
     removeWhere: removeWhere,

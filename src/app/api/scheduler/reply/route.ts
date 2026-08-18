@@ -5,6 +5,7 @@ import { classifyReply, extractReplyPreview } from '@/lib/reply-classifier';
 import { notificationService } from '@/lib/services/notification-service';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { maybeEscalateReplyReviewFromContactedId } from '@/lib/server/antonia-reply-escalation';
+import { shouldGloballySuppressReply } from '@/lib/contact-history-guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -128,14 +129,14 @@ async function updateLead(supabase: any, id: string, text: string) {
         error = retryError;
     }
 
-    if ((classification.intent === 'unsubscribe' || classification.intent === 'negative') && row?.email) {
+    if (shouldGloballySuppressReply(classification) && row?.email) {
         await supabase
             .from('unsubscribed_emails')
             .upsert({
                 email: row.email,
                 user_id: row.user_id || null,
                 organization_id: row.organization_id || null,
-                reason: `reply:${classification.intent}`,
+                reason: 'reply:unsubscribe',
             }, { onConflict: 'email,user_id,organization_id' } as any);
     }
 

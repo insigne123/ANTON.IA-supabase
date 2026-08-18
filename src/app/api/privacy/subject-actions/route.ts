@@ -55,6 +55,14 @@ export async function POST(req: NextRequest) {
         requestId,
         actorEmail: user.email || null,
       });
+      if (result.outcome === 'manual_review') {
+        return NextResponse.json({
+          success: false,
+          outcome: 'manual_review',
+          error: 'El contacto quedo bloqueado, pero la eliminacion requiere revision manual.',
+          result,
+        }, { status: 409 });
+      }
       return NextResponse.json({ success: true, result });
     }
 

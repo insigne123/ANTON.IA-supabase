@@ -14,11 +14,23 @@ window.addEventListener('message', function (event) {
     if (!event.data || typeof event.data !== 'object') return;
 
     if (event.data.type && event.data.type === 'ANTON_TO_EXTENSION') {
-        console.log('[Anton.IA Ext] Received message from web app:', event.data.payload?.action);
-        const requestId = event.data.payload?.requestId || null;
+        const payload = event.data.payload || {};
+        const requestId = typeof payload.requestId === 'string' ? payload.requestId : null;
+
+        if (
+            payload.action !== 'SEND_DM' ||
+            !requestId ||
+            typeof payload.profileUrl !== 'string' ||
+            typeof payload.message !== 'string' ||
+            payload.message.trim().length === 0 ||
+            payload.message.length > 500
+        ) {
+            postToPage('EXTENSION_Response', { requestId, success: false, error: 'Solicitud de LinkedIn inválida.' });
+            return;
+        }
 
         // Forward to Background Script
-        chrome.runtime.sendMessage(event.data.payload, (response) => {
+        chrome.runtime.sendMessage(payload, (response) => {
             if (chrome.runtime.lastError) {
                 console.error('[Anton.IA Ext] Runtime error:', chrome.runtime.lastError.message);
                 postToPage('EXTENSION_Response', { requestId, success: false, error: chrome.runtime.lastError.message });
@@ -35,24 +47,9 @@ window.addEventListener('message', function (event) {
     }
 });
 
-// 1b. Listen for messages from the Extension (background -> this content script)
-// and forward them to the web app via window.postMessage.
-chrome.runtime.onMessage.addListener((message) => {
-    try {
-        if (message && message.action === 'REPLY_DETECTED') {
-            console.log('[Anton.IA Ext] Forwarding REPLY_DETECTED to web app');
-            postToPage('ANTON_REPLY_DETECTED', message.payload || {});
-        }
-    } catch (e) {
-        console.error('[Anton.IA Ext] Failed to forward extension message:', e);
-    }
-    return false;
+// Announce only after the service worker responds, not merely because this script was injected.
+chrome.runtime.sendMessage({ action: 'CHECK_STATUS' }, (response) => {
+    if (chrome.runtime.lastError || response?.status !== 'active') return;
+    document.body.setAttribute('data-anton-extension-installed', 'true');
+    postToPage('ANTON_EXTENSION_READY');
 });
-
-// 2. Announce presence
-// We set a flag in sessionStorage or DOM so the Web App knows we are installed immediately
-document.body.setAttribute('data-anton-extension-installed', 'true');
-console.log('[Anton.IA Ext] Set data-anton-extension-installed attribute');
-
-postToPage('ANTON_EXTENSION_READY');
-console.log('[Anton.IA Ext] Sent ANTON_EXTENSION_READY message');

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -76,15 +76,15 @@ export default function PrivacyRequestPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background px-4 py-10 md:px-10">
+    <main className="min-h-screen bg-background px-4 py-10 md:px-10">
       <div className="mx-auto max-w-3xl space-y-6">
         <div className="flex flex-wrap items-center gap-3">
-          <Link href="/privacy">
-            <Button variant="ghost" className="gap-2">
+          <Button asChild variant="ghost" className="gap-2">
+            <Link href="/privacy">
               <ArrowLeft className="h-4 w-4" />
               Volver a privacidad
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
 
         <Card>
@@ -93,7 +93,7 @@ export default function PrivacyRequestPage() {
               <ShieldCheck className="h-5 w-5" />
               <span className="text-sm font-medium">Canal formal de privacidad</span>
             </div>
-            <CardTitle>Solicitud de derechos sobre datos personales</CardTitle>
+            <h1 className="text-2xl font-semibold leading-none tracking-tight">Solicitud de derechos sobre datos personales</h1>
             <CardDescription>
               Usa este formulario para pedir acceso, rectificacion, supresion, oposicion, portabilidad, bloqueo u otra gestion relacionada con tus datos.
               Si prefieres, tambien puedes escribir a <a className="underline" href={`mailto:${legalConfig.privacyContactEmail}`}>{legalConfig.privacyContactEmail}</a>.
@@ -114,7 +114,7 @@ export default function PrivacyRequestPage() {
                 <div className="grid gap-5 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="privacy-request-type">Tipo de solicitud</Label>
-                    <Select value={requestType} onValueChange={(value) => setRequestType(value as PrivacyRequestType)}>
+                    <Select name="requestType" value={requestType} onValueChange={(value) => setRequestType(value as PrivacyRequestType)}>
                       <SelectTrigger id="privacy-request-type">
                         <SelectValue placeholder="Selecciona una opcion" />
                       </SelectTrigger>
@@ -128,7 +128,7 @@ export default function PrivacyRequestPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="privacy-request-relation">Relacion con los datos</Label>
-                    <Select value={relationToData} onValueChange={(value) => setRelationToData(value as PrivacyRequestRelation)}>
+                    <Select name="relationToData" value={relationToData} onValueChange={(value) => setRelationToData(value as PrivacyRequestRelation)}>
                       <SelectTrigger id="privacy-request-relation">
                         <SelectValue placeholder="Selecciona una opcion" />
                       </SelectTrigger>
@@ -200,6 +200,6 @@ export default function PrivacyRequestPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </main>
   );
 }

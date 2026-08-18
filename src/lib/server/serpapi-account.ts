@@ -29,7 +29,9 @@ function toNullableNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-export async function getSerpApiAccountStatus(): Promise<SerpApiAccountStatus> {
+export async function getSerpApiAccountStatus(
+  dependencies: { fetch?: typeof fetch; timeoutMs?: number } = {},
+): Promise<SerpApiAccountStatus> {
   const apiKey = getSerpApiApiKey();
   if (!apiKey) {
     return {
@@ -45,11 +47,24 @@ export async function getSerpApiAccountStatus(): Promise<SerpApiAccountStatus> {
   }
 
   const url = `https://serpapi.com/account.json?api_key=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-    cache: 'no-store',
-  });
+  const timeoutMs = dependencies.timeoutMs
+    ?? Math.max(1000, Math.min(15000, Number(process.env.SERPAPI_ACCOUNT_TIMEOUT_MS || 5000)));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await (dependencies.fetch || fetch)(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('SERPAPI_ACCOUNT_TIMEOUT');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) {

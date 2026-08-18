@@ -16,7 +16,6 @@ import { useAuth } from '@/context/AuthContext';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import type { ContactedLead } from '@/lib/types';
 import { v4 as uuid } from 'uuid';
-import { getCompanyProfile } from '@/lib/data';
 
 export default function EmailTestPage() {
     const { toast } = useToast();
@@ -59,18 +58,6 @@ export default function EmailTestPage() {
         refreshLogs();
     }, [refreshLogs]);
 
-    // Helper to inject link tracking
-    function rewriteLinksForTracking(html: string, trackingId: string): string {
-        const origin = typeof window !== 'undefined' ? window.location.origin : '';
-        // Capture quote in group 1, URL in group 2
-        return html.replace(/href=(["'])(http[^"']+)\1/gi, (match, quote, url) => {
-            // Avoid rewriting tracking links themselves if already present
-            if (url.includes('/api/tracking/click')) return match;
-            const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
-            return `href=${quote}${trackingUrl}${quote}`;
-        });
-    }
-
     async function handleSend() {
         if (!to) return toast({ variant: 'destructive', title: 'Falta destinatario' });
         if (!from) return toast({ variant: 'destructive', title: 'Falta remitente', description: 'No se pudo detectar tu email.' });
@@ -79,7 +66,7 @@ export default function EmailTestPage() {
         setDebugResult(null);
 
         try {
-            const endpoint = useGmail ? '/api/gmail/send' : '/api/providers/send';
+            const endpoint = '/api/providers/send';
             const trackingId = uuid();
 
 
@@ -94,27 +81,6 @@ export default function EmailTestPage() {
                 // Convert URLs to detected links
                 .replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
 
-            // 1. Rewrite Links if enabled
-            if (useLinkTracking) {
-                finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
-            }
-
-            // 3. Inject Pixel (Visible but 1x1)
-            if (usePixel) {
-                const origin = typeof window !== 'undefined' ? window.location.origin : '';
-                let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-
-                // OPTIMIZATION: Redirect to logo if available
-                const profile = getCompanyProfile();
-                if (profile?.logo && profile.logo.startsWith('http')) {
-                    pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
-                }
-
-                // FIX: Removed display:none to prevent blocking by email clients
-                const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
-                finalHtmlBody += `\n<br>${trackingPixel}`;
-            }
-
             const payload: any = {
                 to: to,
                 from,
@@ -123,7 +89,10 @@ export default function EmailTestPage() {
                 provider: useGmail ? 'google' : 'outlook',
                 htmlBody: finalHtmlBody,
                 organizationId: undefined,
-                requestReceipts: useReadReceipt
+                requestReceipts: useGmail ? false : useReadReceipt,
+                idempotencyKey: `email-studio-test:${trackingId}`,
+                trackingId,
+                tracking: { pixel: usePixel, linkTracking: useLinkTracking },
             };
 
             const res = await fetch(endpoint, {
@@ -134,7 +103,7 @@ export default function EmailTestPage() {
 
             const data = await res.json();
 
-            if (!res.ok) throw new Error(data.error || 'Error enviando correo');
+            if (!res.ok || data?.status !== 'sent') throw new Error(data.error || 'El envio no fue confirmado.');
 
             toast({ title: 'Correo enviado', description: 'Revisa tu bandeja.' });
 
@@ -149,10 +118,10 @@ export default function EmailTestPage() {
                 sentAt: new Date().toISOString(),
                 status: 'sent',
                 provider: useGmail ? 'gmail' : 'outlook',
-                messageId: data.id || data.messageId, // Handle different responses
-                threadId: data.threadId,
+                messageId: data?.receipt?.providerMessageId,
+                threadId: data?.receipt?.providerResponse?.threadId,
                 clickCount: 0,
-                readReceiptMessageId: useReadReceipt ? (data.id || data.messageId) : undefined, // Potential match
+                readReceiptMessageId: useReadReceipt ? data?.receipt?.providerMessageId : undefined,
                 role: 'Tester',
                 industry: 'Test',
                 city: 'Test City',
@@ -255,15 +224,8 @@ export default function EmailTestPage() {
                                         </div>
                                         <div className="text-xs mt-1 border-t border-green-200 pt-1">
                                             <p className="font-semibold mb-1">Diagnóstico:</p>
-                                            <a
-                                                href={`/api/tracking/open?id=${debugResult.trackingId}`}
-                                                target="_blank"
-                                                className="underline text-blue-600 hover:text-blue-800 block"
-                                            >
-                                                1. Click para Simular Apertura (Browser Directo)
-                                            </a>
                                             <span className="text-muted-foreground block mt-1">
-                                                Si este funciona pero Gmail no, es culpa de Gmail/Cache.
+                                                Abre el correo recibido para comprobar el pixel y los enlaces firmados.
                                             </span>
                                         </div>
                                     </div>

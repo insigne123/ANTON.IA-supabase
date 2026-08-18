@@ -1,4 +1,5 @@
 import type { StyleProfile } from './types';
+import { getBrowserStorage } from './browser-storage';
 
 const KEY = 'email-style-profiles';
 
@@ -34,12 +35,14 @@ Saludos,
 
 
 function getAll(): StyleProfile[] {
-  if (typeof window === 'undefined') return [defaultStyle];
-  try { return JSON.parse(localStorage.getItem(KEY) || '[]') || []; } catch { return []; }
+  const storage = getBrowserStorage();
+  if (!storage) return [defaultStyle];
+  try { return JSON.parse(storage.getItem(KEY) || '[]') || []; } catch { return []; }
 }
 function setAll(items: StyleProfile[]) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(KEY, JSON.stringify(items));
+  const storage = getBrowserStorage();
+  if (!storage) return;
+  storage.setItem(KEY, JSON.stringify(items));
 }
 
 export const styleProfilesStorage = {

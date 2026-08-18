@@ -4,6 +4,7 @@
 import React from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import type { LucideIcon } from 'lucide-react';
 import {
   Sidebar,
   SidebarGroup,
@@ -19,21 +20,30 @@ import {
   SidebarTrigger
 } from '@/components/ui/sidebar';
 import {
-  User, Search, Send, Share2, Briefcase, Settings, Table as TableIcon, Users, MailCheck, Mail, LayoutDashboard, Building2, LogOut, Ban, Shield, LayoutGrid, Bot, Sparkles
+  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, Building2, LogOut, Shield, LayoutGrid, Bot, Sparkles, Link2
 } from 'lucide-react';
 import Logo from './logo';
 import { useAuth } from '@/context/AuthContext';
 import { APP_VERSION } from '@/lib/app-version';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { legalConfig } from '@/lib/legal-config';
+import { isOpportunitiesEnabled } from '@/lib/opportunities/access';
+import { isSupliaEnabled } from '@/lib/suplia/access';
 
-const navSections = [
+type NavItem = {
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  aliases?: string[];
+  feature?: 'opportunities' | 'suplia';
+};
+
+const navSections: Array<{ label: string; items: NavItem[] }> = [
   {
     label: 'Centro de mando',
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-      { href: '/suplia', icon: Sparkles, label: 'SUPL.IA' },
+      { href: '/suplia', icon: Sparkles, label: 'SUPL.IA', feature: 'suplia' },
       { href: '/antonia', icon: Bot, label: 'Agente ANTON.IA' },
       { href: '/profile', icon: User, label: 'Mi Perfil de Empresa' },
     ],
@@ -42,7 +52,7 @@ const navSections = [
     label: 'Prospección',
     items: [
       { href: '/search', icon: Search, label: 'Búsqueda de Leads' },
-      { href: '/opportunities', icon: Briefcase, label: 'Oportunidades' },
+      { href: '/opportunities', icon: Briefcase, label: 'Oportunidades', feature: 'opportunities' },
       { href: '/campaigns', icon: MailCheck, label: 'Campañas' },
     ],
   },
@@ -52,31 +62,34 @@ const navSections = [
       { href: '/sheet', label: 'Sheet (Datos)', icon: TableIcon },
       { href: '/crm', label: 'Pipeline (CRM)', icon: LayoutGrid },
       { href: '/saved/leads', icon: Users, label: 'Guardados · Leads' },
-      { href: '/saved/opportunities', icon: Briefcase, label: 'Guardados · Oportunidades' },
+      { href: '/saved/opportunities', icon: Briefcase, label: 'Guardados · Oportunidades', feature: 'opportunities' },
       { href: '/contacted', icon: Send, label: 'Leads Contactados' },
     ],
   },
   {
-    label: 'Canales y ajustes',
+    label: 'Configuración',
     items: [
-      { href: '/outlook', icon: Share2, label: 'Conexión con Outlook' },
-      { href: '/gmail', icon: Mail, label: 'Conectar Gmail' },
-      { href: '/settings/email-studio', icon: Settings, label: 'Ajustes · Email Studio' },
-      { href: '/settings/organization', icon: Building2, label: 'Ajustes · Organización' },
-      { href: '/settings/unsubscribes', icon: Ban, label: 'Ajustes · Bajas' },
-      { href: '/settings/privacy-requests', icon: Shield, label: 'Ajustes · Solicitudes privacidad' },
-      { href: '/settings/privacy-incidents', icon: Shield, label: 'Ajustes · Incidentes privacidad' },
-      { href: '/privacy', icon: Shield, label: 'Ajustes · Privacidad' },
+      { href: '/connections', icon: Link2, label: 'Conexiones', aliases: ['/gmail', '/outlook'] },
+      { href: '/settings/email-studio', icon: Settings, label: 'Email Studio' },
+      { href: '/settings/organization', icon: Building2, label: 'Organización' },
+      {
+        href: '/settings/privacy',
+        icon: Shield,
+        label: 'Privacidad',
+        aliases: ['/settings/unsubscribes', '/settings/privacy-requests', '/settings/privacy-incidents'],
+      },
     ],
   },
 ];
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const { signOut, user } = useAuth();
-  const canAccessPrivacyAdmin = String(user?.email || '').trim().toLowerCase() === String(legalConfig.privacyContactEmail || '').trim().toLowerCase();
+  const { signOut } = useAuth();
+  const canAccessSuplia = isSupliaEnabled();
+  const canAccessOpportunities = isOpportunitiesEnabled();
 
-  const isActiveRoute = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const isActiveRoute = (item: NavItem) => [item.href, ...(item.aliases || [])]
+    .some((href) => pathname === href || pathname.startsWith(`${href}/`));
 
   return (
     <Sidebar className="border-r border-sidebar-border/70 bg-[linear-gradient(180deg,hsl(var(--sidebar-background))_0%,hsl(var(--sidebar-background))_68%,hsl(var(--background))_100%)]">
@@ -100,7 +113,8 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent className="px-2 pb-3 pt-2">
-        {navSections.map((section, index) => (
+        <nav aria-label="Navegacion principal" className="contents">
+          {navSections.map((section, index) => (
           <React.Fragment key={section.label}>
             <SidebarGroup className="p-0">
               <SidebarGroupLabel className="px-3 pb-2 pt-1 text-[11px] font-medium uppercase tracking-[0.18em] text-sidebar-foreground/55">
@@ -109,9 +123,10 @@ export function AppSidebar() {
               <SidebarGroupContent>
                 <SidebarMenu className="gap-1.5">
                   {section.items
-                    .filter((item) => canAccessPrivacyAdmin || (item.href !== '/settings/privacy-requests' && item.href !== '/settings/privacy-incidents'))
+                    .filter((item) => item.feature !== 'suplia' || canAccessSuplia)
+                    .filter((item) => item.feature !== 'opportunities' || canAccessOpportunities)
                     .map((item) => {
-                    const isActive = isActiveRoute(item.href);
+                    const isActive = isActiveRoute(item);
 
                     return (
                       <SidebarMenuItem key={item.href}>
@@ -125,7 +140,7 @@ export function AppSidebar() {
                             isActive && 'bg-sidebar-accent/95 text-sidebar-accent-foreground shadow-[0_18px_38px_-28px_rgba(15,23,42,0.55)]',
                           )}
                         >
-                          <Link href={item.href} className="text-[0.95rem]">
+                          <Link href={item.href} className="text-[0.95rem]" aria-current={isActive ? 'page' : undefined}>
                             <item.icon />
                             <span>{item.label}</span>
                           </Link>
@@ -138,7 +153,8 @@ export function AppSidebar() {
             </SidebarGroup>
             {index < navSections.length - 1 && <SidebarSeparator className="mx-3 my-2 bg-sidebar-border/65" />}
           </React.Fragment>
-        ))}
+          ))}
+        </nav>
       </SidebarContent>
 
       <SidebarFooter className="gap-3 border-t border-sidebar-border/70 px-3 py-3">

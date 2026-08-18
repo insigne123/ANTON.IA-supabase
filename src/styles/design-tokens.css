@@ -102,7 +102,6 @@ html.dark {
 }
 :where(button, a, input, textarea, [role="button"], [tabindex]):focus-visible {
   box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring));
-  border-radius: 12px;
   transition: box-shadow .15s ease;
 }
 

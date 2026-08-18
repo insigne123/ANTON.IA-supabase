@@ -26,19 +26,29 @@ import { PhoneCallModal } from '@/components/phone-call-modal';
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
 import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
 import { styleProfilesStorage } from '@/lib/style-profiles-storage';
-import { getCompanyProfile } from '@/lib/data';
-import { buildSenderInfo, applySignaturePlaceholders } from '@/lib/signature-placeholders';
+import { buildEffectiveCompanyProfile, buildSenderInfo, applySignaturePlaceholders } from '@/lib/signature-placeholders';
 import { buildPersonEmailContext, renderTemplate } from '@/lib/template';
 import { ensureSubjectPrefix, generateCompanyOutreachV2 } from '@/lib/outreach-templates';
 import { restyleDraftWithProfile } from '@/lib/email-style-restyle';
 import * as Quota from '@/lib/quota-client';
+import { getBrowserStorage } from '@/lib/browser-storage';
+import { profileService, type Profile } from '@/lib/services/profile-service';
+import { adaptLeadResearchResponseToReport, isLeadResearchReadyForAutoContact } from '@/lib/lead-research';
+import {
+  buildOpportunitySendRequests,
+  reconcileOpportunitySendResults,
+  sendOpportunityRequestsSequentially,
+  type OpportunitySendReceipt,
+} from '@/lib/opportunity-bulk-send';
 
 
 function getClientUserId(): string {
+  const storage = getBrowserStorage();
+  if (!storage) return 'anon';
   try {
     const KEY = 'lf.clientUserId';
-    let v = localStorage.getItem(KEY);
-    if (!v) { v = uuidv4(); localStorage.setItem(KEY, v); }
+    let v = storage.getItem(KEY);
+    if (!v) { v = uuidv4(); storage.setItem(KEY, v); }
     return v;
   } catch { return 'anon'; }
 }
@@ -51,6 +61,10 @@ async function getUserIdOrFail(): Promise<string> {
 
 const displayDomain = (url: string) => { try { const u = new URL(url.startsWith('http') ? url : `https://${url}`); return u.hostname.replace(/^www\./, ''); } catch { return url.replace(/^https?:\/\//, '').replace(/^www\./, ''); } };
 const asHttp = (url: string) => url.startsWith('http') ? url : `https://${url}`;
+
+function isPendingEnrichmentStatus(status?: string | null) {
+  return String(status || '').trim().toLowerCase().startsWith('pending');
+}
 
 export default function EnrichedOpportunitiesPage() {
   const router = useRouter();
@@ -95,11 +109,14 @@ export default function EnrichedOpportunitiesPage() {
   // Mass Compose State
   const [openCompose, setOpenCompose] = useState(false);
   const [composeList, setComposeList] = useState<Array<{ lead: EnrichedOppLead; subject: string; body: string }>>([]);
+  const [composeId, setComposeId] = useState('');
+  const [bulkReceipts, setBulkReceipts] = useState<OpportunitySendReceipt[]>([]);
   const [sendingBulk, setSendingBulk] = useState(false);
   const [bulkProvider, setBulkProvider] = useState<'gmail' | 'outlook'>('outlook');
   const [draftSource, setDraftSource] = useState<'investigation' | 'style'>('investigation');
   const [selectedStyleName, setSelectedStyleName] = useState<string>('');
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
+  const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
 
   // Bulk Editor
   const [showBulkEditor, setShowBulkEditor] = useState(false);
@@ -126,6 +143,25 @@ export default function EnrichedOpportunitiesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'enriched_opportunities' }, () => loadData())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    profileService.getCurrentProfile()
+      .then((profile) => {
+        if (!active) return;
+        setCurrentProfile(profile);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error('No se pudo cargar el perfil actual para oportunidades enriquecidas', error);
+        setCurrentProfile(null);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Normalización
@@ -170,15 +206,25 @@ export default function EnrichedOpportunitiesPage() {
   // Helpers Referencias
   const leadRefOf = (e: EnrichedOppLead) => e.id || e.email || e.linkedinUrl || `${e.fullName}|${e.companyName || ''}`;
 
-  const hasReportStrict = (e: EnrichedOppLead) => !!e.report;
-  const isResearchedLead = (e: EnrichedOppLead) => !!e.report;
+  const normalizedReportFor = (e: EnrichedOppLead): LeadResearchReport | null => {
+    const report = e.report as unknown as LeadResearchReport | undefined;
+    if (!report) return null;
+    if (report.id && report.company && report.createdAt && report.cross) {
+      return {
+        ...report,
+        meta: { ...report.meta, leadRef: report.meta?.leadRef || leadRefOf(e) },
+      };
+    }
+    return adaptLeadResearchResponseToReport(report, leadRefOf(e));
+  };
+  const isResearchedLead = (e: EnrichedOppLead) => isLeadResearchReadyForAutoContact(normalizedReportFor(e));
 
   // Bulk Checks
   const researchEligiblePage = pageLeads.filter(e => e.email && !isResearchedLead(e)).length;
   const allResearchChecked = researchEligiblePage > 0 && pageLeads.filter(e => e.email && !isResearchedLead(e)).every(e => sel[e.id]);
 
   // CONTACT LOGIC: Must be researched + have email
-  const canContact = (e: EnrichedOppLead) => isResearchedLead(e) && !!e.email;
+  const canContact = (e: EnrichedOppLead) => !!e.email && isLeadResearchReadyForAutoContact(normalizedReportFor(e));
   const toggleAllContact = (checked: boolean) => {
     const next = new Set(selectedToContact);
     pageLeads.forEach(e => {
@@ -327,9 +373,24 @@ export default function EnrichedOpportunitiesPage() {
       website: realProfile?.company_domain || '',
     };
 
+    const userContext = {
+      id: userId,
+      name: realProfile?.full_name || null,
+      jobTitle: realProfile?.job_title || null,
+    };
+
     const payload = {
+      ...base,
       companies: [item],
       userCompanyProfile: effectiveCompanyProfile,
+      id: e.id || null,
+      fullName: e.fullName || null,
+      title: e.title || null,
+      email: e.email || null,
+      linkedinUrl: e.linkedinUrl || null,
+      companyName: e.companyName || null,
+      companyDomain: e.companyDomain || null,
+      userContext,
     };
 
     // Enviamos el shape ANIDADO que n8n espera + trazabilidad
@@ -358,20 +419,14 @@ export default function EnrichedOpportunitiesPage() {
     Quota.incClientQuota('research');
 
     // Normalización de reports (cross/meta.leadRef) - Para Oportunidades guardamos en DB
-    if (Array.isArray(data?.reports) && data.reports.length) {
-      const normalized = data.reports.map((r: any) => {
-        const out: any = { ...r };
-        if (!out.cross) out.cross = out.report || out.data || null;
-        if (!out.meta) out.meta = {};
-        if (!out.meta.leadRef) out.meta.leadRef = leadRef;
-        return out;
-      });
-      // Return first normalized report for cloud persistence
-      return { leadRef, report: normalized[0]?.cross || normalized[0] };
-    }
-
-    // Fallback: si no hay reports array, intenta usar el objeto directamente
-    return { leadRef, report: data };
+    const rawReport = Array.isArray(data?.reports) && data.reports.length ? data.reports[0] : data;
+    const report = rawReport?.id && rawReport?.company && rawReport?.createdAt && rawReport?.cross
+      ? {
+        ...rawReport,
+        meta: { ...rawReport.meta, leadRef: rawReport.meta?.leadRef || leadRef },
+      } as LeadResearchReport
+      : adaptLeadResearchResponseToReport(rawReport, leadRef);
+    return { leadRef, report };
   };
 
   const handleRunN8nResearch = async () => {
@@ -392,7 +447,7 @@ export default function EnrichedOpportunitiesPage() {
           try {
             const res = await runOneInvestigation(t, userId);
             // Persistent storage update
-            await enrichedOpportunitiesStorage.update(t.id, { report: res.report });
+            await enrichedOpportunitiesStorage.update(t.id, { report: res.report } as any);
           } catch (e) { console.error(e); }
         }
         done++;
@@ -408,8 +463,8 @@ export default function EnrichedOpportunitiesPage() {
   // --- BULK CONTACT LOGIC ---
   const buildComposeDrafts = async (source: 'investigation' | 'style', styleName?: string) => {
     const ids = Array.from(selectedToContact);
-    const company = getCompanyProfile() || {};
-    const sender = buildSenderInfo();
+    const company = buildEffectiveCompanyProfile(currentProfile);
+    const sender = buildSenderInfo(currentProfile);
     const profile = source === 'style'
       ? (styleProfiles.find(p => p.name === styleName) || styleProfiles[0] || null)
       : null;
@@ -418,10 +473,11 @@ export default function EnrichedOpportunitiesPage() {
       const l = enriched.find(x => x.id === id);
       if (!l || !canContact(l)) return null;
 
-      const seed = l.report?.emailDraft
+      const report = normalizedReportFor(l);
+      const seed = report?.cross?.emailDraft
         ? {
-          subject: l.report.emailDraft.subject || `Contacto: ${l.fullName}`,
-          body: l.report.emailDraft.body || `Hola ${l.fullName}, te contacto desde...`,
+          subject: report.cross.emailDraft.subject || `Contacto: ${l.fullName}`,
+          body: report.cross.emailDraft.body || `Hola ${l.fullName}, te contacto desde...`,
         }
         : (() => {
           const v2 = generateCompanyOutreachV2({
@@ -449,7 +505,7 @@ export default function EnrichedOpportunitiesPage() {
           baseBody: body,
           styleProfile: profile,
           lead: { id: l.id, fullName: l.fullName, email: l.email, title: l.title, companyName: l.companyName, companyDomain: l.companyDomain },
-          report: l.report || null,
+          report,
           companyProfile: company,
         });
         subject = styled.subject;
@@ -467,10 +523,16 @@ export default function EnrichedOpportunitiesPage() {
 
   const handleOpenBulkCompose = async () => {
     if (selectedToContact.size === 0) return;
+    if (composeId && composeList.length > 0) {
+      setOpenCompose(true);
+      return;
+    }
     try {
       const toCompose = await buildComposeDrafts(draftSource, selectedStyleName || styleProfiles[0]?.name || '');
 
       setComposeList(toCompose);
+      if (!composeId) setComposeId(uuidv4());
+      setBulkReceipts([]);
       setOpenCompose(true);
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo preparar el borrador.' });
@@ -481,36 +543,63 @@ export default function EnrichedOpportunitiesPage() {
     if (!confirm(`¿Enviar ${composeList.length} correos usando ${bulkProvider}?`)) return;
     setSendingBulk(true);
     try {
-      const userId = await getUserIdOrFail();
-      const payload = {
-        userId,
+      const operationId = composeId || uuidv4();
+      if (!composeId) setComposeId(operationId);
+      const drafts = composeList.map((item) => ({
+        ...item,
+        recipientId: item.lead.id,
+        email: item.lead.email!,
+        organizationId: (item.lead as EnrichedOppLead & { organizationId?: string }).organizationId || null,
+      }));
+      const requests = buildOpportunitySendRequests({
+        composeId: operationId,
         provider: bulkProvider,
-        tracking: { pixel: usePixel, links: useLinkTracking, readReceipt: useReadReceipt }, // Using local state options
-        emails: composeList.map(it => ({
-          to: [it.lead.email!], // Already validated has email
-          subject: it.subject,
-          text: it.body,
-          html: `<p>${it.body.replace(/\n/g, '<br/>')}</p>`,
-          leadId: it.lead.id
-        }))
-      };
+        drafts,
+        deliveryOptions: { pixel: usePixel, links: useLinkTracking, readReceipt: bulkProvider === 'outlook' && useReadReceipt },
+      });
+      const receipts = await sendOpportunityRequestsSequentially(requests, async (request) => {
+        const res = await fetch('/api/providers/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider: request.provider,
+            to: request.email,
+            subject: request.subject,
+            textBody: request.body,
+            htmlBody: request.htmlBody,
+            organizationId: request.organizationId || undefined,
+            leadId: request.recipientId,
+            idempotencyKey: request.idempotencyKey,
+            tracking: { pixel: usePixel, links: useLinkTracking, readReceipt: useReadReceipt },
+          }),
+        });
+        const result = await res.json().catch(() => null);
+        if (result?.status === 'unknown') {
+          return { status: 'unknown', receipt: result?.receipt, error: result?.receipt?.errorMessage || result?.error };
+        }
+        if (result?.status === 'failed') {
+          return { status: 'failed', receipt: result?.receipt, error: result?.receipt?.errorMessage || result?.error };
+        }
+        if (!res.ok) throw new Error(result?.error || result?.receipt?.errorMessage || 'Error al enviar');
+        return { status: result?.status, receipt: result?.receipt, error: result?.receipt?.errorMessage };
+      });
+      const outcome = reconcileOpportunitySendResults(drafts, receipts);
+      setBulkReceipts(receipts);
+      setComposeList(outcome.failedDrafts.map(({ lead, subject, body }) => ({ lead, subject, body })));
+      setSelectedToContact(new Set(outcome.failedDrafts.map((draft) => draft.recipientId)));
 
-      const res = await fetch('/api/email/bulk-send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      toast({
+        title: outcome.failedCount === 0 ? 'Envío completado' : 'Envío parcialmente completado',
+        description: `Enviados: ${outcome.sentCount}, Pendientes o fallidos: ${outcome.failedCount}`,
+        ...(outcome.failedCount > 0 ? { variant: 'destructive' as const } : {}),
       });
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Error al enviar');
+      if (outcome.failedCount === 0) {
+        setOpenCompose(false);
+        setComposeList([]);
+        setComposeId('');
+        setSelectedToContact(new Set());
       }
-
-      const j = await res.json();
-      toast({ title: 'Envío completado', description: `Enviados: ${j.sentCount || 0}, Fallidos: ${j.failedCount || 0}` });
-      setOpenCompose(false);
-      setComposeList([]);
-      setSelectedToContact(new Set());
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error envío masivo', description: e.message });
     } finally {
@@ -520,10 +609,7 @@ export default function EnrichedOpportunitiesPage() {
 
 
   // Contadores
-  const researchEligible = useMemo(
-    () => filtered.filter(e => !!e.email && !isResearchedLead(e)).length,
-    [filtered]
-  );
+  const researchEligible = filtered.filter(e => !!e.email && !isResearchedLead(e)).length;
   const anyInvestigated = useMemo(
     () => enriched.some(e => !!e.report),
     [enriched]
@@ -674,9 +760,9 @@ export default function EnrichedOpportunitiesPage() {
                   pageLeads.map((e) => {
                     const emailData = extractPrimaryEmail(e);
                     const hasEmail = !!emailData.email;
-                    const researched = !!e.report;
-                    const report = e.report;
-                    const pendingPhone = e.enrichmentStatus === 'pending_phone';
+                    const researched = isResearchedLead(e);
+                    const report = normalizedReportFor(e);
+                    const pendingPhone = isPendingEnrichmentStatus(e.enrichmentStatus);
 
                     return (
                       <TableRow key={e.id}>
@@ -735,7 +821,7 @@ export default function EnrichedOpportunitiesPage() {
                           <Button size="icon" variant="ghost" title="Ver detalles completos" onClick={() => { setDetailsLead(e); setShowDetails(true); }}>
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => { setReportLead(e); setReportToView(report ? { leadRef: leadRefOf(e), cross: report } as any : null); setOpenReport(true); }}>
+                          <Button size="sm" variant="outline" onClick={() => { setReportLead(e); setReportToView(report); setOpenReport(true); }}>
                             {report ? 'Ver reporte' : 'Sin reporte'}
                           </Button>
                           <Button size="sm" disabled={!canContact(e)}>Contactar</Button>
@@ -782,12 +868,18 @@ export default function EnrichedOpportunitiesPage() {
             <div className="space-y-4 text-sm">
               <p>{reportToView.cross.overview}</p>
               {reportToView.cross.pains?.length > 0 && <div><strong>Pains:</strong> <ul className="list-disc pl-5">{reportToView.cross.pains.map(p => <li key={p}>{p}</li>)}</ul></div>}
+              {reportToView.cross.opportunities?.length > 0 && <div><strong>Oportunidades:</strong> <ul className="list-disc pl-5">{reportToView.cross.opportunities.map(p => <li key={p}>{p}</li>)}</ul></div>}
+              {reportToView.cross.risks?.length > 0 && <div><strong>Riesgos:</strong> <ul className="list-disc pl-5">{reportToView.cross.risks.map(p => <li key={p}>{p}</li>)}</ul></div>}
+              {reportToView.cross.leadContext?.iceBreaker && <div><strong>Icebreaker:</strong> <p className="mt-1 italic">"{reportToView.cross.leadContext.iceBreaker}"</p></div>}
+              {reportToView.cross.leadContext?.recentActivitySummary && <div><strong>Actividad reciente:</strong> <p className="mt-1">{reportToView.cross.leadContext.recentActivitySummary}</p></div>}
               {reportToView.cross.emailDraft && (
                 <div className="bg-muted p-2 rounded">
                   <strong>Email Draft:</strong>
                   <div className="text-xs font-mono whitespace-pre-wrap mt-1">{reportToView.cross.emailDraft.body}</div>
                 </div>
               )}
+              {reportToView.cross.nextSteps?.length ? <div><strong>Siguientes pasos:</strong><ul className="mt-1 space-y-2">{reportToView.cross.nextSteps.map((step, i) => <li key={i} className="rounded-md border bg-muted/40 p-2"><div className="font-medium">{step.action}</div>{step.why ? <div className="text-xs text-muted-foreground mt-1">{step.why}</div> : null}</li>)}</ul></div> : null}
+              {reportToView.cross.sources?.length ? <div><strong>Fuentes:</strong><ul className="mt-1 space-y-1">{reportToView.cross.sources.map((s, i) => <li key={i}>• <a className="underline" href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a></li>)}</ul></div> : null}
             </div>
           ) : (
             <div className="p-4 text-center text-muted-foreground">
@@ -972,6 +1064,11 @@ export default function EnrichedOpportunitiesPage() {
             {composeList.map((item, idx) => (
               <div key={item.lead.id} className="border rounded-lg p-3">
                 <div className="font-semibold text-sm">{item.lead.fullName} &lt;{item.lead.email}&gt;</div>
+                {bulkReceipts.find((receipt) => receipt.recipientId === item.lead.id) ? (
+                  <div className="mt-1 text-xs text-destructive">
+                    {bulkReceipts.find((receipt) => receipt.recipientId === item.lead.id)?.error || 'Envío pendiente de confirmación.'}
+                  </div>
+                ) : null}
                 <div className="mt-2 text-xs font-semibold">Asunto</div>
                 <Input value={item.subject} onChange={e => {
                   const n = [...composeList]; n[idx].subject = e.target.value; setComposeList(n);

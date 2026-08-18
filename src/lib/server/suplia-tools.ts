@@ -1,5 +1,8 @@
 import type { AuthContext } from '@/lib/server/auth-utils';
+import { z } from 'genkit';
 import { generateCampaignFlow } from '@/ai/flows/generate-campaign';
+import { getOpenAiModelsForTier } from '@/ai/model-router';
+import { generateStructuredWithTelemetry } from '@/ai/openai-json';
 import { assessCampaignQa } from '@/lib/campaign-qa';
 import { cleanDomain, getContactabilityCopy, normalizeEmail, type ContactabilityStatus } from '@/lib/commercial-intelligence';
 import { enrichPersonWithPDL, pickPdlEmail } from '@/lib/providers/pdl';
@@ -11,9 +14,23 @@ import { buildSupliaContext } from '@/lib/server/suplia-context';
 import { sendSupliaEmail } from '@/lib/server/suplia-email';
 import { getSupliaPolicy, type SupliaPolicy } from '@/lib/server/suplia-policy';
 import { searchProspectingCompanies, searchProspectingPeople, type SupliaProspectingProvider } from '@/lib/server/suplia-prospecting';
+import {
+  researchBrand,
+  researchBrandMentions,
+  researchSerpCompanyNews,
+  researchSerpCompetitors,
+  researchSerpJobsSignals,
+  researchSimilarweb,
+  researchWhois,
+} from '@/lib/server/suplia-research-tools';
 import { syncLeadAutopilotToCrm } from '@/lib/server/crm-autopilot';
 import { syncRepliesForOrganization } from '@/lib/server/reply-sync';
 import { draftAutonomousReply } from '@/lib/server/antonia-reply-drafting';
+import {
+  classifySupliaBulkRecipientError,
+  throwForIncompleteSupliaBulkOutcomes,
+  type SupliaBulkRecipientOutcome,
+} from '@/lib/server/suplia-bulk-send-outcomes';
 import {
   buildGmailContactArtifactContent,
   fetchGmailMailboxMessage,
@@ -589,22 +606,35 @@ async function scoreCompanies(input: Record<string, unknown>, context: SupliaToo
     const domain = getCompanyDomain(company);
     const reasons: string[] = [];
     const risks: string[] = [];
-    let score = 35;
+    let fit = 8;
+    let intent = 0;
+    let reach = 0;
 
-    if (domain) { score += 15; reasons.push('Dominio identificable.'); }
-    if (typeof company.score === 'number' && company.score >= 0.65) { score += 15; reasons.push('Buen match con el criterio de busqueda.'); }
-    if (textIncludesAny(`${name} ${company.industry || ''}`, industries)) { score += 18; reasons.push('Coincide con industria/segmento ICP.'); }
-    if (textIncludesAny(JSON.stringify(company), buyingSignals)) { score += 10; reasons.push('Tiene senales compatibles con la hipotesis de compra.'); }
+    if (textIncludesAny(`${name} ${company.industry || ''}`, industries)) { fit += 22; reasons.push('Fit: coincide con industria/segmento del ICP.'); }
+    if (typeof company.score === 'number' && company.score >= 0.65) { fit += 15; reasons.push('Fit: buen match con el criterio de busqueda.'); }
+
+    if (textIncludesAny(JSON.stringify(company), buyingSignals)) { intent += 22; reasons.push('Intent: senales compatibles con la hipotesis de compra.'); }
+    const research = (company as any).research || (company as any).similarweb || (company as any).whois;
+    if (research && Number((research as any).visitsMonthly) > 0) { intent += 8; reasons.push('Intent: presencia digital con trafico medible.'); }
+    if (research && ((research as any).created || (research as any).registrar)) { intent += 5; reasons.push('Intent: dominio con antiguedad o registro identificable.'); }
+
+    if (domain) { reach += 20; reasons.push('Reach: dominio identificable para buscar decisores.'); }
     if (!domain) risks.push('Sin dominio claro para buscar decisores.');
     if (String(name).length < 3) risks.push('Nombre de empresa poco confiable.');
 
-    score = Math.max(0, Math.min(100, Math.round(score)));
+    const breakdown = {
+      fit: Math.round(Math.min(45, fit)),
+      intent: Math.round(Math.min(35, intent)),
+      reach: Math.round(Math.min(20, reach)),
+    };
+    const score = Math.max(0, Math.min(100, breakdown.fit + breakdown.intent + breakdown.reach));
     return {
       companyKey: String(company.id || domain || name),
       companyName: name,
       domain,
       score,
       scoreLabel: scoreLabel(score),
+      breakdown,
       reasons: reasons.length ? reasons : ['Match inicial por criterio de busqueda.'],
       risks,
       matchedSegments: segments.map((segment: any) => segment.name).filter(Boolean).slice(0, 3),
@@ -625,7 +655,7 @@ async function scoreCompanies(input: Record<string, unknown>, context: SupliaToo
       reasons: item.reasons,
       risks: item.risks,
       matched_segments: item.matchedSegments,
-      source_payload: item.sourcePayload,
+      source_payload: { ...(item.sourcePayload as any), breakdown: item.breakdown },
     })));
   }
 
@@ -647,25 +677,33 @@ async function scorePeople(input: Record<string, unknown>, context: SupliaToolCo
     const companyName = asText(lead.companyName || lead.company || lead.organization_name);
     const reasons: string[] = [];
     const risks: string[] = [];
-    let score = 30;
+    let fit = 6;
+    let reach = 0;
+    let intent = 0;
 
-    if (email && email.includes('@')) { score += 20; reasons.push('Email disponible.'); }
+    if (email && email.includes('@')) { reach += 28; reasons.push('Reach: email disponible.'); }
     else risks.push('Sin email util para contactar.');
-    if (lead.lockedEmail) { score -= 12; risks.push('Email bloqueado o no desbloqueado.'); }
-    if (textIncludesAny(title, decisionRoles)) { score += 25; reasons.push('Rol decisor compatible con ICP.'); }
-    else if (textIncludesAny(title, influencerRoles)) { score += 14; reasons.push('Rol influenciador compatible con ICP.'); }
-    else if (textIncludesAny(title, targetRoles)) { score += 10; reasons.push('Rol relacionado con el ICP.'); }
-    if (companyName) { score += 8; reasons.push('Empresa identificable.'); }
-    if (lead.linkedinUrl || lead.linkedin_url) score += 5;
+    if (lead.lockedEmail) { reach -= 12; risks.push('Email bloqueado o no desbloqueado.'); }
+    if (textIncludesAny(title, decisionRoles)) { fit += 34; reasons.push('Fit: rol decisor compatible con ICP.'); }
+    else if (textIncludesAny(title, influencerRoles)) { fit += 22; reasons.push('Fit: rol influenciador compatible con ICP.'); }
+    else if (textIncludesAny(title, targetRoles)) { fit += 12; reasons.push('Fit: rol relacionado con el ICP.'); }
+    if (companyName) { intent += 8; reasons.push('Intent: empresa identificable.'); }
+    if (lead.linkedinUrl || lead.linkedin_url) { reach += 6; reasons.push('Reach: perfil de LinkedIn disponible.'); }
+    if ((lead as any).signal || (lead as any).buyingSignal) { intent += 7; reasons.push('Intent: senal de compra asociada.'); }
 
     let contactability: any = null;
     if (email) {
       contactability = await checkContactability({ email }, context);
-      if (contactability.status === 'blocked') { score = Math.min(score, 20); risks.push('Bloqueado por privacidad/contactabilidad.'); }
-      if (contactability.status === 'warning') { score -= 8; risks.push('Tiene warning de contactabilidad.'); }
+      if (contactability.status === 'blocked') { reach = 0; risks.push('Bloqueado por privacidad/contactabilidad.'); }
+      if (contactability.status === 'warning') { reach -= 8; risks.push('Tiene warning de contactabilidad.'); }
     }
 
-    score = Math.max(0, Math.min(100, Math.round(score)));
+    const breakdown = {
+      fit: Math.round(Math.min(40, fit)),
+      reach: Math.round(Math.max(0, Math.min(45, reach))),
+      intent: Math.round(Math.min(15, intent)),
+    };
+    const score = Math.max(0, Math.min(100, breakdown.fit + breakdown.reach + breakdown.intent));
     return {
       leadKey: String(lead.id || email || `${fullName}-${companyName}`),
       leadId: asText(lead.leadId || lead.lead_id) || null,
@@ -675,6 +713,7 @@ async function scorePeople(input: Record<string, unknown>, context: SupliaToolCo
       companyName,
       score,
       scoreLabel: scoreLabel(score),
+      breakdown,
       reasons: reasons.length ? reasons : ['Lead compatible con la busqueda inicial.'],
       risks,
       recommendedAction: score >= 60 && email ? 'approve_for_enrichment_or_preview' : 'review_before_using',
@@ -699,7 +738,7 @@ async function scorePeople(input: Record<string, unknown>, context: SupliaToolCo
       reasons: item.reasons,
       risks: item.risks,
       recommended_action: item.recommendedAction,
-      source_payload: item.sourcePayload,
+      source_payload: { ...(item.sourcePayload as any), breakdown: item.breakdown },
     })));
   }
 
@@ -779,20 +818,62 @@ async function enrichLeadBatch(input: Record<string, unknown>, context: SupliaTo
 
 async function personalizeForLead(input: Record<string, unknown>, context: SupliaToolContext) {
   const lead = input.lead && typeof input.lead === 'object' ? input.lead as any : input;
-  const profile = (await buildSupliaContext(context.auth)).profile || {};
+  const appContext = await buildSupliaContext(context.auth);
+  const profile = appContext.profile || {};
   const fullName = getLeadName(lead) || 'ahi';
+  const openingName = fullName.split(' ')[0] || fullName;
   const companyName = asText(lead.companyName || lead.company) || 'tu equipo';
   const role = asText(lead.title || lead.role);
-  const offer = asText(input.offerSummary || input.offer || profile.company_profile || profile.companyName || profile.company || 'ANTON.IA');
+  const offer = asText(input.offerSummary || input.offer || appContext.offer || profile.company_profile || profile.companyName || profile.company || 'ANTON.IA');
   const cta = asText(input.cta) || 'te parece si lo revisamos 15 minutos esta semana?';
-  const subject = asText(input.subject) || `${companyName} y automatizacion comercial`;
-  const openingName = fullName.split(' ')[0] || fullName;
-  const textBody = [
+  const signal = asText((lead as any).signal || (lead as any).buyingSignal || (lead as any).reason || input.signal);
+  const winningSubjects = asList(input.winningSubjects).slice(0, 5);
+
+  let subject = asText(input.subject) || `${companyName} y automatizacion comercial`;
+  let textBody = [
     `Hola ${openingName},`,
     `Vi que ${companyName}${role ? ` tiene perfiles como ${role}` : ''} y pense que podria ser buen momento para mostrarte ${offer}.`,
     'La idea es ayudar a priorizar oportunidades, preparar mensajes y mantener control humano antes de acciones sensibles.',
     cta.charAt(0).toUpperCase() + cta.slice(1),
   ].join('\n\n');
+  let usedModelCopy = false;
+
+  try {
+    const prompt = `
+Eres un copywriter B2B senior experto en correo en frio. Escribe UN correo corto, personalizado y humano.
+
+Reglas:
+- Asunto de 4 a 7 palabras, especifico, con curiosidad o beneficio. Sin clickbait ni mayusculas gritonas.
+- Abre con una senal real del prospecto si existe. Si no existe, usa empresa/rol sin inventar datos.
+- Una sola idea y un solo CTA. Maximo 90 palabras.
+- Tono cercano y profesional, espanol de Chile.
+- No prometas resultados que no puedas respaldar.
+- Devuelve JSON: { "subject": string, "textBody": string }.
+
+Prospecto:
+- Nombre: ${fullName}
+- Rol: ${role || 'desconocido'}
+- Empresa: ${companyName}
+- Senal o contexto: ${signal || 'sin senal especifica'}
+
+Oferta: ${offer}
+CTA: ${cta}
+${winningSubjects.length ? `\nAsuntos que ya generaron respuesta. Replica el estilo, no el texto:\n- ${winningSubjects.join('\n- ')}` : ''}
+`.trim();
+
+    const { data } = await generateStructuredWithTelemetry({
+      prompt,
+      schema: z.object({ subject: z.string(), textBody: z.string() }),
+      temperature: 0.7,
+      openAiModels: getOpenAiModelsForTier('balanced'),
+    });
+
+    if (data.subject) subject = data.subject.trim();
+    if (data.textBody) textBody = data.textBody.trim();
+    usedModelCopy = Boolean(data.subject || data.textBody);
+  } catch (error) {
+    console.warn('[SUPLIA/personalizeForLead] fallback copy:', error);
+  }
 
   return {
     to: getLeadEmail(lead),
@@ -803,7 +884,7 @@ async function personalizeForLead(input: Record<string, unknown>, context: Supli
     textBody,
     htmlBody: textBody.split('\n\n').map((paragraph) => `<p>${paragraph}</p>`).join(''),
     sourceLead: lead,
-    note: 'Borrador personalizado. No fue enviado.',
+    note: usedModelCopy ? 'Borrador personalizado con IA. No fue enviado.' : 'Borrador personalizado. No fue enviado.',
   };
 }
 
@@ -1290,7 +1371,7 @@ async function bulkSend(input: Record<string, unknown>, context: SupliaToolConte
     throw new Error('Bulk send requiere confirmacion fuerte: ENVIAR.');
   }
 
-  const results = [];
+  const results: SupliaBulkRecipientOutcome[] = [];
   await context.reportProgress?.({ current: 0, total: messages.length, label: 'Bulk send iniciado' });
   for (let index = 0; index < messages.length; index += 1) {
     await context.assertRunnable?.();
@@ -1317,17 +1398,22 @@ async function bulkSend(input: Record<string, unknown>, context: SupliaToolConte
       });
       results.push({ status: 'sent', to: sent.to, contactedId: sent.contactedId, provider: sent.provider, index });
     } catch (error: any) {
-      results.push({ status: 'failed', to, error: error?.message || 'send_failed', index });
+      results.push(classifySupliaBulkRecipientError(error, { to, index }));
     }
     await context.reportProgress?.({ current: results.length, total: messages.length, label: `Bulk send ${results.length}/${messages.length}` });
     await context.heartbeat?.();
     if (index < messages.length - 1) await sleep(perMessageDelayMs);
   }
 
+  throwForIncompleteSupliaBulkOutcomes(results);
+  const rejected = results.filter((item) => item.status === 'rejected');
+
   return {
     dryRun: false,
+    partial: rejected.length > 0,
     preflight,
     results,
+    recipientFailures: rejected,
     summary: {
       requested: requestedMessages.length,
       processed: messages.length,
@@ -1337,8 +1423,13 @@ async function bulkSend(input: Record<string, unknown>, context: SupliaToolConte
       perMessageDelayMs,
       sendWindow: { startHour: windowStartHour, endHour: windowEndHour, timeZone },
       sent: results.filter((item) => item.status === 'sent').length,
-      failed: results.filter((item) => item.status === 'failed').length,
+      failed: rejected.length,
+      rejected: rejected.length,
+      retryExpected: false,
     },
+    note: rejected.length > 0
+      ? 'Envio parcial. Los rechazos permanentes se informan por destinatario y no se reintentaran automaticamente.'
+      : 'Todos los destinatarios fueron enviados.',
   };
 }
 
@@ -2047,6 +2138,48 @@ const SUPLIA_TOOLS: Record<string, SupliaToolDefinition> = {
     description: 'Puntua personas/leads contra el ICP, contactabilidad e historial disponible.',
     inputSchema: '{ "leads": object[], "strategy"?: object, "limit"?: number }',
     handler: scorePeople,
+  },
+  'research.similarweb': {
+    name: 'research.similarweb',
+    description: 'Obtiene trafico estimado de un dominio desde SimilarWeb publico. Sin costo, solo lectura, con timeout y fallback.',
+    inputSchema: '{ "domain": string, "cache"?: boolean }',
+    handler: researchSimilarweb,
+  },
+  'research.whois': {
+    name: 'research.whois',
+    description: 'Obtiene registrar, antiguedad y disponibilidad WHOIS de un dominio. Sin costo, solo lectura, con timeout y fallback.',
+    inputSchema: '{ "domain": string, "cache"?: boolean }',
+    handler: researchWhois,
+  },
+  'research.brand': {
+    name: 'research.brand',
+    description: 'Obtiene perfil de marca, logos, colores y metadata via Brand.dev. Consume creditos y requiere aprobacion.',
+    inputSchema: '{ "domain": string }',
+    handler: researchBrand,
+  },
+  'research.brand_mentions': {
+    name: 'research.brand_mentions',
+    description: 'Busca menciones externas de una marca via SerpAPI. Consume creditos y requiere aprobacion.',
+    inputSchema: '{ "company"?: string, "domain"?: string, "query"?: string, "limit"?: number }',
+    handler: researchBrandMentions,
+  },
+  'research.serp_company_news': {
+    name: 'research.serp_company_news',
+    description: 'Busca noticias recientes de una empresa via SerpAPI. Consume creditos y requiere aprobacion.',
+    inputSchema: '{ "company"?: string, "domain"?: string, "query"?: string, "limit"?: number }',
+    handler: researchSerpCompanyNews,
+  },
+  'research.serp_competitors': {
+    name: 'research.serp_competitors',
+    description: 'Busca competidores y alternativas de una empresa via SerpAPI. Consume creditos y requiere aprobacion.',
+    inputSchema: '{ "company"?: string, "domain"?: string, "query"?: string, "limit"?: number }',
+    handler: researchSerpCompetitors,
+  },
+  'research.serp_jobs_signals': {
+    name: 'research.serp_jobs_signals',
+    description: 'Busca senales de contratacion y crecimiento via SerpAPI. Consume creditos y requiere aprobacion.',
+    inputSchema: '{ "company"?: string, "domain"?: string, "location"?: string, "query"?: string, "limit"?: number }',
+    handler: researchSerpJobsSignals,
   },
   'prospecting.search_companies': {
     name: 'prospecting.search_companies',

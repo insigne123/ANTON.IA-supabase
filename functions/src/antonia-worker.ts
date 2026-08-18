@@ -1,16 +1,15 @@
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import { createClient } from '@supabase/supabase-js';
 
-// Environment variables from Firebase config
-const config = functions.config();
-const supabaseUrl = config.supabase?.url || process.env.SUPABASE_URL!;
-const supabaseServiceKey = config.supabase?.service_key || process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const appUrl = config.app?.url || process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
-const cronSecret = config.cron?.secret || process.env.CRON_SECRET || '';
+// Runtime config is deprecated in firebase-functions v7; use managed environment variables instead.
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '';
+const cronSecret = process.env.CRON_SECRET || '';
 const DEFAULT_LEAD_SEARCH_URL = "https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search";
 const LEAD_SEARCH_URL = process.env.ANTONIA_LEAD_SEARCH_URL || process.env.LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
-const internalApiSecret = config.internal?.api_secret || process.env.INTERNAL_API_SECRET || '';
-const workerIngressSecret = config.worker?.tick_secret || process.env.ANTONIA_FIREBASE_TICK_SECRET || '';
+const internalApiSecret = process.env.INTERNAL_API_SECRET || '';
+const workerIngressSecret = process.env.ANTONIA_FIREBASE_TICK_SECRET || '';
 
 function withInternalApiSecret(headers: Record<string, string>): Record<string, string> {
     const secret = String(internalApiSecret || '').trim();
@@ -94,6 +93,11 @@ export const antoniaWorker = functions
             const providedSecret = String(req.get('x-cron-secret') || '').trim();
             if (workerIngressSecret && providedBearer !== workerIngressSecret && providedSecret !== workerIngressSecret) {
                 res.status(401).json({ error: 'Unauthorized' });
+                return;
+            }
+
+            if (!supabaseUrl || !supabaseServiceKey) {
+                res.status(503).json({ error: 'Supabase worker configuration is missing' });
                 return;
             }
 
@@ -397,7 +401,8 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
                 email: l.email
             })),
             revealEmail: true,
-            revealPhone: isDeep
+            revealPhone: isDeep,
+            tableName: 'enriched_leads'
         })
     });
 

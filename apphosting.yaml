@@ -15,7 +15,7 @@ build:
 
     - name: bundle
       entrypoint: bash
-      args: ["-lc", "mkdir -p \"${BUILD_DIR}\" && tar --exclude='./.git' --exclude='./.env.local' --exclude='./chrome-extension.pem' --exclude='./antonia-extension-v1.1.zip' --exclude='./*.log' --exclude='./typecheck*.log' --exclude='./widget_error.txt' -cf - . | tar -xf - -C \"${BUILD_DIR}\""]
+      args: ["-lc", "mkdir -p \"${BUILD_DIR}\" && tar --exclude='./.git' --exclude='./.env*' --exclude='./.firebase' --exclude='./.next' --exclude='./node_modules' --exclude='./functions' --exclude='./supabase' --exclude='./chrome-extension' --exclude='./.playwright-mcp' --exclude='./.opencode' --exclude='./opencode.json' --exclude='./AGENTS.md' --exclude='./chrome-extension.pem' --exclude='./antonia-extension-v1.1.zip' --exclude='./*.log' --exclude='./typecheck*.log' --exclude='./widget_error.txt' -cf - . | tar -xf - -C \"${BUILD_DIR}\""]
 
 runConfig:
   minInstances: 0
@@ -37,6 +37,38 @@ env:
   - variable: OPENAI_MODEL
     value: gpt-4o-mini
     availability: [RUNTIME]
+
+  - variable: AI_PROVIDER
+    value: glm
+    availability: [RUNTIME]
+
+  - variable: GLM_API_KEY
+    secret: GLM_API_KEY
+    availability: [RUNTIME]
+
+  - variable: GLM_BASE_URL
+    value: https://open.bigmodel.cn/api/paas/v4
+    availability: [RUNTIME]
+
+  - variable: GLM_MODEL
+    value: glm-5.2
+    availability: [RUNTIME]
+
+  - variable: SUPLIA_CONTEXT_COMPACT_THRESHOLD_TOKENS
+    value: "150000"
+    availability: [RUNTIME]
+
+  - variable: SUPLIA_CONTEXT_RECENT_MESSAGES
+    value: "12"
+    availability: [RUNTIME]
+
+  - variable: NEXT_PUBLIC_SUPLIA_ENABLED
+    value: "false"
+    availability: [BUILD, RUNTIME]
+
+  - variable: NEXT_PUBLIC_OPPORTUNITIES_ENABLED
+    value: "false"
+    availability: [BUILD, RUNTIME]
 
   # === Lead providers (Apollo/PDL trial) ===
   - variable: LEADS_PROVIDER_DEFAULT
@@ -193,11 +225,19 @@ env:
     availability: [RUNTIME]
 
   - variable: N8N_RESEARCH_WEBHOOK_URL
-    value: https://nicogun.app.n8n.cloud/webhook/ANTONIA
+    value: https://n8n.yago.cl/webhook/ANTONIA2.0
     availability: [RUNTIME]
 
   - variable: N8N_WEBHOOK_URL
-    value: https://nicogun.app.n8n.cloud/webhook/ANTONIA
+    value: https://n8n.yago.cl/webhook/ANTONIA2.0
+    availability: [RUNTIME]
+
+  - variable: ANTONIA_N8N_WEBHOOK_URL
+    value: https://n8n.yago.cl/webhook/ANTONIA2.0
+    availability: [RUNTIME]
+
+  - variable: N8N_RESEARCH_TIMEOUT_MS
+    value: "120000"
     availability: [RUNTIME]
 
   - variable: LEAD_RESEARCH_WORKER_SECRET
@@ -219,6 +259,10 @@ env:
     secret: ANTONIA_TICK_SECRET
     availability: [RUNTIME]
 
+  - variable: ANTONIA_PRIVACY_RETENTION_ENABLED
+    value: "false"
+    availability: [RUNTIME]
+
   # Cron endpoint protection
   - variable: CRON_SECRET
     secret: ANTONIA_TICK_SECRET
@@ -227,4 +271,8 @@ env:
   # Tracking webhook protection (optional but recommended)
   - variable: TRACKING_WEBHOOK_SECRET
     secret: TRACKING_WEBHOOK_SECRET
+    availability: [RUNTIME]
+
+  - variable: TRACKING_TOKEN_SECRET
+    secret: TRACKING_TOKEN_SECRET
     availability: [RUNTIME]

@@ -1,94 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { resolveTrackingToken } from '@/lib/server/tracking-token';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-function resolveRedirectDestination(req: NextRequest, rawUrl: string | null): string {
-    const fallback = req.nextUrl.origin;
-    const trimmed = String(rawUrl || '').trim();
-    if (!trimmed) return fallback;
+export async function GET(req: NextRequest) {
+    const token = resolveTrackingToken(req.nextUrl.searchParams.get('t'), 'click');
+    if (!token?.destination) {
+        return NextResponse.json(
+            { error: 'Invalid tracking link' },
+            { status: 400, headers: { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } }
+        );
+    }
 
     try {
-        const parsed = trimmed.startsWith('/')
-            ? new URL(trimmed, req.nextUrl.origin)
-            : new URL(trimmed);
+        const supabase = getSupabaseAdminClient();
+        const { data: row, error: fetchError } = await supabase
+            .from('contacted_leads')
+            .select('id, click_count, engagement_score')
+            .eq('id', token.contactedId)
+            .eq('organization_id', token.organizationId)
+            .maybeSingle();
+        if (fetchError) throw fetchError;
 
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-            return fallback;
-        }
-
-        return parsed.toString();
-    } catch {
-        return fallback;
-    }
-}
-
-export async function GET(req: NextRequest) {
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
-    const url = searchParams.get("url");
-
-    if (id && url) {
-        // Use Service Role to bypass RLS for tracking updates
-        const supabaseAdmin = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY!
-        );
-
-        // Await the update to ensure it completes before the response is sent
-        try {
+        if (row) {
             const nowIso = new Date().toISOString();
-
-            // Support both:
-            // - id = contacted_leads.id (legacy followups)
-            // - id = leads.id (agent pipeline)
-            let row: any = null;
-
-            const byId = await supabaseAdmin
+            const { error: updateError } = await supabase
                 .from('contacted_leads')
-                .select('id, click_count, engagement_score')
-                .eq('id', id)
-                .maybeSingle();
-            if (byId.data) {
-                row = byId.data;
-            } else {
-                const byLead = await supabaseAdmin
-                    .from('contacted_leads')
-                    .select('id, click_count, engagement_score')
-                    .eq('lead_id', id)
-                    .order('sent_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-                row = byLead.data;
-            }
-
-            if (row?.id) {
-                const currentClicks = (row.click_count || 0) + 1;
-                const currentScore = row.engagement_score || 0;
-                const newScore = currentScore + 3;
-
-                await supabaseAdmin
-                    .from('contacted_leads')
-                    .update({
-                        click_count: currentClicks,
-                        clicked_at: nowIso,
-                        delivery_status: 'clicked',
-                        last_interaction_at: nowIso,
-                        engagement_score: newScore,
-                        evaluation_status: 'pending',
-                        last_update_at: nowIso,
-                    } as any)
-                    .eq('id', row.id);
-            }
-        } catch (err) {
-            console.error("Tracking error:", err);
+                .update({
+                    click_count: Number(row.click_count || 0) + 1,
+                    clicked_at: nowIso,
+                    delivery_status: 'clicked',
+                    last_interaction_at: nowIso,
+                    engagement_score: Number(row.engagement_score || 0) + 3,
+                    evaluation_status: 'pending',
+                    last_update_at: nowIso,
+                } as any)
+                .eq('id', token.contactedId)
+                .eq('organization_id', token.organizationId)
+                // A signed link counts at most once, including when scanners retry it.
+                .is('clicked_at', null);
+            if (updateError) throw updateError;
         }
+    } catch (error) {
+        // Tracking must not prevent a recipient from reaching a valid signed destination.
+        console.error('[tracking/click] Failed to record click:', error);
     }
 
-    // Redirect to the original URL (or fallback to homepage if missing)
-    const destination = resolveRedirectDestination(req, url);
-
-    // Use 307 Temporary Redirect to preserve method/body if any (though GET here)
-    return NextResponse.redirect(destination, 307);
+    const response = NextResponse.redirect(token.destination, 302);
+    response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('Referrer-Policy', 'no-referrer');
+    return response;
 }

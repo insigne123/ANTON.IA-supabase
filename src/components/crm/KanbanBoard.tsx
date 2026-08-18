@@ -1,164 +1,146 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
-    DndContext,
-    DragOverlay,
     closestCorners,
+    defaultDropAnimationSideEffects,
+    DndContext,
+    DragEndEvent,
+    DragOverlay,
+    DragStartEvent,
+    DropAnimation,
     KeyboardSensor,
     PointerSensor,
     useSensor,
     useSensors,
-    DragStartEvent,
-    DragOverEvent,
-    DragEndEvent,
-    defaultDropAnimationSideEffects,
-    DragOverlayProps,
-    DropAnimation
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
+
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { PIPELINE_STAGES, type PipelineStage } from '@/lib/crm-types';
+import type { UnifiedRow } from '@/lib/unified-sheet-types';
 import { KanbanColumn } from './KanbanColumn';
 import { LeadCard } from './LeadCard';
-import type { UnifiedRow } from '@/lib/unified-sheet-types';
-import { PIPELINE_STAGES, PipelineStage } from '@/lib/crm-types';
 
 interface Props {
     leads: UnifiedRow[];
     onLeadMove: (leadId: string, newStage: PipelineStage) => void;
     onLeadClick: (lead: UnifiedRow) => void;
+    movingLeadIds?: Set<string>;
     focusMode?: boolean;
     setFocusMode?: (mode: boolean) => void;
     focusedStage?: PipelineStage;
     setFocusedStage?: (stage: PipelineStage) => void;
 }
+
+const CLOSED_STAGES = new Set<PipelineStage>(['closed_won', 'closed_lost']);
+
+function normalizedStage(lead: UnifiedRow): PipelineStage {
+    return PIPELINE_STAGES.some((stage) => stage.id === lead.stage) ? lead.stage as PipelineStage : 'inbox';
+}
+
 export function KanbanBoard({
     leads,
     onLeadMove,
     onLeadClick,
+    movingLeadIds = new Set(),
     focusMode = false,
     setFocusMode,
-    focusedStage: propFocusedStage,
-    setFocusedStage: propSetFocusedStage
+    focusedStage: controlledFocusedStage,
+    setFocusedStage: setControlledFocusedStage,
 }: Props) {
     const [activeId, setActiveId] = useState<string | null>(null);
-    // Local state fallback if not provided (though in this app it will always be provided)
     const [localFocusedStage, setLocalFocusedStage] = useState<PipelineStage>('contacted');
-
-    // Use prop if available, otherwise local state
-    const focusedStage = propFocusedStage !== undefined ? propFocusedStage : localFocusedStage;
-    const setFocusedStage = propSetFocusedStage || setLocalFocusedStage;
+    const focusedStage = controlledFocusedStage ?? localFocusedStage;
+    const setFocusedStage = setControlledFocusedStage ?? setLocalFocusedStage;
 
     const sensors = useSensors(
-        useSensor(PointerSensor),
-        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+        useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
     );
 
-    // Group leads by stage
     const columns = useMemo(() => {
         const map = new Map<PipelineStage, UnifiedRow[]>();
-        PIPELINE_STAGES.forEach(s => map.set(s.id, []));
-
-        leads.forEach(lead => {
-            // Default to 'inbox' if no stage or invalid stage
-            const stage = (lead.stage && map.has(lead.stage as PipelineStage))
-                ? (lead.stage as PipelineStage)
-                : 'inbox';
-            map.get(stage)?.push(lead);
-        });
+        PIPELINE_STAGES.forEach((stage) => map.set(stage.id, []));
+        leads.forEach((lead) => map.get(normalizedStage(lead))?.push(lead));
+        map.forEach((items) => items.sort((a, b) => {
+            const aDue = a.nextActionDueAt ? new Date(a.nextActionDueAt).getTime() : Number.POSITIVE_INFINITY;
+            const bDue = b.nextActionDueAt ? new Date(b.nextActionDueAt).getTime() : Number.POSITIVE_INFINITY;
+            if (aDue !== bDue) return aDue - bDue;
+            return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime();
+        }));
         return map;
     }, [leads]);
 
-    const activeLead = useMemo(() =>
-        leads.find(l => l.gid === activeId),
-        [activeId, leads]);
+    const activeLead = useMemo(() => leads.find((lead) => lead.gid === activeId), [activeId, leads]);
+    const visibleStages = focusMode
+        ? PIPELINE_STAGES.filter((stage) => stage.id === focusedStage)
+        : PIPELINE_STAGES;
 
-    const handleDragStart = (event: DragStartEvent) => {
-        setActiveId(event.active.id as string);
-    };
-
-    const handleDragEnd = (event: DragEndEvent) => {
+    function handleDragEnd(event: DragEndEvent) {
         const { active, over } = event;
         setActiveId(null);
-
         if (!over) return;
 
-        const activeLeadId = active.id as string;
+        const leadId = active.id as string;
         const overId = over.id as string;
-
-        // Check if dropped on a column (stage)
-        // Note: over.id could be a column ID (PipelineStage) or another Card ID (string)
-
-        let newStage: PipelineStage | null = null;
-
-        // Is overId a stage?
-        if (PIPELINE_STAGES.some(s => s.id === overId)) {
-            newStage = overId as PipelineStage;
-        } else {
-            // Must be dropped over another card, find that card's stage
-            const overLead = leads.find(l => l.gid === overId);
-            if (overLead) {
-                const s = overLead.stage as PipelineStage;
-                newStage = PIPELINE_STAGES.some(st => st.id === s) ? s : 'inbox';
-            }
-        }
-
-        if (newStage) {
-            onLeadMove(activeLeadId, newStage);
-        }
-    };
+        const targetStage = PIPELINE_STAGES.some((stage) => stage.id === overId)
+            ? overId as PipelineStage
+            : normalizedStage(leads.find((lead) => lead.gid === overId) || {} as UnifiedRow);
+        const lead = leads.find((item) => item.gid === leadId);
+        if (lead && normalizedStage(lead) !== targetStage) onLeadMove(leadId, targetStage);
+    }
 
     const dropAnimation: DropAnimation = {
-        sideEffects: defaultDropAnimationSideEffects({
-            styles: {
-                active: { opacity: '0.5' },
-            },
-        }),
+        sideEffects: defaultDropAnimationSideEffects({ styles: { active: { opacity: '0.5' } } }),
     };
 
     return (
         <DndContext
             sensors={sensors}
             collisionDetection={closestCorners}
-            onDragStart={handleDragStart}
+            onDragStart={(event: DragStartEvent) => setActiveId(event.active.id as string)}
+            onDragCancel={() => setActiveId(null)}
             onDragEnd={handleDragEnd}
         >
-            <div className={`flex bg-background h-full overflow-x-auto gap-4 p-4 items-start ${focusMode ? 'justify-center' : ''}`}>
-
-                {/* Stage Selector for Focus Mode */}
+            <div className="flex h-full min-h-0 flex-col">
                 {focusMode && (
-                    <div className="absolute top-20 left-1/2 -translate-x-1/2 z-10 bg-white/90 backdrop-blur border rounded-full px-2 py-1 shadow-sm flex items-center gap-1">
-                        {PIPELINE_STAGES.map(s => (
-                            <button
-                                key={s.id}
-                                onClick={() => setFocusedStage(s.id)}
-                                className={`text-xs px-2 py-1 rounded-full transition-colors ${focusedStage === s.id ? 'bg-black text-white' : 'hover:bg-gray-100 text-gray-500'}`}
-                            >
-                                {s.label}
-                            </button>
-                        ))}
+                    <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-muted/20 px-4 py-2">
+                        <span className="text-xs font-medium text-muted-foreground">Etapa prioritaria</span>
+                        <Select value={focusedStage} onValueChange={(value) => setFocusedStage(value as PipelineStage)}>
+                            <SelectTrigger className="h-8 w-44 bg-background"><SelectValue /></SelectTrigger>
+                            <SelectContent>{PIPELINE_STAGES.map((stage) => <SelectItem key={stage.id} value={stage.id}>{stage.label}</SelectItem>)}</SelectContent>
+                        </Select>
+                        <Button variant="ghost" size="sm" className="h-8" onClick={() => setFocusMode?.(false)}>Ver pipeline completo</Button>
                     </div>
                 )}
 
-                {PIPELINE_STAGES.map(stage => {
-                    if (focusMode && stage.id !== focusedStage) return null;
-
-                    return (
-                        <div key={stage.id} className={focusMode ? "w-[600px] h-full transition-all duration-300" : "h-full"}>
-                            <KanbanColumn
-                                id={stage.id}
-                                title={stage.label}
-                                colorClass={stage.color}
-                                count={columns.get(stage.id)?.length || 0}
-                                leads={columns.get(stage.id) || []}
-                                onLeadClick={onLeadClick}
-                            />
-                        </div>
-                    );
-                })}
+                <div className="flex h-full min-h-0 items-stretch gap-3 overflow-x-auto overscroll-x-contain bg-muted/10 p-3 sm:p-4">
+                    {visibleStages.map((stage, index) => {
+                        const closed = CLOSED_STAGES.has(stage.id);
+                        const showClosedDivider = !focusMode && closed && index > 0 && !CLOSED_STAGES.has(visibleStages[index - 1].id);
+                        return (
+                            <div key={stage.id} className="flex h-full items-stretch gap-3">
+                                {showClosedDivider && <div className="my-2 w-px shrink-0 bg-border" aria-hidden="true" />}
+                                <KanbanColumn
+                                    id={stage.id}
+                                    title={stage.label}
+                                    count={columns.get(stage.id)?.length || 0}
+                                    leads={columns.get(stage.id) || []}
+                                    closed={closed}
+                                    movingLeadIds={movingLeadIds}
+                                    onLeadClick={onLeadClick}
+                                    onLeadMove={onLeadMove}
+                                />
+                            </div>
+                        );
+                    })}
+                </div>
             </div>
 
             <DragOverlay dropAnimation={dropAnimation}>
-                {activeLead ? <LeadCard lead={activeLead} /> : null}
+                {activeLead ? <div className="w-[280px]"><LeadCard lead={activeLead} /></div> : null}
             </DragOverlay>
         </DndContext>
     );

@@ -10,8 +10,20 @@ export async function exportToXlsx(
   const XLSX = await import('xlsx');
   const data = [headers, ...rows];
   const ws = XLSX.utils.aoa_to_sheet(data);
+  ws['!cols'] = headers.map((header, columnIndex) => ({
+    wch: Math.min(
+      42,
+      Math.max(
+        header.length + 2,
+        ...rows.slice(0, 250).map((row) => String(row[columnIndex] ?? '').length + 2),
+      ),
+    ),
+  }));
+  if (headers.length > 0) {
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: headers.length - 1 } }) };
+  }
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Sheet');
+  XLSX.utils.book_append_sheet(wb, ws, 'Datos');
   const safe = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
   XLSX.writeFile(wb, safe, { compression: true });
 }
@@ -31,7 +43,7 @@ export async function exportToPdf(
 
   const margin = 24;
   doc.setFontSize(12);
-  doc.text('LeadFlow.AI — Export', margin, 22);
+  doc.text('Hoja de datos — Exportación', margin, 22);
   doc.setFontSize(8);
   doc.text(new Date().toLocaleString(), margin, 36);
 
@@ -59,7 +71,7 @@ export async function exportToPdf(
   doc.save(safe);
 }
 
-/** NUEVO: exportación a CSV genérica */
+/** Exportación a CSV genérica. */
 export function exportToCsv(
   headers: string[],
   rows: (string | number)[][],
@@ -67,14 +79,15 @@ export function exportToCsv(
 ) {
   const safe = filename.endsWith('.csv') ? filename : `${filename}.csv`;
   const escape = (val: string | number) => {
-    const s = String(val ?? '');
+    const raw = String(val ?? '');
+    const s = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [
     headers.map(escape).join(','),
     ...rows.map((r) => r.map(escape).join(',')),
   ];
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -82,5 +95,5 @@ export function exportToCsv(
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }

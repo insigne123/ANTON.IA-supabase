@@ -13,12 +13,18 @@ const required = [
   'APOLLO_WEBHOOK_SECRET',
 ]
 
+const aiProvider = String(process.env.SUPLIA_AI_PROVIDER || process.env.AI_PROVIDER || 'openai').trim().toLowerCase()
+const aiKey = aiProvider === 'glm' || aiProvider === 'zhipu' || aiProvider === 'bigmodel' || aiProvider === 'zai' || aiProvider === 'z.ai'
+  ? 'GLM_API_KEY'
+  : 'OPENAI_API_KEY'
+
 const recommended = [
   'TRACKING_WEBHOOK_SECRET',
+  'TRACKING_TOKEN_SECRET',
   'ANTONIA_FIREBASE_TICK_URL',
   'ANTONIA_FIREBASE_TICK_SECRET',
   'N8N_RESEARCH_WEBHOOK_URL',
-  'GOOGLE_GENAI_API_KEY',
+  aiKey,
 ]
 
 const missingRequired = required.filter((key) => !String(process.env[key] || '').trim())

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTemplateById } from '@/lib/email-studio/storage';
 import { buildTemplateContext, renderTemplateString } from '@/lib/email-studio/template-engine';
 import type { RenderRequest, RenderResult } from '@/lib/types';
+import { requestAuthErrorResponse, requireSessionRequestAuth } from '@/lib/server/request-auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -9,6 +10,7 @@ export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
+    await requireSessionRequestAuth();
     const body = await req.json() as RenderRequest;
 
     const tpl = getTemplateById(body.templateId);
@@ -50,6 +52,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (e: any) {
+    const authResponse = requestAuthErrorResponse(e);
+    if (authResponse) return authResponse;
     return NextResponse.json({ error: e?.message || 'Render error' }, { status: 500 });
   }
 }

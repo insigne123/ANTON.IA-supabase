@@ -61,15 +61,15 @@ if (!secret || (bearer !== secret && headerSecret !== secret)) {
 ```
 
 Acepta el secreto de dos formas:
-1. **Header `Authorization: Bearer 78717871`**
-2. **Header `x-cron-secret: 78717871`**
+1. **Header `Authorization: Bearer $ANTONIA_TICK_SECRET`**
+2. **Header `x-cron-secret: $ANTONIA_TICK_SECRET`**
 
 ## ✅ Verificar que funcionó
 
 Después de configurar los permisos, prueba la función:
 
 ```bash
-curl -H "x-cron-secret: 78717871" \
+curl -H "x-cron-secret: $ANTONIA_TICK_SECRET" \
   https://us-central1-leadflowai-3yjcy.cloudfunctions.net/antoniaTickHttp
 ```
 
@@ -77,7 +77,4 @@ Deberías recibir: `{"ok":true}`
 
 ## 📝 Nota
 
-Esta configuración es **más segura** que hacer la función pública, ya que:
-- ✅ Requiere el secreto `ANTONIA_TICK_SECRET` para invocar
-- ✅ Solo permite invocaciones de cuentas de servicio autorizadas
-- ✅ Cumple con las políticas de seguridad de tu organización
+Mientras `antoniaTickHttp` use `invoker: 'public'`, el secreto es una defensa adicional, no una política IAM. Migra el invocador a una cuenta de servicio/OIDC antes de tratar este endpoint como privado.

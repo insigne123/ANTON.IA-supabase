@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 
 import { Badge } from '@/components/ui/badge';
@@ -47,6 +47,11 @@ type SubjectLookupResponse = {
     contactedLeads: number;
     unsubscribedEntries: number;
     researchReports: number;
+    researchSnapshots?: number;
+    researchJobs?: number;
+    messagingDrafts?: number;
+    messagingDraftVersions?: number;
+    outboundDispatches?: number;
     emailEvents?: number;
     leadResponses?: number;
   };
@@ -57,6 +62,11 @@ type SubjectLookupResponse = {
     contactedLeads: Array<{ id: string; name: string | null; role: string | null; company: string | null; email: string; status: string | null; sent_at: string | null; replied_at: string | null }>;
     unsubscribedEntries: Array<{ id: string; email: string; reason: string | null; created_at: string | null }>;
     researchReports: Array<{ id: string; email: string | null; company_name: string | null; company_domain: string | null; generated_at: string | null; updated_at: string | null }>;
+    researchSnapshots?: Array<{ id: string }>;
+    researchJobs?: Array<{ id: string }>;
+    messagingDrafts?: Array<{ id: string }>;
+    messagingDraftVersions?: Array<{ id: string }>;
+    outboundDispatches?: Array<{ id: string }>;
     emailEvents?: Array<{ id: string; contacted_id: string | null; event_type: string; provider: string | null; event_at: string; meta: any }>;
     leadResponses?: Array<{ id: string; lead_id: string | null; contacted_id?: string | null; type: string; content: string | null; created_at: string }>;
   };
@@ -114,9 +124,9 @@ export default function PrivacyRequestsSettingsPage() {
   const [lookupError, setLookupError] = useState('');
   const [lookupResult, setLookupResult] = useState<SubjectLookupResponse | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
-  const [actionNotice, setActionNotice] = useState('');
+  const [actionNotice, setActionNotice] = useState<{ tone: 'success' | 'warning'; message: string } | null>(null);
 
-  async function loadRequests(nextStatus = status) {
+  const loadRequests = useCallback(async (nextStatus = status) => {
     setLoading(true);
     setError('');
 
@@ -139,7 +149,7 @@ export default function PrivacyRequestsSettingsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [status]);
 
   async function updateStatus(id: string, nextStatus: 'submitted' | 'in_review' | 'resolved' | 'rejected') {
     setUpdatingId(id);
@@ -208,7 +218,7 @@ export default function PrivacyRequestsSettingsPage() {
       }
 
     setActionLoadingId(request.id);
-    setActionNotice('');
+    setActionNotice(null);
     setError('');
 
     try {
@@ -218,6 +228,20 @@ export default function PrivacyRequestsSettingsPage() {
         body: JSON.stringify({ action, email: targetEmail, requestId: request.id }),
       });
       const data = await response.json().catch(() => ({}));
+
+      if (action === 'delete' && data?.result?.outcome === 'manual_review') {
+        const reason = String(data.result.reason || '').trim();
+        const reasonText = reason ? ` Motivo: ${reason}.` : '';
+        setActionNotice({
+          tone: 'warning',
+          message: `El contacto para ${targetEmail} quedo bloqueado. La eliminacion no se ejecuto y requiere revision manual.${reasonText}`,
+        });
+        await loadRequests(status);
+        if (lookupEmail === targetEmail || lookupResult?.email === targetEmail) {
+          await runLookup(targetEmail);
+        }
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(data?.error || 'No se pudo ejecutar la accion.');
@@ -232,17 +256,17 @@ export default function PrivacyRequestsSettingsPage() {
         link.download = `privacy-export-${targetEmail.replace(/[^a-z0-9@._-]+/gi, '_')}.json`;
         link.click();
         window.URL.revokeObjectURL(url);
-        setActionNotice(`Se exportaron los datos encontrados para ${targetEmail}.`);
+        setActionNotice({ tone: 'success', message: `Se exportaron los datos encontrados para ${targetEmail}.` });
       } else if (action === 'block') {
-        setActionNotice(`Se bloqueó el contacto para ${targetEmail} en el servicio.`);
+        setActionNotice({ tone: 'success', message: `Se bloqueó el contacto para ${targetEmail} en el servicio.` });
       } else if (action === 'suspend_account') {
         const warnings = Array.isArray(data?.result?.warnings) ? data.result.warnings : [];
         const warningText = warnings.length > 0 ? ` Aviso: ${warnings[0]}` : '';
-        setActionNotice(`Se suspendió el acceso al SaaS para ${targetEmail}.${warningText}`);
+        setActionNotice({ tone: 'success', message: `Se suspendió el acceso al SaaS para ${targetEmail}.${warningText}` });
       } else {
         const warnings = Array.isArray(data?.result?.warnings) ? data.result.warnings : [];
         const warningText = warnings.length > 0 ? ` Aviso: ${warnings[0]}` : '';
-        setActionNotice(`Se eliminaron los datos comerciales para ${targetEmail} y se mantuvo una supresion minima.${warningText}`);
+        setActionNotice({ tone: 'success', message: `Se eliminaron los datos comerciales para ${targetEmail} y se mantuvo una supresion minima.${warningText}` });
       }
 
       await loadRequests(status);
@@ -258,7 +282,7 @@ export default function PrivacyRequestsSettingsPage() {
 
   useEffect(() => {
     loadRequests(status);
-  }, [status]);
+  }, [loadRequests, status]);
 
   const summary = useMemo(() => {
     return requests.reduce(
@@ -341,8 +365,10 @@ export default function PrivacyRequestsSettingsPage() {
           ) : null}
 
           {actionNotice ? (
-            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-              {actionNotice}
+            <div className={actionNotice.tone === 'warning'
+              ? 'rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
+              : 'rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200'}>
+              {actionNotice.message}
             </div>
           ) : null}
 
@@ -520,6 +546,11 @@ export default function PrivacyRequestsSettingsPage() {
                 <Card><CardHeader className="pb-2"><CardDescription>Contactados</CardDescription><CardTitle className="text-xl">{lookupResult.summary.contactedLeads}</CardTitle></CardHeader></Card>
                 <Card><CardHeader className="pb-2"><CardDescription>Bajas</CardDescription><CardTitle className="text-xl">{lookupResult.summary.unsubscribedEntries}</CardTitle></CardHeader></Card>
                 <Card><CardHeader className="pb-2"><CardDescription>Reportes</CardDescription><CardTitle className="text-xl">{lookupResult.summary.researchReports}</CardTitle></CardHeader></Card>
+                <Card><CardHeader className="pb-2"><CardDescription>Snapshots</CardDescription><CardTitle className="text-xl">{lookupResult.summary.researchSnapshots || 0}</CardTitle></CardHeader></Card>
+                <Card><CardHeader className="pb-2"><CardDescription>Jobs</CardDescription><CardTitle className="text-xl">{lookupResult.summary.researchJobs || 0}</CardTitle></CardHeader></Card>
+                <Card><CardHeader className="pb-2"><CardDescription>Borradores</CardDescription><CardTitle className="text-xl">{lookupResult.summary.messagingDrafts || 0}</CardTitle></CardHeader></Card>
+                <Card><CardHeader className="pb-2"><CardDescription>Versiones</CardDescription><CardTitle className="text-xl">{lookupResult.summary.messagingDraftVersions || 0}</CardTitle></CardHeader></Card>
+                <Card><CardHeader className="pb-2"><CardDescription>Envios</CardDescription><CardTitle className="text-xl">{lookupResult.summary.outboundDispatches || 0}</CardTitle></CardHeader></Card>
               </div>
 
               <div className="space-y-3 text-sm">
