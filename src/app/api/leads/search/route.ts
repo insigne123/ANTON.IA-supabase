@@ -1,4 +1,5 @@
 // src/app/api/leads/search/route.ts
+import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { normalizeDomainList } from "@/lib/domain";
@@ -15,6 +16,7 @@ import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/s
 import { enrichPersonWithPDL, pickPdlEmail, pickPdlPhones, searchCompaniesWithPDL, searchPeopleWithPDL } from '@/lib/providers/pdl';
 import { isPdlFallbackEnabled, resolveLeadProvider, resolveOrganizationIdForUser } from '@/lib/server/provider-routing';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import { partitionLinkedInProfileLeads } from '@/lib/linkedin-profile-result';
 
@@ -490,6 +492,51 @@ async function reserveLeadSearchQuota(userId: string, organizationId?: string | 
   }
 
   return { organizationId: resolvedOrganizationId, quota };
+}
+
+type SearchAuditContext = {
+  requestId: string;
+  userId: string;
+  organizationId?: string | null;
+  actorType: 'user' | 'agent';
+  searchMode: string;
+  providerRequested?: string | null;
+  providerUsed?: string | null;
+  quotaCount?: number;
+  quotaLimit?: number;
+  fallbackApplied?: boolean;
+};
+
+async function auditSearchResponse(response: NextResponse, context: SearchAuditContext) {
+  const succeeded = response.status >= 200 && response.status < 400;
+  await safeAppendAntoniaEvent({
+    eventKey: `search:${context.requestId}:${succeeded ? 'completed' : 'failed'}`,
+    eventType: succeeded ? 'search.completed' : 'search.failed',
+    organizationId: context.organizationId,
+    actorId: context.userId,
+    actorType: context.actorType,
+    entityType: 'search',
+    entityId: context.requestId,
+    sourceRoute: '/api/leads/search',
+    requestId: context.requestId,
+    correlationId: context.requestId,
+    operationId: context.requestId,
+    outcome: response.status === 429 ? 'quota_denied' : succeeded ? 'results_returned' : 'http_error',
+    status: succeeded ? 'completed' : 'failed',
+    severity: succeeded ? 'info' : response.status === 429 ? 'warning' : 'error',
+    metrics: {
+      httpStatus: response.status,
+      ...(context.quotaCount == null ? {} : { quotaCount: context.quotaCount }),
+      ...(context.quotaLimit == null ? {} : { quotaLimit: context.quotaLimit }),
+    },
+    payload: {
+      searchMode: context.searchMode,
+      providerRequested: context.providerRequested || null,
+      providerUsed: context.providerUsed || null,
+      fallbackApplied: Boolean(context.fallbackApplied),
+    },
+  });
+  return response;
 }
 
 function buildPeopleSearchLeadRow(person: any, options: {
@@ -1410,6 +1457,40 @@ export async function POST(req: NextRequest) {
     const ctx = await resolveSearchUserId(req);
     if ('error' in ctx) return ctx.error;
     const userId = ctx.userId;
+    const requestId = req.headers.get('x-request-id')?.trim() || randomUUID();
+    const actorType = req.headers.get('x-user-id')?.trim() ? 'agent' as const : 'user' as const;
+    let requestRecorded = false;
+    const recordSearchRequest = async (params: {
+      searchMode: string;
+      organizationId?: string | null;
+      providerRequested?: string | null;
+      providerUsed?: string | null;
+    }) => {
+      if (requestRecorded) return;
+      requestRecorded = true;
+      await safeAppendAntoniaEvent({
+        eventKey: `search:${requestId}:requested`,
+        eventType: 'search.requested',
+        organizationId: params.organizationId,
+        actorId: userId,
+        actorType,
+        entityType: 'search',
+        entityId: requestId,
+        sourceRoute: '/api/leads/search',
+        requestId,
+        correlationId: requestId,
+        operationId: requestId,
+        idempotencyKey: requestId,
+        status: 'started',
+        outcome: 'accepted',
+        metrics: { bodyIsArray: Array.isArray(body) },
+        payload: {
+          searchMode: params.searchMode,
+          providerRequested: params.providerRequested || null,
+          providerUsed: params.providerUsed || null,
+        },
+      });
+    };
 
     let body: unknown = null;
     try {
@@ -1426,9 +1507,19 @@ export async function POST(req: NextRequest) {
           profileReq.linkedin_url || profileReq.linkedin_profile_url || profileReq.linkedinUrl || ''
         ).trim();
         const organizationId = await resolveOrganizationIdForUser(userId);
-        const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
-        if ('error' in quotaReservation) return quotaReservation.error;
         const requestedProvider = String((body as any)?.provider || '').trim().toLowerCase();
+        await recordSearchRequest({ searchMode: 'linkedin_profile', organizationId, providerRequested: requestedProvider || null });
+        const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
+        if ('error' in quotaReservation && quotaReservation.error) {
+          return await auditSearchResponse(quotaReservation.error, {
+            requestId,
+            userId,
+            organizationId,
+            actorType,
+            searchMode: 'linkedin_profile',
+            providerRequested: requestedProvider || null,
+          });
+        }
         const profilePayload = {
           user_id: userId,
           search_mode: 'linkedin_profile',
@@ -1448,15 +1539,36 @@ export async function POST(req: NextRequest) {
         response.headers.set('x-provider-used', 'backend-antonia');
         response.headers.set('x-quota-count', String(quotaReservation.quota.count));
         response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
-        return response;
+        return await auditSearchResponse(response, {
+          requestId,
+          userId,
+          organizationId,
+          actorType,
+          searchMode: 'linkedin_profile',
+          providerRequested: requestedProvider || null,
+          providerUsed: 'backend-antonia',
+          quotaCount: quotaReservation.quota.count,
+          quotaLimit: quotaReservation.quota.limit,
+        });
       }
 
       const companyParsed = CompanyNameSearchRequestSchema.safeParse(body);
       if (companyParsed.success) {
         const companyReq = companyParsed.data;
         const organizationId = await resolveOrganizationIdForUser(userId);
+        const requestedProvider = String((body as any)?.provider || '').trim().toLowerCase();
+        await recordSearchRequest({ searchMode: 'company_name', organizationId, providerRequested: requestedProvider || null });
         const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
-        if ('error' in quotaReservation) return quotaReservation.error;
+        if ('error' in quotaReservation && quotaReservation.error) {
+          return await auditSearchResponse(quotaReservation.error, {
+            requestId,
+            userId,
+            organizationId,
+            actorType,
+            searchMode: 'company_name',
+            providerRequested: requestedProvider || null,
+          });
+        }
         const organizationDomains = normalizeDomainList([
           ...(companyReq.organization_domains || []),
           ...(companyReq.organizationDomains || []),
@@ -1490,7 +1602,17 @@ export async function POST(req: NextRequest) {
         response.headers.set('x-search-mode', 'company_name');
         response.headers.set('x-quota-count', String(quotaReservation.quota.count));
         response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
-        return response;
+        return await auditSearchResponse(response, {
+          requestId,
+          userId,
+          organizationId,
+          actorType,
+          searchMode: 'company_name',
+          providerRequested: requestedProvider || null,
+          providerUsed: 'backend-antonia',
+          quotaCount: quotaReservation.quota.count,
+          quotaLimit: quotaReservation.quota.limit,
+        });
       }
 
       return NextResponse.json(
@@ -1525,17 +1647,52 @@ export async function POST(req: NextRequest) {
       fallbackDefaultProvider: 'apollo',
     });
 
+    await recordSearchRequest({
+      searchMode: 'batch',
+      organizationId,
+      providerRequested: providerDecision.requestedProvider,
+      providerUsed: providerDecision.provider,
+    });
+
     let fallbackApplied = false;
     let fallbackReason: string | undefined;
 
     if (USE_APIFY) {
+      await safeAppendAntoniaEvent({
+        eventKey: `search:${requestId}:bypassed:apify`,
+        eventType: 'search.bypassed',
+        organizationId,
+        actorId: userId,
+        actorType,
+        entityType: 'search',
+        entityId: requestId,
+        sourceRoute: '/api/leads/search',
+        requestId,
+        correlationId: requestId,
+        operationId: requestId,
+        status: 'bypassed',
+        outcome: 'apify_redirect',
+        severity: 'warning',
+        payload: { searchMode: 'batch', provider: 'apify' },
+      });
       const url = new URL(req.url);
       url.pathname = "/api/leads/apify";
       return NextResponse.redirect(url, 307);
     }
 
     const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
-    if ('error' in quotaReservation) return quotaReservation.error;
+    if ('error' in quotaReservation && quotaReservation.error) {
+      return await auditSearchResponse(quotaReservation.error, {
+        requestId,
+        userId,
+        organizationId,
+        actorType,
+        searchMode: 'batch',
+        providerRequested: providerDecision.requestedProvider,
+        providerUsed: providerDecision.provider,
+        fallbackApplied,
+      });
+    }
 
     if (providerDecision.provider === 'pdl') {
       try {
@@ -1549,10 +1706,21 @@ export async function POST(req: NextRequest) {
         response.headers.set('x-provider-used', 'pdl');
         response.headers.set('x-quota-count', String(quotaReservation.quota.count));
         response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
-        return response;
+        return await auditSearchResponse(response, {
+          requestId,
+          userId,
+          organizationId,
+          actorType,
+          searchMode: 'batch',
+          providerRequested: providerDecision.requestedProvider,
+          providerUsed: 'pdl',
+          quotaCount: quotaReservation.quota.count,
+          quotaLimit: quotaReservation.quota.limit,
+          fallbackApplied: false,
+        });
       } catch (error: any) {
         if (!isPdlFallbackEnabled()) {
-          return NextResponse.json(
+          const response = NextResponse.json(
             {
               error: 'PDL_SEARCH_ERROR',
               message: error?.message || 'PDL search failed',
@@ -1562,6 +1730,18 @@ export async function POST(req: NextRequest) {
             },
             { status: 502 },
           );
+          return await auditSearchResponse(response, {
+            requestId,
+            userId,
+            organizationId,
+            actorType,
+            searchMode: 'batch',
+            providerRequested: providerDecision.requestedProvider,
+            providerUsed: 'pdl',
+            quotaCount: quotaReservation.quota.count,
+            quotaLimit: quotaReservation.quota.limit,
+            fallbackApplied: false,
+          });
         }
         fallbackApplied = true;
         fallbackReason = error?.message || 'pdl_search_failed';
@@ -1595,7 +1775,18 @@ export async function POST(req: NextRequest) {
     response.headers.set('x-provider-used', 'apollo');
     response.headers.set('x-quota-count', String(quotaReservation.quota.count));
     response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
-    return response;
+    return await auditSearchResponse(response, {
+      requestId,
+      userId,
+      organizationId,
+      actorType,
+      searchMode: 'batch',
+      providerRequested: providerDecision.requestedProvider,
+      providerUsed: 'apollo',
+      quotaCount: quotaReservation.quota.count,
+      quotaLimit: quotaReservation.quota.limit,
+      fallbackApplied,
+    });
   } catch (error: any) {
     console.error('[leads/search] Unhandled route error:', error);
     return NextResponse.json(

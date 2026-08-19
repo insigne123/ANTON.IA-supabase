@@ -1,4 +1,5 @@
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { redactExpiredAntoniaEventPayloads } from '@/lib/server/antonia-event-ledger';
 
 type RetentionRunResult = {
   key: string;
@@ -185,10 +186,13 @@ export async function runPrivacyRetention(input?: { dryRun?: boolean }) {
     results.push(await policy.run(dryRun, cutoffs));
   }
 
+  const ledgerPayloadsRedacted = dryRun ? 0 : await redactExpiredAntoniaEventPayloads();
+
   return {
     dryRun,
     executedAt: new Date().toISOString(),
     results,
+    ledgerPayloadsRedacted,
     summary: results.reduce(
       (acc, item) => {
         acc.matchedCount += item.matchedCount;

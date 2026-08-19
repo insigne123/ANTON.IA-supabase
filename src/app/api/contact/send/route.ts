@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { createClient } from '@supabase/supabase-js';
+import { randomUUID } from 'node:crypto';
 import { cookies } from 'next/headers';
 import { tokenService } from '@/lib/services/token-service';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
@@ -19,6 +20,7 @@ import {
     OutboundPreProviderDeferredError,
 } from '@/lib/server/outbound-dispatch';
 import { findLatestLeadResearchSnapshotId } from '@/lib/server/lead-research-jobs';
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -26,6 +28,7 @@ export const runtime = 'nodejs';
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
+        const requestId = req.headers.get('x-request-id')?.trim() || randomUUID();
         const { to, subject, body: emailBody, userId: bodyUserId, isHtml } = body;
 
         const debug = process.env.CONTACT_DEBUG === 'true';
@@ -138,6 +141,30 @@ export async function POST(req: NextRequest) {
         if (!missionOrgId) {
             return NextResponse.json({ error: 'Organization is required for durable outbound sending' }, { status: 403 });
         }
+
+        await safeAppendAntoniaEvent({
+            eventType: 'contact.requested',
+            organizationId: missionOrgId,
+            actorId: userId,
+            actorType: isInternalAutomationRequest ? 'agent' : 'user',
+            entityType: leadId ? 'lead' : 'contact',
+            entityId: String(leadId || requestId),
+            leadId: leadId || null,
+            missionId: missionId || null,
+            sourceSystem: 'contact-send',
+            sourceRoute: '/api/contact/send',
+            requestId,
+            correlationId: requestId,
+            operationId: String(body.idempotencyKey || requestId).trim() || requestId,
+            status: 'started',
+            outcome: 'accepted',
+            metrics: { isHtml: Boolean(isHtml), internalAutomation: isInternalAutomationRequest },
+            payload: {
+                hasLeadId: Boolean(leadId),
+                hasMissionId: Boolean(missionId),
+                hasRecipient: Boolean(String(to || '').trim()),
+            },
+        });
 
         // 3. Apply suppression and domain policy to every outbound send. Lookup errors fail closed.
         const toEmail = String(to || '').trim().toLowerCase();
@@ -352,6 +379,29 @@ export async function POST(req: NextRequest) {
                 : dispatchResult.status === 'failed'
                 ? isConfirmedProvider4xx ? 422 : 502
                 : dispatchResult.status === 'pending' || dispatchResult.status === 'sending' ? 202 : 503;
+            await safeAppendAntoniaEvent({
+                eventType: dispatchResult.status === 'deferred' ? 'contact.deferred' : 'contact.failed',
+                organizationId: missionOrgId,
+                actorId: userId,
+                actorType: isInternalAutomationRequest ? 'agent' : 'user',
+                entityType: 'outbound_dispatch',
+                entityId: dispatchResult.dispatch.id,
+                leadId: leadId || null,
+                missionId: missionId || null,
+                dispatchId: dispatchResult.dispatch.id,
+                sourceSystem: 'contact-send',
+                sourceRoute: '/api/contact/send',
+                provider: providerLabel,
+                requestId,
+                correlationId: requestId,
+                operationId: idempotencyKey,
+                idempotencyKey,
+                status: dispatchResult.status,
+                outcome: dispatchResult.dispatch.errorCode || dispatchResult.status,
+                severity: dispatchResult.status === 'deferred' ? 'warning' : 'error',
+                errorCode: dispatchResult.dispatch.errorCode,
+                payload: { dispatchId: dispatchResult.dispatch.id, replayed: dispatchResult.replayed },
+            });
             return NextResponse.json({
                 error: dispatchResult.dispatch.errorMessage || 'Provider outcome is not confirmed.',
                 code: isDailyQuotaDeferred
@@ -364,6 +414,30 @@ export async function POST(req: NextRequest) {
                 retry: dispatchResult.retry,
             }, { status: responseStatus });
         }
+
+        await safeAppendAntoniaEvent({
+            eventType: 'contact.sent',
+            organizationId: missionOrgId,
+            actorId: userId,
+            actorType: isInternalAutomationRequest ? 'agent' : 'user',
+            entityType: 'outbound_dispatch',
+            entityId: dispatchResult.dispatch.id,
+            leadId: leadId || null,
+            missionId: missionId || null,
+            dispatchId: dispatchResult.dispatch.id,
+            sourceSystem: 'contact-send',
+            sourceRoute: '/api/contact/send',
+            provider: providerLabel,
+            providerRequestId: String((result as any).messageId || (result as any).internetMessageId || '').trim() || null,
+            requestId,
+            correlationId: requestId,
+            operationId: idempotencyKey,
+            idempotencyKey,
+            status: 'sent',
+            outcome: dispatchResult.replayed ? 'idempotent_replay' : 'accepted',
+            metrics: { replayed: dispatchResult.replayed },
+            payload: { dispatchId: dispatchResult.dispatch.id },
+        });
 
         debugLog(`[CONTACT_DEBUG] Email sent successfully via ${provider}`);
         return NextResponse.json({

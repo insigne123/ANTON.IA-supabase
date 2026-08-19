@@ -6,6 +6,7 @@ import {
   type MessagingSendMetadataV1,
 } from '@/lib/messaging-contracts';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 
 export type OutboundDispatchStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'deferred' | 'unknown';
 
@@ -254,6 +255,36 @@ function isUniqueViolation(error: any) {
   return error?.code === '23505';
 }
 
+async function recordOutboundDispatchEvent(dispatch: OutboundDispatch) {
+  await safeAppendAntoniaEvent({
+    eventKey: `outbound:${dispatch.id}:${dispatch.status}:${dispatch.attemptCount || 0}:${dispatch.updatedAt}`,
+    eventType: 'contact.dispatch_state_changed',
+    organizationId: dispatch.organizationId,
+    actorId: dispatch.userId,
+    actorType: 'user',
+    entityType: 'outbound_dispatch',
+    entityId: dispatch.id,
+    dispatchId: dispatch.id,
+    sourceSystem: 'outbound-dispatch',
+    provider: dispatch.provider,
+    operationId: dispatch.idempotencyKey,
+    idempotencyKey: dispatch.idempotencyKey,
+    providerRequestId: dispatch.providerMessageId,
+    status: dispatch.status,
+    outcome: dispatch.status,
+    severity: dispatch.status === 'failed' || dispatch.status === 'unknown' ? 'error' : 'info',
+    metrics: {
+      channel: dispatch.channel,
+      attemptCount: dispatch.attemptCount || 0,
+    },
+    payload: {
+      dispatchId: dispatch.id,
+      status: dispatch.status,
+      errorCode: dispatch.errorCode,
+    },
+  });
+}
+
 export function createSupabaseOutboundDispatchRepository(
   client: SupabaseClientLike = getSupabaseAdminClient(),
 ): OutboundDispatchRepository {
@@ -285,7 +316,9 @@ export function createSupabaseOutboundDispatchRepository(
       if (current) return current;
       throw new Error(`Outbound dispatch ${dispatchId} no longer exists.`);
     }
-    return mapDispatchRow(data);
+    const dispatch = mapDispatchRow(data);
+    await recordOutboundDispatchEvent(dispatch);
+    return dispatch;
   }
 
   return {
@@ -308,7 +341,11 @@ export function createSupabaseOutboundDispatchRepository(
         .select('*')
         .single();
 
-      if (!error) return { created: true, dispatch: mapDispatchRow(data) };
+      if (!error) {
+        const dispatch = mapDispatchRow(data);
+        await recordOutboundDispatchEvent(dispatch);
+        return { created: true, dispatch };
+      }
       const { data: existing, error: existingError } = await client
         .from('outbound_dispatches')
         .select('*')
@@ -343,7 +380,11 @@ export function createSupabaseOutboundDispatchRepository(
         .select('*')
         .maybeSingle();
       if (error) throw error;
-      if (data) return { claimed: true, dispatch: mapDispatchRow(data) };
+      if (data) {
+        const dispatch = mapDispatchRow(data);
+        await recordOutboundDispatchEvent(dispatch);
+        return { claimed: true, dispatch };
+      }
       const current = await findById(dispatchId);
       if (current) return { claimed: false, dispatch: current };
       throw new Error(`Outbound dispatch ${dispatchId} no longer exists.`);

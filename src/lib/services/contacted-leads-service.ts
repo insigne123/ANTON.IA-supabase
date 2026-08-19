@@ -2,7 +2,7 @@ import { supabase } from '../supabase';
 import type { ContactedLead } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { organizationService } from './organization-service';
-import { buildThreadKey } from '../email-observability';
+import { buildThreadKey } from '../email-observability-core';
 
 const TABLE = 'contacted_leads';
 

@@ -6,7 +6,7 @@
 // Last Updated: 2025-12-30 02:45 Dry Run & N8N Fields Fix
 import * as functions from 'firebase-functions/v2';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { buildAntoniaDailyDashboardHtml, type AntoniaDailyMissionRow } from './report-email';
 import { getMessagingOutcomeEffects } from './messaging-outcome';
 import { getResearchReadinessBlockReason, hasMeaningfulResearchEvidence } from './research-readiness';
@@ -602,12 +602,98 @@ async function safeInsertLeadEvents(supabase: SupabaseClient, events: LeadEventI
     const filtered = events.filter((e) => e.lead_id && uuidRegex.test(String(e.lead_id)));
     if (filtered.length === 0) return;
     try {
-        const { error } = await supabase.from('antonia_lead_events').insert(filtered);
-        if (error) {
-            console.error('[antonia_lead_events] insert error:', error);
+    const { error } = await supabase.from('antonia_lead_events').insert(filtered);
+    if (error) {
+        console.error('[antonia_lead_events] insert error:', error);
+    }
+
+    await safeInsertAntoniaLedgerEvents(supabase, filtered);
+  } catch (e) {
+    console.error('[antonia_lead_events] insert exception:', e);
+  }
+}
+
+function redactWorkerLedgerValue(value: unknown, key = '', depth = 0): unknown {
+    if (/(authorization|api[_-]?key|token|secret|password|cookie)/i.test(key)) return '[REDACTED]';
+    if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
+    if (depth > 4) return '[TRUNCATED]';
+    if (typeof value === 'string') {
+        if (/(^|_)(email|phone|mobile|linkedin)(_|$)/i.test(key)) {
+            return `sha256:${createHash('sha256').update(value.trim().toLowerCase()).digest('hex')}`;
         }
-    } catch (e) {
-        console.error('[antonia_lead_events] insert exception:', e);
+        return value.slice(0, 500);
+    }
+    if (Array.isArray(value)) return value.slice(0, 50).map((item) => redactWorkerLedgerValue(item, key, depth + 1));
+    if (typeof value === 'object') {
+        return Object.keys(value as Record<string, unknown>)
+            .slice(0, 100)
+            .reduce<Record<string, unknown>>((out, childKey) => {
+                out[childKey] = redactWorkerLedgerValue((value as Record<string, unknown>)[childKey], childKey, depth + 1);
+                return out;
+            }, {});
+    }
+    return String(value).slice(0, 500);
+}
+
+async function safeInsertAntoniaLedgerEvents(supabase: SupabaseClient, events: LeadEventInsert[]) {
+    const rows = events.map((event) => {
+        const createdAt = event.created_at || new Date().toISOString();
+        const seed = JSON.stringify({
+            lead: event.lead_id,
+            mission: event.mission_id || null,
+            task: event.task_id || null,
+            type: event.event_type,
+            createdAt,
+            outcome: event.outcome || null,
+        });
+        const payload = redactWorkerLedgerValue(event.meta || {}) as Record<string, unknown>;
+        return {
+            event_key: `legacy:lead_event:${createHash('sha256').update(seed).digest('hex')}`,
+            event_type: `legacy.lead.${String(event.event_type || 'unknown').trim() || 'unknown'}`,
+            occurred_at: createdAt,
+            organization_id: event.organization_id || null,
+            organization_ref: event.organization_id || null,
+            actor_type: 'worker',
+            lead_id: event.lead_id,
+            entity_type: 'lead',
+            entity_id: event.lead_id,
+            mission_id: event.mission_id || null,
+            task_id: event.task_id || null,
+            source_system: 'firebase-antonia-worker',
+            status: event.stage || null,
+            outcome: event.outcome || null,
+            message: event.message || null,
+            metrics: {},
+            redacted_payload: payload,
+            source_confidence: 'observed',
+            privacy_class: 'operational',
+        };
+    });
+
+    for (const event of rows) {
+        try {
+            const { error } = await supabase.rpc('append_antonia_event_v1', { p_event: event });
+            if (error) console.error('[antonia_event_ledger] append error:', error);
+        } catch (error) {
+            console.error('[antonia_event_ledger] append exception:', error);
+        }
+    }
+}
+
+async function safeAppendWorkerLedgerEvent(supabase: SupabaseClient, event: Record<string, unknown>) {
+    try {
+        const message = typeof event.message === 'string'
+            ? event.message
+                .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[EMAIL_REDACTED]')
+                .replace(/\+?[0-9][0-9().\s-]{7,}[0-9]/g, '[PHONE_REDACTED]')
+                .slice(0, 500)
+            : event.message;
+        const { error } = await supabase.rpc('append_antonia_event_v1', {
+            p_event: { ...event, message },
+        });
+        if (error) console.error('[antonia_event_ledger] worker event error:', error);
+    } catch (error) {
+        console.error('[antonia_event_ledger] worker event exception:', error);
     }
 }
 
@@ -1530,6 +1616,8 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
                 'Content-Type': 'application/json',
                 'x-user-id': userId,
                 'x-organization-id': task.organization_id,
+                'Idempotency-Key': enrichmentOperationId,
+                'x-request-id': enrichmentOperationId,
             }),
             body: JSON.stringify(internalBody)
         });
@@ -2044,6 +2132,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
                     leads: leadsFormatted,
                     revealEmail: true,
                     revealPhone,
+                    operationId: enrichmentOperationId,
                     tableName: 'enriched_leads'
                 })
             });
@@ -4829,6 +4918,7 @@ async function executeLegacyContact(task: any, supabase: SupabaseClient) {
     const appUrl = getAppUrl();
     let contactedCount = 0;
     const attemptAt = new Date().toISOString();
+    const enrichmentOperationId = `antonia-task:${String(task.id)}:${String(task.updated_at || task.created_at || 'initial')}:${String(enrichmentLevel || 'normal')}`;
     const stage = 'contact';
     const leadList = Array.isArray(leads) ? leads : [];
     const leadResults: Array<{ leadId: string | null; contactedLeadId?: string | null; email: string | null; status: 'sent' | 'replayed' | 'skipped' | 'failed'; code?: string | null; error?: string | null }> = [];
@@ -5376,6 +5466,30 @@ async function processTaskWithTimeout(task: any, supabase: SupabaseClient) {
 
 async function processTask(task: any, supabase: SupabaseClient): Promise<any> {
     console.log(`[Worker] Processing task ${task.id} (${task.type})`);
+    const taskActorId = String(task.user_id || task.payload?.userId || '').trim() || null;
+    const taskEventBase = {
+        organization_id: task.organization_id || null,
+        organization_ref: task.organization_id || null,
+        actor_id: taskActorId,
+        actor_type: 'worker',
+        entity_type: 'task',
+        entity_id: String(task.id),
+        task_id: String(task.id),
+        mission_id: task.mission_id ? String(task.mission_id) : null,
+        source_system: 'firebase-antonia-worker',
+        source_route: 'processTask',
+        operation_id: String(task.id),
+        metrics: { taskType: String(task.type || '') },
+    };
+    await safeAppendWorkerLedgerEvent(supabase, {
+        ...taskEventBase,
+        event_key: `worker:task:${task.id}:started:${String(task.updated_at || task.created_at || 'initial')}`,
+        event_type: 'task.started',
+        occurred_at: new Date().toISOString(),
+        status: 'processing',
+        outcome: 'claimed',
+        redacted_payload: {},
+    });
 
     // Note: Status already set to 'processing' by optimistic lock in antoniaTick
     // This update is redundant but kept for backwards compatibility if processTask is called directly
@@ -5460,6 +5574,16 @@ async function processTask(task: any, supabase: SupabaseClient): Promise<any> {
                 details: result
             });
 
+            await safeAppendWorkerLedgerEvent(supabase, {
+                ...taskEventBase,
+                event_key: `worker:task:${task.id}:deferred:${retryAt}`,
+                event_type: 'task.deferred',
+                occurred_at: new Date().toISOString(),
+                status: 'pending',
+                outcome: String((result as any).reason || 'scheduled_deferral'),
+                redacted_payload: { retryAt },
+            });
+
             return result;
         }
 
@@ -5476,6 +5600,19 @@ async function processTask(task: any, supabase: SupabaseClient): Promise<any> {
             level: 'success',
             message: `Task ${task.type} completed successfully.`,
             details: result
+        });
+
+        await safeAppendWorkerLedgerEvent(supabase, {
+            ...taskEventBase,
+            event_key: `worker:task:${task.id}:completed:${new Date().toISOString()}`,
+            event_type: 'task.completed',
+            occurred_at: new Date().toISOString(),
+            status: 'completed',
+            outcome: (result as any)?.skipped ? String((result as any).reason || 'skipped') : 'completed',
+            redacted_payload: redactWorkerLedgerValue({
+                skipped: Boolean((result as any)?.skipped),
+                reason: (result as any)?.reason || null,
+            }) as Record<string, unknown>,
         });
 
         return result;
@@ -5521,6 +5658,19 @@ async function processTask(task: any, supabase: SupabaseClient): Promise<any> {
                 level: 'warning',
                 message: `Task ${task.type} will retry (${retryCount + 1}/${maxRetries}): ${e.message}`
             });
+
+            await safeAppendWorkerLedgerEvent(supabase, {
+                ...taskEventBase,
+                event_key: `worker:task:${task.id}:retry:${retryCount + 1}:${scheduledFor}`,
+                event_type: 'task.retry_scheduled',
+                occurred_at: new Date().toISOString(),
+                status: 'pending',
+                outcome: 'retry_scheduled',
+                error_code: e?.code || null,
+                message: String(e?.message || 'retryable_task_error').slice(0, 500),
+                metrics: { ...taskEventBase.metrics, retryCount: retryCount + 1, maxRetries, scheduledFor },
+                redacted_payload: {},
+            });
         } else {
             // Permanent failure
             const failureReason = isRetryable
@@ -5539,6 +5689,20 @@ async function processTask(task: any, supabase: SupabaseClient): Promise<any> {
                 organization_id: task.organization_id,
                 level: 'error',
                 message: `Task ${task.type} failed permanently: ${e.message}`
+            });
+
+            await safeAppendWorkerLedgerEvent(supabase, {
+                ...taskEventBase,
+                event_key: `worker:task:${task.id}:failed:${new Date().toISOString()}`,
+                event_type: 'task.failed',
+                occurred_at: new Date().toISOString(),
+                status: 'failed',
+                outcome: isRetryable ? 'max_retries_exceeded' : 'non_retryable_error',
+                severity: 'error',
+                error_code: e?.code || null,
+                message: String(e?.message || 'task_failed').slice(0, 500),
+                metrics: { ...taskEventBase.metrics, retryCount, maxRetries },
+                redacted_payload: {},
             });
         }
 

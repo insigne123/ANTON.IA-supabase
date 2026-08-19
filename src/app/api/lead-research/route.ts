@@ -26,6 +26,7 @@ import {
   storeLeadResearchReport,
 } from '@/lib/server/lead-research-reports';
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -221,6 +222,50 @@ export async function POST(req: NextRequest) {
     }
     const requestIdentity = clientRequestIdentity || `generated:${crypto.randomUUID()}`;
     const leadIdentity = getLeadIdentity(outgoing);
+    const auditResearch = async (
+      eventType: string,
+      input: {
+        status?: string;
+        outcome?: string;
+        severity?: string;
+        providerReportId?: string | null;
+        errorCode?: string | null;
+        metrics?: Record<string, unknown>;
+        payload?: Record<string, unknown>;
+      } = {},
+    ) => safeAppendAntoniaEvent({
+      eventType,
+      organizationId: ctx.access.organizationId,
+      actorId: ctx.access.userId,
+      actorType: isTrustedInternalRequest(req) ? 'agent' : 'user',
+      entityType: 'research_job',
+      entityId: input.providerReportId || requestIdentity,
+      researchJobId: input.providerReportId || requestIdentity,
+      sourceSystem: 'lead-research',
+      sourceRoute: '/api/lead-research',
+      provider: 'lead-research',
+      requestId: requestIdentity,
+      correlationId: requestIdentity,
+      operationId: requestIdentity,
+      idempotencyKey: requestIdentity,
+      status: input.status,
+      outcome: input.outcome,
+      severity: input.severity,
+      errorCode: input.errorCode,
+      metrics: input.metrics || {},
+      payload: {
+        hasLeadId: Boolean(leadIdentity.leadId),
+        hasEmail: Boolean(leadIdentity.email),
+        hasCompanyDomain: Boolean(leadIdentity.companyDomain),
+        ...(input.payload || {}),
+      },
+    });
+
+    await auditResearch('research.requested', {
+      status: 'started',
+      outcome: 'accepted',
+      metrics: { idempotencyProvided: Boolean(clientRequestIdentity) },
+    });
     const claim = await claimLeadResearchRequest({
       ...ctx.access,
       ...leadIdentity,
@@ -228,6 +273,13 @@ export async function POST(req: NextRequest) {
       requestPayload: outgoing,
     });
     if (!claim.claimed) {
+      await auditResearch('research.replayed', {
+        status: claim.job.status,
+        outcome: 'idempotent_replay',
+        severity: 'info',
+        providerReportId: claim.job.providerReportId,
+        metrics: { requestClaimState: claim.job.requestClaimState },
+      });
       const reusable = reusableLeadResearchJobResponse(claim.job);
       return NextResponse.json(reusable.payload, {
         status: reusable.status,
@@ -247,6 +299,12 @@ export async function POST(req: NextRequest) {
         ...ownedClaim,
         errorCode: 'lead_research_url_missing',
         errorMessage: 'Lead research provider URL is missing.',
+      });
+      await auditResearch('research.failed', {
+        status: 'failed',
+        outcome: 'provider_url_missing',
+        severity: 'error',
+        errorCode: 'lead_research_url_missing',
       });
       return NextResponse.json({ error: 'LEAD_RESEARCH_URL_MISSING' }, { status: 500 });
     }
@@ -275,6 +333,13 @@ export async function POST(req: NextRequest) {
         errorCode: 'daily_research_quota_exceeded',
         errorMessage: 'Daily research quota exceeded.',
       });
+      await auditResearch('research.failed', {
+        status: 'denied',
+        outcome: 'quota_denied',
+        severity: 'warning',
+        errorCode: 'daily_research_quota_exceeded',
+        metrics: { count: quota.count, limit: quota.limit },
+      });
       return NextResponse.json({
         error: 'DAILY_RESEARCH_QUOTA_EXCEEDED',
         count: quota.count,
@@ -288,6 +353,11 @@ export async function POST(req: NextRequest) {
 
     try {
       await markLeadResearchRequestProviderSubmitting(ownedClaim);
+      await auditResearch('research.provider_submitting', {
+        status: 'submitting',
+        outcome: 'claim_marked',
+        metrics: { quotaCount: quota.count, quotaLimit: quota.limit },
+      });
     } catch (error) {
       await releasePreProviderClaim({
         ...ownedClaim,
@@ -321,6 +391,12 @@ export async function POST(req: NextRequest) {
       } catch (persistError) {
         console.error('[lead-research] failed to persist unknown provider outcome:', persistError);
       }
+      await auditResearch('research.failed', {
+        status: 'unknown',
+        outcome: 'provider_outcome_unknown',
+        severity: 'error',
+        errorCode: 'provider_outcome_unknown',
+      });
       return NextResponse.json({
         error: 'LEAD_RESEARCH_PROVIDER_OUTCOME_UNKNOWN',
         message: 'The provider outcome is unknown. This request will not be submitted again automatically.',
@@ -338,6 +414,13 @@ export async function POST(req: NextRequest) {
           provider_http_status: res.status,
         },
       });
+      await auditResearch('research.failed', {
+        status: 'failed',
+        outcome: 'provider_http_error',
+        severity: 'error',
+        errorCode: `provider_http_${res.status}`,
+        metrics: { providerHttpStatus: res.status },
+      });
       return NextResponse.json(payload, {
         status: res.status,
         headers: { 'Cache-Control': 'no-store' },
@@ -352,6 +435,12 @@ export async function POST(req: NextRequest) {
         ...ownedClaim,
         errorCode: 'invalid_provider_response',
         errorMessage: 'Provider accepted the request without returning a report ID.',
+      });
+      await auditResearch('research.failed', {
+        status: 'unknown',
+        outcome: 'invalid_provider_response',
+        severity: 'error',
+        errorCode: 'invalid_provider_response',
       });
       return NextResponse.json({
         error: 'LEAD_RESEARCH_REPORT_ID_MISSING',
@@ -376,6 +465,21 @@ export async function POST(req: NextRequest) {
       const terminal = buildTerminalLeadResearchReport(payload, buildLeadRef(outgoing));
       researchSnapshotId = await updateLeadResearchJobStatus(providerReportId, ctx.access, status, terminal?.report);
     }
+
+    await auditResearch(
+      ['queued', 'running', 'in_progress', 'pending', 'processing'].includes(status)
+        ? 'research.provider_accepted'
+        : 'research.completed',
+      {
+        status,
+        outcome: 'provider_accepted',
+        providerReportId,
+        metrics: {
+          providerHttpStatus: res.status,
+          hasResearchSnapshot: Boolean(researchSnapshotId),
+        },
+      },
+    );
 
     return NextResponse.json(withResearchSnapshotId(payload, researchSnapshotId), {
       status: res.status,

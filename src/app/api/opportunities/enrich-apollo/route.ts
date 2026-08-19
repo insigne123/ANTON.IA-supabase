@@ -14,6 +14,7 @@ import {
   type EnrichmentQuotaOperationClaim,
 } from '@/lib/server/daily-quota-store';
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 import { enrichPersonWithPDL, pickPdlEmail, pickPdlPhones } from '@/lib/providers/pdl';
 import { isPdlFallbackEnabled, resolveLeadProvider } from '@/lib/server/provider-routing';
 
@@ -394,6 +395,56 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'ORGANIZATION_REQUIRED' }, { status: 403 });
     }
 
+    const auditEnrichment = async (
+      eventType: string,
+      input: {
+        status?: string;
+        outcome?: string;
+        severity?: string;
+        provider?: string | null;
+        errorCode?: string | null;
+        metrics?: Record<string, unknown>;
+        payload?: Record<string, unknown>;
+      } = {},
+    ) => safeAppendAntoniaEvent({
+      eventType,
+      organizationId,
+      actorId: userId,
+      actorType: trustedInternalCaller ? 'agent' : 'user',
+      entityType: 'enrichment_operation',
+      entityId: operationIdentity.operationId,
+      sourceSystem: 'enrich-apollo',
+      sourceRoute: '/api/opportunities/enrich-apollo',
+      provider: input.provider || body.provider || null,
+      requestId: operationIdentity.operationId,
+      correlationId: operationIdentity.operationId,
+      operationId: operationIdentity.operationId,
+      idempotencyKey: operationIdentity.operationId,
+      status: input.status,
+      outcome: input.outcome,
+      severity: input.severity,
+      errorCode: input.errorCode,
+      metrics: {
+        leadCount: leads.length,
+        mode: enrichmentMode,
+        quotaResource,
+        tableName,
+        ...(input.metrics || {}),
+      },
+      payload: {
+        revealEmail: shouldRevealEmail,
+        revealPhone: shouldRevealPhone,
+        ...(input.payload || {}),
+      },
+    });
+
+    await auditEnrichment('enrichment.requested', {
+      status: 'started',
+      outcome: 'accepted',
+      severity: 'info',
+      metrics: { idempotencyProvided: true },
+    });
+
     const existingRecordReferences = resolveExistingRecordIds(leads);
     if (!existingRecordReferences.ok) {
       return NextResponse.json({ error: 'INVALID_EXISTING_RECORD_ID' }, { status: 400 });
@@ -428,7 +479,15 @@ export async function POST(req: NextRequest) {
         operationId: operationIdentity.operationId,
         requestFingerprint,
       });
-      if (existingOperation) return operationStateResponse(existingOperation);
+      if (existingOperation) {
+        await auditEnrichment('enrichment.replayed', {
+          status: existingOperation.status,
+          outcome: 'idempotent_replay',
+          provider: body.provider,
+          metrics: { operationState: existingOperation.status },
+        });
+        return operationStateResponse(existingOperation);
+      }
     } catch (error) {
       if (/operation id was already used/i.test(String((error as any)?.message || ''))) {
         return NextResponse.json({ error: 'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST' }, { status: 409 });
@@ -487,6 +546,16 @@ export async function POST(req: NextRequest) {
     claimedOrganizationId = organizationId;
     claimedResource = quotaResource;
     if (!claimedOperation.claimed || !claimedOperation.allowed || !claimedOperation.claimToken) {
+      await auditEnrichment('enrichment.failed', {
+        status: claimedOperation.status,
+        outcome: claimedOperation.allowed ? 'operation_not_claimed' : 'quota_denied',
+        severity: 'warning',
+        provider: providerDecision.provider,
+        errorCode: claimedOperation.allowed ? null : 'daily_quota_exceeded',
+        metrics: operationUsage(claimedOperation),
+      });
+    }
+    if (!claimedOperation.claimed || !claimedOperation.allowed || !claimedOperation.claimToken) {
       return operationStateResponse(claimedOperation);
     }
 
@@ -502,6 +571,11 @@ export async function POST(req: NextRequest) {
       if (providerStarted) return;
       await markEnrichmentQuotaOperationSubmitted(operationMutationIdentity);
       providerStarted = true;
+      await auditEnrichment('enrichment.provider_submitting', {
+        status: 'submitting',
+        outcome: 'claim_marked',
+        provider: providerDecision.provider,
+      });
     };
     const finalizeOperation = async (payload: Record<string, any>, status: number, providerUsed?: 'apollo' | 'pdl') => {
       const responsePayload = {
@@ -515,6 +589,14 @@ export async function POST(req: NextRequest) {
         status: status >= 200 && status < 300 ? 'completed' : 'failed',
         responseStatus: status,
         responsePayload,
+      });
+      await auditEnrichment(status >= 200 && status < 300 ? 'enrichment.completed' : 'enrichment.failed', {
+        status: responsePayload.operationStatus,
+        outcome: status >= 200 && status < 300 ? 'provider_completed' : 'provider_failed',
+        severity: status >= 200 && status < 300 ? 'info' : 'error',
+        provider: providerUsed || providerDecision.provider,
+        metrics: { responseStatus: status, ...operationUsage(claimedOperation!) },
+        payload: { providerUsed: providerUsed || providerDecision.provider, fallbackApplied },
       });
       const response = NextResponse.json(responsePayload, { status });
       response.headers.set('x-operation-id', operationIdentity.operationId);
@@ -929,6 +1011,26 @@ export async function POST(req: NextRequest) {
       }
       const response = NextResponse.json(payload, { status: 502 });
       response.headers.set('x-operation-id', claimedOperation.operationId);
+      await safeAppendAntoniaEvent({
+        eventType: 'enrichment.failed',
+        organizationId: claimedOrganizationId,
+        actorId: userId,
+        actorType: trustedInternalCaller ? 'agent' : 'user',
+        entityType: 'enrichment_operation',
+        entityId: claimedOperation.operationId,
+        sourceSystem: 'enrich-apollo',
+        sourceRoute: '/api/opportunities/enrich-apollo',
+        requestId: claimedOperation.operationId,
+        correlationId: claimedOperation.operationId,
+        operationId: claimedOperation.operationId,
+        idempotencyKey: claimedOperation.operationId,
+        status: 'failed',
+        outcome: 'provider_outcome_unknown',
+        severity: 'error',
+        errorCode: 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN',
+        metrics: operationUsage(claimedOperation),
+        payload: { providerState: 'unknown' },
+      });
       return response;
     }
     console.error('Fatal Hybrid Error', e);

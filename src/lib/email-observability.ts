@@ -1,42 +1,36 @@
-type ProviderLike = 'gmail' | 'outlook' | 'linkedin' | 'phone' | string;
-
-export function buildThreadKey(input: {
-  provider?: ProviderLike | null;
-  threadId?: string | null;
-  conversationId?: string | null;
-  internetMessageId?: string | null;
-  messageId?: string | null;
-}) {
-  const provider = String(input.provider || '').trim().toLowerCase();
-  const threadId = String(input.threadId || '').trim();
-  const conversationId = String(input.conversationId || '').trim();
-  const internetMessageId = String(input.internetMessageId || '').trim().replace(/^<|>$/g, '');
-  const messageId = String(input.messageId || '').trim();
-
-  if (provider === 'gmail' && threadId) return `gmail:${threadId}`;
-  if (provider === 'outlook' && conversationId) return `outlook:${conversationId}`;
-  if (internetMessageId) return `msg:${internetMessageId}`;
-  if (messageId) return `${provider || 'mail'}:${messageId}`;
-  return null;
-}
-
-export function deriveLifecycleState(current: string | null | undefined, eventType: string | null | undefined) {
-  const event = String(eventType || '').trim().toLowerCase();
-  const curr = String(current || '').trim().toLowerCase();
-  const order = ['queued', 'sent', 'delivered', 'opened', 'clicked', 'replied'];
-  if (event === 'bounce' || event === 'bounced' || event === 'blocked' || event === 'dropped' || event === 'deferred') return 'bounced';
-  if (event === 'failed') return 'failed';
-  if (event === 'reply' || event === 'replied' || event === 'inbound') return 'replied';
-  if (event === 'click' || event === 'clicked') return 'clicked';
-  if (event === 'open' || event === 'opened') return 'opened';
-  if (event === 'delivered' || event === 'delivery') return curr && order.includes(curr) ? curr : 'delivered';
-  if (event === 'send' || event === 'sent') return curr || 'sent';
-  return curr || 'sent';
-}
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
+export { buildThreadKey, deriveLifecycleState } from './email-observability-core';
 
 export async function safeInsertEmailEvent(supabase: any, payload: Record<string, any>) {
   try {
-    return await supabase.from('email_events').insert(payload);
+    const result = await supabase.from('email_events').insert(payload);
+    if (!result?.error) {
+      await safeAppendAntoniaEvent({
+        eventType: `email.${String(payload.event_type || payload.type || 'event').trim() || 'event'}`,
+        organizationId: payload.organization_id || null,
+        actorId: payload.user_id || null,
+        actorType: payload.user_id ? 'user' : 'system',
+        entityType: 'email_event',
+        entityId: payload.id || payload.message_id || payload.provider_message_id || null,
+        contactedId: payload.contacted_lead_id || payload.contacted_id || null,
+        sourceSystem: 'email-observability',
+        provider: payload.provider || null,
+        providerRequestId: payload.provider_message_id || payload.message_id || null,
+        operationId: payload.idempotency_key || payload.event_id || payload.message_id || null,
+        status: payload.status || payload.event_type || 'recorded',
+        outcome: payload.event_type || payload.type || 'recorded',
+        metrics: {
+          hasThreadKey: Boolean(payload.thread_key),
+          hasProviderMessageId: Boolean(payload.provider_message_id || payload.message_id),
+        },
+        payload: {
+          eventType: payload.event_type || payload.type || null,
+          lifecycleState: payload.lifecycle_state || null,
+          threadKey: payload.thread_key || null,
+        },
+      });
+    }
+    return result;
   } catch (error) {
     return { error };
   }

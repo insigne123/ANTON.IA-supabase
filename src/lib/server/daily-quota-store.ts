@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { DEFAULT_DAILY_QUOTA_LIMITS } from '@/lib/daily-quota-limits';
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 
 // Use a service role client for reliable quota updates (bypassing RLS if needed for atomic increments)
 // or standard client if we trust RLS. For atomic increments via RPC + security definer, service role is safest or
@@ -571,6 +572,39 @@ export async function getUserScopedAntoniaQuotaStatus(params: {
   };
 }
 
+async function recordQuotaDecision(params: {
+  userId: string;
+  organizationId: string;
+  resource: string;
+  requestedCount: number;
+  scope: 'organization' | 'user';
+  result: DailyQuotaResult;
+}) {
+  await safeAppendAntoniaEvent({
+    eventType: params.result.allowed ? 'quota.reserved' : 'quota.denied',
+    actorId: params.userId,
+    actorType: 'user',
+    organizationId: params.organizationId,
+    entityType: 'quota',
+    entityId: `${params.resource}:${params.result.dayKey}`,
+    sourceSystem: 'daily-quota-store',
+    status: params.result.allowed ? 'allowed' : 'denied',
+    outcome: params.result.allowed ? 'reserved' : 'quota_exceeded',
+    severity: params.result.allowed ? 'info' : 'warning',
+    metrics: {
+      resource: params.resource,
+      scope: params.scope,
+      requestedCount: params.requestedCount,
+      count: params.result.count,
+      limit: params.result.limit,
+    },
+    payload: {
+      resource: params.resource,
+      quotaDay: params.result.dayKey,
+    },
+  });
+}
+
 export async function checkAndConsumeDailyQuota(
   params: {
     userId: string;
@@ -589,10 +623,14 @@ export async function checkAndConsumeDailyQuota(
     const used = contactQuota.count;
 
     if (used + count > contactQuota.limit) {
-      return { allowed: false, count: used, limit: contactQuota.limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
+      const result = { allowed: false, count: used, limit: contactQuota.limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
+      await recordQuotaDecision({ userId, organizationId: orgId, resource, requestedCount: count, scope: contactQuota.scope, result });
+      return result;
     }
 
-    return { allowed: true, count: used + count, limit: contactQuota.limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
+    const result = { allowed: true, count: used + count, limit: contactQuota.limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
+    await recordQuotaDecision({ userId, organizationId: orgId, resource, requestedCount: count, scope: contactQuota.scope, result });
+    return result;
   }
 
   if (!ATOMIC_DAILY_QUOTA_RESOURCES.has(resource as AtomicDailyQuotaResource)) {
@@ -621,18 +659,20 @@ export async function checkAndConsumeDailyQuota(
   });
   if (error) throw error;
 
-  const result = data as { allowed?: boolean; count?: number; limit?: number } | null;
-  if (!result || typeof result.allowed !== 'boolean' || !Number.isFinite(Number(result.count))) {
+  const rawResult = data as { allowed?: boolean; count?: number; limit?: number } | null;
+  if (!rawResult || typeof rawResult.allowed !== 'boolean' || !Number.isFinite(Number(rawResult.count))) {
     throw new Error('Invalid atomic quota response');
   }
 
-  return {
-    allowed: result.allowed,
-    count: Number(result.count),
-    limit: Number(result.limit ?? quota.limit),
+  const result = {
+    allowed: rawResult.allowed,
+    count: Number(rawResult.count),
+    limit: Number(rawResult.limit ?? quota.limit),
     dayKey: date,
     resetAtISO: nextDayStartISOUTC(),
   };
+  await recordQuotaDecision({ userId, organizationId: orgId, resource, requestedCount: count, scope: quota.scope, result });
+  return result;
 }
 
 export async function getDailyQuotaStatus(
