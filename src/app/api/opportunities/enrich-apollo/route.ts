@@ -283,11 +283,7 @@ function resolveExistingRecordIds(leads: EnrichInput['leads']) {
       return { ok: false as const };
     }
 
-    const providedId = String(lead.id || '').trim();
-    const clientRef = String(lead.clientRef || '').trim();
-    for (const recordId of [explicitRecordId, providedId, clientRef]) {
-      if (isUuid(recordId)) recordIds.add(recordId);
-    }
+    if (explicitRecordId) recordIds.add(explicitRecordId);
   }
 
   return { ok: true as const, recordIds: [...recordIds] };
@@ -668,15 +664,11 @@ export async function POST(req: NextRequest) {
       const clientRef = typeof l.clientRef === 'string' ? l.clientRef.trim() : '';
       const explicitRecordId = typeof l.existingRecordId === 'string' ? l.existingRecordId.trim() : '';
       const existingRecordId = isUuid(explicitRecordId) ? explicitRecordId : '';
-      const recordIdFromProvidedId = isUuid(providedId) ? providedId : '';
-      const recordIdFromClientRef = isUuid(clientRef) ? clientRef : '';
 
       // Retry only against a UUID row already verified in this organization.
-      const isRetry = Boolean(existingRecordId || recordIdFromProvidedId || recordIdFromClientRef);
+      const isRetry = Boolean(existingRecordId);
       const enrichedId =
         existingRecordId ||
-        recordIdFromProvidedId ||
-        recordIdFromClientRef ||
         uuid();
 
       // Prefer explicit Apollo ID; fallback to providedId when it is not a UUID (often Apollo person id)
@@ -1076,13 +1068,9 @@ async function handlePdlEnrichment(params: {
     const clientRef = typeof l.clientRef === 'string' ? l.clientRef.trim() : '';
     const explicitRecordId = typeof l.existingRecordId === 'string' ? l.existingRecordId.trim() : '';
     const existingRecordId = isUuid(explicitRecordId) ? explicitRecordId : '';
-    const recordIdFromProvidedId = isUuid(providedId) ? providedId : '';
-    const recordIdFromClientRef = isUuid(clientRef) ? clientRef : '';
-    const isRetry = Boolean(existingRecordId || recordIdFromProvidedId || recordIdFromClientRef);
+    const isRetry = Boolean(existingRecordId);
     const enrichedId =
       existingRecordId ||
-      recordIdFromProvidedId ||
-      recordIdFromClientRef ||
       uuid();
 
     const foundApolloId: string | undefined =

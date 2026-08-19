@@ -50,6 +50,15 @@ test('only UUID database references are treated as existing enrichment records',
   });
 });
 
+test('source lead ids do not masquerade as existing enriched records', () => {
+  assert.deepEqual(resolveExistingRecordIds([
+    {
+      id: '22222222-2222-4222-8222-222222222222',
+      clientRef: '22222222-2222-4222-8222-222222222222',
+    },
+  ]), { ok: true, recordIds: [] });
+});
+
 test('explicit non-UUID record references are rejected before provider work begins', () => {
   assert.deepEqual(resolveExistingRecordIds([
     { existingRecordId: 'record-from-another-system' },

@@ -209,7 +209,8 @@ export default function EnrichedLeadsClient() {
         companyDomain: l.companyDomain,
         title: l.title,
         sourceOpportunityId: l.sourceOpportunityId,
-        clientRef: l.id
+        clientRef: l.id,
+        existingRecordId: l.id,
       }));
       const operationId = uuid();
 
