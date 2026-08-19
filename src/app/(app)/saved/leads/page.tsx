@@ -26,6 +26,7 @@ import { CommentsSection } from '@/components/comments-section';
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { retainVisibleSelection } from '@/lib/leads-workspace/selection';
+import { v4 as uuid } from 'uuid';
 
 const displayDomain = (url: string) => { try { const u = new URL(url.startsWith('http') ? url : `https://${url}`); return u.hostname.replace(/^www\./, ''); } catch { return url.replace(/^https?:\/\//, '').replace(/^www\./, ''); } };
 const asHttp = (url: string) => url.startsWith('http') ? url : `https://${url}`;
@@ -251,11 +252,13 @@ export default function SavedLeadsPage() {
         id: l.id,
         apolloId: l.apolloId,
       }));
+      const operationId = uuid();
 
       const r = await fetch('/api/opportunities/enrich-apollo', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': operationId,
           'x-quota-ticket': getQuotaTicket() || '',
         },
         body: JSON.stringify({ leads: payloadLeads, revealEmail, revealPhone, tableName: 'enriched_leads' }),

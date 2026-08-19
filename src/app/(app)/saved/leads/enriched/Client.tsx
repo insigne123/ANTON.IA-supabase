@@ -211,10 +211,14 @@ export default function EnrichedLeadsClient() {
         sourceOpportunityId: l.sourceOpportunityId,
         clientRef: l.id
       }));
+      const operationId = uuid();
 
       const res = await fetch('/api/opportunities/enrich-apollo', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': operationId,
+        },
         body: JSON.stringify({
           leads: payloadLeads,
           revealEmail: opts.revealEmail,

@@ -20,6 +20,7 @@ import { useRouter } from 'next/navigation';
 import { toCsv, downloadCsv } from '@/lib/csv';
 import { AlertCircle, Download, Search } from 'lucide-react';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
+import { v4 as uuid } from 'uuid';
 
 export default function SavedOpportunitiesPage() {
     const { toast } = useToast();
@@ -215,10 +216,14 @@ export default function SavedOpportunitiesPage() {
                 revealEmail: opts.revealEmail,
                 revealPhone: opts.revealPhone
             };
+            const operationId = uuid();
 
             const r = await fetch('/api/opportunities/enrich-apollo', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Idempotency-Key': operationId,
+                },
                 body: JSON.stringify(payload),
             });
             const j = await r.json();
