@@ -593,6 +593,19 @@ export default function SearchPage() {
           ...(result.profile_tracking_ids || []),
           ...result.leads.map((raw) => raw.id),
         ].filter(Boolean)));
+
+        if (pollingIds.length === 0) {
+          setLastProfilePhoneStatus('failed');
+          setProfilePhonePollingStartedAt(null);
+          setProfileSearchNotice(buildLinkedInProfileNotice({
+            emailRequested: filters.revealEmail,
+            phoneRequested: filters.revealPhone,
+            emailState,
+            phoneState: 'missing',
+          }));
+          return;
+        }
+
         setProfilePhonePollingIds(pollingIds);
         setProfilePhonePollingStartedAt(Date.now());
         setProfileSearchNotice(result.leads.length === 0
@@ -814,124 +827,155 @@ export default function SearchPage() {
 
     let cancelled = false;
     let attempts = 0;
+    let failedAttempts = 0;
+    let timeoutId: number | null = null;
+    const maxAttempts = 18;
+    const startedAt = Date.now();
+    const maxDurationMs = maxAttempts * 5000;
+    const emailStateBeforePolling = profileSearchNotice?.emailState
+      || (filters.revealEmail ? 'missing' : 'not_requested');
+
+    const finishWithoutPhone = (description: string) => {
+      if (cancelled) return;
+      setProfilePhonePollingIds([]);
+      setProfilePhonePollingStartedAt(null);
+      setLastProfilePhoneStatus('failed');
+      profilePhoneToastStateRef.current = 'missing';
+      setProfileSearchNotice({
+        tone: 'warning',
+        title: 'Telefono no disponible por ahora',
+        description,
+        emailState: emailStateBeforePolling,
+        phoneState: filters.revealPhone ? 'missing' : 'not_requested',
+      });
+    };
 
     const poll = async () => {
       if (cancelled) return;
 
-      profileStatusAbortRef.current?.abort();
+      attempts += 1;
       const controller = new AbortController();
       profileStatusAbortRef.current = controller;
 
       try {
         const items = (await Promise.all(
-          profilePhonePollingIds.map((id) => getLinkedInProfileLead(id, controller.signal).catch(() => null))
+          profilePhonePollingIds.map(async (id) => {
+            try {
+              return await getLinkedInProfileLead(id, controller.signal);
+            } catch (error: any) {
+              if (error?.name !== 'AbortError') failedAttempts += 1;
+              return null;
+            }
+          })
         )).filter(Boolean) as Lead[];
-        if (cancelled || items.length === 0) return;
+        if (cancelled) return;
 
-        const byId = new Map(items.map((item) => [String(item.id || '').trim(), item]));
-        const resolvedWithRequestedData = items.filter((item) => {
-          const phoneNumbers = normalizeUiPhoneNumbers(item.phone_numbers);
-          const hasPhone = Boolean(item.primary_phone || getPhoneFallback(phoneNumbers));
-          const phoneSatisfied = !filters.revealPhone || hasPhone;
-          return phoneSatisfied;
-        });
-        const stillPending = items.some((item) => {
-          const phoneNumbers = normalizeUiPhoneNumbers(item.phone_numbers);
-          const hasPhone = Boolean(item.primary_phone || getPhoneFallback(phoneNumbers));
-          const phoneMissing = filters.revealPhone && !hasPhone;
-          const status = String(item.enrichment_status || '').trim();
-          return phoneMissing && isPendingEnrichmentStatus(status);
-        });
-
-        setLeads((prev) => {
-          const updated = prev.map((lead) => {
-            const item = byId.get(String(lead.id || '').trim());
-            if (!item) return lead;
-            const nextPhoneNumbersRaw = normalizeUiPhoneNumbers(item.phone_numbers) || lead.phoneNumbers;
-            const nextPrimaryPhoneRaw = item.primary_phone || getPhoneFallback(nextPhoneNumbersRaw) || lead.primaryPhone || null;
-            const nextEmailRaw = String(item.email || '').trim() || lead.email || null;
-            const nextPhoneNumbers = filters.revealPhone ? (nextPhoneNumbersRaw || null) : null;
-            const nextPrimaryPhone = filters.revealPhone ? nextPrimaryPhoneRaw : null;
-            const nextEmail = filters.revealEmail ? nextEmailRaw : null;
-            const nextLead: UILaed = {
-              ...lead,
-              email: nextEmail,
-              phoneNumbers: nextPhoneNumbers,
-              primaryPhone: nextPrimaryPhone,
-              enrichmentStatus: filters.revealPhone || filters.revealEmail
-                ? (String(item.enrichment_status || '').trim() || (nextPrimaryPhoneRaw ? 'completed' : lead.enrichmentStatus))
-                : undefined,
-              emailEnrichment: nextEmail
-                ? { enriched: true, source: 'n8n' }
-                : undefined,
-            };
-            return nextLead;
+        if (items.length > 0) {
+          const byId = new Map(items.map((item) => [String(item.id || '').trim(), item]));
+          const resolvedWithRequestedData = items.filter((item) => {
+            const phoneNumbers = normalizeUiPhoneNumbers(item.phone_numbers);
+            const hasPhone = Boolean(item.primary_phone || getPhoneFallback(phoneNumbers));
+            const phoneSatisfied = !filters.revealPhone || hasPhone;
+            return phoneSatisfied;
           });
-          const knownIds = new Set(updated.map((lead) => String(lead.id || '').trim()));
-          const newlyAvailable = items
-            .filter((item) => hasUsableLinkedInProfileData(item) && !knownIds.has(String(item.id || '').trim()))
-            .map((item) => normalizeLeadForUI(item, {
-              revealEmail: filters.revealEmail,
-              revealPhone: filters.revealPhone,
-            }));
-          return [...updated, ...newlyAvailable];
-        });
-
-        if (resolvedWithRequestedData.length > 0) {
-          setProfilePhonePollingIds([]);
-          setProfilePhonePollingStartedAt(null);
-          setProfileSearchNotice({
-            tone: 'info',
-            title: 'Perfil actualizado',
-            description: 'El telefono ya esta visible en el resultado y puedes guardarlo sin salir de esta pantalla.',
-            emailState: items.some((item) => hasVisibleLeadEmail(item as any)) ? 'ready' : (filters.revealEmail ? 'missing' : 'not_requested'),
-            phoneState: 'ready',
+          const stillPending = items.some((item) => {
+            const phoneNumbers = normalizeUiPhoneNumbers(item.phone_numbers);
+            const hasPhone = Boolean(item.primary_phone || getPhoneFallback(phoneNumbers));
+            const phoneMissing = filters.revealPhone && !hasPhone;
+            const status = String(item.enrichment_status || '').trim();
+            return phoneMissing && isPendingEnrichmentStatus(status);
           });
-          setLastProfilePhoneStatus(null);
-          if (profilePhoneToastStateRef.current !== 'found') {
-            profilePhoneToastStateRef.current = 'found';
-            toast({
-              title: 'Datos actualizados',
-              description: 'El perfil ya se actualizo en el resultado de la busqueda.',
+
+          setLeads((prev) => {
+            const updated = prev.map((lead) => {
+              const item = byId.get(String(lead.id || '').trim());
+              if (!item) return lead;
+              const nextPhoneNumbersRaw = normalizeUiPhoneNumbers(item.phone_numbers) || lead.phoneNumbers;
+              const nextPrimaryPhoneRaw = item.primary_phone || getPhoneFallback(nextPhoneNumbersRaw) || lead.primaryPhone || null;
+              const nextEmailRaw = String(item.email || '').trim() || lead.email || null;
+              const nextPhoneNumbers = filters.revealPhone ? (nextPhoneNumbersRaw || null) : null;
+              const nextPrimaryPhone = filters.revealPhone ? nextPrimaryPhoneRaw : null;
+              const nextEmail = filters.revealEmail ? nextEmailRaw : null;
+              const nextLead: UILaed = {
+                ...lead,
+                email: nextEmail,
+                phoneNumbers: nextPhoneNumbers,
+                primaryPhone: nextPrimaryPhone,
+                enrichmentStatus: filters.revealPhone || filters.revealEmail
+                  ? (String(item.enrichment_status || '').trim() || (nextPrimaryPhoneRaw ? 'completed' : lead.enrichmentStatus))
+                  : undefined,
+                emailEnrichment: nextEmail
+                  ? { enriched: true, source: 'n8n' }
+                  : undefined,
+              };
+              return nextLead;
             });
-          }
-        } else if (!stillPending && attempts >= 5 && profilePhoneToastStateRef.current !== 'missing') {
-          setProfilePhonePollingIds([]);
-          setProfilePhonePollingStartedAt(null);
-          profilePhoneToastStateRef.current = 'missing';
-          setLastProfilePhoneStatus('failed');
-          setProfileSearchNotice({
-            tone: 'warning',
-            title: 'Datos no disponibles por ahora',
-            description: 'No encontramos todos los datos solicitados para este perfil.',
-            emailState: items.some((item) => hasVisibleLeadEmail(item as any)) ? 'ready' : (filters.revealEmail ? 'missing' : 'not_requested'),
-            phoneState: filters.revealPhone ? 'missing' : 'not_requested',
+            const knownIds = new Set(updated.map((lead) => String(lead.id || '').trim()));
+            const newlyAvailable = items
+              .filter((item) => hasUsableLinkedInProfileData(item) && !knownIds.has(String(item.id || '').trim()))
+              .map((item) => normalizeLeadForUI(item, {
+                revealEmail: filters.revealEmail,
+                revealPhone: filters.revealPhone,
+              }));
+            return [...updated, ...newlyAvailable];
           });
+
+          if (resolvedWithRequestedData.length > 0) {
+            setProfilePhonePollingIds([]);
+            setProfilePhonePollingStartedAt(null);
+            setProfileSearchNotice({
+              tone: 'info',
+              title: 'Perfil actualizado',
+              description: 'El telefono ya esta visible en el resultado y puedes guardarlo sin salir de esta pantalla.',
+              emailState: items.some((item) => hasVisibleLeadEmail(item as any)) ? 'ready' : (filters.revealEmail ? 'missing' : 'not_requested'),
+              phoneState: 'ready',
+            });
+            setLastProfilePhoneStatus(null);
+            if (profilePhoneToastStateRef.current !== 'found') {
+              profilePhoneToastStateRef.current = 'found';
+              toast({
+                title: 'Datos actualizados',
+                description: 'El perfil ya se actualizo en el resultado de la busqueda.',
+              });
+            }
+            return;
+          }
+
+          if (!stillPending) {
+            finishWithoutPhone('Encontramos el perfil, pero el proveedor no devolvio un telefono disponible.');
+            return;
+          }
         }
+
+        if (attempts >= maxAttempts || Date.now() - startedAt >= maxDurationMs) {
+          finishWithoutPhone(failedAttempts > 0
+            ? 'No pudimos confirmar el estado del telefono despues de varios intentos. Puedes volver a buscarlo.'
+            : 'El proveedor esta tardando mas de lo esperado. Puedes volver a intentarlo en unos minutos.');
+          return;
+        }
+
+        timeoutId = window.setTimeout(poll, 5000);
       } catch (error: any) {
         if (cancelled || error?.name === 'AbortError') return;
         console.warn('[search] profile phone polling failed:', error?.message || error);
+        if (attempts >= maxAttempts || Date.now() - startedAt >= maxDurationMs) {
+          finishWithoutPhone('No pudimos confirmar el estado del telefono. Puedes volver a intentarlo.');
+          return;
+        }
+        timeoutId = window.setTimeout(poll, 5000);
       }
     };
 
-    poll();
-    const intervalId = window.setInterval(() => {
-      attempts += 1;
-      if (attempts >= 18) {
-        setProfilePhonePollingIds([]);
-        setProfilePhonePollingStartedAt(null);
-        window.clearInterval(intervalId);
-        return;
-      }
-      poll();
-    }, 5000);
+    void poll();
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
       profileStatusAbortRef.current?.abort();
       profileStatusAbortRef.current = null;
     };
+    // The notice is captured when polling starts; adding it as a dependency would restart the timer on every status update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.searchMode, filters.revealEmail, filters.revealPhone, profilePhonePollingIds, toast]);
 
   const isPageAllSelected = useMemo(() => {
