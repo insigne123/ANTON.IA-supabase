@@ -8,11 +8,12 @@ export function normalizeLinkedinProfileUrl(input?: string | null): string {
 
   try {
     const url = new URL(value);
-    const host = url.hostname.replace(/^www\./i, '').toLowerCase();
-    if (!/linkedin\.com$/i.test(host)) return '';
+    const host = url.hostname.toLowerCase();
+    if (host !== 'linkedin.com' && !host.endsWith('.linkedin.com')) return '';
 
     const pathname = url.pathname.replace(/\/+$/, '');
-    if (!pathname || pathname === '/') return '';
+    // Direct outreach is only supported for public person profile URLs.
+    if (!/^\/in\/[a-z0-9][a-z0-9-]*$/i.test(pathname)) return '';
 
     return `https://www.linkedin.com${pathname}`;
   } catch {
