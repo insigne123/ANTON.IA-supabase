@@ -31,12 +31,12 @@ test('model output with unknown citations is rejected and replaced by the cited 
   const generatedAt = '2026-08-24T18:20:00.000Z';
   const projection = buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt });
   const modelBody = {
-    executiveSummary: structuredClone(projection.executiveSummary),
-    person: { verifiedFacts: structuredClone(projection.person.verifiedFacts) },
-    company: structuredClone(projection.company),
-    signals: structuredClone(projection.signals),
-    commercialHypotheses: structuredClone(projection.commercialHypotheses),
-    outreachBrief: structuredClone(projection.outreachBrief),
+    executiveSummary: { facts: [structuredClone(projection.executiveSummary.facts[0])] },
+    person: { verifiedFacts: [] },
+    company: { overview: [], offerings: [], market: [], scale: [] },
+    signals: [],
+    commercialHypotheses: [],
+    outreachBrief: { factualAnchors: [], hypotheses: [], doNotClaim: [] },
   };
   modelBody.executiveSummary.facts[0].citations.claimIds = ['unknown-model-claim'];
   let prompt = '';
@@ -51,4 +51,38 @@ test('model output with unknown citations is rejected and replaced by the cited 
   assert.equal(result.metadata.retryable, true);
   assert.deepEqual(result.document, projection);
   assert.match(prompt, /Copy every fact and hypothesis statement verbatim/);
+  assert.match(prompt, /Every signal must keep classification exactly "fact"/);
+  assert.match(prompt, /"classification":"fact","subjectScope":"company\|person"/);
+});
+
+test('model synthesis drops an invalid extra block while preserving canonically covered sections', async () => {
+  const snapshot = draftSnapshotFixture();
+  const generatedAt = '2026-08-24T18:30:00.000Z';
+  const projection = buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt });
+  const modelBody = {
+    executiveSummary: structuredClone(projection.executiveSummary),
+    person: { verifiedFacts: structuredClone(projection.person.verifiedFacts) },
+    company: structuredClone(projection.company),
+    signals: structuredClone(projection.signals),
+    commercialHypotheses: structuredClone(projection.commercialHypotheses),
+    outreachBrief: structuredClone(projection.outreachBrief),
+  };
+  modelBody.executiveSummary.facts.push({
+    ...structuredClone(modelBody.executiveSummary.facts[0]),
+    id: 'model-invalid-extra',
+    citations: { claimIds: ['unknown-model-claim'], evidenceIds: ['evidence-acme'] },
+  });
+  modelBody.company.overview = [];
+  modelBody.outreachBrief.factualAnchors = [];
+
+  const result = await synthesizeResearchReportDocumentV1({ snapshot, generatedAt }, {
+    generate: async () => ({ data: modelBody, telemetry: { modelName: 'test-model' } }),
+  });
+
+  assert.equal(result.metadata.generationMethod, 'model');
+  assert.equal(result.metadata.retryable, false);
+  assert.equal(result.document.executiveSummary.facts.some((block) => block.id === 'model-invalid-extra'), false);
+  assert.ok(result.document.company.overview.length > 0);
+  assert.ok(result.document.outreachBrief.factualAnchors.length > 0);
+  assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(result.document, snapshot));
 });

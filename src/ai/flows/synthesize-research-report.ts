@@ -227,6 +227,132 @@ function assertModelCoverage(body: ResearchReportSynthesisOutputV1, snapshot: Re
   );
 }
 
+function sanitizeModelSynthesisBody(
+  body: ResearchReportSynthesisOutputV1,
+  snapshot: ResearchSnapshotV1,
+) {
+  const claimsById = new Map(snapshot.claims.map((claim) => [claim.id, claim]));
+  const evidenceById = new Map(snapshot.evidence.map((evidence) => [evidence.id, evidence]));
+  const sourceById = new Map(snapshot.sources.map((source) => [source.id, source]));
+  const seenBlockIds = new Set<string>();
+  const signalKinds = new Set<ResearchClaimV1['kind']>(['news_signal', 'hiring_signal', 'technology_signal', 'site_signal']);
+  const companySectionKinds = {
+    overview: new Set<ResearchClaimV1['kind']>(['company_overview', 'company_identity', 'company_priority']),
+    offerings: new Set<ResearchClaimV1['kind']>(['company_service']),
+    market: new Set<ResearchClaimV1['kind']>(['company_industry']),
+    scale: new Set<ResearchClaimV1['kind']>(['company_size']),
+  };
+  const keep = (
+    block: ResearchReportFactualBlockV1 | ResearchReportHypothesisBlockV1,
+    classification: ResearchClaimV1['classification'],
+    scope?: ResearchClaimV1['subjectScope'],
+    allowedKinds?: Set<ResearchClaimV1['kind']>,
+  ) => {
+    if (seenBlockIds.has(block.id)) return false;
+    const claims = block.citations.claimIds.map((claimId) => claimsById.get(claimId));
+    if (claims.some((claim) => !claim)) return false;
+    const canonicalClaims = claims.filter((claim): claim is ResearchClaimV1 => Boolean(claim));
+    if (canonicalClaims.some((claim) => (
+      claim.classification !== classification
+      || claim.subjectScope !== block.subjectScope
+      || (scope && claim.subjectScope !== scope)
+      || (allowedKinds && !allowedKinds.has(claim.kind))
+    ))) return false;
+    if (!canonicalClaims.some((claim) => claim.statement.replace(/\s+/g, ' ').trim() === block.statement.replace(/\s+/g, ' ').trim())) {
+      return false;
+    }
+    const citedEvidence = block.citations.evidenceIds.map((evidenceId) => evidenceById.get(evidenceId));
+    if (citedEvidence.some((evidence) => !evidence)) return false;
+    if (block.citations.evidenceIds.some((evidenceId) => !canonicalClaims.some((claim) => claim.supportingEvidenceIds.includes(evidenceId)))) {
+      return false;
+    }
+    if (canonicalClaims.some((claim) => !block.citations.evidenceIds.some((evidenceId) => claim.supportingEvidenceIds.includes(evidenceId)))) {
+      return false;
+    }
+    seenBlockIds.add(block.id);
+    return true;
+  };
+  const facts = (values: ResearchReportFactualBlockV1[], scope?: ResearchClaimV1['subjectScope'], kinds?: Set<ResearchClaimV1['kind']>) =>
+    values.filter((block) => keep(block, 'fact', scope, kinds));
+  const hypotheses = (values: ResearchReportHypothesisBlockV1[]) =>
+    values.filter((block) => keep(block, 'hypothesis'));
+  const signals = body.signals.filter((block) => {
+    const claim = claimsById.get(block.citations.claimIds[0]);
+    const evidence = block.citations.evidenceIds.map((evidenceId) => evidenceById.get(evidenceId)).find(Boolean);
+    const source = evidence ? sourceById.get(evidence.sourceId) : null;
+    const expectedType = claim?.kind === 'news_signal'
+      ? 'news'
+      : claim?.kind === 'hiring_signal'
+        ? 'hiring'
+        : claim?.kind === 'technology_signal'
+          ? 'technology'
+          : claim?.kind === 'site_signal'
+            ? 'site'
+            : null;
+    const expectedObservedAt = evidence?.observedAt || source?.publishedAt || source?.retrievedAt || null;
+    const observedAtMatches = block.observedAt === expectedObservedAt
+      || (block.observedAt != null && expectedObservedAt != null && Date.parse(block.observedAt) === Date.parse(expectedObservedAt));
+    return block.signalType === expectedType
+      && observedAtMatches
+      && keep(block, 'fact', undefined, signalKinds);
+  });
+
+  return ResearchReportSynthesisOutputV1Schema.parse({
+    executiveSummary: { facts: facts(body.executiveSummary.facts) },
+    person: { verifiedFacts: facts(body.person.verifiedFacts, 'person') },
+    company: {
+      overview: facts(body.company.overview, 'company', companySectionKinds.overview),
+      offerings: facts(body.company.offerings, 'company', companySectionKinds.offerings),
+      market: facts(body.company.market, 'company', companySectionKinds.market),
+      scale: facts(body.company.scale, 'company', companySectionKinds.scale),
+    },
+    signals,
+    commercialHypotheses: hypotheses(body.commercialHypotheses),
+    outreachBrief: {
+      factualAnchors: facts(body.outreachBrief.factualAnchors),
+      hypotheses: hypotheses(body.outreachBrief.hypotheses),
+      doNotClaim: body.outreachBrief.doNotClaim,
+    },
+  });
+}
+
+function mergeModelWithCanonicalProjection(
+  model: ResearchReportSynthesisOutputV1,
+  canonical: ResearchReportSynthesisOutputV1,
+) {
+  const validModelBlockCount = [
+    ...model.executiveSummary.facts,
+    ...model.person.verifiedFacts,
+    ...model.company.overview,
+    ...model.company.offerings,
+    ...model.company.market,
+    ...model.company.scale,
+    ...model.signals,
+    ...model.commercialHypotheses,
+    ...model.outreachBrief.factualAnchors,
+    ...model.outreachBrief.hypotheses,
+  ].length;
+  if (validModelBlockCount === 0) throw new Error('RESEARCH_REPORT_MODEL_NO_VALID_BLOCKS');
+  const preferModel = <T>(modelValues: T[], canonicalValues: T[]) => modelValues.length > 0 ? modelValues : canonicalValues;
+  return ResearchReportSynthesisOutputV1Schema.parse({
+    executiveSummary: { facts: preferModel(model.executiveSummary.facts, canonical.executiveSummary.facts) },
+    person: { verifiedFacts: preferModel(model.person.verifiedFacts, canonical.person.verifiedFacts) },
+    company: {
+      overview: preferModel(model.company.overview, canonical.company.overview),
+      offerings: preferModel(model.company.offerings, canonical.company.offerings),
+      market: preferModel(model.company.market, canonical.company.market),
+      scale: preferModel(model.company.scale, canonical.company.scale),
+    },
+    signals: preferModel(model.signals, canonical.signals),
+    commercialHypotheses: preferModel(model.commercialHypotheses, canonical.commercialHypotheses),
+    outreachBrief: {
+      factualAnchors: preferModel(model.outreachBrief.factualAnchors, canonical.outreachBrief.factualAnchors),
+      hypotheses: preferModel(model.outreachBrief.hypotheses, canonical.outreachBrief.hypotheses),
+      doNotClaim: [...new Set([...canonical.outreachBrief.doNotClaim, ...model.outreachBrief.doNotClaim])].slice(0, 12),
+    },
+  });
+}
+
 function createDocument(input: {
   snapshot: ResearchSnapshotV1;
   body: ResearchReportSynthesisOutputV1;
@@ -329,7 +455,7 @@ Rules:
 - Do not cite IDs absent from the canonical input.
 - Person verifiedFacts may use only person-scoped factual claims. Imported subject fields are context only and must not appear as verified facts unless a person claim supports them.
 - Company sections may use only company-scoped factual claims.
-- signals may use only news_signal, hiring_signal, technology_signal, or site_signal claims. Derive signalType from the cited claim kind and observedAt from its cited evidence observedAt, then source publishedAt, then source retrievedAt.
+- signals may use only news_signal, hiring_signal, technology_signal, or site_signal claims. Every signal must keep classification exactly "fact" (never "signal") and must include subjectScope copied from its cited claim. Derive signalType from the cited claim kind and observedAt from its cited evidence observedAt, then source publishedAt, then source retrievedAt.
 - Do not create facts, numeric claims, customers, needs, pains, or intent.
 - Keep arrays empty when canonical support is absent.
 - Use unique block IDs. IDs are display identifiers, not citations.
@@ -347,7 +473,8 @@ Return exactly this shape:
 
 Each fact or hypothesis block is:
 {"id":"unique","classification":"fact|hypothesis","subjectScope":"company|person","statement":"...","citations":{"claimIds":["..."],"evidenceIds":["..."]}}
-Each signal also includes "signalType":"news|hiring|technology|site" and "observedAt":"ISO timestamp or null".
+Each signal must use this complete shape:
+{"id":"unique","classification":"fact","subjectScope":"company|person","statement":"verbatim canonical claim statement","citations":{"claimIds":["..."],"evidenceIds":["..."]},"signalType":"news|hiring|technology|site","observedAt":"ISO timestamp or null"}
 
 Canonical input:
 ${JSON.stringify(canonicalInput)}
@@ -386,7 +513,10 @@ export async function synthesizeResearchReportDocumentV1(
       provider: 'openai',
       openAiModel: process.env.NATIVE_RESEARCH_REPORT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
     });
-    const body = ResearchReportSynthesisOutputV1Schema.parse(generated.data);
+    const body = mergeModelWithCanonicalProjection(
+      sanitizeModelSynthesisBody(ResearchReportSynthesisOutputV1Schema.parse(generated.data), snapshot),
+      deterministicSynthesisBody(snapshot),
+    );
     assertModelCoverage(body, snapshot);
     const document = createDocument({
       snapshot,
@@ -430,4 +560,6 @@ export const researchReportSynthesisInternals = {
   assertModelCoverage,
   completenessFor,
   deterministicSynthesisBody,
+  mergeModelWithCanonicalProjection,
+  sanitizeModelSynthesisBody,
 };
