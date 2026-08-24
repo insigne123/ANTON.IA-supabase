@@ -48,6 +48,7 @@ import { Badge } from '@/components/ui/badge';
 import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
+import { APOLLO_EMAIL_ENRICHMENT_CREDITS, APOLLO_PHONE_ENRICHMENT_CREDITS, apolloEnrichmentCreditCost } from '@/lib/apollo-credit-costs';
 import {
   DEFAULT_LEAD_SEARCH_FILTERS,
   normalizeSavedSearchCriteria,
@@ -1225,20 +1226,23 @@ export default function SearchPage() {
                       <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
                         <div>
                           <Label htmlFor="revealEmail">Buscar correo</Label>
-                          <p className="text-xs text-muted-foreground">Incluye el correo cuando esté disponible.</p>
+                          <p className="text-xs text-muted-foreground">Incluye el correo cuando esté disponible · {APOLLO_EMAIL_ENRICHMENT_CREDITS} crédito Apollo.</p>
                         </div>
                         <Switch id="revealEmail" checked={filters.revealEmail} onCheckedChange={(value) => handleFilterChange('revealEmail', value)} />
                       </div>
                       <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
                         <div>
                           <Label htmlFor="revealPhone">Buscar teléfono</Label>
-                          <p className="text-xs text-muted-foreground">Puede tardar un poco más.</p>
+                          <p className="text-xs text-muted-foreground">Puede tardar un poco más · {APOLLO_PHONE_ENRICHMENT_CREDITS} créditos Apollo.</p>
                         </div>
                         <Switch id="revealPhone" checked={filters.revealPhone} onCheckedChange={(value) => handleFilterChange('revealPhone', value)} />
                       </div>
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
+                <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
+                  Costo estimado por perfil: <strong className="font-medium text-foreground">{apolloEnrichmentCreditCost({ revealEmail: filters.revealEmail, revealPhone: filters.revealPhone })} créditos Apollo</strong>.
+                </p>
               </div>
             ) : filters.searchMode === 'company_name' ? (
               <div className="space-y-4">

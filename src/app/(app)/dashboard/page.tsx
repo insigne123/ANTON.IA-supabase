@@ -9,6 +9,7 @@ import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
 import NextStepsWidget from '@/components/dashboard/NextStepsWidget';
 import PerformanceChart from '@/components/dashboard/PerformanceChart';
 import SummaryCards from '@/components/dashboard/SummaryCards';
+import ApolloCreditsCard from '@/components/dashboard/ApolloCreditsCard';
 import { LayoutGrid, Search } from 'lucide-react';
 
 export default function DashboardPage() {
@@ -40,7 +41,10 @@ export default function DashboardPage() {
           <PerformanceChart />
         </section>
 
-        <DailyQuotaProgress summary title="Uso diario" />
+        <section aria-label="Créditos y uso diario" className="grid gap-4 xl:grid-cols-[minmax(280px,0.65fr)_minmax(0,1.5fr)]">
+          <ApolloCreditsCard />
+          <DailyQuotaProgress summary title="Uso diario" className="h-full [&>div]:h-full" />
+        </section>
       </main>
     </div>
   );

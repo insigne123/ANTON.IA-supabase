@@ -4,7 +4,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { useState } from 'react';
 import { AlertCircle, Calculator, Mail, Phone } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { APOLLO_EMAIL_ENRICHMENT_CREDITS, APOLLO_PHONE_ENRICHMENT_CREDITS, apolloEnrichmentCreditCost } from '@/lib/apollo-credit-costs';
 
 interface EnrichmentOptionsDialogProps {
     open: boolean;
@@ -18,7 +20,7 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
     const [revealEmail, setRevealEmail] = useState(true);
     const [revealPhone, setRevealPhone] = useState(false);
 
-    const costPerLead = (revealEmail ? 1 : 0) + (revealPhone ? 1 : 0);
+    const costPerLead = apolloEnrichmentCreditCost({ revealEmail, revealPhone });
     const totalCost = costPerLead * leadCount;
 
     const handleConfirm = () => {
@@ -43,7 +45,7 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
                             <Mail className="w-4 h-4 text-muted-foreground" />
                             Obtener Email Personal
                         </Label>
-                        <span className="text-xs font-medium bg-secondary px-2 py-1 rounded">1 crédito</span>
+                        <Badge variant="secondary" className="tabular-nums">{APOLLO_EMAIL_ENRICHMENT_CREDITS} crédito</Badge>
                     </div>
 
                     <div className="flex items-center space-x-2 border p-4 rounded-md">
@@ -52,17 +54,19 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
                             <Phone className="w-4 h-4 text-muted-foreground" />
                             Obtener Teléfono Móvil/Directo
                         </Label>
-                        <span className="text-xs font-medium bg-secondary px-2 py-1 rounded">1 crédito</span>
+                        <Badge variant="secondary" className="tabular-nums">{APOLLO_PHONE_ENRICHMENT_CREDITS} créditos</Badge>
                     </div>
 
                     {totalCost > 0 && (
-                        <Alert>
-                            <Calculator className="h-4 w-4" />
-                            <AlertTitle>Estimación de Costo</AlertTitle>
-                            <AlertDescription>
-                                Enriquecer <strong>{leadCount}</strong> leads costará aproximadamente <strong>{totalCost}</strong> créditos.
-                            </AlertDescription>
-                        </Alert>
+                        <div className="flex gap-3 rounded-xl border border-border/60 bg-muted/30 p-3" role="status" aria-live="polite">
+                            <Calculator className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                            <div className="text-sm">
+                                <div className="font-medium">Créditos Apollo estimados</div>
+                                <p className="mt-0.5 text-muted-foreground">
+                                    Enriquecer <strong>{leadCount}</strong> {leadCount === 1 ? 'lead' : 'leads'} usará aproximadamente <strong>{totalCost}</strong> {totalCost === 1 ? 'crédito' : 'créditos'}.
+                                </p>
+                            </div>
+                        </div>
                     )}
 
                     {totalCost === 0 && (

@@ -227,9 +227,8 @@ export default function SavedLeadsPage() {
     const { revealEmail, revealPhone } = opts;
     const chosen = leadsToEnrich;
 
-    // Validación preventiva de cuota (approx)
-    const costPerLead = (revealEmail ? 1 : 0) + (revealPhone ? 1 : 0);
-    const totalCost = costPerLead * chosen.length;
+    // La cuota diaria interna cuenta leads procesados; los créditos Apollo se muestran por separado.
+    const totalCost = chosen.length;
 
     if (!Quota.canUseClientQuota('enrich', totalCost)) {
       const { enrich: used = 0 } = Quota.getClientQuota() as any;
