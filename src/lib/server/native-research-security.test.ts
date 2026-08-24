@@ -50,11 +50,20 @@ test('long public profile URLs use a bounded durable lead reference', () => {
 });
 
 test('official-site requests use an approved DNS answer instead of resolving during fetch', () => {
-  assert.match(nativeResearchSource, /lookup: \(_hostname, _options, callback\) => callback\(null, address\.address, address\.family\)/);
+  assert.match(nativeResearchSource, /lookup: pinnedOfficialSiteLookup\(address\)/);
   assert.doesNotMatch(nativeResearchSource, /await fetch\(/);
   assert.equal(nativeResearchInternals.isSafeOfficialSiteUrl(new URL('https://example.com')), true);
   assert.equal(nativeResearchInternals.isSafeOfficialSiteUrl(new URL('http://example.com:8080')), false);
   assert.equal(nativeResearchInternals.isSafeOfficialSiteUrl(new URL('https://user@example.com')), false);
+
+  const lookup = nativeResearchInternals.pinnedOfficialSiteLookup({ address: '8.8.8.8', family: 4 });
+  let single: unknown[] = [];
+  lookup('example.com', {}, (...args) => { single = args; });
+  assert.deepEqual(single, [null, '8.8.8.8', 4]);
+
+  let all: unknown[] = [];
+  lookup('example.com', { all: true }, (...args) => { all = args; });
+  assert.deepEqual(all, [null, [{ address: '8.8.8.8', family: 4 }]]);
 });
 
 test('deep official-site collection stays on the company domain and search signals need company context', () => {
@@ -84,6 +93,30 @@ test('deep official-site collection stays on the company domain and search signa
     companyName: 'Acme',
     companyDomain: 'acme.com',
   }), false);
+});
+
+test('official-site collection keeps bounded HTML and falls back to useful page text', () => {
+  const first = nativeResearchInternals.boundedOfficialSiteChunk(Buffer.from('abcdefghij'), 120_000 - 4);
+  assert.equal(first?.toString('utf8'), 'abcd');
+  assert.equal(nativeResearchInternals.boundedOfficialSiteChunk(Buffer.from('more'), 120_000), null);
+
+  const page = nativeResearchInternals.officialPageFromHtml(
+    new URL('https://acme.com/about'),
+    [
+      '<html><head><title>Acme</title><meta name="description" content="Acme"></head><body>',
+      'Acme ayuda a empresas de todo el país con soluciones verificables de logística, operaciones y soporte especializado.',
+      '</body></html>',
+    ].join(''),
+  );
+  const pageContent = nativeResearchInternals.usefulOfficialPageContent(page);
+  assert.equal(pageContent?.locator, 'page_text');
+  assert.match(pageContent?.statement || '', /Acme ayuda a empresas/);
+
+  const officialDescription = nativeResearchInternals.officialPageFromHtml(
+    new URL('https://acme.com'),
+    '<meta name="description" content="Acme ofrece servicios empresariales especializados con cobertura nacional y atención para distintas industrias.">',
+  );
+  assert.equal(nativeResearchInternals.usefulOfficialPageContent(officialDescription)?.locator, 'meta_description');
 });
 
 test('native generation and deletion use durable privacy-aware claims', () => {

@@ -342,6 +342,21 @@ function headerValue(headers: IncomingHttpHeaders, name: string) {
   return Array.isArray(value) ? value[0] || null : value || null;
 }
 
+function boundedOfficialSiteChunk(chunk: Buffer, bufferedBytes: number) {
+  const remaining = Math.max(0, OFFICIAL_SITE_MAX_RESPONSE_BYTES - bufferedBytes);
+  return remaining > 0 ? chunk.subarray(0, remaining) : null;
+}
+
+function pinnedOfficialSiteLookup(address: ResolvedPublicAddress) {
+  return (_hostname: string, options: any, callback: (...args: any[]) => void) => {
+    if (options && typeof options === 'object' && options.all) {
+      callback(null, [{ address: address.address, family: address.family }]);
+      return;
+    }
+    callback(null, address.address, address.family);
+  };
+}
+
 function requestOfficialSite(url: URL, address: ResolvedPublicAddress, signal: AbortSignal): Promise<OfficialSiteResponse> {
   return new Promise((resolve, reject) => {
     const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
@@ -350,7 +365,7 @@ function requestOfficialSite(url: URL, address: ResolvedPublicAddress, signal: A
         Accept: 'text/html,application/xhtml+xml',
         'User-Agent': 'ANTON.IA Native Research/1.0',
       },
-      lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
+      lookup: pinnedOfficialSiteLookup(address),
       signal,
     }, (response) => {
       const status = response.statusCode || 0;
@@ -364,17 +379,31 @@ function requestOfficialSite(url: URL, address: ResolvedPublicAddress, signal: A
 
       const chunks: Buffer[] = [];
       let totalBytes = 0;
+      let settled = false;
+      const complete = () => {
+        if (settled) return;
+        settled = true;
+        resolve({ status, headers, body: Buffer.concat(chunks).toString('utf8') });
+      };
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
       response.on('data', (chunk: Buffer | string) => {
         const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        totalBytes += buffer.length;
-        if (totalBytes > OFFICIAL_SITE_MAX_RESPONSE_BYTES) {
-          response.destroy(new Error('official site response exceeds the size limit'));
-          return;
+        const accepted = boundedOfficialSiteChunk(buffer, totalBytes);
+        if (accepted) {
+          chunks.push(accepted);
+          totalBytes += accepted.length;
         }
-        chunks.push(buffer);
+        if (totalBytes >= OFFICIAL_SITE_MAX_RESPONSE_BYTES) {
+          complete();
+          response.destroy();
+        }
       });
-      response.once('error', reject);
-      response.once('end', () => resolve({ status, headers, body: Buffer.concat(chunks).toString('utf8') }));
+      response.once('error', fail);
+      response.once('end', complete);
     });
     request.once('error', reject);
     request.end();
@@ -398,9 +427,22 @@ function officialPageFromHtml(url: URL, html: string): OfficialSitePage {
   return { url: url.toString(), title, description, text: readable };
 }
 
+function usefulOfficialPageContent(page: OfficialSitePage) {
+  const candidates = [
+    { value: page.description, locator: 'meta_description' as const },
+    { value: page.text, locator: 'page_text' as const },
+  ];
+  for (const candidate of candidates) {
+    const statement = conciseSourceStatement(candidate.value);
+    if (statement.length >= 60 && !isGenericResearchText(statement)) {
+      return { statement, locator: candidate.locator };
+    }
+  }
+  return null;
+}
+
 function isUsefulOfficialPage(page: OfficialSitePage) {
-  const statement = text(page.description || page.text);
-  return statement.length >= 60 && !isGenericResearchText(statement);
+  return Boolean(usefulOfficialPageContent(page));
 }
 
 function candidateOfficialPageUrls(html: string, baseUrl: URL, domain: string, country?: string | null, maxPages = MAX_OFFICIAL_SITE_PAGES) {
@@ -917,8 +959,9 @@ function buildSnapshot(input: {
   const companyFactEvidence: ResearchEvidenceV1[] = [];
 
   for (const page of officialPages) {
-    const statement = conciseSourceStatement(page.description || page.text);
-    if (!statement || isGenericResearchText(statement)) continue;
+    const content = usefulOfficialPageContent(page);
+    if (!content) continue;
+    const { statement, locator } = content;
     const source = addSource({
       url: page.url,
       type: 'official_site',
@@ -932,7 +975,7 @@ function buildSnapshot(input: {
       source,
       kind: 'fact',
       confidence: 0.86,
-      locator: { kind: 'page_section', value: page.description ? 'meta_description' : 'page_text' },
+      locator: { kind: 'page_section', value: locator },
       extractedAt: companyFetchedAt,
       extractionMethod: 'rule',
     });
@@ -1963,10 +2006,15 @@ export function nativeResearchJobToResult(job: NativeResearchJob) {
 }
 
 export const nativeResearchInternals = {
+  boundedOfficialSiteChunk,
   candidateOfficialPageUrls,
+  fetchOfficialSite,
   isPrivateIpAddress,
   isRelevantSearchResult,
   isSafeOfficialSiteUrl,
+  officialPageFromHtml,
+  pinnedOfficialSiteLookup,
+  usefulOfficialPageContent,
 };
 
 export type { NativeResearchAccess, NativeResearchJob, NativeResearchPipelineOutput };

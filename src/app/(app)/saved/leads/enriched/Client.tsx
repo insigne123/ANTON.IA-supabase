@@ -21,7 +21,6 @@ import { supabase } from '@/lib/supabase';
 import { hasMeaningfulLeadResearch } from '@/lib/lead-research';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { unmarkResearched } from '@/lib/researched-leads-storage';
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
 import { renderTemplate, buildPersonEmailContext } from '@/lib/template';
@@ -1665,8 +1664,8 @@ export default function EnrichedLeadsClient() {
       </Sheet>
 
       <Dialog open={openReport} onOpenChange={setOpenReport}>
-        <DialogContent className="flex max-h-[90vh] max-w-4xl flex-col gap-0 overflow-hidden rounded-[28px] p-0" onEscapeKeyDown={() => setOpenReport(false)}>
-          <DialogHeader className="border-b border-border/60 px-5 py-4 sm:px-6">
+        <DialogContent className="flex h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-4xl flex-col gap-0 overflow-hidden rounded-[28px] p-0 sm:h-[90dvh]" onEscapeKeyDown={() => setOpenReport(false)}>
+          <DialogHeader className="shrink-0 border-b border-border/60 px-5 py-4 pr-12 sm:px-6 sm:pr-12">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">Investigación</div>
@@ -1692,7 +1691,12 @@ export default function EnrichedLeadsClient() {
             </div>
           )}
           {hasNativeResearchResult(nativeReportToView) && nativeReportToView?.result && reportLead ? (
-            <ScrollArea className="min-h-0 flex-1">
+            <div
+              role="region"
+              aria-label="Contenido del reporte de investigación"
+              tabIndex={0}
+              className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            >
               <NativeResearchReport
                 result={nativeReportToView.result}
                 status={nativeReportToView.status}
@@ -1709,10 +1713,15 @@ export default function EnrichedLeadsClient() {
                 }}
                 className="px-5 py-5 sm:px-6 sm:py-6"
               />
-            </ScrollArea>
+            </div>
           ) : reportToView?.cross ? (
-            <ScrollArea className="min-h-0 flex-1">
-              <div className="space-y-4 px-5 pb-6 pt-4 text-sm leading-relaxed sm:px-6">
+            <div
+              role="region"
+              aria-label="Contenido del reporte de investigación"
+              tabIndex={0}
+              className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            >
+              <div className="space-y-4 px-5 pb-6 pt-4 text-sm leading-relaxed [overflow-wrap:anywhere] sm:px-6">
                 <section className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
                   <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-primary">Ángulo recomendado</div>
                   <p className="mt-2 text-base font-medium text-foreground">
@@ -1961,7 +1970,7 @@ export default function EnrichedLeadsClient() {
                   </CollapsibleContent>
                 </Collapsible>
               </div>
-            </ScrollArea>
+            </div>
           ) : null}
         </DialogContent>
       </Dialog>
