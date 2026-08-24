@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { buildDeterministicResearchReportDocumentV1 } from '@/ai/flows/synthesize-research-report';
+import { ResearchReportDocumentV1Schema } from '@/lib/research-report-contracts';
 import {
   buildResearchReport,
   buildResearchNarrative,
   canShowResearchDraftAction,
   createQueuedResearchWorkspaceRun,
+  parseResearchReportDetail,
   parseResearchWorkspaceRun,
+  researchDraftErrorMessage,
   researchDraftBlockReasonLabel,
   researchEvidenceKindLabel,
   researchSourceTypeLabel,
@@ -134,6 +138,57 @@ test('uses the canonical snapshot for verified company context and drafting read
   assert.equal(report.person.facts[0].statement, 'Ada Lovelace ocupa el cargo de Directora de Operaciones.');
   assert.equal(item.readiness, 'ready');
   assert.equal(item.canCreateDraft, true);
+});
+
+test('maps a validated report document first and keeps claim, evidence, and source counts independent', () => {
+  const snapshot = draftSnapshotFixture();
+  const deterministic = buildDeterministicResearchReportDocumentV1({
+    snapshot,
+    generatedAt: '2026-08-24T12:00:00.000Z',
+  });
+  const document = ResearchReportDocumentV1Schema.parse({
+    ...deterministic,
+    executiveSummary: {
+      facts: deterministic.executiveSummary.facts,
+    },
+  });
+  const detail = parseResearchReportDetail({
+    reportId: 'report-ada',
+    status: 'completed',
+    researchSnapshotId: snapshot.id,
+    result: {
+      status: 'completed',
+      researchSnapshotId: snapshot.id,
+      lead: {
+        fullName: 'Ada Lovelace',
+        email: 'ada@acme.example',
+        title: 'Directora de Operaciones',
+        companyName: 'Acme',
+        organizationIndustry: 'Software',
+        organizationSize: 240,
+      },
+      score: 82,
+      evidence: [],
+      sources: [],
+      quality: { score: 82, sufficientResearch: true },
+      draftEligibility: { eligible: true, blockReason: null },
+      warnings: [],
+    },
+    snapshot,
+    reportDocument: document,
+  });
+
+  assert.ok(detail?.reportDocument);
+  const report = buildResearchReport(detail.result, detail.reportDocument);
+  assert.equal(report.executive[0].statement, 'Ada Lovelace ocupa el cargo de Directora de Operaciones.');
+  assert.equal(report.coverage.claims, 3);
+  assert.equal(report.coverage.evidenceRecords, 2);
+  assert.equal(report.coverage.sources, 2);
+  assert.equal(report.evidenceRecords.length, 2);
+  assert.equal(report.sources.length, 2);
+  assert.ok(report.person.fields.every((field) => !['Industria', 'Tamaño de empresa'].includes(field.label)));
+  assert.deepEqual(report.companyContext.map((field) => field.label), ['Industria', 'Tamaño de empresa']);
+  assert.equal(report.companySections.overview[0].evidence[0].sourceUrl, 'https://acme.example/about');
 });
 
 test('keeps historical payloads readable and explicitly marks unavailable company information', () => {
@@ -327,10 +382,11 @@ test('treats the batch creation response as an in-progress selection until its d
   const run = createQueuedResearchWorkspaceRun({
     runId: 'run-3',
     leads,
-    items: [{ jobId: 'job-ana', leadRef: 'lead-ana', position: 0, status: 'queued' }],
+    items: [{ jobId: 'job-ana', reportId: 'report-ana', leadRef: 'lead-ana', position: 0, status: 'queued' }],
   });
 
   assert.equal(run.items[0].status, 'queued');
+  assert.equal(run.items[0].reportId, 'report-ana');
   assert.equal(run.items[0].readiness, 'in_progress');
   assert.equal(shouldPollResearchRun(run), true);
 });
@@ -347,6 +403,25 @@ test('maps native report labels into concise user-facing copy', () => {
   assert.equal(
     researchDraftBlockReasonLabel(null, 'missing_evidence'),
     'Falta evidencia con fuentes antes de redactar.',
+  );
+});
+
+test('surfaces the first structured draft issue and the remaining issue count', () => {
+  assert.equal(
+    researchDraftErrorMessage({
+      error: 'NATIVE_DRAFT_PREFLIGHT_FAILED',
+      message: 'No se pudo preparar el borrador.',
+      issues: [
+        { code: 'cta_count', message: 'Revisa la llamada a la acción del mensaje.', location: 'body' },
+        { code: 'body_length', message: 'Reduce la extensión del mensaje.', location: 'body' },
+        { code: 'personalization_missing', message: 'Agrega una personalización respaldada.', location: 'research' },
+      ],
+    }, 'Inténtalo nuevamente.'),
+    'Revisa la llamada a la acción del mensaje. Hay 2 puntos más por revisar.',
+  );
+  assert.equal(
+    researchDraftErrorMessage({ result: { issues: [{ message: 'Confirma la fuente usada para personalizar.' }] } }, 'Inténtalo nuevamente.'),
+    'Confirma la fuente usada para personalizar.',
   );
 });
 

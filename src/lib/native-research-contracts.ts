@@ -124,6 +124,12 @@ export type NativeResearchResult = {
   quality: ResearchQualityAssessment;
   draftEligibility: ResearchDraftEligibility;
   warnings: string[];
+  reportSynthesis?: {
+    status: 'completed' | 'partial';
+    generationMethod: 'model' | 'fallback';
+    retryable: boolean;
+    errorCode: string | null;
+  };
   snapshot?: ResearchSnapshotV1;
 };
 

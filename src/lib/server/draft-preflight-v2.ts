@@ -144,19 +144,12 @@ function hasVisiblePersonalization(
   personalization: DraftPersonalizationProvenanceV2[],
   content: string,
 ) {
-  const evidenceIds = new Set(personalization.map((item) => item.evidenceId));
-  const scopes = new Set(context.evidence
-    .filter((evidence) => evidenceIds.has(evidence.evidenceId))
-    .map((evidence) => evidence.subjectScope));
-  const candidateTerms = [
-    ...(scopes.has('company') ? [context.company.name, context.company.domain] : []),
-    ...(scopes.has('person') ? [context.person.fullName, context.person.title] : []),
-  ]
-    .map((value) => normalizeForMatch(value || ''))
-    .filter((value) => value.length >= 3);
-  if (candidateTerms.length === 0) return false;
+  const evidenceById = new Map(context.evidence.map((evidence) => [evidence.evidenceId, evidence]));
   const normalizedContent = normalizeForMatch(content);
-  return candidateTerms.some((term) => normalizedContent.includes(term));
+  return personalization.every((item) => {
+    const statement = normalizeForMatch(evidenceById.get(item.evidenceId)?.statement || '');
+    return Boolean(statement && normalizedContent.includes(statement));
+  });
 }
 
 function containsHypothesisHedge(body: string) {
@@ -231,13 +224,16 @@ export function validateDraftPreflightV2(
     }
   }
 
-  const requiredCta = normalizeForMatch(context.constraints.cta.exactText);
-  const requiredCtaCount = countOccurrences(normalizeForMatch(body), requiredCta);
-  const questions = body.match(/\?/g)?.length || 0;
+  const requiredCta = text(context.constraints.cta.exactText);
+  const requiredCtaCount = countOccurrences(body, requiredCta);
+  const bodyOutsideRequiredCta = requiredCta
+    ? body.split(requiredCta).join(' ')
+    : body;
+  const hasExtraQuestion = /[¿?]/.test(bodyOutsideRequiredCta);
   if (
     requiredCtaCount !== context.constraints.cta.maximumCount
-    || ctaSentenceCount(body) !== context.constraints.cta.maximumCount
-    || questions > context.constraints.cta.maximumCount
+    || ctaSentenceCount(bodyOutsideRequiredCta) > 0
+    || hasExtraQuestion
   ) {
     add('cta_count', 'El correo debe incluir exactamente un CTA y usar el CTA aprobado para este estilo.', 'body');
   }
@@ -272,7 +268,7 @@ export function validateDraftPreflightV2(
     }
   }
   if (output.personalization.length > 0 && !hasVisiblePersonalization(context, output.personalization, `${subject} ${body}`)) {
-    add('personalization_invalid', 'El contenido no muestra una personalización vinculada al contexto investigado.', 'body');
+    add('personalization_invalid', 'El contenido debe incluir literalmente la evidencia seleccionada para personalizar.', 'body');
   }
 
   const hypothesesById = new Map(context.hypotheses.map((hypothesis) => [hypothesis.claimId, hypothesis]));

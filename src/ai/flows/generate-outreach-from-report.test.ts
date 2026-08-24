@@ -57,8 +57,53 @@ test('DraftContextV2 generation exposes only the server-selected factual evidenc
     assert.equal(result.personalization[0].claimId, 'claim-acme-overview');
     assert.deepEqual(result.hypothesisIds, []);
     assert.match(prompt, /"hypotheses":\[\]/);
+    assert.match(prompt, /El servidor lo agregará literalmente una sola vez al final/);
+    assert.match(prompt, /No agregues ninguna pregunta, invitación a actuar/);
+    assert.match(prompt, /Copia literalmente en el asunto o cuerpo el statement completo/);
     assert.doesNotMatch(prompt, /Acme necesita contratar urgentemente/);
     assert.doesNotMatch(prompt, /claim-acme-opportunity/);
+  } finally {
+    if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousOpenAiKey;
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('DraftContextV2 generation consumes the validated report brief and prioritizes its canonical anchor', async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      const request = JSON.parse(String(init?.body || '{}'));
+      prompt = String(request.messages?.[1]?.content || '');
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ subject: 'Una idea para Ada', body: 'Contenido factual.' }) } }],
+        usage: {},
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    const baseContext = draftContextFixture();
+    const context = {
+      ...baseContext,
+      report: {
+        synthesis: { method: 'model' as const, status: 'completed' as const },
+        outreachBrief: {
+          selectedFactualAnchorClaimIds: ['claim-ada-role'],
+          selectedHypothesisIds: ['claim-acme-opportunity'],
+          doNotClaim: ['No presentar hipótesis como necesidades confirmadas.'],
+        },
+      },
+    };
+
+    const result = await generateOutreachFromDraftContextV2({ context });
+
+    assert.equal(result.personalization[0].claimId, 'claim-ada-role');
+    assert.match(prompt, /REPORT_OUTREACH_BRIEF/);
+    assert.match(prompt, /claim-ada-role/);
+    assert.match(prompt, /No presentar hipótesis como necesidades confirmadas/);
+    assert.match(prompt, /Ada Lovelace figura como Directora de Operaciones en Acme/);
+    assert.doesNotMatch(prompt, /Acme publica que ayuda a equipos de operaciones a reducir trabajo manual/);
   } finally {
     if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousOpenAiKey;

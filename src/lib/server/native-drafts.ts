@@ -17,6 +17,7 @@ import {
   createDefaultDraftWritingStyleV2,
   normalizeDraftSellerProfileV2,
   normalizeDraftWritingStyleV2,
+  requiredReportAwareDraftPersonalizationV2,
   type DraftContextBuildResult,
   type DraftContextV2,
   type DraftSellerProfileV2,
@@ -25,8 +26,8 @@ import {
 import {
   createFailedDraftPreflightV2,
   draftContentFingerprintV2,
-  requiredDraftPersonalizationV2,
   validateDraftPreflightV2,
+  type DraftPreflightIssueV2,
   type DraftPersonalizationProvenanceV2,
   type GeneratedOutreachV2,
 } from '@/lib/server/draft-preflight-v2';
@@ -39,7 +40,9 @@ import {
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { getNativeSnapshot } from '@/lib/server/native-research';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
-import { ResearchSnapshotV1Schema } from '@/lib/research-contracts';
+import { ResearchSnapshotV1Schema, type ResearchSnapshotV1 } from '@/lib/research-contracts';
+import type { ResearchReportDocumentV1 } from '@/lib/research-report-contracts';
+import { ensureResearchReportDocument } from '@/lib/server/research-report-documents';
 
 export type NativeDraftAccess = {
   organizationId: string;
@@ -112,6 +115,7 @@ export type NativeDraftGenerationResult =
     draft: MessagingDraftV1;
     context: DraftContextV2;
     preflight: MessagingPreflightV1;
+    issues: DraftPreflightIssueV2[];
     generation: { provider: 'openai'; model: string; promptVersion: 'native-draft/v2' };
   }
   | {
@@ -122,6 +126,7 @@ export type NativeDraftGenerationResult =
     message: string;
     retryable: false;
     preflight: MessagingPreflightV1;
+    issues: DraftPreflightIssueV2[];
   }
   | {
     status: 'failed';
@@ -131,12 +136,18 @@ export type NativeDraftGenerationResult =
     message: string;
     retryable: true;
     preflight: MessagingPreflightV1;
+    issues: DraftPreflightIssueV2[];
   };
 
 export type NativeDraftGenerationDependencies = {
   getSnapshot?: (input: { snapshotId: string; access: NativeDraftAccess }) => Promise<NativeSnapshotRow | null>;
   loadSellerProfile?: (userId: string) => Promise<DraftSellerProfileV2>;
   loadWritingStyle?: (input: NativeDraftAccess & { styleProfileId?: string | null; styleName?: string | null }) => Promise<DraftWritingStyleV2>;
+  ensureReportDocument?: (input: {
+    snapshot: ResearchSnapshotV1;
+    access: NativeDraftAccess;
+    generatedAt?: string;
+  }) => Promise<ResearchReportDocumentV1>;
   claimGeneration?: (input: NativeDraftAccess & { draftId: string; snapshotId: string; email: string }) => Promise<NativeDraftGenerationClaim>;
   releaseGeneration?: (input: NativeDraftAccess & { draftId: string; claimToken: string }) => Promise<boolean>;
   isSuppressed?: (email: string, access: NativeDraftAccess) => Promise<boolean>;
@@ -152,7 +163,10 @@ export type NativeDraftGenerationDependencies = {
 };
 
 export class NativeDraftPreflightError extends Error {
-  constructor(public readonly preflight: MessagingPreflightV1) {
+  constructor(
+    public readonly preflight: MessagingPreflightV1,
+    public readonly issues: DraftPreflightIssueV2[] = [],
+  ) {
     super(preflight.errors.join(' ') || 'NATIVE_DRAFT_PREFLIGHT_FAILED');
     this.name = 'NativeDraftPreflightError';
   }
@@ -388,8 +402,10 @@ function failureResult(input: {
   code: NativeDraftFailureCode;
   message: string;
   errors?: string[];
+  issues?: DraftPreflightIssueV2[];
   now: Date;
 }): NativeDraftGenerationResult {
+  const issues = input.issues || [];
   return {
     status: 'failed',
     draft: null,
@@ -397,7 +413,12 @@ function failureResult(input: {
     code: input.code,
     message: input.message,
     retryable: true,
-    preflight: createFailedDraftPreflightV2(input.errors || [input.message], input.context.warnings, input.now),
+    preflight: createFailedDraftPreflightV2(
+      input.errors || (issues.length > 0 ? issues.map((issue) => issue.message) : [input.message]),
+      input.context.warnings,
+      input.now,
+    ),
+    issues,
   };
 }
 
@@ -406,8 +427,10 @@ function blockedResult(input: {
   code: NativeDraftBlockedCode;
   message: string;
   errors?: string[];
+  issues?: DraftPreflightIssueV2[];
   now: Date;
 }): NativeDraftGenerationResult {
+  const issues = input.issues || [];
   return {
     status: 'blocked',
     draft: null,
@@ -415,7 +438,12 @@ function blockedResult(input: {
     code: input.code,
     message: input.message,
     retryable: false,
-    preflight: createFailedDraftPreflightV2(input.errors || [input.message], input.context.warnings, input.now),
+    preflight: createFailedDraftPreflightV2(
+      input.errors || (issues.length > 0 ? issues.map((issue) => issue.message) : [input.message]),
+      input.context.warnings,
+      input.now,
+    ),
+    issues,
   };
 }
 
@@ -465,8 +493,8 @@ function outputForPreflight(
 ): GeneratedOutreachV2 {
   return {
     subject: generated.subject,
-    body: generated.body,
-    personalization: requiredDraftPersonalizationV2(context),
+    body: normalizeNativeDraftBody(`${generated.body}\n\n${context.constraints.cta.exactText}`),
+    personalization: requiredReportAwareDraftPersonalizationV2(context),
     hypothesisIds: generated.hypothesisIds,
   };
 }
@@ -480,7 +508,12 @@ async function createDraftContext(input: {
   now: Date;
 }) {
   const snapshot = ResearchSnapshotV1Schema.parse(input.snapshotRow.payload);
-  const [seller, style] = await Promise.all([
+  const ensureReportDocument = input.dependencies?.ensureReportDocument || (async (request: {
+    snapshot: ResearchSnapshotV1;
+    access: NativeDraftAccess;
+    generatedAt?: string;
+  }) => (await ensureResearchReportDocument(request)).document);
+  const [seller, style, reportDocument] = await Promise.all([
     input.dependencies?.loadSellerProfile?.(input.access.userId) || loadSellerProfile(input.access.userId),
     input.dependencies?.loadWritingStyle?.({
       ...input.access,
@@ -491,6 +524,13 @@ async function createDraftContext(input: {
       styleProfileId: input.styleProfileId,
       styleName: input.styleName,
     }),
+    snapshot.subject.email
+      ? ensureReportDocument({
+        snapshot,
+        access: input.access,
+        generatedAt: input.now.toISOString(),
+      })
+      : Promise.resolve(null),
   ]);
   return {
     snapshot,
@@ -503,6 +543,7 @@ async function createDraftContext(input: {
       },
       seller,
       style,
+      reportDocument,
       now: input.now,
     }),
   };
@@ -527,6 +568,10 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   const snapshotRow = await (dependencies?.getSnapshot?.({ snapshotId: input.snapshotId, access: input })
     || getNativeSnapshot({ snapshotId: input.snapshotId, access: input }));
   if (!snapshotRow?.payload) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
+  const parsedSnapshot = ResearchSnapshotV1Schema.parse(snapshotRow.payload);
+  const snapshotEmail = text(parsedSnapshot.subject.email).toLowerCase();
+  const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
+  if (snapshotEmail && await isSuppressed(snapshotEmail, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
   const { snapshot, style, result: contextResult } = await createDraftContext({
     access: input,
     snapshotRow,
@@ -545,7 +590,6 @@ export async function createNativeDraft(input: NativeDraftAccess & {
     now,
   });
 
-  const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
   if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
   const identity = canonicalSha256({
     schemaVersion: 'native-draft/v2',
@@ -565,6 +609,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
       draft: existing,
       context,
       preflight: existing.preflight,
+      issues: [],
       generation: { provider: 'openai', model: 'persisted', promptVersion: 'native-draft/v2' },
     };
   }
@@ -616,7 +661,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
           context,
           code: 'openai_rewrite_failed',
           message: 'OpenAI no pudo corregir el borrador para cumplir los controles requeridos.',
-          errors: validation.issues.map((issue) => issue.message),
+          issues: validation.issues,
           now,
         });
       }
@@ -628,7 +673,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
         context,
         code: 'draft_preflight_failed',
         message: 'El borrador no cumple los controles de evidencia y calidad.',
-        errors: validation.issues.map((issue) => issue.message),
+        issues: validation.issues,
         now,
       });
     }
@@ -652,8 +697,8 @@ export async function createNativeDraft(input: NativeDraftAccess & {
         linkedinUrl: context.person.linkedinUrl,
       },
       content: {
-        subject: text(generated.subject),
-        text: normalizeNativeDraftBody(generated.body),
+        subject: text(generatedOutput.subject),
+        text: generatedOutput.body,
         html: null,
       },
       approval: { status: 'pending', decidedBy: null, decidedAt: null, reason: null },
@@ -694,6 +739,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
       draft: persisted,
       context,
       preflight: validation.preflight,
+      issues: [],
       generation: {
         provider: generated.provider,
         model: generated.model,
@@ -824,12 +870,12 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
     generatedOutput = outputForPreflight(context, generated);
     validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now });
   }
-  if (!validation.valid) throw new NativeDraftPreflightError(validation.preflight);
+  if (!validation.valid) throw new NativeDraftPreflightError(validation.preflight, validation.issues);
   if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
 
   const content: MessagingContentV1 = {
-    subject: text(generated.subject),
-    text: normalizeNativeDraftBody(generated.body),
+    subject: text(generatedOutput.subject),
+    text: generatedOutput.body,
     html: null,
     ...(input.draft.content.deliveryOptions ? { deliveryOptions: input.draft.content.deliveryOptions } : {}),
   };
@@ -902,7 +948,7 @@ export async function approveNativeDraft(input: NativeDraftAccess & {
     outputForPersistedDraft({ draft: current, context, metadata }),
     { existingContentFingerprints, now },
   );
-  if (!validation.valid) throw new NativeDraftPreflightError(validation.preflight);
+  if (!validation.valid) throw new NativeDraftPreflightError(validation.preflight, validation.issues);
 
   const warnings = unique([...(validation.preflight.warnings || []), ...(input.warnings || [])]).slice(0, 100);
   const { data, error } = await getSupabaseAdminClient().rpc('approve_messaging_draft_v1', {

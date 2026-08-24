@@ -6,14 +6,22 @@ import {
   buildDraftContextV2,
   createDefaultDraftWritingStyleV2,
   normalizeDraftSellerProfileV2,
+  requiredReportAwareDraftPersonalizationV2,
 } from './draft-context-v2';
 import {
   DRAFT_FIXTURE_NOW,
   draftSnapshotFixture,
 } from './draft-v2-test-fixtures';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
+import { buildDeterministicResearchReportDocumentV1 } from '@/ai/flows/synthesize-research-report';
+import { ResearchReportDocumentV1Schema, type ResearchReportDocumentV1 } from '@/lib/research-report-contracts';
 
-function build(input: { includeRole?: boolean; capturedAt?: string; overallConfidence?: number } = {}) {
+function build(input: {
+  includeRole?: boolean;
+  capturedAt?: string;
+  overallConfidence?: number;
+  reportDocument?: ResearchReportDocumentV1;
+} = {}) {
   const baseSnapshot = draftSnapshotFixture({ includeRole: input.includeRole });
   const snapshot = input.overallConfidence == null
     ? baseSnapshot
@@ -30,6 +38,7 @@ function build(input: { includeRole?: boolean; capturedAt?: string; overallConfi
       services: ['Automatización de operaciones'],
     }),
     style: createDefaultDraftWritingStyleV2(),
+    reportDocument: input.reportDocument,
     now: DRAFT_FIXTURE_NOW,
   });
 }
@@ -47,7 +56,7 @@ test('DraftContextV2 separates source-backed evidence from hypotheses and carrie
   assert.ok(result.context.evidence.some((evidence) => evidence.supportedFactClaimIds.includes('claim-acme-overview')));
   assert.deepEqual(result.context.hypotheses.map((hypothesis) => hypothesis.claimId), ['claim-acme-opportunity']);
   assert.equal(result.context.quality.minimumScore, MIN_DRAFT_QUALITY_SCORE);
-  assert.equal(result.context.quality.priority, 'B');
+  assert.equal(result.context.quality.priority, 'A');
   assert.equal(result.context.constraints.cta.maximumCount, 1);
 });
 
@@ -102,4 +111,56 @@ test('DraftContextV2 blocks a snapshot whose persisted artifact hash does not ma
   assert.equal(result.status, 'blocked');
   if (result.status !== 'blocked') return;
   assert.equal(result.reason, 'research_artifact_invalid');
+});
+
+test('validated report anchors take priority in canonical draft personalization', () => {
+  const snapshot = draftSnapshotFixture();
+  const deterministic = buildDeterministicResearchReportDocumentV1({
+    snapshot,
+    generatedAt: DRAFT_FIXTURE_NOW.toISOString(),
+  });
+  const personAnchor = deterministic.outreachBrief.factualAnchors.find((anchor) =>
+    anchor.citations.claimIds.includes('claim-ada-role'),
+  );
+  assert.ok(personAnchor);
+  const reportDocument = ResearchReportDocumentV1Schema.parse({
+    ...deterministic,
+    outreachBrief: {
+      ...deterministic.outreachBrief,
+      factualAnchors: [personAnchor],
+    },
+  });
+
+  const result = build({ reportDocument });
+
+  assert.equal(result.status, 'ready');
+  if (result.status !== 'ready') return;
+  assert.deepEqual(result.context.report?.outreachBrief.selectedFactualAnchorClaimIds, ['claim-ada-role']);
+  assert.deepEqual(result.context.report?.outreachBrief.selectedHypothesisIds, ['claim-acme-opportunity']);
+  assert.equal(result.context.report?.synthesis.method, 'fallback');
+  assert.equal(requiredReportAwareDraftPersonalizationV2(result.context)[0].claimId, 'claim-ada-role');
+});
+
+test('dangling report references are rejected before they can enter DraftContextV2', () => {
+  const snapshot = draftSnapshotFixture();
+  const deterministic = buildDeterministicResearchReportDocumentV1({
+    snapshot,
+    generatedAt: DRAFT_FIXTURE_NOW.toISOString(),
+  });
+  const firstAnchor = deterministic.outreachBrief.factualAnchors[0];
+  const dangling = {
+    ...deterministic,
+    outreachBrief: {
+      ...deterministic.outreachBrief,
+      factualAnchors: [{
+        ...firstAnchor,
+        citations: { ...firstAnchor.citations, claimIds: ['claim-does-not-exist'] },
+      }],
+    },
+  } as ResearchReportDocumentV1;
+
+  assert.throws(
+    () => build({ reportDocument: dangling }),
+    /references unknown claim claim-does-not-exist/,
+  );
 });

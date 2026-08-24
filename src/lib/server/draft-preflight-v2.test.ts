@@ -16,7 +16,7 @@ function validOutput(): GeneratedOutreachV2 {
     subject: 'Una idea para Acme',
     body: `Hola Ada,
 
-Vi que Acme publica un foco claro en reducir trabajo manual dentro de las operaciones. En Northstar ayudamos a equipos que quieren ordenar tareas repetitivas sin imponer cambios bruscos a su forma de trabajo.
+Acme publica que ayuda a equipos de operaciones a reducir trabajo manual. En Northstar ayudamos a equipos que quieren ordenar tareas repetitivas sin imponer cambios bruscos a su forma de trabajo.
 
 Por tu rol de Directora de Operaciones, pensé que podría ser útil compartir un ejemplo práctico de cómo detectar procesos que consumen tiempo y priorizar los primeros ajustes. La idea es entender el contexto de Acme antes de proponer cualquier alternativa concreta.
 
@@ -38,6 +38,56 @@ test('draft preflight passes an evidence-backed message with exactly one approve
   assert.equal(result.valid, true);
   assert.equal(result.preflight.status, 'passed');
   assert.equal(result.preflight.errors.length, 0);
+});
+
+test('draft preflight rejects provenance when only company terms and a paraphrase are visible', () => {
+  const context = draftContextFixture();
+  const output = validOutput();
+  const result = validateDraftPreflightV2(context, {
+    ...output,
+    body: output.body.replace(
+      'Acme publica que ayuda a equipos de operaciones a reducir trabajo manual.',
+      'Acme comunica un foco claro en reducir tareas manuales de operaciones.',
+    ),
+  }, { now: new Date('2026-08-22T12:00:00.000Z') });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some((issue) => issue.code === 'personalization_invalid'));
+});
+
+test('draft preflight accepts an arbitrary exact CTA without requiring a known CTA cue', () => {
+  const baseContext = draftContextFixture();
+  const exactText = 'Gracias por considerar esta propuesta para Acme.';
+  const context = {
+    ...baseContext,
+    constraints: {
+      ...baseContext.constraints,
+      cta: { ...baseContext.constraints.cta, exactText },
+    },
+  };
+  const output = validOutput();
+  const result = validateDraftPreflightV2(context, {
+    ...output,
+    body: output.body.replace(baseContext.constraints.cta.exactText, exactText),
+  }, { now: new Date('2026-08-22T12:00:00.000Z') });
+
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.issues, []);
+});
+
+test('draft preflight rejects CTA language and questions outside the one exact CTA', () => {
+  const context = draftContextFixture();
+  const output = validOutput();
+
+  for (const extra of ['Podemos conversar mañana.', '¿Hay algún detalle pendiente?']) {
+    const result = validateDraftPreflightV2(context, {
+      ...output,
+      body: `${output.body}\n\n${extra}`,
+    }, { now: new Date('2026-08-22T12:00:00.000Z') });
+
+    assert.equal(result.valid, false, extra);
+    assert.ok(result.issues.some((issue) => issue.code === 'cta_count'), extra);
+  }
 });
 
 test('draft preflight blocks unresolved placeholders, prohibited phrases, duplicate content, and bad provenance', () => {
@@ -80,7 +130,7 @@ test('draft preflight blocks duplicate sentences and unsupported hypothesis prov
   assert.ok(result.issues.some((issue) => issue.code === 'hypothesis_invalid'));
 });
 
-test('person-scoped factual provenance requires visible person context', () => {
+test('person-scoped provenance requires the full evidence statement, not person terms', () => {
   const baseContext = draftContextFixture();
   const context = {
     ...baseContext,
@@ -90,13 +140,8 @@ test('person-scoped factual provenance requires visible person context', () => {
   };
   const personalization = requiredDraftPersonalizationV2(context);
   const output = validOutput();
-  const withoutPersonContext = output.body.replace(
-    'Por tu rol de Directora de Operaciones,',
-    'Al revisar el contexto disponible,',
-  );
   const result = validateDraftPreflightV2(context, {
     ...output,
-    body: withoutPersonContext,
     personalization,
   }, { now: new Date('2026-08-22T12:00:00.000Z') });
 

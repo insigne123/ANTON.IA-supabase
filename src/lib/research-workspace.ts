@@ -1,6 +1,14 @@
 import type { NativeResearchStatus } from '@/lib/native-research-contracts';
 import { ResearchSnapshotV1Schema, type ResearchSnapshotV1 } from '@/lib/research-contracts';
 import {
+  ResearchReportDocumentV1Schema,
+  validateResearchReportDocumentCitationsV1,
+  type ResearchReportDocumentV1,
+  type ResearchReportFactualBlockV1,
+  type ResearchReportHypothesisBlockV1,
+  type ResearchReportSectionV1,
+} from '@/lib/research-report-contracts';
+import {
   isFreshResearchClaim,
   isGenericResearchText,
   isDraftablePersonFactClaim,
@@ -95,25 +103,62 @@ export type ResearchReportClaim = {
   classification: 'fact' | 'hypothesis';
   confidence: number;
   validUntil: string | null;
+  observedAt: string | null;
+  canonicalClaimIds: string[];
   evidence: ResearchReportEvidence[];
 };
 
 export type ResearchReportProfileField = {
   label: string;
   value: string;
+  href?: string;
+};
+
+export type ResearchReportCompanySections = {
+  overview: ResearchReportClaim[];
+  offerings: ResearchReportClaim[];
+  market: ResearchReportClaim[];
+  scale: ResearchReportClaim[];
+};
+
+export type ResearchReportGap = {
+  id: string;
+  section: ResearchReportSectionV1;
+  description: string;
+};
+
+export type ResearchReportContradiction = {
+  id: string;
+  summary: string;
+  status: 'unresolved' | 'resolved';
+  evidence: ResearchReportEvidence[];
 };
 
 export type ResearchReportView = {
+  executive: ResearchReportClaim[];
   person: {
     fields: ResearchReportProfileField[];
     facts: ResearchReportClaim[];
   };
   company: ResearchReportClaim[];
+  companyContext: ResearchReportProfileField[];
+  companySections: ResearchReportCompanySections;
   signals: ResearchReportClaim[];
   opportunities: ResearchReportClaim[];
+  gaps: ResearchReportGap[];
+  contradictions: ResearchReportContradiction[];
+  evidenceRecords: ResearchReportEvidence[];
   sources: ResearchReportEvidence[];
   updatedAt: string | null;
+  completeness: {
+    status: 'complete' | 'partial';
+    score: number;
+    coveredSections: ResearchReportSectionV1[];
+    missingSections: ResearchReportSectionV1[];
+  } | null;
   coverage: {
+    claims: number;
+    evidenceRecords: number;
     companyFacts: number;
     signals: number;
     sources: number;
@@ -127,6 +172,7 @@ export type ResearchReportView = {
 
 export type ResearchWorkspaceRunItem = {
   id: string;
+  reportId: string | null;
   position: number;
   leadRef: string;
   status: ResearchWorkspaceStatus;
@@ -150,6 +196,12 @@ export type ResearchWorkspaceRun = {
   failedCount: number;
   updatedAt: string | null;
   items: ResearchWorkspaceRunItem[];
+};
+
+export type ResearchReportDetail = {
+  reportId: string | null;
+  result: ResearchWorkspaceResult;
+  reportDocument: ResearchReportDocumentV1 | null;
 };
 
 export type ResearchReadiness =
@@ -333,6 +385,33 @@ export function researchWarningLabel(warning: string): string {
   return text(warning);
 }
 
+/** Turns structured draft preflight failures into concise, actionable product copy. */
+export function researchDraftErrorMessage(payload: unknown, fallback: string): string {
+  const root = record(payload);
+  const result = record(root.result);
+  const code = text(root.error || root.code || result.code).toLowerCase();
+  if (code.includes('auth')) return 'Tu sesión ya no está disponible. Vuelve a iniciar sesión e inténtalo nuevamente.';
+  if (code.includes('privacy') || code.includes('suppressed')) return 'No podemos continuar con este contacto por sus preferencias de privacidad.';
+  if (code.includes('in_progress')) return 'Ya estamos preparando este borrador. Espera un momento antes de volver a intentarlo.';
+
+  const rawIssues = list(root.issues).length > 0 ? list(root.issues) : list(result.issues);
+  const issues = rawIssues.map((issue) => {
+    if (typeof issue === 'string') return text(issue);
+    const value = record(issue);
+    return text(value.message || value.description);
+  }).filter((issue) => issue && issue.length <= 500);
+  if (issues.length > 0) {
+    const remaining = issues.length - 1;
+    if (remaining === 0) return issues[0];
+    return `${issues[0]} ${remaining === 1 ? 'Hay 1 punto más por revisar.' : `Hay ${remaining} puntos más por revisar.`}`;
+  }
+
+  if (code.includes('setup') || code.includes('metadata')) return 'No pudimos preparar el borrador todavía. Inténtalo nuevamente en unos minutos.';
+  if (code.includes('quota')) return 'Alcanzaste el límite disponible para preparar borradores por ahora. Inténtalo más tarde.';
+  const message = text(root.message || result.message);
+  return message && message.length <= 300 ? message : fallback;
+}
+
 export function safeResearchSourceUrl(value: unknown): string | null {
   const candidate = text(value);
   if (!candidate) return null;
@@ -367,13 +446,37 @@ function withFinalPeriod(value: string): string {
   return /[.!?…]$/.test(value) ? value : `${value}.`;
 }
 
-function profileFieldsFor(lead: ResearchWorkspaceResult['lead']): ResearchReportProfileField[] {
+function profileFieldsFor(
+  lead: ResearchWorkspaceResult['lead'],
+  importedContext?: ResearchReportDocumentV1['person']['importedContext'],
+): ResearchReportProfileField[] {
+  const person = importedContext || {
+    fullName: lead.fullName,
+    title: lead.title,
+    linkedinUrl: lead.linkedinUrl,
+    city: lead.city,
+    country: lead.country,
+  };
+  const fields: Array<ResearchReportProfileField | null> = [
+    text(person.fullName) ? { label: 'Nombre', value: text(person.fullName) } : null,
+    text(person.title) ? { label: 'Cargo', value: text(person.title) } : null,
+    !importedContext && text(lead.headline) ? { label: 'Titular profesional', value: text(lead.headline) } : null,
+    !importedContext && text(lead.seniority) ? { label: 'Seniority', value: text(lead.seniority) } : null,
+    !importedContext && Array.isArray(lead.departments) && lead.departments.some(Boolean)
+      ? { label: 'Área', value: lead.departments.filter(Boolean).join(', ') }
+      : null,
+    [person.city, person.country].filter(Boolean).length > 0
+      ? { label: 'Ubicación', value: [person.city, person.country].filter(Boolean).join(', ') }
+      : null,
+    safeResearchSourceUrl(person.linkedinUrl)
+      ? { label: 'Perfil importado', value: 'LinkedIn', href: safeResearchSourceUrl(person.linkedinUrl)! }
+      : null,
+  ];
+  return fields.filter((field): field is ResearchReportProfileField => Boolean(field));
+}
+
+function companyContextFieldsFor(lead: ResearchWorkspaceResult['lead']): ResearchReportProfileField[] {
   const fields: Array<[string, unknown]> = [
-    ['Cargo', lead.title],
-    ['Titular profesional', lead.headline],
-    ['Seniority', lead.seniority],
-    ['Área', Array.isArray(lead.departments) ? lead.departments.join(', ') : null],
-    ['Ubicación', [lead.city, lead.country].filter(Boolean).join(', ')],
     ['Industria', lead.organizationIndustry],
     ['Tamaño de empresa', lead.organizationSize ? `${lead.organizationSize.toLocaleString('es-CL')} personas` : null],
   ];
@@ -390,7 +493,7 @@ function reportEvidenceFromSnapshot(
   const evidence = snapshot.evidence.find((item) => item.id === evidenceId);
   if (!evidence) return null;
   const source = snapshot.sources.find((item) => item.id === evidence.sourceId);
-  const sourceUrl = safeResearchSourceUrl(source?.url);
+  const sourceUrl = safeResearchSourceUrl(source?.canonicalUrl || source?.url);
   if (!source || !sourceUrl) return null;
   return {
     id: evidence.id,
@@ -445,10 +548,184 @@ function uniqueReportSources(values: ResearchReportEvidence[]) {
   });
 }
 
+function emptyCompanySections(): ResearchReportCompanySections {
+  return { overview: [], offerings: [], market: [], scale: [] };
+}
+
+function reportClaimFromSnapshot(
+  snapshot: ResearchSnapshotV1,
+  claim: ResearchSnapshotV1['claims'][number],
+  options: {
+    id?: string;
+    statement?: string;
+    evidenceIds?: string[];
+    observedAt?: string | null;
+  } = {},
+): ResearchReportClaim | null {
+  const evidence = uniqueReportEvidence((options.evidenceIds || claim.supportingEvidenceIds).flatMap((evidenceId) => {
+    const item = reportEvidenceFromSnapshot(snapshot, evidenceId);
+    return item ? [item] : [];
+  }));
+  if (evidence.length === 0) return null;
+  return {
+    id: options.id || claim.id,
+    kind: claim.kind,
+    statement: text(options.statement ?? claim.statement),
+    classification: claim.classification,
+    confidence: claim.confidence,
+    validUntil: nullableText(claim.freshness.validUntil),
+    observedAt: nullableText(options.observedAt),
+    canonicalClaimIds: [claim.id],
+    evidence,
+  };
+}
+
+function reportClaimFromDocumentBlock(
+  snapshot: ResearchSnapshotV1,
+  block: ResearchReportFactualBlockV1 | ResearchReportHypothesisBlockV1,
+  observedAt: string | null = null,
+): ResearchReportClaim | null {
+  const claims = block.citations.claimIds.flatMap((claimId) => {
+    const claim = snapshot.claims.find((item) => item.id === claimId);
+    return claim ? [claim] : [];
+  });
+  const evidence = uniqueReportEvidence(block.citations.evidenceIds.flatMap((evidenceId) => {
+    const item = reportEvidenceFromSnapshot(snapshot, evidenceId);
+    return item ? [item] : [];
+  }));
+  if (claims.length === 0 || evidence.length === 0) return null;
+  const validUntil = claims.map((claim) => nullableText(claim.freshness.validUntil)).filter((value): value is string => Boolean(value)).sort()[0] || null;
+  return {
+    id: block.id,
+    kind: claims[0].kind,
+    statement: text(block.statement),
+    classification: block.classification,
+    confidence: Math.min(...claims.map((claim) => claim.confidence)),
+    validUntil,
+    observedAt: nullableText(observedAt),
+    canonicalClaimIds: claims.map((claim) => claim.id),
+    evidence,
+  };
+}
+
+function reportCoverage(input: {
+  claims: ResearchReportClaim[];
+  additionalEvidence?: ResearchReportEvidence[];
+  companyFacts: number;
+  signals: number;
+  profileFields: number;
+}) {
+  const claimIds = new Set<string>();
+  input.claims.forEach((claim) => {
+    const ids = claim.canonicalClaimIds.length > 0 ? claim.canonicalClaimIds : [claim.id];
+    ids.forEach((id) => claimIds.add(id));
+  });
+  const evidenceRecords = uniqueReportEvidence([
+    ...input.claims.flatMap((claim) => claim.evidence),
+    ...(input.additionalEvidence || []),
+  ]);
+  const sources = uniqueReportSources(evidenceRecords);
+  return {
+    evidenceRecords,
+    sources,
+    coverage: {
+      claims: claimIds.size,
+      evidenceRecords: evidenceRecords.length,
+      companyFacts: input.companyFacts,
+      signals: input.signals,
+      sources: sources.length,
+      profileFields: input.profileFields,
+    },
+  };
+}
+
 /** Projects the immutable snapshot into a readable report without filling gaps with generated prose. */
-export function buildResearchReport(result: ResearchWorkspaceResult): ResearchReportView {
-  const profileFields = profileFieldsFor(result.lead);
+export function buildResearchReport(
+  result: ResearchWorkspaceResult,
+  reportDocument?: ResearchReportDocumentV1 | null,
+): ResearchReportView {
   const snapshot = result.snapshot;
+  const companyContext = companyContextFieldsFor(result.lead);
+
+  if (snapshot && reportDocument) {
+    const executive = reportDocument.executiveSummary.facts.flatMap((block) => {
+      const claim = reportClaimFromDocumentBlock(snapshot, block);
+      return claim ? [claim] : [];
+    });
+    const personFacts = reportDocument.person.verifiedFacts.flatMap((block) => {
+      const claim = reportClaimFromDocumentBlock(snapshot, block);
+      return claim ? [claim] : [];
+    });
+    const companySections: ResearchReportCompanySections = {
+      overview: reportDocument.company.overview.flatMap((block) => {
+        const claim = reportClaimFromDocumentBlock(snapshot, block);
+        return claim ? [claim] : [];
+      }),
+      offerings: reportDocument.company.offerings.flatMap((block) => {
+        const claim = reportClaimFromDocumentBlock(snapshot, block);
+        return claim ? [claim] : [];
+      }),
+      market: reportDocument.company.market.flatMap((block) => {
+        const claim = reportClaimFromDocumentBlock(snapshot, block);
+        return claim ? [claim] : [];
+      }),
+      scale: reportDocument.company.scale.flatMap((block) => {
+        const claim = reportClaimFromDocumentBlock(snapshot, block);
+        return claim ? [claim] : [];
+      }),
+    };
+    const company = [
+      ...companySections.overview,
+      ...companySections.offerings,
+      ...companySections.market,
+      ...companySections.scale,
+    ];
+    const signals = reportDocument.signals.flatMap((block) => {
+      const claim = reportClaimFromDocumentBlock(snapshot, block, block.observedAt);
+      return claim ? [claim] : [];
+    });
+    const opportunities = reportDocument.commercialHypotheses.flatMap((block) => {
+      const claim = reportClaimFromDocumentBlock(snapshot, block);
+      return claim ? [claim] : [];
+    });
+    const contradictions = reportDocument.contradictions.map((item) => ({
+      id: item.id,
+      summary: item.summary,
+      status: item.status,
+      evidence: uniqueReportEvidence(item.citations.evidenceIds.flatMap((evidenceId) => {
+        const evidence = reportEvidenceFromSnapshot(snapshot, evidenceId);
+        return evidence ? [evidence] : [];
+      })),
+    }));
+    const visibleClaims = [...executive, ...personFacts, ...company, ...signals, ...opportunities];
+    const metrics = reportCoverage({
+      claims: visibleClaims,
+      additionalEvidence: contradictions.flatMap((item) => item.evidence),
+      companyFacts: company.length,
+      signals: signals.length,
+      profileFields: profileFieldsFor(result.lead, reportDocument.person.importedContext).length,
+    });
+    const profileFields = profileFieldsFor(result.lead, reportDocument.person.importedContext);
+    return {
+      executive,
+      person: { fields: profileFields, facts: personFacts },
+      company,
+      companyContext,
+      companySections,
+      signals,
+      opportunities,
+      gaps: reportDocument.gaps,
+      contradictions,
+      evidenceRecords: metrics.evidenceRecords,
+      sources: metrics.sources,
+      updatedAt: nullableText(reportDocument.synthesis.generatedAt),
+      completeness: reportDocument.completeness,
+      coverage: metrics.coverage,
+      missing: { company: company.length === 0, person: profileFields.length === 0 && personFacts.length === 0 },
+    };
+  }
+
+  const profileFields = profileFieldsFor(result.lead);
   if (!snapshot) {
     const companyEvidence = fallbackReportEvidence(result, 'fact');
     const signals = fallbackReportEvidence(result, 'signal');
@@ -459,6 +736,8 @@ export function buildResearchReport(result: ResearchWorkspaceResult): ResearchRe
       classification: 'fact' as const,
       confidence: evidence.confidence ?? 0.6,
       validUntil: null,
+      observedAt: null,
+      canonicalClaimIds: [`fact-${evidence.id}`],
       evidence: [evidence],
     }));
     const signalClaims = signals.slice(0, 4).map((evidence) => ({
@@ -468,31 +747,43 @@ export function buildResearchReport(result: ResearchWorkspaceResult): ResearchRe
       classification: 'fact' as const,
       confidence: evidence.confidence ?? 0.6,
       validUntil: null,
+      observedAt: evidence.publishedAt || evidence.retrievedAt,
+      canonicalClaimIds: [`signal-${evidence.id}`],
       evidence: [evidence],
     }));
+    const companySections = { ...emptyCompanySections(), overview: company };
+    const executive = [...company.slice(0, 2), ...signalClaims.slice(0, 1)];
+    const metrics = reportCoverage({
+      claims: [...executive, ...company, ...signalClaims],
+      companyFacts: company.length,
+      signals: signalClaims.length,
+      profileFields: profileFields.length,
+    });
     return {
+      executive,
       person: { fields: profileFields, facts: [] },
       company,
+      companyContext,
+      companySections,
       signals: signalClaims,
       opportunities: [],
-      sources: uniqueReportSources([...companyEvidence, ...signals]),
+      gaps: [],
+      contradictions: [],
+      evidenceRecords: metrics.evidenceRecords,
+      sources: metrics.sources,
       updatedAt: null,
-      coverage: { companyFacts: company.length, signals: signalClaims.length, sources: companyEvidence.length + signals.length, profileFields: profileFields.length },
+      completeness: null,
+      coverage: metrics.coverage,
       missing: { company: company.length === 0, person: profileFields.length === 0 },
     };
   }
 
   const sourceById = new Map(snapshot.sources.map((source) => [source.id, source]));
   const evidenceById = new Map(snapshot.evidence.map((evidence) => [evidence.id, evidence]));
-  const claimEvidence = (claim: ResearchSnapshotV1['claims'][number]) => uniqueReportEvidence(
-    claim.supportingEvidenceIds.flatMap((evidenceId) => {
-      const item = reportEvidenceFromSnapshot(snapshot, evidenceId);
-      return item ? [item] : [];
-    }),
-  );
   const companyClaims = snapshot.claims.flatMap((claim) => {
     if (claim.classification !== 'fact' || claim.subjectScope !== 'company' || !isFreshResearchClaim(claim, Date.now())) return [];
-    const claimEvidenceItems = claimEvidence(claim);
+    if (['news_signal', 'hiring_signal', 'technology_signal', 'site_signal'].includes(claim.kind)) return [];
+    const projected = reportClaimFromSnapshot(snapshot, claim);
     const supported = claim.supportingEvidenceIds.some((evidenceId) => {
       const evidence = evidenceById.get(evidenceId);
       return Boolean(evidence && isQualifiedResearchFactEvidence({
@@ -502,32 +793,20 @@ export function buildResearchReport(result: ResearchWorkspaceResult): ResearchRe
         companyDomain: snapshot.subject.company.domain,
       }));
     });
-    return supported && claimEvidenceItems.length > 0 ? [{
-      id: claim.id,
-      kind: claim.kind,
-      statement: text(claim.statement),
-      classification: claim.classification,
-      confidence: claim.confidence,
-      validUntil: nullableText(claim.freshness.validUntil),
-      evidence: claimEvidenceItems,
-    }] : [];
+    return supported && projected ? [projected] : [];
   });
   const personClaims = snapshot.claims.flatMap((claim) => {
     if (!isDraftablePersonFactClaim({ snapshot, claim, nowMs: Date.now() })) return [];
-    const claimEvidenceItems = claimEvidence(claim);
-    return claimEvidenceItems.length > 0 ? [{
-      id: claim.id,
-      kind: claim.kind,
-      statement: text(claim.statement),
-      classification: claim.classification,
-      confidence: claim.confidence,
-      validUntil: nullableText(claim.freshness.validUntil),
-      evidence: claimEvidenceItems,
-    }] : [];
+    const projected = reportClaimFromSnapshot(snapshot, claim);
+    return projected ? [projected] : [];
   });
   const signals = snapshot.claims.flatMap((claim) => {
-    if (!['news_signal', 'hiring_signal', 'technology_signal', 'site_signal'].includes(claim.kind)) return [];
-    const claimEvidenceItems = claimEvidence(claim);
+    if (claim.classification !== 'fact' || !['news_signal', 'hiring_signal', 'technology_signal', 'site_signal'].includes(claim.kind)) return [];
+    const firstEvidence = claim.supportingEvidenceIds.map((evidenceId) => evidenceById.get(evidenceId)).find(Boolean);
+    const firstSource = firstEvidence ? sourceById.get(firstEvidence.sourceId) : undefined;
+    const projected = reportClaimFromSnapshot(snapshot, claim, {
+      observedAt: firstEvidence?.observedAt || firstSource?.publishedAt || firstSource?.retrievedAt || null,
+    });
     const supported = claim.supportingEvidenceIds.some((evidenceId) => {
       const evidence = evidenceById.get(evidenceId);
       return Boolean(evidence && isRelevantResearchSignal({
@@ -537,19 +816,11 @@ export function buildResearchReport(result: ResearchWorkspaceResult): ResearchRe
         companyDomain: snapshot.subject.company.domain,
       }));
     });
-    return supported && claimEvidenceItems.length > 0 ? [{
-      id: claim.id,
-      kind: claim.kind,
-      statement: text(claim.statement),
-      classification: claim.classification,
-      confidence: claim.confidence,
-      validUntil: nullableText(claim.freshness.validUntil),
-      evidence: claimEvidenceItems,
-    }] : [];
+    return supported && projected ? [projected] : [];
   });
   const opportunities = snapshot.claims.flatMap((claim) => {
-    if (claim.kind !== 'opportunity_hypothesis' || claim.classification !== 'hypothesis' || !isFreshResearchClaim(claim, Date.now())) return [];
-    const claimEvidenceItems = claimEvidence(claim);
+    if (claim.classification !== 'hypothesis' || !isFreshResearchClaim(claim, Date.now())) return [];
+    const projected = reportClaimFromSnapshot(snapshot, claim);
     const supported = claim.supportingEvidenceIds.some((evidenceId) => {
       const evidence = evidenceById.get(evidenceId);
       const source = evidence ? sourceById.get(evidence.sourceId) : undefined;
@@ -567,36 +838,51 @@ export function buildResearchReport(result: ResearchWorkspaceResult): ResearchRe
         })
       ));
     });
-    return supported && claimEvidenceItems.length > 0 ? [{
-      id: claim.id,
-      kind: claim.kind,
-      statement: text(claim.statement),
-      classification: claim.classification,
-      confidence: claim.confidence,
-      validUntil: nullableText(claim.freshness.validUntil),
-      evidence: claimEvidenceItems,
-    }] : [];
+    return supported && projected ? [projected] : [];
   });
-  const sources = uniqueReportSources([
-    ...companyClaims.flatMap((claim) => claim.evidence),
-    ...personClaims.flatMap((claim) => claim.evidence),
-    ...signals.flatMap((claim) => claim.evidence),
-    ...opportunities.flatMap((claim) => claim.evidence),
-  ]);
+  const companySections: ResearchReportCompanySections = {
+    overview: companyClaims.filter((claim) => ['company_overview', 'company_identity', 'company_priority'].includes(claim.kind)),
+    offerings: companyClaims.filter((claim) => claim.kind === 'company_service'),
+    market: companyClaims.filter((claim) => claim.kind === 'company_industry'),
+    scale: companyClaims.filter((claim) => claim.kind === 'company_size'),
+  };
+  const executive = [
+    ...personClaims.slice(0, 1),
+    ...companySections.overview.slice(0, 2),
+    ...signals.slice(0, 1),
+  ];
+  const contradictions = snapshot.contradictions.map((item) => ({
+    id: item.id,
+    summary: item.summary,
+    status: item.status,
+    evidence: uniqueReportEvidence(item.evidenceIds.flatMap((evidenceId) => {
+      const evidence = reportEvidenceFromSnapshot(snapshot, evidenceId);
+      return evidence ? [evidence] : [];
+    })),
+  }));
+  const metrics = reportCoverage({
+    claims: [...executive, ...personClaims, ...companyClaims, ...signals, ...opportunities],
+    additionalEvidence: contradictions.flatMap((item) => item.evidence),
+    companyFacts: companyClaims.length,
+    signals: signals.length,
+    profileFields: profileFields.length,
+  });
 
   return {
+    executive,
     person: { fields: profileFields, facts: personClaims },
     company: companyClaims,
+    companyContext,
+    companySections,
     signals,
     opportunities,
-    sources,
+    gaps: [],
+    contradictions,
+    evidenceRecords: metrics.evidenceRecords,
+    sources: metrics.sources,
     updatedAt: nullableText(snapshot.updatedAt),
-    coverage: {
-      companyFacts: companyClaims.length,
-      signals: signals.length,
-      sources: sources.length,
-      profileFields: profileFields.length,
-    },
+    completeness: null,
+    coverage: metrics.coverage,
     missing: { company: companyClaims.length === 0, person: profileFields.length === 0 && personClaims.length === 0 },
   };
 }
@@ -761,6 +1047,45 @@ function normalizeResult(value: unknown): ResearchWorkspaceResult | null {
   };
 }
 
+/** Parses the tenant-scoped detail response and validates document citations against its snapshot. */
+export function parseResearchReportDetail(
+  payload: unknown,
+  fallbackResult?: ResearchWorkspaceResult | null,
+): ResearchReportDetail | null {
+  const root = record(payload);
+  const rawResult = record(root.result);
+  const parsedSnapshot = ResearchSnapshotV1Schema.safeParse(root.snapshot);
+  const normalized = normalizeResult({
+    ...rawResult,
+    status: rawResult.status ?? root.status,
+    researchSnapshotId: rawResult.researchSnapshotId ?? root.researchSnapshotId ?? root.research_snapshot_id,
+    ...(parsedSnapshot.success ? { snapshot: parsedSnapshot.data } : {}),
+  });
+  const result = normalized || (fallbackResult
+    ? { ...fallbackResult, ...(parsedSnapshot.success ? { snapshot: parsedSnapshot.data } : {}) }
+    : null);
+  if (!result) return null;
+
+  const rawDocument = root.reportDocument ?? root.report_document;
+  let reportDocument: ResearchReportDocumentV1 | null = null;
+  if (rawDocument != null) {
+    if (!parsedSnapshot.success) return null;
+    const parsedDocument = ResearchReportDocumentV1Schema.safeParse(rawDocument);
+    if (!parsedDocument.success) return null;
+    try {
+      reportDocument = validateResearchReportDocumentCitationsV1(parsedDocument.data, parsedSnapshot.data);
+    } catch {
+      return null;
+    }
+  }
+
+  return {
+    reportId: nullableText(root.reportId ?? root.report_id),
+    result,
+    reportDocument,
+  };
+}
+
 function fallbackLead(leadRef: string, position: number): ResearchWorkspaceLead {
   return {
     key: leadRef || `research-item-${position}`,
@@ -829,8 +1154,8 @@ function normalizeRunItem(rawValue: unknown, fallbackPosition: number, leads: Re
       ?? result?.researchSnapshotId,
   );
   const report = result ? buildResearchReport(result) : null;
-  const evidenceCount = report?.sources.length ?? result?.evidence.length ?? 0;
-  const sourceCount = report?.sources.length ?? result?.sources.length ?? 0;
+  const evidenceCount = report?.coverage.evidenceRecords ?? result?.evidence.length ?? 0;
+  const sourceCount = report?.coverage.sources ?? result?.sources.length ?? 0;
   const readiness = researchReadinessFor({
     status,
     lead,
@@ -841,7 +1166,8 @@ function normalizeRunItem(rawValue: unknown, fallbackPosition: number, leads: Re
   });
 
   return {
-    id: nullableText(raw.id ?? raw.job_id ?? job.id) || `research-item-${position}`,
+    id: nullableText(raw.id ?? raw.job_id ?? raw.jobId ?? job.id) || `research-item-${position}`,
+    reportId: nullableText(raw.report_id ?? raw.reportId ?? job.provider_report_id ?? job.providerReportId),
     position,
     leadRef: leadRef || lead.key,
     status,

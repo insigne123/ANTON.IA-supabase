@@ -50,7 +50,12 @@ import {
   releaseCompanyResearchArtifactClaim,
 } from '@/lib/server/company-research-artifacts';
 import { getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
+import { collectPublicPersonEvidence, type PublicPersonEvidenceResult } from '@/lib/server/native-person-research';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
+import {
+  ensureResearchReportDocument,
+  researchReportDocumentMetadata,
+} from '@/lib/server/research-report-documents';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import {
   researchBrand,
@@ -867,6 +872,7 @@ function buildSnapshot(input: {
   news: Record<string, any>;
   jobs: Record<string, any>;
   mentions: Record<string, any>;
+  person: PublicPersonEvidenceResult;
   warnings: string[];
 }): NativeResearchPipelineOutput {
   const now = new Date().toISOString();
@@ -972,6 +978,7 @@ function buildSnapshot(input: {
     : input.company.official ? [input.company.official] : [];
   const companyUrl = safeSourceUrl(officialPages[0]?.url, domain);
   const companyFactEvidence: ResearchEvidenceV1[] = [];
+  const personFactEvidence: ResearchEvidenceV1[] = [];
 
   for (const page of officialPages) {
     const content = usefulOfficialPageContent(page);
@@ -1067,6 +1074,42 @@ function buildSnapshot(input: {
     });
   }
 
+  for (const item of input.person.items) {
+    const link = validHttpUrl(item.link);
+    const statement = conciseSourceStatement(`${text(item.title) || input.lead.fullName}${text(item.snippet) ? `: ${text(item.snippet)}` : ''}`);
+    if (!link || !statement || isGenericResearchText(statement)) continue;
+    const source = addSource({
+      url: link,
+      type: new URL(link).hostname.toLowerCase().endsWith('linkedin.com') ? 'linkedin' : 'search_result',
+      title: item.title || input.lead.fullName || 'Perfil publico',
+      publisher: item.source,
+      provider: input.person.provider,
+      reliability: 0.74,
+      retrievedAt: input.person.fetchedAt,
+      publishedAt: item.date,
+    });
+    const itemEvidence = addEvidence({
+      statement,
+      source,
+      kind: 'fact',
+      subjectScope: 'person',
+      confidence: 0.74,
+      locator: { kind: 'search_snippet', value: 'strict_identity_match' },
+      extractedAt: input.person.fetchedAt,
+      observedAt: item.date,
+      extractionMethod: 'rule',
+    });
+    if (!itemEvidence) continue;
+    personFactEvidence.push(itemEvidence);
+    addClaim({
+      kind: input.lead.title ? 'lead_role' : 'lead_profile',
+      statement,
+      supportingEvidenceIds: [itemEvidence.id],
+      confidence: itemEvidence.confidence,
+      asOf: input.person.fetchedAt,
+    });
+  }
+
   const searchEvidence: Array<{ evidence: ResearchEvidenceV1; source: ResearchSourceV1; kind: 'news' | 'jobs' | 'mentions' }> = [];
   for (const kind of ['news', 'jobs', 'mentions'] as const) {
     const payload = kind === 'news' ? input.news : kind === 'jobs' ? input.jobs : input.mentions;
@@ -1144,17 +1187,11 @@ function buildSnapshot(input: {
     companyName,
     companyDomain: domain,
   }));
-  const profileFields = [
-    input.lead.title,
-    input.lead.headline,
-    input.lead.seniority,
-    ...(input.lead.departments || []),
-    input.lead.city,
-    input.lead.country,
-  ].filter((value) => Boolean(text(value)));
   const reportWarnings = [...new Set(input.warnings)];
   if (companyFactEvidence.length === 0) reportWarnings.push('company_context_missing');
-  if (profileFields.length === 0) reportWarnings.push('person_context_missing');
+  if (input.lead.fullName && personFactEvidence.length === 0 && !reportWarnings.includes('person_public_evidence_missing')) {
+    reportWarnings.push('person_public_evidence_missing');
+  }
 
   const hasUsefulClaim = claims.length > 0;
   const status: NativeResearchStatus = companyFactEvidence.length > 0 && reportWarnings.length === 0
@@ -1168,9 +1205,9 @@ function buildSnapshot(input: {
   }));
   if (status === 'insufficient_data') lifecycleErrors.push(createError({ code: 'insufficient_evidence', stage: 'validate', message: 'No se obtuvo contexto público suficiente para explicar esta empresa.', retryable: true }));
 
-  const qualifiedEvidence = [...companyFactEvidence, ...qualifiedSignals.map((item) => item.evidence)];
+  const qualifiedEvidence = [...companyFactEvidence, ...personFactEvidence, ...qualifiedSignals.map((item) => item.evidence)];
   const companyCoverage = Math.min(1, companyFactEvidence.length / 2);
-  const personCoverage = Math.min(1, profileFields.length / 3);
+  const personCoverage = Math.min(1, personFactEvidence.length / 2);
   const recentSignalCount = qualifiedSignals.filter((item) => Boolean(item.source.publishedAt)).length;
   const recentCoverage = Math.min(1, recentSignalCount / 2);
   const overallConfidence = Math.max(0, Math.min(1, 0.2 + companyCoverage * 0.55 + personCoverage * 0.1 + recentCoverage * 0.15));
@@ -1180,7 +1217,7 @@ function buildSnapshot(input: {
     status,
     companyIdentityPresent: Boolean(domain || input.lead.companyName),
     emailPresent: Boolean(input.lead.email),
-    leadRolePresent: Boolean(input.lead.title),
+    leadRolePresent: claims.some((claim) => claim.kind === 'lead_role' && claim.classification === 'fact'),
     evidenceCount: qualifiedEvidence.length,
     verifiedSourceCount,
     companyFactCount: companyFactEvidence.length,
@@ -1609,36 +1646,45 @@ export async function listNativeResearchLeadStatuses(input: {
   return Array.from(latestByLeadId.values());
 }
 
+async function persistNativeSnapshotRow(input: {
+  job: NativeResearchJob;
+  snapshot: ResearchSnapshotV1;
+}) {
+  const admin = getSupabaseAdminClient();
+  const contentHash = hash(input.snapshot);
+  const { error: insertError } = await admin.from('research_snapshots').upsert({
+    id: input.snapshot.id,
+    scope_key: input.job.organizationId,
+    organization_id: input.job.organizationId,
+    user_id: input.job.userId,
+    lead_ref: input.snapshot.subject.leadRef,
+    source: NATIVE_PROVIDER,
+    schema_version: 1,
+    payload: input.snapshot,
+    content_hash: contentHash,
+    captured_at: input.snapshot.createdAt,
+    created_at: input.snapshot.createdAt,
+  }, { onConflict: 'id', ignoreDuplicates: true });
+  if (insertError) throw insertError;
+  const { data: owned, error: ownedError } = await admin
+    .from('research_snapshots')
+    .select('id,content_hash')
+    .eq('id', input.snapshot.id)
+    .eq('organization_id', input.job.organizationId)
+    .eq('user_id', input.job.userId)
+    .maybeSingle();
+  if (ownedError) throw ownedError;
+  if (!owned || owned.content_hash !== contentHash) throw new Error('NATIVE_RESEARCH_SNAPSHOT_CONFLICT');
+  return input.snapshot.id;
+}
+
 async function persistNativeSnapshot(input: {
   job: NativeResearchJob;
   output: NativeResearchPipelineOutput;
 }) {
   const admin = getSupabaseAdminClient();
   const serialized = canonicalJson(input.output.snapshot);
-  const contentHash = hash(input.output.snapshot);
-  const { error: insertError } = await admin.from('research_snapshots').upsert({
-    id: input.output.snapshot.id,
-    scope_key: input.job.organizationId,
-    organization_id: input.job.organizationId,
-    user_id: input.job.userId,
-    lead_ref: input.output.snapshot.subject.leadRef,
-    source: NATIVE_PROVIDER,
-    schema_version: 1,
-    payload: input.output.snapshot,
-    content_hash: contentHash,
-    captured_at: input.output.snapshot.createdAt,
-    created_at: input.output.snapshot.createdAt,
-  }, { onConflict: 'id', ignoreDuplicates: true });
-  if (insertError) throw insertError;
-  const { data: owned, error: ownedError } = await admin
-    .from('research_snapshots')
-    .select('id,content_hash')
-    .eq('id', input.output.snapshot.id)
-    .eq('organization_id', input.job.organizationId)
-    .eq('user_id', input.job.userId)
-    .maybeSingle();
-  if (ownedError) throw ownedError;
-  if (!owned || owned.content_hash !== contentHash) throw new Error('NATIVE_RESEARCH_SNAPSHOT_CONFLICT');
+  await persistNativeSnapshotRow({ job: input.job, snapshot: input.output.snapshot });
 
   const resultPayload = {
     ...input.output.result,
@@ -1664,6 +1710,21 @@ async function persistNativeSnapshot(input: {
     .is('research_snapshot_id', null);
   if (jobError) throw jobError;
   return input.output.snapshot.id;
+}
+
+async function ensureNativeResearchReport(job: NativeResearchJob, snapshot: ResearchSnapshotV1) {
+  const access = { organizationId: job.organizationId, userId: job.userId };
+  return ensureResearchReportDocument({ snapshot, access });
+}
+
+function attachReportSynthesis(result: NativeResearchResult, report: Awaited<ReturnType<typeof ensureNativeResearchReport>>) {
+  const metadata = researchReportDocumentMetadata(report);
+  result.reportSynthesis = {
+    status: metadata.status,
+    generationMethod: metadata.generationMethod,
+    retryable: metadata.retryable,
+    errorCode: metadata.errorCode,
+  };
 }
 
 export async function settleNativeResearchRunItems(input: {
@@ -1761,11 +1822,13 @@ async function processJob(job: NativeResearchJob) {
     return false;
   }
   const recoveringTerminalResult = claim.job.requestClaimState === 'terminal_pending';
+  let terminalCheckpointStored = recoveringTerminalResult;
   try {
     if (recoveringTerminalResult) {
       const durableSnapshot = ResearchSnapshotV1Schema.parse(object(claim.job.resultPayload?.snapshot));
       const durableResult = { ...object(claim.job.resultPayload) };
       delete durableResult.snapshot;
+      const recoveredResult = durableResult as NativeResearchResult;
       const recoveredJob: NativeResearchJob = {
         ...job,
         providerReportId: claim.job.providerReportId || job.providerReportId,
@@ -1777,9 +1840,16 @@ async function processJob(job: NativeResearchJob) {
         errorCode: claim.job.errorCode,
         errorMessage: claim.job.errorMessage,
       };
+      await persistNativeSnapshotRow({ job: recoveredJob, snapshot: durableSnapshot });
+      const report = await ensureNativeResearchReport(recoveredJob, durableSnapshot);
+      attachReportSynthesis(recoveredResult, report);
+      if (await isNativeResearchSuppressed(recoveredJob)) {
+        await settleSuppressedNativeResearchJob({ job: recoveredJob, access, claimToken: claim.claimToken });
+        return false;
+      }
       const snapshotId = await persistNativeSnapshot({
         job: recoveredJob,
-        output: { snapshot: durableSnapshot, result: durableResult as NativeResearchResult },
+        output: { snapshot: durableSnapshot, result: recoveredResult },
       });
       await completeLeadResearchRequestClaim({
         ...owned,
@@ -1848,7 +1918,10 @@ async function processJob(job: NativeResearchJob) {
       });
       return false;
     }
-    const search = await collectSearchSignals({ organizationId: job.organizationId, lead, options });
+    const [search, person] = await Promise.all([
+      collectSearchSignals({ organizationId: job.organizationId, lead, options }),
+      collectPublicPersonEvidence({ organizationId: job.organizationId, lead, options }),
+    ]);
     if (await isNativeResearchSuppressed(job)) {
       await settleSuppressedNativeResearchJob({ job, access, claimToken: claim.claimToken });
       return false;
@@ -1864,7 +1937,8 @@ async function processJob(job: NativeResearchJob) {
       news: search.news,
       jobs: search.jobs,
       mentions: search.mentions,
-      warnings: [...company.warnings, ...search.warnings],
+      person,
+      warnings: [...company.warnings, ...search.warnings, ...person.warnings],
     });
     output.result.companyResearchCache = {
       hit: company.cacheHit,
@@ -1873,6 +1947,11 @@ async function processJob(job: NativeResearchJob) {
       artifactId: company.artifactId,
       cacheIdentity: company.cacheIdentity,
     };
+    if (await isNativeResearchSuppressed(job)) {
+      await settleSuppressedNativeResearchJob({ job, access, claimToken: claim.claimToken });
+      return false;
+    }
+    const terminalResultPayload = { ...output.result, snapshot: output.snapshot };
     await completeLeadResearchRequestClaim({
       ...owned,
       providerReportId: job.providerReportId,
@@ -1883,9 +1962,17 @@ async function processJob(job: NativeResearchJob) {
       companyName: job.companyName,
       companyDomain: job.companyDomain,
       requestPayload: job.requestPayload,
-      resultPayload: { ...output.result, snapshot: output.snapshot } as any,
+      resultPayload: terminalResultPayload,
       phase: 'store_terminal',
     });
+    terminalCheckpointStored = true;
+    await persistNativeSnapshotRow({ job, snapshot: output.snapshot });
+    const report = await ensureNativeResearchReport(job, output.snapshot);
+    attachReportSynthesis(output.result, report);
+    if (await isNativeResearchSuppressed(job)) {
+      await settleSuppressedNativeResearchJob({ job, access, claimToken: claim.claimToken });
+      return false;
+    }
     const snapshotId = await persistNativeSnapshot({ job, output });
     await completeLeadResearchRequestClaim({
       ...owned,
@@ -1904,14 +1991,14 @@ async function processJob(job: NativeResearchJob) {
     return true;
   } catch (error: any) {
     const message = text(error?.message) || 'Native research failed.';
-    try {
-      if (!recoveringTerminalResult) {
+    if (!terminalCheckpointStored) {
+      try {
         await failLeadResearchRequestClaim({ ...owned, errorCode: 'native_research_failed', errorMessage: message, resultPayload: { provider_status: 'failed' } });
+      } catch (persistError) {
+        console.error('[native-research] failed to persist job error:', persistError);
       }
-    } catch (persistError) {
-      console.error('[native-research] failed to persist job error:', persistError);
+      await updateRunItem({ job, status: 'failed', errorCode: 'native_research_failed', errorMessage: message });
     }
-    await updateRunItem({ job, status: 'failed', errorCode: 'native_research_failed', errorMessage: message });
     console.error('[native-research] job failed:', { jobId: job.id, error: message });
     return false;
   }

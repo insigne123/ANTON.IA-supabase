@@ -8,11 +8,11 @@ import { z } from 'genkit';
 import { generateStructured, generateStructuredWithTelemetry } from '@/ai/openai-json';
 import {
   DraftContextV2Schema,
+  requiredReportAwareDraftPersonalizationV2,
   type DraftContextV2,
 } from '@/lib/server/draft-context-v2';
 import {
   GeneratedOutreachV2Schema,
-  requiredDraftPersonalizationV2,
   type GeneratedOutreachV2,
 } from '@/lib/server/draft-preflight-v2';
 
@@ -116,8 +116,12 @@ function modelForDraftPriority(priority: DraftContextV2['quality']['priority']) 
   return String(process.env.OPENAI_BALANCED_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
 }
 
+function draftWordCount(value: string) {
+  return value.match(/[\p{L}\p{N}]+/gu)?.length || 0;
+}
+
 function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
-  const requiredPersonalization = requiredDraftPersonalizationV2(input.context);
+  const requiredPersonalization = requiredReportAwareDraftPersonalizationV2(input.context);
   const requiredEvidenceIds = new Set(requiredPersonalization.map((item) => item.evidenceId));
   const requiredEvidence = requiredPersonalization.map((provenance) => {
     const evidence = input.context.evidence.find((item) => item.evidenceId === provenance.evidenceId);
@@ -132,6 +136,11 @@ function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
     evidence: input.context.evidence.filter((evidence) => requiredEvidenceIds.has(evidence.evidenceId)),
     hypotheses: [],
   };
+  const approvedCtaWords = draftWordCount(input.context.constraints.cta.exactText);
+  const modelBodyWords = {
+    min: Math.max(1, input.context.constraints.body.minWords - approvedCtaWords),
+    max: Math.max(1, input.context.constraints.body.maxWords - approvedCtaWords),
+  };
   const correction = input.rewrite
     ? `
 BORRADOR ANTERIOR (solo referencia de redacción; no es evidencia):
@@ -143,7 +152,7 @@ ${JSON.stringify(input.rewrite.instruction || null)}
 CORRECCIONES DE VALIDACIÓN:
 ${JSON.stringify(input.rewrite.errors)}
 
-Reescribe sin agregar información ausente de DRAFT_CONTEXT_V2. El ajuste solicitado puede cambiar voz, extensión o estructura, pero nunca relajar las reglas no negociables.
+El cuerpo anterior ya incluye el CTA agregado por el servidor. No lo reproduzcas en la nueva salida. Reescribe sin agregar información ausente de DRAFT_CONTEXT_V2. El ajuste solicitado puede cambiar voz, extensión o estructura, pero nunca relajar las reglas no negociables.
 `
     : '';
 
@@ -151,20 +160,25 @@ Reescribe sin agregar información ausente de DRAFT_CONTEXT_V2. El ajuste solici
 
 Usa exclusivamente este DraftContextV2 factual. La matriz evidence contiene la única evidencia autorizada para personalizar. No inventes datos, métricas, clientes, necesidades ni fuentes. No muestres URLs, IDs, nombres de herramientas ni el proceso de investigación dentro del correo.
 
+REPORT_OUTREACH_BRIEF selecciona el enfoque del reporte validado. Sus IDs solo priorizan contexto canónico y doNotClaim solo agrega restricciones: ninguno de esos campos es evidencia ni una fuente de hechos.
+
 Reglas no negociables:
 - Asunto dentro de los límites definidos por constraints.subject.
-- Cuerpo dentro de los límites definidos por constraints.body.
+- Devuelve entre ${modelBodyWords.min} y ${modelBodyWords.max} palabras de cuerpo. El servidor agregará después el CTA aprobado para que el correo completo quede dentro de los límites definidos por constraints.body.
 - Sigue context.style.profile para el tono, la extensión y las instrucciones de escritura, salvo que contradiga estas reglas.
 - Estructura el cuerpo en 4 a 6 párrafos breves separados por una línea en blanco. El saludo debe quedar solo y cada párrafo central debe tener como máximo dos frases.
-- Usa exactamente una invitación a actuar y copia literalmente constraints.cta.exactText una sola vez.
-- No agregues otra pregunta, enlace de agenda, ni CTA.
+- No incluyas constraints.cta.exactText en el cuerpo. El servidor lo agregará literalmente una sola vez al final.
+- No agregues ninguna pregunta, invitación a actuar, enlace de agenda ni CTA alternativo.
 - No dejes placeholders.
-- La personalización visible debe usar naturalmente el statement de REQUIRED_FACTUAL_PERSONALIZATION. Si su subjectScope es person, menciona de forma natural el cargo o nombre completo del contacto; si es company, menciona la empresa.
+- Copia literalmente en el asunto o cuerpo el statement completo de REQUIRED_FACTUAL_PERSONALIZATION. No lo resumas ni lo parafrasees.
 - No uses hipótesis, señales o afirmaciones del intento anterior que no aparezcan en DRAFT_CONTEXT_V2.
 - El servidor vinculará la procedencia de REQUIRED_FACTUAL_PERSONALIZATION; no devuelvas IDs de evidencia ni claims dentro del correo o el JSON.
 
 REQUIRED_FACTUAL_PERSONALIZATION:
 ${JSON.stringify(requiredEvidence)}
+
+REPORT_OUTREACH_BRIEF:
+${JSON.stringify(input.context.report)}
 
 DRAFT CONTEXT V2:
 ${JSON.stringify(factualContext)}
@@ -190,7 +204,7 @@ export async function generateOutreachFromDraftContextV2(
   });
   return {
     ...result.data,
-    personalization: requiredDraftPersonalizationV2(parsed.context),
+    personalization: requiredReportAwareDraftPersonalizationV2(parsed.context),
     hypothesisIds: [],
     provider: 'openai',
     model: result.telemetry.modelName,

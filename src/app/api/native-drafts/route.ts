@@ -35,12 +35,14 @@ export async function POST(req: NextRequest) {
       idempotencyKey: typeof body?.idempotencyKey === 'string' ? body.idempotencyKey : req.headers.get('idempotency-key'),
     });
     if (result.status === 'drafted') {
-      return NextResponse.json({ ok: true, draft: result.draft, result }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json({ ok: true, draft: result.draft, issues: result.issues, result }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
     }
     return NextResponse.json({
       ok: false,
       error: result.code,
       message: result.message,
+      preflight: result.preflight,
+      issues: result.issues,
       result,
     }, {
       status: result.status === 'blocked' ? 422 : 503,

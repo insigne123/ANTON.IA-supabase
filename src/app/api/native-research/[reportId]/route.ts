@@ -6,6 +6,10 @@ import {
   getNativeSnapshot,
   nativeResearchJobToResult,
 } from '@/lib/server/native-research';
+import {
+  loadResearchReportDocument,
+  researchReportDocumentMetadata,
+} from '@/lib/server/research-report-documents';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -21,16 +25,22 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ report
     });
     if (!job) return NextResponse.json({ error: 'NATIVE_RESEARCH_NOT_FOUND' }, { status: 404 });
 
-    const snapshot = job.researchSnapshotId
-      ? await getNativeSnapshot({
-        snapshotId: job.researchSnapshotId,
-        access: { organizationId: auth.organizationId, organizationIds: auth.organizationIds, userId: auth.user.id },
-      })
-      : null;
+    const access = { organizationId: auth.organizationId, organizationIds: auth.organizationIds, userId: auth.user.id };
+    const [snapshot, reportDocument] = job.researchSnapshotId
+      ? await Promise.all([
+        getNativeSnapshot({
+          snapshotId: job.researchSnapshotId,
+          access,
+        }),
+        loadResearchReportDocument({ researchSnapshotId: job.researchSnapshotId, access }),
+      ])
+      : [null, null];
     return NextResponse.json({
       ok: true,
       ...nativeResearchJobToResult(job),
       snapshot: snapshot?.payload || null,
+      reportDocument: reportDocument?.document || null,
+      reportSynthesis: reportDocument ? researchReportDocumentMetadata(reportDocument) : null,
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: any) {
     if (error?.name === 'AuthError') return handleAuthError(error);

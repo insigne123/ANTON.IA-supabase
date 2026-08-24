@@ -17,6 +17,10 @@ import {
   assessResearchQuality,
   type ResearchQualityAssessment,
 } from '@/lib/native-research-quality';
+import {
+  validateResearchReportDocumentCitationsV1,
+  type ResearchReportDocumentV1,
+} from '@/lib/research-report-contracts';
 
 export const DRAFT_CONTEXT_V2_SCHEMA_VERSION = 'draft-context/v2';
 export const DRAFT_CONTEXT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -82,6 +86,19 @@ export const DraftHypothesisV2Schema = z.object({
 }).strict();
 export type DraftHypothesisV2 = z.infer<typeof DraftHypothesisV2Schema>;
 
+export const DraftReportOutreachV2Schema = z.object({
+  synthesis: z.object({
+    method: z.enum(['model', 'fallback']),
+    status: z.enum(['completed', 'partial']),
+  }).strict(),
+  outreachBrief: z.object({
+    selectedFactualAnchorClaimIds: z.array(z.string().trim().min(1).max(256)).max(20),
+    selectedHypothesisIds: z.array(z.string().trim().min(1).max(256)).max(20),
+    doNotClaim: z.array(z.string().trim().min(1).max(4_000)).max(20),
+  }).strict(),
+}).strict();
+export type DraftReportOutreachV2 = z.infer<typeof DraftReportOutreachV2Schema>;
+
 export const DraftContextV2Schema = z.object({
   schemaVersion: z.literal(DRAFT_CONTEXT_V2_SCHEMA_VERSION),
   research: z.object({
@@ -121,6 +138,7 @@ export const DraftContextV2Schema = z.object({
     draftEligible: z.boolean(),
     factors: z.record(z.number()),
   }).strict(),
+  report: DraftReportOutreachV2Schema.nullable(),
   evidence: z.array(DraftEvidenceV2Schema).max(50),
   hypotheses: z.array(DraftHypothesisV2Schema).max(20),
   constraints: z.object({
@@ -155,6 +173,7 @@ export type BuildDraftContextV2Input = {
   };
   seller: DraftSellerProfileV2;
   style: DraftWritingStyleV2;
+  reportDocument?: ResearchReportDocumentV1 | null;
   now?: Date;
 };
 
@@ -212,6 +231,10 @@ function priorityForScore(score: number): 'A' | 'B' | 'C' {
   return 'C';
 }
 
+function unique(values: string[]) {
+  return [...new Set(values)];
+}
+
 function qualityForSnapshot(snapshot: ResearchSnapshotV1): ResearchQualityAssessment {
   const sourceIds = new Set(snapshot.sources.map((source) => source.id));
   const sourceById = new Map(snapshot.sources.map((source) => [source.id, source]));
@@ -221,13 +244,18 @@ function qualityForSnapshot(snapshot: ResearchSnapshotV1): ResearchQualityAssess
     companyName: snapshot.subject.company.name,
     companyDomain: snapshot.subject.company.domain,
   }));
+  const personFacts = snapshot.evidence.filter((evidence) => isQualifiedResearchPersonFactEvidence({
+    evidence,
+    source: sourceById.get(evidence.sourceId),
+    personName: snapshot.subject.person.fullName,
+  }));
   const signals = snapshot.evidence.filter((evidence) => isRelevantResearchSignal({
     evidence,
     source: sourceById.get(evidence.sourceId),
     companyName: snapshot.subject.company.name,
     companyDomain: snapshot.subject.company.domain,
   }));
-  const meaningfulEvidence = [...companyFacts, ...signals];
+  const meaningfulEvidence = [...companyFacts, ...personFacts, ...signals];
   const verifiedSourceCount = new Set(meaningfulEvidence.map((evidence) => evidence.sourceId).filter((sourceId) => sourceIds.has(sourceId))).size;
   const companyFactSourceCount = new Set(companyFacts.map((evidence) => evidence.sourceId)).size;
   const recentSignalCount = new Set(
@@ -240,7 +268,7 @@ function qualityForSnapshot(snapshot: ResearchSnapshotV1): ResearchQualityAssess
     status: snapshot.lifecycle.status,
     companyIdentityPresent: Boolean(snapshot.subject.company.name || snapshot.subject.company.domain),
     emailPresent: Boolean(snapshot.subject.email),
-    leadRolePresent: Boolean(snapshot.subject.person.title),
+    leadRolePresent: snapshot.claims.some((claim) => claim.kind === 'lead_role' && claim.classification === 'fact'),
     evidenceCount: meaningfulEvidence.length,
     verifiedSourceCount,
     companyFactCount: companyFacts.length,
@@ -385,6 +413,26 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
         })]
         : [];
     });
+  const reportDocument = input.reportDocument
+    ? validateResearchReportDocumentCitationsV1(input.reportDocument, snapshot)
+    : null;
+  const eligibleFactClaimIds = new Set(evidence.flatMap((item) => item.supportedFactClaimIds));
+  const eligibleHypothesisIds = new Set(hypotheses.map((item) => item.claimId));
+  const report = reportDocument ? DraftReportOutreachV2Schema.parse({
+    synthesis: {
+      method: reportDocument.synthesis.method,
+      status: reportDocument.synthesis.status,
+    },
+    outreachBrief: {
+      selectedFactualAnchorClaimIds: unique(
+        reportDocument.outreachBrief.factualAnchors.flatMap((anchor) => anchor.citations.claimIds),
+      ).filter((claimId) => eligibleFactClaimIds.has(claimId)),
+      selectedHypothesisIds: unique(
+        reportDocument.outreachBrief.hypotheses.flatMap((hypothesis) => hypothesis.citations.claimIds),
+      ).filter((claimId) => eligibleHypothesisIds.has(claimId)),
+      doNotClaim: reportDocument.outreachBrief.doNotClaim,
+    },
+  }) : null;
   const quality = qualityForSnapshot(snapshot);
   const capturedAt = nullableText(input.artifact.capturedAt);
   const contentHash = artifactHashMatches ? artifactHash : '';
@@ -435,6 +483,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
       draftEligible: quality.draftEligibility.eligible,
       factors: quality.factors,
     },
+    report,
     evidence,
     hypotheses,
     constraints: {
@@ -472,4 +521,34 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
     return { status: 'blocked', context, reason: 'quality_below_threshold', message: `La calidad de investigación (${quality.score}) no alcanza el mínimo para redactar (${MIN_DRAFT_QUALITY_SCORE}).` };
   }
   return { status: 'ready', context };
+}
+
+export function requiredReportAwareDraftPersonalizationV2(context: DraftContextV2) {
+  const reportAnchorOrder = new Map(
+    (context.report?.outreachBrief.selectedFactualAnchorClaimIds || []).map((claimId, index) => [claimId, index]),
+  );
+  const candidates = context.evidence.flatMap((evidence) =>
+    evidence.supportedFactClaimIds.map((claimId) => ({
+      evidenceId: evidence.evidenceId,
+      claimId,
+      sourceUrl: evidence.source.url,
+      subjectScope: evidence.subjectScope,
+      confidence: evidence.confidence,
+      reportAnchorOrder: reportAnchorOrder.get(claimId),
+    })),
+  );
+  candidates.sort((left, right) => {
+    const leftIsReportAnchor = left.reportAnchorOrder !== undefined;
+    const rightIsReportAnchor = right.reportAnchorOrder !== undefined;
+    if (leftIsReportAnchor !== rightIsReportAnchor) return leftIsReportAnchor ? -1 : 1;
+    if (left.reportAnchorOrder !== right.reportAnchorOrder) {
+      return (left.reportAnchorOrder ?? Number.MAX_SAFE_INTEGER) - (right.reportAnchorOrder ?? Number.MAX_SAFE_INTEGER);
+    }
+    if (left.subjectScope !== right.subjectScope) return left.subjectScope === 'company' ? -1 : 1;
+    if (left.confidence !== right.confidence) return right.confidence - left.confidence;
+    return `${left.evidenceId}:${left.claimId}`.localeCompare(`${right.evidenceId}:${right.claimId}`);
+  });
+  return candidates
+    .slice(0, context.constraints.minimumEvidenceProvenance)
+    .map(({ evidenceId, claimId, sourceUrl }) => ({ evidenceId, claimId, sourceUrl }));
 }

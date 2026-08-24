@@ -18,7 +18,9 @@ import {
   draftSnapshotFixture,
 } from './draft-v2-test-fixtures';
 import type { GeneratedOutreachFromDraftContextV2 } from '@/ai/flows/generate-outreach-from-report';
+import { buildDeterministicResearchReportDocumentV1 } from '@/ai/flows/synthesize-research-report';
 import { canonicalSha256, createChildMessagingDraftV1, type MessagingDraftV1 } from '@/lib/messaging-contracts';
+import { ResearchReportDocumentV1Schema } from '@/lib/research-report-contracts';
 
 const access = {
   organizationId: DRAFT_FIXTURE_IDS.organization,
@@ -31,11 +33,9 @@ function generated(context: DraftContextV2): GeneratedOutreachFromDraftContextV2
     subject: 'Una idea para Acme',
     body: `Hola Ada,
 
-Vi que Acme publica un foco claro en reducir trabajo manual dentro de las operaciones. En Northstar ayudamos a equipos que quieren ordenar tareas repetitivas sin imponer cambios bruscos a su forma de trabajo.
+Acme publica que ayuda a equipos de operaciones a reducir trabajo manual. En Northstar ayudamos a equipos que quieren ordenar tareas repetitivas sin imponer cambios bruscos a su forma de trabajo.
 
-Por tu rol de Directora de Operaciones, pensé que podría ser útil compartir un ejemplo práctico de cómo detectar procesos que consumen tiempo y priorizar los primeros ajustes. La idea es entender el contexto de Acme antes de proponer cualquier alternativa concreta.
-
-${context.constraints.cta.exactText}`,
+Por tu rol de Directora de Operaciones, pensé que podría ser útil compartir un ejemplo práctico de cómo detectar procesos que consumen tiempo y priorizar los primeros ajustes. La idea es entender el contexto de Acme antes de proponer cualquier alternativa concreta.`,
     personalization: [{
       evidenceId: evidence.evidenceId,
       claimId: 'claim-acme-overview',
@@ -65,6 +65,21 @@ function dependencies(snapshot = draftSnapshotFixture()) {
       services: ['Automatización de operaciones'],
     }),
     loadWritingStyle: async () => createDefaultDraftWritingStyleV2(),
+    ensureReportDocument: async () => {
+      const document = buildDeterministicResearchReportDocumentV1({
+        snapshot,
+        generatedAt: DRAFT_FIXTURE_NOW.toISOString(),
+      });
+      return ResearchReportDocumentV1Schema.parse({
+        ...document,
+        outreachBrief: {
+          ...document.outreachBrief,
+          factualAnchors: document.outreachBrief.factualAnchors.filter((anchor) =>
+            anchor.citations.claimIds.includes('claim-acme-overview'),
+          ),
+        },
+      });
+    },
     claimGeneration: async () => {
       claims += 1;
       return { state: 'claimed', claimToken: 'claim-token' };
@@ -111,6 +126,45 @@ test('native drafting returns a failure result when OpenAI is unavailable and ne
   assert.equal(fixture.releaseCount(), 1);
 });
 
+test('suppressed historical snapshots never synthesize a report document', async () => {
+  const fixture = dependencies();
+  let ensureReportCalls = 0;
+  fixture.value.isSuppressed = async () => true;
+  fixture.value.ensureReportDocument = async () => {
+    ensureReportCalls += 1;
+    throw new Error('Report synthesis should not run');
+  };
+
+  await assert.rejects(
+    () => createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, fixture.value),
+    /NATIVE_DRAFT_PRIVACY_SUPPRESSED/,
+  );
+  assert.equal(ensureReportCalls, 0);
+  assert.equal(fixture.claimCount(), 0);
+});
+
+test('snapshots without an email return blocked without synthesizing a report document', async () => {
+  const baseSnapshot = draftSnapshotFixture();
+  const snapshot = {
+    ...baseSnapshot,
+    subject: { ...baseSnapshot.subject, email: undefined },
+  };
+  const fixture = dependencies(snapshot);
+  let ensureReportCalls = 0;
+  fixture.value.ensureReportDocument = async () => {
+    ensureReportCalls += 1;
+    throw new Error('Report synthesis should not run');
+  };
+
+  const result = await createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, fixture.value);
+
+  assert.equal(result.status, 'blocked');
+  if (result.status !== 'blocked') return;
+  assert.equal(result.code, 'recipient_missing');
+  assert.equal(ensureReportCalls, 0);
+  assert.equal(fixture.claimCount(), 0);
+});
+
 test('native drafting permits one corrective generation pass, then persists a traceable immutable version', async () => {
   const fixture = dependencies();
   let generationCalls = 0;
@@ -132,9 +186,63 @@ test('native drafting permits one corrective generation pass, then persists a tr
   assert.equal(result.draft.lifecycle, 'draft');
   assert.equal(result.draft.preflight.status, 'passed');
   assert.equal(result.draft.approval.status, 'pending');
-  assert.match(result.draft.content.text || '', /Hola Ada,\n\nVi que Acme/);
+  assert.match(result.draft.content.text || '', /Hola Ada,\n\nAcme publica que ayuda/);
+  assert.ok(result.draft.content.text?.endsWith(result.context.constraints.cta.exactText));
   assert.equal(fixture.persisted.length, 1);
   assert.deepEqual(fixture.metadata[0].claimIds, ['claim-acme-overview']);
+});
+
+test('native drafting appends an arbitrary approved CTA exactly once on the server', async () => {
+  const fixture = dependencies();
+  const exactCta = 'Gracias por considerar esta propuesta concreta.';
+  fixture.value.loadWritingStyle = async () => {
+    const style = createDefaultDraftWritingStyleV2();
+    return {
+      ...style,
+      profile: { ...style.profile, cta: { label: exactCta } },
+    };
+  };
+  fixture.value.generate = async ({ context }) => {
+    const output = generated(context);
+    assert.doesNotMatch(output.body, new RegExp(exactCta));
+    return output;
+  };
+
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+
+  assert.equal(result.status, 'drafted');
+  if (result.status !== 'drafted') return;
+  const body = result.draft.content.text || '';
+  assert.equal(body.split(exactCta).length - 1, 1);
+  assert.ok(body.endsWith(exactCta));
+  assert.ok((body.match(/[\p{L}\p{N}]+/gu)?.length || 0) >= 60);
+  assert.ok((body.match(/[\p{L}\p{N}]+/gu)?.length || 0) <= 180);
+});
+
+test('native drafting returns structured issues after two failed preflight generations', async () => {
+  const fixture = dependencies();
+  let generationCalls = 0;
+  fixture.value.generate = async ({ context }) => {
+    generationCalls += 1;
+    return { ...generated(context), body: 'Hola Ada.' };
+  };
+
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+
+  assert.equal(result.status, 'blocked');
+  if (result.status !== 'blocked') return;
+  assert.equal(result.code, 'draft_preflight_failed');
+  assert.equal(generationCalls, 2);
+  assert.deepEqual(result.issues.map((issue) => issue.code), ['body_length', 'personalization_invalid']);
+  assert.deepEqual(result.preflight.errors, result.issues.map((issue) => issue.message));
+  assert.equal(fixture.persisted.length, 0);
+  assert.equal(fixture.releaseCount(), 1);
 });
 
 test('native draft body normalization preserves paragraph boundaries', () => {
@@ -171,13 +279,11 @@ test('requested AI rewrites create a canonical revision and replace its generati
         subject: 'Acme, una alternativa más directa',
         body: `Hola Ada,
 
-Vi que Acme mantiene un foco claro en reducir trabajo manual dentro de sus operaciones.
+Acme publica que ayuda a equipos de operaciones a reducir trabajo manual.
 
 En Northstar ayudamos a ordenar tareas repetitivas con un enfoque gradual, sin imponer cambios bruscos al equipo.
 
-Por tu rol de Directora de Operaciones, pensé que podía ser útil compartir una forma práctica de detectar procesos que consumen tiempo y priorizar los primeros ajustes según el contexto actual de Acme.
-
-${context.constraints.cta.exactText}`,
+Por tu rol de Directora de Operaciones, pensé que podía ser útil compartir una forma práctica de detectar procesos que consumen tiempo y priorizar los primeros ajustes según el contexto actual de Acme.`,
       };
     },
     appendRevision: async (parent, changes) => createChildMessagingDraftV1(parent, {
@@ -198,7 +304,7 @@ ${context.constraints.cta.exactText}`,
   assert.equal(result.draft.revision, 2);
   assert.equal(result.draft.parentVersionId, initial.draft.versionId);
   assert.equal(result.preflight.status, 'passed');
-  assert.match(result.draft.content.text || '', /Hola Ada,\n\nVi que Acme/);
+  assert.match(result.draft.content.text || '', /Hola Ada,\n\nAcme publica que ayuda/);
   assert.deepEqual(replacedMetadata[0].claimIds, ['claim-acme-overview']);
   assert.equal(replacedMetadata[0].generationMethod, 'model');
 });

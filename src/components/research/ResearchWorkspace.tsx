@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 import { PageHeader } from '@/components/page-header';
-import NativeResearchReport from '@/components/research/NativeResearchReport';
+import NativeResearchReport, { NativeResearchReportSkeleton } from '@/components/research/NativeResearchReport';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -33,10 +33,13 @@ import {
   createQueuedResearchWorkspaceRun,
   isResearchInFlight,
   parseResearchWorkspaceRun,
+  parseResearchReportDetail,
+  researchDraftErrorMessage,
   researchReadinessLabel,
   researchStatusLabel,
   shouldPollResearchRun,
   type ResearchReadiness,
+  type ResearchReportDetail,
   type ResearchWorkspaceLead,
   type ResearchWorkspaceRun,
   type ResearchWorkspaceRunItem,
@@ -274,6 +277,9 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const [startError, setStartError] = useState('');
   const [creatingBatch, setCreatingBatch] = useState(false);
   const [creatingDraftId, setCreatingDraftId] = useState<string | null>(null);
+  const [reportDetails, setReportDetails] = useState<Record<string, ResearchReportDetail>>({});
+  const [reportDetailLoading, setReportDetailLoading] = useState<Record<string, boolean>>({});
+  const [reportDetailErrors, setReportDetailErrors] = useState<Record<string, string>>({});
   const [researchUnavailable, setResearchUnavailable] = useState(false);
   const [handoff, setHandoff] = useState<ResearchWorkspaceHandoff | null>(null);
   const [handoffLeads, setHandoffLeads] = useState<ResearchWorkspaceLead[]>([]);
@@ -284,6 +290,8 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const [handoffError, setHandoffError] = useState('');
   const currentRunIdRef = useRef<string | null>(null);
   const runRequestRef = useRef<string | null>(null);
+  const reportDetailRequestsRef = useRef<Set<string>>(new Set());
+  const draftRequestRef = useRef<string | null>(null);
   const resolvedHandoffRef = useRef<string | null>(null);
 
   const loadLeads = useCallback(async () => {
@@ -406,6 +414,29 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     }
   }, [organizationId, scope, user?.id]);
 
+  const fetchReportDetail = useCallback(async (reportId: string, fallbackResult: ResearchWorkspaceRunItem['result']) => {
+    if (!reportId || !fallbackResult || reportDetailRequestsRef.current.has(reportId)) return;
+    reportDetailRequestsRef.current.add(reportId);
+    setReportDetailLoading((current) => ({ ...current, [reportId]: true }));
+    setReportDetailErrors((current) => ({ ...current, [reportId]: '' }));
+    try {
+      const response = await fetch(`/api/native-research/${encodeURIComponent(reportId)}`, { cache: 'no-store' });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error('NATIVE_RESEARCH_DETAIL_FAILED');
+      const detail = parseResearchReportDetail(payload, fallbackResult);
+      if (!detail) throw new Error('NATIVE_RESEARCH_DETAIL_INVALID');
+      setReportDetails((current) => ({ ...current, [reportId]: detail }));
+    } catch {
+      setReportDetailErrors((current) => ({
+        ...current,
+        [reportId]: 'No pudimos cargar la versión completa. Mostramos la evidencia disponible en esta selección.',
+      }));
+    } finally {
+      reportDetailRequestsRef.current.delete(reportId);
+      setReportDetailLoading((current) => ({ ...current, [reportId]: false }));
+    }
+  }, []);
+
   useEffect(() => {
     if (!activeBatch?.runId) return;
     void fetchRun(activeBatch.runId, batchLeads, true);
@@ -450,10 +481,34 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const activeItem = runItems.find((item) => item.lead.key === activeLeadKey) || null;
   const activeLead = activeItem?.lead || workspaceLeads.find((lead) => lead.key === activeLeadKey) || null;
   const activeStatus = activeItem?.status || 'idle';
+  const activeReportId = activeItem?.reportId || null;
+  const activeReportDetail = activeReportId ? reportDetails[activeReportId] || null : null;
+  const activeReportDetailError = activeReportId ? reportDetailErrors[activeReportId] || '' : '';
+  const activeReportDetailPending = Boolean(
+    activeItem?.result
+    && activeReportId
+    && ['completed', 'partial', 'insufficient_data'].includes(activeStatus)
+    && !activeReportDetail
+    && !activeReportDetailError,
+  );
+  const activeReportDetailLoading = activeReportDetailPending || Boolean(activeReportId && reportDetailLoading[activeReportId] && !activeReportDetail);
   const activeInFlightCount = runItems.filter((item) => isResearchInFlight(item.status)).length;
+  const activeRunProgress = Math.max(8, Math.round(((runItems.length - activeInFlightCount) / Math.max(runItems.length, 1)) * 100));
   const activeRunBlocksNewBatch = Boolean(activeBatch && runLoading) || isPolling || creatingBatch;
   const handoffPending = !handoffReady || !handoffResolved;
   const selectionLocked = activeRunBlocksNewBatch || handoffPending;
+  const draftRequestPending = creatingDraftId !== null;
+
+  useEffect(() => {
+    if (
+      !activeItem?.result
+      || !activeReportId
+      || !['completed', 'partial', 'insufficient_data'].includes(activeStatus)
+      || activeReportDetail
+      || activeReportDetailError
+    ) return;
+    void fetchReportDetail(activeReportId, activeItem.result);
+  }, [activeItem?.result, activeReportDetail, activeReportDetailError, activeReportId, activeStatus, fetchReportDetail]);
 
   useEffect(() => {
     setSelectedKeys((current) => current.filter((key) => selectableQueueLeads.some((lead) => lead.key === key)));
@@ -585,7 +640,8 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   }
 
   async function createDraft(item: ResearchWorkspaceRunItem) {
-    if (!item.canCreateDraft || !item.researchSnapshotId) return;
+    if (!item.canCreateDraft || !item.researchSnapshotId || draftRequestRef.current) return;
+    draftRequestRef.current = item.id;
     setCreatingDraftId(item.id);
     try {
       const response = await fetch('/api/native-drafts', {
@@ -598,7 +654,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
         toast({
           variant: 'destructive',
           title: 'No se pudo preparar el borrador',
-          description: friendlyRequestError(payload, 'Inténtalo nuevamente.'),
+          description: researchDraftErrorMessage(payload, 'Inténtalo nuevamente.'),
         });
         return;
       }
@@ -612,6 +668,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
         description: userMessage(error, 'Inténtalo nuevamente.'),
       });
     } finally {
+      if (draftRequestRef.current === item.id) draftRequestRef.current = null;
       setCreatingDraftId(null);
     }
   }
@@ -731,7 +788,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                         : `${readyItems.length} ${readyItems.length === 1 ? 'lead está listo para redactar' : 'leads están listos para redactar'}.`}
                     </p>
                   </div>
-                  {isPolling ? <div className="w-full sm:w-52"><Progress value={Math.max(8, Math.round(((runItems.length - activeInFlightCount) / Math.max(runItems.length, 1)) * 100))} className="h-1.5" /></div> : null}
+                  {isPolling ? <div className="w-full sm:w-52"><Progress value={activeRunProgress} className="h-1.5" aria-label={`Progreso de la selección: ${activeRunProgress}%`} /></div> : null}
                 </div>
               </div>
             ) : null}
@@ -848,8 +905,9 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                           <button
                             type="button"
                             onClick={() => setActiveLeadKey(lead.key)}
+                            disabled={draftRequestPending}
                             aria-pressed={isActive}
-                            className="min-w-0 rounded-xl text-left outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            className="min-w-0 rounded-xl text-left outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             <span className="flex min-w-0 flex-col gap-2 px-1 py-0.5">
                               <span className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1">
@@ -864,7 +922,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                                 <span><span className="font-medium text-foreground">Evidencia:</span> {evidence}</span>
                                 <span className={`font-medium ${readinessClass(item?.readiness || 'review')}`}>{readiness}</span>
                               </span>
-                              {inFlight ? <Progress value={progressFor(item?.status || 'idle')} className="h-1.5" /> : null}
+                              {inFlight ? <Progress value={progressFor(item?.status || 'idle')} className="h-1.5" aria-label={`Progreso de investigación de ${lead.fullName || lead.companyName || 'lead'}: ${researchStatusLabel(item?.status || 'idle')}`} /> : null}
                             </span>
                           </button>
                         </div>
@@ -901,8 +959,9 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                             key={item.id}
                             type="button"
                             onClick={() => setActiveLeadKey(item.lead.key)}
+                            disabled={draftRequestPending}
                             aria-pressed={selected}
-                            className={`flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl border px-3.5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${selected ? 'border-primary/35 bg-primary/[0.06]' : 'border-border/60 bg-background/60 hover:bg-muted/40'}`}
+                            className={`flex w-full min-w-0 items-center justify-between gap-3 rounded-2xl border px-3.5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 ${selected ? 'border-primary/35 bg-primary/[0.06]' : 'border-border/60 bg-background/60 hover:bg-muted/40'}`}
                           >
                               <span className="min-w-0">
                                 <span className="flex items-center gap-2"><CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-300" aria-hidden="true" /><span className="truncate text-sm font-medium">{item.lead.fullName || item.lead.companyName || 'Lead'}</span></span>
@@ -945,11 +1004,11 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                               <p className="mt-1 text-xs leading-5 text-sky-900/75 dark:text-sky-100/75">El resultado se guarda en tu selección. Puedes seguir revisando otros leads.</p>
                             </div>
                           </div>
-                          <Progress value={progressFor(activeStatus)} className="mt-3 h-1.5" />
+                          <Progress value={progressFor(activeStatus)} className="mt-3 h-1.5" aria-label={`Progreso de investigación de ${activeLead.fullName || activeLead.companyName || 'lead'}: ${researchStatusLabel(activeStatus)}`} />
                         </div>
-                      ) : activeStatus === 'failed' || activeStatus === 'cancelled' || activeStatus === 'insufficient_data' ? (
-                        <div className={`rounded-2xl border p-4 ${activeStatus === 'failed' || activeStatus === 'cancelled' ? 'border-rose-200 bg-rose-50/80 text-rose-950 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100' : 'border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100'}`}>
-                          <p className="text-sm font-medium">{activeStatus === 'insufficient_data' ? 'Aún falta evidencia para redactar' : 'Esta investigación necesita atención'}</p>
+                      ) : activeStatus === 'failed' || activeStatus === 'cancelled' ? (
+                        <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-4 text-rose-950 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100">
+                          <p className="text-sm font-medium">Esta investigación necesita atención</p>
                           <p className="mt-1 text-xs leading-5 opacity-80">Incluye este lead en una nueva selección cuando tengas más información o quieras volver a investigarlo.</p>
                           <Button type="button" size="sm" variant="outline" className="mt-3 rounded-full" onClick={includeActiveLead} disabled={!canSelectActiveLead || selectionLocked}>
                             {selectedKeys.includes(activeLead.key) ? 'Incluido en la selección' : 'Incluir para investigar'}
@@ -957,10 +1016,12 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                         </div>
                       ) : activeItem?.result ? (
                         <>
-                          <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/75 p-4 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
-                            <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
+                          <div className={`flex items-start gap-3 rounded-2xl border p-4 ${activeStatus === 'insufficient_data' ? 'border-amber-200 bg-amber-50/75 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100' : 'border-emerald-200 bg-emerald-50/75 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100'}`}>
+                            {activeStatus === 'insufficient_data'
+                              ? <CircleAlert className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
+                              : <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />}
                             <div className="min-w-0">
-                              <p className="text-sm font-medium">Reporte guardado</p>
+                              <p className="text-sm font-medium">{activeStatus === 'insufficient_data' ? 'Reporte con información limitada' : 'Reporte guardado'}</p>
                               <p className="mt-1 text-xs leading-5 opacity-80">
                                 {scope === 'leads'
                                   ? 'La investigación queda disponible en tu lista de leads cuando vuelvas.'
@@ -968,19 +1029,43 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                               </p>
                             </div>
                           </div>
-                          <NativeResearchReport
-                            result={activeItem.result}
-                            status={activeStatus}
-                            readiness={activeReadiness}
-                            researchSnapshotId={activeItem.researchSnapshotId}
-                            canCreateDraft={activeItem.canCreateDraft}
-                            creatingDraft={creatingDraftId === activeItem.id}
-                            createDraftLabel="Crear borrador y revisar"
-                            creatingDraftLabel="Preparando borrador…"
-                            onCreateDraft={() => void createDraft(activeItem)}
-                            refreshing={creatingBatch}
-                            onRefresh={() => void refreshActiveResearch()}
-                          />
+                          {activeReportDetailLoading ? (
+                            <NativeResearchReportSkeleton />
+                          ) : (
+                            <>
+                              {activeReportDetailError ? (
+                                <div className="flex flex-col items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/65 px-4 py-3 text-sm leading-6 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/[0.08] dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between" role="alert">
+                                  <span>{activeReportDetailError}</span>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="shrink-0 rounded-full bg-background/80"
+                                    onClick={() => void fetchReportDetail(activeReportId!, activeItem.result)}
+                                    aria-label={`Reintentar cargar el reporte completo de ${activeLead.fullName || activeLead.companyName || 'este lead'}`}
+                                  >
+                                    <RefreshCw aria-hidden="true" />
+                                    Reintentar
+                                  </Button>
+                                </div>
+                              ) : null}
+                              <NativeResearchReport
+                                result={activeReportDetail?.result || activeItem.result}
+                                reportDocument={activeReportDetail?.reportDocument}
+                                status={activeStatus}
+                                readiness={activeReadiness}
+                                researchSnapshotId={activeItem.researchSnapshotId}
+                                canCreateDraft={activeItem.canCreateDraft}
+                                creatingDraft={creatingDraftId === activeItem.id}
+                                createDraftDisabled={draftRequestPending}
+                                createDraftLabel="Crear borrador y revisar"
+                                creatingDraftLabel="Preparando borrador…"
+                                onCreateDraft={() => void createDraft(activeItem)}
+                                refreshing={creatingBatch}
+                                onRefresh={() => void refreshActiveResearch()}
+                              />
+                            </>
+                          )}
                         </>
                       ) : (
                         <div className="rounded-2xl border border-dashed border-border/70 px-4 py-6 text-center">

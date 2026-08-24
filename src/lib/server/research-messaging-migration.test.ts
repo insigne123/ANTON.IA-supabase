@@ -169,7 +169,8 @@ test('native workspace metadata is protected by RLS and tenant-safe updates', ()
 });
 
 test('native terminal research results retain the snapshot for recovery', () => {
-  assert.match(nativeResearch, /resultPayload: \{ \.\.\.output\.result, snapshot: output\.snapshot \}/);
+  assert.match(nativeResearch, /const terminalResultPayload = \{ \.\.\.output\.result, snapshot: output\.snapshot \}/);
+  assert.match(nativeResearch, /resultPayload: terminalResultPayload[\s\S]*?phase: 'store_terminal'/);
   assert.match(nativeResearch, /const resultPayload = \{[\s\S]*snapshot: input\.output\.snapshot/);
   assert.match(nativeResearch, /requestClaimState === 'terminal_pending'/);
   assert.match(nativeResearch, /\.in\('status', \['queued', 'running', 'completed', 'partial', 'insufficient_data'\]\)/);
