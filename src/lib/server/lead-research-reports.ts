@@ -82,7 +82,10 @@ function getCompanyDomain(lead: Partial<ContactedLead> & { companyDomain?: strin
 }
 
 function getScopeKey(userId: string, organizationId?: string | null) {
-  return organizationId || `user:${userId}`;
+  const orgId = String(organizationId || '').trim();
+  if (orgId) return orgId;
+  const normalizedUserId = String(userId || '').trim();
+  return normalizedUserId ? `user:${normalizedUserId}` : '';
 }
 
 function getInternalAppBaseUrl() {
@@ -153,6 +156,8 @@ export async function findCachedLeadResearchReport(
   try {
     const repository = options.repository || createSupabaseLeadResearchReportsRepository();
     const scopeKey = getScopeKey(input.userId, input.organizationId);
+    if (!scopeKey) return null;
+
     const leadRef = getLeadRef(input.lead);
     const email = String(input.lead.email || '').trim().toLowerCase();
     const nowMs = options.nowMs ?? Date.now();

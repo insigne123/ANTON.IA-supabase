@@ -173,7 +173,8 @@ test('native terminal research results retain the snapshot for recovery', () => 
   assert.match(nativeResearch, /const resultPayload = \{[\s\S]*snapshot: input\.output\.snapshot/);
   assert.match(nativeResearch, /requestClaimState === 'terminal_pending'/);
   assert.match(nativeResearch, /\.in\('status', \['queued', 'running', 'completed', 'partial', 'insufficient_data'\]\)/);
-  assert.match(nativeResearch, /\.in\('request_claim_state', \['retryable', 'pre_provider', 'terminal_pending'\]\)/);
+  assert.match(nativeResearch, /\.in\('request_claim_state', \['retryable', 'terminal_pending'\]\)/);
+  assert.match(nativeResearch, /stalePreProviderQuery[\s\S]*?\.eq\('request_claim_state', 'pre_provider'\)[\s\S]*?\.lt\('request_claimed_at', staleAt\)/);
 });
 
 test('native run items accept insufficient data as a terminal status', () => {
