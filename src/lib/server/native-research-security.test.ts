@@ -78,7 +78,7 @@ test('deep official-site collection stays on the company domain and search signa
     'Chile',
     5,
   );
-  assert.deepEqual(candidates, ['https://acme.com/company', 'https://acme.com/services']);
+  assert.deepEqual(candidates, ['https://acme.com/chile/', 'https://acme.com/company', 'https://acme.com/services']);
   assert.equal(nativeResearchInternals.isRelevantSearchResult({
     title: 'Acme anuncia una nueva alianza',
     snippet: 'La empresa Acme compartió la noticia esta semana.',
@@ -117,6 +117,17 @@ test('official-site collection keeps bounded HTML and falls back to useful page 
     '<meta name="description" content="Acme ofrece servicios empresariales especializados con cobertura nacional y atención para distintas industrias.">',
   );
   assert.equal(nativeResearchInternals.usefulOfficialPageContent(officialDescription)?.locator, 'meta_description');
+
+  const truncatedRegionalLanding = nativeResearchInternals.officialPageFromHtml(
+    new URL('https://acme.com'),
+    [
+      '<title>Acme | Selecciona tu país</title>',
+      '<meta name="description" content="Bienvenido a Acme. Selecciona tu país para acceder a la información disponible en tu región.">',
+      '<script>const translations = { messages: "'.concat('boilerplate '.repeat(1_000)),
+    ].join(''),
+  );
+  assert.doesNotMatch(truncatedRegionalLanding.text, /boilerplate/);
+  assert.equal(nativeResearchInternals.usefulOfficialPageContent(truncatedRegionalLanding), null);
 });
 
 test('native generation and deletion use durable privacy-aware claims', () => {

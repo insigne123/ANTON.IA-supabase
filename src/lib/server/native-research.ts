@@ -418,9 +418,9 @@ function officialPageFromHtml(url: URL, html: string): OfficialSitePage {
   ) || null;
   const readable = text(
     html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+      .replace(/<script\b[\s\S]*?(?:<\/script>|$)/gi, ' ')
+      .replace(/<style\b[\s\S]*?(?:<\/style>|$)/gi, ' ')
+      .replace(/<noscript\b[\s\S]*?(?:<\/noscript>|$)/gi, ' ')
       .replace(/<[^>]+>/g, ' '),
   ).slice(0, 4_000);
 
@@ -448,13 +448,28 @@ function isUsefulOfficialPage(page: OfficialSitePage) {
 function candidateOfficialPageUrls(html: string, baseUrl: URL, domain: string, country?: string | null, maxPages = MAX_OFFICIAL_SITE_PAGES) {
   const countryKey = text(country).toLowerCase();
   const candidates = new Map<string, number>();
+  const countryPath = countryKey
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (countryPath) {
+    const countryUrl = new URL(`/${countryPath}/`, baseUrl);
+    if (
+      countryUrl.toString() !== baseUrl.toString()
+      && isSafeOfficialSiteUrl(countryUrl)
+      && isSameResearchCompanyDomain(countryUrl.toString(), domain)
+    ) {
+      candidates.set(countryUrl.toString(), 12);
+    }
+  }
   const anchorPattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match: RegExpExecArray | null;
   while ((match = anchorPattern.exec(html))) {
     try {
       const url = new URL(match[1], baseUrl);
       if (!isSafeOfficialSiteUrl(url) || !isSameResearchCompanyDomain(url.toString(), domain)) continue;
-      if (url.hash || url.pathname === '/') continue;
+      if (url.hash || url.pathname === '/' || url.toString() === baseUrl.toString()) continue;
 
       const label = text(match[2].replace(/<[^>]+>/g, ' ')).toLowerCase();
       const path = url.pathname.toLowerCase();
