@@ -90,6 +90,25 @@ function normalizeForMatch(value: unknown) {
     .trim();
 }
 
+const personalizationBoilerplate = /\b(?:ir al contenido|profile picture|email & phone number|facebook-f|linkedin-in|instagram|tiktok|youtube|search)\b|\.{3}/i;
+
+export function draftEvidencePersonalizationStatementV2(value: unknown) {
+  const statement = text(value);
+  if (statement.length <= 180 && !personalizationBoilerplate.test(statement)) return statement;
+  const excerpt = statement
+    .split(/(?:[.!?;]\s+|\|)/)
+    .map(text)
+    .find((candidate) => {
+      const words = candidate.match(/[\p{L}\p{N}]+/gu)?.length || 0;
+      return candidate.length >= 24
+        && candidate.length <= 180
+        && words >= 4
+        && words <= 28
+        && !personalizationBoilerplate.test(candidate);
+    });
+  return excerpt || statement;
+}
+
 function countOccurrences(value: string, phrase: string) {
   if (!phrase) return 0;
   let count = 0;
@@ -134,9 +153,26 @@ function sentenceParts(value: string) {
     .filter(Boolean);
 }
 
+const draftCtaCue = /\b(?:agenda(?:mos|r)?|agend(?:amos|ar)?|coordina(?:mos|r)?|conversemos|conversar|hablemos|hablar|reunion|reunión|llamada|call|calendly|calendar|te parece|te sirve|podemos (?:hablar|conversar)|responde|disponibilidad)\b/i;
+
+function isUnapprovedDraftCtaSentence(sentence: string) {
+  return draftCtaCue.test(sentence) || /[¿?]/.test(sentence);
+}
+
+export function stripUnapprovedDraftCtasV2(body: string, approvedCta: string) {
+  const withoutApprovedCta = approvedCta ? body.split(approvedCta).join(' ') : body;
+  return withoutApprovedCta
+    .split(/\n{2,}/)
+    .map((paragraph) => sentenceParts(paragraph)
+      .filter((sentence) => !isUnapprovedDraftCtaSentence(sentence))
+      .join(' '))
+    .map(text)
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 function ctaSentenceCount(body: string) {
-  const ctaCue = /\b(?:agenda(?:mos|r)?|agend(?:amos|ar)?|coordina(?:mos|r)?|conversemos|conversar|hablemos|hablar|reunion|reunión|llamada|call|calendly|calendar|te parece|te sirve|podemos (?:hablar|conversar)|responde|disponibilidad)\b/i;
-  return sentenceParts(body).filter((sentence) => ctaCue.test(sentence)).length;
+  return sentenceParts(body).filter((sentence) => draftCtaCue.test(sentence)).length;
 }
 
 function hasVisiblePersonalization(
@@ -147,7 +183,9 @@ function hasVisiblePersonalization(
   const evidenceById = new Map(context.evidence.map((evidence) => [evidence.evidenceId, evidence]));
   const normalizedContent = normalizeForMatch(content);
   return personalization.every((item) => {
-    const statement = normalizeForMatch(evidenceById.get(item.evidenceId)?.statement || '');
+    const statement = normalizeForMatch(draftEvidencePersonalizationStatementV2(
+      evidenceById.get(item.evidenceId)?.statement || '',
+    ));
     return Boolean(statement && normalizedContent.includes(statement));
   });
 }

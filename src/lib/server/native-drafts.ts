@@ -26,6 +26,7 @@ import {
 import {
   createFailedDraftPreflightV2,
   draftContentFingerprintV2,
+  stripUnapprovedDraftCtasV2,
   validateDraftPreflightV2,
   type DraftPreflightIssueV2,
   type DraftPersonalizationProvenanceV2,
@@ -491,9 +492,11 @@ function outputForPreflight(
   context: DraftContextV2,
   generated: GeneratedOutreachFromDraftContextV2,
 ): GeneratedOutreachV2 {
+  const approvedCta = context.constraints.cta.exactText;
+  const modelBody = stripUnapprovedDraftCtasV2(normalizeNativeDraftBody(generated.body), approvedCta);
   return {
     subject: generated.subject,
-    body: normalizeNativeDraftBody(`${generated.body}\n\n${context.constraints.cta.exactText}`),
+    body: normalizeNativeDraftBody(`${modelBody}\n\n${approvedCta}`),
     personalization: requiredReportAwareDraftPersonalizationV2(context),
     hypothesisIds: generated.hypothesisIds,
   };

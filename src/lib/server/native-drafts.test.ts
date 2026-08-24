@@ -222,6 +222,33 @@ test('native drafting appends an arbitrary approved CTA exactly once on the serv
   assert.ok((body.match(/[\p{L}\p{N}]+/gu)?.length || 0) <= 180);
 });
 
+test('native drafting removes a model CTA before appending the approved CTA', async () => {
+  const fixture = dependencies();
+  let generationCalls = 0;
+  fixture.value.generate = async ({ context }) => {
+    generationCalls += 1;
+    const output = generated(context);
+    return {
+      ...output,
+      body: `${output.body}\n\n¿Te parece si coordinamos una llamada la próxima semana?`,
+    };
+  };
+
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+
+  assert.equal(result.status, 'drafted');
+  if (result.status !== 'drafted') return;
+  const body = result.draft.content.text || '';
+  assert.equal(generationCalls, 1);
+  assert.doesNotMatch(body, /coordinamos una llamada/i);
+  assert.equal(body.split(result.context.constraints.cta.exactText).length - 1, 1);
+  assert.ok(body.endsWith(result.context.constraints.cta.exactText));
+  assert.equal(result.preflight.status, 'passed');
+});
+
 test('native drafting returns structured issues after two failed preflight generations', async () => {
   const fixture = dependencies();
   let generationCalls = 0;

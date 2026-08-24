@@ -12,6 +12,7 @@ import {
   type DraftContextV2,
 } from '@/lib/server/draft-context-v2';
 import {
+  draftEvidencePersonalizationStatementV2,
   GeneratedOutreachV2Schema,
   type GeneratedOutreachV2,
 } from '@/lib/server/draft-preflight-v2';
@@ -127,7 +128,7 @@ function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
     const evidence = input.context.evidence.find((item) => item.evidenceId === provenance.evidenceId);
     return {
       ...provenance,
-      statement: evidence?.statement || '',
+      statement: draftEvidencePersonalizationStatementV2(evidence?.statement || ''),
       subjectScope: evidence?.subjectScope || 'company',
     };
   });

@@ -2,12 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  draftEvidencePersonalizationStatementV2,
   draftContentFingerprintV2,
   requiredDraftPersonalizationV2,
   validateDraftPreflightV2,
   type GeneratedOutreachV2,
 } from './draft-preflight-v2';
 import { draftContextFixture } from './draft-v2-test-fixtures';
+
+test('personalization uses a concise verbatim excerpt when evidence contains search boilerplate', () => {
+  const statement = "Ada Lovelace - Directora de Operaciones del ...: Experiencia ; Directora de Operaciones para Chile - Perú. Acme. abr 2019 - actualidad 7 años 5 meses ; Analista de Operaciones. EMPRESA ...";
+  const excerpt = draftEvidencePersonalizationStatementV2(statement);
+
+  assert.equal(excerpt, 'Directora de Operaciones para Chile - Perú');
+  assert.ok(statement.includes(excerpt));
+});
 
 function validOutput(): GeneratedOutreachV2 {
   const context = draftContextFixture();
