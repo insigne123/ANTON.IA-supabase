@@ -4,13 +4,11 @@ dotenv.config({ path: '.env.local' })
 
 const baseUrl = String(process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:9003').replace(/\/$/, '')
 const cronSecret = String(process.env.CRON_SECRET || '').trim()
+const firebaseSchedulerSecret = String(process.env.FIREBASE_SCHEDULER_SECRET || '').trim()
 
-async function checkEndpoint(path) {
+async function checkEndpoint(path, headers) {
   const res = await fetch(`${baseUrl}${path}`, {
-    headers: {
-      Authorization: `Bearer ${cronSecret}`,
-      'x-cron-secret': cronSecret,
-    },
+    headers,
   })
 
   const text = await res.text()
@@ -32,20 +30,32 @@ async function main() {
   console.log('--- Verificacion Cron ANTON.IA ---')
   console.log(`Base URL: ${baseUrl}`)
   console.log(`CRON_SECRET: ${cronSecret ? 'OK' : 'MISSING'}`)
+  console.log(`FIREBASE_SCHEDULER_SECRET: ${firebaseSchedulerSecret ? 'OK' : 'MISSING'}`)
 
-  if (!cronSecret) {
-    console.error('Falta CRON_SECRET en .env.local')
+  if (!cronSecret || !firebaseSchedulerSecret) {
+    console.error('Faltan CRON_SECRET o FIREBASE_SCHEDULER_SECRET en .env.local')
     process.exit(1)
   }
 
   const checks = [
-    ['/api/cron/antonia?dryRun=1&skipFirebaseForward=1', 'Cron principal'],
-    ['/api/cron/process-campaigns?dryRun=1&includeDetails=1', 'Cron de campanas'],
+    [
+      '/api/cron/antonia',
+      'Compatibilidad legacy de ANTON.IA (debe responder 410)',
+      { Authorization: `Bearer ${cronSecret}`, 'x-cron-secret': cronSecret },
+    ],
+    [
+      '/api/cron/process-campaigns?dryRun=1&includeDetails=1',
+      'Bridge de campanas de Firebase (dry run)',
+      {
+        'x-firebase-scheduler-secret': firebaseSchedulerSecret,
+        'x-scheduler-owner': 'firebase-functions',
+      },
+    ],
   ]
 
-  for (const [path, label] of checks) {
+  for (const [path, label, headers] of checks) {
     try {
-      const result = await checkEndpoint(path)
+      const result = await checkEndpoint(path, headers)
       console.log(`\n[${label}] ${result.status} ${result.ok ? 'OK' : 'FAIL'}`)
       console.log(JSON.stringify(result.body, null, 2))
     } catch (error) {
@@ -54,7 +64,7 @@ async function main() {
     }
   }
 
-  console.log('\nSiguiente paso sugerido: comparar estos resultados con Vercel logs y revisar que last_run_at cambie en produccion.')
+  console.log('\nSiguiente paso sugerido: revisar los jobs y logs de Firebase Scheduler para todos los ticks propietarios.')
 }
 
 main()

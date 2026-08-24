@@ -1,6 +1,6 @@
-import { supabase } from '@/lib/supabase';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { decryptStoredToken, encryptStoredToken, isEncryptedStoredToken } from '@/lib/server/token-crypto';
+import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export const tokenService = {
     async saveToken(supabase: SupabaseClient, provider: 'google' | 'outlook', refreshToken: string, expiresAt?: Date) {
@@ -9,7 +9,7 @@ export const tokenService = {
 
         const encryptedRefreshToken = encryptStoredToken(refreshToken);
 
-        const { error } = await supabase
+        const { error } = await getSupabaseAdminClient()
             .from('provider_tokens')
             .upsert({
                 user_id: user.id,
@@ -27,7 +27,13 @@ export const tokenService = {
     },
 
     async getToken(supabase: SupabaseClient, userId: string, provider: 'google' | 'outlook') {
-        const { data, error } = await supabase
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user && user.id !== userId) return null;
+
+        // A verified user may read only their own token through this server-only helper.
+        // Service-role callers continue using their supplied client for background work.
+        const tokenClient = user ? getSupabaseAdminClient() : supabase;
+        const { data, error } = await tokenClient
             .from('provider_tokens')
             .select('refresh_token, expires_at')
             .eq('user_id', userId)
@@ -40,7 +46,7 @@ export const tokenService = {
         if (!refreshToken) return null;
 
         if (!isEncryptedStoredToken(data.refresh_token)) {
-            await supabase
+            await tokenClient
                 .from('provider_tokens')
                 .update({ refresh_token: encryptStoredToken(refreshToken), updated_at: new Date().toISOString() })
                 .eq('user_id', userId)

@@ -49,6 +49,21 @@ export function buildUnsubscribeFooterText(url: string) {
   return `\n\n---\nSi no deseas recibir más correos de nosotros, puedes darte de baja aquí: ${url}`;
 }
 
+function normalizeOutboundText(value: string) {
+  const text = String(value || '').trim();
+  const lowered = text.toLowerCase();
+  if (!text) return '';
+  if (['null', 'undefined', 'n/a', 'none'].includes(lowered)) return '';
+  return text;
+}
+
+function hasUnresolvedPlaceholder(value: string) {
+  const text = String(value || '');
+  if (!text) return false;
+  if (/\{\{[^}]+\}\}/.test(text)) return true;
+  return /\[\s*(?:nombre(?:\s+del\s+lead)?|lead\s+name|cargo(?:\s+del\s+lead)?|lead\s+title|empresa(?:\s+del\s+lead)?|lead\s+company|tu\s+nombre|mi\s+nombre|su\s+nombre|tu\s+cargo|mi\s+cargo|su\s+cargo|tu\s+compa(?:ñ|n)[ií]a|mi\s+compa(?:ñ|n)[ií]a|tu\s+empresa|mi\s+empresa|su\s+empresa|tu\s+correo(?:\s+electr[oó]nico)?|mi\s+correo(?:\s+electr[oó]nico)?|su\s+correo(?:\s+electr[oó]nico)?|tu\s+tel[eé]fono|mi\s+tel[eé]fono|su\s+tel[eé]fono|tu\s+sitio\s+web|mi\s+sitio\s+web|su\s+sitio\s+web)\s*\]/i.test(text);
+}
+
 export function prepareOutboundEmail(input: {
   html?: string;
   text?: string;
@@ -104,14 +119,18 @@ export function validateOutboundEmail(input: {
   const errors: string[] = [];
   const warnings: string[] = [];
   const to = String(input.to || '').trim();
-  const subject = String(input.subject || '').trim();
-  const html = String(input.html || '').trim();
-  const text = String(input.text || '').trim();
+  const subject = normalizeOutboundText(String(input.subject || ''));
+  const html = normalizeOutboundText(String(input.html || ''));
+  const text = normalizeOutboundText(String(input.text || ''));
   const unsubscribeUrl = String(input.unsubscribeUrl || '').trim();
+  const effectiveBodyText = normalizeOutboundText(text || stripHtmlToText(html));
 
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) errors.push('Invalid recipient email.');
   if (!subject) errors.push('Missing email subject.');
-  if (!html && !text) errors.push('Missing email content.');
+  if (!effectiveBodyText) errors.push('Missing email content.');
+  if (hasUnresolvedPlaceholder(subject) || hasUnresolvedPlaceholder(html) || hasUnresolvedPlaceholder(text)) {
+    errors.push('Email contains unresolved placeholders.');
+  }
   if (subject.length > 180) warnings.push('Subject is unusually long.');
   if (input.requireUnsubscribe && !unsubscribeUrl) errors.push('Missing unsubscribe URL.');
 

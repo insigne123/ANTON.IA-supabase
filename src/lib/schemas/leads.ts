@@ -19,25 +19,45 @@ export const LeadOrganizationSchema = z.object({
 export const LeadPhoneNumberSchema = z.object({
   raw_number: z.string().optional().nullable(),
   sanitized_number: z.string().optional().nullable(),
+  number: z.string().optional().nullable(),
   type: z.string().optional().nullable(),
+  type_cd: z.string().optional().nullable(),
   position: z.string().optional().nullable(),
   status: z.string().optional().nullable(),
 });
 
 export const LeadSchema = z.object({
   id: z.string(),
+  name: z.string().nullable().optional(),
   first_name: z.string().nullable().optional(),
   last_name: z.string().nullable().optional(),
   email: z.string().nullable().optional(),
+  email_status: z.string().nullable().optional(),
+  linkedin_url: z.string().nullable().optional(),
+  org_name: z.string().nullable().optional(),
+  organization_name: z.string().nullable().optional(),
+  organization_id: z.string().nullable().optional(),
+  organization_website: z.string().nullable().optional(),
+  industry: z.string().nullable().optional(),
   title: z.string().nullable().optional(),
   organization: LeadOrganizationSchema.optional(),
-  linkedin_url: z.string().nullable().optional(),
   photo_url: z.string().nullable().optional(),
-  email_status: z.string().nullable().optional(),
   apollo_id: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+  headline: z.string().nullable().optional(),
+  seniority: z.string().nullable().optional(),
+  departments: z.array(z.string()).nullable().optional(),
   primary_phone: z.string().nullable().optional(),
   phone_numbers: z.array(LeadPhoneNumberSchema).nullable().optional(),
   enrichment_status: z.string().nullable().optional(),
+  organization_domain: z.string().nullable().optional(),
+  organization_industry: z.string().nullable().optional(),
+  organization_size: z.number().nullable().optional(),
+  page: z.number().nullable().optional(),
+  batch_run_id: z.string().nullable().optional(),
+  updated_at: z.string().nullable().optional(),
 });
 
 export const LeadsResponseSchema = z.object({
@@ -79,11 +99,13 @@ export const LeadSearchResponseSchema = LeadsResponseSchema.extend({
   search_mode: z.string().optional(),
   company_name: z.string().optional(),
   leads_count: z.number().nonnegative().optional(),
+  warnings: z.array(z.string()).optional(),
   requested_reveal: RevealFlagsSchema.optional(),
   applied_reveal: RevealFlagsSchema.optional(),
   effective_reveal: RevealFlagsSchema.optional(),
   phone_enrichment: LeadPhoneEnrichmentSchema.optional(),
   provider_warnings: z.array(z.string()).optional(),
+  profile_tracking_ids: z.array(z.string()).optional(),
   warning: z.string().optional(),
   requires_organization_selection: z.boolean().optional(),
   organization_candidates: z.array(CompanySearchOrganizationSchema).optional(),
@@ -173,14 +195,10 @@ export const CompanyNameSearchRequestSchema = z.object({
   selected_organization_id: z.string().trim().optional(),
   selected_organization_name: z.string().trim().optional(),
   selected_organization_domain: z.string().trim().optional(),
+  selected_organization_website: z.string().trim().optional(),
+  selected_organization_industry: z.string().trim().optional(),
+  selected_organization_size: z.number().nullable().optional(),
 }).superRefine((value, ctx) => {
-  if (!value.company_name && !value.selected_organization_id) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'company_name o selected_organization_id es obligatorio',
-      path: ['company_name'],
-    });
-  }
   const domains = normalizeDomainList([
     ...(value.organization_domains || []),
     ...(value.organizationDomains || []),
@@ -191,6 +209,14 @@ export const CompanyNameSearchRequestSchema = z.object({
     value.company_domain,
     value.companyDomain,
   ]);
+
+  if (!value.company_name && !value.selected_organization_id && domains.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'company_name, organization_domains o selected_organization_id es obligatorio',
+      path: ['company_name'],
+    });
+  }
   if ([
     ...(value.organization_domains || []),
     ...(value.organizationDomains || []),

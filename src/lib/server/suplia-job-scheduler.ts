@@ -11,6 +11,7 @@ function adminAuthForJob(job: any): AuthContext {
   return {
     user: { id: job.user_id, email: null },
     organizationId: job.organization_id,
+    organizationIds: [job.organization_id],
     supabase: admin,
   };
 }

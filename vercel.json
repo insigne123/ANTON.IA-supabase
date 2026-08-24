@@ -1,8 +1,8 @@
 {
     "crons": [
         {
-            "path": "/api/cron/antonia",
-            "schedule": "*/5 * * * *"
+            "path": "/api/cron/suplia",
+            "schedule": "*/2 * * * *"
         }
     ]
 }

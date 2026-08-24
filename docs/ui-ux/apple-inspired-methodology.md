@@ -70,9 +70,5 @@ Preguntar siempre:
 
 ## Skills y recursos instalados para reforzar esta metodologia
 
-- `apple-hig-designer`
-- `hig-foundations`
-- `accessibility-tester`
-- `frontend-design`
-- `ui-ux-pro-max`
-- `web-design-guidelines`
+- skill local `premium-layout-composer`
+- skill local `wcag-remediator`

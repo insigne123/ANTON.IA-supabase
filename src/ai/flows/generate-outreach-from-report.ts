@@ -5,7 +5,16 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
-import { generateStructured } from '@/ai/openai-json';
+import { generateStructured, generateStructuredWithTelemetry } from '@/ai/openai-json';
+import {
+  DraftContextV2Schema,
+  type DraftContextV2,
+} from '@/lib/server/draft-context-v2';
+import {
+  GeneratedOutreachV2Schema,
+  requiredDraftPersonalizationV2,
+  type GeneratedOutreachV2,
+} from '@/lib/server/draft-preflight-v2';
 
 const GenerateOutreachInputSchema = z.object({
   report: z.any().describe('The detailed research report for the lead and their company.'),
@@ -15,9 +24,38 @@ const GenerateOutreachInputSchema = z.object({
 });
 
 const GenerateOutreachOutputSchema = z.object({
-  subject: z.string().describe('The generated email subject line.'),
-  body: z.string().describe('The generated email body.'),
+  subject: z.string().trim().min(1).max(80).describe('The generated email subject line.'),
+  body: z.string().trim().min(1).describe('The generated email body.'),
 });
+
+const GenerateOutreachFromDraftContextV2InputSchema = z.object({
+  context: DraftContextV2Schema,
+  rewrite: z.object({
+    previous: GeneratedOutreachV2Schema,
+    errors: z.array(z.string().trim().min(1).max(2_000)).max(20).default([]),
+    instruction: z.string().trim().min(1).max(1_000).optional(),
+  }).optional(),
+});
+
+const GeneratedOutreachModelV2Schema = GeneratedOutreachV2Schema.omit({
+  personalization: true,
+  hypothesisIds: true,
+});
+
+export type GenerateOutreachFromDraftContextV2Input = {
+  context: DraftContextV2;
+  rewrite?: {
+    previous: GeneratedOutreachV2;
+    errors: string[];
+    instruction?: string;
+  };
+};
+
+export type GeneratedOutreachFromDraftContextV2 = GeneratedOutreachV2 & {
+  provider: 'openai';
+  model: string;
+  promptVersion: 'native-draft/v2';
+};
 
 export async function generateOutreachFromReport(
   input: z.infer<typeof GenerateOutreachInputSchema>
@@ -67,21 +105,95 @@ Devuelve SOLO JSON valido con esta forma:
       throw new Error('Failed to generate outreach email.');
     }
 
-    const { body, subject } = output;
-
-    // Heurística simple para el asunto si no viene separado
-    const finalSubject =
-      subject ||
-      body
-        .split('\n')
-        .find((l: string) => l.toLowerCase().startsWith('asunto'))
-        ?.split(':')
-        .slice(1)
-        .join(':')
-        .trim() ||
-      body.split('\n')[0]?.slice(0, 80) ||
-      'Propuesta';
-
-    return { subject: finalSubject, body };
+    return { subject: output.subject, body: output.body };
   }
 );
+
+function modelForDraftPriority(priority: DraftContextV2['quality']['priority']) {
+  if (priority === 'A') {
+    return String(process.env.OPENAI_REASONING_MODEL || process.env.OPENAI_HIGH_QUALITY_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
+  }
+  return String(process.env.OPENAI_BALANCED_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
+}
+
+function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
+  const requiredPersonalization = requiredDraftPersonalizationV2(input.context);
+  const requiredEvidenceIds = new Set(requiredPersonalization.map((item) => item.evidenceId));
+  const requiredEvidence = requiredPersonalization.map((provenance) => {
+    const evidence = input.context.evidence.find((item) => item.evidenceId === provenance.evidenceId);
+    return {
+      ...provenance,
+      statement: evidence?.statement || '',
+      subjectScope: evidence?.subjectScope || 'company',
+    };
+  });
+  const factualContext = {
+    ...input.context,
+    evidence: input.context.evidence.filter((evidence) => requiredEvidenceIds.has(evidence.evidenceId)),
+    hypotheses: [],
+  };
+  const correction = input.rewrite
+    ? `
+BORRADOR ANTERIOR (solo referencia de redacción; no es evidencia):
+${JSON.stringify({ subject: input.rewrite.previous.subject, body: input.rewrite.previous.body })}
+
+AJUSTE SOLICITADO POR EL USUARIO:
+${JSON.stringify(input.rewrite.instruction || null)}
+
+CORRECCIONES DE VALIDACIÓN:
+${JSON.stringify(input.rewrite.errors)}
+
+Reescribe sin agregar información ausente de DRAFT_CONTEXT_V2. El ajuste solicitado puede cambiar voz, extensión o estructura, pero nunca relajar las reglas no negociables.
+`
+    : '';
+
+  return `Idioma: Español (Chile). Redacta un único correo de prospección B2B, profesional y humano.
+
+Usa exclusivamente este DraftContextV2 factual. La matriz evidence contiene la única evidencia autorizada para personalizar. No inventes datos, métricas, clientes, necesidades ni fuentes. No muestres URLs, IDs, nombres de herramientas ni el proceso de investigación dentro del correo.
+
+Reglas no negociables:
+- Asunto dentro de los límites definidos por constraints.subject.
+- Cuerpo dentro de los límites definidos por constraints.body.
+- Sigue context.style.profile para el tono, la extensión y las instrucciones de escritura, salvo que contradiga estas reglas.
+- Estructura el cuerpo en 4 a 6 párrafos breves separados por una línea en blanco. El saludo debe quedar solo y cada párrafo central debe tener como máximo dos frases.
+- Usa exactamente una invitación a actuar y copia literalmente constraints.cta.exactText una sola vez.
+- No agregues otra pregunta, enlace de agenda, ni CTA.
+- No dejes placeholders.
+- La personalización visible debe usar naturalmente el statement de REQUIRED_FACTUAL_PERSONALIZATION. Si su subjectScope es person, menciona de forma natural el cargo o nombre completo del contacto; si es company, menciona la empresa.
+- No uses hipótesis, señales o afirmaciones del intento anterior que no aparezcan en DRAFT_CONTEXT_V2.
+- El servidor vinculará la procedencia de REQUIRED_FACTUAL_PERSONALIZATION; no devuelvas IDs de evidencia ni claims dentro del correo o el JSON.
+
+REQUIRED_FACTUAL_PERSONALIZATION:
+${JSON.stringify(requiredEvidence)}
+
+DRAFT CONTEXT V2:
+${JSON.stringify(factualContext)}
+${correction}
+Devuelve SOLO JSON válido con esta forma exacta:
+{"subject":"...","body":"..."}`;
+}
+
+/**
+ * Native drafting bypasses the configurable provider route: this path must fail closed
+ * when OpenAI is unavailable rather than falling back to generic copy from another source.
+ */
+export async function generateOutreachFromDraftContextV2(
+  input: GenerateOutreachFromDraftContextV2Input,
+): Promise<GeneratedOutreachFromDraftContextV2> {
+  const parsed = GenerateOutreachFromDraftContextV2InputSchema.parse(input);
+  const result = await generateStructuredWithTelemetry({
+    prompt: draftContextPrompt(parsed),
+    schema: GeneratedOutreachModelV2Schema,
+    provider: 'openai',
+    openAiModel: modelForDraftPriority(parsed.context.quality.priority),
+    temperature: parsed.rewrite ? 0 : 0.2,
+  });
+  return {
+    ...result.data,
+    personalization: requiredDraftPersonalizationV2(parsed.context),
+    hypothesisIds: [],
+    provider: 'openai',
+    model: result.telemetry.modelName,
+    promptVersion: 'native-draft/v2',
+  };
+}

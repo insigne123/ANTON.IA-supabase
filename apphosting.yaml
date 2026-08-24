@@ -1,22 +1,5 @@
 # apphosting.yaml
 
-build:
-  steps:
-    - name: fetch                
-      uri: ${SOURCE_TARBALL_URL}
-
-    - name: setup
-      entrypoint: bash
-      args: ["-lc", "npm ci --include=dev"]
-
-    - name: build
-      entrypoint: bash
-      args: ["-lc", "npm run build"]
-
-    - name: bundle
-      entrypoint: bash
-      args: ["-lc", "mkdir -p \"${BUILD_DIR}\" && tar --exclude='./.git' --exclude='./.env.local' --exclude='./chrome-extension.pem' --exclude='./antonia-extension-v1.1.zip' --exclude='./*.log' --exclude='./typecheck*.log' --exclude='./widget_error.txt' -cf - . | tar -xf - -C \"${BUILD_DIR}\""]
-
 runConfig:
   minInstances: 0
   maxInstances: 20
@@ -25,7 +8,7 @@ runConfig:
   memoryMiB: 768
 
 env:
-  # === Existing Variables ===
+  # === Primary production providers ===
   - variable: APOLLO_API_KEY
     secret: APOLLO_API_KEY
     availability: [RUNTIME]
@@ -37,6 +20,26 @@ env:
   - variable: OPENAI_MODEL
     value: gpt-4o-mini
     availability: [RUNTIME]
+
+  - variable: AI_PROVIDER
+    value: openai
+    availability: [RUNTIME]
+
+  - variable: SUPLIA_CONTEXT_COMPACT_THRESHOLD_TOKENS
+    value: "150000"
+    availability: [RUNTIME]
+
+  - variable: SUPLIA_CONTEXT_RECENT_MESSAGES
+    value: "12"
+    availability: [RUNTIME]
+
+  - variable: NEXT_PUBLIC_SUPLIA_ENABLED
+    value: "false"
+    availability: [BUILD, RUNTIME]
+
+  - variable: NEXT_PUBLIC_OPPORTUNITIES_ENABLED
+    value: "false"
+    availability: [BUILD, RUNTIME]
 
   # === Lead providers (Apollo/PDL trial) ===
   - variable: LEADS_PROVIDER_DEFAULT
@@ -159,49 +162,38 @@ env:
     secret: SUPABASE_SERVICE_ROLE_KEY
     availability: [RUNTIME]
 
-  # === Lead Research / Vane (server-only) ===
-  - variable: VANE_BASE_URL
-    value: https://alan-flexible-boards-payments.trycloudflare.com
+  # === Native web research / Serper (server-only) ===
+  - variable: SERPER_API_KEY
+    secret: SERPER_API_KEY
     availability: [RUNTIME]
 
-  - variable: VANE_PROVIDER_NAME
-    value: OpenAI
+  - variable: NATIVE_RESEARCH_ENABLED
+    value: "true"
     availability: [RUNTIME]
 
-  - variable: VANE_CHAT_MODEL_KEY
-    value: gpt-4o-mini
+  - variable: SERPER_TIMEOUT_MS
+    value: "6000"
     availability: [RUNTIME]
 
-  - variable: VANE_EMBEDDING_MODEL_KEY
-    value: text-embedding-3-small
+  - variable: SERPER_MAX_RETRIES
+    value: "1"
     availability: [RUNTIME]
 
-  - variable: VANE_AUTH_HEADER_NAME
-    value: x-vane-auth
-    availability: [RUNTIME]
-
-  - variable: VANE_AUTH_HEADER_VALUE
-    secret: VANE_AUTH_HEADER_VALUE
-    availability: [RUNTIME]
-
-  - variable: VANE_TIMEOUT_MS
-    value: "240000"
+  - variable: SERPER_RETRY_DELAY_MS
+    value: "250"
     availability: [RUNTIME]
 
   - variable: ANTONIA_LEAD_RESEARCH_URL
     value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-research
     availability: [RUNTIME]
 
-  - variable: N8N_RESEARCH_WEBHOOK_URL
-    value: https://nicogun.app.n8n.cloud/webhook/ANTONIA
-    availability: [RUNTIME]
-
-  - variable: N8N_WEBHOOK_URL
-    value: https://nicogun.app.n8n.cloud/webhook/ANTONIA
-    availability: [RUNTIME]
-
   - variable: LEAD_RESEARCH_WORKER_SECRET
     secret: LEAD_RESEARCH_WORKER_SECRET
+    availability: [RUNTIME]
+
+  # Shared only with Firebase-owned scheduler bridges.
+  - variable: FIREBASE_SCHEDULER_SECRET
+    secret: FIREBASE_SCHEDULER_SECRET
     availability: [RUNTIME]
 
   # === ANTON.IA Agent Variables ===

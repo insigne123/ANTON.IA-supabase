@@ -10,15 +10,17 @@ const required = [
   'SUPABASE_SERVICE_ROLE_KEY',
   'CRON_SECRET',
   'INTERNAL_API_SECRET',
+  'FIREBASE_SCHEDULER_SECRET',
   'APOLLO_WEBHOOK_SECRET',
 ]
 
+const aiProvider = String(process.env.SUPLIA_AI_PROVIDER || process.env.AI_PROVIDER || 'openai').trim().toLowerCase()
+const unsupportedAiProvider = aiProvider !== 'openai'
+
 const recommended = [
   'TRACKING_WEBHOOK_SECRET',
-  'ANTONIA_FIREBASE_TICK_URL',
-  'ANTONIA_FIREBASE_TICK_SECRET',
-  'N8N_RESEARCH_WEBHOOK_URL',
-  'GOOGLE_GENAI_API_KEY',
+  'LEAD_RESEARCH_WORKER_SECRET',
+  'OPENAI_API_KEY',
 ]
 
 const missingRequired = required.filter((key) => !String(process.env[key] || '').trim())
@@ -38,13 +40,17 @@ if (missingRecommended.length > 0) {
   for (const key of missingRecommended) console.warn(`- ${key}`)
 }
 
+if (unsupportedAiProvider) {
+  console.error(`\nUnsupported AI_PROVIDER for production: ${aiProvider || '(empty)'}. Use openai.`)
+}
+
 const baseUrl = String(process.env.NEXT_PUBLIC_BASE_URL || '').trim()
 const appUrl = String(process.env.NEXT_PUBLIC_APP_URL || '').trim()
 if (baseUrl && appUrl && baseUrl !== appUrl) {
   console.warn(`\nWarning: NEXT_PUBLIC_BASE_URL (${baseUrl}) != NEXT_PUBLIC_APP_URL (${appUrl})`)
 }
 
-if (missingRequired.length > 0) {
+if (missingRequired.length > 0 || unsupportedAiProvider) {
   process.exit(1)
 }
 

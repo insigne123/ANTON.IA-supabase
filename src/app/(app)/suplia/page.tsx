@@ -1,5 +1,5 @@
-import { SupliaWorkspace } from '@/components/suplia/SupliaWorkspace';
+import { notFound } from 'next/navigation';
 
 export default function SupliaPage() {
-  return <SupliaWorkspace />;
+  notFound();
 }

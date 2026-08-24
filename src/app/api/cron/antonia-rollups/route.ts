@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { refreshAntoniaDailyRollups } from '@/lib/server/antonia-event-ledger';
+import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -9,15 +10,8 @@ function isValidDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
-function isAuthorized(req: NextRequest) {
-  const cronSecret = String(process.env.CRON_SECRET || '').trim();
-  const providedBearer = String(req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
-  const providedCronSecret = String(req.headers.get('x-cron-secret') || '').trim();
-  return Boolean(cronSecret && (providedBearer === cronSecret || providedCronSecret === cronSecret));
-}
-
 export async function GET(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  if (!isFirebaseSchedulerRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -36,7 +30,7 @@ export async function GET(req: NextRequest) {
       refreshedRows,
       from: from || null,
       to: to || null,
-    }, { headers: { 'Cache-Control': 'no-store' } });
+    }, { headers: firebaseSchedulerResponseHeaders() });
   } catch (error) {
     console.error('[cron/antonia-rollups] refresh failed', error);
     return NextResponse.json(

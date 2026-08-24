@@ -8,6 +8,8 @@ import { syncLeadAutopilotToCrm } from '@/lib/server/crm-autopilot';
 import { createAntoniaException } from '@/lib/server/antonia-exceptions';
 import { maybeEscalateReplyReviewFromContactedId } from '@/lib/server/antonia-reply-escalation';
 import { buildThreadKey, deriveLifecycleState, safeInsertEmailEvent } from '@/lib/email-observability';
+import { shouldGloballySuppressReply } from '@/lib/contact-history-guard';
+import { ingestInboundReply, recordInboundUnsubscribe } from '@/lib/server/inbound-reply-ingestion';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -40,7 +42,7 @@ async function resolveContactedLeadForEvent(params: {
     conversationId?: string | null;
 }) {
     const { supabase, eventType } = params;
-    const select = 'id, user_id, email, organization_id, mission_id, engagement_score, click_count, opened_at, clicked_at, replied_at, campaign_followup_allowed, reply_intent, name, company, role, lead_id, message_id, internet_message_id, thread_id, conversation_id';
+    const select = 'id, user_id, email, organization_id, mission_id, engagement_score, click_count, opened_at, clicked_at, replied_at, campaign_followup_allowed, reply_intent, name, company, role, lead_id, provider, status, lifecycle_state, message_id, internet_message_id, thread_id, conversation_id';
     const attempts: Array<{ field: string; value?: string | null }> = [
         { field: 'id', value: String(params.contactedId || '').trim() || null },
         { field: 'message_id', value: normalizeMessageId(params.messageId) || null },
@@ -163,13 +165,14 @@ export async function POST(req: Request) {
                 : new Date().toISOString();
             const leadId = event.leadId || event.custom_args?.leadId;
             const messageId = normalizeMessageId(event.sg_message_id || event.messageId || event.custom_args?.messageId || event.headers?.['message-id']);
-            const internetMessageId = normalizeMessageId(event.internetMessageId || event.custom_args?.internetMessageId || event.headers?.['in-reply-to'] || event.headers?.['references']);
+            const internetMessageId = normalizeMessageId(event.internetMessageId || event.headers?.['message-id']);
+            const replyToInternetMessageId = normalizeMessageId(event.custom_args?.internetMessageId || event.headers?.['in-reply-to'] || event.headers?.['references']);
             const threadId = String(event.threadId || event.custom_args?.threadId || event.thread_id || '').trim() || null;
             const conversationId = String(event.conversationId || event.custom_args?.conversationId || event.conversation_id || '').trim() || null;
             const contactedId = String(event.contactedId || event.custom_args?.contactedId || '').trim() || null;
 
             if (!leadId) {
-                console.log('[Tracking] Event skipped: No leadId found', event);
+                console.log('[Tracking] Event skipped: No leadId found', { type });
                 continue;
             }
 
@@ -186,7 +189,7 @@ export async function POST(req: Request) {
                 contactedId,
                 leadId,
                 messageId,
-                internetMessageId,
+                internetMessageId: replyToInternetMessageId || internetMessageId,
                 threadId,
                 conversationId,
             });
@@ -207,35 +210,27 @@ export async function POST(req: Request) {
                 messageId: messageId || (contacted as any)?.message_id,
             });
 
-            await safeInsertEmailEvent(supabase, {
-                organization_id: orgId,
-                mission_id: missionId,
-                contacted_id: (contacted as any)?.id || null,
-                lead_id: leadId,
-                provider: (contacted as any)?.provider || null,
-                event_type: eventType,
-                event_source: 'tracking_webhook',
-                event_at: timestamp,
-                thread_key: threadKey,
-                message_id: messageId || null,
-                internet_message_id: internetMessageId || null,
-                meta: {
-                    email,
-                    replyIntent: event.replyIntent || null,
-                    summary: String(rawEventText || '').slice(0, 500),
-                },
-            });
+            if (eventType !== 'reply') {
+                await safeInsertEmailEvent(supabase, {
+                    organization_id: orgId,
+                    mission_id: missionId,
+                    contacted_id: (contacted as any)?.id || null,
+                    lead_id: leadId,
+                    provider: (contacted as any)?.provider || null,
+                    event_type: eventType,
+                    event_source: 'tracking_webhook',
+                    event_at: timestamp,
+                    thread_key: threadKey,
+                    message_id: messageId || null,
+                    internet_message_id: internetMessageId || null,
+                    meta: {
+                        email,
+                        replyIntent: event.replyIntent || null,
+                        summary: String(rawEventText || '').slice(0, 500),
+                    },
+                });
 
-            await supabase.from('lead_responses').insert({
-                lead_id: leadId,
-                contacted_id: (contacted as any)?.id || null,
-                organization_id: orgId,
-                mission_id: missionId,
-                email_message_id: messageId,
-                type: eventType,
-                content: rawEventText || null,
-                created_at: timestamp,
-            } as any);
+            }
 
             const scoreIncrement =
                 eventType === 'open' ? 1 :
@@ -354,211 +349,204 @@ export async function POST(req: Request) {
             }
 
             if (eventType === 'reply') {
-                updateData.replied_at = timestamp;
-                updateData.status = 'replied';
-                updateData.delivery_status = 'replied';
-                updateData.last_follow_up_at = timestamp;
-                updateData.reply_message_id = messageId || null;
-                updateData.reply_subject = event.subject || event.headers?.subject || null;
-
                 const replyContent = event.text || event.html || '';
                 const preview = extractReplyPreview(replyContent);
-                updateData.reply_preview = preview || null;
-                updateData.reply_snippet = preview || null;
-                updateData.last_reply_text = replyContent ? String(replyContent).slice(0, 4000) : null;
+                const detectedFailure = detectDeliveryFailure({
+                    subject: event.subject || event.headers?.subject,
+                    from: event.from || event.sender || event.headers?.from || email,
+                    text: event.text || '',
+                    html: event.html || '',
+                });
+                const classification: any = detectedFailure
+                    ? {
+                        intent: detectedFailure.replyIntent,
+                        sentiment: 'neutral',
+                        confidence: 0.98,
+                        summary: detectedFailure.bounceReason,
+                        reason: detectedFailure.campaignFollowupReason,
+                        shouldContinue: false,
+                        evaluationStatus: detectedFailure.evaluationStatus,
+                        deliveryStatus: detectedFailure.deliveryStatus,
+                        bounceCategory: detectedFailure.bounceCategory,
+                        bounceReason: detectedFailure.bounceReason,
+                    }
+                    : await classifyReply(replyContent || '');
 
-                try {
-                    const detectedFailure = detectDeliveryFailure({
-                        subject: event.subject || event.headers?.subject,
-                        from: event.from || event.sender || event.headers?.from || email,
-                        text: event.text || '',
-                        html: event.html || '',
+                if (!detectedFailure) {
+                    classification.evaluationStatus = classification.intent === 'negative' || classification.intent === 'unsubscribe'
+                        ? 'do_not_contact'
+                        : classification.intent === 'meeting_request' || classification.intent === 'positive'
+                            ? 'action_required'
+                            : 'pending';
+                }
+
+                const recipientEmail = String((contacted as any)?.email || '').trim().toLowerCase();
+                if (!recipientEmail || (!messageId && !internetMessageId)) {
+                    console.warn('[Tracking] Reply skipped: stable message identity or recipient context missing', {
+                        contactedId: (contacted as any)?.id,
+                        hasRecipient: Boolean(recipientEmail),
+                        hasMessageIdentity: Boolean(messageId || internetMessageId),
                     });
+                    continue;
+                }
 
-                    if (detectedFailure) {
-                        updateData.status = 'failed';
-                        updateData.replied_at = null;
-                        updateData.delivery_status = detectedFailure.deliveryStatus;
-                        updateData.bounced_at = timestamp;
-                        updateData.bounce_category = detectedFailure.bounceCategory;
-                        updateData.bounce_reason = detectedFailure.bounceReason;
-                        updateData.reply_intent = detectedFailure.replyIntent;
-                        updateData.reply_sentiment = 'neutral';
-                        updateData.reply_confidence = 0.98;
-                        updateData.reply_summary = detectedFailure.bounceReason;
-                        updateData.campaign_followup_allowed = false;
-                        updateData.campaign_followup_reason = detectedFailure.campaignFollowupReason;
-                        updateData.evaluation_status = detectedFailure.evaluationStatus;
-                    } else {
-                        const shouldNotify = !(contacted as any)?.reply_intent;
-                        const classification = await classifyReply(replyContent || '');
-                        updateData.reply_intent = classification.intent;
-                        updateData.reply_sentiment = classification.sentiment;
-                        updateData.reply_confidence = classification.confidence;
-                        updateData.reply_summary = classification.summary || null;
-                        updateData.campaign_followup_allowed = classification.shouldContinue;
-                        updateData.campaign_followup_reason = classification.reason || null;
+                const shouldNotify = !(contacted as any)?.reply_intent;
+                const ingestion = await ingestInboundReply(supabase, {
+                    contactedId: (contacted as any).id,
+                    recipientEmail,
+                    provider: String((contacted as any)?.provider || event.provider || 'email'),
+                    messageId: messageId || null,
+                    internetMessageId: internetMessageId || null,
+                    eventType: detectedFailure ? 'bounce' : 'reply',
+                    eventSource: 'tracking_webhook',
+                    eventAt: timestamp,
+                    threadKey,
+                    threadId: threadId || (contacted as any)?.thread_id,
+                    conversationId: conversationId || (contacted as any)?.conversation_id,
+                    subject: event.subject || event.headers?.subject || null,
+                    content: replyContent || null,
+                    preview: preview || null,
+                    classification,
+                });
 
-                        if (!classification.shouldContinue) {
-                            updateData.evaluation_status = classification.intent === 'negative' || classification.intent === 'unsubscribe'
-                                ? 'do_not_contact'
-                                : 'action_required';
-                        }
+                if (!ingestion.inserted) continue;
 
-                        if ((classification.intent === 'unsubscribe' || classification.intent === 'negative') && (contacted as any)?.email) {
+                if (shouldGloballySuppressReply(classification) && recipientEmail) {
+                    const suppression = await recordInboundUnsubscribe(supabase, {
+                        contactedId: (contacted as any).id,
+                        recipientEmail,
+                        eventKey: ingestion.eventKey,
+                    });
+                    if (!suppression.recorded) continue;
+                }
+
+                if (!detectedFailure) {
+                    const leadSummary = {
+                        id: leadId,
+                        name: (contacted as any)?.name || null,
+                        fullName: (contacted as any)?.name || null,
+                        email: recipientEmail,
+                        company: (contacted as any)?.company || null,
+                        companyName: (contacted as any)?.company || null,
+                        title: (contacted as any)?.role || null,
+                    };
+
+                    if (shouldNotify && orgId && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
+                        const { data: autopilotConfig } = await supabase
+                            .from('antonia_config')
+                            .select('booking_link, meeting_instructions')
+                            .eq('organization_id', orgId)
+                            .maybeSingle();
+                        const suggestedReply = buildSuggestedMeetingReply({
+                            leadName: leadSummary.fullName,
+                            companyName: leadSummary.companyName,
+                            bookingLink: autopilotConfig?.booking_link,
+                            meetingInstructions: autopilotConfig?.meeting_instructions,
+                        });
+                        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+                        const summary = classification.summary || preview || 'Respuesta positiva detectada';
+
+                        await notificationService.sendAlert(
+                            orgId,
+                            'Respuesta positiva detectada',
+                            `Lead ${recipientEmail} respondió: ${summary}. Revisar: ${appUrl}/contacted/replied`
+                        );
+                        await createAntoniaException(supabase, {
+                            organizationId: orgId,
+                            missionId,
+                            leadId,
+                            category: 'positive_reply',
+                            severity: classification.intent === 'meeting_request' ? 'critical' : 'high',
+                            title: classification.intent === 'meeting_request' ? 'Lead solicitó reunión' : 'Lead con respuesta positiva',
+                            description: summary,
+                            dedupeKey: `positive_reply_${leadId}`,
+                            payload: { lead: leadSummary, classification, preview, suggestedReply },
+                        });
+                        await syncLeadAutopilotToCrm(supabase, {
+                            organizationId: orgId,
+                            leadId,
+                            stage: classification.intent === 'meeting_request' ? 'meeting' : 'engaged',
+                            notes: summary,
+                            nextAction: classification.intent === 'meeting_request'
+                                ? 'Confirmar reunion y preparar contexto comercial'
+                                : 'Responder rapido y proponer horario de reunion',
+                            nextActionType: classification.intent === 'meeting_request' ? 'meeting_handoff' : 'hot_reply_followup',
+                            nextActionDueAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+                            autopilotStatus: classification.intent === 'meeting_request' ? 'meeting_requested' : 'positive_reply',
+                            lastAutopilotEvent: classification.intent,
+                            meetingLink: autopilotConfig?.booking_link || null,
+                        });
+                    }
+
+                    if (orgId && classification.intent !== 'negative' && classification.intent !== 'unsubscribe' && classification.intent !== 'delivery_failure') {
+                        await maybeEscalateReplyReviewFromContactedId({
+                            supabase,
+                            organizationId: orgId,
+                            userId: (contacted as any)?.user_id,
+                            contactedId: (contacted as any).id,
+                            rawReply: replyContent,
+                            replySubject: event.subject || event.headers?.subject || null,
+                        }).catch((error) => {
+                            console.warn('[Tracking] reply escalation failed:', error);
+                        });
+                    }
+
+                    if (orgId && missionId && (classification.intent === 'unsubscribe' || classification.intent === 'negative')) {
+                        const { data: orgConfig } = await supabase
+                            .from('antonia_config')
+                            .select('pause_on_negative_reply')
+                            .eq('organization_id', orgId)
+                            .maybeSingle();
+
+                        await createAntoniaException(supabase, {
+                            organizationId: orgId,
+                            missionId,
+                            leadId,
+                            category: 'negative_reply_guardrail',
+                            severity: 'high',
+                            title: 'Reply negativo detectado',
+                            description: classification.summary || preview || 'ANTONIA detuvo seguimiento por señal negativa.',
+                            dedupeKey: `negative_reply_${leadId}`,
+                            payload: { lead: leadSummary, classification, preview },
+                        });
+                        await syncLeadAutopilotToCrm(supabase, {
+                            organizationId: orgId,
+                            leadId,
+                            stage: 'closed_lost',
+                            notes: classification.summary || preview || 'Respuesta negativa detectada',
+                            nextAction: 'Detener secuencia y revisar motivo de rechazo',
+                            nextActionType: 'negative_reply_review',
+                            nextActionDueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+                            autopilotStatus: 'negative_reply',
+                            lastAutopilotEvent: classification.intent,
+                        });
+
+                        if (orgConfig?.pause_on_negative_reply) {
                             await supabase
-                                .from('unsubscribed_emails')
-                                .upsert({
-                                    email: (contacted as any).email,
-                                    user_id: (contacted as any)?.user_id || null,
-                                    organization_id: orgId,
-                                    reason: `reply:${classification.intent}`,
-                                }, { onConflict: 'email,user_id,organization_id' } as any);
-                        }
-
-                        const leadSummary = {
-                            id: leadId,
-                            name: (contacted as any)?.name || null,
-                            fullName: (contacted as any)?.name || null,
-                            email: (contacted as any)?.email || email || null,
-                            company: (contacted as any)?.company || null,
-                            companyName: (contacted as any)?.company || null,
-                            title: (contacted as any)?.role || null,
-                        };
-
-                            if (shouldNotify && orgId && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
-                            const { data: autopilotConfig } = await supabase
-                                .from('antonia_config')
-                                .select('booking_link, meeting_instructions')
-                                .eq('organization_id', orgId)
-                                .maybeSingle();
-
-                            const suggestedReply = buildSuggestedMeetingReply({
-                                leadName: leadSummary.fullName,
-                                companyName: leadSummary.companyName,
-                                bookingLink: autopilotConfig?.booking_link,
-                                meetingInstructions: autopilotConfig?.meeting_instructions,
-                            });
-
-                            const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
-                            const summary = classification.summary || preview || 'Respuesta positiva detectada';
-                            const leadEmail = (contacted as any)?.email || leadId;
-                            await notificationService.sendAlert(
-                                orgId,
-                                'Respuesta positiva detectada',
-                                `Lead ${leadEmail} respondió: ${summary}. Revisar: ${appUrl}/contacted/replied`
-                            );
-
-                            await createAntoniaException(supabase, {
-                                organizationId: orgId,
-                                missionId,
-                                leadId,
-                                category: 'positive_reply',
-                                severity: classification.intent === 'meeting_request' ? 'critical' : 'high',
-                                title: classification.intent === 'meeting_request' ? 'Lead solicitó reunión' : 'Lead con respuesta positiva',
-                                description: summary,
-                                dedupeKey: `positive_reply_${leadId}`,
-                                payload: {
-                                    lead: leadSummary,
-                                    classification,
-                                    preview,
-                                    suggestedReply,
-                                },
-                            });
-
-                                await syncLeadAutopilotToCrm(supabase, {
-                                    organizationId: orgId,
-                                    leadId,
-                                stage: classification.intent === 'meeting_request' ? 'meeting' : 'engaged',
-                                notes: summary,
-                                nextAction: classification.intent === 'meeting_request'
-                                    ? 'Confirmar reunion y preparar contexto comercial'
-                                    : 'Responder rapido y proponer horario de reunion',
-                                nextActionType: classification.intent === 'meeting_request' ? 'meeting_handoff' : 'hot_reply_followup',
-                                nextActionDueAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-                                autopilotStatus: classification.intent === 'meeting_request' ? 'meeting_requested' : 'positive_reply',
-                                lastAutopilotEvent: classification.intent,
-                                    meetingLink: autopilotConfig?.booking_link || null,
-                                });
-                            }
-
-                            if (orgId && (contacted as any)?.id && classification.intent !== 'negative' && classification.intent !== 'unsubscribe' && classification.intent !== 'delivery_failure') {
-                                await maybeEscalateReplyReviewFromContactedId({
-                                    supabase,
-                                    organizationId: orgId,
-                                    userId: (contacted as any)?.user_id,
-                                    contactedId: (contacted as any).id,
-                                    rawReply: replyContent,
-                                    replySubject: event.subject || event.headers?.subject || null,
-                                }).catch((error) => {
-                                    console.warn('[Tracking] reply escalation failed:', error);
-                                });
-                            }
-
-                            if (orgId && missionId && (classification.intent === 'unsubscribe' || classification.intent === 'negative')) {
-                            const { data: orgConfig } = await supabase
-                                .from('antonia_config')
-                                .select('pause_on_negative_reply')
-                                .eq('organization_id', orgId)
-                                .maybeSingle();
-
-                            await createAntoniaException(supabase, {
-                                organizationId: orgId,
-                                missionId,
-                                leadId,
-                                category: 'negative_reply_guardrail',
-                                severity: 'high',
-                                title: 'Reply negativo detectado',
-                                description: classification.summary || preview || 'ANTONIA detuvo seguimiento por señal negativa.',
-                                dedupeKey: `negative_reply_${leadId}`,
-                                payload: { lead: leadSummary, classification, preview },
-                            });
-
-                            await syncLeadAutopilotToCrm(supabase, {
-                                organizationId: orgId,
-                                leadId,
-                                stage: 'closed_lost',
-                                notes: classification.summary || preview || 'Respuesta negativa detectada',
-                                nextAction: 'Detener secuencia y revisar motivo de rechazo',
-                                nextActionType: 'negative_reply_review',
-                                nextActionDueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-                                autopilotStatus: 'negative_reply',
-                                lastAutopilotEvent: classification.intent,
-                            });
-
-                            if (orgConfig?.pause_on_negative_reply) {
-                                await supabase
-                                    .from('antonia_missions')
-                                    .update({ status: 'paused', updated_at: new Date().toISOString() })
-                                    .eq('id', missionId)
-                                    .eq('status', 'active');
-
-                                await supabase
-                                    .from('antonia_tasks')
-                                    .update({
-                                        status: 'completed',
-                                        result: {
-                                            skipped: true,
-                                            reason: 'mission_paused',
-                                            source: 'negative_reply_guardrail',
-                                        },
-                                        error_message: null,
-                                        updated_at: new Date().toISOString(),
-                                    } as any)
-                                    .eq('mission_id', missionId)
-                                    .eq('status', 'pending')
-                                    .in('type', ['GENERATE_CAMPAIGN', 'SEARCH', 'ENRICH', 'INVESTIGATE', 'CONTACT', 'CONTACT_INITIAL', 'CONTACT_CAMPAIGN']);
-                            }
+                                .from('antonia_missions')
+                                .update({ status: 'paused', updated_at: new Date().toISOString() })
+                                .eq('id', missionId)
+                                .eq('status', 'active');
+                            await supabase
+                                .from('antonia_tasks')
+                                .update({
+                                    status: 'completed',
+                                    result: {
+                                        skipped: true,
+                                        reason: 'mission_paused',
+                                        source: 'negative_reply_guardrail',
+                                    },
+                                    error_message: null,
+                                    updated_at: new Date().toISOString(),
+                                } as any)
+                                .eq('mission_id', missionId)
+                                .eq('status', 'pending')
+                                .in('type', ['GENERATE_CAMPAIGN', 'SEARCH', 'ENRICH', 'INVESTIGATE', 'CONTACT', 'CONTACT_INITIAL', 'CONTACT_CAMPAIGN']);
                         }
                     }
-                } catch (err) {
-                    updateData.reply_intent = 'unknown';
-                    updateData.reply_sentiment = 'neutral';
-                    updateData.reply_confidence = 0.2;
-                    updateData.reply_summary = null;
-                    updateData.campaign_followup_allowed = false;
-                    updateData.campaign_followup_reason = 'classifier_error';
                 }
+
+                continue;
             }
 
             await updateContactedLead(supabase, (contacted as any)?.id, updateData);

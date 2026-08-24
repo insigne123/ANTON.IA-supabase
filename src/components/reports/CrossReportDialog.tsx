@@ -37,6 +37,20 @@ export default function CrossReportDialog({
               </section>
             )}
 
+            {cross.opportunities?.length > 0 && (
+              <section>
+                <h4 className="text-xs font-semibold uppercase text-muted-foreground">Oportunidades</h4>
+                <ul className="list-disc pl-5">{cross.opportunities.map((x, i) => <li key={i}>{x}</li>)}</ul>
+              </section>
+            )}
+
+            {cross.risks?.length > 0 && (
+              <section>
+                <h4 className="text-xs font-semibold uppercase text-muted-foreground">Riesgos</h4>
+                <ul className="list-disc pl-5">{cross.risks.map((x, i) => <li key={i}>{x}</li>)}</ul>
+              </section>
+            )}
+
             {cross.valueProps?.length > 0 && (
               <section>
                 <h4 className="text-xs font-semibold uppercase text-muted-foreground">Cómo ayudamos</h4>
@@ -72,6 +86,21 @@ export default function CrossReportDialog({
                 <pre className="whitespace-pre-wrap mt-2 font-mono text-xs">{cross.emailDraft.body}</pre>
               </section>
             )}
+
+            {cross.nextSteps?.length ? (
+              <section>
+                <h4 className="text-xs font-semibold uppercase text-muted-foreground">Siguientes pasos</h4>
+                <ul className="space-y-2">
+                  {cross.nextSteps.map((step, i) => (
+                    <li key={i} className="rounded-md border bg-muted/40 p-3">
+                      <div className="font-medium">{step.action}</div>
+                      {step.why ? <div className="mt-1 text-xs text-muted-foreground">{step.why}</div> : null}
+                      {step.priority ? <div className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground">Prioridad: {step.priority}</div> : null}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
 
             {cross.sources?.length ? (
               <section>

@@ -5,7 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -91,10 +91,10 @@ function LoginContent() {
     };
 
     return (
-        <div className="flex items-center justify-center min-h-screen bg-muted/50 px-4">
+        <main className="flex items-center justify-center min-h-screen bg-muted/50 px-4">
             <Card className="w-full max-w-md">
                 <CardHeader className="space-y-1">
-                    <CardTitle className="text-2xl font-bold text-center">Bienvenido</CardTitle>
+                    <h1 className="text-center text-2xl font-bold">Bienvenido</h1>
                     <CardDescription className="text-center">
                         Inicia sesión o crea una cuenta para continuar
                     </CardDescription>
@@ -111,8 +111,9 @@ function LoginContent() {
                                 <div className="space-y-2">
                                     <Label htmlFor="email-login">Email</Label>
                                     <Input
-                                        id="email-login"
-                                        type="email"
+                                         id="email-login"
+                                         type="email"
+                                         autoComplete="email"
                                         placeholder="tu@email.com"
                                         value={email}
                                         onChange={(e) => setEmail(e.target.value)}
@@ -123,8 +124,9 @@ function LoginContent() {
                                     <Label htmlFor="password-login">Contraseña</Label>
                                     <div className="relative">
                                         <Input
-                                            id="password-login"
-                                            type={showPassword ? "text" : "password"}
+                                             id="password-login"
+                                             type={showPassword ? "text" : "password"}
+                                             autoComplete="current-password"
                                             value={password}
                                             onChange={(e) => setPassword(e.target.value)}
                                             required
@@ -133,9 +135,11 @@ function LoginContent() {
                                             type="button"
                                             variant="ghost"
                                             size="sm"
-                                            className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                                            onClick={() => setShowPassword(!showPassword)}
-                                        >
+                                             className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                             onClick={() => setShowPassword(!showPassword)}
+                                             aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                                             aria-pressed={showPassword}
+                                         >
                                             {showPassword ? (
                                                 <EyeOff className="h-4 w-4 text-muted-foreground" />
                                             ) : (
@@ -156,8 +160,9 @@ function LoginContent() {
                                 <div className="space-y-2">
                                     <Label htmlFor="email-register">Email</Label>
                                     <Input
-                                        id="email-register"
-                                        type="email"
+                                         id="email-register"
+                                         type="email"
+                                         autoComplete="email"
                                         placeholder="tu@email.com"
                                         value={email}
                                         onChange={(e) => setEmail(e.target.value)}
@@ -168,8 +173,9 @@ function LoginContent() {
                                     <Label htmlFor="password-register">Contraseña</Label>
                                     <div className="relative">
                                         <Input
-                                            id="password-register"
-                                            type={showPassword ? "text" : "password"}
+                                             id="password-register"
+                                             type={showPassword ? "text" : "password"}
+                                             autoComplete="new-password"
                                             value={password}
                                             onChange={(e) => setPassword(e.target.value)}
                                             required
@@ -179,9 +185,11 @@ function LoginContent() {
                                             type="button"
                                             variant="ghost"
                                             size="sm"
-                                            className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                                            onClick={() => setShowPassword(!showPassword)}
-                                        >
+                                             className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                                             onClick={() => setShowPassword(!showPassword)}
+                                             aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                                             aria-pressed={showPassword}
+                                         >
                                             {showPassword ? (
                                                 <EyeOff className="h-4 w-4 text-muted-foreground" />
                                             ) : (
@@ -194,8 +202,9 @@ function LoginContent() {
                                     <Label htmlFor="confirm-password">Confirmar Contraseña</Label>
                                     <div className="relative">
                                         <Input
-                                            id="confirm-password"
-                                            type={showPassword ? "text" : "password"}
+                                             id="confirm-password"
+                                             type={showPassword ? "text" : "password"}
+                                             autoComplete="new-password"
                                             value={confirmPassword}
                                             onChange={(e) => setConfirmPassword(e.target.value)}
                                             required
@@ -239,7 +248,7 @@ function LoginContent() {
                     </Button>
                 </CardContent>
             </Card>
-        </div>
+        </main>
     );
 }
 

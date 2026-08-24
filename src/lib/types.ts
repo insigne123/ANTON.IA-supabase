@@ -71,7 +71,9 @@ export interface Lead {
   phoneNumbers?: Array<{
     raw_number?: string | null;
     sanitized_number?: string | null;
+    number?: string | null;
     type?: string | null;
+    type_cd?: string | null;
     position?: string | null;
     status?: string | null;
   }> | null;
@@ -160,6 +162,7 @@ export interface ContactedLead {
   replySummary?: string;
   campaignFollowupAllowed?: boolean;
   campaignFollowupReason?: string;
+  data?: Record<string, any> | null;
 }
 
 export interface ContactedOpportunity extends Omit<ContactedLead, 'leadId'> {
@@ -276,7 +279,7 @@ export type EnrichedLead = {
   // Metadata
   updatedAt?: string;
 
-  report?: CrossReport; // Persistent Report
+  report?: CrossReport | LeadResearchReport; // Legacy CrossReport remains readable during migration.
 };
 
 export type EnrichedOppLead = {
@@ -321,7 +324,7 @@ export type EnrichedOppLead = {
   primaryPhone?: string | null;
   enrichmentStatus?: 'completed' | 'pending_phone' | 'failed' | string;
   updatedAt?: string;
-  report?: CrossReport; // Persistent Report
+  report?: CrossReport | LeadResearchReport; // Legacy CrossReport remains readable during migration.
 };
 
 export type N8nCompanyResearchInput = {
@@ -356,7 +359,15 @@ export type CrossReport = {
     recentActivitySummary?: string | null;
     foundRecentActivity?: boolean;
     profileSummary?: string;
+    communicationStyle?: string | null;
   };
+  contradictions?: string[];
+  confidence?: Record<string, number>;
+  nextSteps?: Array<{
+    action: string;
+    why?: string;
+    priority?: string;
+  }>;
 };
 
 export type LeadResearchReport = {
@@ -438,9 +449,12 @@ export type ChatRole = 'user' | 'assistant' | 'system';
 export type ChatMessage = { id?: string; role: ChatRole; content: string; createdAt?: string };
 
 export type StyleProfile = {
+  id?: string;
+  isDefault?: boolean;
   scope: 'leads' | 'opportunities';
   name: string;
-  tone?: 'professional' | 'warm' | 'direct' | 'challenger' | 'brief';
+  tone?: 'professional' | 'warm' | 'direct' | 'challenger' | 'brief' | 'commercial' | 'consultative' | 'executive';
+  instructions?: string;
   length?: 'short' | 'medium' | 'long';
   structure?: Array<'hook' | 'context' | 'value' | 'proof' | 'cta'>;
   do?: string[];

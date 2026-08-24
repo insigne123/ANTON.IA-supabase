@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Anton.IA Automation",
+  "version": "3.1",
+  "description": "Mensajes directos de LinkedIn confirmados desde Anton.IA.",
+  "permissions": ["tabs"],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://studio--leadflowai-3yjcy.us-central1.hosted.app/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["content.js"]
+    },
+    {
+      "matches": ["https://studio--leadflowai-3yjcy.us-central1.hosted.app/*"],
+      "js": ["web_injector.js"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Anton.IA Status",
+    "default_icon": "icon.png"
+  },
+  "icons": { "16": "icon.png", "48": "icon.png", "128": "icon.png" }
+}

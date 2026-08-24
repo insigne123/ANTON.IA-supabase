@@ -4,18 +4,18 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from '@/components/ui/pagination';
 import { companySizes } from '@/lib/data';
 import type { Lead as UILaed, SavedSearch } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Search, Save, X, Frown, ChevronDown, Loader2, Bookmark, BookmarkPlus, Trash2, Info, AlertCircle, Building2, CheckCircle2 } from 'lucide-react';
+import { Search, Save, X, ChevronDown, Loader2, Bookmark, BookmarkPlus, Trash2, Info, AlertCircle, Building2, CheckCircle2, Mail, Phone, SlidersHorizontal } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useToast } from '@/hooks/use-toast';
 import { supabaseService } from '@/lib/supabase-service';
@@ -39,11 +39,21 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { APOLLO_SENIORITIES } from '@/lib/apollo-taxonomies';
-import { savedSearchesService } from '@/lib/services/saved-searches-service';
+import { DuplicateSavedSearchNameError, savedSearchesService } from '@/lib/services/saved-searches-service';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { splitDomainInput } from '@/lib/domain';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { Badge } from '@/components/ui/badge';
+import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { cn } from '@/lib/utils';
+import {
+  DEFAULT_LEAD_SEARCH_FILTERS,
+  normalizeSavedSearchCriteria,
+  savedSearchNamesMatch,
+  type LeadSearchMode,
+} from '@/lib/search/saved-search-criteria';
 
 function MultiCheckDropdown({
   label,
@@ -58,6 +68,7 @@ function MultiCheckDropdown({
   onChange: (next: string[]) => void;
   placeholder?: string;
 }) {
+  const triggerId = React.useId();
   const toggle = (val: string, checked: boolean) => {
     const set = new Set(value);
     if (checked) set.add(val); else set.delete(val);
@@ -71,10 +82,10 @@ function MultiCheckDropdown({
 
   return (
     <div className="grid gap-2">
-      {label ? <Label>{label}</Label> : null}
+      {label ? <Label htmlFor={triggerId}>{label}</Label> : null}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" role="combobox" className="justify-between w-full">
+          <Button id={triggerId} variant="outline" role="combobox" className="justify-between w-full">
             <span className="truncate">{buttonText}</span>
             <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
           </Button>
@@ -96,31 +107,63 @@ function MultiCheckDropdown({
   );
 }
 
+function getFriendlySearchErrorMessage(message?: string) {
+  const raw = String(message || '').trim();
+  const lower = raw.toLowerCase();
+
+  if (!raw) {
+    return 'No pudimos completar la busqueda. Revisa los filtros y vuelve a intentarlo.';
+  }
+
+  if (lower.includes('linkedin') || lower.includes('url')) {
+    return 'Revisa la URL de LinkedIn e intenta nuevamente.';
+  }
+
+  if (lower.includes('industria') || lower.includes('ubicacion') || lower.includes('ubicación') || lower.includes('tamano') || lower.includes('tamaño') || lower.includes('obligatorio') || lower.startsWith('debes')) {
+    return raw;
+  }
+
+  if (lower.includes('quota') || lower.includes('limite') || lower.includes('límite') || lower.includes('429')) {
+    if (lower.includes('alcanzaste el límite diario') || lower.includes('alcanzaste el limite diario')) return raw;
+    return 'Llegaste al limite disponible por hoy. Puedes volver a intentarlo mas tarde o ajustar el volumen de la busqueda.';
+  }
+
+  if (lower.includes('unauthorized') || lower.includes('401') || lower.includes('sesion') || lower.includes('sesión')) {
+    return 'Tu sesion necesita renovarse. Vuelve a iniciar sesion y repite la busqueda.';
+  }
+
+  return 'No pudimos completar la busqueda. Revisa los filtros y vuelve a intentarlo.';
+}
+
 function normalizeLeadForUI(raw: Lead, options?: {
   phoneStatus?: 'not_requested' | 'queued' | 'skipped' | 'failed' | undefined;
   revealEmail?: boolean;
   revealPhone?: boolean;
 }): UILaed {
   const name =
-    `${raw.first_name || ''} ${raw.last_name || ''}`.trim() || '—';
+    raw.name?.trim() || `${raw.first_name || ''} ${raw.last_name || ''}`.trim() || '—';
 
   const company =
-    raw.organization?.name?.trim() || '—';
+    raw.organization_name?.trim() || raw.org_name?.trim() || raw.organization?.name?.trim() || '—';
 
   const title = raw.title?.trim() || '—';
-  const industry = raw.organization?.industry?.trim() || '—';
+  const industry = raw.organization_industry?.trim() || raw.industry?.trim() || raw.organization?.industry?.trim() || '—';
 
-  const location = '—'; // n8n response no lo trae, pero UI lo espera
+  const location = [raw.city, raw.state, raw.country].filter(Boolean).join(', ') || '—';
 
   const avatar =
     raw.photo_url?.trim() ||
     `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&size=40`;
 
-  const companyWebsite = raw.organization?.website_url?.trim() || (raw.organization?.domain ? `https://${raw.organization.domain}` : null);
+  const companyWebsite =
+    raw.organization_website?.trim() ||
+    raw.organization?.website_url?.trim() ||
+    raw.organization_domain?.trim() ||
+    (raw.organization?.domain ? `https://${raw.organization.domain}` : null);
   const companyLinkedin = raw.organization?.linkedin_url?.trim() || null;
   const linkedinUrl = raw.linkedin_url || null;
-  const phoneNumbers = Array.isArray(raw.phone_numbers) ? raw.phone_numbers : undefined;
-  const fallbackPhone = phoneNumbers?.find((phone) => phone?.sanitized_number)?.sanitized_number || null;
+  const phoneNumbers = normalizeUiPhoneNumbers(raw.phone_numbers);
+  const fallbackPhone = getPhoneFallback(phoneNumbers);
   const primaryPhone = raw.primary_phone || fallbackPhone || null;
   const revealEmail = options?.revealEmail ?? true;
   const revealPhone = options?.revealPhone ?? true;
@@ -147,8 +190,99 @@ function normalizeLeadForUI(raw: Lead, options?: {
     country: null,
     city: null,
     status: 'saved',
-    emailEnrichment: revealEmail && raw.email ? { enriched: true, source: 'n8n' } : undefined,
+    emailEnrichment: revealEmail && raw.email ? { enriched: true } : undefined,
   };
+}
+
+type ProfileContactState = 'ready' | 'missing' | 'queued' | 'not_requested';
+
+function hasVisibleLeadEmail(raw?: Pick<Lead, 'email'> | null) {
+  const email = String(raw?.email || '').trim();
+  return Boolean(email) && email !== 'email_not_unlocked@domain.com';
+}
+
+function getPhoneValue(phone: any) {
+  return String(phone?.sanitized_number || phone?.number || phone?.raw_number || '').trim() || null;
+}
+
+function normalizeUiPhoneNumbers(phoneNumbers?: any[] | null): UILaed['phoneNumbers'] {
+  if (!Array.isArray(phoneNumbers) || phoneNumbers.length === 0) return null;
+
+  const normalized: NonNullable<UILaed['phoneNumbers']> = [];
+
+  for (const phone of phoneNumbers) {
+    const value = getPhoneValue(phone);
+    if (!value) continue;
+
+    normalized.push({
+        raw_number: String(phone?.raw_number || phone?.number || value).trim(),
+        sanitized_number: String(phone?.sanitized_number || phone?.number || phone?.raw_number || value).trim(),
+        number: String(phone?.number || phone?.sanitized_number || phone?.raw_number || value).trim(),
+        type: String(phone?.type || phone?.type_cd || '').trim() || null,
+        type_cd: String(phone?.type_cd || phone?.type || '').trim() || null,
+        position: String(phone?.position || '').trim() || null,
+        status: String(phone?.status || '').trim() || null,
+      });
+  }
+
+  return normalized.length > 0 ? normalized : null;
+}
+
+function hasVisibleLeadPhone(raw?: Pick<Lead, 'primary_phone' | 'phone_numbers'> | null) {
+  const phoneNumbers = normalizeUiPhoneNumbers(raw?.phone_numbers);
+  return Boolean(raw?.primary_phone || getPhoneFallback(phoneNumbers));
+}
+
+function buildLinkedInProfileNotice(params: {
+  emailRequested: boolean;
+  phoneRequested: boolean;
+  emailState: ProfileContactState;
+  phoneState: ProfileContactState;
+}) {
+  const { emailRequested, phoneRequested, emailState, phoneState } = params;
+
+  let tone: 'info' | 'warning' = 'info';
+  let title = 'Perfil encontrado';
+  let description = 'Ya puedes revisar el resultado y decidir si quieres guardarlo.';
+
+  if (phoneState === 'queued') {
+    title = emailState === 'ready' ? 'Correo listo, telefono en camino' : 'Telefono en camino';
+    description = emailState === 'ready'
+      ? 'El correo ya esta disponible. El telefono aparecera en el resultado cuando este listo.'
+      : 'Encontramos el perfil y seguimos buscando el telefono. Puedes continuar trabajando mientras se actualiza.';
+  } else if (emailRequested && emailState === 'missing' && phoneRequested && phoneState === 'missing') {
+    tone = 'warning';
+    title = 'Perfil sin datos de contacto visibles';
+    description = 'Encontramos el perfil, pero no hay correo ni telefono disponibles para esta URL.';
+  } else if (emailRequested && emailState === 'missing') {
+    tone = 'warning';
+    title = 'Perfil encontrado, sin correo disponible';
+    description = phoneState === 'ready'
+      ? 'El telefono esta disponible, pero no encontramos un correo para este perfil.'
+      : 'No encontramos un correo disponible para este perfil.';
+  } else if (phoneRequested && phoneState === 'missing') {
+    tone = 'warning';
+    title = 'Telefono no disponible por ahora';
+    description = emailState === 'ready'
+      ? 'El perfil y el correo estan listos, pero no encontramos un telefono.'
+      : 'Encontramos el perfil, pero no hay un telefono disponible.';
+  } else if (!emailRequested && !phoneRequested) {
+    title = 'Perfil encontrado';
+    description = 'Encontramos el perfil sin solicitar datos de contacto.';
+  }
+
+  return { tone, title, description, emailState, phoneState };
+}
+
+function statusChipClasses(state: ProfileContactState) {
+  if (state === 'ready') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200';
+  if (state === 'queued') return 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200';
+  if (state === 'missing') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200';
+  return 'border-border/70 bg-muted/40 text-muted-foreground';
+}
+
+function isPendingEnrichmentStatus(value?: string | null) {
+  return String(value || '').trim().toLowerCase().startsWith('pending');
 }
 
 const displayDomain = (url?: string) => {
@@ -166,17 +300,19 @@ function normalizePhoneNumbersForEnriched(phoneNumbers?: UILaed['phoneNumbers'])
 
   return phoneNumbers
     .map((phone) => ({
-      raw_number: String(phone?.raw_number || phone?.sanitized_number || '').trim(),
-      sanitized_number: String(phone?.sanitized_number || phone?.raw_number || '').trim(),
-      type: String(phone?.type || '').trim(),
+      raw_number: String(phone?.raw_number || phone?.number || phone?.sanitized_number || '').trim(),
+      sanitized_number: String(phone?.sanitized_number || phone?.number || phone?.raw_number || '').trim(),
+      number: String(phone?.number || phone?.sanitized_number || phone?.raw_number || '').trim(),
+      type: String(phone?.type || phone?.type_cd || '').trim(),
+      type_cd: String(phone?.type_cd || phone?.type || '').trim(),
       position: String(phone?.position || '').trim(),
       status: String(phone?.status || '').trim(),
     }))
-    .filter((phone) => phone.raw_number || phone.sanitized_number);
+    .filter((phone) => phone.raw_number || phone.sanitized_number || phone.number);
 }
 
 function getPhoneFallback(phoneNumbers?: UILaed['phoneNumbers']) {
-  return phoneNumbers?.find((phone) => phone?.sanitized_number)?.sanitized_number || null;
+  return phoneNumbers?.map((phone) => getPhoneValue(phone)).find(Boolean) || null;
 }
 
 function hasLeadPhone(lead: UILaed) {
@@ -213,22 +349,9 @@ function splitTitlesInput(value?: string) {
     .filter(Boolean);
 }
 
-const DEFAULT_FILTERS = {
-  searchMode: 'filters' as 'filters' | 'linkedin_profile' | 'company_name',
-  industry: '',
-  location: '',
-  title: '',
-  sizeRange: '',
-  seniorities: [] as string[],
-  companyName: '',
-  companyDomains: '',
-  maxResults: 25,
-  linkedinUrl: '',
-  revealEmail: true,
-  revealPhone: false,
-};
+const DEFAULT_FILTERS = DEFAULT_LEAD_SEARCH_FILTERS;
 
-type SearchMode = typeof DEFAULT_FILTERS.searchMode;
+type SearchMode = LeadSearchMode;
 
 
 export default function SearchPage() {
@@ -246,6 +369,7 @@ export default function SearchPage() {
   const abortRef = useRef<AbortController | null>(null);
   const profileStatusAbortRef = useRef<AbortController | null>(null);
   const submittingRef = useRef(false);
+  const searchRunIdRef = useRef(0);
   const profilePhoneToastStateRef = useRef<'idle' | 'found' | 'missing'>('idle');
 
   // Saved Searches State
@@ -254,6 +378,14 @@ export default function SearchPage() {
   const [newSearchName, setNewSearchName] = useState('');
   const [isShared, setIsShared] = useState(false);
   const [savingSearch, setSavingSearch] = useState(false);
+  const [savedSearchPendingDelete, setSavedSearchPendingDelete] = useState<SavedSearch | null>(null);
+  const [deletingSavedSearch, setDeletingSavedSearch] = useState(false);
+  const [savedSearchesLoading, setSavedSearchesLoading] = useState(true);
+  const [savedSearchesError, setSavedSearchesError] = useState('');
+  const [saveSearchError, setSaveSearchError] = useState('');
+  const [activeSavedSearchId, setActiveSavedSearchId] = useState<string | null>(null);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
 
   useEffect(() => { setPageIndex(0); }, [leads]);
 
@@ -273,23 +405,35 @@ export default function SearchPage() {
     });
 
     // Load saved searches
-    loadSavedSearches();
+    void loadSavedSearches();
   }, []);
 
   const loadSavedSearches = async () => {
-    const data = await savedSearchesService.getSavedSearches();
-    setSavedSearches(data);
+    setSavedSearchesLoading(true);
+    setSavedSearchesError('');
+    try {
+      const data = await savedSearchesService.getSavedSearches();
+      setSavedSearches(data);
+    } catch (loadError) {
+      console.error('[search] Load saved searches failed:', loadError);
+      setSavedSearches([]);
+      setSavedSearchesError('No pudimos cargar tus búsquedas guardadas.');
+    } finally {
+      setSavedSearchesLoading(false);
+    }
   };
 
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
 
   const handleFilterChange = (field: keyof typeof filters, value: any) => {
+    if (field === 'searchMode') {
+      setAdvancedFiltersOpen(value === 'linkedin_profile');
+    }
     if (field === 'searchMode' || field === 'linkedinUrl' || field === 'revealEmail' || field === 'revealPhone') {
       setProfileSearchNotice(null);
       setLastProfilePhoneStatus(null);
       setProfilePhonePollingIds([]);
       setProfilePhonePollingStartedAt(null);
-      setProfilePhonePollingElapsedMs(0);
       profilePhoneToastStateRef.current = 'idle';
     }
     if (field === 'searchMode' || field === 'companyName' || field === 'companyDomains' || field === 'title' || field === 'seniorities' || field === 'maxResults') {
@@ -297,6 +441,7 @@ export default function SearchPage() {
       setSelectedOrganization(null);
       setCompanySelectionPending(false);
     }
+    setActiveSavedSearchId(null);
     setFilters(prev => ({ ...prev, [field]: value }));
   };
 
@@ -305,11 +450,12 @@ export default function SearchPage() {
     tone: 'info' | 'warning';
     title: string;
     description: string;
+    emailState: ProfileContactState;
+    phoneState: ProfileContactState;
   }>(null);
   const [lastProfilePhoneStatus, setLastProfilePhoneStatus] = useState<'not_requested' | 'queued' | 'skipped' | 'failed' | null>(null);
   const [profilePhonePollingIds, setProfilePhonePollingIds] = useState<string[]>([]);
   const [profilePhonePollingStartedAt, setProfilePhonePollingStartedAt] = useState<number | null>(null);
-  const [profilePhonePollingElapsedMs, setProfilePhonePollingElapsedMs] = useState(0);
   const [companyCandidates, setCompanyCandidates] = useState<CompanySearchOrganization[]>([]);
   const [selectedOrganization, setSelectedOrganization] = useState<CompanySearchOrganization | null>(null);
   const [companySelectionPending, setCompanySelectionPending] = useState(false);
@@ -329,16 +475,16 @@ export default function SearchPage() {
 
     setIsSaving(true);
     try {
-      const withEmail = selectedNotContacted.filter(l => !!l.email);
+      const withDirectContactData = selectedNotContacted.filter((lead) => !!lead.email || hasLeadPhone(lead));
       let enrichedAdded = 0;
-      if (withEmail.length) {
-        const enriched = withEmail.map(mapLeadToEnriched);
+      if (withDirectContactData.length) {
+        const enriched = withDirectContactData.map(mapLeadToEnriched);
         const res = await enrichedLeadsStorage.addDedup(enriched);
         enrichedAdded = res.addedCount;
       }
 
-      const withoutEmail = selectedNotContacted.filter(l => !l.email);
-      const resSv = await supabaseService.addLeadsDedup(withoutEmail);
+      const withoutDirectContactData = selectedNotContacted.filter((lead) => !lead.email && !hasLeadPhone(lead));
+      const resSv = await supabaseService.addLeadsDedup(withoutDirectContactData);
 
       // Actualizar estado local de guardados
       const all = await supabaseService.getLeads();
@@ -348,7 +494,7 @@ export default function SearchPage() {
       const phonePendingNote =
         filters.searchMode === 'linkedin_profile' &&
         lastProfilePhoneStatus === 'queued' &&
-        withEmail.length > 0
+        withDirectContactData.length > 0
           ? ' El telefono aun esta en proceso y puede no reflejarse todavia en Leads Enriquecidos.'
           : '';
 
@@ -392,7 +538,6 @@ export default function SearchPage() {
       setLastProfilePhoneStatus(null);
       setProfilePhonePollingIds([]);
       setProfilePhonePollingStartedAt(null);
-      setProfilePhonePollingElapsedMs(0);
       setLeads(result.leads.map((raw) => normalizeLeadForUI(raw, {
         revealEmail: true,
         revealPhone: true,
@@ -405,7 +550,6 @@ export default function SearchPage() {
     setSelectedOrganization(null);
     setProfilePhonePollingIds([]);
     setProfilePhonePollingStartedAt(null);
-    setProfilePhonePollingElapsedMs(0);
 
     const phoneStatus = mode === 'linkedin_profile'
       ? (result.phone_enrichment?.status || null)
@@ -419,29 +563,89 @@ export default function SearchPage() {
 
     if (mode === 'linkedin_profile') {
       const warnings = Array.isArray(result.provider_warnings) ? result.provider_warnings.filter(Boolean) : [];
+      const emailState: ProfileContactState = !filters.revealEmail
+        ? 'not_requested'
+        : result.leads.some((lead) => hasVisibleLeadEmail(lead))
+          ? 'ready'
+          : 'missing';
+      const phoneState: ProfileContactState = !filters.revealPhone
+        ? 'not_requested'
+        : phoneStatus === 'queued'
+          ? 'queued'
+          : result.leads.some((lead) => hasVisibleLeadPhone(lead))
+            ? 'ready'
+            : 'missing';
+
+      if (result.leads.length === 0 && phoneStatus !== 'queued') {
+        setProfilePhonePollingStartedAt(null);
+        setProfileSearchNotice({
+          tone: 'warning',
+          title: 'Perfil no disponible',
+          description: 'No encontramos información suficiente para crear un lead con esta URL.',
+          emailState,
+          phoneState,
+        });
+        return;
+      }
 
       if (phoneStatus === 'queued') {
-        setProfilePhonePollingIds(result.leads.map((raw) => raw.id).filter(Boolean));
+        const pollingIds = Array.from(new Set([
+          ...(result.profile_tracking_ids || []),
+          ...result.leads.map((raw) => raw.id),
+        ].filter(Boolean)));
+
+        if (pollingIds.length === 0) {
+          setLastProfilePhoneStatus('failed');
+          setProfilePhonePollingStartedAt(null);
+          setProfileSearchNotice(buildLinkedInProfileNotice({
+            emailRequested: filters.revealEmail,
+            phoneRequested: filters.revealPhone,
+            emailState,
+            phoneState: 'missing',
+          }));
+          return;
+        }
+
+        setProfilePhonePollingIds(pollingIds);
         setProfilePhonePollingStartedAt(Date.now());
-        setProfileSearchNotice({
-          tone: 'info',
-          title: 'Datos del perfil en proceso',
-          description: result.phone_enrichment?.message || 'El perfil se esta completando y se actualizara en breve.',
-        });
+        setProfileSearchNotice(result.leads.length === 0
+          ? {
+              tone: 'info',
+              title: 'Perfil en proceso',
+              description: 'Estamos preparando el perfil. El resultado aparecerá aquí cuando esté disponible.',
+              emailState,
+              phoneState,
+            }
+          : buildLinkedInProfileNotice({
+              emailRequested: filters.revealEmail,
+              phoneRequested: filters.revealPhone,
+              emailState,
+              phoneState,
+            }));
       } else if (phoneStatus === 'skipped' || phoneStatus === 'failed') {
         setProfilePhonePollingStartedAt(null);
-        setProfileSearchNotice({
-          tone: 'warning',
-          title: 'Telefono no disponible por ahora',
-          description: result.phone_enrichment?.message || warnings[0] || 'La busqueda encontro el perfil, pero el telefono no pudo enriquecerse en este momento.',
-        });
+        setProfileSearchNotice(buildLinkedInProfileNotice({
+          emailRequested: filters.revealEmail,
+          phoneRequested: filters.revealPhone,
+          emailState,
+          phoneState,
+        }));
       } else if (warnings.length > 0) {
         setProfilePhonePollingStartedAt(null);
-        setProfileSearchNotice({
-          tone: 'warning',
-          title: 'Advertencia del proveedor',
-          description: warnings[0],
-        });
+        setProfileSearchNotice(buildLinkedInProfileNotice({
+          emailRequested: filters.revealEmail,
+          phoneRequested: filters.revealPhone,
+          emailState,
+          phoneState,
+        }));
+      } else if (filters.revealEmail || filters.revealPhone) {
+        setProfilePhonePollingStartedAt(null);
+        setProfileSearchNotice(buildLinkedInProfileNotice({
+          emailRequested: filters.revealEmail,
+          phoneRequested: filters.revealPhone,
+          emailState,
+          phoneState,
+        }));
       } else {
         setProfilePhonePollingStartedAt(null);
       }
@@ -457,16 +661,19 @@ export default function SearchPage() {
   } = {}) => {
     if (submittingRef.current) return;
     submittingRef.current = true;
+    const searchRunId = ++searchRunIdRef.current;
 
     const canUseClientQuota = typeof (Quota as any).canUseClientQuota === 'function' ? (Quota as any).canUseClientQuota : (_k: any) => true;
     const incClientQuota = typeof (Quota as any).incClientQuota === 'function' ? (Quota as any).incClientQuota : (_k: any) => { };
     const getClientLimit = typeof (Quota as any).getClientLimit === 'function' ? (Quota as any).getClientLimit : (_k: any) => 50;
 
     if (countQuota && !canUseClientQuota('leadSearch')) {
-      toast({ title: 'Sincronizando cuota', description: `Tu navegador marcaba ${getClientLimit('leadSearch')} búsquedas hoy, pero voy a validar con el servidor.` });
+      toast({ title: 'Comprobando disponibilidad', description: `Validaremos si aún tienes búsquedas disponibles hoy (límite estimado: ${getClientLimit('leadSearch')}).` });
     }
 
     setIsLoading(true);
+    setHasSearched(true);
+    setLeads([]);
     setSelectedLeads(new Set());
     setPageIndex(0);
     setError('');
@@ -474,7 +681,6 @@ export default function SearchPage() {
     setLastProfilePhoneStatus(null);
     setProfilePhonePollingIds([]);
     setProfilePhonePollingStartedAt(null);
-    setProfilePhonePollingElapsedMs(0);
     profilePhoneToastStateRef.current = 'idle';
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -488,7 +694,6 @@ export default function SearchPage() {
           throw new Error('La URL de LinkedIn no es valida.');
         }
 
-        if (countQuota) incClientQuota('leadSearch');
         result = await searchLinkedInProfileLead({
           search_mode: 'linkedin_profile',
           linkedin_url: linkedinUrl,
@@ -500,11 +705,10 @@ export default function SearchPage() {
         const organization = selectedOrg || selectedOrganization;
         const organizationDomains = splitDomainInput(filters.companyDomains);
 
-        if (!companyName && !organization) {
-          throw new Error('Debes indicar un nombre de empresa.');
+        if (!companyName && !organization && organizationDomains.length === 0) {
+          throw new Error('Debes indicar un nombre de empresa o al menos un dominio.');
         }
 
-        if (countQuota) incClientQuota('leadSearch');
         result = await searchCompanyNameLeads({
           search_mode: 'company_name',
           company_name: companyName || organization?.name,
@@ -515,6 +719,9 @@ export default function SearchPage() {
           selected_organization_id: organization?.id,
           selected_organization_name: organization?.name,
           selected_organization_domain: organization?.primary_domain || undefined,
+          selected_organization_website: organization?.website_url || undefined,
+          selected_organization_industry: organization?.industry || undefined,
+          selected_organization_size: organization?.estimated_num_employees ?? undefined,
         }, abortRef.current.signal);
       } else {
         const industryKeywords = [filters.industry.trim()].filter(Boolean);
@@ -531,7 +738,6 @@ export default function SearchPage() {
           throw new Error('Debes seleccionar al menos un tamaño de empresa.');
         }
 
-        if (countQuota) incClientQuota('leadSearch');
         const payload: LeadsSearchParams = [{
           industry_keywords: industryKeywords,
           company_location: locations,
@@ -548,20 +754,28 @@ export default function SearchPage() {
         result = await searchLeads(payload, abortRef.current.signal);
       }
 
+      if (searchRunIdRef.current !== searchRunId) return;
+      if (countQuota) incClientQuota('leadSearch');
       applySearchResult(result, filters.searchMode);
     } catch (error: any) {
+      if (searchRunIdRef.current !== searchRunId) return;
       if (error.name !== 'AbortError') {
-        setError(error.message || 'Error desconocido');
-        toast({ variant: 'destructive', title: 'Error en la Búsqueda', description: error.message || 'No se pudieron obtener los leads.' });
+        const friendlyMessage = getFriendlySearchErrorMessage(error.message);
+        setError(friendlyMessage);
+        toast({
+          title: 'No se pudo completar la busqueda',
+          description: friendlyMessage,
+        });
       }
       setLeads([]);
       setLastProfilePhoneStatus(null);
       setProfilePhonePollingIds([]);
       setProfilePhonePollingStartedAt(null);
-      setProfilePhonePollingElapsedMs(0);
     } finally {
-      setIsLoading(false);
-      submittingRef.current = false;
+      if (searchRunIdRef.current === searchRunId) {
+        setIsLoading(false);
+        submittingRef.current = false;
+      }
     }
   };
 
@@ -575,13 +789,22 @@ export default function SearchPage() {
   };
 
   const handleAbort = () => {
+    searchRunIdRef.current += 1;
     abortRef.current?.abort();
+    submittingRef.current = false;
     setIsLoading(false);
     toast({ title: 'Búsqueda cancelada' });
   };
 
   const handleClear = () => {
+    searchRunIdRef.current += 1;
+    abortRef.current?.abort();
+    submittingRef.current = false;
+    setIsLoading(false);
     setFilters(DEFAULT_FILTERS);
+    setHasSearched(false);
+    setActiveSavedSearchId(null);
+    setAdvancedFiltersOpen(false);
     setLeads([]);
     setSelectedLeads(new Set());
     setError('');
@@ -589,7 +812,6 @@ export default function SearchPage() {
     setLastProfilePhoneStatus(null);
     setProfilePhonePollingIds([]);
     setProfilePhonePollingStartedAt(null);
-    setProfilePhonePollingElapsedMs(0);
     profilePhoneToastStateRef.current = 'idle';
     setCompanyCandidates([]);
     setSelectedOrganization(null);
@@ -605,138 +827,154 @@ export default function SearchPage() {
 
     let cancelled = false;
     let attempts = 0;
+    let failedAttempts = 0;
+    let timeoutId: number | null = null;
+    const maxAttempts = 18;
+    const startedAt = Date.now();
+    const maxDurationMs = maxAttempts * 5000;
+    const emailStateBeforePolling = profileSearchNotice?.emailState
+      || (filters.revealEmail ? 'missing' : 'not_requested');
+
+    const finishWithoutPhone = (description: string) => {
+      if (cancelled) return;
+      setProfilePhonePollingIds([]);
+      setProfilePhonePollingStartedAt(null);
+      setLastProfilePhoneStatus('failed');
+      profilePhoneToastStateRef.current = 'missing';
+      setProfileSearchNotice({
+        tone: 'warning',
+        title: 'Telefono no disponible por ahora',
+        description,
+        emailState: emailStateBeforePolling,
+        phoneState: filters.revealPhone ? 'missing' : 'not_requested',
+      });
+    };
 
     const poll = async () => {
       if (cancelled) return;
 
-      profileStatusAbortRef.current?.abort();
+      attempts += 1;
       const controller = new AbortController();
       profileStatusAbortRef.current = controller;
 
       try {
         const items = (await Promise.all(
-          profilePhonePollingIds.map((id) => getLinkedInProfileLead(id, controller.signal).catch(() => null))
-        )).filter(Boolean) as Array<{
-          id: string;
-          linkedin_url?: string | null;
-          email?: string | null;
-          email_status?: string | null;
-          primary_phone?: string | null;
-          phone_numbers?: any[] | null;
-          enrichment_status?: string | null;
-          updated_at?: string | null;
-        }>;
-        if (cancelled || items.length === 0) return;
+          profilePhonePollingIds.map(async (id) => {
+            try {
+              return await getLinkedInProfileLead(id, controller.signal);
+            } catch (error: any) {
+              if (error?.name !== 'AbortError') failedAttempts += 1;
+              return null;
+            }
+          })
+        )).filter(Boolean) as Lead[];
+        if (cancelled) return;
 
-        const byId = new Map(items.map((item) => [String(item.id || '').trim(), item]));
-        const resolvedWithRequestedData = items.filter((item) => {
-          const phoneNumbers = Array.isArray(item.phone_numbers) ? item.phone_numbers : [];
-          const hasPhone = Boolean(item.primary_phone || phoneNumbers.find((phone) => phone?.sanitized_number));
-          const hasEmail = Boolean(String(item.email || '').trim());
-          const phoneSatisfied = !filters.revealPhone || hasPhone;
-          const emailSatisfied = !filters.revealEmail || hasEmail;
-          return phoneSatisfied && emailSatisfied && (hasPhone || hasEmail);
-        });
-        const stillPending = items.some((item) => {
-          const phoneNumbers = Array.isArray(item.phone_numbers) ? item.phone_numbers : [];
-          const hasPhone = Boolean(item.primary_phone || phoneNumbers.find((phone) => phone?.sanitized_number));
-          const hasEmail = Boolean(String(item.email || '').trim());
-          const phoneMissing = filters.revealPhone && !hasPhone;
-          const emailMissing = filters.revealEmail && !hasEmail;
-          const status = String(item.enrichment_status || '').trim();
-          return (phoneMissing || emailMissing) && (status === 'pending_phone' || status === 'pending_profile');
-        });
-
-        setLeads((prev) => prev.map((lead) => {
-          const item = byId.get(String(lead.id || '').trim());
-          if (!item) return lead;
-          const nextPhoneNumbersRaw = Array.isArray(item.phone_numbers) ? item.phone_numbers : lead.phoneNumbers;
-          const nextPrimaryPhoneRaw = item.primary_phone || getPhoneFallback(nextPhoneNumbersRaw) || lead.primaryPhone || null;
-          const nextEmailRaw = String(item.email || '').trim() || lead.email || null;
-          const nextPhoneNumbers = filters.revealPhone ? (nextPhoneNumbersRaw || null) : null;
-          const nextPrimaryPhone = filters.revealPhone ? nextPrimaryPhoneRaw : null;
-          const nextEmail = filters.revealEmail ? nextEmailRaw : null;
-          const nextLead: UILaed = {
-            ...lead,
-            email: nextEmail,
-            phoneNumbers: nextPhoneNumbers,
-            primaryPhone: nextPrimaryPhone,
-            enrichmentStatus: filters.revealPhone || filters.revealEmail
-              ? (String(item.enrichment_status || '').trim() || (nextPrimaryPhoneRaw ? 'completed' : lead.enrichmentStatus))
-              : undefined,
-            emailEnrichment: nextEmail
-              ? { enriched: true, source: 'n8n' }
-              : undefined,
-          };
-          return nextLead;
-        }));
-
-        if (resolvedWithRequestedData.length > 0) {
-          setProfilePhonePollingIds([]);
-          setProfilePhonePollingStartedAt(null);
-          setProfilePhonePollingElapsedMs(0);
-          setProfileSearchNotice({
-            tone: 'info',
-            title: 'Perfil actualizado',
-            description: 'El telefono y los datos revelados ya estan visibles en el resultado y puedes guardarlos sin salir de esta pantalla.',
+        if (items.length > 0) {
+          const byId = new Map(items.map((item) => [String(item.id || '').trim(), item]));
+          const resolvedWithRequestedData = items.filter((item) => {
+            const phoneNumbers = normalizeUiPhoneNumbers(item.phone_numbers);
+            const hasPhone = Boolean(item.primary_phone || getPhoneFallback(phoneNumbers));
+            const phoneSatisfied = !filters.revealPhone || hasPhone;
+            return phoneSatisfied;
           });
-          setLastProfilePhoneStatus(null);
-          if (profilePhoneToastStateRef.current !== 'found') {
-            profilePhoneToastStateRef.current = 'found';
-            toast({
-              title: 'Datos actualizados',
-              description: 'El perfil ya se actualizo en el resultado de la busqueda.',
+          const stillPending = items.some((item) => {
+            const phoneNumbers = normalizeUiPhoneNumbers(item.phone_numbers);
+            const hasPhone = Boolean(item.primary_phone || getPhoneFallback(phoneNumbers));
+            const phoneMissing = filters.revealPhone && !hasPhone;
+            const status = String(item.enrichment_status || '').trim();
+            return phoneMissing && isPendingEnrichmentStatus(status);
+          });
+
+          setLeads((prev) => {
+            const updated = prev.map((lead) => {
+              const item = byId.get(String(lead.id || '').trim());
+              if (!item) return lead;
+              const nextPhoneNumbersRaw = normalizeUiPhoneNumbers(item.phone_numbers) || lead.phoneNumbers;
+              const nextPrimaryPhoneRaw = item.primary_phone || getPhoneFallback(nextPhoneNumbersRaw) || lead.primaryPhone || null;
+              const nextEmailRaw = String(item.email || '').trim() || lead.email || null;
+              const nextPhoneNumbers = filters.revealPhone ? (nextPhoneNumbersRaw || null) : null;
+              const nextPrimaryPhone = filters.revealPhone ? nextPrimaryPhoneRaw : null;
+              const nextEmail = filters.revealEmail ? nextEmailRaw : null;
+              const nextLead: UILaed = {
+                ...lead,
+                email: nextEmail,
+                phoneNumbers: nextPhoneNumbers,
+                primaryPhone: nextPrimaryPhone,
+                enrichmentStatus: filters.revealPhone || filters.revealEmail
+                  ? (String(item.enrichment_status || '').trim() || (nextPrimaryPhoneRaw ? 'completed' : lead.enrichmentStatus))
+                  : undefined,
+                emailEnrichment: nextEmail ? { enriched: true } : undefined,
+              };
+              return nextLead;
             });
-          }
-        } else if (!stillPending && attempts >= 5 && profilePhoneToastStateRef.current !== 'missing') {
-          setProfilePhonePollingIds([]);
-          setProfilePhonePollingStartedAt(null);
-          setProfilePhonePollingElapsedMs(0);
-          profilePhoneToastStateRef.current = 'missing';
-          setLastProfilePhoneStatus('failed');
-          setProfileSearchNotice({
-            tone: 'warning',
-            title: 'Datos no disponibles por ahora',
-            description: 'El proveedor termino el enriquecimiento, pero no devolvio todos los datos solicitados para este perfil.',
+            const knownIds = new Set(updated.map((lead) => String(lead.id || '').trim()));
+            const newlyAvailable = items
+              .filter((item) => hasUsableLinkedInProfileData(item) && !knownIds.has(String(item.id || '').trim()))
+              .map((item) => normalizeLeadForUI(item, {
+                revealEmail: filters.revealEmail,
+                revealPhone: filters.revealPhone,
+              }));
+            return [...updated, ...newlyAvailable];
           });
+
+          if (resolvedWithRequestedData.length > 0) {
+            setProfilePhonePollingIds([]);
+            setProfilePhonePollingStartedAt(null);
+            setProfileSearchNotice({
+              tone: 'info',
+              title: 'Perfil actualizado',
+              description: 'El telefono ya esta visible en el resultado y puedes guardarlo sin salir de esta pantalla.',
+              emailState: items.some((item) => hasVisibleLeadEmail(item as any)) ? 'ready' : (filters.revealEmail ? 'missing' : 'not_requested'),
+              phoneState: 'ready',
+            });
+            setLastProfilePhoneStatus(null);
+            if (profilePhoneToastStateRef.current !== 'found') {
+              profilePhoneToastStateRef.current = 'found';
+              toast({
+                title: 'Datos actualizados',
+                description: 'El perfil ya se actualizo en el resultado de la busqueda.',
+              });
+            }
+            return;
+          }
+
+          if (!stillPending) {
+            finishWithoutPhone('Encontramos el perfil, pero el proveedor no devolvio un telefono disponible.');
+            return;
+          }
         }
+
+        if (attempts >= maxAttempts || Date.now() - startedAt >= maxDurationMs) {
+          finishWithoutPhone(failedAttempts > 0
+            ? 'No pudimos confirmar el estado del telefono despues de varios intentos. Puedes volver a buscarlo.'
+            : 'El proveedor esta tardando mas de lo esperado. Puedes volver a intentarlo en unos minutos.');
+          return;
+        }
+
+        timeoutId = window.setTimeout(poll, 5000);
       } catch (error: any) {
         if (cancelled || error?.name === 'AbortError') return;
         console.warn('[search] profile phone polling failed:', error?.message || error);
+        if (attempts >= maxAttempts || Date.now() - startedAt >= maxDurationMs) {
+          finishWithoutPhone('No pudimos confirmar el estado del telefono. Puedes volver a intentarlo.');
+          return;
+        }
+        timeoutId = window.setTimeout(poll, 5000);
       }
     };
 
-    poll();
-    const intervalId = window.setInterval(() => {
-      attempts += 1;
-      if (attempts >= 18) {
-        setProfilePhonePollingIds([]);
-        setProfilePhonePollingStartedAt(null);
-        window.clearInterval(intervalId);
-        return;
-      }
-      poll();
-    }, 5000);
+    void poll();
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
       profileStatusAbortRef.current?.abort();
       profileStatusAbortRef.current = null;
     };
+    // The notice is captured when polling starts; adding it as a dependency would restart the timer on every status update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.searchMode, filters.revealEmail, filters.revealPhone, profilePhonePollingIds, toast]);
-
-  useEffect(() => {
-    if (!profilePhonePollingStartedAt || profilePhonePollingIds.length === 0) {
-      setProfilePhonePollingElapsedMs(0);
-      return;
-    }
-
-    const updateElapsed = () => setProfilePhonePollingElapsedMs(Date.now() - profilePhonePollingStartedAt);
-    updateElapsed();
-    const intervalId = window.setInterval(updateElapsed, 1000);
-    return () => window.clearInterval(intervalId);
-  }, [profilePhonePollingIds.length, profilePhonePollingStartedAt]);
 
   const isPageAllSelected = useMemo(() => {
     if (pagedLeads.length === 0) return false;
@@ -771,291 +1009,382 @@ export default function SearchPage() {
   // Saved Searches Handlers
   const handleSaveSearch = async () => {
     if (!newSearchName.trim()) return;
+    const duplicate = savedSearches.find((savedSearch) => savedSearchNamesMatch(savedSearch.name, newSearchName));
+    if (duplicate) {
+      setSaveSearchError(`Ya existe una búsqueda llamada “${duplicate.name}”. Usa un nombre diferente.`);
+      return;
+    }
+
     setSavingSearch(true);
+    setSaveSearchError('');
     try {
-      await savedSearchesService.saveSearch(newSearchName, filters, isShared);
+      const savedSearch = await savedSearchesService.saveSearch(newSearchName, filters, isShared);
+      setSavedSearches((current) => [savedSearch, ...current.filter((item) => item.id !== savedSearch.id)]);
       toast({ title: 'Búsqueda guardada', description: 'Los filtros se han guardado correctamente.' });
       setSaveSearchOpen(false);
       setNewSearchName('');
       setIsShared(false);
-      loadSavedSearches();
+      setActiveSavedSearchId(savedSearch.id);
     } catch (error) {
-      toast({ variant: 'destructive', title: 'Error', description: 'No se pudo guardar la búsqueda.' });
+      const description = error instanceof DuplicateSavedSearchNameError
+        ? error.message
+        : 'No se pudo guardar la búsqueda. Intenta nuevamente.';
+      setSaveSearchError(description);
+      toast({ variant: 'destructive', title: 'No se guardó la búsqueda', description });
     } finally {
       setSavingSearch(false);
     }
   };
 
   const handleLoadSearch = (search: SavedSearch) => {
-    setFilters({ ...DEFAULT_FILTERS, ...(search.criteria || {}) });
+    const criteria = normalizeSavedSearchCriteria(search.criteria);
+    searchRunIdRef.current += 1;
+    abortRef.current?.abort();
+    profileStatusAbortRef.current?.abort();
+    submittingRef.current = false;
+    setIsLoading(false);
+    setFilters(criteria);
+    setActiveSavedSearchId(search.id);
+    setAdvancedFiltersOpen(Boolean(
+      criteria.title ||
+      criteria.seniorities.length > 0 ||
+      criteria.companyDomains ||
+      criteria.maxResults !== DEFAULT_FILTERS.maxResults ||
+      criteria.revealEmail !== DEFAULT_FILTERS.revealEmail ||
+      criteria.revealPhone !== DEFAULT_FILTERS.revealPhone
+    ));
+    setLeads([]);
+    setSelectedLeads(new Set());
+    setError('');
+    setPageIndex(0);
+    setPageSize(PAGE_SIZE_DEFAULT);
+    setHasSearched(false);
     setProfileSearchNotice(null);
     setLastProfilePhoneStatus(null);
     setProfilePhonePollingIds([]);
     setProfilePhonePollingStartedAt(null);
-    setProfilePhonePollingElapsedMs(0);
     setCompanyCandidates([]);
     setSelectedOrganization(null);
     setCompanySelectionPending(false);
     toast({ title: 'Filtros cargados', description: `Se han aplicado los filtros de "${search.name}".` });
   };
 
-  const handleDeleteSearch = async (e: React.MouseEvent, id: string) => {
+  const handleRequestDeleteSearch = (e: React.MouseEvent, search: SavedSearch) => {
     e.stopPropagation();
-    if (!confirm('¿Eliminar esta búsqueda guardada?')) return;
+    setSavedSearchPendingDelete(search);
+  };
+
+  const confirmDeleteSearch = async () => {
+    if (!savedSearchPendingDelete) return;
+    setDeletingSavedSearch(true);
     try {
-      await savedSearchesService.deleteSearch(id);
-      loadSavedSearches();
+      await savedSearchesService.deleteSearch(savedSearchPendingDelete.id);
+      if (activeSavedSearchId === savedSearchPendingDelete.id) setActiveSavedSearchId(null);
+      setSavedSearches((current) => current.filter((item) => item.id !== savedSearchPendingDelete.id));
       toast({ title: 'Búsqueda eliminada' });
     } catch (error) {
-      toast({ variant: 'destructive', title: 'Error', description: 'No se pudo eliminar la búsqueda.' });
+      console.error('[search] Delete saved search failed:', error);
+      toast({ variant: 'destructive', title: 'No se pudo eliminar', description: 'La búsqueda guardada sigue disponible. Intenta nuevamente en unos segundos.' });
+    } finally {
+      setDeletingSavedSearch(false);
+      setSavedSearchPendingDelete(null);
     }
   };
 
   return (
-    <div className="container mx-auto space-y-6 py-2">
+    <div className="mx-auto max-w-[1440px] space-y-5 py-2">
       <PageHeader
         title="Búsqueda de Leads"
-        description="Encuentra prospectos con menos fricción, guarda criterios útiles y revisa resultados listos para decidir."
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="shadow-none">
-                <Bookmark className="mr-2 h-4 w-4" />
-                Cargar Búsqueda
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64 max-h-80 overflow-auto">
-              {savedSearches.length === 0 ? (
-                <div className="p-2 text-sm text-muted-foreground text-center">No hay búsquedas guardadas.</div>
-              ) : (
-                savedSearches.map((s) => (
-                  <div key={s.id} className="flex items-center justify-between p-2 hover:bg-muted rounded-sm cursor-pointer group" onClick={() => handleLoadSearch(s)}>
-                    <div className="flex flex-col overflow-hidden">
-                      <span className="text-sm font-medium truncate">{s.name}</span>
-                      <span className="text-xs text-muted-foreground flex items-center gap-1">
-                        {s.isShared ? 'Compartida' : 'Privada'} • {s.user?.fullName}
-                      </span>
-                    </div>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 opacity-0 group-hover:opacity-100" onClick={(e) => handleDeleteSearch(e, s.id)}>
-                      <Trash2 className="h-3 w-3 text-destructive" />
-                    </Button>
+        description="Define tu audiencia, busca prospectos y guarda criterios para volver a usarlos."
+      />
+
+      <Card className="overflow-hidden rounded-2xl border-border/60 bg-card/90 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/75">
+        <CardHeader className="gap-3 border-b border-border/60 bg-muted/10 p-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0 sm:px-5">
+          <div className="min-w-0 space-y-1">
+            <h2 className="text-lg font-semibold tracking-tight">Criterios de búsqueda</h2>
+            <CardDescription className="truncate">
+              {activeSavedSearchId
+                ? `Usando “${savedSearches.find((item) => item.id === activeSavedSearchId)?.name || 'búsqueda guardada'}”`
+                : 'Configura solo lo necesario para encontrar leads.'}
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-1 sm:flex-shrink-0">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="max-w-[190px] shadow-none" aria-label="Abrir búsquedas guardadas">
+                  {savedSearchesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bookmark className="h-4 w-4" />}
+                  <span className="truncate">Guardadas{savedSearches.length > 0 ? ` (${savedSearches.length})` : ''}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="max-h-80 w-[min(20rem,calc(100vw-2rem))] overflow-auto">
+                {savedSearchesLoading ? (
+                  <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Cargando búsquedas…
                   </div>
-                ))
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <Button variant="secondary" onClick={() => setSaveSearchOpen(true)} className="shadow-none">
-            <BookmarkPlus className="mr-2 h-4 w-4" />
-            Guardar Filtros
-          </Button>
-        </div>
-      </PageHeader>
-
-      <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
-        <CardHeader className="border-b border-border/60 bg-muted/10">
-          <CardTitle>Filtros de Búsqueda</CardTitle>
-          <CardDescription>
-            {filters.searchMode === 'linkedin_profile'
-              ? 'Busca una persona puntual usando la URL de su perfil de LinkedIn.'
-              : filters.searchMode === 'company_name'
-                ? 'Busca contactos dentro de una empresa específica y, si hay ambigüedad, elige la organización correcta.'
-                : 'Define los parámetros para encontrar los leads que necesitas.'}
-          </CardDescription>
+                ) : savedSearchesError ? (
+                  <div className="space-y-2 p-3">
+                    <p className="text-sm text-destructive">{savedSearchesError}</p>
+                    <Button size="sm" variant="outline" onClick={() => void loadSavedSearches()}>Reintentar</Button>
+                  </div>
+                ) : savedSearches.length === 0 ? (
+                  <div className="p-3 text-sm text-muted-foreground">Aún no guardaste búsquedas.</div>
+                ) : (
+                  savedSearches.map((savedSearch) => (
+                    <div key={savedSearch.id} className="group flex items-center gap-1 rounded-md p-1 hover:bg-muted focus-within:bg-muted">
+                      <button
+                        type="button"
+                        aria-current={activeSavedSearchId === savedSearch.id ? 'true' : undefined}
+                        className="min-w-0 flex-1 rounded-md p-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => handleLoadSearch(savedSearch)}
+                      >
+                      <span className="block min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-medium">{savedSearch.name}</span>
+                          {activeSavedSearchId === savedSearch.id ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> : null}
+                        </div>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {savedSearch.isShared ? `Equipo · ${savedSearch.user?.fullName || 'Usuario'}` : 'Privada'}
+                        </span>
+                      </span>
+                      </button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100" onClick={(event) => handleRequestDeleteSearch(event, savedSearch)} aria-label={`Eliminar búsqueda guardada ${savedSearch.name}`}>
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shadow-none"
+              aria-label="Guardar búsqueda"
+              onClick={() => {
+                setSaveSearchError('');
+                setSaveSearchOpen(true);
+              }}
+            >
+              <BookmarkPlus className="h-4 w-4" />
+              <span className="hidden sm:inline">Guardar</span>
+            </Button>
+          </div>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-6">
-            <div className="max-w-sm">
-              <Label htmlFor="searchMode">Modo de búsqueda</Label>
-              <Select value={filters.searchMode} onValueChange={(v: SearchMode) => handleFilterChange('searchMode', v)}>
-                <SelectTrigger id="searchMode"><SelectValue placeholder="Seleccionar modo" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="filters">Búsqueda por filtros</SelectItem>
-                  <SelectItem value="linkedin_profile">Perfil de LinkedIn</SelectItem>
-                  <SelectItem value="company_name">Empresa por nombre</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+        <CardContent className="space-y-5 p-4 sm:p-5">
+          <div className="grid h-10 w-full grid-cols-3 rounded-xl border border-border/60 bg-muted/60 p-1 sm:w-[420px]" role="group" aria-label="Modo de búsqueda">
+            {([
+              ['filters', 'Filtros'],
+              ['company_name', 'Empresa'],
+              ['linkedin_profile', 'Perfil'],
+            ] as const).map(([value, label]) => {
+              const active = filters.searchMode === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => handleFilterChange('searchMode', value)}
+                  className={cn(
+                    'inline-flex items-center justify-center whitespace-nowrap rounded-lg px-2 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                    active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
 
+          <div className="space-y-4">
             {filters.searchMode === 'linkedin_profile' ? (
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <div className="md:col-span-2">
+              <div className="space-y-4">
+                <div className="max-w-3xl space-y-2">
                   <Label htmlFor="linkedinUrl">URL del perfil de LinkedIn *</Label>
                   <Input
                     id="linkedinUrl"
-                    placeholder="Ej: https://www.linkedin.com/in/usuario"
+                    inputMode="url"
+                    autoComplete="url"
+                    placeholder="https://www.linkedin.com/in/nombre"
                     value={filters.linkedinUrl}
-                    onChange={(e) => handleFilterChange('linkedinUrl', e.target.value)}
+                    onChange={(event) => handleFilterChange('linkedinUrl', event.target.value)}
+                    required
                   />
-                  <small className="text-muted-foreground">Consulta una sola persona por URL usando el endpoint interno de perfil.</small>
+                  <p className="text-xs text-muted-foreground">El correo se consulta por defecto. Activa el teléfono antes de buscar si también lo necesitas.</p>
                 </div>
-                <div className="flex items-center justify-between rounded-md border p-4">
-                  <div>
-                    <Label htmlFor="revealEmail">Revelar email</Label>
-                    <p className="text-sm text-muted-foreground">Solicita email si el proveedor logra encontrarlo.</p>
-                  </div>
-                  <Switch id="revealEmail" checked={filters.revealEmail} onCheckedChange={(v) => handleFilterChange('revealEmail', v)} />
-                </div>
-                <div className="flex items-center justify-between rounded-md border p-4">
-                  <div>
-                    <Label htmlFor="revealPhone">Revelar teléfono</Label>
-                    <p className="text-sm text-muted-foreground">Solicita teléfono si el proveedor logra encontrarlo.</p>
-                  </div>
-                  <Switch id="revealPhone" checked={filters.revealPhone} onCheckedChange={(v) => handleFilterChange('revealPhone', v)} />
-                </div>
+                <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
+                  <CollapsibleTrigger asChild>
+                    <Button type="button" variant="ghost" size="sm" className="px-0 text-muted-foreground hover:bg-transparent hover:text-foreground">
+                      <SlidersHorizontal className="h-4 w-4" />
+                      Datos de contacto
+                      <ChevronDown className={`h-4 w-4 transition-transform ${advancedFiltersOpen ? 'rotate-180' : ''}`} />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-2">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
+                        <div>
+                          <Label htmlFor="revealEmail">Buscar correo</Label>
+                          <p className="text-xs text-muted-foreground">Incluye el correo cuando esté disponible.</p>
+                        </div>
+                        <Switch id="revealEmail" checked={filters.revealEmail} onCheckedChange={(value) => handleFilterChange('revealEmail', value)} />
+                      </div>
+                      <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
+                        <div>
+                          <Label htmlFor="revealPhone">Buscar teléfono</Label>
+                          <p className="text-xs text-muted-foreground">Puede tardar un poco más.</p>
+                        </div>
+                        <Switch id="revealPhone" checked={filters.revealPhone} onCheckedChange={(value) => handleFilterChange('revealPhone', value)} />
+                      </div>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
               </div>
             ) : filters.searchMode === 'company_name' ? (
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <div className="md:col-span-2">
+              <div className="space-y-4">
+                <div className="max-w-3xl space-y-2">
                   <Label htmlFor="companyName">Empresa *</Label>
                   <Input
                     id="companyName"
-                    placeholder="Ej: Microsoft"
+                    autoComplete="organization"
+                    placeholder="Ej. Microsoft"
                     value={filters.companyName}
-                    onChange={(e) => handleFilterChange('companyName', e.target.value)}
+                    onChange={(event) => handleFilterChange('companyName', event.target.value)}
                   />
-                  <small className="text-muted-foreground">El backend intentará encontrar la organización correcta por nombre.</small>
+                  <p className="text-xs text-muted-foreground">También puedes buscar solo por dominio desde las opciones avanzadas.</p>
                 </div>
-                <div className="md:col-span-2">
-                  <Label htmlFor="companyDomains">Dominio de la empresa</Label>
-                  <Input
-                    id="companyDomains"
-                    placeholder="Ej: grupoexpro.com, grupoexpro.cl"
-                    value={filters.companyDomains}
-                    onChange={(e) => handleFilterChange('companyDomains', e.target.value)}
-                  />
-                  <small className="text-muted-foreground">Opcional. Ayuda a resolver empresas ambiguas con mucha más precisión.</small>
-                </div>
-                <div>
-                  <Label htmlFor="companyTitles">Cargos</Label>
-                  <Input
-                    id="companyTitles"
-                    placeholder="Ej: VP Marketing, Marketing Director"
-                    value={filters.title}
-                    onChange={(e) => handleFilterChange('title', e.target.value)}
-                  />
-                  <small className="text-muted-foreground">Puedes separar varios cargos por coma.</small>
-                </div>
-                <div>
-                  <Label htmlFor="maxResults">Máximo de resultados</Label>
-                  <Input
-                    id="maxResults"
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={String(filters.maxResults)}
-                    onChange={(e) => handleFilterChange('maxResults', Math.max(1, Number(e.target.value) || 25))}
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <MultiCheckDropdown
-                    label="Management level"
-                    options={APOLLO_SENIORITIES}
-                    value={filters.seniorities}
-                    onChange={(next) => handleFilterChange('seniorities', next)}
-                    placeholder="Seleccionar niveles"
-                  />
-                </div>
+                <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
+                  <CollapsibleTrigger asChild>
+                    <Button type="button" variant="ghost" size="sm" className="px-0 text-muted-foreground hover:bg-transparent hover:text-foreground">
+                      <SlidersHorizontal className="h-4 w-4" />
+                      Opciones avanzadas
+                      <ChevronDown className={`h-4 w-4 transition-transform ${advancedFiltersOpen ? 'rotate-180' : ''}`} />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-2">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor="companyDomains">Dominio de la empresa</Label>
+                        <Input id="companyDomains" placeholder="Ej. empresa.com, empresa.cl" value={filters.companyDomains} onChange={(event) => handleFilterChange('companyDomains', event.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="companyTitles">Cargos</Label>
+                        <Input id="companyTitles" placeholder="Ej. VP Marketing, Marketing Director" value={filters.title} onChange={(event) => handleFilterChange('title', event.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="maxResults">Máximo de resultados</Label>
+                        <Input id="maxResults" type="number" min={1} max={100} value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', Math.min(100, Math.max(1, Number(event.target.value) || 25)))} />
+                      </div>
+                      <div className="md:col-span-2">
+                        <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" />
+                      </div>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
 
                 {selectedOrganization ? (
-                  <div className="md:col-span-2 rounded-md border border-emerald-200 bg-emerald-50/60 p-4">
-                    <div className="flex items-start gap-3">
-                      <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
-                      <div className="space-y-1 text-sm">
-                        <div className="font-medium text-emerald-900">Empresa seleccionada</div>
-                        <div className="text-emerald-800">
-                          {selectedOrganization.name}
-                          {selectedOrganization.primary_domain ? ` · ${selectedOrganization.primary_domain}` : ''}
-                        </div>
-                      </div>
+                  <div className="flex max-w-3xl items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-sm dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+                    <div>
+                      <span className="font-medium text-emerald-900 dark:text-emerald-100">Empresa seleccionada: </span>
+                      <span className="text-emerald-800 dark:text-emerald-200">{selectedOrganization.name}{selectedOrganization.primary_domain ? ` · ${selectedOrganization.primary_domain}` : ''}</span>
                     </div>
                   </div>
                 ) : null}
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-                <div>
-                  <Label htmlFor="industry">Industria (texto libre) *</Label>
-                  <Input id="industry" placeholder="Ej: Human Resources, Retail" value={filters.industry} onChange={(e) => handleFilterChange('industry', e.target.value)} required />
-                  <small className="text-muted-foreground">Obligatorio.</small>
+              <div className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="industry">Industria *</Label>
+                    <Input id="industry" placeholder="Ej. Recursos Humanos" value={filters.industry} onChange={(event) => handleFilterChange('industry', event.target.value)} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="location">Ubicación *</Label>
+                    <Input id="location" placeholder="Ej. Chile, Argentina" value={filters.location} onChange={(event) => handleFilterChange('location', event.target.value)} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="sizeRange">Tamaño de empresa *</Label>
+                    <Select name="sizeRange" value={filters.sizeRange} onValueChange={(value) => handleFilterChange('sizeRange', value)}>
+                      <SelectTrigger id="sizeRange" aria-required="true"><SelectValue placeholder="Selecciona un tamaño" /></SelectTrigger>
+                      <SelectContent>{companySizes.map((size) => <SelectItem key={size} value={size}>{size.replace('+', ' o más')}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <div>
-                  <Label htmlFor="location">Ubicación (País) *</Label>
-                  <Input id="location" placeholder="Ej: Chile, United States (separado por comas)" value={filters.location} onChange={(e) => handleFilterChange('location', e.target.value)} required />
-                  <small className="text-muted-foreground">Al menos uno. Puedes listar varios.</small>
-                </div>
-                <div>
-                  <Label htmlFor="sizeRange">Tamaño de empresa *</Label>
-                  <Select value={filters.sizeRange} onValueChange={(v) => handleFilterChange('sizeRange', v)}>
-                    <SelectTrigger id="sizeRange"><SelectValue placeholder="Seleccionar tamaño" /></SelectTrigger>
-                    <SelectContent>{companySizes.map(s => <SelectItem key={s} value={s}>{s.replace('+', ' o más')}</SelectItem>)}</SelectContent>
-                  </Select>
-                  <small className="text-muted-foreground">Al menos uno.</small>
-                </div>
-                <div>
-                  <Label htmlFor="title">Cargo/Posición</Label>
-                  <Input id="title" placeholder="Ej: Marketing Director" value={filters.title} onChange={(e) => handleFilterChange('title', e.target.value)} />
-                </div>
-                <div className="md:col-span-2 lg:col-span-4">
-                  <MultiCheckDropdown
-                    label="Management level"
-                    options={APOLLO_SENIORITIES}
-                    value={filters.seniorities}
-                    onChange={(next) => handleFilterChange('seniorities', next)}
-                    placeholder="Seleccionar niveles"
-                  />
-                </div>
+                <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
+                  <CollapsibleTrigger asChild>
+                    <Button type="button" variant="ghost" size="sm" className="px-0 text-muted-foreground hover:bg-transparent hover:text-foreground">
+                      <SlidersHorizontal className="h-4 w-4" />
+                      Cargo y nivel
+                      <ChevronDown className={`h-4 w-4 transition-transform ${advancedFiltersOpen ? 'rotate-180' : ''}`} />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-2">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="title">Cargo o posición</Label>
+                        <Input id="title" placeholder="Ej. Marketing Director" value={filters.title} onChange={(event) => handleFilterChange('title', event.target.value)} />
+                      </div>
+                      <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" />
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
               </div>
             )}
           </div>
 
-          <div className="mt-6 flex flex-wrap justify-end gap-2">
-            <Button variant="outline" className="shadow-none" onClick={handleClear}><X className="mr-2" />Limpiar</Button>
-            <Button className="shadow-none" onClick={handleSearch} disabled={isLoading}><Search className="mr-2" />{isLoading ? 'Buscando...' : (filters.searchMode === 'linkedin_profile' ? 'Buscar Perfil' : filters.searchMode === 'company_name' ? 'Buscar Empresa' : 'Buscar Leads')}</Button>
-            {isLoading && (
-              <Button variant="outline" className="shadow-none" onClick={handleAbort}>Cancelar</Button>
-            )}
+          <div className="flex flex-col-reverse gap-2 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-end">
+            <Button variant="ghost" className="shadow-none" onClick={handleClear} disabled={isLoading}><X className="h-4 w-4" />Limpiar</Button>
+            {isLoading ? <Button variant="outline" className="shadow-none" onClick={handleAbort}>Cancelar</Button> : null}
+            <Button className="shadow-none sm:min-w-36" onClick={handleSearch} disabled={isLoading}>
+              {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              {isLoading ? 'Buscando…' : 'Buscar leads'}
+            </Button>
           </div>
 
           {profileSearchNotice ? (
-            <Alert className="mt-4" variant={profileSearchNotice.tone === 'warning' ? 'destructive' : 'default'}>
+            <Alert
+              className={cn(
+                'mt-4 overflow-hidden border-border/60 bg-card/90',
+                profileSearchNotice.tone === 'warning' && 'border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100',
+              )}
+            >
               {profileSearchNotice.tone === 'warning'
-                ? <AlertCircle className="h-4 w-4" />
+                ? <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
                 : (profilePhonePollingIds.length > 0 ? <Loader2 className="h-4 w-4 animate-spin" /> : <Info className="h-4 w-4" />)}
               <AlertTitle>{profileSearchNotice.title}</AlertTitle>
               <AlertDescription>
                 <div className="space-y-3">
                   <p>{profileSearchNotice.description}</p>
-                  {profilePhonePollingIds.length > 0 ? (
-                    <div className="space-y-2 rounded-md border border-blue-200/60 bg-blue-50/70 p-3 text-blue-900">
-                      <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide">
-                        <span className="inline-flex items-center gap-2">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          Esperando telefono por webhook
-                        </span>
-                        <span>{Math.floor(profilePhonePollingElapsedMs / 1000)}s</span>
-                      </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-blue-100">
-                        <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-500" />
-                      </div>
-                      <p className="text-xs text-blue-800/80">
-                        Puedes seguir usando la app; el numero aparecera aqui apenas el proveedor complete el enriquecimiento.
-                      </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="inline-flex items-center gap-2 text-sm">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      <span>Correo</span>
+                      <Badge variant="outline" className={statusChipClasses(profileSearchNotice.emailState)}>
+                        {profileSearchNotice.emailState === 'ready' ? 'Disponible' : profileSearchNotice.emailState === 'missing' ? 'No disponible' : 'No solicitado'}
+                      </Badge>
                     </div>
-                  ) : null}
+                    <div className="inline-flex items-center gap-2 text-sm">
+                      <Phone className="h-4 w-4 text-muted-foreground" />
+                      <span>Teléfono</span>
+                      <Badge variant="outline" className={statusChipClasses(profileSearchNotice.phoneState)}>
+                        {profileSearchNotice.phoneState === 'ready' ? 'Disponible' : profileSearchNotice.phoneState === 'queued' ? 'Buscando…' : profileSearchNotice.phoneState === 'missing' ? 'No disponible' : 'No solicitado'}
+                      </Badge>
+                    </div>
+                  </div>
+                  {profilePhonePollingIds.length > 0 ? <p className="text-xs text-muted-foreground">Puedes seguir usando la app; este resultado se actualizará automáticamente.</p> : null}
                 </div>
               </AlertDescription>
             </Alert>
           ) : null}
 
           {filters.searchMode === 'company_name' && companySelectionPending && companyCandidates.length > 0 ? (
-            <div className="mt-4 rounded-md border p-4">
+            <div className="mt-4 rounded-xl border border-border/60 bg-muted/20 p-4">
               <div className="mb-3 flex items-start gap-3">
                 <Building2 className="mt-0.5 h-4 w-4 text-blue-600" />
                 <div>
                   <div className="font-medium">Selecciona la empresa correcta</div>
-                  <p className="text-sm text-muted-foreground">Encontramos varias coincidencias para "{filters.companyName}". Elige una para continuar la búsqueda sin volver a consumir cuota.</p>
+                  <p className="text-sm text-muted-foreground">Encontramos varias coincidencias para “{filters.companyName}”. Elige una para continuar.</p>
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
@@ -1064,7 +1393,7 @@ export default function SearchPage() {
                     key={candidate.id}
                     type="button"
                     onClick={() => handleSelectOrganization(candidate)}
-                    className="rounded-md border bg-background p-4 text-left transition hover:border-blue-400 hover:bg-muted/40"
+                    className="rounded-xl border border-border/60 bg-background p-3 text-left transition hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <div className="font-medium">{candidate.name}</div>
                     <div className="mt-1 text-sm text-muted-foreground">
@@ -1081,53 +1410,111 @@ export default function SearchPage() {
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
-        <CardHeader className="flex flex-col gap-4 border-b border-border/60 bg-muted/10 md:flex-row md:items-center md:justify-between">
-          <div>
-            <CardTitle>Resultados de la Búsqueda</CardTitle>
+      <Card className="overflow-hidden rounded-2xl border-border/60 bg-card/90 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/75">
+        <CardHeader className="flex flex-col gap-3 border-b border-border/60 bg-muted/10 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold tracking-tight">Resultados</h2>
             <CardDescription>
-              {leads.length > 0
+              {isLoading
+                ? 'Buscando leads que coincidan con tus criterios…'
+                : leads.length > 0
                 ? `Mostrando ${pagedLeads.length} de ${leads.length} leads.`
                 : companySelectionPending
-                  ? 'Selecciona una organización para continuar con la búsqueda.'
-                  : 'No se han encontrado leads.'}
+                  ? 'Selecciona una empresa para continuar.'
+                  : hasSearched
+                    ? 'Revisa el resultado o ajusta los criterios.'
+                    : 'Aquí aparecerán los leads que encuentres.'}
             </CardDescription>
           </div>
           <Button
+            variant="outline"
+            size="sm"
             disabled={selectedLeads.size === 0 || isSaving}
             onClick={handleSaveSelectedLeads}
+            className="shadow-none"
           >
-            {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2" />}
-            {isSaving ? 'Guardando...' : `Guardar ${selectedLeads.size > 0 ? `(${selectedLeads.size})` : ''}`}
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {isSaving ? 'Guardando…' : `Guardar seleccionados${selectedLeads.size > 0 ? ` (${selectedLeads.size})` : ''}`}
           </Button>
         </CardHeader>
-        <CardContent>
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[50px]">
-                    <Checkbox onCheckedChange={(checked) => handleSelectAll(Boolean(checked))} checked={isPageAllSelected} />
-                  </TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Cargo</TableHead>
-                  <TableHead>Empresa</TableHead>
-                  <TableHead>Industria</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  Array.from({ length: 5 }).map((_, i) => (
-                    <TableRow key={i}>
-                      <TableCell><Skeleton className="h-4 w-4" /></TableCell>
-                      <TableCell><div className="flex items-center gap-2"><Skeleton className="h-10 w-10 rounded-full" /><Skeleton className="h-4 w-24" /></div></TableCell>
-                      <TableCell><Skeleton className="h-4 w-40" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-32" /></TableCell>
-                      <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+        <CardContent className="p-4 sm:p-5">
+          {error ? (
+            <Alert className="mb-4 rounded-2xl border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+              <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+              <AlertTitle>No pudimos completar la búsqueda</AlertTitle>
+              <AlertDescription className="space-y-3 text-amber-800 dark:text-amber-100/80">
+                <p>{error}</p>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <Button size="sm" variant="outline" className="border-amber-300 bg-background/80 text-foreground hover:bg-background dark:border-amber-500/40" onClick={handleSearch} disabled={isLoading}>
+                    Intentar de nuevo
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-amber-900 hover:bg-amber-100 dark:text-amber-100 dark:hover:bg-amber-500/10" onClick={() => setError('')}>
+                    Ocultar aviso
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {isLoading ? (
+            <div className="space-y-2" role="status" aria-live="polite" aria-label="Buscando leads">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="flex items-center gap-3 rounded-xl border border-border/60 p-3">
+                  <Skeleton className="h-4 w-4" />
+                  <Skeleton className="h-10 w-10 rounded-full" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-40 max-w-full" />
+                    <Skeleton className="h-3 w-64 max-w-full" />
+                  </div>
+                </div>
+              ))}
+              <span className="sr-only">Buscando leads…</span>
+            </div>
+          ) : pagedLeads.length > 0 ? (
+            <>
+              <div className="space-y-2 md:hidden">
+                {pagedLeads.map((lead) => {
+                  const already = savedIds.has(lead.id);
+                  const contacted = !!((lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email)));
+                  const disabled = already || contacted;
+                  return (
+                    <div key={lead.id} className="rounded-xl border border-border/60 p-3" data-state={selectedLeads.has(lead.id) ? 'selected' : undefined}>
+                      <div className="flex items-start gap-3">
+                        <Checkbox aria-label={`Seleccionar ${lead.name}`} className="mt-1" disabled={disabled} checked={selectedLeads.has(lead.id)} onCheckedChange={(checked) => handleSelectLead(lead.id, Boolean(checked))} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">{lead.name}</p>
+                              <p className="line-clamp-2 text-sm text-muted-foreground">{lead.title}</p>
+                            </div>
+                            {already ? <Badge variant="secondary">Guardado</Badge> : contacted ? <Badge variant="outline">Contactado</Badge> : null}
+                          </div>
+                          <p className="mt-2 truncate text-sm">{lead.company}</p>
+                          <p className="truncate text-xs text-muted-foreground">{lead.industry}</p>
+                          {lead.email ? <p className="mt-2 truncate text-xs text-muted-foreground">{lead.email}</p> : null}
+                          {filters.searchMode === 'linkedin_profile' && filters.revealPhone ? (
+                            <p className="mt-1 text-xs text-muted-foreground">{lead.primaryPhone || (isPendingEnrichmentStatus(lead.enrichmentStatus) ? 'Teléfono en proceso…' : 'Sin teléfono disponible')}</p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="hidden overflow-x-auto rounded-xl border border-border/60 md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[52px]">
+                        <Checkbox aria-label="Seleccionar todos los leads de esta página" onCheckedChange={(checked) => handleSelectAll(Boolean(checked))} checked={isPageAllSelected} />
+                      </TableHead>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead>Cargo</TableHead>
+                      <TableHead>Empresa</TableHead>
+                      <TableHead>Industria</TableHead>
                     </TableRow>
-                  ))
-                ) : pagedLeads.length > 0 ? (
-                  pagedLeads.map(lead => {
+                  </TableHeader>
+                  <TableBody>
+                    {pagedLeads.map(lead => {
                     const already = savedIds.has(lead.id);
                     const contacted = !!((lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email)));
                     const disabled = already || contacted;
@@ -1135,6 +1522,7 @@ export default function SearchPage() {
                       <TableRow key={lead.id} data-state={selectedLeads.has(lead.id) ? "selected" : ""}>
                         <TableCell>
                           <Checkbox
+                            aria-label={`Seleccionar ${lead.name}`}
                             disabled={disabled}
                             checked={selectedLeads.has(lead.id)}
                             onCheckedChange={(checked) => handleSelectLead(lead.id, Boolean(checked))}
@@ -1155,19 +1543,14 @@ export default function SearchPage() {
                                   {filters.searchMode === 'linkedin_profile' && filters.revealEmail ? (
                                     lead.email ? (
                                       <span className="text-muted-foreground">{lead.email}</span>
-                                    ) : lead.enrichmentStatus === 'pending_profile' && !lead.primaryPhone ? (
-                                      <span className="inline-flex items-center gap-1 text-blue-600">
-                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                        Correo en proceso...
-                                      </span>
                                     ) : (
-                                      <span className="text-muted-foreground">Sin correo visible</span>
+                                      <span className="text-amber-700">Correo no disponible</span>
                                     )
                                   ) : lead.email ? <span className="text-muted-foreground">{lead.email}</span> : null}
                                   {filters.searchMode === 'linkedin_profile' && filters.revealPhone ? (
                                     lead.primaryPhone ? (
                                       <span className="font-medium text-emerald-600">{lead.primaryPhone}</span>
-                                    ) : lead.enrichmentStatus === 'pending_profile' || lead.enrichmentStatus === 'pending_phone' ? (
+                                    ) : isPendingEnrichmentStatus(lead.enrichmentStatus) ? (
                                       <span className="inline-flex items-center gap-1 text-blue-600">
                                         <Loader2 className="h-3 w-3 animate-spin" />
                                         Teléfono en proceso...
@@ -1185,45 +1568,54 @@ export default function SearchPage() {
                         <TableCell>{lead.company}</TableCell>
                         <TableCell>{lead.industry}</TableCell>
                       </TableRow>
-                    )
-                  })
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={6} className="h-24 text-center">
-                      {!isLoading && (
-                        <div className="flex flex-col items-center gap-2">
-                          <Frown className="h-8 w-8 text-muted-foreground" />
-                          <p className="text-muted-foreground">
-                            {companySelectionPending
-                              ? 'Selecciona una organización sugerida para ver los resultados.'
-                              : 'Realiza una búsqueda para ver los resultados.'}
-                          </p>
-                        </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                    );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          ) : !error ? (
+            <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-6 py-8 text-center">
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <Search className="h-5 w-5" />
+              </div>
+              <p className="font-medium">
+                {companySelectionPending
+                  ? 'Elige una empresa para continuar'
+                  : filters.searchMode === 'linkedin_profile' && profileSearchNotice
+                    ? 'El perfil aún no está disponible'
+                    : hasSearched
+                      ? 'No encontramos leads con estos criterios'
+                      : 'Tus resultados aparecerán aquí'}
+              </p>
+              <p className="mt-1 max-w-md text-sm text-muted-foreground">
+                {companySelectionPending
+                  ? 'Selecciona una de las coincidencias mostradas arriba.'
+                  : hasSearched
+                    ? 'Prueba ampliando la ubicación, el tamaño de empresa o el cargo.'
+                    : 'Completa los criterios y selecciona Buscar leads.'}
+              </p>
+            </div>
+          ) : null}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between py-2">
+            <div className="flex flex-col gap-3 py-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-sm text-muted-foreground">
                 Mostrando{' '}
                 {leads.length === 0 ? '0' : `${pageIndex * pageSize + 1}–${Math.min(leads.length, (pageIndex + 1) * pageSize)}`} de {leads.length}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Select
+                  name="pageSize"
                   value={String(pageSize)}
                   onValueChange={(v) => { const n = Number(v); if (!Number.isNaN(n)) { setPageSize(n); setPageIndex(0); } }}
                 >
-                  <SelectTrigger className="w-[150px]"><SelectValue placeholder="Tamaño de página" /></SelectTrigger>
+                  <SelectTrigger className="w-full sm:w-[150px]"><SelectValue placeholder="Tamaño de página" /></SelectTrigger>
                   <SelectContent>
                     {PAGE_SIZE_OPTIONS.map((opt) => (<SelectItem key={opt} value={String(opt)}>{opt} / página</SelectItem>))}
                   </SelectContent>
                 </Select>
-                <Button variant="outline" onClick={() => setPageIndex((p) => Math.max(0, p - 1))} disabled={pageIndex === 0}>Anterior</Button>
-                <Button variant="outline" onClick={() => setPageIndex((p) => (p + 1 < totalPages ? p + 1 : p))} disabled={pageIndex + 1 >= totalPages}>Siguiente</Button>
+                <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setPageIndex((p) => Math.max(0, p - 1))} disabled={pageIndex === 0}>Anterior</Button>
+                <Button className="flex-1 sm:flex-none" variant="outline" onClick={() => setPageIndex((p) => (p + 1 < totalPages ? p + 1 : p))} disabled={pageIndex + 1 >= totalPages}>Siguiente</Button>
               </div>
             </div>
           )}
@@ -1233,27 +1625,63 @@ export default function SearchPage() {
       <Dialog open={saveSearchOpen} onOpenChange={setSaveSearchOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Guardar Búsqueda</DialogTitle>
-            <DialogDescription>Guarda los filtros actuales para usarlos después o compartirlos con tu equipo.</DialogDescription>
+            <DialogTitle>Guardar búsqueda</DialogTitle>
+            <DialogDescription>Guarda los criterios actuales para volver a usarlos.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="search-name">Nombre de la búsqueda</Label>
-              <Input id="search-name" value={newSearchName} onChange={(e) => setNewSearchName(e.target.value)} placeholder="Ej: Gerentes de Marketing en Chile" />
+              <Input
+                id="search-name"
+                value={newSearchName}
+                onChange={(event) => {
+                  setNewSearchName(event.target.value);
+                  setSaveSearchError('');
+                }}
+                placeholder="Ej. Gerentes de Marketing en Chile"
+                aria-invalid={Boolean(saveSearchError)}
+                aria-describedby={saveSearchError ? 'save-search-error' : undefined}
+                autoFocus
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && newSearchName.trim() && !savingSearch) void handleSaveSearch();
+                }}
+              />
+              {saveSearchError ? <p id="save-search-error" className="text-sm text-destructive">{saveSearchError}</p> : null}
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 p-3">
+              <div>
+                <Label htmlFor="shared">Compartir con el equipo</Label>
+                <p className="text-xs text-muted-foreground">Otros miembros podrán cargar estos criterios.</p>
+              </div>
               <Switch id="shared" checked={isShared} onCheckedChange={setIsShared} />
-              <Label htmlFor="shared">Compartir con mi organización</Label>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSaveSearchOpen(false)}>Cancelar</Button>
             <Button onClick={handleSaveSearch} disabled={savingSearch || !newSearchName.trim()}>
-              {savingSearch ? 'Guardando...' : 'Guardar'}
+              {savingSearch ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {savingSearch ? 'Guardando…' : 'Guardar búsqueda'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <AlertDialog open={!!savedSearchPendingDelete} onOpenChange={(open) => !open && !deletingSavedSearch && setSavedSearchPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar búsqueda guardada</AlertDialogTitle>
+            <AlertDialogDescription>
+              Quitaremos “{savedSearchPendingDelete?.name}” de tus búsquedas guardadas. No afecta los leads encontrados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingSavedSearch}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={confirmDeleteSearch} disabled={deletingSavedSearch}>
+              {deletingSavedSearch ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {deletingSavedSearch ? 'Eliminando…' : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -11,6 +11,21 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @layer components {
   .suplia-claude-shell {
     --suplia-bg: #faf9f5;
@@ -23,9 +38,9 @@
     --suplia-code-head: #1f1e1c;
     --suplia-text: #1f1e1d;
     --suplia-muted: #6b6a64;
-    --suplia-faint: #9b998f;
-    --suplia-accent: #d97757;
-    --suplia-accent-hover: #c4623f;
+    --suplia-faint: #66645e;
+    --suplia-accent: #a8442a;
+    --suplia-accent-hover: #8f371f;
     --suplia-accent-soft: #f4e4dc;
     --suplia-border: #e7e4d8;
     --suplia-border-strong: #d9d6c8;
@@ -56,12 +71,52 @@
     --suplia-code-head: #141312;
     --suplia-text: #ecebe4;
     --suplia-muted: #a9a79d;
-    --suplia-faint: #76746c;
-    --suplia-accent: #e08a6c;
-    --suplia-accent-hover: #d97757;
+    --suplia-faint: #aaa89e;
+    --suplia-accent: #b84f32;
+    --suplia-accent-hover: #a8442a;
     --suplia-accent-soft: #3a2c25;
     --suplia-border: #3a3935;
     --suplia-border-strong: #4b4940;
+  }
+
+  .app-shell-suplia {
+    height: 100svh;
+    min-height: 100svh;
+    overflow: hidden;
+    background: #020817;
+  }
+
+  .app-shell-suplia .suplia-claude-shell {
+    width: 100%;
+    height: 100svh;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .app-shell-suplia .suplia-sidebar:not(.collapsed) .suplia-sb-top {
+    padding-left: 56px;
+  }
+
+  .suplia-app-sidebar-trigger {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    z-index: 80;
+    width: 36px;
+    height: 36px;
+    border: 1px solid color-mix(in srgb, var(--suplia-border, hsl(var(--border))) 82%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--suplia-elevated, hsl(var(--background))) 88%, transparent);
+    color: var(--suplia-muted, hsl(var(--foreground)));
+    box-shadow: 0 14px 34px -28px rgba(0, 0, 0, .55);
+    backdrop-filter: blur(14px);
+  }
+
+  .suplia-app-sidebar-trigger:hover {
+    background: var(--suplia-hover, hsl(var(--accent)));
+    color: var(--suplia-text, hsl(var(--foreground)));
   }
 
   .suplia-claude-shell * {
@@ -323,6 +378,21 @@
     padding: 0 14px 0 18px;
   }
 
+  .suplia-top-title {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .suplia-top-title > span {
+    overflow: hidden;
+    color: var(--suplia-faint);
+    font-size: 12.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .suplia-model-pick,
   .suplia-pill-btn {
     display: inline-flex;
@@ -364,6 +434,172 @@
     display: flex;
     align-items: center;
     gap: 4px;
+  }
+
+  .suplia-workspace-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    border-top: 1px solid color-mix(in srgb, var(--suplia-border) 68%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--suplia-border) 68%, transparent);
+    background: color-mix(in srgb, var(--suplia-elevated) 58%, transparent);
+    padding: 8px 18px;
+  }
+
+  .suplia-status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 26px;
+    border: 1px solid var(--suplia-border);
+    border-radius: 999px;
+    background: var(--suplia-bg);
+    color: var(--suplia-muted);
+    padding: 4px 10px;
+    font-size: 12.5px;
+    font-weight: 550;
+  }
+
+  .suplia-status-chip.warn {
+    border-color: color-mix(in srgb, #d97706 28%, var(--suplia-border));
+    background: color-mix(in srgb, #f59e0b 12%, var(--suplia-bg));
+    color: #9a5a00;
+  }
+
+  .dark .suplia-status-chip.warn {
+    color: #f2c477;
+  }
+
+  .suplia-status-chip.danger {
+    border-color: color-mix(in srgb, #dc2626 32%, var(--suplia-border));
+    color: #b42318;
+  }
+
+  .dark .suplia-status-chip.danger {
+    color: #f0a09a;
+  }
+
+  .suplia-status-chip.muted {
+    color: var(--suplia-faint);
+  }
+
+  .suplia-status-chip.action {
+    cursor: pointer;
+    color: var(--suplia-accent);
+    transition: background .15s, border-color .15s, color .15s;
+  }
+
+  .suplia-status-chip.action:hover {
+    border-color: var(--suplia-border-strong);
+    background: var(--suplia-hover);
+    color: var(--suplia-accent-hover);
+  }
+
+  .suplia-memory-shelf {
+    border-bottom: 1px solid color-mix(in srgb, var(--suplia-border) 62%, transparent);
+    background: color-mix(in srgb, var(--suplia-elevated) 40%, transparent);
+    padding: 12px 18px;
+  }
+
+  .suplia-memory-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    max-width: 980px;
+    margin: 0 auto 9px;
+  }
+
+  .suplia-memory-head span {
+    color: var(--suplia-text);
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+
+  .suplia-memory-head p {
+    margin: 0;
+    color: var(--suplia-muted);
+    font-size: 12.5px;
+  }
+
+  .suplia-memory-list {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    max-width: 980px;
+    margin: 0 auto;
+  }
+
+  .suplia-memory-card {
+    min-width: 0;
+    border: 1px solid var(--suplia-border);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--suplia-bg) 84%, var(--suplia-elevated));
+    padding: 11px;
+    box-shadow: 0 10px 24px -22px rgba(0, 0, 0, .5);
+  }
+
+  .suplia-memory-card.pending {
+    border-color: color-mix(in srgb, #d97706 32%, var(--suplia-border));
+  }
+
+  .suplia-memory-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 7px;
+  }
+
+  .suplia-memory-card-top span,
+  .suplia-memory-card-top small {
+    color: var(--suplia-faint);
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .suplia-memory-card strong {
+    display: block;
+    overflow: hidden;
+    color: var(--suplia-text);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .suplia-memory-card p {
+    display: -webkit-box;
+    min-height: 36px;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    margin: 4px 0 10px;
+    color: var(--suplia-muted);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .suplia-memory-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .suplia-memory-actions button {
+    border-radius: 999px;
+    background: var(--suplia-user);
+    color: var(--suplia-muted);
+    padding: 4px 9px;
+    font-size: 11.5px;
+    font-weight: 600;
+    transition: background .15s, color .15s;
+  }
+
+  .suplia-memory-actions button:hover {
+    background: var(--suplia-hover);
+    color: var(--suplia-text);
   }
 
   .suplia-scroll {
@@ -648,6 +884,19 @@
     margin-bottom: 18px;
     color: var(--suplia-text);
     font-family: var(--suplia-sans);
+  }
+
+  .suplia-tool.compact {
+    display: inline-flex;
+    max-width: 100%;
+    border-radius: 999px;
+    margin: 0 6px 10px 0;
+    background: color-mix(in srgb, var(--suplia-elevated) 74%, transparent);
+  }
+
+  .suplia-tool.compact .suplia-tool-head {
+    padding: 7px 11px;
+    font-size: 12.5px;
   }
 
   .suplia-approval p {
@@ -1102,6 +1351,21 @@
     color: var(--suplia-text);
   }
 
+  .suplia-icon-btn:focus-visible,
+  .suplia-sb-item:focus-visible,
+  .suplia-sb-chat:focus-visible,
+  .suplia-starter:focus-visible,
+  .suplia-comp-tool:focus-visible,
+  .suplia-send:focus-visible,
+  .suplia-pill-btn:focus-visible,
+  .suplia-status-chip.action:focus-visible,
+  .suplia-foot-btn:focus-visible,
+  .suplia-tab:focus-visible,
+  .suplia-artifact-card:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--suplia-accent) 62%, transparent);
+    outline-offset: 2px;
+  }
+
   .suplia-comp-spacer {
     flex: 1;
   }
@@ -1386,9 +1650,288 @@
     color: #3f7a4e;
   }
 
+  .suplia-company-research {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .suplia-research-hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    border: 1px solid #e7e4d8;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #faf9f5, #fff);
+    padding: 18px;
+  }
+
+  .dark .suplia-research-hero {
+    border-color: #3a3935;
+    background: linear-gradient(135deg, #262624, #1e1d1b);
+  }
+
+  .suplia-research-kicker {
+    display: inline-flex;
+    margin-bottom: 8px;
+    border-radius: 999px;
+    background: var(--suplia-accent-soft);
+    color: var(--suplia-accent);
+    padding: 3px 9px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+
+  .suplia-research-hero p {
+    margin: 0;
+    color: #6b6a64;
+    font-size: 13px;
+  }
+
+  .dark .suplia-research-hero p {
+    color: #a9a79d;
+  }
+
+  .suplia-research-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .suplia-research-stats div,
+  .suplia-research-grid section {
+    border: 1px solid #e7e4d8;
+    border-radius: 14px;
+    background: #fff;
+    padding: 14px;
+  }
+
+  .dark .suplia-research-stats div,
+  .dark .suplia-research-grid section {
+    border-color: #3a3935;
+    background: #262624;
+  }
+
+  .suplia-research-stats span {
+    display: block;
+    color: #9b998f;
+    font-size: 11.5px;
+    font-weight: 650;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .suplia-research-stats strong {
+    display: block;
+    margin-top: 6px;
+    color: #1f1e1d;
+    font-size: 17px;
+  }
+
+  .dark .suplia-research-stats strong {
+    color: #ecebe4;
+  }
+
+  .suplia-research-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .suplia-research-grid h2 {
+    margin: 0 0 10px;
+    color: inherit;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .suplia-research-grid p,
+  .suplia-research-grid li,
+  .suplia-research-grid dd {
+    color: #6b6a64;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .dark .suplia-research-grid p,
+  .dark .suplia-research-grid li,
+  .dark .suplia-research-grid dd {
+    color: #a9a79d;
+  }
+
+  .suplia-research-grid ul {
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  .suplia-research-grid dl {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+  }
+
+  .suplia-research-grid dl div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .suplia-research-grid dt {
+    color: #9b998f;
+    font-size: 12px;
+    font-weight: 650;
+  }
+
   .suplia-email-preview,
   .suplia-doc-card {
     max-width: 660px;
+  }
+
+  .suplia-strategy-doc {
+    display: flex;
+    max-width: 760px;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .suplia-doc-hero,
+  .suplia-doc-section {
+    border: 1px solid #e7e4d8;
+    border-radius: 18px;
+    background: #fff;
+    padding: 18px;
+  }
+
+  .suplia-doc-hero {
+    background: linear-gradient(135deg, #faf9f5, #fff);
+  }
+
+  .dark .suplia-doc-hero,
+  .dark .suplia-doc-section {
+    border-color: #3a3935;
+    background: #262624;
+  }
+
+  .dark .suplia-doc-hero {
+    background: linear-gradient(135deg, #262624, #1e1d1b);
+  }
+
+  .suplia-doc-hero p {
+    margin: 8px 0 0;
+    color: #6b6a64;
+    font-size: 14px;
+    line-height: 1.65;
+  }
+
+  .dark .suplia-doc-hero p {
+    color: #a9a79d;
+  }
+
+  .suplia-doc-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .suplia-doc-section.featured {
+    background: #faf9f5;
+  }
+
+  .dark .suplia-doc-section.featured {
+    background: #232320;
+  }
+
+  .suplia-doc-section h2 {
+    margin: 0 0 12px;
+    color: inherit;
+    font-size: 13px;
+    font-weight: 750;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .suplia-doc-items {
+    display: grid;
+    gap: 10px;
+  }
+
+  .suplia-doc-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    border-top: 1px solid #f0eee6;
+    padding-top: 10px;
+  }
+
+  .suplia-doc-item:first-child {
+    border-top: none;
+    padding-top: 0;
+  }
+
+  .suplia-doc-item strong,
+  .suplia-doc-priority-grid strong {
+    display: block;
+    color: #1f1e1d;
+    font-size: 13.5px;
+    line-height: 1.45;
+  }
+
+  .dark .suplia-doc-item strong,
+  .dark .suplia-doc-priority-grid strong {
+    color: #ecebe4;
+  }
+
+  .suplia-doc-item p,
+  .suplia-doc-priority-grid p {
+    margin: 4px 0 0;
+    color: #6b6a64;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  .dark .suplia-doc-item p,
+  .dark .suplia-doc-priority-grid p {
+    color: #a9a79d;
+  }
+
+  .suplia-doc-item > span {
+    flex-shrink: 0;
+    border-radius: 999px;
+    background: #f4e4dc;
+    color: #c4623f;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 650;
+  }
+
+  .suplia-doc-priority-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 10px;
+  }
+
+  .suplia-doc-priority-grid article {
+    border: 1px solid #e7e4d8;
+    border-radius: 14px;
+    background: #fff;
+    padding: 14px;
+  }
+
+  .dark .suplia-doc-priority-grid article {
+    border-color: #3a3935;
+    background: #30302e;
+  }
+
+  .suplia-doc-priority-grid span {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--suplia-accent);
+    font-size: 12px;
+    font-weight: 750;
   }
 
   .suplia-email-header {
@@ -1425,6 +1968,45 @@
     white-space: pre-wrap;
   }
 
+  .suplia-email-stack {
+    display: grid;
+    gap: 12px;
+    margin-top: 14px;
+  }
+
+  .suplia-email-stack section {
+    border: 1px solid #e7e4d8;
+    border-radius: 14px;
+    background: #faf9f5;
+    padding: 14px;
+  }
+
+  .suplia-email-stack div {
+    display: grid;
+    gap: 3px;
+    margin-bottom: 9px;
+  }
+
+  .suplia-email-stack span {
+    color: #9b998f;
+    font-size: 11.5px;
+    font-weight: 650;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .suplia-email-stack strong {
+    color: #1f1e1d;
+    font-size: 14px;
+  }
+
+  .suplia-email-stack p {
+    margin: 0;
+    color: #6b6a64;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
   .suplia-email-actions {
     display: flex;
     flex-wrap: wrap;
@@ -1455,6 +2037,19 @@
 
   .dark .suplia-email-body {
     background: #262624;
+  }
+
+  .dark .suplia-email-stack section {
+    border-color: #3a3935;
+    background: #262624;
+  }
+
+  .dark .suplia-email-stack strong {
+    color: #ecebe4;
+  }
+
+  .dark .suplia-email-stack p {
+    color: #a9a79d;
   }
 
   .dark .suplia-email-actions span {
@@ -1538,6 +2133,188 @@
 
   .dark .suplia-pipeline-card p,
   .dark .suplia-pipeline-empty {
+    color: #a9a79d;
+  }
+
+  .suplia-task-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  .suplia-task-card {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    border: 1px solid #e7e4d8;
+    border-radius: 14px;
+    background: #fff;
+    padding: 13px 14px;
+  }
+
+  .suplia-task-card strong {
+    display: block;
+    color: #1f1e1d;
+    font-size: 13.5px;
+  }
+
+  .suplia-task-card p {
+    margin: 3px 0 0;
+    color: #6b6a64;
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+
+  .suplia-task-card > span {
+    flex-shrink: 0;
+    border-radius: 999px;
+    background: #f4e4dc;
+    color: #c4623f;
+    padding: 4px 9px;
+    font-size: 11px;
+    font-weight: 650;
+  }
+
+  .dark .suplia-task-card {
+    border-color: #3a3935;
+    background: #30302e;
+  }
+
+  .dark .suplia-task-card strong {
+    color: #ecebe4;
+  }
+
+  .dark .suplia-task-card p {
+    color: #a9a79d;
+  }
+
+  .suplia-risk-preview {
+    max-width: 720px;
+  }
+
+  .suplia-risk-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    border: 1px solid #e7e4d8;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #fff, #faf9f5);
+    padding: 16px;
+  }
+
+  .suplia-risk-head span {
+    display: block;
+    margin-bottom: 4px;
+    color: #9b998f;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+
+  .suplia-risk-head > strong {
+    border-radius: 999px;
+    background: #f4e4dc;
+    color: #c4623f;
+    padding: 4px 10px;
+    font-size: 12px;
+    text-transform: capitalize;
+  }
+
+  .suplia-risk-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .suplia-risk-metrics div {
+    border: 1px solid #e7e4d8;
+    border-radius: 14px;
+    background: #fff;
+    padding: 13px;
+  }
+
+  .suplia-risk-metrics span {
+    display: block;
+    color: #9b998f;
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .suplia-risk-metrics strong {
+    display: block;
+    margin-top: 4px;
+    color: #1f1e1d;
+    font-size: 18px;
+  }
+
+  .suplia-risk-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .suplia-risk-list div,
+  .suplia-risk-list > p {
+    border: 1px solid #e7e4d8;
+    border-radius: 14px;
+    background: #fff;
+    padding: 13px 14px;
+  }
+
+  .suplia-risk-list span {
+    display: inline-flex;
+    margin-bottom: 5px;
+    border-radius: 999px;
+    background: #f0eee6;
+    color: #6b6a64;
+    padding: 2px 8px;
+    font-size: 11px;
+    text-transform: capitalize;
+  }
+
+  .suplia-risk-list strong {
+    display: block;
+    color: #1f1e1d;
+    font-size: 13.5px;
+  }
+
+  .suplia-risk-list p {
+    margin: 3px 0 0;
+    color: #6b6a64;
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+
+  .dark .suplia-risk-head {
+    border-color: #3a3935;
+    background: linear-gradient(135deg, #30302e, #262624);
+  }
+
+  .dark .suplia-risk-metrics div,
+  .dark .suplia-risk-list div,
+  .dark .suplia-risk-list > p {
+    border-color: #3a3935;
+    background: #262624;
+  }
+
+  .dark .suplia-risk-metrics strong,
+  .dark .suplia-risk-list strong {
+    color: #ecebe4;
+  }
+
+  .dark .suplia-risk-list span {
+    background: #30302e;
+    color: #a9a79d;
+  }
+
+  .dark .suplia-risk-list p,
+  .dark .suplia-risk-list > p {
     color: #a9a79d;
   }
 
@@ -1656,11 +2433,15 @@
       inset: 0 auto 0 0;
       z-index: 50;
       transform: translateX(-105%);
+      visibility: hidden;
       box-shadow: var(--suplia-shadow);
+      transition: transform .22s ease, visibility 0s linear .22s;
     }
 
     .suplia-sidebar.mobile-open {
       transform: translateX(0);
+      visibility: visible;
+      transition-delay: 0s;
     }
 
     .suplia-floating-open-sidebar {
@@ -1669,6 +2450,10 @@
       left: 12px;
       z-index: 30;
       display: flex;
+    }
+
+    .app-shell-suplia .suplia-floating-open-sidebar {
+      left: 58px;
     }
 
     .suplia-overlay {
@@ -1686,6 +2471,51 @@
 
     .suplia-topbar {
       padding-left: 58px;
+    }
+
+    .app-shell-suplia .suplia-topbar {
+      padding-left: 104px;
+    }
+
+    .suplia-top-title > span {
+      display: none;
+    }
+
+    .suplia-top-right .suplia-pill-btn:not(:last-child) {
+      display: none;
+    }
+
+    .suplia-workspace-strip {
+      padding: 7px 14px;
+      overflow-x: auto;
+      flex-wrap: nowrap;
+    }
+
+    .suplia-status-chip {
+      flex: 0 0 auto;
+    }
+
+    .suplia-memory-shelf {
+      padding: 10px 14px;
+    }
+
+    .suplia-memory-head {
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .suplia-memory-head p {
+      margin-top: 2px;
+    }
+
+    .suplia-memory-list {
+      display: flex;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+
+    .suplia-memory-card {
+      min-width: 230px;
     }
 
     .suplia-composer-wrap {
@@ -1711,6 +2541,24 @@
 
     .suplia-comp-tool span {
       display: none;
+    }
+
+    .suplia-panel-head,
+    .suplia-panel-foot {
+      flex-wrap: wrap;
+    }
+
+    .suplia-research-stats,
+    .suplia-research-grid,
+    .suplia-doc-grid,
+    .suplia-doc-priority-grid,
+    .suplia-risk-metrics {
+      grid-template-columns: 1fr;
+    }
+
+    .suplia-task-card,
+    .suplia-risk-head {
+      flex-direction: column;
     }
   }
 }

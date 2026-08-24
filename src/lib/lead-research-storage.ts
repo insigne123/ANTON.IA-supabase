@@ -3,28 +3,50 @@
 // Guarda reportes de investigación/cross-report.
 
 import type { LeadResearchReport, EnhancedReport } from './types';
-const KEY = 'leadflow-lead-research';
+import { getBrowserStorage } from './browser-storage';
+const LEGACY_KEY = 'leadflow-lead-research';
+const STORAGE_KEY_VERSION = 2;
+let activeStorageKey = '';
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_REPORTS = 500;
 
 type LeadResearchCacheState = {
-  version: 1;
+  version: 2;
   updatedAt: string;
   items: LeadResearchReport[];
 };
 
+function keyForScope() {
+  return activeStorageKey;
+}
+
+export function setLeadResearchStorageScope(userId?: string | null, organizationId?: string | null) {
+  const normalizedUserId = String(userId || '').trim().toLowerCase();
+  const normalizedOrganizationId = String(organizationId || '').trim().toLowerCase();
+  const nextKey = normalizedUserId
+    ? `${LEGACY_KEY}:v${STORAGE_KEY_VERSION}:user:${normalizedUserId}:organization:${normalizedOrganizationId || 'personal'}`
+    : '';
+  if (nextKey === activeStorageKey) return;
+
+  activeStorageKey = nextKey;
+}
+
 function sanitizeReports(items: any[]): LeadResearchReport[] {
-  return (Array.isArray(items) ? items : []).filter(Boolean).slice(0, MAX_REPORTS);
+  return (Array.isArray(items) ? items : [])
+    .filter((report) => report && isReportFresh(report))
+    .slice(0, MAX_REPORTS);
 }
 
 function persist(items: LeadResearchReport[]) {
-  if (typeof window === 'undefined') return;
+  const storage = getBrowserStorage();
+  const key = keyForScope();
+  if (!storage || !key) return;
   const payload: LeadResearchCacheState = {
-    version: 1,
+    version: STORAGE_KEY_VERSION,
     updatedAt: new Date().toISOString(),
     items: sanitizeReports(items),
   };
-  localStorage.setItem(KEY, JSON.stringify(payload));
+  storage.setItem(key, JSON.stringify(payload));
 }
 
 function isExpired(updatedAt?: string) {
@@ -34,9 +56,12 @@ function isExpired(updatedAt?: string) {
 }
 
 function getAll(): LeadResearchReport[] {
-  if (typeof window === 'undefined') return [];
+  const storage = getBrowserStorage();
+  const key = keyForScope();
+  if (!storage || !key) return [];
   try {
-    const parsed = JSON.parse(localStorage.getItem(KEY) || '[]');
+    const scopedRaw = storage.getItem(key);
+    const parsed = JSON.parse(scopedRaw ?? '[]');
 
     if (Array.isArray(parsed)) {
       const migrated = sanitizeReports(parsed);
@@ -46,12 +71,12 @@ function getAll(): LeadResearchReport[] {
 
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.items)) {
       if (isExpired(parsed.updatedAt)) {
-        localStorage.removeItem(KEY);
+        storage.removeItem(key);
         return [];
       }
 
       const items = sanitizeReports(parsed.items);
-      if (items.length !== parsed.items.length) {
+      if (parsed.version !== STORAGE_KEY_VERSION || items.length !== parsed.items.length) {
         persist(items);
       }
       return items;
@@ -64,17 +89,23 @@ function getAll(): LeadResearchReport[] {
 }
 
 function setAll(items: LeadResearchReport[]) {
-  if (typeof window === 'undefined') return;
+  if (!getBrowserStorage() || !keyForScope()) return;
   persist(items);
 }
 
-// Ampliamos búsqueda: acepta una "leadRef" flexible (id/email/compuesto) y fallback por dominio/nombre.
+function isReportFresh(report: LeadResearchReport) {
+  const ts = Date.parse(String(report?.createdAt || ''));
+  return Number.isFinite(ts) && Date.now() - ts >= 0 && Date.now() - ts <= CACHE_TTL_MS;
+}
+
+// Reuse is safe only for the exact lead identity supplied by the caller.
 export function findReportForLead(opts: {
   leadId?: string;
+  email?: string | null;
   companyDomain?: string | null;
   companyName?: string | null;
 }): LeadResearchReport | null {
-  if (typeof window === 'undefined') return null;
+  if (!getBrowserStorage()) return null;
   const arr = getAll();
   // Normalizamos trim y lowercase para evitar misses por casing
   const leadRefRaw = (opts.leadId || '').trim();
@@ -86,33 +117,20 @@ export function findReportForLead(opts: {
     })
     : null;
   if (byRef) return byRef;
-  const byDomain = opts.companyDomain ? arr.find(r => r.company.domain === opts.companyDomain) : null;
-  if (byDomain) return byDomain;
-  const byName = opts.companyName ? arr.find(r => (r.company.name || '').toLowerCase() === opts.companyName!.toLowerCase()) : null;
-  return byName || null;
+  const email = String(opts.email || '').trim().toLowerCase();
+  if (!email) return null;
+  return arr.find(r => String(r.meta?.leadRef || '').trim().toLowerCase() === email) || null;
 }
 
 export function upsertLeadReports(newOnes: LeadResearchReport[]) {
-  if (typeof window === 'undefined') return;
+  if (!getBrowserStorage() || !keyForScope()) return;
   const cur = getAll();
-  // Normaliza meta.leadRef vacío si fuese necesario (lo haremos más consistente en el caller también).
-  const normalized = (newOnes || []).map(r => {
-    if (!r?.meta) r.meta = {};
-    if (!r.meta.leadRef) {
-      // Fallback minimalista: usa dominio o nombre+fecha como referencia
-      r.meta.leadRef = r.meta.leadRef
-        || (r.company?.domain ? `d:${r.company.domain}` : '')
-        || `n:${(r.company?.name || '').toLowerCase()}:${r.createdAt}`;
-    }
-    return r;
-  });
+  const normalized = (newOnes || []).filter(r => String(r?.meta?.leadRef || '').trim());
   const all = [...normalized, ...cur];
-  // de-dupe por (meta.leadRef || company.domain || company.name + createdAt)
   const seen = new Set<string>();
   const dedup = all.filter(r => {
-    const k = r.meta?.leadRef
-      || (r.company.domain ? `d:${r.company.domain}` : '')
-      || `n:${(r.company.name || '').toLowerCase()}:${r.createdAt}`;
+    const k = String(r.meta?.leadRef || '').trim();
+    if (!k) return false;
     if (k && seen.has(k)) return false;
     if (k) seen.add(k);
     return true;
@@ -139,10 +157,7 @@ export const leadResearchStorage = {
 
 export function upsertEnhancedReport(leadRefOrDomain: string, enhanced: EnhancedReport) {
   const cur = getAll();
-  const idx = cur.findIndex(r =>
-    r.meta?.leadRef === leadRefOrDomain ||
-    r.company.domain === leadRefOrDomain
-  );
+  const idx = cur.findIndex(r => r.meta?.leadRef === leadRefOrDomain);
   if (idx >= 0) {
     cur[idx].enhanced = enhanced;
     setAll(cur);
@@ -155,7 +170,7 @@ export function getLeadReports(): LeadResearchReport[] {
 
 /** Busca SOLO por referencia de lead (sin fallback por dominio/nombre). */
 export function findReportByRef(leadRef: string | undefined | null): LeadResearchReport | null {
-  if (typeof window === 'undefined') return null;
+  if (!getBrowserStorage()) return null;
   const ref = (leadRef || '').trim();
   if (!ref) return null;
   const arr = getAll();
@@ -163,7 +178,7 @@ export function findReportByRef(leadRef: string | undefined | null): LeadResearc
 }
 /** Elimina reportes para una ref. */
 export function removeReportFor(leadRef: string | undefined | null) {
-  if (typeof window === 'undefined') return 0;
+  if (!getBrowserStorage()) return 0;
   const ref = (leadRef || '').trim();
   if (!ref) return 0;
   return leadResearchStorage.removeWhere(r => (r.meta?.leadRef || '') === ref);

@@ -5,164 +5,134 @@ import { classifyReply, extractReplyPreview } from '@/lib/reply-classifier';
 import { notificationService } from '@/lib/services/notification-service';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { maybeEscalateReplyReviewFromContactedId } from '@/lib/server/antonia-reply-escalation';
+import { shouldGloballySuppressReply } from '@/lib/contact-history-guard';
+import {
+    createStableInboundMessageId,
+    ingestInboundReply,
+    recordInboundUnsubscribe,
+} from '@/lib/server/inbound-reply-ingestion';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
-function stripReplyTraceFields(updateData: any) {
-    const copy = { ...updateData };
-    delete copy.reply_snippet;
-    return copy;
-}
-
-function hasReplyTraceColumnError(error: any) {
-    const text = String(error?.message || error?.details || '').toLowerCase();
-    return text.includes('reply_snippet');
+function eventTimestamp(value: unknown) {
+    const time = Date.parse(String(value || ''));
+    return Number.isFinite(time) ? new Date(time).toISOString() : new Date().toISOString();
 }
 
 export async function POST(request: Request) {
-    const supabase = createRouteHandlerClient({ cookies });
-    const body = await request.json();
-    const { linkedinThreadUrl, replyText, profileUrl } = body;
+    try {
+        const supabase = createRouteHandlerClient({ cookies });
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    console.log('[API] Reply Detected:', { linkedinThreadUrl, profileUrl });
+        const body = await request.json().catch(() => ({}));
+        const {
+            linkedinThreadUrl,
+            replyText,
+            profileUrl,
+            messageId,
+            linkedinMessageId,
+            eventId,
+            receivedAt,
+        } = body;
+        const text = String(replyText || '').trim();
+        if (!text) return NextResponse.json({ error: 'Missing reply text' }, { status: 400 });
 
-    // Finding the lead can be tricky if we don't have the exact Thread URL in DB.
-    // Strategy:
-    // 1. Try to find by `linkedin_thread_url` (exact match).
-    // 2. Try to find by `linkedin_url` (Profile URL) if provided.
-    // 3. Update status = 'replied'.
-
-    let query = supabase.from('contacted_leads').select('id').eq('provider', 'linkedin');
-
-    if (linkedinThreadUrl) {
-        // Or condition? querying by thread first
-        const { data: byThread } = await supabase
-            .from('contacted_leads')
-            .select('id')
-            .eq('linkedin_thread_url', linkedinThreadUrl)
-            .limit(1)
-            .single();
-
-        if (byThread) {
-            return await updateLead(supabase, byThread.id, replyText);
+        const select = 'id, user_id, email, organization_id, reply_intent, thread_key, thread_id, conversation_id';
+        let row: any = null;
+        if (linkedinThreadUrl) {
+            const { data } = await supabase
+                .from('contacted_leads')
+                .select(select)
+                .eq('provider', 'linkedin')
+                .eq('linkedin_thread_url', linkedinThreadUrl)
+                .limit(1)
+                .maybeSingle();
+            row = data;
         }
-    }
-
-    if (profileUrl) {
-        // Clean profile URL?
-        // Assuming extensions sends clean url like 'https://linkedin.com/in/foo'
-        // DB might have 'https://linkedin.com/in/foo/' or w/ query params.
-        // For now, strict match or like.
-        // Let's try exact match first.
-        const { data: byProfile } = await supabase
-            .from('contacted_leads')
-            .select('id')
-            .ilike('linkedin_thread_url', `%${profileUrl}%`) // linkedin_thread_url often = profile in our logic so far
-            .limit(1)
-            .single();
-
-        if (byProfile) {
-            return await updateLead(supabase, byProfile.id, replyText);
+        if (!row && profileUrl) {
+            const { data } = await supabase
+                .from('contacted_leads')
+                .select(select)
+                .eq('provider', 'linkedin')
+                .ilike('linkedin_thread_url', `%${profileUrl}%`)
+                .limit(1)
+                .maybeSingle();
+            row = data;
         }
-    }
+        if (!row) return NextResponse.json({ message: 'Lead not found for reply', matched: false });
 
-    return NextResponse.json({ message: 'Lead not found for reply', matched: false });
-}
-
-async function updateLead(supabase: any, id: string, text: string) {
-    const classification = await classifyReply(text || '');
-    const preview = extractReplyPreview(text || '');
-
-    const { data: row } = await supabase
-        .from('contacted_leads')
-        .select('id, user_id, email, organization_id')
-        .eq('id', id)
-        .maybeSingle();
-
-    const evalStatus =
-        classification.intent === 'negative' || classification.intent === 'unsubscribe'
-            ? 'do_not_contact'
-            : (classification.intent === 'meeting_request' || classification.intent === 'positive')
-                ? 'action_required'
-                : 'pending';
-
-    let { error } = await supabase
-        .from('contacted_leads')
-        .update({
-            status: 'replied',
-            linkedin_message_status: 'replied',
-            last_reply_text: text,
-            reply_preview: preview || null,
-            reply_snippet: preview || null,
-            reply_intent: classification.intent,
-            reply_sentiment: classification.sentiment,
-            reply_confidence: classification.confidence,
-            reply_summary: classification.summary || null,
-            campaign_followup_allowed: classification.shouldContinue,
-            campaign_followup_reason: classification.reason || null,
-            last_follow_up_at: new Date().toISOString(),
-            evaluation_status: evalStatus,
-            last_update_at: new Date().toISOString()
-        })
-        .eq('id', id);
-
-    if (error && hasReplyTraceColumnError(error)) {
-        const { error: retryError } = await supabase
-            .from('contacted_leads')
-            .update(stripReplyTraceFields({
-                status: 'replied',
-                linkedin_message_status: 'replied',
-                last_reply_text: text,
-                reply_preview: preview || null,
-                reply_intent: classification.intent,
-                reply_sentiment: classification.sentiment,
-                reply_confidence: classification.confidence,
-                reply_summary: classification.summary || null,
-                campaign_followup_allowed: classification.shouldContinue,
-                campaign_followup_reason: classification.reason || null,
-                last_follow_up_at: new Date().toISOString(),
-                evaluation_status: evalStatus,
-                last_update_at: new Date().toISOString()
-            }))
-            .eq('id', id);
-        error = retryError;
-    }
-
-    if ((classification.intent === 'unsubscribe' || classification.intent === 'negative') && row?.email) {
-        await supabase
-            .from('unsubscribed_emails')
-            .upsert({
-                email: row.email,
-                user_id: row.user_id || null,
-                organization_id: row.organization_id || null,
-                reason: `reply:${classification.intent}`,
-            }, { onConflict: 'email,user_id,organization_id' } as any);
-    }
-
-    if (row?.organization_id && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
-        const summary = classification.summary || preview || 'Respuesta positiva detectada';
-        await notificationService.sendAlert(
-            row.organization_id,
-            'Respuesta positiva detectada',
-            `Lead ${row.email || id} respondió: ${summary}. Revisar: ${appUrl}/contacted/replied`
-        );
-    }
-
-    if (row?.organization_id && row?.id && classification.intent !== 'negative' && classification.intent !== 'unsubscribe' && classification.intent !== 'delivery_failure') {
-        await maybeEscalateReplyReviewFromContactedId({
-            supabase: getSupabaseAdminClient(),
-            organizationId: row.organization_id,
-            userId: row.user_id,
+        const replyClassification = await classifyReply(text);
+        const classification = {
+            ...replyClassification,
+            evaluationStatus: replyClassification.intent === 'negative' || replyClassification.intent === 'unsubscribe'
+                ? 'do_not_contact'
+                : replyClassification.intent === 'meeting_request' || replyClassification.intent === 'positive'
+                    ? 'action_required'
+                    : 'pending',
+        };
+        const preview = extractReplyPreview(text);
+        const explicitMessageId = String(messageId || linkedinMessageId || eventId || '').trim();
+        const threadIdentity = String(linkedinThreadUrl || profileUrl || '').trim();
+        const resolvedMessageId = explicitMessageId || createStableInboundMessageId({
+            provider: 'linkedin',
             contactedId: row.id,
-            rawReply: text,
-        }).catch((error) => {
-            console.warn('[scheduler/reply] escalation failed:', error);
+            content: [threadIdentity, text].join('\u001f'),
         });
-    }
+        const ingestion = await ingestInboundReply(getSupabaseAdminClient(), {
+            contactedId: row.id,
+            recipientEmail: row.email || null,
+            provider: 'linkedin',
+            messageId: resolvedMessageId,
+            eventType: 'reply',
+            eventSource: 'scheduler_reply',
+            eventAt: eventTimestamp(receivedAt),
+            threadKey: threadIdentity ? `linkedin:${threadIdentity}` : row.thread_key || null,
+            threadId: threadIdentity || row.thread_id || null,
+            conversationId: String(profileUrl || '').trim() || row.conversation_id || null,
+            content: text,
+            preview: preview || null,
+            classification,
+        });
 
-    if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        if (!ingestion.inserted) {
+            return NextResponse.json({ success: true, id: row.id, duplicate: true });
+        }
+
+        if (shouldGloballySuppressReply(classification) && row.email) {
+            await recordInboundUnsubscribe(getSupabaseAdminClient(), {
+                contactedId: row.id,
+                recipientEmail: row.email,
+                eventKey: ingestion.eventKey,
+            });
+        }
+
+        if (!row.reply_intent && row.organization_id && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
+            const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
+            const summary = classification.summary || preview || 'Respuesta positiva detectada';
+            await notificationService.sendAlert(
+                row.organization_id,
+                'Respuesta positiva detectada',
+                `Lead ${row.email || row.id} respondió: ${summary}. Revisar: ${appUrl}/contacted/replied`,
+            );
+        }
+
+        if (row.organization_id && classification.intent !== 'negative' && classification.intent !== 'unsubscribe' && classification.intent !== 'delivery_failure') {
+            await maybeEscalateReplyReviewFromContactedId({
+                supabase: getSupabaseAdminClient(),
+                organizationId: row.organization_id,
+                userId: row.user_id,
+                contactedId: row.id,
+                rawReply: text,
+            }).catch((error) => {
+                console.warn('[scheduler/reply] escalation failed:', error);
+            });
+        }
+
+        return NextResponse.json({ success: true, id: row.id });
+    } catch (error: any) {
+        console.error('[scheduler/reply] error:', error);
+        return NextResponse.json({ error: error?.message || 'Unable to ingest reply' }, { status: 500 });
     }
-    return NextResponse.json({ success: true, id });
 }

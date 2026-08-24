@@ -1,17 +1,45 @@
 import { supabase } from '@/lib/supabase';
 import { activityLogService } from './activity-log-service';
 
+const currentOrganizationListeners = new Set<() => void>();
+
+function notifyCurrentOrganizationChanged() {
+    for (const listener of currentOrganizationListeners) listener();
+}
+
+async function detachUserOwnedRecordsFromOrganization(userId: string, orgId: string): Promise<boolean> {
+    const results = await Promise.all([
+        supabase.from('leads').update({ organization_id: null }).eq('organization_id', orgId).eq('user_id', userId),
+        supabase.from('enriched_leads').update({ organization_id: null }).eq('organization_id', orgId).eq('user_id', userId),
+        supabase.from('contacted_leads').update({ organization_id: null }).eq('organization_id', orgId).eq('user_id', userId),
+        supabase.from('campaigns').update({ organization_id: null }).eq('organization_id', orgId).eq('user_id', userId),
+    ]);
+
+    const firstError = results.find((result) => result.error)?.error;
+    if (firstError) {
+        console.error('Error detaching user-owned records from organization:', firstError);
+        return false;
+    }
+
+    return true;
+}
+
 export const organizationService = {
-    async getCurrentOrganizationId(): Promise<string | null> {
+    subscribeToCurrentOrganizationChanges(listener: () => void) {
+        currentOrganizationListeners.add(listener);
+        return () => currentOrganizationListeners.delete(listener);
+    },
+
+    async getCurrentOrganizationId(knownUserId?: string | null): Promise<string | null> {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return null;
+            const userId = String(knownUserId || '').trim() || (await supabase.auth.getUser()).data.user?.id;
+            if (!userId) return null;
 
             // Get the first organization the user is a member of
             const { data, error } = await supabase
                 .from('organization_members')
                 .select('organization_id')
-                .eq('user_id', user.id)
+                .eq('user_id', userId)
                 .order('created_at', { ascending: true })
                 .limit(1)
                 .single();
@@ -40,6 +68,7 @@ export const organizationService = {
             return null;
         }
 
+        notifyCurrentOrganizationChanged();
         return data; // Returns the new org ID
     },
 
@@ -58,7 +87,7 @@ export const organizationService = {
         return true;
     },
 
-    async getCredits(): Promise<{ credits: number, enabled: boolean } | null> {
+    async getCredits(): Promise<{ credits: number, enabled: boolean, source?: 'organization' } | null> {
         const orgId = await this.getCurrentOrganizationId();
         if (!orgId) return null;
 
@@ -74,8 +103,9 @@ export const organizationService = {
         }
 
         return {
-            credits: data.social_search_credits ?? 0,
-            enabled: data.feature_social_search_enabled ?? false
+            credits: Number(data.social_search_credits ?? 0),
+            enabled: Boolean(data.feature_social_search_enabled),
+            source: 'organization',
         };
     },
 
@@ -179,12 +209,18 @@ export const organizationService = {
             throw error;
         }
 
+        if (data) notifyCurrentOrganizationChanged();
         return !!data;
     },
 
     async leaveOrganization(orgId: string): Promise<boolean> {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return false;
+
+        const detached = await detachUserOwnedRecordsFromOrganization(user.id, orgId);
+        if (!detached) {
+            return false;
+        }
 
         const { error } = await supabase
             .from('organization_members')
@@ -196,6 +232,7 @@ export const organizationService = {
             console.error('Error leaving organization:', error);
             return false;
         }
+        notifyCurrentOrganizationChanged();
         return true;
     },
 
@@ -210,6 +247,7 @@ export const organizationService = {
             console.error('Error deleting organization:', error);
             return false;
         }
+        notifyCurrentOrganizationChanged();
         return true;
     },
 

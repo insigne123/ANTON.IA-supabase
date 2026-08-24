@@ -2,33 +2,23 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { CheckCircle2, XCircle } from 'lucide-react';
 
 export default function GmailConnectPage() {
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
-  const supabase = createClientComponentClient();
-
   const checkConnection = useCallback(async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data } = await supabase
-        .from('provider_tokens')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('provider', 'google')
-        .maybeSingle();
-
-      setConnected(!!data);
+      const response = await fetch('/api/integrations/store-token', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Unable to load provider connection status');
+      const connections = await response.json();
+      setConnected(Boolean(connections?.google));
     } catch (error) {
       console.error('Error checking connection:', error);
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, []);
 
   useEffect(() => {
     checkConnection();
@@ -79,6 +69,7 @@ export default function GmailConnectPage() {
             <ul className="list-disc pl-5 mt-2 space-y-1">
               <li>Envío de correos manuales desde la plataforma.</li>
               <li><strong>Envío automático</strong> de campañas en segundo plano (24/7).</li>
+              <li>Lectura de hilos para detectar respuestas cuando sincronizas la bandeja.</li>
               <li>Almacenamiento seguro de credenciales (Refresh Token).</li>
             </ul>
           </div>

@@ -29,24 +29,24 @@ test('strong approvals require APROBAR by default', () => {
   assert.equal(confirmed.valid, true);
 });
 
-test('real bulk send requires ENVIAR confirmation', () => {
-  assert.equal(getSupliaStrongConfirmationPhrase('email.bulk_send', { dryRun: false }), 'ENVIAR');
+test('bulk draft preparation requires APROBAR confirmation', () => {
+  assert.equal(getSupliaStrongConfirmationPhrase('email.bulk_send', { dryRun: false }), 'APROBAR');
   assert.equal(getSupliaStrongConfirmationPhrase('email.bulk_send', { dryRun: true }), 'APROBAR');
 
   const wrong = validateSupliaStrongConfirmation({
     approvalKind: 'strong',
     toolName: 'email.bulk_send',
     payload: { dryRun: false },
-    confirmationText: 'APROBAR',
+    confirmationText: 'ENVIAR',
   });
   assert.equal(wrong.valid, false);
-  assert.equal(wrong.requiredText, 'ENVIAR');
+  assert.equal(wrong.requiredText, 'APROBAR');
 
   const confirmed = validateSupliaStrongConfirmation({
     approvalKind: 'strong',
     toolName: 'email.bulk_send',
     payload: { dryRun: false },
-    confirmationText: 'enviar',
+    confirmationText: 'aprobar',
   });
   assert.equal(confirmed.valid, true);
 });
@@ -63,14 +63,14 @@ test('simple approvals do not require strong confirmation text', () => {
   assert.equal(result.requiredText, null);
 });
 
-test('approved action payload injects ENVIAR only for confirmed real bulk send', () => {
+test('approved action payload preserves bulk draft preparation input', () => {
   assert.deepEqual(
     buildSupliaApprovedActionPayload({
       toolName: 'email.bulk_send',
       payload: { dryRun: false, messages: [{ to: 'a@example.com' }] },
-      requiredText: 'ENVIAR',
+      requiredText: 'APROBAR',
     }),
-    { dryRun: false, messages: [{ to: 'a@example.com' }], strongConfirmationText: 'ENVIAR' },
+    { dryRun: false, messages: [{ to: 'a@example.com' }] },
   );
 
   assert.deepEqual(

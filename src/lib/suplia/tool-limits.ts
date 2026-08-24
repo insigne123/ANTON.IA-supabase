@@ -16,7 +16,7 @@ function clean(value: unknown) {
 
 function providerFromInput(input: Record<string, unknown>, fallback = 'auto') {
   const provider = clean(input.provider || input.providerUsed);
-  if (provider === 'apollo' || provider === 'pdl' || provider === 'gmail' || provider === 'outlook') return provider;
+  if (provider === 'apollo' || provider === 'gmail' || provider === 'outlook') return provider;
   return fallback;
 }
 
@@ -28,19 +28,19 @@ export function getSupliaToolLeasePolicy(
   const ttlSeconds = envInt(env, 'SUPLIA_TOOL_LEASE_TTL_SECONDS', 120, 15, 900);
 
   if (toolName === 'prospecting.search_companies' || toolName === 'prospecting.search_people') {
-    const provider = providerFromInput(input, 'apollo');
-    const maxConcurrent = provider === 'pdl'
-      ? envInt(env, 'SUPLIA_PDL_CONCURRENCY_PER_ORG', 2, 1, 10)
-      : envInt(env, 'SUPLIA_APOLLO_CONCURRENCY_PER_ORG', 1, 1, 10);
-    return { resourceKey: `provider:${provider}`, maxConcurrent, ttlSeconds };
+    return {
+      resourceKey: 'provider:apollo',
+      maxConcurrent: envInt(env, 'SUPLIA_APOLLO_CONCURRENCY_PER_ORG', 1, 1, 10),
+      ttlSeconds,
+    };
   }
 
   if (toolName === 'lead.enrich' || toolName === 'lead.enrich_batch') {
-    const provider = providerFromInput(input, 'pdl');
-    const maxConcurrent = provider === 'apollo'
-      ? envInt(env, 'SUPLIA_APOLLO_CONCURRENCY_PER_ORG', 1, 1, 10)
-      : envInt(env, 'SUPLIA_PDL_CONCURRENCY_PER_ORG', 2, 1, 10);
-    return { resourceKey: `provider:${provider}`, maxConcurrent, ttlSeconds };
+    return {
+      resourceKey: 'provider:apollo',
+      maxConcurrent: envInt(env, 'SUPLIA_APOLLO_CONCURRENCY_PER_ORG', 1, 1, 10),
+      ttlSeconds,
+    };
   }
 
   if (toolName === 'email.bulk_send') {

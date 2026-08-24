@@ -1,4 +1,12 @@
 import type { CrossReport, EnhancedReport, EnrichedLead, LeadResearchReport } from '@/lib/types';
+import { extractJsonFromMaybeFencedDetailed } from '@/lib/extract-json';
+import {
+  buildResearchRequestIdempotencyKeyV1,
+  getResearchAutoContactBlockReasonV1,
+  hasMeaningfulResearchContentV1,
+} from '@/lib/research-contracts';
+
+const TRUNCATED_RESEARCH_WARNING = 'La respuesta del proveedor llego truncada. Se recuperaron las secciones completas disponibles; revisa el contenido antes de usarlo.';
 
 type SellerProfile = {
   company_name?: string | null;
@@ -39,6 +47,72 @@ function firstNonEmpty(...values: Array<any>) {
   return undefined;
 }
 
+export function unwrapLeadResearchResponse(response: any) {
+  const nested = response?.report;
+  const merged = nested && typeof nested === 'object'
+    ? {
+      ...(response && typeof response === 'object' && !Array.isArray(response) ? response : {}),
+      ...nested,
+    }
+    : response;
+
+  const envelope = Array.isArray(merged)
+    ? merged.find((item) => item?.message?.content || item?.content) || null
+    : merged?.message?.content || merged?.content
+      ? merged
+      : Array.isArray(response)
+        ? response.find((item) => item?.message?.content || item?.content) || null
+        : response?.message?.content || response?.content
+          ? response
+          : null;
+
+  if (envelope) {
+    const extracted = extractJsonFromMaybeFencedDetailed(envelope?.message?.content || envelope?.content);
+    const parsed = extracted?.value;
+    if (parsed && typeof parsed === 'object') {
+      const annotationSources = asArray(envelope?.message?.annotations || envelope?.annotations)
+        .map((annotation) => {
+          const citation = annotation?.url_citation;
+          if (!citation?.url) return null;
+          return {
+            title: citation.title || undefined,
+            url: citation.url,
+          };
+        })
+        .filter(Boolean);
+
+      const mergedSources = [
+        ...asArray((parsed as any)?.sources),
+        ...annotationSources,
+      ].reduce<Array<{ title?: string; url: string }>>((acc, source) => {
+        const mapped = source?.url
+          ? { title: source.title || source.name || undefined, url: source.url }
+          : null;
+        if (!mapped?.url) return acc;
+
+        const exists = acc.some((item) => item.url.trim().toLowerCase() === mapped.url.trim().toLowerCase());
+        if (!exists) acc.push(mapped);
+        return acc;
+      }, []);
+      const warnings = normalizeStringArray((parsed as any)?.warnings);
+      if (extracted?.recovered && !warnings.includes(TRUNCATED_RESEARCH_WARNING)) {
+        warnings.push(TRUNCATED_RESEARCH_WARNING);
+      }
+
+      return {
+        ...(merged && typeof merged === 'object' && !Array.isArray(merged) ? merged : {}),
+        ...parsed,
+        ...(extracted?.recovered ? { status: 'partial', response_truncated: true } : {}),
+        sources: mergedSources,
+        warnings,
+        annotations: envelope?.message?.annotations || envelope?.annotations || [],
+      };
+    }
+  }
+
+  return merged;
+}
+
 function mapSource(source: any) {
   if (!source?.url) return null;
   return {
@@ -65,6 +139,84 @@ function resolveSources(sourceIds: any, sourcesById: Map<string, any>) {
     .filter(Boolean) as Array<{ title?: string; url: string }>;
 }
 
+function normalizeDirectLeadContext(value: any) {
+  if (!value || typeof value !== 'object') return undefined;
+
+  const profileSummary = firstNonEmpty(value.profileSummary, value.profile_summary, value.role_summary);
+  const recentActivitySummary = firstNonEmpty(value.recentActivitySummary, value.recent_activity_summary);
+  const iceBreaker = firstNonEmpty(value.iceBreaker, value.ice_breaker);
+  const communicationStyle = firstNonEmpty(value.communicationStyle, value.communication_style);
+  const foundRecentActivity = typeof value.foundRecentActivity === 'boolean'
+    ? value.foundRecentActivity
+    : typeof value.found_recent_activity === 'boolean'
+      ? value.found_recent_activity
+      : Boolean(recentActivitySummary);
+
+  if (!profileSummary && !recentActivitySummary && !iceBreaker && !communicationStyle && !foundRecentActivity) {
+    return undefined;
+  }
+
+  return {
+    iceBreaker: iceBreaker || null,
+    recentActivitySummary: recentActivitySummary || null,
+    foundRecentActivity,
+    profileSummary: profileSummary || undefined,
+    communicationStyle: communicationStyle || null,
+  };
+}
+
+function normalizeConfidenceMap(value: any) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+
+  const entries = Object.entries(value)
+    .map(([key, score]) => [key, Number(score)] as const)
+    .filter(([, score]) => Number.isFinite(score));
+
+  return entries.length > 0 ? Object.fromEntries(entries) as Record<string, number> : undefined;
+}
+
+function normalizeNextSteps(value: any) {
+  const items = asArray(value)
+    .map((item) => {
+      if (typeof item === 'string') {
+        return { action: item.trim(), why: undefined, priority: undefined };
+      }
+
+      const action = firstNonEmpty(item?.action, item?.title);
+      if (!action) return null;
+
+      return {
+        action,
+        why: firstNonEmpty(item?.why, item?.reason),
+        priority: firstNonEmpty(item?.priority),
+      };
+    })
+    .filter(Boolean) as Array<{ action: string; why?: string; priority?: string }>;
+
+  return items.length > 0 ? items : undefined;
+}
+
+function isDirectCrossPayload(response: any) {
+  return Boolean(
+    response &&
+    typeof response === 'object' &&
+    !Array.isArray(response) &&
+    response.company &&
+    (
+      typeof response.overview === 'string' ||
+      Array.isArray(response.pains) ||
+      Array.isArray(response.opportunities) ||
+      Array.isArray(response.risks) ||
+      Array.isArray(response.valueProps) ||
+      Array.isArray(response.useCases) ||
+      Array.isArray(response.talkTracks) ||
+      Array.isArray(response.subjectLines) ||
+      response.emailDraft ||
+      Array.isArray(response.nextSteps)
+    )
+  );
+}
+
 function buildCrossReport(response: any, sourcesById: Map<string, any>): CrossReport {
   const existing = response?.existing_compat?.cross || response?.cross;
   if (existing) {
@@ -72,6 +224,36 @@ function buildCrossReport(response: any, sourcesById: Map<string, any>): CrossRe
       ...existing,
       sources: asArray(existing.sources).map(mapSource).filter(Boolean),
     } as CrossReport;
+  }
+
+  if (isDirectCrossPayload(response)) {
+    return {
+      company: {
+        name: firstNonEmpty(response?.company?.name) || 'Empresa',
+        domain: firstNonEmpty(response?.company?.domain, response?.company?.primary_domain),
+        linkedin: firstNonEmpty(response?.company?.linkedin, response?.company?.linkedin_url),
+        industry: firstNonEmpty(response?.company?.industry),
+        country: firstNonEmpty(response?.company?.country),
+        website: firstNonEmpty(response?.company?.website, response?.company?.website_url),
+      },
+      overview: firstNonEmpty(response?.overview) || '',
+      pains: normalizeStringArray(response?.pains),
+      opportunities: normalizeStringArray(response?.opportunities),
+      risks: normalizeStringArray(response?.risks),
+      valueProps: normalizeStringArray(response?.valueProps),
+      useCases: normalizeStringArray(response?.useCases),
+      talkTracks: normalizeStringArray(response?.talkTracks),
+      subjectLines: normalizeStringArray(response?.subjectLines),
+      emailDraft: {
+        subject: firstNonEmpty(response?.emailDraft?.subject, response?.email_draft?.subject) || '',
+        body: firstNonEmpty(response?.emailDraft?.body, response?.email_draft?.body) || '',
+      },
+      sources: asArray(response?.sources).map(mapSource).filter(Boolean) as Array<{ title?: string; url: string }>,
+      leadContext: normalizeDirectLeadContext(response?.leadContext || response?.lead_context),
+      contradictions: normalizeStringArray(response?.contradictions),
+      confidence: normalizeConfidenceMap(response?.confidence),
+      nextSteps: normalizeNextSteps(response?.nextSteps || response?.next_steps),
+    };
   }
 
   const leadContext = response?.lead_context || {};
@@ -110,7 +292,11 @@ function buildCrossReport(response: any, sourcesById: Map<string, any>): CrossRe
       recentActivitySummary: leadContext.recent_activity_summary || null,
       foundRecentActivity: Boolean(leadContext.found_recent_activity || asArray(response?.signals).length > 0),
       profileSummary: leadContext.profile_summary || leadContext.role_summary || undefined,
+      communicationStyle: firstNonEmpty(leadContext.communication_style, leadContext.communicationStyle) || null,
     },
+    contradictions: normalizeStringArray(response?.contradictions),
+    confidence: normalizeConfidenceMap(response?.confidence),
+    nextSteps: normalizeNextSteps(response?.next_steps),
   };
 }
 
@@ -143,14 +329,29 @@ export function buildLeadResearchPayloadFromLead(params: {
   userName?: string | null;
   userJobTitle?: string | null;
   sellerProfile?: SellerProfile | null;
+  freshnessBucket?: string | number;
+  jobIdentity?: string | null;
 }) {
   const { lead, userId, userName, userJobTitle, sellerProfile } = params;
   const extended = sellerProfile?.signatures?.profile_extended || {};
-  const companyDomain = cleanDomain(lead.companyDomain || lead.organizationDomain || sellerProfile?.company_domain || undefined);
+  const companyDomain = cleanDomain(lead.companyDomain || lead.organizationDomain || undefined);
+  const leadRef = lead.id || lead.email || lead.linkedinUrl || undefined;
+  const freshnessBucket = params.freshnessBucket ?? Math.floor(Date.now() / (24 * 60 * 60 * 1000));
+  const idempotencyKey = buildResearchRequestIdempotencyKeyV1({
+    ownerId: userId,
+    leadRef,
+    email: lead.email,
+    companyDomain,
+    provider: 'lead-research',
+    freshnessBucket,
+    jobIdentity: params.jobIdentity,
+  });
 
   return {
     user_id: userId,
-    lead_ref: lead.id || lead.email || lead.linkedinUrl || `${lead.fullName}|${lead.companyName || ''}`,
+    idempotency_key: idempotencyKey,
+    use_social_context: true,
+    lead_ref: leadRef,
     lead: {
       id: lead.id,
       apollo_id: lead.apolloId,
@@ -194,6 +395,7 @@ export function buildLeadResearchPayloadFromLead(params: {
     options: {
       language: 'es',
       depth: 'standard',
+      use_social_context: true,
       include_outreach_pack: true,
       include_company_research: true,
       include_lead_research: true,
@@ -208,52 +410,45 @@ export function buildLeadResearchPayloadFromLead(params: {
 }
 
 export function adaptLeadResearchResponseToReport(response: any, leadRef: string): LeadResearchReport {
-  const sources = asArray(response?.sources);
+  const normalizedResponse = unwrapLeadResearchResponse(response);
+  const sources = asArray(normalizedResponse?.sources);
   const sourcesById = buildSourcesById(sources);
-  const cross = buildCrossReport(response, sourcesById);
-  const enhanced = buildEnhancedReport(response);
-  const websiteSources = resolveSources(response?.website_summary?.source_ids, sourcesById);
+  const cross = buildCrossReport(normalizedResponse, sourcesById);
+  const enhanced = buildEnhancedReport(normalizedResponse);
+  const websiteSources = resolveSources(normalizedResponse?.website_summary?.source_ids, sourcesById);
 
   return {
-    id: response?.report_id || `${leadRef}:${Date.now()}`,
+    id: normalizedResponse?.report_id || `${leadRef}:${Date.now()}`,
     company: {
-      name: firstNonEmpty(response?.company?.name, cross.company.name) || 'Empresa',
-      domain: firstNonEmpty(response?.company?.domain, cross.company.domain),
-      linkedin: firstNonEmpty(response?.company?.linkedin_url, cross.company.linkedin),
-      industry: firstNonEmpty(response?.company?.industry, cross.company.industry),
-      country: firstNonEmpty(response?.company?.country, cross.company.country),
-      website: firstNonEmpty(response?.company?.website_url, cross.company.website),
-      size: response?.company?.size,
+      name: firstNonEmpty(normalizedResponse?.company?.name, cross.company.name) || 'Empresa',
+      domain: firstNonEmpty(normalizedResponse?.company?.domain, cross.company.domain),
+      linkedin: firstNonEmpty(normalizedResponse?.company?.linkedin_url, normalizedResponse?.company?.linkedin, cross.company.linkedin),
+      industry: firstNonEmpty(normalizedResponse?.company?.industry, cross.company.industry),
+      country: firstNonEmpty(normalizedResponse?.company?.country, cross.company.country),
+      website: firstNonEmpty(normalizedResponse?.company?.website_url, normalizedResponse?.company?.website, cross.company.website),
+      size: normalizedResponse?.company?.size,
     },
     websiteSummary: {
-      overview: response?.website_summary?.overview || cross.overview,
-      services: asArray(response?.website_summary?.services).filter(Boolean),
+      overview: normalizedResponse?.website_summary?.overview || cross.overview,
+      services: asArray(normalizedResponse?.website_summary?.services).filter(Boolean),
       sources: websiteSources.length > 0 ? websiteSources : asArray(cross.sources).slice(0, 3),
     },
-    signals: asArray(response?.signals).map((signal) => ({
+    signals: asArray(normalizedResponse?.signals).map((signal) => ({
       type: (['news', 'hiring', 'tech', 'site'].includes(signal?.type) ? signal.type : 'site') as 'news' | 'hiring' | 'tech' | 'site',
       title: signal?.title || 'Signal',
       url: signal?.url || undefined,
       when: signal?.published_at || signal?.when || undefined,
     })),
-    createdAt: response?.generated_at || new Date().toISOString(),
+    createdAt: normalizedResponse?.generated_at || new Date().toISOString(),
     cross,
     enhanced,
-    raw: response,
+    raw: normalizedResponse,
     meta: { leadRef },
   };
 }
 
 export function hasMeaningfulLeadResearch(report: LeadResearchReport | null | undefined) {
-  if (!report) return false;
-  return Boolean(
-    report.cross?.overview ||
-    report.cross?.pains?.length ||
-    report.cross?.opportunities?.length ||
-    report.cross?.talkTracks?.length ||
-    report.signals?.length ||
-    report.websiteSummary?.overview
-  );
+  return hasMeaningfulResearchContentV1(report);
 }
 
 export function getLeadResearchStatus(report: LeadResearchReport | null | undefined) {
@@ -268,20 +463,10 @@ export function isLeadResearchReadyForAutoContact(report: LeadResearchReport | n
 
 export function getLeadResearchAutoContactBlockReason(report: LeadResearchReport | null | undefined, warning?: string | null) {
   if (warning) return String(warning).trim().toLowerCase() || 'research_warning';
-  if (!report) return 'missing_research';
-
-  const status = getLeadResearchStatus(report);
-  if (status !== 'completed') return status;
-  if (!hasMeaningfulLeadResearch(report)) return 'insufficient_research';
-
-  const overview = String(report.cross?.overview || report.websiteSummary?.overview || '').trim().toLowerCase();
-  if (overview.startsWith('no se pudo completar la investigacion automatica')) {
-    return 'research_failed_fallback';
-  }
-
-  return 'ready';
+  return getResearchAutoContactBlockReasonV1(report) || 'ready';
 }
 
 export function getLeadResearchWarnings(response: any) {
-  return asArray(response?.warnings).filter(Boolean);
+  const normalizedResponse = unwrapLeadResearchResponse(response);
+  return asArray(normalizedResponse?.warnings).filter(Boolean);
 }

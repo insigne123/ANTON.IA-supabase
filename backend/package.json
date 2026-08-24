@@ -1,0 +1,28 @@
+{
+  "name": "anton-apollo-backend",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test src/lib/gateway.test.ts src/lib/validation.test.ts"
+  },
+  "dependencies": {
+    "next": "16.3.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "tsx": "^4.19.2",
+    "typescript": "^5"
+  }
+}

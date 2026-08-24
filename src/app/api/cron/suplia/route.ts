@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { runSupliaScheduler } from '@/lib/server/suplia-job-scheduler';
+import { isSupliaEnabled } from '@/lib/suplia/access';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 function isAuthorized(req: NextRequest) {
   const secret = String(process.env.INTERNAL_API_SECRET || process.env.CRON_SECRET || '').trim();
-  if (!secret) return true;
+  if (!secret) return false;
   const headerSecret = String(req.headers.get('x-internal-api-secret') || '').trim();
   const bearer = String(req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
   return headerSecret === secret || bearer === secret;
@@ -15,6 +16,7 @@ function isAuthorized(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
+    if (!isSupliaEnabled()) return NextResponse.json({ error: 'Not Found' }, { status: 404 });
     if (!isAuthorized(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const limit = Number(req.nextUrl.searchParams.get('limit') || 5);
     const maxJobsPerOrganization = Number(req.nextUrl.searchParams.get('maxJobsPerOrganization') || process.env.SUPLIA_MAX_JOBS_PER_ORG || 1);

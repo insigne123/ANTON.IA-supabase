@@ -1,4 +1,6 @@
 // LEGACY: usado solo si USE_APIFY="true"
+import { getBrowserStorage } from './browser-storage';
+
 const KEY = 'leadflow-search-runs';
 
 export type SavedRun = {
@@ -10,12 +12,14 @@ export type SavedRun = {
 };
 
 function load(): SavedRun[] {
-  if (typeof window === 'undefined') return [];
-  try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { return []; }
+  const storage = getBrowserStorage();
+  if (!storage) return [];
+  try { return JSON.parse(storage.getItem(KEY) || '[]'); } catch { return []; }
 }
 function save(all: SavedRun[]) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(KEY, JSON.stringify(all));
+  const storage = getBrowserStorage();
+  if (!storage) return;
+  storage.setItem(KEY, JSON.stringify(all));
   // disparar evento para otras pestañas
   try { window.dispatchEvent(new StorageEvent('storage', { key: KEY } as any)); } catch {}
 }

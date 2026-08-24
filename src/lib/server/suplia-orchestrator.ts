@@ -5,18 +5,30 @@ import { ensureSupliaPromptConversationContext } from '@/lib/server/suplia-conve
 import { insertSupliaArtifacts, mapSupliaArtifactRow, updateSupliaArtifact } from '@/lib/server/suplia-artifacts';
 import { normalizeSupliaBrainWorkflowRequest, repairSupliaNoOpOperationalOutput, runSupliaBrain, type SupliaBrainOutput, type SupliaBrainOutputResult, type SupliaBrainToolResult } from '@/lib/server/suplia-brain';
 import { buildSupliaContext } from '@/lib/server/suplia-context';
+import { classifySupliaIntentHybrid } from '@/lib/server/suplia-intent-llm';
 import { createSupliaJobFromMessage, loadSupliaJobsForConversation, runSupliaJob } from '@/lib/server/suplia-job-runner';
 import { canRunWithoutApproval, getSupliaPolicy } from '@/lib/server/suplia-policy';
 import { getSupliaTool } from '@/lib/server/suplia-tools';
 import { mapSupliaToolRunRow, recordSupliaToolPendingApproval, runSupliaTool } from '@/lib/server/suplia-tool-runner';
 import { buildSupliaArtifactChangeSummary, selectSupliaArtifactUpdateTarget } from '@/lib/suplia/artifacts';
-import { classifySupliaIntent } from '@/lib/suplia/intent';
+import { getSupliaCompactionFromMetadata, type SupliaConversationCompaction } from '@/lib/suplia/conversation-context';
 import { buildSupliaJobIntroMessage } from '@/lib/suplia/job-narration';
 import type { SupliaArtifact, SupliaAskAnswerPayload, SupliaChatResponse, SupliaConversation, SupliaMemory, SupliaMessage, SupliaMessagePart, SupliaPendingAction } from '@/lib/suplia/types';
 import { formatSupliaWorkflowPlan, generateSupliaWorkflowPlan } from '@/lib/server/suplia-workflow-plan';
 
 type AgentOutput = SupliaBrainOutput;
 type AgentOutputResult = SupliaBrainOutputResult;
+type SupliaProcessEvents = {
+  onEvent?: (event: string, data: Record<string, unknown>) => void | Promise<void>;
+};
+
+function emitSupliaProcessEvent(events: SupliaProcessEvents | undefined, event: string, data: Record<string, unknown>) {
+  try {
+    void events?.onEvent?.(event, { ...data, at: Date.now() });
+  } catch {
+    // Streaming events are best-effort; the persisted response remains source of truth.
+  }
+}
 
 function mapConversation(row: any): SupliaConversation {
   return {
@@ -100,28 +112,61 @@ function cleanText(value: unknown) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-async function loadConversationMessagesForPrompt(conversationId: string, organizationId: string) {
-  const admin = getSupabaseAdminClient();
-  const pageSize = 1000;
-  const maxPages = 10;
-  const rows: any[] = [];
+const PROMPT_MESSAGES_HARD_LIMIT = 400;
 
-  for (let page = 0; page < maxPages; page += 1) {
-    const from = page * pageSize;
-    const to = from + pageSize - 1;
-    const { data, error } = await admin
-      .from('suplia_messages')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .eq('organization_id', organizationId)
-      .order('created_at', { ascending: true })
-      .range(from, to);
-    if (error) throw error;
-    rows.push(...(data || []));
-    if (!data || data.length < pageSize) break;
+async function loadConversationMessagesForPrompt(
+  conversationId: string,
+  organizationId: string,
+  compaction: SupliaConversationCompaction | null
+) {
+  const admin = getSupabaseAdminClient();
+
+  if (!compaction?.compactedThroughCreatedAt) {
+    const pageSize = 1000;
+    const maxPages = 10;
+    const rows: any[] = [];
+
+    // First compaction still needs the full scanned history to avoid summarizing
+    // an incomplete prefix and losing recent messages in long conversations.
+    for (let page = 0; page < maxPages; page += 1) {
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
+      const { data, error } = await admin
+        .from('suplia_messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .eq('organization_id', organizationId)
+        .order('created_at', { ascending: true })
+        .range(from, to);
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+    }
+
+    return { messages: rows.map(mapMessage), overflow: false };
   }
 
-  return rows.map(mapMessage);
+  let query = admin
+    .from('suplia_messages')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .eq('organization_id', organizationId)
+    .order('created_at', { ascending: true })
+    .limit(PROMPT_MESSAGES_HARD_LIMIT + 1);
+
+  if (compaction?.compactedThroughCreatedAt) {
+    // Messages at exactly the same timestamp are covered by the previous summary.
+    query = query.gt('created_at', compaction.compactedThroughCreatedAt);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const rows = data || [];
+  return {
+    messages: rows.slice(0, PROMPT_MESSAGES_HARD_LIMIT).map(mapMessage),
+    overflow: rows.length > PROMPT_MESSAGES_HARD_LIMIT,
+  };
 }
 
 function textPart(text: string) {
@@ -330,6 +375,20 @@ function isValidGmailAction(action: AgentOutput['pendingActions'][number]) {
   return false;
 }
 
+function isValidResearchAction(action: AgentOutput['pendingActions'][number]) {
+  const policy = getSupliaPolicy(action.actionType);
+  if (!policy.requiresApproval || policy.approvalKind === 'none') return false;
+  const payload = action.payload || {};
+  const hasDomain = Boolean(String(payload.domain || payload.companyDomain || payload.website || payload.url || '').trim());
+  const hasCompany = Boolean(String(payload.company || payload.companyName || payload.keyword || payload.name || '').trim());
+  const hasQuery = Boolean(String(payload.query || '').trim());
+
+  if (action.actionType === 'research.brand') return hasDomain;
+  if (action.actionType === 'research.brand_mentions') return hasCompany || hasDomain || hasQuery;
+  if (action.actionType === 'research.serp_company_news' || action.actionType === 'research.serp_competitors' || action.actionType === 'research.serp_jobs_signals') return hasCompany || hasDomain || hasQuery;
+  return false;
+}
+
 function sanitizeAgentOutput<T extends AgentOutput>(output: T): T {
   const hasAskRequests = (output.askRequests || []).some(hasValidAskRequest);
   const pendingActions = output.pendingActions.filter((action) => {
@@ -343,6 +402,7 @@ function sanitizeAgentOutput<T extends AgentOutput>(output: T): T {
     if (action.actionType === 'memory.save' || action.actionType === 'memory.forget') return isValidMemoryAction(action);
     if (action.actionType === 'antonia.create_mission') return isValidAntoniaAction(action);
     if (action.actionType.startsWith('gmail.')) return isValidGmailAction(action);
+    if (action.actionType.startsWith('research.')) return isValidResearchAction(action);
     return false;
   });
 
@@ -365,10 +425,16 @@ async function runRequestedTools(params: {
   messageId: string;
   requests: AgentOutput['toolRequests'];
   modelTier: ReturnType<typeof selectSupliaModelTier>;
+  events?: SupliaProcessEvents;
 }): Promise<ToolResultForPrompt[]> {
   const results: ToolResultForPrompt[] = [];
 
   for (const request of sanitizeToolRequests(params.requests)) {
+    emitSupliaProcessEvent(params.events, 'tool.started', {
+      toolName: request.toolName,
+      label: `Ejecutando ${request.toolName.replace(/\./g, ' · ')}`,
+      input: request.input || {},
+    });
     try {
       const { output } = await runSupliaTool({
         auth: params.auth,
@@ -379,11 +445,20 @@ async function runRequestedTools(params: {
         modelTier: params.modelTier,
       });
       results.push({ toolName: request.toolName, input: request.input || {}, status: 'completed', output });
+      emitSupliaProcessEvent(params.events, 'tool.completed', {
+        toolName: request.toolName,
+        label: `${request.toolName.replace(/\./g, ' · ')} listo`,
+      });
     } catch (error: any) {
       results.push({
         toolName: request.toolName,
         input: request.input || {},
         status: 'failed',
+        error: error?.message || 'No se pudo ejecutar la herramienta.',
+      });
+      emitSupliaProcessEvent(params.events, 'tool.failed', {
+        toolName: request.toolName,
+        label: `${request.toolName.replace(/\./g, ' · ')} fallo`,
         error: error?.message || 'No se pudo ejecutar la herramienta.',
       });
     }
@@ -398,6 +473,7 @@ async function persistPendingActions(params: {
   messageId: string;
   actions: AgentOutput['pendingActions'];
   modelTier: ReturnType<typeof selectSupliaModelTier>;
+  events?: SupliaProcessEvents;
 }) {
   if (params.actions.length === 0) return;
 
@@ -426,6 +502,12 @@ async function persistPendingActions(params: {
   if (error) throw error;
 
   for (const action of data || []) {
+    emitSupliaProcessEvent(params.events, 'approval.requested', {
+      actionId: action.id,
+      actionType: action.action_type,
+      approvalKind: action.approval_kind,
+      label: action.title || `Aprobacion requerida: ${action.action_type}`,
+    });
     const toolRun = await recordSupliaToolPendingApproval({
       auth: params.auth,
       conversationId: params.conversationId,
@@ -448,6 +530,7 @@ async function persistWorkflowPlanApproval(params: {
   goal: string;
   context: Awaited<ReturnType<typeof buildSupliaContext>>;
   brainOutput?: AgentOutputResult | null;
+  events?: SupliaProcessEvents;
 }) {
   const admin = getSupabaseAdminClient();
   const { plan, telemetry } = await generateSupliaWorkflowPlan({ goal: params.goal, context: params.context });
@@ -461,6 +544,14 @@ async function persistWorkflowPlanApproval(params: {
     data: { plan, goal: params.goal, telemetry },
     changeSummary: 'Plan inicial creado antes de ejecutar agentes.',
   }]);
+  if (artifact) {
+    emitSupliaProcessEvent(params.events, 'artifact.created', {
+      artifactId: artifact.id,
+      artifactType: artifact.type,
+      title: artifact.title,
+      label: `Artifact creado: ${artifact.title}`,
+    });
+  }
   const policy = getSupliaPolicy('workflow.approve_plan');
   const now = new Date().toISOString();
   const { data: action, error: actionError } = await admin
@@ -494,6 +585,12 @@ async function persistWorkflowPlanApproval(params: {
     .select('*')
     .single();
   if (actionError) throw actionError;
+  emitSupliaProcessEvent(params.events, 'approval.requested', {
+    actionId: action.id,
+    actionType: action.action_type,
+    approvalKind: action.approval_kind,
+    label: action.title || 'Aprobar plan de trabajo',
+  });
 
   const reply = [
     'Prepare un plan antes de ejecutar agentes.',
@@ -616,7 +713,11 @@ export async function getSupliaState(auth: AuthContext, conversationId?: string 
   };
 }
 
-export async function processSupliaMessage(auth: AuthContext, input: { conversationId?: string | null; message: string; activeArtifactId?: string | null; answerToAsk?: SupliaAskAnswerPayload | null }): Promise<SupliaChatResponse> {
+export async function processSupliaMessage(
+  auth: AuthContext,
+  input: { conversationId?: string | null; message: string; activeArtifactId?: string | null; answerToAsk?: SupliaAskAnswerPayload | null },
+  events: SupliaProcessEvents = {}
+): Promise<SupliaChatResponse> {
   const admin = getSupabaseAdminClient();
   const message = input.message.trim();
   if (!message) throw new Error('Mensaje requerido.');
@@ -664,15 +765,19 @@ export async function processSupliaMessage(auth: AuthContext, input: { conversat
   }).select('id').single();
   if (userMessageError) throw userMessageError;
 
-  const intent = classifySupliaIntent(message);
+  const intentResult = await classifySupliaIntentHybrid(message);
+  const intent = { intent: intentResult.intent, confidence: intentResult.confidence, reason: intentResult.reason };
+  const intentSlots = intentResult.slots;
 
   const stateBefore = await getSupliaState(auth, activeConversationId);
   const context = await buildSupliaContext(auth);
-  const promptMessages = await loadConversationMessagesForPrompt(activeConversationId, auth.organizationId);
+  const compaction = getSupliaCompactionFromMetadata(stateBefore.conversation!.metadata);
+  const { messages: promptMessages, overflow } = await loadConversationMessagesForPrompt(activeConversationId, auth.organizationId, compaction);
   const conversationContext = await ensureSupliaPromptConversationContext({
     auth,
     conversation: stateBefore.conversation!,
     messages: promptMessages,
+    precomputed: { compaction, overflow },
   });
   const modelTier = selectSupliaModelTier({ message, messages: promptMessages });
   const artifactUpdateTargetId = selectSupliaArtifactUpdateTarget(intent, input.activeArtifactId, stateBefore.artifacts);
@@ -692,6 +797,7 @@ export async function processSupliaMessage(auth: AuthContext, input: { conversat
       messageId: userMessageRow.id,
       requests: plannedOutput.toolRequests,
       modelTier,
+      events,
     })
     : [];
   const rawAgentOutput = toolResults.length > 0
@@ -722,6 +828,7 @@ export async function processSupliaMessage(auth: AuthContext, input: { conversat
       metadata: {
         generatedBy: 'suplia-clarification',
         intent,
+        intentSlots,
         artifactUpdateTargetId,
         reasoningSummary: agentOutput.reasoningSummary || null,
         workflowRequest: { kind: 'none' },
@@ -754,6 +861,7 @@ export async function processSupliaMessage(auth: AuthContext, input: { conversat
       goal: workflowRequest.goal || message,
       context,
       brainOutput: agentOutput,
+      events,
     });
 
     return getSupliaState(auth, activeConversationId);
@@ -765,6 +873,11 @@ export async function processSupliaMessage(auth: AuthContext, input: { conversat
       message: workflowRequest.goal || message,
       messageId: userMessageRow.id,
       jobType: 'gmail_mailbox_analysis',
+    });
+    emitSupliaProcessEvent(events, 'job.started', {
+      jobId: job.id,
+      jobType: job.jobType,
+      label: `Job creado: ${job.title || job.goal}`,
     });
     const jobIntro = buildSupliaJobIntroMessage({ id: job.id, jobType: job.jobType, goal: job.goal });
     const reply = agentOutput.reply.trim() || jobIntro;
@@ -779,6 +892,7 @@ export async function processSupliaMessage(auth: AuthContext, input: { conversat
         generatedBy: 'suplia-ai-first-gmail-job',
         jobId: job.id,
         intent,
+        intentSlots,
         reasoningSummary: agentOutput.reasoningSummary || null,
         workflowRequest,
         planningModelTelemetry: plannedOutput.modelTelemetry || null,
@@ -805,6 +919,7 @@ export async function processSupliaMessage(auth: AuthContext, input: { conversat
   const baseMessageMetadata = {
     generatedBy: 'suplia-orchestrator',
     intent,
+    intentSlots,
     artifactUpdateTargetId,
     reasoningSummary: agentOutput.reasoningSummary || null,
     workflowRequest,
@@ -876,6 +991,14 @@ export async function processSupliaMessage(auth: AuthContext, input: { conversat
     }
 
     if (persistedArtifacts.length) {
+      for (const artifact of persistedArtifacts) {
+        emitSupliaProcessEvent(events, 'artifact.created', {
+          artifactId: artifact.id,
+          artifactType: artifact.type,
+          title: artifact.title,
+          label: `Artifact listo: ${artifact.title}`,
+        });
+      }
       await admin
         .from('suplia_messages')
         .update({
@@ -896,6 +1019,7 @@ export async function processSupliaMessage(auth: AuthContext, input: { conversat
       messageId: assistantMessageRow.id,
       actions: agentOutput.pendingActions,
       modelTier,
+      events,
     });
   }
 

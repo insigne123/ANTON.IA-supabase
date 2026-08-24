@@ -1,10 +1,11 @@
 // src/lib/unified-sheet-storage.ts
 import type { ColumnDef, ColumnKey, UnifiedRow } from './unified-sheet-types';
+import { getBrowserStorage } from './browser-storage';
 
 const SCHEMA_KEY = 'leadflow-sheet-columns-v1';
 const CUSTOM_DATA_KEY = 'leadflow-sheet-custom-v1';
 const COLUMNS_VERSION_KEY = 'unified_sheet_columns_v';
-const CURRENT_COLUMNS_VERSION = 3;
+const CURRENT_COLUMNS_VERSION = 4;
 
 
 export function defaultColumns(): ColumnDef[] {
@@ -16,9 +17,9 @@ export function defaultColumns(): ColumnDef[] {
     { key: 'industry', label: 'Industria', visible: true, width: 180, editable: false },
     { key: 'createdAt', label: 'Captación', visible: true, width: 160, editable: false },
     { key: 'status', label: 'Estado', visible: true, width: 140, editable: false },
-    { key: 'stage', label: 'Stage', visible: true, width: 160, editable: true },
-    { key: 'owner', label: 'Owner', visible: true, width: 140, editable: true },
-    { key: 'notes', label: 'Notas', visible: true, width: 320, editable: true },
+    { key: 'stage', label: 'Etapa', visible: false, width: 160, editable: true },
+    { key: 'owner', label: 'Responsable', visible: false, width: 160, editable: true },
+    { key: 'notes', label: 'Notas', visible: false, width: 320, editable: true },
     { key: 'kind', label: 'Tipo', visible: false, width: 110 },
     { key: 'source', label: 'Fuente', visible: false, width: 120 },
     { key: 'updatedAt', label: 'Última act.', visible: false, width: 160 },
@@ -34,18 +35,22 @@ export function defaultColumns(): ColumnDef[] {
 }
 
 export function saveColumns(cols: ColumnDef[]) {
+  const storage = getBrowserStorage();
+  if (!storage) return;
   try {
-    localStorage.setItem(SCHEMA_KEY, JSON.stringify(cols));
-    localStorage.setItem(COLUMNS_VERSION_KEY, String(CURRENT_COLUMNS_VERSION));
+    storage.setItem(SCHEMA_KEY, JSON.stringify(cols));
+    storage.setItem(COLUMNS_VERSION_KEY, String(CURRENT_COLUMNS_VERSION));
   } catch (e) {
     console.error('[sheet] saveColumns error', e);
   }
 }
 
 export function loadColumns(): ColumnDef[] {
+  const storage = getBrowserStorage();
+  if (!storage) return [...defaultColumns()];
   try {
-    const raw = localStorage.getItem(SCHEMA_KEY);
-    const version = Number(localStorage.getItem(COLUMNS_VERSION_KEY) || '0');
+    const raw = storage.getItem(SCHEMA_KEY);
+    const version = Number(storage.getItem(COLUMNS_VERSION_KEY) || '0');
     let cols: ColumnDef[] = raw ? (JSON.parse(raw) as ColumnDef[]) : [...defaultColumns()];
 
     // Migraciones de columnas visibles
@@ -73,6 +78,15 @@ export function loadColumns(): ColumnDef[] {
     ensureColumn({ key: 'lastAutopilotEvent', label: 'Último evento', visible: false, width: 220, editable: true }, 'autopilotStatus');
     ensureColumn({ key: 'meetingLink', label: 'Link reunión', visible: false, width: 220, editable: true }, 'lastAutopilotEvent');
 
+    if (version < 4) {
+      cols = cols.map((column) => {
+        if (column.key === 'stage') return { ...column, label: 'Etapa', visible: false };
+        if (column.key === 'owner') return { ...column, label: 'Responsable', visible: false };
+        if (column.key === 'notes') return { ...column, visible: false };
+        return column;
+      });
+    }
+
     cols = cols.filter((column, index, arr) => arr.findIndex((item) => item.key === column.key) === index);
 
     if (version < CURRENT_COLUMNS_VERSION || !hasEmail) {
@@ -88,33 +102,53 @@ export function loadColumns(): ColumnDef[] {
   }
 }
 
-export type CustomData = Partial<Pick<UnifiedRow, 'stage' | 'owner' | 'notes'>>;
+export type CustomData = Partial<Pick<
+  UnifiedRow,
+  | 'stage'
+  | 'owner'
+  | 'notes'
+  | 'nextAction'
+  | 'nextActionType'
+  | 'nextActionDueAt'
+  | 'autopilotStatus'
+  | 'lastAutopilotEvent'
+  | 'meetingLink'
+>>;
 
 
 export function getCustom(gid: string): CustomData | undefined {
-  if (typeof window === 'undefined') return undefined;
+  const storage = getBrowserStorage();
+  if (!storage) return undefined;
   try {
-    const all = JSON.parse(localStorage.getItem(CUSTOM_DATA_KEY) || '{}');
+    const all = JSON.parse(storage.getItem(CUSTOM_DATA_KEY) || '{}');
     return all[gid];
   } catch { return undefined; }
 }
 
 export function setCustom(gid: string, patch: CustomData) {
-  if (typeof window === 'undefined') return;
-  const all = JSON.parse(localStorage.getItem(CUSTOM_DATA_KEY) || '{}');
+  const storage = getBrowserStorage();
+  if (!storage) return;
+  const all = JSON.parse(storage.getItem(CUSTOM_DATA_KEY) || '{}');
   all[gid] = { ...(all[gid] || {}), ...patch };
-  localStorage.setItem(CUSTOM_DATA_KEY, JSON.stringify(all));
+  storage.setItem(CUSTOM_DATA_KEY, JSON.stringify(all));
 }
 
 export function bulkSetCustom(rows: UnifiedRow[]) {
-  if (typeof window === 'undefined') return;
-  const all = JSON.parse(localStorage.getItem(CUSTOM_DATA_KEY) || '{}');
+  const storage = getBrowserStorage();
+  if (!storage) return;
+  const all = JSON.parse(storage.getItem(CUSTOM_DATA_KEY) || '{}');
   for (const r of rows) {
     const customData: CustomData = {};
     if (r.stage) customData.stage = r.stage;
     if (r.owner) customData.owner = r.owner;
     if (r.notes) customData.notes = r.notes;
+    if (r.nextAction) customData.nextAction = r.nextAction;
+    if (r.nextActionType) customData.nextActionType = r.nextActionType;
+    if (r.nextActionDueAt) customData.nextActionDueAt = r.nextActionDueAt;
+    if (r.autopilotStatus) customData.autopilotStatus = r.autopilotStatus;
+    if (r.lastAutopilotEvent) customData.lastAutopilotEvent = r.lastAutopilotEvent;
+    if (r.meetingLink) customData.meetingLink = r.meetingLink;
     if (Object.keys(customData).length > 0) all[r.gid] = { ...(all[r.gid] || {}), ...customData };
   }
-  localStorage.setItem(CUSTOM_DATA_KEY, JSON.stringify(all));
+  storage.setItem(CUSTOM_DATA_KEY, JSON.stringify(all));
 }

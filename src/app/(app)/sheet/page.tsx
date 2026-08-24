@@ -1,410 +1,562 @@
 'use client';
 
-import React from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import {
+  AlertCircle,
+  ArrowDownAZ,
+  ArrowUpAZ,
+  ChevronDown,
+  ChevronUp,
+  Columns3,
+  Download,
+  ExternalLink,
+  FileSpreadsheet,
+  FileText,
+  Filter,
+  Import,
+  Loader2,
+  Pencil,
+  RefreshCw,
+  Search,
+  Settings2,
+  X,
+} from 'lucide-react';
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ChevronDown, ChevronUp, Columns3, Download, RotateCw, Settings2, ExternalLink, FileSpreadsheet, FileText } from 'lucide-react';
-
-import { buildUnifiedRows } from '@/lib/unified-sheet-data';
-import type { ColumnDef, ColumnKey, UnifiedRow, UnifiedStatus } from '@/lib/unified-sheet-types';
-import { defaultColumns } from '@/lib/unified-sheet-storage';
-import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { toCsv, downloadCsv } from '@/lib/csv';
-import Link from 'next/link';
-import { exportToXlsx, exportToPdf } from '@/lib/sheet-export';
+import { downloadCsv, toCsv } from '@/lib/csv';
+import { exportToPdf, exportToXlsx } from '@/lib/sheet-export';
+import { buildUnifiedRows } from '@/lib/unified-sheet-data';
+import { defaultColumns } from '@/lib/unified-sheet-storage';
+import type { CustomData } from '@/lib/services/unified-sheet-service';
+import { unifiedSheetService } from '@/lib/services/unified-sheet-service';
+import type { ColumnDef, ColumnKey, UnifiedRow, UnifiedStatus } from '@/lib/unified-sheet-types';
 
-function pill(status: UnifiedStatus) {
-  switch (status) {
-    case 'replied': return <Badge>Respondido</Badge>;
-    case 'read': return <Badge>Abierto</Badge>;
-    case 'sent': return <Badge variant="secondary">Enviado</Badge>;
-    case 'enriched': return <Badge variant="secondary">Enriquecido</Badge>;
-    default: return <Badge variant="outline">Guardado</Badge>;
-  }
+type StatusFilter = 'all' | 'saved' | 'enriched' | 'sent' | 'read' | 'replied';
+type EditableKey = Exclude<keyof CustomData, 'updated_at'>;
+type ExportFormat = 'xlsx' | 'csv' | 'pdf';
+
+const STATUS_LABELS: Record<UnifiedStatus, string> = {
+  saved: 'Guardado',
+  enriched: 'Enriquecido',
+  sent: 'Enviado',
+  read: 'Abierto',
+  replied: 'Respondido',
+  opened: 'Abierto',
+  clicked: 'Click',
+  archived: 'Archivado',
+};
+
+function StatusBadge({ status }: { status: UnifiedStatus }) {
+  const variant = status === 'replied' || status === 'clicked'
+    ? 'default'
+    : status === 'sent' || status === 'enriched' || status === 'opened' || status === 'read'
+      ? 'secondary'
+      : 'outline';
+  return <Badge variant={variant}>{STATUS_LABELS[status]}</Badge>;
 }
 
-function kindLabel(k: UnifiedRow['kind']) {
+function kindLabel(kind: UnifiedRow['kind']) {
   return ({
-    lead_saved: 'Lead (guardado)',
-    lead_enriched: 'Lead (enriquecido)',
+    lead_saved: 'Lead guardado',
+    lead_enriched: 'Lead enriquecido',
     opportunity: 'Oportunidad',
     contacted: 'Contactado',
-  } as const)[k];
-}
-
-function hasReplyInRow(row: UnifiedRow) {
-  return row.status === 'replied';
+  } as const)[kind];
 }
 
 function formatCellValue(key: ColumnKey, row: UnifiedRow) {
-  const value = (row as any)[key];
+  const value = row[key as keyof UnifiedRow];
   if (value == null || value === '') return '—';
   if (key === 'createdAt' || key === 'updatedAt' || key === 'nextActionDueAt') {
-    const date = new Date(value);
+    const date = new Date(value as string | number);
     if (Number.isNaN(date.getTime())) return '—';
     return date.toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' });
   }
-  return value;
+  return String(value);
 }
 
-export default function UnifiedSheetPage() {
-  const { toast } = useToast();
-  const [cols, setCols] = useState<ColumnDef[]>(defaultColumns());
-  const [rows, setRows] = useState<UnifiedRow[]>([]);
-  const [q, setQ] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'saved' | 'enriched' | 'sent' | 'read' | 'replied'>('all');
-  const [industryFilter, setIndustryFilter] = useState('all');
-  const [createdFrom, setCreatedFrom] = useState('');
-  const [createdTo, setCreatedTo] = useState('');
-  const [openCols, setOpenCols] = useState(false);
-  const [sortKey, setSortKey] = useState<ColumnKey>('updatedAt');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [loading, setLoading] = useState(true);
+function EditableCell({
+  column,
+  row,
+  saving,
+  onCommit,
+}: {
+  column: ColumnDef;
+  row: UnifiedRow;
+  saving: boolean;
+  onCommit: (row: UnifiedRow, key: EditableKey, value: string) => Promise<void>;
+}) {
+  const currentValue = String(row[column.key as keyof UnifiedRow] ?? '');
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(currentValue);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const unifiedRows = await buildUnifiedRows();
-      setRows(unifiedRows);
-    } catch (error) {
-      toast({ variant: 'destructive', title: 'Error al cargar datos', description: 'No se pudieron unificar las fuentes.' })
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
+  useEffect(() => setDraft(currentValue), [currentValue]);
 
-  useEffect(() => {
-    setCols(unifiedSheetService.loadColumns());
-    refresh();
-  }, [refresh]);
-
-  function toggleColVisibility(key: ColumnKey, v: boolean) {
-    const next = cols.map(c => c.key === key ? { ...c, visible: v } : c);
-    setCols(next);
-    unifiedSheetService.saveColumns(next);
-  }
-
-  function moveCol(key: ColumnKey, dir: -1 | 1) {
-    const idx = cols.findIndex(c => c.key === key);
-    if (idx < 0) return;
-    const next = [...cols];
-    const newIdx = Math.max(0, Math.min(cols.length - 1, idx + dir));
-    const [it] = next.splice(idx, 1);
-    next.splice(newIdx, 0, it);
-    setCols(next);
-    unifiedSheetService.saveColumns(next);
-  }
-
-  function resetSchema() {
-    const d = defaultColumns();
-    setCols(d);
-    unifiedSheetService.saveColumns(d);
-  }
-
-  const visibleCols = cols.filter(c => c.visible);
-  const industryOptions = useMemo(() => {
-    return Array.from(new Set(rows.map((row) => String(row.industry || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-  }, [rows]);
-  const summary = useMemo(() => ({
-    total: rows.length,
-    replied: rows.filter((row) => hasReplyInRow(row)).length,
-    activeCrm: rows.filter((row) => !!row.stage && !['closed_lost', 'closed_won'].includes(String(row.stage))).length,
-    industries: industryOptions.length,
-  }), [rows, industryOptions]);
-
-  const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    const list = rows.filter(r => {
-      if (statusFilter !== 'all' && r.status !== statusFilter) return false;
-      if (industryFilter !== 'all' && String(r.industry || '').trim() !== industryFilter) return false;
-      if (createdFrom || createdTo) {
-        const dateValue = new Date(r.createdAt || 0);
-        if (Number.isNaN(dateValue.getTime())) return false;
-        if (createdFrom) {
-          const from = new Date(`${createdFrom}T00:00:00`);
-          if (dateValue < from) return false;
-        }
-        if (createdTo) {
-          const to = new Date(`${createdTo}T23:59:59`);
-          if (dateValue > to) return false;
-        }
-      }
-      if (!term) return true;
-      const hay = [
-        r.name, r.email, r.company, r.title, r.industry,
-        r.linkedinUrl, kindLabel(r.kind)
-      ].map(x => (x || '').toString().toLowerCase());
-      return hay.some(s => s.includes(term));
-    });
-
-    const get = (r: UnifiedRow, key: ColumnKey): any => {
-      if (key === 'stage') return r.stage;
-      if (key === 'owner') return r.owner;
-      if (key === 'notes') return r.notes;
-      if (key === 'nextAction') return r.nextAction;
-      if (key === 'nextActionType') return r.nextActionType;
-      if (key === 'nextActionDueAt') return r.nextActionDueAt;
-      if (key === 'autopilotStatus') return r.autopilotStatus;
-      if (key === 'lastAutopilotEvent') return r.lastAutopilotEvent;
-      if (key === 'meetingLink') return r.meetingLink;
-      return (r as any)[key];
-    };
-
-    const sorted = [...list].sort((a, b) => {
-      const av = get(a, sortKey);
-      const bv = get(b, sortKey);
-      const an = typeof av === 'string' ? av.toLowerCase() : av;
-      const bn = typeof bv === 'string' ? bv.toLowerCase() : bv;
-      if (an == null && bn == null) return 0;
-      if (an == null) return 1;
-      if (bn == null) return -1;
-      if (String(sortKey).toLowerCase().includes('at')) {
-        const da = new Date(av || 0).getTime();
-        const db = new Date(bv || 0).getTime();
-        return sortDir === 'asc' ? (da - db) : (db - da);
-      }
-      if (an < bn) return sortDir === 'asc' ? -1 : 1;
-      if (an > bn) return sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
-    return sorted;
-  }, [rows, q, statusFilter, industryFilter, createdFrom, createdTo, sortKey, sortDir]);
-
-  function onEdit(r: UnifiedRow, key: ColumnKey, value: string) {
-    const patch: any = {};
-    patch[key] = value;
-
-    // Optimistic update
-    setRows(prev => prev.map(x => x.gid === r.gid ? { ...x, ...patch } : x));
-    // Async save
-    unifiedSheetService.setCustom(r.gid, patch);
-  }
-
-  // ---- helpers para exportación ----
-  function buildHeaderAndData() {
-    const headers = visibleCols.map(c => c.label);
-    const mapKey = (key: ColumnKey, r: UnifiedRow): string | number => {
-      switch (key) {
-        case 'status': return r.status;
-        case 'kind': return kindLabel(r.kind);
-        case 'linkedinUrl': return r.linkedinUrl || '';
-        case 'stage': return r.stage || '';
-        case 'owner': return r.owner || '';
-        case 'notes': return r.notes || '';
-        default: return (r as any)[key] ?? '';
-      }
-    };
-    const data = filtered.map(r => visibleCols.map(c => mapKey(c.key, r)));
-    return { headers, data };
-  }
-
-  function exportCsv() {
-    const { headers, data } = buildHeaderAndData();
-    const csvData = toCsv(data.map(row => row.map(cell => String(cell))), headers);
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    downloadCsv(`leadflow-sheet-${stamp}.csv`, csvData);
-    toast({ title: 'Exportado', description: `${filtered.length} filas a CSV.` });
-  }
-
-  async function exportXlsx() {
-    const { headers, data } = buildHeaderAndData();
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    await exportToXlsx(headers, data, `leadflow-sheet-${stamp}.xlsx`);
-  }
-
-  async function exportPdf() {
-    const { headers, data } = buildHeaderAndData();
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-    await exportToPdf(headers, data, `leadflow-sheet-${stamp}.pdf`);
-  }
-
-  function headerSort(key: ColumnKey) {
-    if (sortKey !== key) { setSortKey(key); setSortDir('asc'); return; }
-    setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+  if (editing) {
+    return (
+      <Input
+        autoFocus
+        value={draft}
+        aria-label={`Editar ${column.label} de ${row.name || 'fila'}`}
+        className="h-8 min-w-[140px] bg-background"
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          setEditing(false);
+          if (draft !== currentValue) void onCommit(row, column.key as EditableKey, draft);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur();
+          if (event.key === 'Escape') {
+            setDraft(currentValue);
+            setEditing(false);
+          }
+        }}
+      />
+    );
   }
 
   return (
-    <div className="container mx-auto py-2">
+    <button
+      type="button"
+      disabled={saving}
+      onClick={() => setEditing(true)}
+      className="group flex min-h-8 w-full min-w-[120px] items-center rounded-md px-2 py-1 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
+      aria-label={`Editar ${column.label} de ${row.name || 'fila'}`}
+    >
+      <span className="line-clamp-2 flex-1 break-words">{currentValue || '—'}</span>
+      {saving ? <Loader2 className="ml-2 h-3.5 w-3.5 animate-spin" /> : <Pencil className="ml-2 h-3.5 w-3.5 opacity-0 group-hover:opacity-60 group-focus-visible:opacity-60" />}
+    </button>
+  );
+}
+
+export default function SheetPage() {
+  const { toast } = useToast();
+  const [columns, setColumns] = useState<ColumnDef[]>(defaultColumns());
+  const [rows, setRows] = useState<UnifiedRow[]>([]);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [industryFilter, setIndustryFilter] = useState('all');
+  const [createdFrom, setCreatedFrom] = useState('');
+  const [createdTo, setCreatedTo] = useState('');
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [sortKey, setSortKey] = useState<ColumnKey>('updatedAt');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savingCells, setSavingCells] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState<ExportFormat | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await buildUnifiedRows();
+      setRows(data.filter((row) => row.kind !== 'opportunity'));
+    } catch (error) {
+      console.error('[sheet] load error', error);
+      setLoadError('No pudimos cargar la hoja. Revisa tu conexión e inténtalo de nuevo.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const savedColumns = unifiedSheetService.loadColumns();
+    const nextColumns = savedColumns.map((column) => column.key === 'name' ? { ...column, visible: true } : column);
+    setColumns(nextColumns);
+    if (savedColumns.some((column) => column.key === 'name' && !column.visible)) {
+      unifiedSheetService.saveColumns(nextColumns);
+    }
+    void refresh();
+  }, [refresh]);
+
+  const orderedVisibleColumns = useMemo(() => {
+    const visible = columns.filter((column) => column.visible);
+    const identity = visible.find((column) => column.key === 'name');
+    return identity ? [identity, ...visible.filter((column) => column.key !== 'name')] : visible;
+  }, [columns]);
+
+  const industryOptions = useMemo(() => Array.from(new Set(
+    rows.map((row) => String(row.industry || '').trim()).filter(Boolean),
+  )).sort((a, b) => a.localeCompare(b)), [rows]);
+
+  const hasFilters = Boolean(query || statusFilter !== 'all' || industryFilter !== 'all' || createdFrom || createdTo);
+  const activeFilterCount = [statusFilter !== 'all', industryFilter !== 'all', Boolean(createdFrom), Boolean(createdTo)].filter(Boolean).length;
+
+  const filteredRows = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    const list = rows.filter((row) => {
+      if (statusFilter !== 'all' && row.status !== statusFilter) return false;
+      if (industryFilter !== 'all' && String(row.industry || '').trim() !== industryFilter) return false;
+      if (createdFrom || createdTo) {
+        const createdAt = new Date(row.createdAt || 0);
+        if (Number.isNaN(createdAt.getTime())) return false;
+        if (createdFrom && createdAt < new Date(`${createdFrom}T00:00:00`)) return false;
+        if (createdTo && createdAt > new Date(`${createdTo}T23:59:59`)) return false;
+      }
+      if (!term) return true;
+      return [row.name, row.email, row.company, row.title, row.industry, row.linkedinUrl, kindLabel(row.kind)]
+        .some((value) => String(value || '').toLowerCase().includes(term));
+    });
+
+    return [...list].sort((a, b) => {
+      const aValue = a[sortKey as keyof UnifiedRow];
+      const bValue = b[sortKey as keyof UnifiedRow];
+      if (aValue == null && bValue == null) return 0;
+      if (aValue == null) return 1;
+      if (bValue == null) return -1;
+      const multiplier = sortDirection === 'asc' ? 1 : -1;
+      if (sortKey.toLowerCase().includes('at')) {
+        return (new Date(aValue as string | number).getTime() - new Date(bValue as string | number).getTime()) * multiplier;
+      }
+      return String(aValue).localeCompare(String(bValue), 'es', { numeric: true, sensitivity: 'base' }) * multiplier;
+    });
+  }, [createdFrom, createdTo, industryFilter, query, rows, sortDirection, sortKey, statusFilter]);
+
+  function clearFilters() {
+    setQuery('');
+    setStatusFilter('all');
+    setIndustryFilter('all');
+    setCreatedFrom('');
+    setCreatedTo('');
+  }
+
+  function saveColumns(next: ColumnDef[]) {
+    setColumns(next);
+    unifiedSheetService.saveColumns(next);
+  }
+
+  function toggleColumn(key: ColumnKey, visible: boolean) {
+    saveColumns(columns.map((column) => column.key === key ? { ...column, visible } : column));
+  }
+
+  function moveColumn(key: ColumnKey, direction: -1 | 1) {
+    const index = columns.findIndex((column) => column.key === key);
+    const destination = Math.max(0, Math.min(columns.length - 1, index + direction));
+    if (index < 0 || index === destination) return;
+    const next = [...columns];
+    const [column] = next.splice(index, 1);
+    next.splice(destination, 0, column);
+    saveColumns(next);
+  }
+
+  function sortBy(key: ColumnKey) {
+    if (sortKey !== key) {
+      setSortKey(key);
+      setSortDirection('asc');
+      return;
+    }
+    setSortDirection((direction) => direction === 'asc' ? 'desc' : 'asc');
+  }
+
+  async function editCell(row: UnifiedRow, key: EditableKey, value: string) {
+    const cellId = `${row.gid}:${String(key)}`;
+    const previousValue = row[key as keyof UnifiedRow];
+    setSaveError(null);
+    setSavingCells((current) => new Set(current).add(cellId));
+    setRows((current) => current.map((item) => item.gid === row.gid ? { ...item, [key]: value } : item));
+
+    try {
+      await unifiedSheetService.setCustom(row.gid, { [key]: value });
+    } catch (error) {
+      console.error('[sheet] save error', error);
+      setRows((current) => current.map((item) => item.gid === row.gid ? { ...item, [key]: previousValue } : item));
+      setSaveError(`No se guardó “${columns.find((column) => column.key === key)?.label || String(key)}”. Restauramos el valor anterior.`);
+    } finally {
+      setSavingCells((current) => {
+        const next = new Set(current);
+        next.delete(cellId);
+        return next;
+      });
+    }
+  }
+
+  function exportData() {
+    const headers = orderedVisibleColumns.map((column) => column.label);
+    const data = filteredRows.map((row) => orderedVisibleColumns.map((column) => {
+      if (column.key === 'kind') return kindLabel(row.kind);
+      if (column.key === 'status') return STATUS_LABELS[row.status];
+      return String(row[column.key as keyof UnifiedRow] ?? '');
+    }));
+    return { headers, data };
+  }
+
+  async function runExport(format: ExportFormat) {
+    if (filteredRows.length === 0 || exporting) return;
+    setExporting(format);
+    const { headers, data } = exportData();
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    try {
+      if (format === 'xlsx') await exportToXlsx(headers, data, `datos-${timestamp}.xlsx`);
+      if (format === 'pdf') await exportToPdf(headers, data, `datos-${timestamp}.pdf`);
+      if (format === 'csv') downloadCsv(`datos-${timestamp}.csv`, toCsv(data, headers));
+      toast({ title: 'Archivo listo', description: `${filteredRows.length} filas visibles exportadas a ${format.toUpperCase()}.` });
+    } catch (error) {
+      console.error('[sheet] export error', error);
+      toast({ variant: 'destructive', title: 'No se pudo exportar', description: 'Inténtalo nuevamente o elige otro formato.' });
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  function renderCell(row: UnifiedRow, column: ColumnDef) {
+    if (column.editable) {
+      return (
+        <EditableCell
+          column={column}
+          row={row}
+          saving={savingCells.has(`${row.gid}:${column.key}`)}
+          onCommit={editCell}
+        />
+      );
+    }
+    if (column.key === 'status') return <StatusBadge status={row.status} />;
+    if (column.key === 'kind') return kindLabel(row.kind);
+    if (column.key === 'linkedinUrl' && row.linkedinUrl) {
+      return <a className="inline-flex items-center gap-1 text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href={row.linkedinUrl} target="_blank" rel="noopener noreferrer">Perfil <ExternalLink className="h-3.5 w-3.5" /></a>;
+    }
+    if (column.key === 'meetingLink' && row.meetingLink) {
+      return <a className="inline-flex items-center gap-1 text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href={row.meetingLink} target="_blank" rel="noopener noreferrer">Abrir <ExternalLink className="h-3.5 w-3.5" /></a>;
+    }
+    return formatCellValue(column.key, row);
+  }
+
+  return (
+    <div className="mx-auto min-w-0 py-3 sm:py-5">
       <PageHeader
-        title="CRM unificado"
-        description="Vista tipo hoja para leads, contactados y oportunidades. Elige qué columnas ver, ordena la información y trabaja con más contexto sin salir del CRM."
+        title="Datos"
+        description="Tu espacio de trabajo tipo Excel para revisar, ordenar y exportar leads y contactos. Los filtros y las columnas visibles se aplican al archivo."
       />
 
-      <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)]"><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Filas totales</div><div className="mt-1 text-2xl font-semibold">{summary.total}</div></CardContent></Card>
-        <Card className="border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)]"><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Respondidos</div><div className="mt-1 text-2xl font-semibold">{summary.replied}</div></CardContent></Card>
-        <Card className="border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)]"><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Activos en CRM</div><div className="mt-1 text-2xl font-semibold">{summary.activeCrm}</div></CardContent></Card>
-        <Card className="border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)]"><CardContent className="p-4"><div className="text-xs uppercase text-muted-foreground">Industrias</div><div className="mt-1 text-2xl font-semibold">{summary.industries}</div></CardContent></Card>
-      </div>
-
-      <div className="mb-3 rounded-xl border bg-muted/20 p-4">
-        <div className="grid gap-3 xl:grid-cols-[minmax(0,1.6fr)_repeat(4,minmax(0,0.7fr))]">
-          <Input placeholder="Buscar por nombre, email, empresa, cargo o industria" value={q} onChange={e => setQ(e.target.value)} className="w-full" />
-          <select className="h-10 border rounded-md px-3 py-2 text-sm bg-background" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)}>
-            <option value="all">Todos los estados</option>
-            <option value="saved">Guardado</option>
-            <option value="enriched">Enriquecido</option>
-            <option value="sent">Enviado</option>
-            <option value="read">Abierto</option>
-            <option value="replied">Respondido</option>
-          </select>
-          <select className="h-10 border rounded-md px-3 py-2 text-sm bg-background" value={industryFilter} onChange={(e) => setIndustryFilter(e.target.value)}>
-            <option value="all">Todas las industrias</option>
-            {industryOptions.map((industry) => <option key={industry} value={industry}>{industry}</option>)}
-          </select>
-          <Input type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} className="w-full" aria-label="Ingreso CRM desde" />
-          <Input type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} className="w-full" aria-label="Ingreso CRM hasta" />
-          <Button variant="ghost" className="shadow-none" onClick={() => { setQ(''); setStatusFilter('all'); setIndustryFilter('all'); setCreatedFrom(''); setCreatedTo(''); }}>
-            Limpiar
-          </Button>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="secondary" className="shadow-none" onClick={() => setOpenCols(true)}>
-            <Columns3 className="mr-2 h-4 w-4" /> Columnas
-          </Button>
-          <Button variant="outline" className="shadow-none" onClick={refresh} disabled={loading}>
-            <RotateCw className="mr-2 h-4 w-4" /> Refrescar
-          </Button>
-          <Button className="shadow-none" onClick={exportCsv}>
-            <Download className="mr-2 h-4 w-4" /> Exportar CSV
-          </Button>
-          <Button onClick={exportXlsx} variant="outline" className="shadow-none">
-            <FileSpreadsheet className="mr-2 h-4 w-4" /> XLSX
-          </Button>
-          <Button onClick={exportPdf} variant="outline" className="shadow-none">
-            <FileText className="mr-2 h-4 w-4" /> PDF
-          </Button>
-          <Link href="/leads/import">
-            <Button variant="default" className="shadow-none bg-emerald-600 hover:bg-emerald-700">
-              <Download className="mr-2 h-4 w-4 rotate-180" /> Importar Leads
-            </Button>
-          </Link>
-        </div>
-      </div>
-
-      <Card>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  {visibleCols.map(c => (
-                    <TableHead
-                      key={c.key}
-                      style={{ minWidth: c.width ? `${c.width}px` : undefined, cursor: 'pointer' }}
-                      onClick={() => headerSort(c.key)}
-                      title="Ordenar"
-                    >
-                      <div className="flex items-center gap-1">
-                        <span>{c.label}</span>
-                        {sortKey === c.key ? (sortDir === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : null}
-                      </div>
-                    </TableHead>
-                  ))}
-                  <TableHead className="w-32 text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  [...Array(10)].map((_, i) => (
-                    <TableRow key={i}>
-                      {visibleCols.map(c => <TableCell key={c.key}><div className="h-4 bg-muted rounded w-full animate-pulse" /></TableCell>)}
-                      <TableCell><div className="h-8 bg-muted rounded w-24 ml-auto animate-pulse" /></TableCell>
-                    </TableRow>
-                  ))
-                ) : filtered.map(r => (
-                  <TableRow key={r.gid} className="align-top">
-                    {visibleCols.map(c => {
-                      let val: any = (r as any)[c.key];
-                      if (c.key === 'status') val = pill(r.status);
-                      if (c.key === 'kind') val = kindLabel(r.kind);
-                      if (c.key === 'linkedinUrl' && r.linkedinUrl) {
-                        val = <a className="underline" href={r.linkedinUrl} target="_blank" rel="noopener noreferrer">Perfil</a>;
-                      }
-                      if (c.key === 'meetingLink' && r.meetingLink) {
-                        val = <a className="underline" href={r.meetingLink} target="_blank" rel="noopener noreferrer">Abrir</a>;
-                      }
-                      if (c.editable) {
-                        return (
-                          <TableCell key={c.key} style={{ minWidth: c.width ? `${c.width}px` : undefined, textAlign: c.align || 'left' }}>
-                            <Input
-                              defaultValue={val || ''}
-                              onBlur={(e) => onEdit(r, c.key as any, e.target.value)}
-                              placeholder={c.label}
-                              className="h-8"
-                            />
-                          </TableCell>
-                        );
-                      }
-                      return (
-                        <TableCell key={c.key} style={{ minWidth: c.width ? `${c.width}px` : undefined, textAlign: c.align || 'left' }}>
-                          {React.isValidElement(val)
-                            ? val
-                            : c.key === 'email'
-                              ? (r.email ?? '—')
-                              : formatCellValue(c.key, { ...r, [c.key]: val } as UnifiedRow)}
-                        </TableCell>
-                      );
-                    })}
-                    <TableCell className="text-right">
-                      {r.kind === 'contacted' ? (
-                        <Link href="/contacted"><Button size="sm" variant="outline"><ExternalLink className="h-4 w-4 mr-1" />Ver hilo</Button></Link>
-                      ) : r.kind === 'lead_enriched' || r.kind === 'opportunity' && r.hasEmail ? (
-                        <Link href={`/contact/compose?id=${encodeURIComponent(r.sourceId)}`}>
-                          <Button size="sm">Contactar</Button>
-                        </Link>
-                      ) : r.kind === 'lead_saved' ? (
-                        <Link href="/saved/leads"><Button size="sm" variant="outline">Abrir guardados</Button></Link>
-                      ) : r.kind === 'opportunity' ? (
-                        <Link href="/saved/opportunities"><Button size="sm" variant="outline">Abrir oportunidades</Button></Link>
-                      ) : null}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {(!loading && filtered.length === 0) && (
-                  <TableRow>
-                    <TableCell colSpan={visibleCols.length + 1} className="text-center text-sm text-muted-foreground py-10">
-                      Sin resultados. Ajusta filtros o refresca.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+      <div className="mb-3 rounded-xl border border-border/70 bg-card/80 p-2 shadow-sm">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+          <div className="relative min-w-0 flex-1 lg:max-w-md">
+            <Label htmlFor="sheet-search" className="sr-only">Buscar en la hoja</Label>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id="sheet-search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Buscar nombre, email o empresa"
+              className="h-9 border-0 bg-muted/55 pl-9 shadow-none focus-visible:bg-background"
+            />
           </div>
+
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-9">
+                  <Filter className="h-4 w-4" /> Filtros
+                  {activeFilterCount > 0 && <span className="rounded-full bg-primary px-1.5 text-[11px] text-primary-foreground">{activeFilterCount}</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[min(340px,calc(100vw-2rem))] space-y-4">
+                <div>
+                  <p className="text-sm font-medium">Filtrar filas</p>
+                  <p className="text-xs text-muted-foreground">La exportación incluirá solo estos resultados.</p>
+                </div>
+                <div className="grid gap-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="sheet-status">Estado</Label>
+                    <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
+                      <SelectTrigger id="sheet-status"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos los estados</SelectItem>
+                        <SelectItem value="saved">Guardado</SelectItem>
+                        <SelectItem value="enriched">Enriquecido</SelectItem>
+                        <SelectItem value="sent">Enviado</SelectItem>
+                        <SelectItem value="read">Abierto</SelectItem>
+                        <SelectItem value="replied">Respondido</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="sheet-industry">Industria</Label>
+                    <Select value={industryFilter} onValueChange={setIndustryFilter}>
+                      <SelectTrigger id="sheet-industry"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todas las industrias</SelectItem>
+                        {industryOptions.map((industry) => <SelectItem key={industry} value={industry}>{industry}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="grid gap-1.5"><Label htmlFor="sheet-from">Desde</Label><Input id="sheet-from" type="date" value={createdFrom} onChange={(event) => setCreatedFrom(event.target.value)} /></div>
+                    <div className="grid gap-1.5"><Label htmlFor="sheet-to">Hasta</Label><Input id="sheet-to" type="date" value={createdTo} onChange={(event) => setCreatedTo(event.target.value)} /></div>
+                  </div>
+                </div>
+                <Button variant="ghost" size="sm" className="w-full" onClick={clearFilters} disabled={!hasFilters}>Limpiar filtros</Button>
+              </PopoverContent>
+            </Popover>
+
+            <Button variant="outline" size="sm" className="h-9" onClick={() => setColumnsOpen(true)}><Columns3 className="h-4 w-4" /> Columnas</Button>
+            <Button asChild variant="outline" size="sm" className="h-9"><Link href="/leads/import"><Import className="h-4 w-4" /> Importar</Link></Button>
+            <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => void refresh()} disabled={loading} aria-label="Actualizar datos">
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
+
+          <div className="ml-auto flex w-full items-center lg:w-auto">
+            <Button className="h-9 flex-1 rounded-r-none lg:flex-none" onClick={() => void runExport('xlsx')} disabled={filteredRows.length === 0 || orderedVisibleColumns.length === 0 || Boolean(exporting)}>
+              {exporting === 'xlsx' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+              Exportar XLSX
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button className="h-9 rounded-l-none border-l border-primary-foreground/20 px-2" disabled={filteredRows.length === 0 || orderedVisibleColumns.length === 0 || Boolean(exporting)} aria-label="Más formatos de exportación"><ChevronDown className="h-4 w-4" /></Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Exportar filas visibles</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => void runExport('xlsx')}><FileSpreadsheet /> Excel (.xlsx)</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void runExport('csv')}><Download /> CSV (.csv)</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void runExport('pdf')}><FileText /> PDF (.pdf)</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-3 flex min-h-6 flex-wrap items-center justify-between gap-2 px-1 text-xs text-muted-foreground" aria-live="polite">
+        <span>{loading ? 'Actualizando datos…' : `${filteredRows.length} de ${rows.length} filas`}</span>
+        <span>Exportación: filtros actuales · {orderedVisibleColumns.length} columnas visibles</span>
+      </div>
+
+      {loadError && (
+        <Alert variant="destructive" className="mb-3">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>No se pudo cargar la hoja</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3"><span>{loadError}</span><Button variant="outline" size="sm" onClick={() => void refresh()}>Reintentar</Button></AlertDescription>
+        </Alert>
+      )}
+      {saveError && (
+        <Alert variant="destructive" className="mb-3">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Cambio no guardado</AlertTitle>
+          <AlertDescription className="flex items-center justify-between gap-3"><span>{saveError}</span><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSaveError(null)} aria-label="Cerrar aviso"><X className="h-4 w-4" /></Button></AlertDescription>
+        </Alert>
+      )}
+
+      <Card className="min-w-0 overflow-hidden border-border/70 shadow-sm">
+        <CardContent className="p-0 [&>div]:max-h-[70dvh] [&>div]:overscroll-contain sm:[&>div]:max-h-[calc(100dvh-15rem)]">
+          <Table className="min-w-max">
+            <TableHeader className="sticky top-0 z-20 bg-muted/95 backdrop-blur">
+              <TableRow className="hover:bg-transparent">
+                {orderedVisibleColumns.map((column, index) => (
+                  <TableHead
+                    key={column.key}
+                    aria-sort={sortKey === column.key ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    className={`h-10 px-3 ${index === 0 ? 'sticky left-0 z-30 border-r bg-muted' : 'bg-muted/95'}`}
+                    style={{ minWidth: column.width ? `${column.width}px` : undefined }}
+                  >
+                    <button type="button" onClick={() => sortBy(column.key)} className="flex w-full items-center gap-1.5 rounded-sm py-1 text-left font-medium hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      <span>{column.label}</span>
+                      {sortKey === column.key
+                        ? sortDirection === 'asc' ? <ArrowDownAZ className="h-3.5 w-3.5" /> : <ArrowUpAZ className="h-3.5 w-3.5" />
+                        : <span className="sr-only">Ordenar por {column.label}</span>}
+                    </button>
+                  </TableHead>
+                ))}
+                <TableHead className="sticky right-0 z-20 h-10 w-28 border-l bg-muted px-3 text-right">Acción</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading && rows.length === 0 && Array.from({ length: 7 }).map((_, rowIndex) => (
+                <TableRow key={rowIndex}>
+                  {orderedVisibleColumns.map((column, columnIndex) => <TableCell key={column.key} className={`p-3 ${columnIndex === 0 ? 'sticky left-0 z-10 border-r bg-card' : ''}`}><div className="h-4 w-full animate-pulse rounded bg-muted" /></TableCell>)}
+                  <TableCell className="sticky right-0 border-l bg-card p-3"><div className="ml-auto h-8 w-20 animate-pulse rounded bg-muted" /></TableCell>
+                </TableRow>
+              ))}
+
+              {!loading && filteredRows.map((row) => (
+                <TableRow key={row.gid} className="group align-top">
+                  {orderedVisibleColumns.map((column, index) => (
+                    <TableCell
+                      key={column.key}
+                      className={`max-w-[360px] px-3 py-2.5 ${index === 0 ? 'sticky left-0 z-10 border-r bg-card font-medium group-hover:bg-muted' : ''}`}
+                      style={{ minWidth: column.width ? `${column.width}px` : undefined, textAlign: column.align || 'left' }}
+                    >
+                      {column.editable ? renderCell(row, column) : <div className="line-clamp-2 break-words">{renderCell(row, column)}</div>}
+                    </TableCell>
+                  ))}
+                  <TableCell className="sticky right-0 z-10 border-l bg-card px-3 py-2 text-right group-hover:bg-muted">
+                    {row.kind === 'contacted' ? (
+                      <Button asChild size="sm" variant="outline"><Link href="/contacted">Ver hilo</Link></Button>
+                    ) : (row.kind === 'lead_enriched' || row.kind === 'opportunity') && row.hasEmail ? (
+                      <Button asChild size="sm"><Link href={`/contact/compose?id=${encodeURIComponent(row.sourceId)}`}>Contactar</Link></Button>
+                    ) : row.kind === 'lead_saved' ? (
+                      <Button asChild size="sm" variant="outline"><Link href="/saved/leads">Abrir</Link></Button>
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+              ))}
+
+              {!loading && filteredRows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={Math.max(1, orderedVisibleColumns.length + 1)} className="h-64 text-center">
+                    <div className="mx-auto flex max-w-sm flex-col items-center gap-2 px-4">
+                      <FileSpreadsheet className="h-8 w-8 text-muted-foreground/70" />
+                      <p className="font-medium text-foreground">{rows.length === 0 ? 'Tu hoja está vacía' : 'No hay filas con estos filtros'}</p>
+                      <p className="text-sm text-muted-foreground">{rows.length === 0 ? 'Importa leads para revisarlos y exportarlos desde aquí.' : 'Limpia los filtros o cambia la búsqueda para ver más resultados.'}</p>
+                      {rows.length === 0
+                        ? <Button asChild size="sm" className="mt-2"><Link href="/leads/import"><Import className="h-4 w-4" /> Importar leads</Link></Button>
+                        : <Button size="sm" variant="outline" className="mt-2" onClick={clearFilters}>Limpiar filtros</Button>}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
-      {/* Configuración de columnas */}
-      <Dialog open={openCols} onOpenChange={setOpenCols}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader><DialogTitle>Columnas visibles y orden</DialogTitle></DialogHeader>
-          <div className="space-y-2">
-            {cols.map(c => (
-              <div key={c.key} className="flex items-center justify-between border rounded p-2">
-                <div className="flex items-center gap-2">
-                  <Checkbox checked={c.visible} onCheckedChange={(v) => toggleColVisibility(c.key, Boolean(v))} />
-                  <span className="text-sm">{c.label}</span>
-                  {c.editable && <Badge variant="outline">editable</Badge>}
+      <Dialog open={columnsOpen} onOpenChange={setColumnsOpen}>
+        <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Columnas visibles</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">La selección y el orden también se usan al exportar.</p>
+          <div className="space-y-1.5">
+            {columns.map((column, index) => (
+              <div key={column.key} className="flex items-center justify-between gap-3 rounded-lg border border-border/70 p-2.5">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Checkbox id={`column-${column.key}`} checked={column.visible} disabled={column.key === 'name'} onCheckedChange={(checked) => toggleColumn(column.key, Boolean(checked))} />
+                  <Label htmlFor={`column-${column.key}`} className="truncate font-normal">{column.label}</Label>
+                  {column.key === 'name' && <Badge variant="secondary" className="hidden text-[10px] sm:inline-flex">Fija</Badge>}
+                  {column.editable && <Badge variant="outline" className="hidden text-[10px] sm:inline-flex">Editable</Badge>}
                 </div>
-                <div className="flex items-center gap-1">
-                  <Button size="icon" variant="ghost" onClick={() => moveCol(c.key, -1)} title="Subir"><ChevronUp className="h-4 w-4" /></Button>
-                  <Button size="icon" variant="ghost" onClick={() => moveCol(c.key, +1)} title="Bajar"><ChevronDown className="h-4 w-4" /></Button>
+                <div className="flex items-center">
+                  <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => moveColumn(column.key, -1)} disabled={index === 0} aria-label={`Mover ${column.label} hacia arriba`}><ChevronUp className="h-4 w-4" /></Button>
+                  <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => moveColumn(column.key, 1)} disabled={index === columns.length - 1} aria-label={`Mover ${column.label} hacia abajo`}><ChevronDown className="h-4 w-4" /></Button>
                 </div>
               </div>
             ))}
           </div>
-          <div className="mt-3 flex justify-between">
-            <Button variant="outline" onClick={resetSchema}><Settings2 className="h-4 w-4 mr-2" />Restablecer</Button>
-            <Button onClick={() => setOpenCols(false)}>Cerrar</Button>
+          <div className="flex items-center justify-between gap-2 pt-2">
+            <Button variant="outline" onClick={() => saveColumns(defaultColumns())}><Settings2 className="h-4 w-4" /> Restablecer</Button>
+            <Button onClick={() => setColumnsOpen(false)}>Listo</Button>
           </div>
         </DialogContent>
       </Dialog>

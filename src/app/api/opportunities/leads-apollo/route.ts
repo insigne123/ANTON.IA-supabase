@@ -4,29 +4,12 @@ import type { LeadFromApollo } from '@/lib/types';
 import { fetchWithLog } from '@/lib/debug';
 import * as San from '@/lib/input-sanitize';
 import { requireAuth, handleAuthError } from '@/lib/server/auth-utils';
-import { pickPdlEmail, searchCompaniesWithPDL, searchPeopleWithPDL } from '@/lib/providers/pdl';
-import { isPdlFallbackEnabled, resolveLeadProvider } from '@/lib/server/provider-routing';
+import { resolveLeadProvider } from '@/lib/server/provider-routing';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const BASE = 'https://api.apollo.io/api/v1';
-const PDL_DATA_INCLUDE = [
-  'id',
-  'full_name',
-  'first_name',
-  'last_name',
-  'job_title',
-  'linkedin_url',
-  'location_name',
-  'location_locality',
-  'location_region',
-  'location_country',
-  'work_email',
-  'recommended_personal_email',
-  'job_company_name',
-  'job_company_website',
-];
 
 type Body = {
   personTitles?: string[];
@@ -39,7 +22,7 @@ type Body = {
   similarTitles?: boolean;
   dedupe?: 'smart' | 'id' | 'email' | 'none'; // default 'smart'
   includeLockedEmails?: boolean; // default true (se muestran, pero no deduplican)
-  provider?: 'apollo' | 'pdl';
+  provider?: unknown;
 };
 
 const LOCKED_RE = /email_not_unlocked@domain\.com/i;
@@ -60,38 +43,17 @@ export async function POST(req: NextRequest) {
     const providerDecision = resolveLeadProvider({
       requestedProvider: body.provider,
       organizationId,
-      defaultProviderEnv: 'LEADS_PROVIDER_DEFAULT',
-      fallbackDefaultProvider: 'apollo',
     });
 
-    let providerUsed: 'apollo' | 'pdl' = providerDecision.provider;
-    let fallbackApplied = false;
-    let fallbackReason: string | undefined;
-    let result: SearchResult;
-
-    if (providerDecision.provider === 'pdl') {
-      try {
-        result = await searchLeadsWithPdl(body);
-      } catch (error: any) {
-        if (!isPdlFallbackEnabled()) {
-          throw error;
-        }
-        fallbackApplied = true;
-        fallbackReason = error?.message || 'pdl_search_failed';
-        providerUsed = 'apollo';
-        result = await searchLeadsWithApollo(body);
-      }
-    } else {
-      result = await searchLeadsWithApollo(body);
-    }
+    const providerUsed = providerDecision.provider;
+    const result = await searchLeadsWithApollo(body);
 
     const response = NextResponse.json({
       ...result,
       providerRequested: providerDecision.requestedProvider,
       providerUsed,
       providerDefault: providerDecision.defaultProvider,
-      fallbackApplied,
-      fallbackReason,
+      fallbackApplied: false,
       providerForcedReason: providerDecision.forcedApolloReason,
     });
     response.headers.set('x-provider-used', providerUsed);
@@ -216,116 +178,6 @@ async function searchLeadsWithApollo(body: Body): Promise<SearchResult> {
   return { leads: final, total: leads.length, returned: final.length, domains: domainList };
 }
 
-async function searchLeadsWithPdl(body: Body): Promise<SearchResult> {
-  const {
-    personTitles = [],
-    domains = [],
-    companyNames = [],
-    personLocations,
-    perPage = 50,
-    maxPages = 10,
-    onlyVerifiedEmails = true,
-    dedupe = 'smart',
-  } = body;
-
-  const domainSet = new Set<string>(domains.filter(Boolean).map((d) => String(d).toLowerCase()));
-  const namesToResolve = Array.from(new Set((companyNames || []).map(normalizeName).filter(Boolean)));
-
-  for (const name of namesToResolve) {
-    const dom = await resolveDomainFromNamePdl(name);
-    if (dom) domainSet.add(dom.toLowerCase());
-  }
-
-  const domainList = Array.from(domainSet);
-  const cleanTitles = (personTitles || []).map(San.sanitizeTitle).filter(Boolean);
-  const cleanLocs = (personLocations || []).map(San.sanitizeLocation).filter(Boolean);
-  const cleanNames = (companyNames || []).map((n) => San.sanitizeName(n)).filter(Boolean);
-
-  if (domainList.length === 0 && cleanNames.length === 0) {
-    return { leads: [], total: 0, returned: 0, domains: [] };
-  }
-
-  const per = Math.max(1, Math.min(100, perPage));
-  const maxP = Math.max(1, Math.min(100, maxPages));
-  const clauses: string[] = [];
-
-  if (domainList.length > 0) {
-    clauses.push(`(${domainList.map((d) => containsClause('job_company_website', d)).join(' OR ')})`);
-  }
-
-  if (cleanNames.length > 0) {
-    clauses.push(`(${cleanNames.map((n) => containsClause('job_company_name', n)).join(' OR ')})`);
-  }
-
-  if (cleanTitles.length > 0) {
-    clauses.push(`(${cleanTitles.map((t) => containsClause('job_title', t)).join(' OR ')})`);
-  }
-
-  if (cleanLocs.length > 0) {
-    clauses.push(`(${cleanLocs.map((l) => containsClause('location_name', l)).join(' OR ')})`);
-  }
-
-  if (onlyVerifiedEmails) {
-    clauses.push('(work_email IS NOT NULL OR recommended_personal_email IS NOT NULL)');
-  }
-
-  clauses.push('(full_name IS NOT NULL)');
-
-  const where = clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '';
-  const sql = `SELECT * FROM person${where}`;
-
-  const leads: LeadFromApollo[] = [];
-  let page = 1;
-  let scrollToken: string | undefined;
-
-  while (page <= maxP) {
-    const result = await searchPeopleWithPDL({
-      sql,
-      size: per,
-      scrollToken,
-      dataInclude: PDL_DATA_INCLUDE,
-    });
-
-    const people = Array.isArray(result.data) ? result.data : [];
-    for (let i = 0; i < people.length; i++) {
-      const person = people[i];
-      const email = pickPdlEmail(person);
-      const location =
-        person.location_name ||
-        [person.location_locality, person.location_region, person.location_country].filter(Boolean).join(', ') ||
-        undefined;
-
-      const id =
-        String(person.id || '').trim() ||
-        String(person.linkedin_url || '').trim() ||
-        `${String(person.full_name || 'unknown').trim()}-${page}-${i}`;
-
-      leads.push({
-        id,
-        fullName:
-          String(person.full_name || '').trim() ||
-          `${String(person.first_name || '').trim()} ${String(person.last_name || '').trim()}`.trim() ||
-          'Unknown',
-        title: String(person.job_title || '').trim(),
-        email: email || undefined,
-        lockedEmail: false,
-        guessedEmail: false,
-        linkedinUrl: person.linkedin_url || undefined,
-        location,
-        companyName: person.job_company_name || undefined,
-        companyDomain: cleanDomain(person.job_company_website || undefined) || undefined,
-      });
-    }
-
-    if (!result.scrollToken || people.length < per) break;
-    scrollToken = result.scrollToken;
-    page++;
-  }
-
-  const final = dedupeLeads(leads, dedupe);
-  return { leads: final, total: leads.length, returned: final.length, domains: domainList };
-}
-
 function dedupeLeads(leads: LeadFromApollo[], dedupe: Body['dedupe']) {
   let final = leads;
 
@@ -384,32 +236,6 @@ async function resolveDomainFromNameApollo(companyNameRaw: string, apiKey: strin
   return chosen?.primary_domain || cleanDomain(chosen?.website_url) || null;
 }
 
-async function resolveDomainFromNamePdl(companyNameRaw: string): Promise<string | null> {
-  const safeName = normalizeName(companyNameRaw);
-  if (!safeName) return null;
-
-  const sql = `SELECT * FROM company WHERE ${containsClause('name', safeName)}`;
-  const result = await searchCompaniesWithPDL({
-    sql,
-    size: 5,
-    dataInclude: ['id', 'name', 'website', 'linkedin_url'],
-  });
-
-  const orgs: any[] = Array.isArray(result.data) ? result.data : [];
-  if (orgs.length === 0) return null;
-
-  const normalized = orgs.map((org) => ({
-    id: org.id,
-    name: org.name,
-    website_url: org.website,
-    primary_domain: cleanDomain(org.website),
-  }));
-
-  const best = pickBestOrgMatch(companyNameRaw, normalized);
-  const chosen = best || normalized[0];
-  return chosen?.primary_domain || cleanDomain(chosen?.website_url) || null;
-}
-
 function pickBestOrgMatch(targetNameRaw: string, orgs: any[]) {
   const target = normalizeName(targetNameRaw);
   let best: any = null, bestScore = -1;
@@ -454,9 +280,4 @@ function cleanDomain(url?: string): string | null {
     const host = String(url).toLowerCase().replace(/^https?:\/\//, '');
     return host.startsWith('www.') ? host.slice(4) : host;
   }
-}
-
-function containsClause(field: string, value: string) {
-  const escaped = String(value || '').trim().replace(/'/g, "''").replace(/%/g, '').replace(/_/g, '');
-  return `${field} LIKE '%${escaped}%'`;
 }

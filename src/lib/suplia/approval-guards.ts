@@ -20,7 +20,6 @@ export function requiresSupliaStrongConfirmation(approvalKind?: string | null) {
 }
 
 export function getSupliaStrongConfirmationPhrase(toolName: string, payload: Record<string, unknown> = {}) {
-  if (toolName === 'email.bulk_send' && payload.dryRun === false) return 'ENVIAR';
   return 'APROBAR';
 }
 
@@ -37,10 +36,5 @@ export function validateSupliaStrongConfirmation(input: SupliaApprovalValidation
 }
 
 export function buildSupliaApprovedActionPayload(input: SupliaApprovedActionPayloadInput) {
-  const payload = input.payload || {};
-  if (input.toolName === 'email.bulk_send' && input.requiredText === 'ENVIAR') {
-    return { ...payload, strongConfirmationText: 'ENVIAR' };
-  }
-
-  return payload;
+  return input.payload || {};
 }

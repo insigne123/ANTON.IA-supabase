@@ -1,35 +1,17 @@
 import type { LeadFromApollo } from '@/lib/types';
 import * as San from '@/lib/input-sanitize';
-import { pickPdlEmail, searchCompaniesWithPDL, searchPeopleWithPDL } from '@/lib/providers/pdl';
-import { isPdlFallbackEnabled, resolveLeadProvider } from '@/lib/server/provider-routing';
+import { resolveLeadProvider } from '@/lib/server/provider-routing';
 
 const APOLLO_BASE = 'https://api.apollo.io/api/v1';
 const LOCKED_EMAIL_RE = /email_not_unlocked@domain\.com/i;
-const PDL_PERSON_DATA_INCLUDE = [
-  'id',
-  'full_name',
-  'first_name',
-  'last_name',
-  'job_title',
-  'linkedin_url',
-  'location_name',
-  'location_locality',
-  'location_region',
-  'location_country',
-  'work_email',
-  'recommended_personal_email',
-  'job_company_name',
-  'job_company_website',
-];
-
-export type SupliaProspectingProvider = 'apollo' | 'pdl';
+export type SupliaProspectingProvider = 'apollo';
 
 export type SearchCompaniesInput = {
   organizationId: string;
   companyName: string;
   perPage?: number;
   page?: number;
-  provider?: SupliaProspectingProvider;
+  provider?: unknown;
 };
 
 export type SearchPeopleInput = {
@@ -44,7 +26,7 @@ export type SearchPeopleInput = {
   similarTitles?: boolean;
   dedupe?: 'smart' | 'id' | 'email' | 'none';
   includeLockedEmails?: boolean;
-  provider?: SupliaProspectingProvider;
+  provider?: unknown;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -89,11 +71,6 @@ function cleanDomain(url?: string | null): string | null {
   } catch {
     return String(url).toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.+$/, '');
   }
-}
-
-function containsClause(field: string, value: string) {
-  const escaped = String(value || '').trim().replace(/'/g, "''").replace(/%/g, '').replace(/_/g, '');
-  return `${field} LIKE '%${escaped}%'`;
 }
 
 function pickBestOrgMatch(targetNameRaw: string, orgs: any[]) {
@@ -153,28 +130,6 @@ async function searchCompaniesApollo(companyName: string, perPage: number, page:
     .sort((a: any, b: any) => b.score - a.score);
 }
 
-async function searchCompaniesPdl(companyName: string, perPage: number) {
-  const size = clamp(perPage, 1, 25);
-  const sql = `SELECT * FROM company WHERE ${containsClause('name', companyName)}`;
-  const result = await searchCompaniesWithPDL({ sql, size, dataInclude: ['id', 'name', 'website', 'linkedin_url'] });
-  const target = normalizeName(companyName);
-
-  return (Array.isArray(result.data) ? result.data : [])
-    .map((org: any) => {
-      const domain = cleanDomain(org.website) || undefined;
-      return {
-        id: org.id,
-        name: org.name,
-        website_url: org.website || (domain ? `https://${domain}` : undefined),
-        linkedin_url: org.linkedin_url,
-        primary_domain: domain,
-        logo: domain ? `https://logo.clearbit.com/${domain}` : undefined,
-        score: similarityScore(target, normalizeName(org.name || '')),
-      };
-    })
-    .sort((a: any, b: any) => b.score - a.score);
-}
-
 async function resolveDomainFromNameApollo(companyNameRaw: string, apiKey: string): Promise<string | null> {
   const qs = new URLSearchParams();
   qs.set('per_page', '5');
@@ -196,28 +151,6 @@ async function resolveDomainFromNameApollo(companyNameRaw: string, apiKey: strin
   const orgs = Array.isArray(json?.organizations) ? json.organizations : [];
   if (orgs.length === 0) return null;
   const chosen = pickBestOrgMatch(companyNameRaw, orgs) || orgs[0];
-  return chosen?.primary_domain || cleanDomain(chosen?.website_url) || null;
-}
-
-async function resolveDomainFromNamePdl(companyNameRaw: string): Promise<string | null> {
-  const safeName = normalizeName(companyNameRaw);
-  if (!safeName) return null;
-
-  const result = await searchCompaniesWithPDL({
-    sql: `SELECT * FROM company WHERE ${containsClause('name', safeName)}`,
-    size: 5,
-    dataInclude: ['id', 'name', 'website', 'linkedin_url'],
-  });
-  const orgs = Array.isArray(result.data) ? result.data : [];
-  if (orgs.length === 0) return null;
-
-  const normalized = orgs.map((org: any) => ({
-    id: org.id,
-    name: org.name,
-    website_url: org.website,
-    primary_domain: cleanDomain(org.website),
-  }));
-  const chosen = pickBestOrgMatch(companyNameRaw, normalized) || normalized[0];
   return chosen?.primary_domain || cleanDomain(chosen?.website_url) || null;
 }
 
@@ -313,59 +246,6 @@ async function searchPeopleApollo(input: SearchPeopleInput) {
   return { leads: final, total: leads.length, returned: final.length, domains };
 }
 
-async function searchPeoplePdl(input: SearchPeopleInput) {
-  const domainSet = new Set(normalizeList(input.domains).map((domain) => domain.toLowerCase()));
-  const companyNames = normalizeList(input.companyNames).map(normalizeName).filter(Boolean);
-  for (const name of companyNames) {
-    const domain = await resolveDomainFromNamePdl(name);
-    if (domain) domainSet.add(domain.toLowerCase());
-  }
-
-  const domains = Array.from(domainSet);
-  const titles = normalizeList(input.personTitles).map(San.sanitizeTitle).filter(Boolean);
-  const locations = normalizeList(input.personLocations).map(San.sanitizeLocation).filter(Boolean);
-  if (domains.length === 0 && companyNames.length === 0) return { leads: [], total: 0, returned: 0, domains };
-
-  const clauses: string[] = [];
-  if (domains.length > 0) clauses.push(`(${domains.map((domain) => containsClause('job_company_website', domain)).join(' OR ')})`);
-  if (companyNames.length > 0) clauses.push(`(${companyNames.map((name) => containsClause('job_company_name', name)).join(' OR ')})`);
-  if (titles.length > 0) clauses.push(`(${titles.map((title) => containsClause('job_title', title)).join(' OR ')})`);
-  if (locations.length > 0) clauses.push(`(${locations.map((location) => containsClause('location_name', location)).join(' OR ')})`);
-  if (input.onlyVerifiedEmails !== false) clauses.push('(work_email IS NOT NULL OR recommended_personal_email IS NOT NULL)');
-  clauses.push('(full_name IS NOT NULL)');
-
-  const sql = `SELECT * FROM person WHERE ${clauses.join(' AND ')}`;
-  const perPage = clamp(Number(input.perPage || 25), 1, 50);
-  const maxPages = clamp(Number(input.maxPages || 1), 1, 5);
-  const leads: LeadFromApollo[] = [];
-  let scrollToken: string | undefined;
-
-  for (let page = 1; page <= maxPages; page++) {
-    const result = await searchPeopleWithPDL({ sql, size: perPage, scrollToken, dataInclude: PDL_PERSON_DATA_INCLUDE });
-    const people = Array.isArray(result.data) ? result.data : [];
-    people.forEach((person, index) => {
-      const email = pickPdlEmail(person);
-      leads.push({
-        id: String(person.id || person.linkedin_url || `${person.full_name || 'unknown'}-${page}-${index}`).trim(),
-        fullName: String(person.full_name || `${person.first_name || ''} ${person.last_name || ''}`.trim() || 'Unknown'),
-        title: String(person.job_title || '').trim(),
-        email: email || undefined,
-        lockedEmail: false,
-        guessedEmail: false,
-        linkedinUrl: person.linkedin_url || undefined,
-        location: person.location_name || [person.location_locality, person.location_region, person.location_country].filter(Boolean).join(', ') || undefined,
-        companyName: person.job_company_name || undefined,
-        companyDomain: cleanDomain(person.job_company_website || undefined) || undefined,
-      });
-    });
-    if (!result.scrollToken || people.length < perPage) break;
-    scrollToken = result.scrollToken;
-  }
-
-  const final = dedupeLeads(leads, input.dedupe || 'smart');
-  return { leads: final, total: leads.length, returned: final.length, domains };
-}
-
 export async function searchProspectingCompanies(input: SearchCompaniesInput) {
   const companyName = San.sanitizeName(input.companyName);
   if (!companyName) throw new Error('companyName requerido');
@@ -373,35 +253,16 @@ export async function searchProspectingCompanies(input: SearchCompaniesInput) {
   const providerDecision = resolveLeadProvider({
     requestedProvider: input.provider,
     organizationId: input.organizationId,
-    defaultProviderEnv: 'LEADS_PROVIDER_DEFAULT',
-    fallbackDefaultProvider: 'apollo',
   });
-  let providerUsed: SupliaProspectingProvider = providerDecision.provider;
-  let fallbackApplied = false;
-  let fallbackReason: string | undefined;
-  let candidates: any[] = [];
-
-  if (providerDecision.provider === 'pdl') {
-    try {
-      candidates = await searchCompaniesPdl(companyName, Number(input.perPage || 8));
-    } catch (error: any) {
-      if (!isPdlFallbackEnabled()) throw error;
-      fallbackApplied = true;
-      fallbackReason = error?.message || 'pdl_company_search_failed';
-      providerUsed = 'apollo';
-      candidates = await searchCompaniesApollo(companyName, Number(input.perPage || 8), Number(input.page || 1));
-    }
-  } else {
-    candidates = await searchCompaniesApollo(companyName, Number(input.perPage || 8), Number(input.page || 1));
-  }
+  const providerUsed: SupliaProspectingProvider = providerDecision.provider;
+  const candidates = await searchCompaniesApollo(companyName, Number(input.perPage || 8), Number(input.page || 1));
 
   return {
     candidates,
     providerRequested: providerDecision.requestedProvider,
     providerUsed,
     providerDefault: providerDecision.defaultProvider,
-    fallbackApplied,
-    fallbackReason,
+    fallbackApplied: false,
     providerForcedReason: providerDecision.forcedApolloReason,
   };
 }
@@ -410,35 +271,16 @@ export async function searchProspectingPeople(input: SearchPeopleInput) {
   const providerDecision = resolveLeadProvider({
     requestedProvider: input.provider,
     organizationId: input.organizationId,
-    defaultProviderEnv: 'LEADS_PROVIDER_DEFAULT',
-    fallbackDefaultProvider: 'apollo',
   });
-  let providerUsed: SupliaProspectingProvider = providerDecision.provider;
-  let fallbackApplied = false;
-  let fallbackReason: string | undefined;
-  let result: { leads: LeadFromApollo[]; total: number; returned: number; domains: string[] };
-
-  if (providerDecision.provider === 'pdl') {
-    try {
-      result = await searchPeoplePdl(input);
-    } catch (error: any) {
-      if (!isPdlFallbackEnabled()) throw error;
-      fallbackApplied = true;
-      fallbackReason = error?.message || 'pdl_search_failed';
-      providerUsed = 'apollo';
-      result = await searchPeopleApollo(input);
-    }
-  } else {
-    result = await searchPeopleApollo(input);
-  }
+  const providerUsed: SupliaProspectingProvider = providerDecision.provider;
+  const result = await searchPeopleApollo(input);
 
   return {
     ...result,
     providerRequested: providerDecision.requestedProvider,
     providerUsed,
     providerDefault: providerDecision.defaultProvider,
-    fallbackApplied,
-    fallbackReason,
+    fallbackApplied: false,
     providerForcedReason: providerDecision.forcedApolloReason,
   };
 }

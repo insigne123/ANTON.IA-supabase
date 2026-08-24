@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import { matchesConfiguredSecret } from '@/lib/server/internal-api-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -242,6 +243,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unsupported table_name' }, { status: 400 });
     }
 
+    const providerRequestId = req.headers.get('x-apollo-request-id')?.trim() || req.headers.get('x-request-id')?.trim() || null;
+    await safeAppendAntoniaEvent({
+      eventType: 'provider.webhook_received',
+      actorType: 'provider',
+      entityType: tableName === 'enriched_leads' ? 'enriched_lead' : 'people_search_lead',
+      entityId: recordId,
+      externalEntityId: recordId,
+      sourceSystem: 'apollo-webhook',
+      sourceRoute: '/api/apollo-webhook',
+      provider: 'apollo',
+      providerRequestId,
+      requestId: providerRequestId,
+      correlationId: recordId,
+      operationId: recordId,
+      status: 'received',
+      outcome: 'payload_received',
+      payload: { tableName },
+    });
+
     const body = await req.json().catch(() => null);
     const person = extractApolloPerson(body);
     if (!person || typeof person !== 'object') {
@@ -260,8 +280,41 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       console.error('[apollo-webhook] Update error:', { tableName, recordId, error });
+      await safeAppendAntoniaEvent({
+        eventType: 'provider.webhook_failed',
+        actorType: 'provider',
+        entityType: tableName === 'enriched_leads' ? 'enriched_lead' : 'people_search_lead',
+        entityId: recordId,
+        externalEntityId: recordId,
+        sourceSystem: 'apollo-webhook',
+        sourceRoute: '/api/apollo-webhook',
+        provider: 'apollo',
+        providerRequestId,
+        operationId: recordId,
+        status: 'failed',
+        outcome: 'persistence_error',
+        severity: 'error',
+        errorCode: String(error.code || 'WEBHOOK_PERSISTENCE_ERROR'),
+        payload: { tableName },
+      });
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    await safeAppendAntoniaEvent({
+      eventType: 'provider.webhook_processed',
+      actorType: 'provider',
+      entityType: tableName === 'enriched_leads' ? 'enriched_lead' : 'people_search_lead',
+      entityId: recordId,
+      externalEntityId: recordId,
+      sourceSystem: 'apollo-webhook',
+      sourceRoute: '/api/apollo-webhook',
+      provider: 'apollo',
+      providerRequestId,
+      operationId: recordId,
+      status: 'completed',
+      outcome: 'row_updated',
+      payload: { tableName },
+    });
 
     return NextResponse.json({ ok: true, tableName, recordId }, { status: 200 });
   } catch (error: any) {

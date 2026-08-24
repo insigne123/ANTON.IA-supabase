@@ -1,27 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
-import { sendGmail, sendOutlook } from '../server-email-sender';
-import { refreshGoogleToken, refreshMicrosoftToken } from '../server-auth-helpers';
 import { buildAntoniaDailyDashboardHtml, type AntoniaDailyMissionRow } from './antonia-report-email';
-import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
-import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
-import { decryptTokenRecords, encryptStoredToken } from '@/lib/server/token-crypto';
 
-function parseRecipients(raw?: string | null): string[] {
-    if (!raw) return [];
-    const parts = String(raw)
-        .split(/[,;\n\r\t ]+/)
-        .map(s => s.trim().toLowerCase())
-        .filter(Boolean);
-
-    const unique = new Set<string>();
-    const out: string[] = [];
-    for (const p of parts) {
-        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p)) continue;
-        if (unique.has(p)) continue;
-        unique.add(p);
-        out.push(p);
-    }
-    return out;
+function reviewRequiredEmailResult() {
+    // This service never dispatches email; a separate durable approval flow is required.
+    return { sent: false as const, status: 'review_required' as const };
 }
 
 function getDashboardUrl() {
@@ -29,172 +11,22 @@ function getDashboardUrl() {
     return `${base}/antonia`;
 }
 
-/**
- * Send system email using stored OAuth tokens
- * This function is designed to be called from server-side contexts (workers, cron jobs)
- */
-async function sendSystemEmail(to: string, subject: string, html: string, organizationId?: string) {
-    try {
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-        if (!supabaseUrl || !serviceKey) {
-            console.error('[SystemMail] Missing Supabase service credentials');
-            return;
-        }
-
-        const supabase = createClient(supabaseUrl, serviceKey, {
-            auth: { persistSession: false, autoRefreshToken: false }
-        });
-
-        const pickTokens = async () => {
-            if (organizationId) {
-                const { data: members } = await supabase
-                    .from('organization_members')
-                    .select('user_id')
-                    .eq('organization_id', organizationId);
-                const memberIds = (members || []).map((m: any) => m.user_id).filter(Boolean);
-                if (memberIds.length > 0) {
-                    const { data: tokens } = await supabase
-                        .from('provider_tokens')
-                        .select('*')
-                        .in('user_id', memberIds)
-                        .order('updated_at', { ascending: false });
-                    if (tokens && tokens.length > 0) return decryptTokenRecords(tokens);
-                }
-            }
-
-            const { data: tokens } = await supabase
-                .from('provider_tokens')
-                .select('*')
-                .order('updated_at', { ascending: false })
-                .limit(5);
-            return decryptTokenRecords(tokens || []);
-        };
-
-        const tokens = await pickTokens();
-        if (!tokens || tokens.length === 0) {
-            console.error('[SystemMail] No provider_tokens found');
-            console.log(`[SystemMail] Would send: To: ${to} | Subject: ${subject}`);
-            return;
-        }
-
-        const preferred = tokens.find((t: any) => t.provider === 'google') || tokens[0];
-        const provider = preferred.provider as 'google' | 'outlook';
-        const refreshToken = preferred.refresh_token;
-
-        if (!refreshToken) {
-            console.error('[SystemMail] Missing usable refresh token after decryption');
-            return;
-        }
-
-        let accessToken = '';
-        if (provider === 'google') {
-            const refreshed = await refreshGoogleToken(refreshToken, process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!, process.env.GOOGLE_CLIENT_SECRET!);
-            accessToken = refreshed.access_token;
-        } else {
-            const refreshed = await refreshMicrosoftToken(refreshToken, process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID!, process.env.AZURE_AD_CLIENT_SECRET!, process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID!);
-            accessToken = refreshed.access_token;
-            if (refreshed.refresh_token) {
-                await supabase
-                    .from('provider_tokens')
-                    .update({ refresh_token: encryptStoredToken(refreshed.refresh_token), updated_at: new Date().toISOString() })
-                    .eq('user_id', preferred.user_id)
-                    .eq('provider', 'outlook');
-            }
-        }
-
-        if (!accessToken) {
-            console.error('[SystemMail] Failed to refresh access token');
-            console.log(`[SystemMail] Would send: To: ${to} | Subject: ${subject}`);
-            return;
-        }
-
-        const unsubscribeUrl = generateUnsubscribeLink(to, preferred.user_id, organizationId || null);
-        const prepared = prepareOutboundEmail({ html, unsubscribeUrl });
-        const preflight = validateOutboundEmail({ to, subject, html: prepared.html, text: prepared.text, requireUnsubscribe: true, unsubscribeUrl });
-        if (!preflight.ok) {
-            console.error('[SystemMail] Preflight failed:', preflight.errors);
-            return;
-        }
-
-        if (provider === 'google') {
-            await sendGmail(accessToken, to, subject, prepared.html, { textBody: prepared.text, unsubscribeUrl });
-            console.log(`[SystemMail] ✅ Sent via Gmail to: ${to} | Subject: ${subject}`);
-        } else {
-            await sendOutlook(accessToken, to, subject, prepared.html, { textBody: prepared.text, unsubscribeUrl });
-            console.log(`[SystemMail] ✅ Sent via Outlook to: ${to} | Subject: ${subject}`);
-        }
-    } catch (error) {
-        console.error('[SystemMail] Error sending email:', error);
-        // Don't throw - we don't want to break the worker if email fails
-        console.log(`[SystemMail] Failed to send: To: ${to} | Subject: ${subject}`);
-    }
-}
-
 export const notificationService = {
     /**
-     * Send Immediate Alert
+     * Require review for an immediate alert.
      */
-    sendAlert: async (organizationId: string, title: string, message: string) => {
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-        if (!supabaseUrl || !serviceKey) return;
-
-        const supabase = createClient(supabaseUrl, serviceKey, {
-            auth: { persistSession: false, autoRefreshToken: false }
-        });
-
-        const { data: config } = await supabase
-            .from('antonia_config')
-            .select('notification_email, instant_alerts_enabled')
-            .eq('organization_id', organizationId)
-            .maybeSingle();
-
-        if (!config || !config.instant_alerts_enabled || !config.notification_email) {
-            return;
-        }
-
-        await sendSystemEmail(
-            config.notification_email,
-            `[ANTONIA ALERT] ${title}`,
-            `<p>${message}</p>`,
-            organizationId // Pass org ID
-        );
-    },
+    sendAlert: async (_organizationId: string, _title: string, _message: string) => reviewRequiredEmailResult(),
 
     /**
-     * Send report HTML to configured recipients
+     * Require review for report delivery.
      */
-    sendReportEmail: async (organizationId: string, subject: string, html: string) => {
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-        if (!supabaseUrl || !serviceKey) return { sent: false, recipients: [] as string[] };
-
-        const supabase = createClient(supabaseUrl, serviceKey, {
-            auth: { persistSession: false, autoRefreshToken: false }
-        });
-
-        const { data: config } = await supabase
-            .from('antonia_config')
-            .select('notification_email')
-            .eq('organization_id', organizationId)
-            .maybeSingle();
-
-        const recipients = parseRecipients(config?.notification_email);
-        if (recipients.length === 0) {
-            console.warn(`[ReportMail] No recipients configured for org ${organizationId}`);
-            return { sent: false, recipients: [] as string[] };
-        }
-
-        for (const to of recipients) {
-            await sendSystemEmail(to, subject, html, organizationId);
-        }
-
-        return { sent: true, recipients };
-    },
+    sendReportEmail: async (_organizationId: string, _subject: string, _html: string) => ({
+        ...reviewRequiredEmailResult(),
+        recipients: [] as string[],
+    }),
 
     /**
-     * Generate and Send Daily Report
+     * Generate and persist Daily Report.
      */
     sendDailyReport: async (organizationId: string) => {
         console.log(`[DailyReport] Starting report generation for org ${organizationId}`);
@@ -487,18 +319,12 @@ export const notificationService = {
         const subject = `[ANTONIA] Reporte Diario · ${rangeStart.toLocaleDateString('es-AR')} - ${rangeEnd.toLocaleDateString('es-AR')}`;
         const sendResult = await notificationService.sendReportEmail(organizationId, subject, html);
 
-        if (reportRow?.id && sendResult?.recipients?.length) {
-            await supabase
-                .from('antonia_reports')
-                .update({ sent_to: sendResult.recipients })
-                .eq('id', reportRow.id);
-        }
-
         console.log(`[DailyReport] Summary - Searches: ${searchRuns}, Leads: ${leadsFound}, Enriched: ${leadsEnriched}, Investigated: ${leadsInvestigated}, Contacted: ${leadsContacted}`);
         return {
             reportId: reportRow?.id || null,
             sent: Boolean(sendResult?.sent),
             recipients: sendResult?.recipients || [],
+            status: sendResult.status,
             summary: summaryData,
         };
     }

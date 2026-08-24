@@ -1,7 +1,5 @@
 // Cliente robusto para Microsoft Graph (Outlook)
 import { microsoftAuthService } from './microsoft-auth-service';
-import { emailSignatureStorage } from './email-signature-storage';
-import { applySignatureHTML } from './signature-apply';
 
 // --- Types ---
 export type SendEmailInput = {
@@ -12,6 +10,11 @@ export type SendEmailInput = {
   bcc?: string[];
   requestReceipts?: boolean;
   attachments?: Array<{ name: string; contentBytes: string; contentType?: string }>;
+  leadId?: string;
+  researchSnapshotId?: string | null;
+  draftId?: string | null;
+  versionId?: string | null;
+  idempotencyKey: string;
 };
 
 export type SendEmailResult = {
@@ -56,35 +59,42 @@ async function graphFetch(input: string, init?: RequestInit, needRead = false) {
 
 /** Envía un correo intentando crear borrador; si falta Mail.ReadWrite, cae a /me/sendMail. */
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
-  const sig = await emailSignatureStorage.get('outlook');
-  const finalHtml = applySignatureHTML(input.htmlBody, sig?.html);
-  const token = await microsoftAuthService.getSendToken();
-
-  const res = await fetch('/api/outlook/send', {
+  const hasCanonicalDraft = Boolean(input.draftId && input.versionId);
+  if (Boolean(input.draftId) !== Boolean(input.versionId)) {
+    throw new Error('draftId y versionId deben enviarse juntos.');
+  }
+  if (!hasCanonicalDraft) {
+    throw new Error('Selecciona un borrador aprobado antes de enviar.');
+  }
+  if (input.attachments?.length) {
+    throw new Error('Los adjuntos todavia no estan disponibles en el envio idempotente de Outlook.');
+  }
+  if (input.cc?.length || input.bcc?.length) {
+    throw new Error('CC y BCC todavia no estan disponibles en el envio idempotente de Outlook.');
+  }
+  const res = await fetch('/api/providers/send', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      to: input.to,
-      subject: input.subject,
-      body: finalHtml,
-      isHtml: true,
-      attachments: input.attachments || [],
-      requestReceipts: !!input.requestReceipts,
+      provider: 'outlook',
+      draftId: input.draftId,
+      versionId: input.versionId,
+      idempotencyKey: input.idempotencyKey,
     }),
   });
 
   const payload = await res.json().catch(() => ({}));
-  if (!res.ok || !payload?.ok) {
+  if (!res.ok || !payload?.success) {
     throw new Error(payload?.error || payload?.graph?.error?.message || `Outlook send failed (${res.status})`);
   }
 
+  const providerResponse = payload?.receipt?.providerResponse || {};
   return {
-    messageId: payload?.messageId || `sentmail:${Date.now()}`,
-    internetMessageId: payload?.internetMessageId,
-    conversationId: payload?.conversationId,
+    messageId: payload?.receipt?.providerMessageId || providerResponse?.messageId || providerResponse?.id,
+    internetMessageId: providerResponse?.internetMessageId,
+    conversationId: providerResponse?.conversationId,
   };
 }
 

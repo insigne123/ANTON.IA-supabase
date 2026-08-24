@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 
 export async function POST(req: NextRequest) {
     try {
@@ -11,6 +12,7 @@ export async function POST(req: NextRequest) {
         const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
         const { missionId } = await req.json();
+        const requestId = req.headers.get('x-request-id')?.trim() || `mission-trigger:${missionId || 'unknown'}`;
 
         if (!missionId) {
             return NextResponse.json({ error: 'missionId required' }, { status: 400 });
@@ -42,6 +44,42 @@ export async function POST(req: NextRequest) {
         // Check for Auto Campaign Strategy
         const isAutoCampaign = mission.params.autoGenerateCampaign;
         const initialTaskType = isAutoCampaign ? 'GENERATE_CAMPAIGN' : 'SEARCH';
+        const initialTaskIdempotencyKey = `mission_${missionId}_init_v2`;
+
+        const { data: existingTask, error: existingTaskError } = await supabase
+            .from('antonia_tasks')
+            .select('id, type, status')
+            .eq('mission_id', missionId)
+            .eq('idempotency_key', initialTaskIdempotencyKey)
+            .maybeSingle();
+        if (existingTaskError) throw existingTaskError;
+        if (existingTask) {
+            await safeAppendAntoniaEvent({
+                eventType: 'mission.trigger_replayed',
+                organizationId: mission.organization_id,
+                actorId: user.id,
+                actorType: 'user',
+                entityType: 'mission',
+                entityId: missionId,
+                missionId,
+                taskId: existingTask.id,
+                sourceSystem: 'antonia-trigger',
+                sourceRoute: '/api/antonia/trigger',
+                requestId,
+                correlationId: requestId,
+                operationId: initialTaskIdempotencyKey,
+                idempotencyKey: initialTaskIdempotencyKey,
+                status: existingTask.status,
+                outcome: 'idempotent_replay',
+                payload: { taskType: existingTask.type },
+            });
+            return NextResponse.json({
+                success: true,
+                taskId: existingTask.id,
+                reused: true,
+                message: 'Mission task already exists',
+            });
+        }
 
         // Create initial task (SEARCH or GENERATE_CAMPAIGN)
         const { data: task, error: taskError } = await supabase
@@ -67,7 +105,7 @@ export async function POST(req: NextRequest) {
                     campaignContext: mission.params.campaignContext || '',
                     missionTitle: mission.title
                 },
-                idempotency_key: `mission_${missionId}_init_${Date.now()}`,
+                    idempotency_key: initialTaskIdempotencyKey,
                 created_at: new Date().toISOString()
             })
             .select()
@@ -94,6 +132,45 @@ export async function POST(req: NextRequest) {
             message: `Mission triggered: ${mission.title}`,
             details: { taskId: task.id },
             created_at: new Date().toISOString()
+        });
+
+        await safeAppendAntoniaEvent({
+            eventType: 'mission.triggered',
+            organizationId: mission.organization_id,
+            actorId: user.id,
+            actorType: 'user',
+            entityType: 'mission',
+            entityId: missionId,
+            missionId,
+            taskId: task.id,
+            sourceSystem: 'antonia-trigger',
+            sourceRoute: '/api/antonia/trigger',
+            requestId,
+            correlationId: requestId,
+            operationId: initialTaskIdempotencyKey,
+            idempotencyKey: initialTaskIdempotencyKey,
+            status: 'active',
+            outcome: 'task_created',
+            payload: { taskType: initialTaskType },
+        });
+        await safeAppendAntoniaEvent({
+            eventType: 'task.created',
+            organizationId: mission.organization_id,
+            actorId: user.id,
+            actorType: 'user',
+            entityType: 'task',
+            entityId: task.id,
+            missionId,
+            taskId: task.id,
+            sourceSystem: 'antonia-trigger',
+            sourceRoute: '/api/antonia/trigger',
+            requestId,
+            correlationId: requestId,
+            operationId: initialTaskIdempotencyKey,
+            idempotencyKey: initialTaskIdempotencyKey,
+            status: 'pending',
+            outcome: 'created',
+            payload: { taskType: initialTaskType },
         });
 
         return NextResponse.json({

@@ -1,14 +1,18 @@
-import { randomUUID } from 'crypto';
-
-import { tokenService } from '@/lib/services/token-service';
-import { refreshGoogleToken, refreshMicrosoftToken } from '@/lib/server-auth-helpers';
-import { sendGmail, sendOutlook } from '@/lib/server-email-sender';
 import { normalizeConnectedEmailProvider, type ConnectedEmailProvider } from '@/lib/email-provider';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
-import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
-import { buildThreadKey, safeInsertEmailEvent } from '@/lib/email-observability';
+import { safeInsertEmailEvent } from '@/lib/email-observability';
+import {
+  MessagingDraftV1Schema,
+  PendingMessagingApprovalV1,
+  PendingMessagingPreflightV1,
+  deterministicMessagingUuid,
+} from '@/lib/messaging-contracts';
+import { ensureMessagingDraftV1, getCurrentMessagingDraftVersionV1 } from '@/lib/server/messaging-drafts';
+import { prepareOutboundEmail } from '@/lib/email-outbound';
+import { SupliaRecipientDeliveryError } from '@/lib/server/suplia-bulk-send-outcomes';
+import { ensureSupliaEmailReviewItem } from '@/lib/server/suplia-review-inbox';
 
 export type SupliaEmailPayload = {
   to?: unknown;
@@ -20,40 +24,178 @@ export type SupliaEmailPayload = {
   company?: unknown;
   role?: unknown;
   leadId?: unknown;
+  idempotencyKey?: unknown;
+};
+
+export type SupliaEmailReviewResult = {
+  status: 'review_required';
+  draftId: string;
+  versionId: string;
+  to: string;
+  subject: string;
+  provider: 'gmail' | 'outlook' | null;
+  note: string;
 };
 
 function asText(value: unknown) {
   return String(value || '').trim();
 }
 
-async function getRefreshToken(supabase: any, userId: string, requestedProvider?: ConnectedEmailProvider | null) {
-  const providers: ConnectedEmailProvider[] = requestedProvider ? [requestedProvider] : ['google', 'outlook'];
-
-  for (const provider of providers) {
-    const token = await tokenService.getToken(supabase, userId, provider);
-    if (token?.refresh_token) return { provider, refreshToken: token.refresh_token };
-  }
-
-  throw new Error(requestedProvider ? `No hay conexion activa con ${requestedProvider}.` : 'No hay conexion activa con Gmail u Outlook.');
+export function parseRequestedSupliaProvider(value: unknown): ConnectedEmailProvider | null {
+  const rawProvider = asText(value);
+  const provider = normalizeConnectedEmailProvider(rawProvider);
+  if (rawProvider && !provider) throw new SupliaRecipientDeliveryError('rejected', `Proveedor de email no soportado: ${rawProvider}.`);
+  return provider;
 }
 
-async function refreshAccessToken(provider: ConnectedEmailProvider, refreshToken: string) {
-  if (provider === 'google') {
-    const refreshed = await refreshGoogleToken(
-      refreshToken,
-      process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
-      process.env.GOOGLE_CLIENT_SECRET!
-    );
-    return refreshed.access_token as string;
+export function createSupliaEmailReviewDraft(input: {
+  organizationId: string;
+  userId: string;
+  idempotencyKey: string;
+  requestedAt: string;
+  leadRef?: string | null;
+  displayName?: string | null;
+  to: string;
+  subject: string;
+  text?: string | null;
+  html?: string | null;
+}) {
+  const ids = supliaEmailReviewDraftIds(input);
+  return MessagingDraftV1Schema.parse({
+    schemaVersion: 1,
+    draftId: ids.draftId,
+    versionId: ids.versionId,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    researchSnapshotId: null,
+    revision: 1,
+    parentVersionId: null,
+    lifecycle: 'draft',
+    channel: 'email',
+    recipient: {
+      leadRef: asText(input.leadRef) || null,
+      displayName: asText(input.displayName) || null,
+      email: asText(input.to).toLowerCase(),
+      linkedinUrl: null,
+    },
+    content: {
+      subject: asText(input.subject),
+      text: asText(input.text) || null,
+      html: asText(input.html) || null,
+    },
+    approval: PendingMessagingApprovalV1,
+    preflight: PendingMessagingPreflightV1,
+    createdAt: input.requestedAt,
+  });
+}
+
+function supliaEmailReviewDraftIds(input: {
+  organizationId: string;
+  userId: string;
+  idempotencyKey: string;
+}) {
+  const identity = `${input.organizationId}:${input.userId}:${input.idempotencyKey}`;
+  return {
+    draftId: deterministicMessagingUuid(`suplia-review-draft:${identity}`),
+    versionId: deterministicMessagingUuid(`suplia-review-version:${identity}`),
+  };
+}
+
+export async function persistSupliaSentHistory(input: {
+  admin: any;
+  dispatchId: string;
+  organizationId: string;
+  contactedPayload: Record<string, any>;
+  eventPayload: Record<string, any>;
+}) {
+  const deterministicContactedId = deterministicMessagingUuid(`suplia:contacted:${input.dispatchId}`);
+  const sentEventId = deterministicMessagingUuid(`suplia:email-event:sent:${input.dispatchId}`);
+  const { data: existingContacted, error: existingContactedError } = await input.admin
+    .from('contacted_leads')
+    .select('id, lead_id, name, company, role, subject, message_id, thread_id, conversation_id, internet_message_id, thread_key, data')
+    .eq('organization_id', input.organizationId)
+    .contains('data', { dispatchId: input.dispatchId })
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (existingContactedError) throw existingContactedError;
+  const contactedId = existingContacted?.id || deterministicContactedId;
+
+  if (!existingContacted) {
+    const { error: contactedError } = await input.admin
+      .from('contacted_leads')
+      .upsert({
+        ...input.contactedPayload,
+        id: contactedId,
+        data: { ...(input.contactedPayload.data || {}), dispatchId: input.dispatchId },
+      }, { onConflict: 'id', ignoreDuplicates: true });
+    if (contactedError) throw contactedError;
+  } else {
+    // The dispatch finalizer may have created the canonical row first. Enrich it
+    // with SUPL.IA-only context instead of appending a second sent contact.
+    const { error: contactedUpdateError } = await input.admin
+      .from('contacted_leads')
+      .update({
+        lead_id: existingContacted.lead_id || input.contactedPayload.lead_id || null,
+        name: existingContacted.name || input.contactedPayload.name || null,
+        company: existingContacted.company || input.contactedPayload.company || null,
+        role: existingContacted.role || input.contactedPayload.role || null,
+        subject: existingContacted.subject || input.contactedPayload.subject || null,
+        message_id: existingContacted.message_id || input.contactedPayload.message_id || null,
+        thread_id: existingContacted.thread_id || input.contactedPayload.thread_id || null,
+        conversation_id: existingContacted.conversation_id || input.contactedPayload.conversation_id || null,
+        internet_message_id: existingContacted.internet_message_id || input.contactedPayload.internet_message_id || null,
+        thread_key: existingContacted.thread_key || input.contactedPayload.thread_key || null,
+        data: {
+          ...(existingContacted.data || {}),
+          ...(input.contactedPayload.data || {}),
+          dispatchId: input.dispatchId,
+        },
+      })
+      .eq('id', contactedId);
+    if (contactedUpdateError) throw contactedUpdateError;
   }
 
-  const refreshed = await refreshMicrosoftToken(
-    refreshToken,
-    process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID!,
-    process.env.AZURE_AD_CLIENT_SECRET!,
-    process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'common'
-  );
-  return refreshed.access_token as string;
+  const { data: persistedContacted, error: persistedContactedError } = await input.admin
+    .from('contacted_leads')
+    .select('id, provider, email, subject, message_id, thread_id, conversation_id, internet_message_id, thread_key, sent_at, created_at')
+    .eq('id', contactedId)
+    .single();
+  if (persistedContactedError) throw persistedContactedError;
+
+  const { data: existingSentEvent, error: existingSentEventError } = await input.admin
+    .from('email_events')
+    .select('id, meta')
+    .eq('organization_id', input.organizationId)
+    .eq('event_type', 'sent')
+    .eq('event_source', 'suplia')
+    .contains('meta', { dispatchId: input.dispatchId })
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (existingSentEventError) throw existingSentEventError;
+  if (!existingSentEvent) {
+    await safeInsertEmailEvent(input.admin, {
+      ...input.eventPayload,
+      id: sentEventId,
+      contacted_id: contactedId,
+      meta: { ...(input.eventPayload.meta || {}), dispatchId: input.dispatchId },
+    });
+  } else {
+    const { error: eventUpdateError } = await input.admin
+      .from('email_events')
+      .update({
+        meta: {
+          ...(existingSentEvent.meta || {}),
+          ...(input.eventPayload.meta || {}),
+          dispatchId: input.dispatchId,
+        },
+      })
+      .eq('id', existingSentEvent.id);
+    if (eventUpdateError) throw eventUpdateError;
+  }
+
+  return persistedContacted;
 }
 
 export async function sendSupliaEmail(input: {
@@ -68,14 +210,14 @@ export async function sendSupliaEmail(input: {
   const subject = asText(input.payload.subject);
   const htmlBody = asText(input.payload.htmlBody || input.payload.textBody);
   const textBody = asText(input.payload.textBody);
-  const requestedProvider = normalizeConnectedEmailProvider(asText(input.payload.provider));
+  const requestedProvider = parseRequestedSupliaProvider(input.payload.provider);
 
-  if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new Error('El destinatario no es un email valido.');
-  if (!subject) throw new Error('Falta el asunto del email.');
-  if (!htmlBody) throw new Error('Falta el cuerpo del email.');
+  if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new SupliaRecipientDeliveryError('rejected', 'El destinatario no es un email valido.');
+  if (!subject) throw new SupliaRecipientDeliveryError('rejected', 'Falta el asunto del email.');
+  if (!htmlBody) throw new SupliaRecipientDeliveryError('rejected', 'Falta el cuerpo del email.');
 
   const suppressed = await isEmailSuppressedForScope(to, { userId: input.userId, organizationId: input.organizationId });
-  if (suppressed) throw new Error('El destinatario esta dado de baja o bloqueado por privacidad.');
+  if (suppressed) throw new SupliaRecipientDeliveryError('rejected', 'El destinatario esta dado de baja o bloqueado por privacidad.');
 
   const domain = to.split('@')[1]?.trim().toLowerCase();
   if (domain) {
@@ -86,97 +228,73 @@ export async function sendSupliaEmail(input: {
       .eq('domain', domain)
       .maybeSingle();
     if (error) throw error;
-    if (blockedDomain) throw new Error(`El dominio ${domain} esta bloqueado por la organizacion.`);
+    if (blockedDomain) throw new SupliaRecipientDeliveryError('rejected', `El dominio ${domain} esta bloqueado por la organizacion.`);
   }
 
-  const quotaLimits = await getEffectiveDailyQuotaLimits({ userId: input.userId, organizationId: input.organizationId });
-  const quota = await checkAndConsumeDailyQuota({
-    userId: input.userId,
-    organizationId: input.organizationId,
-    resource: 'contact',
-    limit: quotaLimits.contact,
-  });
-  if (!quota.allowed) throw new Error(`Cuota diaria de contactos excedida. Usado ${quota.count}/${quota.limit}.`);
-
-  const { provider, refreshToken } = await getRefreshToken(input.supabase, input.userId, requestedProvider);
-  const accessToken = await refreshAccessToken(provider, refreshToken);
-  if (!accessToken) throw new Error('No se pudo obtener access token para enviar.');
-
-  const unsubscribeUrl = generateUnsubscribeLink(to, input.userId, input.organizationId);
-  const providerLabel = provider === 'google' ? 'gmail' : 'outlook';
-  const result = provider === 'google'
-    ? await sendGmail(accessToken, to, subject, htmlBody, { textBody: textBody || undefined, unsubscribeUrl })
-    : await sendOutlook(accessToken, to, subject, htmlBody, { textBody: textBody || undefined, unsubscribeUrl });
-
-  const messageId = String((result as any)?.id || (result as any)?.messageId || '').trim() || null;
-  const threadId = String((result as any)?.threadId || '').trim() || null;
-  const conversationId = String((result as any)?.conversationId || '').trim() || null;
-  const internetMessageId = String((result as any)?.internetMessageId || '').trim() || null;
-  const threadKey = buildThreadKey({ provider: providerLabel, threadId, conversationId, internetMessageId, messageId });
-  const sentAt = new Date().toISOString();
-  const contactedId = randomUUID();
-
-  const contactedPayload = {
-    id: contactedId,
-    user_id: input.userId,
-    organization_id: input.organizationId,
-    lead_id: asText(input.payload.leadId) || null,
-    name: asText(input.payload.recipientName) || null,
-    email: to,
-    company: asText(input.payload.company) || null,
-    role: asText(input.payload.role) || null,
-    status: 'sent',
-    provider: providerLabel,
+  const reviewRequestedAt = new Date().toISOString();
+  const fallbackReviewKey = deterministicMessagingUuid([
+    'suplia-review-fallback',
+    input.organizationId,
+    input.userId,
+    to,
     subject,
-    message_id: messageId,
-    thread_id: threadId,
-    conversation_id: conversationId,
-    internet_message_id: internetMessageId,
-    thread_key: threadKey,
-    lifecycle_state: 'sent',
-    last_event_type: 'sent',
-    last_event_at: sentAt,
-    sent_at: sentAt,
-    created_at: sentAt,
-    data: {
-      source: 'suplia',
-      supliaConversationId: input.conversationId || null,
-      supliaActionId: input.actionId || null,
-    },
-  };
+    htmlBody,
+    textBody,
+    asText(input.payload.leadId),
+  ].join(':'));
+  const reviewSourceKey = asText(input.payload.idempotencyKey)
+    || asText(input.actionId)
+    || asText(input.conversationId)
+    || fallbackReviewKey;
+  const reviewIdempotencyKey = `suplia-review:${reviewSourceKey}:${to}`;
+  const reviewDraftIds = supliaEmailReviewDraftIds({
+    organizationId: input.organizationId,
+    userId: input.userId,
+    idempotencyKey: reviewIdempotencyKey,
+  });
+  let persistedDraft = await getCurrentMessagingDraftVersionV1({
+    organizationId: input.organizationId,
+    userId: input.userId,
+    draftId: reviewDraftIds.draftId,
+  });
 
-  const { error: contactedError } = await getSupabaseAdminClient().from('contacted_leads').insert(contactedPayload as any);
-  if (contactedError) throw contactedError;
-
-  await safeInsertEmailEvent(getSupabaseAdminClient(), {
-    organization_id: input.organizationId,
-    contacted_id: contactedId,
-    lead_id: asText(input.payload.leadId) || null,
-    provider: providerLabel,
-    event_type: 'sent',
-    event_source: 'suplia',
-    event_at: sentAt,
-    thread_key: threadKey,
-    message_id: messageId,
-    internet_message_id: internetMessageId,
-    meta: {
-      subject,
+  if (!persistedDraft) {
+    const reviewPrepared = prepareOutboundEmail({
+      html: htmlBody,
+      text: textBody || undefined,
+      unsubscribeUrl: generateUnsubscribeLink(to, input.userId, input.organizationId),
+    });
+    const reviewDraft = createSupliaEmailReviewDraft({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      idempotencyKey: reviewIdempotencyKey,
+      requestedAt: reviewRequestedAt,
+      leadRef: asText(input.payload.leadId) || to,
+      displayName: asText(input.payload.recipientName) || null,
       to,
-      supliaConversationId: input.conversationId || null,
-      supliaActionId: input.actionId || null,
-    },
+      subject,
+      text: reviewPrepared.text,
+      html: reviewPrepared.html,
+    });
+    persistedDraft = await ensureMessagingDraftV1(reviewDraft);
+  }
+  await ensureSupliaEmailReviewItem({
+    organizationId: input.organizationId,
+    requestedByUserId: input.userId,
+    senderUserId: input.userId,
+    draft: persistedDraft,
+    conversationId: input.conversationId,
+    actionId: input.actionId,
+    requestedProvider,
   });
 
   return {
-    contactedId,
-    provider: providerLabel,
-    to,
-    subject,
-    messageId,
-    threadId,
-    conversationId,
-    internetMessageId,
-    threadKey,
-    sentAt,
-  };
+    status: 'review_required' as const,
+    draftId: persistedDraft.draftId,
+    versionId: persistedDraft.versionId,
+    to: persistedDraft.recipient.email || to,
+    subject: persistedDraft.content.subject || subject,
+    provider: requestedProvider === 'google' ? 'gmail' : requestedProvider,
+    note: 'Correo preparado en el inbox de revision de SUPL.IA. Apruebalo ahi antes de enviarlo.',
+  } satisfies SupliaEmailReviewResult;
 }

@@ -1,0 +1,42 @@
+runConfig:
+  minInstances: 0
+  # The process-local rate limiter is deliberately kept on one instance.
+  maxInstances: 1
+  concurrency: 20
+  cpu: 1
+  memoryMiB: 512
+
+env:
+  - variable: APOLLO_API_KEY
+    secret: APOLLO_API_KEY
+    availability: [RUNTIME]
+
+  # Must have the same value as the root BFF's ENRICHMENT_SERVICE_SECRET.
+  # It is runtime-only so it cannot be emitted into a browser bundle.
+  - variable: ENRICHMENT_SERVICE_SECRET
+    secret: ENRICHMENT_SERVICE_SECRET
+    availability: [RUNTIME]
+
+  - variable: APOLLO_BACKEND_RATE_LIMIT_WINDOW_MS
+    value: "60000"
+    availability: [RUNTIME]
+
+  - variable: APOLLO_BACKEND_LEAD_SEARCH_MAX_REQUESTS
+    value: "20"
+    availability: [RUNTIME]
+
+  - variable: APOLLO_BACKEND_ENRICH_MAX_REQUESTS
+    value: "60"
+    availability: [RUNTIME]
+
+  - variable: APOLLO_BACKEND_MAX_REQUEST_BYTES
+    value: "65536"
+    availability: [RUNTIME]
+
+  - variable: APOLLO_BACKEND_MAX_SEARCH_RESULTS
+    value: "100"
+    availability: [RUNTIME]
+
+  - variable: APOLLO_BACKEND_PROVIDER_TIMEOUT_MS
+    value: "20000"
+    availability: [RUNTIME]

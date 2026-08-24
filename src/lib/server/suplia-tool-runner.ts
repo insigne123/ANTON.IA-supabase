@@ -4,7 +4,7 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { getSupliaPolicy } from '@/lib/server/suplia-policy';
 import { claimSupliaToolLease, releaseSupliaToolLease, type SupliaToolLease } from '@/lib/server/suplia-tool-leases';
 import { getSupliaTool } from '@/lib/server/suplia-tools';
-import { isSupliaRuntimeError, SupliaRuntimeError } from '@/lib/suplia/runtime';
+import { isSupliaTransientError, SupliaRuntimeError } from '@/lib/suplia/runtime';
 import { getSupliaToolLeasePolicy } from '@/lib/suplia/tool-limits';
 import type { SupliaToolRun } from '@/lib/suplia/types';
 
@@ -278,13 +278,15 @@ export async function runSupliaTool(input: ToolRunInput): Promise<{ toolRun: Sup
   } catch (error: any) {
     const finishedAt = new Date().toISOString();
     await releaseSupliaToolLease(lease);
-    const deferred = isSupliaRuntimeError(error, 'deferred');
+    const retryable = isSupliaTransientError(error);
+    const errorOutput = error?.metadata && typeof error.metadata === 'object' ? error.metadata : null;
     await admin
       .from('suplia_tool_runs')
       .update({
-        status: deferred ? 'queued' : 'failed',
+        status: retryable ? 'queued' : 'failed',
+        output_payload: errorOutput,
         error_message: error?.message || 'Error ejecutando tool',
-        finished_at: finishedAt,
+        finished_at: retryable ? null : finishedAt,
         duration_ms: Date.now() - startedAtMs,
       })
       .eq('id', toolRun.id);

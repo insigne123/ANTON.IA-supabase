@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
+import { handleAuthError, requireSupliaAuth } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { createSupliaJobFromMessage, loadSupliaJobsForConversation, runSupliaJob } from '@/lib/server/suplia-job-runner';
 
@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await requireAuth();
+    const auth = await requireSupliaAuth();
     const conversationId = req.nextUrl.searchParams.get('conversationId');
     if (!conversationId) return NextResponse.json({ error: 'conversationId requerido' }, { status: 400 });
 
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await requireAuth();
+    const auth = await requireSupliaAuth();
     const body = await req.json();
     const conversationId = String(body?.conversationId || '').trim();
     const message = String(body?.message || '').trim();

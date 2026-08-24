@@ -1,4 +1,5 @@
 import type { Lead, ContactedLead } from './types';
+import { getBrowserStorage } from './browser-storage';
 
 export const companyProfile = {
   name: 'Innovatech Solutions',
@@ -64,11 +65,14 @@ export const industryMapping: { [key: string]: string } = {
 };
 
 export function getCompanyProfile() {
-  if (typeof window !== 'undefined') {
-    const savedProfile = localStorage.getItem('leadflow-company-profile');
-    if (savedProfile) {
-      return JSON.parse(savedProfile);
-    }
+  const storage = getBrowserStorage();
+  if (storage) {
+    try {
+      const savedProfile = storage.getItem('leadflow-company-profile');
+      if (savedProfile) {
+        return JSON.parse(savedProfile);
+      }
+    } catch {}
   }
   return companyProfile;
 }

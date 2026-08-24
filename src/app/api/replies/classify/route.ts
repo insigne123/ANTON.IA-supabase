@@ -6,19 +6,19 @@ import { detectDeliveryFailure } from '@/lib/delivery-failure-detector';
 import { notificationService } from '@/lib/services/notification-service';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { maybeEscalateReplyReviewFromContactedId } from '@/lib/server/antonia-reply-escalation';
+import { shouldGloballySuppressReply } from '@/lib/contact-history-guard';
+import {
+  createStableInboundMessageId,
+  ingestInboundReply,
+  recordInboundUnsubscribe,
+} from '@/lib/server/inbound-reply-ingestion';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-function stripReplyTraceFields(updateData: any) {
-  const copy = { ...updateData };
-  delete copy.reply_snippet;
-  return copy;
-}
-
-function hasReplyTraceColumnError(error: any) {
-  const text = String(error?.message || error?.details || '').toLowerCase();
-  return text.includes('reply_snippet');
+function eventTimestamp(value: unknown) {
+  const time = Date.parse(String(value || ''));
+  return Number.isFinite(time) ? new Date(time).toISOString() : new Date().toISOString();
 }
 
 export async function POST(req: NextRequest) {
@@ -29,14 +29,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { contactedId, text, subject, from, html } = await req.json();
+    const {
+      contactedId,
+      text,
+      subject,
+      from,
+      html,
+      messageId,
+      internetMessageId,
+      threadKey,
+      threadId,
+      conversationId,
+      eventAt,
+    } = await req.json();
     if (!contactedId || (!text && !html)) {
       return NextResponse.json({ error: 'Missing contactedId or reply content' }, { status: 400 });
     }
 
     const { data: row } = await supabase
       .from('contacted_leads')
-      .select('id, user_id, email, organization_id, reply_intent')
+      .select('id, user_id, email, organization_id, reply_intent, provider, thread_key, thread_id, conversation_id')
       .eq('id', contactedId)
       .maybeSingle();
 
@@ -53,80 +65,70 @@ export async function POST(req: NextRequest) {
       html: String(html || ''),
     });
 
-    const nowIso = new Date().toISOString();
     const isDeliveryFailure = Boolean(deliveryFailure);
     const failure = deliveryFailure;
     let replyClassification: ReplyClassification | null = null;
     if (!isDeliveryFailure) {
       replyClassification = await classifyReply(rawText);
     }
-    const intent = isDeliveryFailure ? failure!.replyIntent : replyClassification!.intent;
+    const classification = isDeliveryFailure
+      ? {
+          intent: failure!.replyIntent,
+          sentiment: 'neutral',
+          confidence: 0.98,
+          summary: failure!.bounceReason,
+          reason: failure!.campaignFollowupReason,
+          shouldContinue: false,
+          evaluationStatus: failure!.evaluationStatus,
+          deliveryStatus: failure!.deliveryStatus,
+          bounceCategory: failure!.bounceCategory,
+          bounceReason: failure!.bounceReason,
+        }
+      : {
+          ...replyClassification!,
+          evaluationStatus: replyClassification!.intent === 'negative' || replyClassification!.intent === 'unsubscribe'
+            ? 'do_not_contact'
+            : replyClassification!.intent === 'meeting_request' || replyClassification!.intent === 'positive'
+              ? 'action_required'
+              : 'pending',
+        };
+    const intent = classification.intent;
+    const provider = String(row.provider || 'manual').trim() || 'manual';
+    const receivedAt = eventTimestamp(eventAt);
+    const resolvedMessageId = String(messageId || '').trim() || createStableInboundMessageId({
+      provider,
+      contactedId: row.id,
+      sourceIdentity: String(internetMessageId || '').trim() || null,
+      content: [threadKey || row.thread_key, threadId || row.thread_id, conversationId || row.conversation_id, rawText].join('\u001f'),
+    });
+    const ingestion = await ingestInboundReply(getSupabaseAdminClient(), {
+      contactedId: row.id,
+      recipientEmail: row.email || null,
+      provider,
+      messageId: resolvedMessageId,
+      internetMessageId: String(internetMessageId || '').trim() || null,
+      eventType: isDeliveryFailure ? 'bounce' : 'reply',
+      eventSource: 'reply_classify',
+      eventAt: receivedAt,
+      threadKey: String(threadKey || row.thread_key || '').trim() || null,
+      threadId: String(threadId || row.thread_id || '').trim() || null,
+      conversationId: String(conversationId || row.conversation_id || '').trim() || null,
+      subject: String(subject || '').trim() || null,
+      content: rawText,
+      preview: preview || null,
+      classification,
+    });
 
-    const evalStatus =
-      intent === 'negative' || intent === 'unsubscribe'
-        ? 'do_not_contact'
-        : intent === 'delivery_failure'
-          ? failure!.evaluationStatus
-        : (intent === 'meeting_request' || intent === 'positive')
-          ? 'action_required'
-          : 'pending';
-
-    const updateData: any = {
-      status: isDeliveryFailure ? 'failed' : undefined,
-      replied_at: isDeliveryFailure ? null : undefined,
-      reply_preview: preview || null,
-      reply_snippet: preview || null,
-      last_reply_text: String(text || '').slice(0, 4000) || null,
-      reply_intent: intent,
-      reply_sentiment: isDeliveryFailure ? 'neutral' : replyClassification!.sentiment,
-      reply_confidence: isDeliveryFailure ? 0.98 : replyClassification!.confidence,
-      reply_summary: isDeliveryFailure
-        ? failure!.bounceReason
-        : replyClassification!.summary || null,
-      campaign_followup_allowed: isDeliveryFailure ? failure!.campaignFollowupAllowed : replyClassification!.shouldContinue,
-      campaign_followup_reason: isDeliveryFailure
-        ? failure!.campaignFollowupReason
-        : replyClassification!.reason || null,
-      evaluation_status: evalStatus,
-      delivery_status: isDeliveryFailure ? failure!.deliveryStatus : 'replied',
-      bounced_at: isDeliveryFailure ? nowIso : null,
-      bounce_category: isDeliveryFailure ? failure!.bounceCategory : null,
-      bounce_reason: isDeliveryFailure ? failure!.bounceReason : null,
-      last_interaction_at: nowIso,
-      last_update_at: nowIso,
-    };
-
-    if (!isDeliveryFailure) {
-      updateData.status = 'replied';
-      updateData.replied_at = nowIso;
+    if (!ingestion.inserted) {
+      return NextResponse.json({ success: true, duplicate: true, classification: failure || replyClassification });
     }
 
-    let { error: updateError } = await supabase
-      .from('contacted_leads')
-      .update(updateData)
-      .eq('id', contactedId);
-
-    if (updateError && hasReplyTraceColumnError(updateError)) {
-      const { error: retryError } = await supabase
-        .from('contacted_leads')
-        .update(stripReplyTraceFields(updateData))
-        .eq('id', contactedId);
-      updateError = retryError;
-    }
-
-    if (updateError) {
-      return NextResponse.json({ error: updateError.message || 'Failed to update classification' }, { status: 500 });
-    }
-
-    if ((intent === 'unsubscribe' || intent === 'negative') && row.email) {
-      await supabase
-        .from('unsubscribed_emails')
-        .upsert({
-          email: row.email,
-          user_id: row.user_id || user.id,
-          organization_id: row.organization_id || null,
-          reason: `reply:${intent}`,
-        }, { onConflict: 'email,user_id,organization_id' } as any);
+    if (shouldGloballySuppressReply(replyClassification) && row.email) {
+      await recordInboundUnsubscribe(getSupabaseAdminClient(), {
+        contactedId: row.id,
+        recipientEmail: row.email,
+        eventKey: ingestion.eventKey,
+      });
     }
 
     if (!row.reply_intent && row.organization_id && (intent === 'meeting_request' || intent === 'positive')) {

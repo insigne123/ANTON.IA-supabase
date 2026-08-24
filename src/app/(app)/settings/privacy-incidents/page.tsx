@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,7 +46,7 @@ export default function PrivacyIncidentsPage() {
   const [dataTypes, setDataTypes] = useState('');
   const [resolutionNotes, setResolutionNotes] = useState('');
 
-  async function loadIncidents(nextStatus = statusFilter) {
+  const loadIncidents = useCallback(async (nextStatus = statusFilter) => {
     setLoading(true);
     setError('');
     try {
@@ -62,11 +62,11 @@ export default function PrivacyIncidentsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [statusFilter]);
 
   useEffect(() => {
     loadIncidents(statusFilter);
-  }, [statusFilter]);
+  }, [loadIncidents, statusFilter]);
 
   function resetForm() {
     setEditingId(null);

@@ -2,13 +2,15 @@
 // Almacén local para contactos enriquecidos provenientes de Oportunidades.
 
 import type { EnrichedOppLead } from './types';
+import { getBrowserStorage } from './browser-storage';
 
 const KEY = 'anton.saved.enriched.opps.v1';
 
 function load(): EnrichedOppLead[] {
-  if (typeof window === 'undefined') return [];
+  const storage = getBrowserStorage();
+  if (!storage) return [];
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = storage.getItem(KEY);
     const arr = raw ? JSON.parse(raw) : [];
     return Array.isArray(arr) ? arr : [];
   } catch {
@@ -17,9 +19,10 @@ function load(): EnrichedOppLead[] {
 }
 
 function save(list: EnrichedOppLead[]) {
-  if (typeof window === 'undefined') return;
+  const storage = getBrowserStorage();
+  if (!storage) return;
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(list));
+    storage.setItem(KEY, JSON.stringify(list));
   } catch (e) {
     console.warn('[saved-enriched-opps] save failed', (e as any)?.message);
   }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
-import { getDailyQuotaStatus, getUserScopedAntoniaQuotaStatus } from '@/lib/server/daily-quota-store';
+import { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
             .from('organization_members')
             .select('organization_id')
             .eq('user_id', user.id)
+            .order('created_at', { ascending: true })
             .limit(1);
 
         if (memberError) {
@@ -35,70 +36,19 @@ export async function GET(req: NextRequest) {
         }
 
         const organizationId = membership.organization_id;
-        const today = new Date().toISOString().split('T')[0];
-
-        // Get today's usage (Use maybeSingle to avoid 406/PGRST116)
-        const { data: usage, error: usageError } = await supabase
-            .from('antonia_daily_usage')
-            .select('*')
-            .eq('organization_id', organizationId)
-            .eq('date', today)
-            .maybeSingle();
-
-        if (usageError) {
-            console.error('[QuotaAPI] Usage Query Error:', usageError);
-            // Don't fail completely, assume 0 usage
-        }
-
-        // Get active mission limits
-        const { data: mission, error: missionError } = await supabase
-            .from('antonia_missions')
-            .select('daily_search_limit, daily_enrich_limit, daily_contact_limit, daily_investigate_limit')
-            .eq('organization_id', organizationId)
-            .eq('status', 'active')
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-        if (missionError) {
-            console.error('[QuotaAPI] Mission Query Error:', missionError);
-        }
-
-        const activeMission = mission as any;
-
-        // Default limits if no mission
-        const searchRunLimit = activeMission?.daily_search_limit || 3;
-        const enrichLimit = activeMission?.daily_enrich_limit || 10;
-        const contactLimit = activeMission?.daily_contact_limit || 3;
-
-        const enrichQuota = await getUserScopedAntoniaQuotaStatus({
-            userId: user.id,
-            organizationId,
-            resource: 'enrich',
-            limit: enrichLimit,
-            organizationCount: usage?.leads_enriched || 0,
-        });
-
-        const investigateQuota = await getUserScopedAntoniaQuotaStatus({
-            userId: user.id,
-            organizationId,
-            resource: 'investigate',
-            limit: activeMission?.daily_investigate_limit || 5,
-            organizationCount: usage?.leads_investigated || 0,
-        });
-
-        const contactQuota = await getDailyQuotaStatus({
-            userId: user.id,
-            organizationId,
-            resource: 'contact',
-            limit: activeMission?.daily_contact_limit || 3,
-        });
+        const limits = await getEffectiveDailyQuotaLimits({ userId: user.id, organizationId });
+        const [searchQuota, enrichQuota, investigateQuota, contactQuota] = await Promise.all([
+            getDailyQuotaStatus({ userId: user.id, organizationId, resource: 'search', limit: limits.leadSearch }),
+            getDailyQuotaStatus({ userId: user.id, organizationId, resource: 'enrich', limit: limits.enrich }),
+            getDailyQuotaStatus({ userId: user.id, organizationId, resource: 'research', limit: limits.research }),
+            getDailyQuotaStatus({ userId: user.id, organizationId, resource: 'contact', limit: limits.contact }),
+        ]);
 
         const quotaData = {
             searches: {
-                used: usage?.leads_searched || 0,
-                limit: searchRunLimit,
-                runs: usage?.search_runs || 0
+                used: searchQuota.count,
+                limit: searchQuota.limit,
+                runs: searchQuota.count,
             },
             enrichments: {
                 used: enrichQuota.count,
@@ -112,10 +62,15 @@ export async function GET(req: NextRequest) {
                 used: contactQuota.count,
                 limit: contactQuota.limit
             },
-            date: today
+            date: searchQuota.dayKey
         };
 
-        return NextResponse.json(quotaData);
+        return NextResponse.json(quotaData, {
+            headers: {
+                'Cache-Control': 'private, no-store, max-age=0',
+                Vary: 'Cookie',
+            },
+        });
 
     } catch (e: any) {
         console.error('[QuotaAPI] Unexpected Error:', e);

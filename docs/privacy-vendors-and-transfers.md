@@ -31,27 +31,32 @@ Como leer este documento:
 - Efecto: personalizacion, generacion de texto y apoyo al scoring o automatizacion.
 - Accion: definir cuando se envia PII, documentar limite de uso y revisar terminos vigentes.
 
-### 5. n8n
-- Tipo de datos: filtros de busqueda, payloads de leads, enrichment e investigacion segun workflow.
-- Efecto: orquesta flujos externos de busqueda e investigacion.
-- Accion: documentar hosting, logs, terceros conectados y responsable operativo.
+## Integraciones retiradas
 
-### 6. Apollo
+### n8n
+- Estado: retirado del runtime de produccion. No se debe configurar ni usar para nuevas operaciones.
+- Tipo de datos: filtros de busqueda, payloads de leads, enrichment e investigacion segun workflow.
+- Efecto historico: orquestaba flujos externos de busqueda e investigacion.
+- Accion: conservar el inventario y aplicar la retencion/eliminacion aprobada a datos y logs historicos.
+
+## Otros proveedores visibles en el codigo
+
+### 5. Apollo
 - Tipo de datos: datos profesionales de leads y enrichment comercial.
 - Efecto: busqueda y enriquecimiento de prospectos.
 - Accion: documentar origen de datos, terminos del proveedor y base de uso B2B.
 
-### 7. People Data Labs (PDL)
+### 6. People Data Labs (PDL)
 - Tipo de datos: enrichment y datos profesionales de personas.
 - Efecto: proveedor alternativo o complementario para leads.
 - Accion: documentar origen de datos, terminos y restricciones de uso.
 
-### 8. Apify
+### 7. Apify
 - Tipo de datos: resultados de scraping o automatizacion externa para busqueda o LinkedIn.
 - Efecto: flujo legacy de prospeccion e integracion externa.
 - Accion: revisar si sigue activo, donde corre y que datos registra.
 
-### 9. Anymail Finder
+### 8. Anymail Finder
 - Tipo de datos: datos de contacto y enriquecimiento de email.
 - Efecto: revelar o validar correos de leads.
 - Accion: documentar retencion y controles de uso.

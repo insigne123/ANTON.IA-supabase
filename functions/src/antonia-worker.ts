@@ -1,16 +1,14 @@
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v2';
 import { createClient } from '@supabase/supabase-js';
 
-// Environment variables from Firebase config
-const config = functions.config();
-const supabaseUrl = config.supabase?.url || process.env.SUPABASE_URL!;
-const supabaseServiceKey = config.supabase?.service_key || process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const appUrl = config.app?.url || process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
-const cronSecret = config.cron?.secret || process.env.CRON_SECRET || '';
+// This retired endpoint is deployed only as an IAM-private deprecation response.
+// The active scheduler entrypoint is antoniaTick in ../index.ts.
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '';
 const DEFAULT_LEAD_SEARCH_URL = "https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search";
 const LEAD_SEARCH_URL = process.env.ANTONIA_LEAD_SEARCH_URL || process.env.LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
-const internalApiSecret = config.internal?.api_secret || process.env.INTERNAL_API_SECRET || '';
-const workerIngressSecret = config.worker?.tick_secret || process.env.ANTONIA_FIREBASE_TICK_SECRET || '';
+const internalApiSecret = process.env.INTERNAL_API_SECRET || '';
 
 function withInternalApiSecret(headers: Record<string, string>): Record<string, string> {
     const secret = String(internalApiSecret || '').trim();
@@ -82,159 +80,18 @@ async function incrementUsage(supabase: any, organizationId: string, type: 'sear
 
 // Main worker function
 export const antoniaWorker = functions
-    .runWith({
+    .https.onRequest({
         timeoutSeconds: 540,
-        memory: '1GB'
-    })
-    .https.onRequest(async (req, res) => {
-        console.log('[ANTONIA Worker] Starting execution...');
-
-        try {
-            const providedBearer = String(req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
-            const providedSecret = String(req.get('x-cron-secret') || '').trim();
-            if (workerIngressSecret && providedBearer !== workerIngressSecret && providedSecret !== workerIngressSecret) {
-                res.status(401).json({ error: 'Unauthorized' });
-                return;
-            }
-
-            if (appUrl && cronSecret) {
-                const delegateUrl = `${String(appUrl).replace(/\/$/, '')}/api/cron/antonia?skipFirebaseForward=1&forceBackupProcessing=1`;
-                try {
-                    const delegated = await fetch(delegateUrl, {
-                        method: 'GET',
-                        headers: {
-                            'Authorization': `Bearer ${cronSecret}`,
-                            'x-cron-secret': cronSecret,
-                            'x-antonia-source': 'firebase-worker-delegate',
-                            'cache-control': 'no-store',
-                        },
-                    });
-                    const bodyText = await delegated.text().catch(() => '');
-                    if (delegated.ok) {
-                        res.status(200).send(bodyText || JSON.stringify({ delegated: true }));
-                        return;
-                    }
-                    console.error('[ANTONIA Worker] Delegate failed, using legacy fallback:', delegated.status, bodyText.slice(0, 300));
-                } catch (delegateError) {
-                    console.error('[ANTONIA Worker] Delegate request failed, using legacy fallback:', delegateError);
-                }
-            }
-
-            const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-            // Fetch pending tasks
-            const { data: tasks, error: tasksError } = await supabase
-                .from('antonia_tasks')
-                .select('*')
-                .eq('status', 'pending')
-                .limit(5);
-
-            if (tasksError) throw tasksError;
-
-            console.log(`[Worker] Found ${tasks?.length || 0} pending tasks`);
-
-            if (!tasks || tasks.length === 0) {
-                res.json({ processed: 0, message: 'No pending tasks' });
-                return;
-            }
-
-            const processed: string[] = [];
-
-            for (const task of tasks) {
-                try {
-                    console.log(`[Worker] Processing task ${task.id} (${task.type})`);
-
-                    // Mark as processing
-                    await supabase
-                        .from('antonia_tasks')
-                        .update({
-                            status: 'processing',
-                            processing_started_at: new Date().toISOString()
-                        })
-                        .eq('id', task.id);
-
-                    // Get config
-                    const { data: config } = await supabase
-                        .from('antonia_config')
-                        .select('*')
-                        .eq('organization_id', task.organization_id)
-                        .single();
-
-                    let result: any = {};
-
-                    // Process based on task type
-                    switch (task.type) {
-                        case 'SEARCH':
-                            result = await executeSearch(task, supabase, config);
-                            break;
-                        case 'ENRICH':
-                            result = await executeEnrichment(task, supabase, config);
-                            break;
-                        case 'CONTACT':
-                            result = await executeContact(task, supabase);
-                            break;
-                        case 'GENERATE_CAMPAIGN':
-                            result = await executeCampaignGeneration(task, supabase, config);
-                            break;
-                        default:
-                            throw new Error(`Unknown task type: ${task.type}`);
-                    }
-
-                    // Mark as completed
-                    await supabase
-                        .from('antonia_tasks')
-                        .update({
-                            status: 'completed',
-                            result: result,
-                            updated_at: new Date().toISOString()
-                        })
-                        .eq('id', task.id);
-
-                    // Log success
-                    await supabase.from('antonia_logs').insert({
-                        mission_id: task.mission_id,
-                        organization_id: task.organization_id,
-                        level: 'success',
-                        message: `Task ${task.type} completed.`,
-                        details: result,
-                        created_at: new Date().toISOString()
-                    });
-
-                    processed.push(task.id);
-                    console.log(`[Worker] Task ${task.id} completed successfully`);
-
-                } catch (error: any) {
-                    console.error(`[Worker] Task ${task.id} failed:`, error);
-
-                    await supabase
-                        .from('antonia_tasks')
-                        .update({
-                            status: 'failed',
-                            error_message: error.message,
-                            updated_at: new Date().toISOString()
-                        })
-                        .eq('id', task.id);
-
-                    await supabase.from('antonia_logs').insert({
-                        mission_id: task.mission_id,
-                        organization_id: task.organization_id,
-                        level: 'error',
-                        message: `Task ${task.type} failed: ${error.message}`,
-                        created_at: new Date().toISOString()
-                    });
-                }
-            }
-
-            res.json({
-                success: true,
-                processed: processed.length,
-                tasks: processed
-            });
-
-        } catch (error: any) {
-            console.error('[Worker] Fatal error:', error);
-            res.status(500).json({ error: error.message });
-        }
+        memory: '1GiB',
+        invoker: 'private',
+    } as any, async (_req, res) => {
+        res.set('Cache-Control', 'no-store');
+        res.set('Deprecation', 'true');
+        res.set('X-Scheduler-Owner', 'firebase-functions');
+        res.status(410).json({
+            code: 'LEGACY_ANTONIA_WORKER_DEPRECATED',
+            message: 'Use the Firebase scheduled function antoniaTick instead.',
+        });
     });
 
 // Task execution functions with complete chaining logic
@@ -397,7 +254,8 @@ async function executeEnrichment(task: any, supabase: any, config: any) {
                 email: l.email
             })),
             revealEmail: true,
-            revealPhone: isDeep
+            revealPhone: isDeep,
+            tableName: 'enriched_leads'
         })
     });
 

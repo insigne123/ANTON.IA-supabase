@@ -1,10 +1,16 @@
 // Defines the interface for communicating with the Anton.IA Chrome Extension
+import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+
+export type LinkedInSendResult = {
+    success: boolean;
+    error?: string;
+    status?: 'confirmed_dm';
+    linkedinThreadUrl?: string;
+};
 
 export const extensionService = {
     isInstalled: false,
     _listenerInitialized: false,
-    _lastReplyKey: null as null | string,
-    _lastReplyAtMs: 0,
     _requestSeq: 0,
 
     initListener() {
@@ -20,35 +26,22 @@ export const extensionService = {
             if (!event.data || typeof event.data !== 'object') return;
             if (event.data.type === 'ANTON_EXTENSION_READY') {
                 this.isInstalled = true;
-                console.log('[App] Extension detected via ANTON_EXTENSION_READY message!');
-            }
-
-            if (event.data.type === 'ANTON_REPLY_DETECTED') {
-                const payload = event.data.payload || {};
-                this.handleReplyDetected(payload).catch((err) => {
-                    console.error('[App] Failed to handle reply detected:', err);
-                });
             }
         });
 
         if (document.body.getAttribute('data-anton-extension-installed')) {
             this.isInstalled = true;
-            console.log('[App] Extension detected via data-anton-extension-installed attribute!');
         }
-
-        setTimeout(() => {
-            console.log('[App] Extension Service Status:', {
-                isInstalled: this.isInstalled,
-                hasDataAttribute: !!document.body.getAttribute('data-anton-extension-installed'),
-                currentUrl: window.location.href,
-            });
-        }, 1000);
     },
 
-    async sendLinkedinDM(profileUrl: string, message: string): Promise<{ success: boolean; error?: string }> {
+    async sendLinkedinDM(profileUrl: string, message: string): Promise<LinkedInSendResult> {
+        const normalizedProfileUrl = normalizeLinkedinProfileUrl(profileUrl);
+        if (!normalizedProfileUrl || !message.trim() || message.length > 500) {
+            return { success: false, error: 'Revisa el perfil y limita el mensaje a 500 caracteres.' };
+        }
+
         if (!this.isInstalled) {
-            console.error('[App] Cannot send LinkedIn DM: Extension not installed');
-            return { success: false, error: 'Extension not installed' };
+            return { success: false, error: 'No detectamos la extensión de Anton.IA en este navegador.' };
         }
 
         const requestId = `linkedin-${Date.now()}-${++this._requestSeq}`;
@@ -73,12 +66,10 @@ export const extensionService = {
                 settled = true;
                 window.clearTimeout(timeoutId);
                 window.removeEventListener('message', handler);
-                console.log('[App] Received extension response:', payload);
-
-                if (payload.success) {
-                    resolve({ success: true });
+                if (payload.success && payload.status === 'confirmed_dm') {
+                    resolve({ success: true, status: 'confirmed_dm', linkedinThreadUrl: payload.linkedinThreadUrl });
                 } else {
-                    resolve({ success: false, error: payload.error || 'Unknown extension error' });
+                    resolve({ success: false, error: payload.error || 'LinkedIn no confirmó el mensaje.' });
                 }
             };
 
@@ -97,48 +88,14 @@ export const extensionService = {
                 payload: {
                     action: 'SEND_DM',
                     requestId,
-                    profileUrl,
+                    profileUrl: normalizedProfileUrl,
                     message,
                 },
             }, appOrigin);
         });
     },
-
-    async handleReplyDetected(payload: { linkedinThreadUrl?: string; replyText?: string; profileUrl?: string }) {
-        const linkedinThreadUrl = payload?.linkedinThreadUrl || '';
-        const replyText = payload?.replyText || '';
-        const profileUrl = payload?.profileUrl || '';
-
-        const replyKey = `${linkedinThreadUrl}::${profileUrl}::${replyText}`;
-        const now = Date.now();
-        if (this._lastReplyKey === replyKey && now - this._lastReplyAtMs < 5000) {
-            return;
-        }
-        this._lastReplyKey = replyKey;
-        this._lastReplyAtMs = now;
-
-        try {
-            const res = await fetch('/api/scheduler/reply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ linkedinThreadUrl, replyText, profileUrl }),
-            });
-
-            if (!res.ok) {
-                const text = await res.text().catch(() => '');
-                console.error('[App] /api/scheduler/reply failed:', res.status, text);
-                return;
-            }
-
-            const data = await res.json().catch(() => ({}));
-            console.log('[App] Reply event saved:', data);
-        } catch (e) {
-            console.error('[App] Network error saving reply:', e);
-        }
-    },
 };
 
 if (typeof window !== 'undefined') {
     extensionService.initListener();
-    (window as any).extensionService = extensionService;
 }

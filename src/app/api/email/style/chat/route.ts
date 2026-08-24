@@ -3,39 +3,32 @@ import { qualityChecks } from '@/lib/email-quality';
 import type { ChatMessage, StyleProfile } from '@/lib/types';
 import { defaultStyle } from '@/lib/style-profiles-storage';
 import { updateStyleProfile } from '@/ai/flows/update-style-profile';
+import { requestAuthErrorResponse, requireSessionRequestAuth } from '@/lib/server/request-auth';
+import { getTemplateById } from '@/lib/email-studio/storage';
+import { buildTemplateContext, renderTemplateString } from '@/lib/email-studio/template-engine';
 
 // Render: llama a tu endpoint existente de render (servidor a servidor)
-async function renderEmail(style: StyleProfile, mode: 'leads' | 'opportunities', sampleData: any) {
+function renderEmail(style: StyleProfile, mode: 'leads' | 'opportunities', sampleData: any) {
   const templateId = mode === 'opportunities' ? 'seed-opps-1' : 'seed-leads-1';
-  const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/email/render`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      templateId,
-      mode,
-      data: sampleData,
-      tone: style.tone,
-      length: style.length,
-      aiIntensity: 'none',
-    }),
-    cache: 'no-store',
-  }).catch(() => null);
+  const template = getTemplateById(templateId);
+  if (template) {
+    const context = buildTemplateContext(sampleData);
+    return {
+      subject: renderTemplateString(template.subject, context).text,
+      body: renderTemplateString(template.body, context).text,
+    };
+  }
 
-  if (!res || !res.ok) {
-    // fallback muy simple si /api/email/render no existe
-    const subj = `[${style.tone}] {{company.name}} · ${style.cta?.label || 'Conversación breve'}`;
-    const body =
-      `Hola {{lead.firstName}},
+  const subj = `[${style.tone}] {{company.name}} · ${style.cta?.label || 'Conversación breve'}`;
+  const body =
+    `Hola {{lead.firstName}},
 
 Soy de Innovatech. Vi {{company.name}} y creo que podemos aportar valor con X.
 ¿${style.cta?.duration || '15'} min esta semana?
 
 Saludos,
 —`;
-    return { subject: subj, body };
-  }
-  const j = await res.json();
-  return { subject: j.subject || '', body: j.body || '' };
+  return { subject: subj, body };
 }
 
 /**
@@ -53,6 +46,7 @@ function loadSampleFromClient(data: any) {
 
 export async function POST(req: Request) {
   try {
+    await requireSessionRequestAuth();
     const { messages, styleProfile, mode = 'leads', sampleData } = await req.json();
 
     const base: StyleProfile = styleProfile || { ...defaultStyle, scope: mode };
@@ -79,7 +73,7 @@ export async function POST(req: Request) {
 
     // (2) Render seguro
     const sample = loadSampleFromClient(sampleData);
-    const preview = await renderEmail(updated, mode, sample);
+    const preview = renderEmail(updated, mode, sample);
 
     // (3) Calidad
     const qc = qualityChecks(preview.subject, preview.body, updated);
@@ -92,6 +86,8 @@ export async function POST(req: Request) {
       warnings: qc.warnings,
     });
   } catch (e: any) {
+    const authResponse = requestAuthErrorResponse(e);
+    if (authResponse) return authResponse;
     console.error('Error in chat style API:', e);
     return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 });
   }

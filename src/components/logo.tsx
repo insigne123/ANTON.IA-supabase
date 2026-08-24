@@ -31,7 +31,7 @@ export default function Logo({ size = "md", showWordmark = true, className }: Lo
     <Link
       href="/"
       className={cn("app-logo flex items-center gap-3 shrink-0 select-none", className)}
-      aria-label="Ir al inicio"
+      aria-label="ANTON.IA: ir al inicio"
     >
       <div
         className={cn(

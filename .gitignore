@@ -7,13 +7,18 @@ service-account.json
 .firebase/
 functions/.webpack/
 .next/
+.next-build/
+.playwright-mcp/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
 # Artefactos
 *.log
+*.resolved
 .DS_Store
 node_modules
+firepit-log.txt
+scripts/*report.json
 
 # Local backup artifacts
 .deploy_safe/
@@ -32,3 +37,8 @@ supabase/.temp/
 tsc_output.txt
 typecheck_log.txt
 widget_error.txt
+session-ses_*.md
+/research-*.png
+/suplia-claude-*.png
+/suplia-review-*.png
+/public/downloads/antonia-linkedin-extension.zip

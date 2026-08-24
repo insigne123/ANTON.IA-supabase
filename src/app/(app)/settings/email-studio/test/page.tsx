@@ -15,8 +15,6 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import type { ContactedLead } from '@/lib/types';
-import { v4 as uuid } from 'uuid';
-import { getCompanyProfile } from '@/lib/data';
 
 export default function EmailTestPage() {
     const { toast } = useToast();
@@ -72,116 +70,16 @@ export default function EmailTestPage() {
     }
 
     async function handleSend() {
-        if (!to) return toast({ variant: 'destructive', title: 'Falta destinatario' });
-        if (!from) return toast({ variant: 'destructive', title: 'Falta remitente', description: 'No se pudo detectar tu email.' });
-
-        setLoading(true);
-        setDebugResult(null);
-
-        try {
-            const endpoint = useGmail ? '/api/gmail/send' : '/api/providers/send';
-            const trackingId = uuid();
-
-
-            // Auto-convert text to HTML
-            let finalHtmlBody = body
-                // Escape HTML basic chars to avoid XSS if we were strict, but here we want to allow some? 
-                // Let's assume user input is text. Escape chars first.
-                .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;").replace(/'/g, "&#039;")
-                // Convert newlines
-                .replace(/\n/g, '<br/>')
-                // Convert URLs to detected links
-                .replace(/(https?:\/\/[^\s]+)/g, '<a href="$1">$1</a>');
-
-            // 1. Rewrite Links if enabled
-            if (useLinkTracking) {
-                finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
-            }
-
-            // 3. Inject Pixel (Visible but 1x1)
-            if (usePixel) {
-                const origin = typeof window !== 'undefined' ? window.location.origin : '';
-                let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-
-                // OPTIMIZATION: Redirect to logo if available
-                const profile = getCompanyProfile();
-                if (profile?.logo && profile.logo.startsWith('http')) {
-                    pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
-                }
-
-                // FIX: Removed display:none to prevent blocking by email clients
-                const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
-                finalHtmlBody += `\n<br>${trackingPixel}`;
-            }
-
-            const payload: any = {
-                to: to,
-                from,
-                subject,
-                html: finalHtmlBody,
-                provider: useGmail ? 'google' : 'outlook',
-                htmlBody: finalHtmlBody,
-                organizationId: undefined,
-                requestReceipts: useReadReceipt
-            };
-
-            const res = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) throw new Error(data.error || 'Error enviando correo');
-
-            toast({ title: 'Correo enviado', description: 'Revisa tu bandeja.' });
-
-            // Persist for tracking
-            await contactedLeadsStorage.add({
-                id: trackingId, // IMPORTANT: Use trackingId
-                leadId: 'test-' + Date.now(),
-                name: 'Usuario Test',
-                email: to,
-                company: 'Test Corp',
-                subject,
-                sentAt: new Date().toISOString(),
-                status: 'sent',
-                provider: useGmail ? 'gmail' : 'outlook',
-                messageId: data.id || data.messageId, // Handle different responses
-                threadId: data.threadId,
-                clickCount: 0,
-                readReceiptMessageId: useReadReceipt ? (data.id || data.messageId) : undefined, // Potential match
-                role: 'Tester',
-                industry: 'Test',
-                city: 'Test City',
-                country: 'Test Country'
-            } as any);
-
-            setDebugResult({
-                success: true,
-                provider: useGmail ? 'Gmail API' : 'Outlook/Provider',
-                sentTo: to,
-                trackingId,
-                features: { pixel: usePixel, links: useLinkTracking, receipts: useReadReceipt }
-            });
-
-            refreshLogs();
-
-        } catch (e: any) {
-            toast({ variant: 'destructive', title: 'Error', description: e.message });
-            setDebugResult({ success: false, error: e.message });
-        } finally {
-            setLoading(false);
-        }
+        const message = 'Los envíos de prueba sin un borrador aprobado ya no están disponibles. Usa Investigación y Revisar correo para realizar un envío manual.';
+        toast({ title: 'Revisión requerida', description: message });
+        setDebugResult({ success: false, error: message });
     }
 
     return (
         <div className="space-y-6 pb-20">
             <PageHeader
                 title="Email Tester & Tracking Inspector"
-                description="Envía correos reales y monitorea en vivo si el pixel y los links funcionan."
+                description="Consulta eventos recientes. Los envíos se realizan solo desde un borrador aprobado."
             />
 
             <div className="grid gap-6 lg:grid-cols-2">
@@ -189,7 +87,7 @@ export default function EmailTestPage() {
                 <Card className="h-fit">
                     <CardHeader>
                         <CardTitle>Componer Prueba</CardTitle>
-                        <CardDescription>Envía un correo real.</CardDescription>
+                            <CardDescription>Prepara una referencia de prueba sin enviar contenido directamente.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <div className="grid grid-cols-2 gap-4">
@@ -239,9 +137,9 @@ export default function EmailTestPage() {
                             <Label htmlFor="use-gmail">Enviar vía Gmail API</Label>
                         </div>
 
-                        <Button onClick={handleSend} disabled={loading} className="w-full">
+                        <Button onClick={handleSend} disabled={loading} variant="outline" className="w-full">
                             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                            Enviar Prueba y Registrar
+                            Revisión requerida para enviar
                         </Button>
 
                         {/* Debug Result Mini View */}

@@ -1,16 +1,18 @@
 // src/lib/saved-enriched-leads-storage.ts
 import type { EnrichedLead } from './types';
 import { v4 as uuidv4 } from 'uuid';
+import { getBrowserStorage } from './browser-storage';
 
 const KEY = 'leadflow-enriched-leads';
 
 function isBrowser(): boolean {
-  return typeof window !== 'undefined' && typeof localStorage !== 'undefined';
+  return getBrowserStorage() !== null;
 }
 
 function parseAll(): any[] {
-  if (!isBrowser()) return [];
-  try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { return []; }
+  const storage = getBrowserStorage();
+  if (!storage) return [];
+  try { return JSON.parse(storage.getItem(KEY) || '[]'); } catch { return []; }
 }
 
 function sanitize(items: any[]): EnrichedLead[] {
@@ -41,15 +43,17 @@ export function getEnrichedLeads(): EnrichedLead[] {
   const parsed = parseAll();
   const sanitized = sanitize(parsed);
   // if changed, re-save (local migration)
-  if (isBrowser() && JSON.stringify(parsed) !== JSON.stringify(sanitized)) {
-    localStorage.setItem(KEY, JSON.stringify(sanitized));
+  const storage = getBrowserStorage();
+  if (storage && JSON.stringify(parsed) !== JSON.stringify(sanitized)) {
+    storage.setItem(KEY, JSON.stringify(sanitized));
   }
   return sanitized;
 }
 
 export function setEnrichedLeads(items: EnrichedLead[]) {
-  if (!isBrowser()) return;
-  localStorage.setItem(KEY, JSON.stringify(items));
+  const storage = getBrowserStorage();
+  if (!storage) return;
+  storage.setItem(KEY, JSON.stringify(items));
 }
 
 export function addEnrichedLeads(items: EnrichedLead[]) {

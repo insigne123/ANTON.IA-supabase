@@ -8,8 +8,8 @@ import {
 } from '@azure/msal-browser';
 
 const clientId = (process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID || '').trim();
-// Para organizaciones (AAD) por defecto. Si el cliente te da su tenant, usa el GUID aquí.
-const tenantId = process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'organizations';
+// Multi-tenant por defecto. Si el cliente te da su tenant, usa el GUID aquí.
+const tenantId = process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'common';
 
 // 1) Calcula el redirect en runtime del navegador
 function getRedirectUri(isSsr = false): string {
@@ -76,7 +76,19 @@ class MicrosoftAuthService {
   private async ensureInit() {
     if (!clientId) return;
     const app = this.getApp();
-    if (!this.initPromise) this.initPromise = app.initialize();
+    if (!this.initPromise) {
+      this.initPromise = (async () => {
+        await app.initialize();
+        try {
+          const redirectResult = await app.handleRedirectPromise();
+          if (redirectResult?.account) {
+            this.account = redirectResult.account;
+          }
+        } catch (error) {
+          console.error('[MSAL] Error procesando redirect', error);
+        }
+      })();
+    }
     await this.initPromise;
   }
 

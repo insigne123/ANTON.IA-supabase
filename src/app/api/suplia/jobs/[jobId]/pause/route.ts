@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
+import { handleAuthError, requireSupliaAuth } from '@/lib/server/auth-utils';
 import { pauseSupliaJob } from '@/lib/server/suplia-job-runner';
 import { getSupliaState } from '@/lib/server/suplia-orchestrator';
 
@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   try {
-    const auth = await requireAuth();
+    const auth = await requireSupliaAuth();
     const { jobId } = await params;
     const job = await pauseSupliaJob(auth, jobId);
     if (!job) return NextResponse.json({ error: 'Job no encontrado o no pausable' }, { status: 404 });

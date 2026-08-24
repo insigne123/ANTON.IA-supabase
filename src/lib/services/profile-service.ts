@@ -15,7 +15,8 @@ export type Profile = {
 
 export const profileService = {
     async getProfile(userId?: string): Promise<Profile | null> {
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
         const targetId = userId || user?.id;
 
         if (!targetId) return null;
@@ -24,11 +25,10 @@ export const profileService = {
             .from('profiles')
             .select('*')
             .eq('id', targetId)
-            .single();
+            .maybeSingle();
 
         if (error) {
-            // console.error('Error fetching profile:', error);
-            return null;
+            throw error;
         }
 
         return data;
@@ -38,13 +38,14 @@ export const profileService = {
         return this.getProfile();
     },
 
-    async updateProfile(updates: Partial<Profile>): Promise<Profile | null> {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return null;
+    async updateProfile(updates: Partial<Profile>): Promise<Profile> {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        if (error) throw error;
+        if (!user) throw new Error('No authenticated user is available to update the profile.');
         return this.updateProfileById(user.id, updates);
     },
 
-    async updateProfileById(userId: string, updates: Partial<Profile>): Promise<Profile | null> {
+    async updateProfileById(userId: string, updates: Partial<Profile>): Promise<Profile> {
         const { data, error } = await supabase
             .from('profiles')
             .update(updates)
@@ -54,8 +55,10 @@ export const profileService = {
 
         if (error) {
             console.error('Error updating profile:', error);
-            return null;
+            throw error;
         }
+
+        if (!data) throw new Error('The profile update did not return an updated row.');
 
         return data;
     },
@@ -66,8 +69,9 @@ export const profileService = {
     },
 
     async setSignatures(signatures: any): Promise<void> {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        const { data: { user }, error } = await supabase.auth.getUser();
+        if (error) throw error;
+        if (!user) throw new Error('No authenticated user is available to update signatures.');
         await this.updateProfileById(user.id, { signatures });
     }
 };

@@ -26,7 +26,7 @@ export async function refreshMicrosoftToken(refreshToken: string, clientId: stri
             client_secret: clientSecret,
             refresh_token: refreshToken,
             grant_type: 'refresh_token',
-            scope: 'offline_access User.Read Mail.Send',
+            scope: 'offline_access User.Read Mail.Send Mail.Read',
         }),
     });
     if (!res.ok) {

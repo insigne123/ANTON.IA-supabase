@@ -1,31 +1,59 @@
 import { EnrichedLead, LeadResearchReport } from '@/lib/types';
 import { getFirstNameSafe } from '@/lib/template';
 
+export type LinkedInDraft = {
+  message: string;
+  personalization: string;
+  isPersonalized: boolean;
+};
+
+function toShortSentence(value?: string | null, limit = 180) {
+  const cleaned = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  const firstSentence = cleaned.match(new RegExp(`^(.{1,${limit}}?[.!?])(?:\\s|$)`))?.[1] || cleaned;
+  return firstSentence.length > limit ? `${firstSentence.slice(0, limit - 1).trim()}...` : firstSentence;
+}
+
+function lowerCaseFirst(value: string) {
+  return value ? `${value.charAt(0).toLowerCase()}${value.slice(1)}` : value;
+}
+
+function limitMessage(value: string, limit = 500) {
+  return value.length > limit ? `${value.slice(0, limit - 1).trim()}...` : value;
+}
+
+export function buildLinkedinDraft(lead: EnrichedLead, report?: LeadResearchReport | null): LinkedInDraft {
+  const firstName = getFirstNameSafe(lead.fullName) || 'hola';
+  const company = lead.companyName || 'tu equipo';
+  const role = lead.title ? ` como ${lead.title}` : '';
+  const leadContext = report?.cross?.leadContext;
+  const socialSignal = toShortSentence(leadContext?.iceBreaker || leadContext?.recentActivitySummary);
+  const value = toShortSentence(report?.cross?.valueProps?.[0], 140);
+
+  if (socialSignal) {
+    const message = [
+      `Hola ${firstName}, me llamó la atención ${lowerCaseFirst(socialSignal)}.`,
+      value
+        ? `Creo que puede ser relevante conversar sobre ${lowerCaseFirst(value)}.`
+        : `Vi tu trabajo${role} en ${company} y quería compartirte una idea breve.`,
+      '¿Te parece si conectamos?',
+    ].join(' ');
+
+    return {
+      message: limitMessage(message),
+      personalization: leadContext?.iceBreaker ? 'Se basa en un hallazgo específico del perfil.' : 'Se basa en actividad reciente del perfil.',
+      isPersonalized: true,
+    };
+  }
+
+  const message = `Hola ${firstName}, vi tu trabajo${role} en ${company}. Me gustaría compartirte una idea breve que podría ser útil para tu equipo. ¿Te parece si conectamos?`;
+  return {
+    message: limitMessage(message),
+    personalization: 'No encontramos una señal personal verificable; revisa el texto antes de enviarlo.',
+    isPersonalized: false,
+  };
+}
+
 export function generateLinkedinDraft(lead: EnrichedLead, report?: LeadResearchReport | null): string {
-    const firstName = getFirstNameSafe(lead.fullName);
-    const company = lead.companyName || 'su empresa';
-
-    // 1. Si no hay reporte, fallback genérico
-    if (!report || !report.cross) {
-        return `Hola ${firstName}, vi tu perfil y me pareció interesante lo que hacen en ${company}. Me gustaría conectar para compartir experiencias. Saludos.`;
-    }
-
-    // 2. Si hay reporte, intentamos usar 'Pains' o 'ValueProps' o 'UseCases'
-    const cross = report.cross;
-    const pain = cross.pains?.[0]; // Tomamos el primer pain point si existe
-    const valueProp = cross.valueProps?.[0]; // Tomamos el primer value prop
-
-    if (pain) {
-        // "Vi que empresas como [Company] suelen tener problemas con [Pain]..."
-        // Hard to conjugate 'Pain' grammatically, so we keep it somewhat generic or quote it.
-        // "Me gustaría conectar, estamos ayudando a empresas a resolver: ${pain}..."
-        return `Hola ${firstName}, vi tu perfil en ${company}. Estamos viendo que en el sector es un reto "${pain.toLowerCase()}". Me gustaría conectar y contarte cómo lo abordamos. Saludos.`;
-    }
-
-    if (valueProp) {
-        return `Hola ${firstName}, vi tu trabajo en ${company}. Ayudamos a equipos como el tuyo a ${valueProp.toLowerCase()}. Me gustaría conectar para ver si hay sinergias. Saludos.`;
-    }
-
-    // Fallback con Contexto del reporte (Overview muy largo, mejor no usarlo en DM)
-    return `Hola ${firstName}, leí sobre ${company} y me pareció super interesante su enfoque. Me gustaría conectar. Saludos.`;
+  return buildLinkedinDraft(lead, report).message;
 }

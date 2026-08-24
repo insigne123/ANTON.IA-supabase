@@ -10,6 +10,11 @@ export type PrivacySubjectLookupData = {
     contactedLeads: number;
     unsubscribedEntries: number;
     researchReports: number;
+    researchSnapshots: number;
+    researchJobs: number;
+    messagingDrafts: number;
+    messagingDraftVersions: number;
+    outboundDispatches: number;
     emailEvents: number;
     leadResponses: number;
   };
@@ -20,8 +25,26 @@ export type PrivacySubjectLookupData = {
     contactedLeads: Array<{ id: string; user_id?: string | null; organization_id?: string | null; lead_id?: string | null; name: string | null; role: string | null; company: string | null; email: string; status: string | null; sent_at: string | null; replied_at: string | null; evaluation_status?: string | null; campaign_followup_allowed?: boolean | null; campaign_followup_reason?: string | null }>;
     unsubscribedEntries: Array<{ id: string; email: string; user_id?: string | null; organization_id?: string | null; reason: string | null; created_at: string | null }>;
     researchReports: Array<{ id: string; email: string | null; user_id?: string | null; organization_id?: string | null; lead_ref?: string | null; company_name: string | null; company_domain: string | null; generated_at: string | null; updated_at: string | null }>;
+    researchSnapshots: Array<{ id: string; organization_id?: string | null; user_id: string; lead_ref: string; source: string; payload: any; captured_at: string; created_at: string }>;
+    researchJobs: Array<{ id: string; organization_id?: string | null; user_id: string; provider_report_id: string; lead_ref: string; email: string | null; status: string; request_payload: any; result_payload: any; created_at: string; completed_at: string | null }>;
+    messagingDrafts: Array<{ id: string; organization_id: string; user_id: string; research_snapshot_id: string | null; channel: string; lifecycle: string; current_revision: number; created_at: string; updated_at: string }>;
+    messagingDraftVersions: Array<{ id: string; draft_id: string; organization_id: string; user_id: string; research_snapshot_id: string | null; revision: number; recipient: any; content: any; approval: any; preflight: any; payload: any; created_at: string }>;
+    outboundDispatches: Array<{ id: string; organization_id: string; user_id: string; draft_id: string; version_id: string; channel: string; provider: string; status: string; metadata: any; provider_message_id: string | null; provider_response: any; error_code: string | null; error_message: string | null; requested_at: string; completed_at: string | null }>;
     emailEvents: Array<{ id: string; contacted_id: string | null; event_type: string; provider: string | null; event_at: string; meta: any }>;
     leadResponses: Array<{ id: string; lead_id: string | null; contacted_id?: string | null; type: string; content: string | null; created_at: string }>;
+  };
+  privacyReview: {
+    required: boolean;
+    reason: string | null;
+    omittedCounts: {
+      researchSnapshots: number;
+      legacyResearchSnapshots: number;
+      mismatchedResearchSnapshots: number;
+      researchJobs: number;
+      messagingDrafts: number;
+      messagingDraftVersions: number;
+      outboundDispatches: number;
+    };
   };
   warnings: string[];
 };
@@ -30,82 +53,101 @@ export function normalizePrivacyEmail(value: string) {
   return String(value || '').trim().toLowerCase();
 }
 
+function rows(value: unknown): any[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function exactIlikePattern(value: string) {
+  return value.replace(/[\\%_*]/g, '\\$&');
+}
+
 export async function lookupPrivacySubjectData(rawEmail: string): Promise<PrivacySubjectLookupData> {
   const email = normalizePrivacyEmail(rawEmail);
   const admin = getSupabaseAdminClient();
+  const { data, error } = await admin.rpc('lookup_research_messaging_subject_v1', { p_email: email });
+  if (error) throw error;
 
-  const [profiles, leads, enriched, contacted, unsubscribed, researchReports] = await Promise.all([
-    admin.from('profiles').select('id, email, full_name, updated_at').ilike('email', email).limit(5),
-    admin.from('leads').select('id, user_id, organization_id, name, title, company, email, status, created_at').ilike('email', email).order('created_at', { ascending: false }).limit(50),
-    admin.from('enriched_leads').select('id, user_id, organization_id, full_name, title, company_name, email, created_at, updated_at').ilike('email', email).order('updated_at', { ascending: false }).limit(50),
-    admin.from('contacted_leads').select('id, user_id, organization_id, lead_id, name, role, company, email, status, sent_at, replied_at, evaluation_status, campaign_followup_allowed, campaign_followup_reason').ilike('email', email).order('sent_at', { ascending: false }).limit(100),
-    admin.from('unsubscribed_emails').select('id, email, user_id, organization_id, reason, created_at').ilike('email', email).order('created_at', { ascending: false }).limit(50),
-    admin.from('lead_research_reports').select('id, email, user_id, organization_id, lead_ref, company_name, company_domain, generated_at, updated_at').ilike('email', email).order('updated_at', { ascending: false }).limit(50),
-  ]);
-
-  const firstError = [profiles, leads, enriched, contacted, unsubscribed, researchReports].find((result) => result.error)?.error;
-  if (firstError) {
-    throw firstError;
-  }
-
-  const leadIds = Array.from(new Set([
-    ...(leads.data || []).map((row: any) => String(row.id || '').trim()),
-    ...(contacted.data || []).flatMap((row: any) => [String(row.lead_id || '').trim(), String(row.id || '').trim()]),
-  ].filter(Boolean)));
-
-  const contactedIds = Array.from(new Set((contacted.data || []).map((row: any) => String(row.id || '').trim()).filter(Boolean)));
-
-  const [emailEvents, leadResponses] = await Promise.all([
-    contactedIds.length > 0
-      ? admin.from('email_events').select('id, contacted_id, event_type, provider, event_at, meta').in('contacted_id', contactedIds).order('event_at', { ascending: false }).limit(200)
-      : Promise.resolve({ data: [], error: null } as any),
-    leadIds.length > 0 && contactedIds.length > 0
-      ? admin.from('lead_responses').select('id, lead_id, contacted_id, type, content, created_at').or(`lead_id.in.(${leadIds.join(',')}),contacted_id.in.(${contactedIds.join(',')})`).order('created_at', { ascending: false }).limit(200)
-      : leadIds.length > 0
-        ? admin.from('lead_responses').select('id, lead_id, contacted_id, type, content, created_at').in('lead_id', leadIds).order('created_at', { ascending: false }).limit(200)
-        : contactedIds.length > 0
-          ? admin.from('lead_responses').select('id, lead_id, contacted_id, type, content, created_at').in('contacted_id', contactedIds).order('created_at', { ascending: false }).limit(200)
-      : Promise.resolve({ data: [], error: null } as any),
-  ]);
-
-  const secondError = [emailEvents, leadResponses].find((result: any) => result?.error)?.error;
-  if (secondError) {
-    throw secondError;
-  }
-
+  const result = data && typeof data === 'object' ? data as Record<string, unknown> : {};
+  const profiles = rows(result.profiles);
+  const leads = rows(result.leads);
+  const enrichedLeads = rows(result.enrichedLeads);
+  const contactedLeads = rows(result.contactedLeads);
+  const unsubscribedEntries = rows(result.unsubscribedEntries);
+  const researchReports = rows(result.researchReports);
+  const researchSnapshots = rows(result.researchSnapshots);
+  const researchJobs = rows(result.researchJobs);
+  const messagingDrafts = rows(result.messagingDrafts);
+  const messagingDraftVersions = rows(result.messagingDraftVersions);
+  const outboundDispatches = rows(result.outboundDispatches);
+  const emailEvents = rows(result.emailEvents);
+  const leadResponses = rows(result.leadResponses);
+  const privacyReviewInput = result.privacyReview && typeof result.privacyReview === 'object'
+    ? result.privacyReview as Record<string, unknown>
+    : {};
+  const omittedCountsInput = privacyReviewInput.omittedCounts && typeof privacyReviewInput.omittedCounts === 'object'
+    ? privacyReviewInput.omittedCounts as Record<string, unknown>
+    : {};
+  const privacyReview = {
+    required: privacyReviewInput.required === true,
+    reason: typeof privacyReviewInput.reason === 'string' ? privacyReviewInput.reason : null,
+    omittedCounts: {
+      researchSnapshots: Number(omittedCountsInput.researchSnapshots || 0),
+      legacyResearchSnapshots: Number(omittedCountsInput.legacyResearchSnapshots || 0),
+      mismatchedResearchSnapshots: Number(omittedCountsInput.mismatchedResearchSnapshots || 0),
+      researchJobs: Number(omittedCountsInput.researchJobs || 0),
+      messagingDrafts: Number(omittedCountsInput.messagingDrafts || 0),
+      messagingDraftVersions: Number(omittedCountsInput.messagingDraftVersions || 0),
+      outboundDispatches: Number(omittedCountsInput.outboundDispatches || 0),
+    },
+  };
   const warnings: string[] = [];
-  if ((profiles.data || []).length > 0) {
+  if (profiles.length > 0) {
     warnings.push('El correo coincide con un perfil de usuario de la plataforma. La eliminacion completa de cuenta requiere una decision operativa adicional.');
+  }
+  if (privacyReview.required) {
+    warnings.push('Se omitieron registros enlazados cuyo correo no coincide exactamente con el sujeto. Requieren revision manual y no forman parte de esta exportacion.');
   }
 
   return {
     email,
     summary: {
-      profiles: profiles.data?.length || 0,
-      leads: leads.data?.length || 0,
-      enrichedLeads: enriched.data?.length || 0,
-      contactedLeads: contacted.data?.length || 0,
-      unsubscribedEntries: unsubscribed.data?.length || 0,
-      researchReports: researchReports.data?.length || 0,
-      emailEvents: emailEvents.data?.length || 0,
-      leadResponses: leadResponses.data?.length || 0,
+      profiles: profiles.length,
+      leads: leads.length,
+      enrichedLeads: enrichedLeads.length,
+      contactedLeads: contactedLeads.length,
+      unsubscribedEntries: unsubscribedEntries.length,
+      researchReports: researchReports.length,
+      researchSnapshots: researchSnapshots.length,
+      researchJobs: researchJobs.length,
+      messagingDrafts: messagingDrafts.length,
+      messagingDraftVersions: messagingDraftVersions.length,
+      outboundDispatches: outboundDispatches.length,
+      emailEvents: emailEvents.length,
+      leadResponses: leadResponses.length,
     },
     records: {
-      profiles: profiles.data || [],
-      leads: leads.data || [],
-      enrichedLeads: enriched.data || [],
-      contactedLeads: contacted.data || [],
-      unsubscribedEntries: unsubscribed.data || [],
-      researchReports: researchReports.data || [],
-      emailEvents: emailEvents.data || [],
-      leadResponses: leadResponses.data || [],
+      profiles,
+      leads,
+      enrichedLeads,
+      contactedLeads,
+      unsubscribedEntries,
+      researchReports,
+      researchSnapshots,
+      researchJobs,
+      messagingDrafts,
+      messagingDraftVersions,
+      outboundDispatches,
+      emailEvents,
+      leadResponses,
     },
+    privacyReview,
     warnings,
   };
 }
 
 export async function isEmailSuppressedForScope(rawEmail: string, scope: { userId?: string | null; organizationId?: string | null }) {
   const email = normalizePrivacyEmail(rawEmail);
+  const emailPattern = exactIlikePattern(email);
   const userId = String(scope.userId || '').trim() || null;
   const organizationId = String(scope.organizationId || '').trim() || null;
   const admin = getSupabaseAdminClient();
@@ -113,7 +155,7 @@ export async function isEmailSuppressedForScope(rawEmail: string, scope: { userI
   const { data, error } = await admin
     .from('unsubscribed_emails')
     .select('id, user_id, organization_id')
-    .eq('email', email);
+    .ilike('email', emailPattern);
 
   if (error) throw error;
 
@@ -153,6 +195,7 @@ export async function recordPrivacyRequestAction(input: {
 
 export async function applyPrivacyBlock(rawEmail: string, input: { reason?: string | null; requestId?: string | null; actorEmail?: string | null }) {
   const email = normalizePrivacyEmail(rawEmail);
+  const emailPattern = exactIlikePattern(email);
   const admin = getSupabaseAdminClient();
   const reason = String(input.reason || '').trim() || 'privacy_request_block';
 
@@ -164,14 +207,14 @@ export async function applyPrivacyBlock(rawEmail: string, input: { reason?: stri
       evaluation_status: 'do_not_contact',
       last_update_at: new Date().toISOString(),
     } as any)
-    .ilike('email', email)
+    .ilike('email', emailPattern)
     .select('id');
   if (contactedError) throw contactedError;
 
   const { data: updatedLeads, error: leadsError } = await admin
     .from('leads')
     .update({ status: 'do_not_contact' } as any)
-    .ilike('email', email)
+    .ilike('email', emailPattern)
     .select('id');
   if (leadsError) throw leadsError;
 
@@ -200,61 +243,70 @@ export async function applyPrivacyBlock(rawEmail: string, input: { reason?: stri
 export async function deletePrivacySubjectData(rawEmail: string, input: { reason?: string | null; requestId?: string | null; actorEmail?: string | null }) {
   const email = normalizePrivacyEmail(rawEmail);
   const admin = getSupabaseAdminClient();
+
+  const { data: deletedResearchMessaging, error: deleteResearchMessagingError } = await admin.rpc(
+    'delete_native_research_messaging_subject_v1',
+    { p_email: email },
+  );
+  if (deleteResearchMessagingError) throw deleteResearchMessagingError;
   const lookup = await lookupPrivacySubjectData(email);
 
-  const relatedLeadIds = Array.from(new Set([
-    ...lookup.records.leads.map((row) => String(row.id || '').trim()),
-    ...lookup.records.contactedLeads.flatMap((row) => [String(row.id || '').trim(), String(row.lead_id || '').trim()]),
-  ].filter(Boolean)));
-
-  const blockSummary = await applyPrivacyBlock(email, {
-    reason: String(input.reason || '').trim() || 'privacy_request_delete_preserve_block',
-  });
-
-  if (lookup.records.unsubscribedEntries.length > 0) {
-    const { error: deleteUnsubsError } = await admin
-      .from('unsubscribed_emails')
-      .delete()
-      .ilike('email', email);
-    if (deleteUnsubsError) throw deleteUnsubsError;
-
-    const { error: reinsertGlobalError } = await admin
-      .from('unsubscribed_emails')
-      .insert({ email, reason: 'privacy_request_delete_preserve_block' });
-    if (reinsertGlobalError && reinsertGlobalError.code !== '23505') throw reinsertGlobalError;
+  if (deletedResearchMessaging?.outcome === 'manual_review') {
+    const summary = {
+      email,
+      outcome: 'manual_review' as const,
+      blocked: true,
+      reason: String(deletedResearchMessaging.reason || 'cross_subject_reference'),
+      preservedProfilesCount: lookup.records.profiles.length,
+      warnings: [
+        ...lookup.warnings,
+        'La eliminacion requiere revision manual porque hay registros enlazados que no pueden atribuirse con seguridad al sujeto.',
+      ],
+    };
+    await recordPrivacyRequestAction({
+      requestId: input.requestId,
+      actorEmail: input.actorEmail,
+      actionType: 'delete',
+      summary,
+    });
+    return summary;
   }
 
-  let deletedLeadResponsesCount = 0;
-  if (relatedLeadIds.length > 0) {
-    const { data: deletedResponses, error: deleteResponsesError } = await admin
-      .from('lead_responses')
-      .delete()
-      .or(`lead_id.in.(${relatedLeadIds.join(',')}),contacted_id.in.(${relatedLeadIds.join(',')})`)
-      .select('id');
-    if (deleteResponsesError) throw deleteResponsesError;
-    deletedLeadResponsesCount = deletedResponses?.length || 0;
+  if (deletedResearchMessaging?.outcome === 'pending') {
+    const summary = {
+      email,
+      outcome: 'pending' as const,
+      blocked: true,
+      reason: String(deletedResearchMessaging.reason || 'native_research_in_progress'),
+      preservedProfilesCount: lookup.records.profiles.length,
+      warnings: [
+        ...lookup.warnings,
+        'El contacto quedó bloqueado. Vuelve a ejecutar la eliminación cuando termine el trabajo de investigación o generación que ya estaba en curso.',
+      ],
+    };
+    await recordPrivacyRequestAction({
+      requestId: input.requestId,
+      actorEmail: input.actorEmail,
+      actionType: 'delete',
+      summary,
+    });
+    return summary;
   }
-
-  const [{ data: deletedResearch, error: deleteResearchError }, { data: deletedEnriched, error: deleteEnrichedError }, { data: deletedContacted, error: deleteContactedError }, { data: deletedLeads, error: deleteLeadsError }] = await Promise.all([
-    admin.from('lead_research_reports').delete().ilike('email', email).select('id'),
-    admin.from('enriched_leads').delete().ilike('email', email).select('id'),
-    admin.from('contacted_leads').delete().ilike('email', email).select('id'),
-    admin.from('leads').delete().ilike('email', email).select('id'),
-  ]);
-
-  if (deleteResearchError) throw deleteResearchError;
-  if (deleteEnrichedError) throw deleteEnrichedError;
-  if (deleteContactedError) throw deleteContactedError;
-  if (deleteLeadsError) throw deleteLeadsError;
 
   const summary = {
     email,
-    blocked: blockSummary.blocked,
-    deletedResearchReportsCount: deletedResearch?.length || 0,
-    deletedEnrichedLeadsCount: deletedEnriched?.length || 0,
-    deletedContactedLeadsCount: deletedContacted?.length || 0,
-    deletedLeadsCount: deletedLeads?.length || 0,
-    deletedLeadResponsesCount,
+    outcome: 'deleted' as const,
+    blocked: true,
+    deletedResearchReportsCount: Number(deletedResearchMessaging?.leadResearchReports || 0),
+    deletedResearchSnapshotsCount: Number(deletedResearchMessaging?.researchSnapshots || 0),
+    deletedResearchJobsCount: Number(deletedResearchMessaging?.researchJobs || 0),
+    deletedMessagingDraftsCount: Number(deletedResearchMessaging?.messagingDrafts || 0),
+    deletedMessagingDraftVersionsCount: Number(deletedResearchMessaging?.messagingDraftVersions || 0),
+    deletedOutboundDispatchesCount: Number(deletedResearchMessaging?.outboundDispatches || 0),
+    deletedEnrichedLeadsCount: Number(deletedResearchMessaging?.enrichedLeads || 0),
+    deletedContactedLeadsCount: Number(deletedResearchMessaging?.contactedLeads || 0),
+    deletedLeadsCount: Number(deletedResearchMessaging?.leads || 0),
+    deletedLeadResponsesCount: Number(deletedResearchMessaging?.leadResponses || 0),
     preservedProfilesCount: lookup.records.profiles.length,
     warnings: lookup.warnings,
   };

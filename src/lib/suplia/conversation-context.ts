@@ -103,12 +103,14 @@ export function buildSupliaPromptConversationContext(params: {
   compaction?: SupliaConversationCompaction | null;
   thresholdTokens?: number;
   recentMessageCount?: number;
+  tokenEstimate?: number;
 }): SupliaPromptConversationContext {
   const thresholdTokens = Math.max(1, Math.floor(params.thresholdTokens || DEFAULT_SUPLIA_CONTEXT_COMPACT_THRESHOLD_TOKENS));
   const recentMessageCount = Math.max(1, Math.floor(params.recentMessageCount || DEFAULT_SUPLIA_CONTEXT_RECENT_MESSAGE_COUNT));
   const messages = params.messages;
-  const tokenEstimate = estimateSupliaMessagesTokens(messages);
+  const tokenEstimate = Number.isFinite(Number(params.tokenEstimate)) ? Math.max(0, Math.floor(Number(params.tokenEstimate))) : estimateSupliaMessagesTokens(messages);
   const compaction = params.compaction || null;
+  const alreadyOmitted = Math.max(0, Math.floor(Number(compaction?.sourceMessageCount || 0)));
 
   if (tokenEstimate <= thresholdTokens && !compaction) {
     return {
@@ -130,6 +132,7 @@ export function buildSupliaPromptConversationContext(params: {
       summary: compaction?.summary || null,
       compactedThroughMessageId: compaction?.compactedThroughMessageId || null,
       compactedThroughCreatedAt: compaction?.compactedThroughCreatedAt || null,
+      omittedMessageCount: alreadyOmitted || undefined,
     };
   }
 
@@ -138,7 +141,7 @@ export function buildSupliaPromptConversationContext(params: {
     ? compactedIndex + 1
     : Math.max(0, messages.length - recentMessageCount);
   const recentMessages = messages.slice(recentStart);
-  const omittedMessageCount = Math.max(0, messages.length - recentMessages.length);
+  const omittedMessageCount = alreadyOmitted + Math.max(0, messages.length - recentMessages.length);
 
   return {
     mode: 'compacted',

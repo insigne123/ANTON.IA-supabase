@@ -2,6 +2,8 @@
 // Identidad ligera para cuotas cuando no hay login real.
 // Persiste en localStorage y se usa en headers "x-user-id" hacia el backend.
 
+import { getBrowserStorage } from './browser-storage';
+
 const KEY = "lf_client_id";
 
 function genId(): string {
@@ -13,12 +15,13 @@ function genId(): string {
 }
 
 export function getClientId(): string {
-  if (typeof window === "undefined") return "ssr";
+  const storage = getBrowserStorage();
+  if (!storage) return "ssr";
   try {
-    const saved = window.localStorage.getItem(KEY);
+    const saved = storage.getItem(KEY);
     if (saved && saved.length > 0) return saved;
     const id = genId();
-    window.localStorage.setItem(KEY, id);
+    storage.setItem(KEY, id);
     return id;
   } catch {
     // Si localStorage no está disponible, devolvemos un id efímero

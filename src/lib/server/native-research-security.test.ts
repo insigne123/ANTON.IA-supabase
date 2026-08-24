@@ -1,0 +1,137 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+
+import { isNativeDraftVersionConflict } from './native-drafts';
+import { deriveNativeResearchLeadRef, nativeResearchInternals } from './native-research';
+
+const nativeResearchSource = readFileSync('src/lib/server/native-research.ts', 'utf8');
+const nativeDraftSource = readFileSync('src/lib/server/native-drafts.ts', 'utf8');
+const securityMigration = readFileSync('supabase/migrations/20260822111000_native_research_security_fixes.sql', 'utf8');
+const queueIntegrityMigration = readFileSync('supabase/migrations/20260824170000_native_research_queue_integrity.sql', 'utf8');
+const suppressedSettlementMigration = readFileSync('supabase/migrations/20260824173000_settle_suppressed_native_research_jobs.sql', 'utf8');
+const legacyCompatibilityMigration = readFileSync('supabase/migrations/20260823120000_reconcile_legacy_schema_drift.sql', 'utf8');
+const privacySubjectData = readFileSync('src/lib/server/privacy-subject-data.ts', 'utf8');
+const nativeLeadStatusSource = nativeResearchSource.slice(
+  nativeResearchSource.indexOf('export async function listNativeResearchLeadStatuses'),
+  nativeResearchSource.indexOf('\nasync function persistNativeSnapshot'),
+);
+
+test('official-site checks reject mapped, translated, and reserved network addresses', () => {
+  for (const address of [
+    '127.0.0.1',
+    '::ffff:127.0.0.1',
+    '::ffff:7f00:1',
+    '0:0:0:0:0:ffff:7f00:1',
+    '::ffff:a9fe:a9fe',
+    '64:ff9b::7f00:1',
+    'fc00::1',
+    'fe80::1',
+  ]) {
+    assert.equal(nativeResearchInternals.isPrivateIpAddress(address), true, address);
+  }
+
+  assert.equal(nativeResearchInternals.isPrivateIpAddress('8.8.8.8'), false);
+  assert.equal(nativeResearchInternals.isPrivateIpAddress('2606:4700:4700::1111'), false);
+});
+
+test('long public profile URLs use a bounded durable lead reference', () => {
+  const leadRef = deriveNativeResearchLeadRef({
+    id: null,
+    email: null,
+    fullName: null,
+    companyDomain: null,
+    companyName: null,
+    linkedinUrl: `https://www.linkedin.com/in/${'profile-'.repeat(400)}`,
+  });
+
+  assert.match(leadRef, /^native:/);
+  assert.ok(leadRef.length <= 500);
+});
+
+test('official-site requests use an approved DNS answer instead of resolving during fetch', () => {
+  assert.match(nativeResearchSource, /lookup: \(_hostname, _options, callback\) => callback\(null, address\.address, address\.family\)/);
+  assert.doesNotMatch(nativeResearchSource, /await fetch\(/);
+  assert.equal(nativeResearchInternals.isSafeOfficialSiteUrl(new URL('https://example.com')), true);
+  assert.equal(nativeResearchInternals.isSafeOfficialSiteUrl(new URL('http://example.com:8080')), false);
+  assert.equal(nativeResearchInternals.isSafeOfficialSiteUrl(new URL('https://user@example.com')), false);
+});
+
+test('deep official-site collection stays on the company domain and search signals need company context', () => {
+  const candidates = nativeResearchInternals.candidateOfficialPageUrls(
+    [
+      '<a href="/company">Quiénes somos</a>',
+      '<a href="/services">Servicios</a>',
+      '<a href="https://unrelated.example/jobs">Vacantes</a>',
+    ].join(''),
+    new URL('https://acme.com/'),
+    'acme.com',
+    'Chile',
+    5,
+  );
+  assert.deepEqual(candidates, ['https://acme.com/company', 'https://acme.com/services']);
+  assert.equal(nativeResearchInternals.isRelevantSearchResult({
+    title: 'Acme anuncia una nueva alianza',
+    snippet: 'La empresa Acme compartió la noticia esta semana.',
+    link: 'https://news.example/acme-alliance',
+    companyName: 'Acme',
+    companyDomain: 'acme.com',
+  }), true);
+  assert.equal(nativeResearchInternals.isRelevantSearchResult({
+    title: 'Actualización semanal del sector',
+    snippet: 'Las empresas revisan sus planes para este año.',
+    link: 'https://news.example/weekly',
+    companyName: 'Acme',
+    companyDomain: 'acme.com',
+  }), false);
+});
+
+test('native generation and deletion use durable privacy-aware claims', () => {
+  assert.match(securityMigration, /create table if not exists public\.native_draft_generation_claims/);
+  assert.match(securityMigration, /create or replace function public\.claim_native_lead_research_request_v1/);
+  assert.match(securityMigration, /create or replace function public\.claim_native_draft_generation_v1/);
+  assert.match(securityMigration, /create or replace function public\.delete_native_research_messaging_subject_v1/);
+  assert.match(securityMigration, /'outcome', 'pending'/);
+  assert.match(legacyCompatibilityMigration, /alter column version_id drop not null/);
+  assert.match(legacyCompatibilityMigration, /alter column identity_hash drop not null/);
+  assert.match(nativeResearchSource, /cancel_native_lead_research_request_claim_v1/);
+  assert.match(nativeDraftSource, /claim_native_draft_generation_v1/);
+  assert.match(privacySubjectData, /delete_native_research_messaging_subject_v1/);
+});
+
+test('native queue preserves terminal limited research and settles run progress atomically', () => {
+  assert.match(queueIntegrityMigration, /v_provider_status not in \('completed', 'partial', 'insufficient_data'\)/);
+  assert.match(queueIntegrityMigration, /create or replace function public\.settle_native_research_run_items_v1/);
+  assert.match(queueIntegrityMigration, /for update/);
+  assert.match(queueIntegrityMigration, /create unique index if not exists research_runs_active_request_uidx/);
+  assert.match(queueIntegrityMigration, /abort_native_lead_research_request_claim_v1/);
+  assert.match(nativeResearchSource, /\.lte\('scheduled_for', dueAt\)/);
+  assert.match(nativeResearchSource, /\.eq\('request_claim_state', 'provider_submitting'\)/);
+  assert.match(nativeResearchSource, /stalePreProviderQuery/);
+  assert.match(nativeResearchSource, /\.lt\('request_claimed_at', staleAt\)/);
+  assert.match(nativeResearchSource, /settle_native_research_run_items_v1/);
+});
+
+test('suppressed claims without a token settle the durable job and its run item', () => {
+  assert.match(suppressedSettlementMigration, /create or replace function public\.settle_suppressed_native_lead_research_job_v1/);
+  assert.match(suppressedSettlementMigration, /pg_advisory_xact_lock/);
+  assert.match(suppressedSettlementMigration, /request_claim_state in \('pre_provider', 'retryable', 'provider_submitting', 'terminal_pending'\)/);
+  assert.match(suppressedSettlementMigration, /grant execute on function public\.settle_suppressed_native_lead_research_job_v1/);
+  assert.match(nativeResearchSource, /settle_suppressed_native_lead_research_job_v1/);
+  assert.match(nativeResearchSource, /if \(!claim\) \{[\s\S]+settleSuppressedNativeResearchJob\(\{ job, access \}\)/);
+});
+
+test('native lead status lookup stays tenant-scoped and matches only exact lead IDs', () => {
+  assert.match(nativeLeadStatusSource, /applyReadableOrganizationScope\(query, input\.access\)/);
+  assert.match(nativeResearchSource, /function applyReadableOrganizationScope[\s\S]+query\.eq\('organization_id', organizationIds\[0\]\)[\s\S]+query\.in\('organization_id', organizationIds\)/);
+  assert.match(nativeLeadStatusSource, /\.eq\('user_id', input\.access\.userId\)/);
+  assert.match(nativeLeadStatusSource, /\.in\('lead_id', leadIds\)/);
+  assert.doesNotMatch(nativeLeadStatusSource, /company_(?:name|domain)|\.eq\('email'/);
+});
+
+test('draft version conflicts are distinguished from server failures', () => {
+  assert.equal(isNativeDraftVersionConflict({ code: '40001' }), true);
+  assert.equal(isNativeDraftVersionConflict({ code: '40400' }), true);
+  assert.equal(isNativeDraftVersionConflict({ message: 'stale messaging draft parent revision' }), true);
+  assert.equal(isNativeDraftVersionConflict({ code: '23505' }), false);
+});

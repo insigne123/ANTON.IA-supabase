@@ -1,17 +1,20 @@
 // src/lib/enriched-leads-storage.ts
 import type { EnrichedLead } from './types';
 import { v4 as uuidv4 } from 'uuid';
+import { getBrowserStorage } from './browser-storage';
 
 const KEY = 'leadflow-enriched-leads';
 
 function load(): EnrichedLead[] {
-  if (typeof window === 'undefined') return [];
-  try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { return []; }
+  const storage = getBrowserStorage();
+  if (!storage) return [];
+  try { return JSON.parse(storage.getItem(KEY) || '[]'); } catch { return []; }
 }
 
 function save(all: EnrichedLead[]) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(KEY, JSON.stringify(all));
+  const storage = getBrowserStorage();
+  if (!storage) return;
+  storage.setItem(KEY, JSON.stringify(all));
 }
 
 function keyOf(l: EnrichedLead) {

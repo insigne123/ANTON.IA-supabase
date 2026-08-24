@@ -55,6 +55,16 @@ export async function POST(req: NextRequest) {
         requestId,
         actorEmail: user.email || null,
       });
+      if (result.outcome === 'manual_review' || result.outcome === 'pending') {
+        return NextResponse.json({
+          success: false,
+          outcome: result.outcome,
+          error: result.outcome === 'pending'
+            ? 'El contacto quedó bloqueado, pero la eliminación sigue pendiente mientras hay trabajo en curso.'
+            : 'El contacto quedo bloqueado, pero la eliminacion requiere revision manual.',
+          result,
+        }, { status: 409 });
+      }
       return NextResponse.json({ success: true, result });
     }
 

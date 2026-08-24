@@ -9,6 +9,9 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import { sendEmail } from '@/lib/outlook-email-service';
 import { getCompanyProfile } from '@/lib/data';
@@ -19,15 +22,23 @@ import { v4 as uuid } from 'uuid';
 import { extractPrimaryEmail } from '@/lib/email-utils';
 import { renderTemplate } from '@/lib/template';
 import { buildSenderInfo, applySignaturePlaceholders } from '@/lib/signature-placeholders';
-import * as Quota from '@/lib/quota-client';
 import { microsoftAuthService } from '@/lib/microsoft-auth-service';
 import { ensureSubjectPrefix } from '@/lib/outreach-templates';
 import { generateCompanyOutreachV2 } from '@/lib/outreach-templates';
 import { findReportForLead } from '@/lib/lead-research-storage';
 import { getFirstNameSafe } from '@/lib/template';
 import { sendGmailEmail } from '@/lib/gmail-email-service';
-import { styleProfilesStorage } from '@/lib/style-profiles-storage';
 import { restyleDraftWithProfile } from '@/lib/email-style-restyle';
+import { profileService, type Profile } from '@/lib/services/profile-service';
+import { buildEffectiveCompanyProfile } from '@/lib/signature-placeholders';
+import { ContactabilityStatusCard } from '@/components/commercial/ContactabilityStatusCard';
+import { CampaignQaPanel } from '@/components/commercial/CampaignQaPanel';
+import { useContactability } from '@/hooks/use-contactability';
+import { assessCampaignQa } from '@/lib/campaign-qa';
+import { resolveManualEmailOperation, type ManualEmailOperation } from '@/lib/manual-send-idempotency';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Switch } from '@/components/ui/switch';
+import { ArrowLeft, CheckCircle2, ChevronDown, FileText, Loader2, RefreshCw, SendHorizontal, Settings2, Sparkles } from 'lucide-react';
 
 type AnyLead = EnrichedLead | EnrichedOppLead | any;
 
@@ -51,7 +62,21 @@ function ComposeInner() {
   const router = useRouter();
   const sp = useSearchParams();
   const id = sp.get('id') || '';
+  const nativeDraftId = sp.get('draftId') || '';
+  const isCanonicalDraft = Boolean(nativeDraftId);
   const [lead, setLead] = useState<AnyLead | null>(null);
+  const [leadLoading, setLeadLoading] = useState(Boolean(id) && !isCanonicalDraft);
+  const [leadLoadError, setLeadLoadError] = useState<string | null>(null);
+  const [leadReloadKey, setLeadReloadKey] = useState(0);
+  const [nativeDraft, setNativeDraft] = useState<any | null>(null);
+  const [nativeDraftLoading, setNativeDraftLoading] = useState(isCanonicalDraft);
+  const [nativeDraftLoadError, setNativeDraftLoadError] = useState<string | null>(null);
+  const [nativeDraftReloadKey, setNativeDraftReloadKey] = useState(0);
+  const [nativeDraftSaving, setNativeDraftSaving] = useState(false);
+  const [nativeDraftApproving, setNativeDraftApproving] = useState(false);
+  const [nativeDraftRewriting, setNativeDraftRewriting] = useState(false);
+  const [rewriteInstruction, setRewriteInstruction] = useState('');
+  const [rewriteError, setRewriteError] = useState<string | null>(null);
 
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -60,6 +85,9 @@ function ComposeInner() {
   const [draftSource, setDraftSource] = useState<'investigation' | 'style'>('investigation');
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
   const [selectedStyleName, setSelectedStyleName] = useState<string>('');
+  const [styleProfilesError, setStyleProfilesError] = useState(false);
+  const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
+  const [sendOperation, setSendOperation] = useState<ManualEmailOperation | null>(null);
 
   function readComposeBuffer(leadId: string): AnyLead | null {
     try {
@@ -74,71 +102,187 @@ function ComposeInner() {
   }
 
   useEffect(() => {
-    if (!id) return;
+    if (isCanonicalDraft) {
+      setLeadLoading(false);
+      setLeadLoadError(null);
+      return;
+    }
+
+    if (!id) {
+      setLead(null);
+      setLeadLoading(false);
+      setLeadLoadError(null);
+      return;
+    }
+
+    let active = true;
+    setLead(null);
+    setLeadLoading(true);
+    setLeadLoadError(null);
 
     async function loadLead() {
-      // 0) buffer temporal desde la página de enriquecidos
-      const buffered = readComposeBuffer(id);
-      if (buffered) { setLead(buffered); return; }
-
-      // 1) & 2) Enriched Leads (merged)
-      let found: AnyLead | undefined = await enrichedLeadsStorage.findEnrichedLeadById(id);
-      let source = 'leads';
-
-      if (!found) {
-        // Try searching in opportunities
-        const opp = await enrichedOpportunitiesStorage.findEnrichedLeadById(id);
-        if (opp) {
-          found = opp;
-          source = 'opportunities';
+      try {
+        // 0) buffer temporal desde la página de enriquecidos
+        const buffered = readComposeBuffer(id);
+        if (buffered) {
+          if (active) setLead(buffered);
+          return;
         }
-      }
 
-      if (found) {
-        (found as any)._sourceTable = source;
-        setLead(found);
-        return;
-      }
+        // 1) & 2) Enriched Leads (merged)
+        let found: AnyLead | undefined = await enrichedLeadsStorage.findEnrichedLeadById(id);
+        let source = 'leads';
 
-      // 3) contactados (por si se registró antes de abrir compose)
-      const contacted = await contactedLeadsStorage.findByLeadId(id);
-      if (contacted) {
-        setLead({
-          id,
-          fullName: contacted.name,
-          email: contacted.email,
-          companyName: contacted.company,
-          title: (contacted as any).title || '',
-          companyDomain: (contacted as any).companyDomain || '',
-        } as any);
-        return;
-      }
+        if (!found) {
+          // Try searching in opportunities
+          const opp = await enrichedOpportunitiesStorage.findEnrichedLeadById(id);
+          if (opp) {
+            found = opp;
+            source = 'opportunities';
+          }
+        }
 
-      // 4) fallback a reporte (si existe)
-      // Note: findReportForLead is still sync/local for now.
-      const rep = findReportForLead({ leadId: id, companyDomain: null, companyName: null });
-      if (rep?.cross) {
-        setLead({
-          id,
-          fullName: (rep as any)?.lead?.fullName || '',
-          email: (rep as any)?.lead?.email || '',
-          companyName: rep.cross.company?.name || '',
-          companyDomain: rep.cross.company?.domain || '',
-          title: (rep as any)?.lead?.title || '',
-        } as any);
+        if (found) {
+          (found as any)._sourceTable = source;
+          if (active) setLead(found);
+          return;
+        }
+
+        // 3) contactados (por si se registró antes de abrir compose)
+        const contacted = await contactedLeadsStorage.findByLeadId(id);
+        if (contacted) {
+          if (active) {
+            setLead({
+              id,
+              fullName: contacted.name,
+              email: contacted.email,
+              companyName: contacted.company,
+              title: (contacted as any).title || '',
+              companyDomain: (contacted as any).companyDomain || '',
+            } as any);
+          }
+          return;
+        }
+
+        // 4) fallback a reporte (si existe)
+        // Note: findReportForLead is still sync/local for now.
+        const rep = findReportForLead({ leadId: id, companyDomain: null, companyName: null });
+        if (rep?.cross && active) {
+          setLead({
+            id,
+            fullName: (rep as any)?.lead?.fullName || '',
+            email: (rep as any)?.lead?.email || '',
+            companyName: rep.cross.company?.name || '',
+            companyDomain: rep.cross.company?.domain || '',
+            title: (rep as any)?.lead?.title || '',
+          } as any);
+        }
+      } catch (error) {
+        console.error('No se pudo cargar el contacto para compose', error);
+        if (active) setLeadLoadError('No pudimos cargar el contacto. Inténtalo nuevamente o vuelve a la lista.');
+      } finally {
+        if (active) setLeadLoading(false);
       }
     }
-    loadLead();
-  }, [id]);
+
+    void loadLead();
+    return () => { active = false; };
+  }, [id, isCanonicalDraft, leadReloadKey]);
+
   useEffect(() => {
-    const list = styleProfilesStorage.list();
-    setStyleProfiles(list);
-    setSelectedStyleName(prev => prev || (list[0]?.name || ''));
+    if (!nativeDraftId) {
+      setNativeDraft(null);
+      setNativeDraftLoading(false);
+      setNativeDraftLoadError(null);
+      return;
+    }
+
+    let active = true;
+    setNativeDraft(null);
+    setNativeDraftLoading(true);
+    setNativeDraftLoadError(null);
+
+    async function loadNativeDraft() {
+      try {
+        const response = await fetch(`/api/native-drafts/${encodeURIComponent(nativeDraftId)}`, { cache: 'no-store' });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.draft) throw new Error('No se pudo cargar el correo.');
+        if (!active) return;
+        const draft = payload.draft;
+        setNativeDraft(draft);
+        setSubject(draft?.content?.subject || '');
+        setBody(draft?.content?.text || '');
+        setLead({
+          id: draft?.recipient?.leadRef || nativeDraftId,
+          fullName: draft?.recipient?.displayName || 'Contacto',
+          email: draft?.recipient?.email || '',
+          companyName: '',
+          title: '',
+        });
+      } catch (error) {
+        console.error('No se pudo cargar el correo para revisión', error);
+        if (active) setNativeDraftLoadError('No pudimos cargar este correo. Inténtalo nuevamente.');
+      } finally {
+        if (active) setNativeDraftLoading(false);
+      }
+    }
+
+    void loadNativeDraft();
+    return () => { active = false; };
+  }, [nativeDraftId, nativeDraftReloadKey]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadStyleProfiles() {
+      try {
+        const response = await fetch('/api/email-styles', { cache: 'no-store' });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !Array.isArray(payload?.styles)) throw new Error('No se pudieron cargar los estilos.');
+        if (!active) return;
+        const list = payload.styles.map((style: any) => ({
+          ...(style?.profile || {}),
+          id: String(style?.id || ''),
+          name: String(style?.name || style?.profile?.name || 'Estilo sin nombre'),
+          isDefault: Boolean(style?.isDefault),
+        })) as StyleProfile[];
+        setStyleProfiles(list);
+        setSelectedStyleName((current) => current || list.find((profile) => profile.isDefault)?.name || list[0]?.name || '');
+        setStyleProfilesError(false);
+      } catch (error) {
+        console.error('No se pudieron cargar los estilos de email', error);
+        if (active) setStyleProfilesError(true);
+      }
+    }
+
+    void loadStyleProfiles();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCurrentProfile() {
+      try {
+        const profile = await profileService.getCurrentProfile();
+        if (!active) return;
+        setCurrentProfile(profile);
+      } catch (error) {
+        if (!active) return;
+        console.error('No se pudo cargar el perfil actual para compose', error);
+        setCurrentProfile(null);
+      }
+    }
+
+    loadCurrentProfile();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const buildBaseDraftForLead = useCallback((leadObj: AnyLead, opts?: { forceRegenerate?: boolean }) => {
-    const company = getCompanyProfile() || {};
-    const sender = buildSenderInfo();
+    const company = buildEffectiveCompanyProfile(currentProfile);
+    const sender = buildSenderInfo(currentProfile);
     const leadData = {
       firstName: (leadObj?.fullName || '').split(' ')[0] || '',
       name: leadObj?.fullName || '',
@@ -191,7 +335,7 @@ function ComposeInner() {
       leadData,
       company,
     };
-  }, [sp]);
+  }, [currentProfile, sp]);
 
   const buildDraftForLead = useCallback(async (leadObj: AnyLead, opts?: { forceRegenerate?: boolean }) => {
     const base = buildBaseDraftForLead(leadObj, opts);
@@ -231,9 +375,11 @@ function ComposeInner() {
   const [usePixel, setUsePixel] = useState(true);
   const [useReadReceipt, setUseReadReceipt] = useState(false);
   const [useLinkTracking, setUseLinkTracking] = useState(false);
+  const [sendProvider, setSendProvider] = useState<'outlook' | 'gmail'>('outlook');
+  const [showDeliveryOptions, setShowDeliveryOptions] = useState(false);
 
   useEffect(() => {
-    if (!lead) return;
+    if (!lead || nativeDraftId) return;
     let cancelled = false;
     void buildDraftForLead(lead).then((tuned) => {
       if (cancelled) return;
@@ -244,7 +390,71 @@ function ComposeInner() {
       toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo aplicar la personalizacion.' });
     });
     return () => { cancelled = true; };
-  }, [lead, buildDraftForLead, toast]);
+  }, [lead, buildDraftForLead, nativeDraftId, toast]);
+
+  const { email: composeEmail } = lead ? extractPrimaryEmail(lead) : { email: '' };
+  const contactability = useContactability(composeEmail);
+  const campaignQa = assessCampaignQa({
+    email: composeEmail,
+    subject,
+    body,
+    usePixel,
+    useLinkTracking,
+    useReadReceipt,
+    contactability: contactability.result,
+    contactabilityLoading: Boolean(composeEmail) && contactability.loading,
+    contactabilityError: contactability.error,
+  });
+  const campaignQaBlocksSend = campaignQa.status === 'blocked';
+  const contactabilityChecking = Boolean(composeEmail) && contactability.loading;
+  const hasNativeEdits = Boolean(
+    isCanonicalDraft
+    && nativeDraft
+    && (
+      subject !== String(nativeDraft?.content?.subject || '')
+      || body !== String(nativeDraft?.content?.text || '')
+    ),
+  );
+  const nativeReviewComplete = Boolean(
+    isCanonicalDraft
+    && nativeDraft?.lifecycle === 'ready'
+    && nativeDraft?.approval?.status === 'approved'
+    && nativeDraft?.preflight?.status === 'passed',
+  );
+  const nativeDraftArchived = Boolean(isCanonicalDraft && nativeDraft?.lifecycle === 'archived');
+  const nativeReviewRequired = Boolean(
+    isCanonicalDraft
+    && !nativeDraftArchived
+    && (!nativeReviewComplete || hasNativeEdits),
+  );
+  const shouldShowCampaignQa = !nativeDraftArchived
+    && (!isCanonicalDraft || !nativeReviewRequired || campaignQaBlocksSend);
+
+  const canContinueWithContact = () => {
+    if (isCanonicalDraft && (nativeDraftLoading || nativeDraftLoadError || nativeDraftArchived || nativeReviewRequired)) {
+      toast({
+        title: 'Revisa el correo antes de enviarlo',
+        description: hasNativeEdits
+          ? 'Guarda los cambios y confirma la revisión antes de enviarlo.'
+          : 'Este correo requiere una revisión explícita antes de enviarlo.',
+      });
+      return false;
+    }
+    if (contactabilityChecking) {
+      toast({ title: 'Verificando contacto', description: 'Espera unos segundos mientras revisamos si este email puede recibir mensajes.' });
+      return false;
+    }
+    if (campaignQaBlocksSend) {
+      const firstBlockingCheck = campaignQa.checks.find((check) => check.severity === 'blocked');
+      toast({
+        variant: 'destructive',
+        title: 'Corrige el correo antes de enviarlo',
+        description: firstBlockingCheck?.message || 'Hay un bloqueo activo en este correo.',
+      });
+      return false;
+    }
+    return true;
+  };
 
   // Helper to inject link tracking
   function rewriteLinksForTracking(html: string, trackingId: string): string {
@@ -258,28 +468,129 @@ function ComposeInner() {
   }
 
   const regenerate = async () => {
-    if (!lead) return;
+    if (!lead || nativeDraftId) return;
     setIsRegenerating(true);
     try {
       const tuned = await buildDraftForLead(lead, { forceRegenerate: true });
       setSubject(tuned.subject);
       setBody(tuned.body);
-      toast({ title: 'Borrador actualizado', description: 'Se regeneró el asunto y el cuerpo con el nuevo formato.' });
+      toast({ title: 'Correo actualizado', description: 'Actualizamos el asunto y el mensaje.' });
     } finally {
       setIsRegenerating(false);
+    }
+  };
+
+  const saveNativeDraft = async () => {
+    if (!nativeDraftId || !hasNativeEdits) return;
+    setNativeDraftSaving(true);
+    try {
+      const response = await fetch(`/api/native-drafts/${encodeURIComponent(nativeDraftId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject, text: body }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.draft) throw new Error('No se pudo guardar el correo.');
+      setNativeDraft(payload.draft);
+      setSubject(payload?.draft?.content?.subject || subject);
+      setBody(payload?.draft?.content?.text || body);
+      toast({ title: 'Cambios guardados', description: 'Revisa el correo y confirma la revisión antes de enviarlo.' });
+    } catch (error) {
+      console.error('No se pudo guardar el correo', error);
+      toast({ variant: 'destructive', title: 'No se pudo guardar', description: 'Vuelve a intentarlo.' });
+    } finally {
+      setNativeDraftSaving(false);
+    }
+  };
+
+  const approveNativeDraft = async () => {
+    if (!nativeDraftId || !nativeDraft?.versionId || hasNativeEdits || nativeDraftArchived || campaignQaBlocksSend || contactabilityChecking) return;
+    setNativeDraftApproving(true);
+    try {
+      const response = await fetch(`/api/native-drafts/${encodeURIComponent(nativeDraftId)}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ versionId: nativeDraft.versionId, warnings: campaignQa.reviewCount ? ['Hay observaciones para revisar antes de enviar.'] : [] }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.draft) throw new Error('No se pudo confirmar la revisión.');
+      setNativeDraft(payload.draft);
+      toast({ title: 'Correo revisado', description: 'Ya está listo para enviarse.' });
+    } catch (error) {
+      console.error('No se pudo confirmar la revisión del correo', error);
+      toast({ variant: 'destructive', title: 'No se pudo confirmar la revisión', description: 'Revisa el correo e inténtalo nuevamente.' });
+    } finally {
+      setNativeDraftApproving(false);
+    }
+  };
+
+  const rewriteNativeDraftWithAi = async () => {
+    const instruction = rewriteInstruction.trim();
+    if (!nativeDraftId || !instruction || hasNativeEdits || nativeDraftArchived) return;
+    setNativeDraftRewriting(true);
+    setRewriteError(null);
+    try {
+      const selectedStyle = styleProfiles.find((profile) => profile.name === selectedStyleName);
+      const response = await fetch(`/api/native-drafts/${encodeURIComponent(nativeDraftId)}/rewrite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instruction,
+          styleProfileId: selectedStyle?.id || null,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.draft) {
+        throw new Error(payload?.message || 'No se pudo aplicar el ajuste.');
+      }
+      setNativeDraft(payload.draft);
+      setSubject(payload.draft?.content?.subject || '');
+      setBody(payload.draft?.content?.text || '');
+      setRewriteInstruction('');
+      toast({
+        title: 'Correo ajustado',
+        description: 'Creamos una nueva revisión. Confírmala antes de enviar.',
+      });
+    } catch (error: any) {
+      console.error('No se pudo ajustar el correo con IA', error);
+      setRewriteError(error?.message || 'No pudimos aplicar el ajuste. Inténtalo nuevamente.');
+    } finally {
+      setNativeDraftRewriting(false);
     }
   };
 
   const doSendOutlook = async () => {
     const { email } = extractPrimaryEmail(lead);
     if (!email) {
-      toast({ variant: 'destructive', title: 'Sin email', description: 'Este lead no tiene email revelado.' });
+      toast({ variant: 'destructive', title: 'Sin email', description: 'Este contacto no tiene un email disponible.' });
+      return;
+    }
+    if (!canContinueWithContact()) return;
+    if (!nativeDraft?.draftId || !nativeDraft?.versionId) {
+      toast({
+        variant: 'destructive',
+        title: 'Borrador aprobado requerido',
+        description: 'Genera, revisa y aprueba este correo antes de enviarlo.',
+      });
       return;
     }
     setIsLoading(true);
     try {
-      // 1. Generate ID upfront to create pixel URL
-      const trackingId = uuid();
+      const researchSnapshotId = String(findReportForLead({
+        leadId: String((lead as any).id || ''),
+        email,
+      })?.raw?.research_snapshot_id || '').trim() || nativeDraft?.researchSnapshotId || null;
+      const operation = resolveManualEmailOperation(sendOperation, {
+        scope: 'manual-compose',
+        recipientId: String((lead as any).id || ''),
+        email,
+        subject,
+        body,
+        provider: 'outlook',
+        deliveryOptions: { pixel: usePixel, links: useLinkTracking, readReceipt: useReadReceipt },
+      }, uuid);
+      setSendOperation(operation);
+      const trackingId = operation.trackingId;
       let finalHtmlBody = body.replace(/\n/g, '<br>');
 
       // 2. Rewrite Links if enabled
@@ -304,31 +615,19 @@ function ComposeInner() {
         finalHtmlBody += `\n<br>${trackingPixel}`;
       }
 
-      const res = await sendEmail({
+      await sendEmail({
         to: email,
         subject,
         htmlBody: finalHtmlBody,
         requestReceipts: useReadReceipt, // Pass new option
+        leadId: String((lead as any).id || ''),
+        researchSnapshotId,
+        draftId: nativeDraft?.draftId || null,
+        versionId: nativeDraft?.versionId || null,
+        idempotencyKey: operation.idempotencyKey,
       });
 
-      // Incrementa espejo local de cuota
-      Quota.incClientQuota('contact');
-
-      await contactedLeadsStorage.add({
-        id: trackingId, // Use the pre-generated ID
-        leadId: (lead as any).id,
-        name: (lead as any).fullName,
-        email,
-        company: (lead as any).companyName,
-        subject,
-        sentAt: new Date().toISOString(),
-        status: 'sent',
-        provider: 'outlook',
-        messageId: res.messageId,
-        conversationId: res.conversationId,
-        internetMessageId: res.internetMessageId,
-        lastUpdateAt: new Date().toISOString(),
-      });
+      // The dispatch finalizer owns authoritative history and quota writes.
       // ✅ quitar de Oportunidades Enriquecidas (storage correcto)
       // Remove from source
       if ((lead as any)._sourceTable === 'opportunities') {
@@ -338,9 +637,10 @@ function ComposeInner() {
       }
 
       toast({ title: 'Enviado con Outlook', description: `Correo enviado a ${(lead as any).fullName}.` });
+      setSendOperation(null);
       router.back();
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error al enviar con Outlook', description: e.message || 'Outlook falló' });
+      toast({ variant: 'destructive', title: 'No se pudo enviar con Outlook', description: e?.message || 'Revisa la conexion y vuelve a intentarlo.' });
     } finally {
       setIsLoading(false);
     }
@@ -349,13 +649,35 @@ function ComposeInner() {
   const doSendGmail = async () => {
     const { email } = extractPrimaryEmail(lead);
     if (!email) {
-      toast({ variant: 'destructive', title: 'Sin email', description: 'Este lead no tiene email revelado.' });
+      toast({ variant: 'destructive', title: 'Sin email', description: 'Este contacto no tiene un email disponible.' });
+      return;
+    }
+    if (!canContinueWithContact()) return;
+    if (!nativeDraft?.draftId || !nativeDraft?.versionId) {
+      toast({
+        variant: 'destructive',
+        title: 'Borrador aprobado requerido',
+        description: 'Genera, revisa y aprueba este correo antes de enviarlo.',
+      });
       return;
     }
     setIsLoading(true);
     try {
-      // 1. Generate ID upfront to create pixel URL
-      const trackingId = uuid();
+      const researchSnapshotId = String(findReportForLead({
+        leadId: String((lead as any).id || ''),
+        email,
+      })?.raw?.research_snapshot_id || '').trim() || nativeDraft?.researchSnapshotId || null;
+      const operation = resolveManualEmailOperation(sendOperation, {
+        scope: 'manual-compose',
+        recipientId: String((lead as any).id || ''),
+        email,
+        subject,
+        body,
+        provider: 'gmail',
+        deliveryOptions: { pixel: usePixel, links: useLinkTracking, readReceipt: false },
+      }, uuid);
+      setSendOperation(operation);
+      const trackingId = operation.trackingId;
       let finalHtmlBody = body.replace(/\n/g, '<br>');
 
       // 2. Rewrite Links if enabled
@@ -379,26 +701,18 @@ function ComposeInner() {
         finalHtmlBody += `\n<br>${trackingPixel}`;
       }
 
-      const result = await sendGmailEmail({
+      await sendGmailEmail({
         to: email,
         subject: subject,
         html: finalHtmlBody,
+        leadId: String((lead as any).id || ''),
+        researchSnapshotId,
+        draftId: nativeDraft?.draftId || null,
+        versionId: nativeDraft?.versionId || null,
+        idempotencyKey: operation.idempotencyKey,
       });
 
-      Quota.incClientQuota('contact');
-
-      await contactedLeadsStorage.add({
-        id: trackingId, // Use pre-generated ID
-        leadId: (lead as any).id,
-        name: (lead as any).fullName,
-        email,
-        company: (lead as any).companyName,
-        subject,
-        sentAt: new Date().toISOString(),
-        status: 'sent',
-        provider: 'gmail',
-        lastUpdateAt: new Date().toISOString(),
-      });
+      // The dispatch finalizer owns authoritative history and quota writes.
 
       // ✅ quitar de Oportunidades Enriquecidas (storage correcto)
       if ((lead as any)._sourceTable === 'opportunities') {
@@ -407,134 +721,468 @@ function ComposeInner() {
         await enrichedLeadsStorage.removeById((lead as any).id);
       }
       toast({ title: 'Enviado con Gmail', description: `Correo enviado a ${(lead as any).fullName}.` });
+      setSendOperation(null);
       router.back();
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error al enviar con Gmail', description: e.message || 'Gmail falló' });
+      toast({ variant: 'destructive', title: 'No se pudo enviar con Gmail', description: e?.message || 'Revisa la conexion y vuelve a intentarlo.' });
     } finally {
       setIsLoading(false);
     }
   };
 
-  if (!lead) return <div className="p-6">Lead no encontrado. Vuelve a la lista de guardados.</div>;
+  const loadError = nativeDraftLoadError || leadLoadError;
+  if (nativeDraftLoading || leadLoading) {
+    return (
+      <main aria-busy="true" className="mx-auto w-full max-w-4xl space-y-5 px-4 py-6 sm:px-6">
+        <div className="space-y-1">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Revisar correo</p>
+          <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">Cargando correo…</h1>
+        </div>
+        <Card className="border-border/60">
+          <CardContent className="space-y-5 p-5 sm:p-6">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-11 w-full" />
+            <Skeleton className="h-72 w-full" />
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
 
-  const { email: displayEmail } = extractPrimaryEmail(lead);
+  if (loadError) {
+    return (
+      <main className="mx-auto w-full max-w-2xl space-y-5 px-4 py-6 sm:px-6">
+        <div className="space-y-1">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Revisar correo</p>
+          <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">No pudimos cargar el correo</h1>
+        </div>
+        <Alert variant="destructive" className="border-destructive/40 bg-destructive/5">
+          <AlertTitle>Inténtalo nuevamente</AlertTitle>
+          <AlertDescription>{loadError}</AlertDescription>
+        </Alert>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row">
+          <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => router.back()}>
+            Volver
+          </Button>
+          <Button
+            type="button"
+            className="w-full sm:w-auto"
+            onClick={() => isCanonicalDraft ? setNativeDraftReloadKey((value) => value + 1) : setLeadReloadKey((value) => value + 1)}
+          >
+            Reintentar
+          </Button>
+        </div>
+      </main>
+    );
+  }
+
+  if (!lead) {
+    return (
+      <main className="mx-auto w-full max-w-2xl space-y-5 px-4 py-6 sm:px-6">
+        <div className="space-y-1">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Revisar correo</p>
+          <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">No encontramos el contacto</h1>
+        </div>
+        <Card className="border-border/60">
+          <CardContent className="flex flex-col items-start gap-4 p-5 sm:p-6">
+            <FileText className="size-6 text-muted-foreground" aria-hidden="true" />
+            <div className="space-y-1">
+              <p className="font-medium">El correo no está disponible</p>
+              <p className="text-sm leading-6 text-muted-foreground">Vuelve a la lista, elige un contacto y abre su correo desde allí.</p>
+            </div>
+            <Button type="button" onClick={() => router.back()}>Volver</Button>
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
+  const displayEmail = composeEmail;
+  const send = sendProvider === 'outlook' ? doSendOutlook : doSendGmail;
+  const isSendBlocked = isLoading
+    || nativeDraftSaving
+    || nativeDraftApproving
+    || nativeDraftRewriting
+    || contactabilityChecking
+    || campaignQaBlocksSend
+    || nativeDraftArchived
+    || nativeReviewRequired;
+  const isReviewActionBlocked = nativeDraftApproving
+    || nativeDraftSaving
+    || nativeDraftRewriting
+    || isLoading
+    || contactabilityChecking
+    || campaignQaBlocksSend;
+  const reviewStatus = nativeDraftArchived
+    ? {
+      title: 'Correo no disponible',
+      description: 'Este correo ya no puede enviarse desde esta pantalla.',
+      className: 'border-border bg-muted/40 text-foreground',
+      icon: FileText,
+    }
+    : hasNativeEdits
+      ? {
+        title: 'Cambios pendientes de revisión',
+        description: 'Guárdalos y confirma la revisión antes de enviar.',
+        className: 'border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100',
+        icon: RefreshCw,
+      }
+      : nativeReviewComplete
+        ? {
+          title: 'Correo revisado',
+          description: 'Está listo para enviarse cuando tú decidas.',
+          className: 'border-emerald-200 bg-emerald-50/80 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100',
+          icon: CheckCircle2,
+        }
+        : {
+          title: 'Revisión pendiente',
+          description: 'Este correo no se enviará hasta que confirmes la revisión.',
+          className: 'border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100',
+          icon: FileText,
+        };
+  const ReviewStatusIcon = reviewStatus.icon;
 
   return (
-    <div className="p-6 container mx-auto">
-      <Card>
-        <CardHeader>
-          <CardTitle>Contactar a {(lead as any).fullName}</CardTitle>
-          <CardDescription>
-            {(lead as any).title} en {(lead as any).companyName}
-            {displayEmail ? <span className="text-sm text-muted-foreground"> · {displayEmail}</span> : null}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {/* Fuente del borrador y selector de estilo */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Fuente del borrador</div>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => setDraftSource('investigation')} />
-                  Investigación (n8n)
-                </label>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="draft-source" value="style" checked={draftSource === 'style'} onChange={() => {
-                    setDraftSource('style');
-                    if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
-                  }} />
-                  Estilo (Email Studio)
-                </label>
-              </div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Perfil de estilo</div>
-              <select
-                className="h-9 w-full rounded-md border bg-background px-2 text-sm disabled:opacity-50"
-                disabled={draftSource !== 'style' || styleProfiles.length === 0}
-                value={selectedStyleName}
-                onChange={(e) => setSelectedStyleName(e.target.value)}
-              >
-                {styleProfiles.length === 0 ? <option value="">(No hay estilos guardados)</option> :
-                  styleProfiles.map(p => <option key={p.name} value={p.name}>{p.name}</option>)
-                }
-              </select>
-            </div>
-            <div className="flex items-end">
-              <Button type="button" variant="secondary" onClick={regenerate} disabled={isRegenerating || isLoading} title="Regenerar usando la fuente y/o estilo seleccionados">
-                {isRegenerating ? 'Regenerando…' : 'Regenerar borrador'}
-              </Button>
-            </div>
+    <main className="mx-auto w-full max-w-6xl space-y-4 px-4 py-5 pb-24 sm:px-6 sm:py-6 sm:pb-24">
+      <header className="flex flex-col gap-4 border-b border-border/60 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="mt-0.5 shrink-0 rounded-full"
+            onClick={() => router.back()}
+            aria-label="Volver"
+            disabled={isLoading || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting}
+          >
+            <ArrowLeft className="size-4" />
+          </Button>
+          <div className="min-w-0 space-y-1">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Contacto individual</p>
+            <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">Revisar correo</h1>
+            <p className="truncate text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">{(lead as any).fullName || 'Contacto'}</span>
+              {[(lead as any).title, (lead as any).companyName, displayEmail].filter(Boolean).length > 0 ? ` · ${[(lead as any).title, (lead as any).companyName, displayEmail].filter(Boolean).join(' · ')}` : ''}
+            </p>
           </div>
+        </div>
+        <div className="flex shrink-0 rounded-full border border-border/70 bg-muted/30 p-1" role="group" aria-label="Proveedor de envío">
+          {(['outlook', 'gmail'] as const).map((provider) => (
+            <Button
+              key={provider}
+              type="button"
+              size="sm"
+              variant={sendProvider === provider ? 'secondary' : 'ghost'}
+              className="h-8 rounded-full px-3"
+              aria-label={`Usar ${provider === 'outlook' ? 'Outlook' : 'Gmail'} para enviar`}
+              aria-pressed={sendProvider === provider}
+              disabled={isLoading || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting}
+              onClick={() => setSendProvider(provider)}
+            >
+              {provider === 'outlook' ? 'Outlook' : 'Gmail'}
+            </Button>
+          ))}
+        </div>
+      </header>
 
-          {/* Tracking Options - NEW SECTION */}
-          <div className="border border-border/50 rounded-md p-3 bg-muted/20">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Inyecta una imagen invisible para detectar apertura en tiempo real">
-                  <input
-                    type="checkbox"
-                    checked={usePixel}
-                    onChange={(e) => setUsePixel(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                  />
-                  Activar Tracking Pixel
-                  <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded ml-1">Recomendado</span>
-                </label>
-                <p className="text-xs text-muted-foreground ml-6">
-                  Inserta un píxel invisible. Sabrás exactamente cuándo abren tu correo sin que el destinatario lo note.
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Reescribe enlaces para saber si el usuario hizo clic">
-                  <input
-                    type="checkbox"
-                    checked={useLinkTracking}
-                    onChange={(e) => setUseLinkTracking(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                  />
-                  Track Link Clicks
-                </label>
-                <p className="text-xs text-muted-foreground ml-6">
-                  Convierte automáticamente cualquier link en el cuerpo (ej. tu web) en un enlace rastreable.
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Solicita confirmación de lectura estándar (puede ser bloqueado por el usuario)">
-                  <input
-                    type="checkbox"
-                    checked={useReadReceipt}
-                    onChange={(e) => setUseReadReceipt(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                  />
-                  Solicitar Confirmación
-                </label>
-                <p className="text-xs text-muted-foreground ml-6">
-                  Pide una confirmación formal. El destinatario verá una ventana emergente y podría rechazarla.
-                </p>
+      <section aria-label="Estado del correo" className="grid gap-2">
+        {isCanonicalDraft ? (
+          <div
+            id="review-status"
+            role={nativeDraftArchived ? 'alert' : 'status'}
+            aria-live="polite"
+            className={`rounded-xl border px-3 py-2.5 ${reviewStatus.className}`}
+          >
+            <div className="flex items-start gap-2.5">
+              <ReviewStatusIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium">{reviewStatus.title}</p>
+                <p className="text-xs leading-5 opacity-80">{reviewStatus.description}</p>
               </div>
             </div>
           </div>
+        ) : null}
+        <ContactabilityStatusCard
+          compact
+          email={displayEmail}
+          result={contactability.result}
+          loading={contactability.loading}
+          error={contactability.error}
+          onRetry={contactability.refresh}
+        />
+        {shouldShowCampaignQa ? <CampaignQaPanel result={campaignQa} compact /> : null}
+      </section>
 
-          <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Asunto" />
-          <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={14} className="font-mono text-sm" />
-          <div className="flex gap-2">
-            <Button onClick={doSendOutlook} disabled={isLoading}>
-              {isLoading ? 'Enviando...' : 'Enviar con Outlook'}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_290px]">
+        <section aria-labelledby="email-editor-heading" className="min-w-0">
+          <Card className="overflow-hidden border-border/60 shadow-[0_20px_60px_-48px_rgba(15,23,42,0.32)]">
+            <CardHeader className="flex-row items-center justify-between gap-3 border-b border-border/60 py-4">
+              <div>
+                <CardTitle id="email-editor-heading" className="text-base">Correo</CardTitle>
+                <CardDescription className="mt-1">
+                  {isCanonicalDraft ? 'Revísalo y confirma la revisión antes de enviarlo.' : 'Revisa el mensaje antes de enviarlo.'}
+                </CardDescription>
+              </div>
+              {!isCanonicalDraft ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full"
+                  onClick={regenerate}
+                  disabled={isRegenerating || isLoading}
+                >
+                  {isRegenerating ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <RefreshCw data-icon="inline-start" />}
+                  Regenerar
+                </Button>
+              ) : null}
+            </CardHeader>
+            <CardContent className="space-y-4 p-4 sm:p-5">
+              <div className="space-y-2">
+                <Label htmlFor="compose-subject" className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Asunto</Label>
+                <Input
+                  id="compose-subject"
+                  value={subject}
+                  onChange={(event) => setSubject(event.target.value)}
+                  placeholder="Escribe un asunto"
+                  className="h-11"
+                  aria-describedby={isCanonicalDraft ? 'review-status' : undefined}
+                  disabled={nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="compose-body" className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Mensaje</Label>
+                <Textarea
+                  id="compose-body"
+                  value={body}
+                  onChange={(event) => setBody(event.target.value)}
+                  placeholder="Escribe tu mensaje"
+                  rows={16}
+                  className="min-h-[390px] resize-y text-[15px] leading-7"
+                  aria-describedby={isCanonicalDraft ? 'review-status' : undefined}
+                  disabled={nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+
+        <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+          {isCanonicalDraft ? (
+            <section aria-labelledby="ai-adjustment-heading">
+              <Card className="border-border/60">
+                <CardHeader className="pb-3">
+                  <CardTitle id="ai-adjustment-heading" className="flex items-center gap-2 text-base">
+                    <Sparkles className="size-4 text-primary" aria-hidden="true" />
+                    Ajustar con IA
+                  </CardTitle>
+                  <CardDescription>Cambia el tono o la estructura sin perder el contexto investigado.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="native-compose-style" className="text-xs font-medium text-muted-foreground">Estilo</Label>
+                    <select
+                      id="native-compose-style"
+                      className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={nativeDraftRewriting || styleProfiles.length === 0}
+                      value={selectedStyleName}
+                      onChange={(event) => {
+                        setSelectedStyleName(event.target.value);
+                        setRewriteError(null);
+                      }}
+                    >
+                      {styleProfiles.length === 0
+                        ? <option value="">Estilo actual del correo</option>
+                        : styleProfiles.map((profile) => (
+                          <option key={profile.id || profile.name} value={profile.name}>
+                            {profile.name}{profile.isDefault ? ' · Predeterminado' : ''}
+                          </option>
+                        ))}
+                    </select>
+                    {styleProfilesError ? (
+                      <p className="text-xs leading-5 text-muted-foreground">No pudimos cargar tus estilos. Aún puedes indicar el ajuste manualmente.</p>
+                    ) : null}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="native-rewrite-instruction" className="text-xs font-medium text-muted-foreground">Qué quieres cambiar</Label>
+                    <Textarea
+                      id="native-rewrite-instruction"
+                      value={rewriteInstruction}
+                      onChange={(event) => {
+                        setRewriteInstruction(event.target.value);
+                        setRewriteError(null);
+                      }}
+                      rows={4}
+                      maxLength={1_000}
+                      placeholder="Ej. hazlo más directo, con párrafos más breves y un tono consultivo"
+                      className="min-h-24 resize-y leading-6"
+                      disabled={nativeDraftArchived || nativeDraftRewriting}
+                    />
+                  </div>
+                  {hasNativeEdits ? (
+                    <p className="text-xs leading-5 text-amber-700 dark:text-amber-300">Guarda primero tus cambios manuales para aplicar un ajuste con IA.</p>
+                  ) : null}
+                  <div aria-live="polite">
+                    {rewriteError ? <p className="text-sm leading-5 text-destructive">{rewriteError}</p> : null}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => void rewriteNativeDraftWithAi()}
+                    disabled={!rewriteInstruction.trim() || hasNativeEdits || nativeDraftArchived || nativeDraftRewriting || nativeDraftSaving || nativeDraftApproving}
+                  >
+                    {nativeDraftRewriting ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Sparkles data-icon="inline-start" />}
+                    {nativeDraftRewriting ? 'Ajustando…' : 'Aplicar ajuste'}
+                  </Button>
+                </CardContent>
+              </Card>
+            </section>
+          ) : null}
+
+          {!isCanonicalDraft ? (
+            <section aria-labelledby="message-preparation-heading">
+              <Card className="border-border/60">
+                <CardHeader className="pb-3">
+                  <CardTitle id="message-preparation-heading" className="text-base">Preparación</CardTitle>
+                  <CardDescription>Elige cómo preparar el correo.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-2 rounded-xl border border-border/60 bg-muted/30 p-1" role="group" aria-label="Forma de preparar el correo">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={draftSource === 'investigation' ? 'secondary' : 'ghost'}
+                      className="rounded-lg"
+                      aria-pressed={draftSource === 'investigation'}
+                      onClick={() => setDraftSource('investigation')}
+                    >
+                      Sugerencia
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={draftSource === 'style' ? 'secondary' : 'ghost'}
+                      className="rounded-lg"
+                      aria-pressed={draftSource === 'style'}
+                      onClick={() => {
+                        setDraftSource('style');
+                        if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
+                      }}
+                    >
+                      Estilo
+                    </Button>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="compose-style" className="text-xs font-medium text-muted-foreground">Perfil de estilo</Label>
+                    <select
+                      id="compose-style"
+                      className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={draftSource !== 'style' || styleProfiles.length === 0}
+                      value={selectedStyleName}
+                      onChange={(event) => setSelectedStyleName(event.target.value)}
+                    >
+                      {styleProfiles.length === 0 ? <option value="">No hay estilos guardados</option> : styleProfiles.map((profile) => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
+                    </select>
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+          ) : null}
+
+          <Collapsible open={showDeliveryOptions} onOpenChange={setShowDeliveryOptions}>
+            <Card className="border-border/60">
+              <CollapsibleTrigger asChild>
+                <Button type="button" variant="ghost" className="flex h-auto w-full items-center justify-between rounded-xl px-4 py-3 text-left hover:bg-muted/50">
+                  <span className="flex items-center gap-2 text-sm font-medium"><Settings2 className="size-4 text-muted-foreground" aria-hidden="true" />Opciones de seguimiento</span>
+                  <ChevronDown className={`size-4 text-muted-foreground transition-transform ${showDeliveryOptions ? 'rotate-180' : ''}`} aria-hidden="true" />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent className="space-y-4 border-t border-border/60 pt-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <Label htmlFor="tracking-opens" className="text-sm font-medium">Detectar aperturas</Label>
+                      <p id="tracking-opens-description" className="mt-1 text-xs text-muted-foreground">Usa un píxel de seguimiento.</p>
+                    </div>
+                    <Switch id="tracking-opens" checked={usePixel} onCheckedChange={setUsePixel} aria-describedby="tracking-opens-description" />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <Label htmlFor="tracking-clicks" className="text-sm font-medium">Medir clics</Label>
+                      <p id="tracking-clicks-description" className="mt-1 text-xs text-muted-foreground">Hace rastreables los enlaces.</p>
+                    </div>
+                    <Switch id="tracking-clicks" checked={useLinkTracking} onCheckedChange={setUseLinkTracking} aria-describedby="tracking-clicks-description" />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <Label htmlFor="tracking-receipt" className="text-sm font-medium">Solicitar confirmación</Label>
+                      <p id="tracking-receipt-description" className="mt-1 text-xs text-muted-foreground">El destinatario puede rechazarla.</p>
+                    </div>
+                    <Switch id="tracking-receipt" checked={useReadReceipt} onCheckedChange={setUseReadReceipt} aria-describedby="tracking-receipt-description" />
+                  </div>
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+        </aside>
+      </div>
+
+      <footer aria-label="Acciones del correo" className="sticky bottom-3 z-10 flex flex-col gap-3 rounded-2xl border border-border/60 bg-background/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+        <p id="send-summary" className="text-xs leading-5 text-muted-foreground">
+          {nativeDraftArchived
+            ? 'Este correo ya no está disponible.'
+            : hasNativeEdits
+              ? 'Guarda los cambios y vuelve a revisar el correo antes de enviarlo.'
+              : nativeReviewRequired
+                ? 'Este correo no se enviará hasta que confirmes la revisión.'
+                : `Se enviará por ${sendProvider === 'outlook' ? 'Outlook' : 'Gmail'}.`}
+        </p>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full sm:w-auto"
+            onClick={() => router.back()}
+            disabled={isLoading || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting}
+          >
+            Cancelar
+          </Button>
+          {nativeDraftArchived ? (
+            <Button type="button" className="w-full sm:w-auto" disabled>
+              Correo no disponible
             </Button>
-            <Button onClick={doSendGmail} disabled={isLoading}>
-              {isLoading ? 'Enviando...' : 'Enviar con Gmail'}
+          ) : hasNativeEdits ? (
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              onClick={() => void saveNativeDraft()}
+              disabled={nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || isLoading}
+              aria-describedby="review-status"
+            >
+              {nativeDraftSaving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <FileText data-icon="inline-start" />}
+              {nativeDraftSaving ? 'Guardando…' : 'Guardar cambios'}
             </Button>
-            <Button variant="outline" onClick={() => router.back()}>
-              Volver
+          ) : isCanonicalDraft && !nativeReviewComplete ? (
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              onClick={() => void approveNativeDraft()}
+              disabled={isReviewActionBlocked}
+              aria-describedby="review-status"
+            >
+              {nativeDraftApproving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <CheckCircle2 data-icon="inline-start" />}
+              {nativeDraftApproving ? 'Confirmando…' : contactabilityChecking ? 'Verificando contacto…' : 'Revisar y aprobar'}
             </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+          ) : (
+            <Button type="button" className="w-full sm:w-auto" onClick={send} disabled={isSendBlocked} aria-describedby="send-summary">
+              {isLoading ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <SendHorizontal data-icon="inline-start" />}
+              {isLoading ? 'Enviando…' : contactabilityChecking ? 'Verificando…' : 'Enviar correo'}
+            </Button>
+          )}
+        </div>
+      </footer>
+    </main>
   );
 }
 
@@ -542,7 +1190,7 @@ export const dynamic = 'force-dynamic';
 
 export default function ComposePage() {
   return (
-    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Cargando…</div>}>
+    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Cargando correo…</div>}>
       <ComposeInner />
     </Suspense>
   );

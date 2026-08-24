@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { organizationService } from '@/lib/services/organization-service';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -11,7 +11,7 @@ import { supabase } from '@/lib/supabase';
 export default function InvitePage({ params }: { params: Promise<{ token: string }> }) {
     const router = useRouter();
     const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
-    const [message, setMessage] = useState('Verifying invitation...');
+    const [message, setMessage] = useState('Verificando invitacion...');
     const [token, setToken] = useState('');
 
     useEffect(() => {
@@ -31,7 +31,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
 
                 await organizationService.acceptInvite(resolved.token);
                 setStatus('success');
-                setMessage('Invitation accepted! Redirecting to dashboard...');
+                setMessage('Invitacion aceptada. Redirigiendo al dashboard...');
 
                 setTimeout(() => {
                     router.push('/dashboard');
@@ -39,7 +39,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
             } catch (error: any) {
                 console.error('Invite error:', error);
                 setStatus('error');
-                setMessage(error.message || 'Failed to accept invitation. It may be expired or invalid.');
+                setMessage(error.message || 'No se pudo aceptar la invitacion. Puede estar vencida o ser invalida.');
             }
         };
 
@@ -47,14 +47,14 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
     }, [params, router]);
 
     return (
-        <div className="flex items-center justify-center min-h-screen bg-background p-4">
+        <main className="flex items-center justify-center min-h-screen bg-background p-4">
             <Card className="w-full max-w-md">
                 <CardHeader className="text-center">
-                    <CardTitle>Organization Invitation</CardTitle>
+                    <h1 className="text-2xl font-semibold leading-none tracking-tight">Invitacion a la organizacion</h1>
                     <CardDescription>
-                        {status === 'loading' && 'Processing your invitation...'}
-                        {status === 'success' && 'Welcome to the team!'}
-                        {status === 'error' && 'Something went wrong'}
+                        {status === 'loading' && 'Procesando tu invitacion...'}
+                        {status === 'success' && 'Ya eres parte del equipo.'}
+                        {status === 'error' && 'No se pudo completar la invitacion'}
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col items-center justify-center p-6 space-y-4">
@@ -90,6 +90,6 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
                     )}
                 </CardContent>
             </Card>
-        </div>
+        </main>
     );
 }

@@ -1,10 +1,12 @@
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { isSupliaEnabled } from '@/lib/suplia/access';
 
 export type AuthContext = {
     user: any;
     organizationId: string;
+    organizationIds: string[];
     supabase: any;
 };
 
@@ -35,27 +37,39 @@ export async function requireAuth() {
     // 2. Resolve Organization (Active or Primary)
     // First check metadata/cookies if we store active org there, otherwise query DB
     // For now, let's query the first organization they belong to.
-    const { data: member, error: memberError } = await supabase
+    const { data: memberships, error: memberError } = await supabase
         .from('organization_members')
-        .select('organization_id')
+        .select('organization_id, created_at')
         .eq('user_id', user.id)
-        .limit(1)
-        .maybeSingle();
+        .order('created_at', { ascending: true });
 
     if (memberError) {
         console.error('[Auth] Member query error:', memberError);
         throw new AuthError('Failed to verify organization membership', 500);
     }
 
-    if (!member) {
+    const organizationIds = [...new Set((memberships || [])
+        .map((membership: any) => String(membership.organization_id || '').trim())
+        .filter(Boolean))];
+
+    if (organizationIds.length === 0) {
         throw new AuthError('User does not belong to any organization', 403);
     }
 
     return {
         user,
-        organizationId: member.organization_id,
+        organizationId: organizationIds[0],
+        organizationIds,
         supabase
     };
+}
+
+export async function requireSupliaAuth() {
+    if (!isSupliaEnabled()) {
+        throw new AuthError('Not Found', 404);
+    }
+
+    return requireAuth();
 }
 
 export class AuthError extends Error {

@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { getIndustryIdByName } from "@/lib/data";
 import { mapSenioritiesToApollo, mapDepartmentsToApollo } from "@/lib/apollo-taxonomies";
+import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
+import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
+import { resolveOrganizationIdForUser } from '@/lib/server/provider-routing';
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 
 function sanitizeString(s?: string | null): string {
   if (!s) return '';
@@ -48,6 +54,57 @@ type SearchBody = {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as SearchBody;
+    const requestId = req.headers.get('x-request-id')?.trim() || randomUUID();
+    const internalUserId = req.headers.get('x-user-id')?.trim() || '';
+    let userId = internalUserId;
+    const actorType = internalUserId ? 'agent' as const : 'user' as const;
+    if (internalUserId) {
+      if (!isTrustedInternalRequest(req)) {
+        return NextResponse.json({ error: 'UNAUTHORIZED_INTERNAL_REQUEST' }, { status: 401 });
+      }
+    } else {
+      const supabase = createRouteHandlerClient({ cookies: (() => req.cookies) as any });
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.id) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+      userId = user.id;
+    }
+
+    const organizationId = await resolveOrganizationIdForUser(userId);
+    if (!organizationId) return NextResponse.json({ error: 'ORGANIZATION_REQUIRED' }, { status: 403 });
+    const limits = await getEffectiveDailyQuotaLimits({ userId, organizationId });
+    const quota = await checkAndConsumeDailyQuota({
+      userId,
+      organizationId,
+      resource: 'search',
+      limit: limits.leadSearch,
+    });
+    await safeAppendAntoniaEvent({
+      eventType: 'search.provider_started',
+      organizationId,
+      actorId: userId,
+      actorType,
+      entityType: 'search',
+      entityId: requestId,
+      sourceSystem: 'apify-search',
+      sourceRoute: '/api/leads/apify',
+      provider: 'apify',
+      requestId,
+      correlationId: requestId,
+      operationId: requestId,
+      status: quota.allowed ? 'started' : 'denied',
+      outcome: quota.allowed ? 'quota_reserved' : 'quota_denied',
+      severity: quota.allowed ? 'warning' : 'warning',
+      metrics: { quotaCount: quota.count, quotaLimit: quota.limit },
+      payload: { provider: 'apify' },
+    });
+    if (!quota.allowed) {
+      return NextResponse.json({
+        error: 'DAILY_SEARCH_QUOTA_EXCEEDED',
+        count: quota.count,
+        limit: quota.limit,
+        retryAt: quota.resetAtISO,
+      }, { status: 429 });
+    }
 
     // --- Validación mínima ---
     const industry = sanitizeString(body.industry);
@@ -164,6 +221,7 @@ export async function POST(req: NextRequest) {
     const apifyEndpoint = taskId
       ? `https://api.apify.com/v2/actor-tasks/${encodeURIComponent(taskId)}/runs?token=${encodeURIComponent(token)}`
       : `https://api.apify.com/v2/acts/${encodeURIComponent(actorId!)}/runs?token=${encodeURIComponent(token)}`;
+    const safeApifyEndpoint = apifyEndpoint.replace(/([?&]token=)[^&]+/i, '$1[REDACTED]');
 
     // Input EXACTO requerido por el actor (según tu ejemplo)
     const actorInput = {
@@ -184,7 +242,7 @@ export async function POST(req: NextRequest) {
       console.error('[apify:start] failed', {
         status: runRes.status,
         text: text?.slice(0, 1024),
-        apifyEndpoint,
+        apifyEndpoint: safeApifyEndpoint,
       });
       if (runRes.status === 401) {
         return NextResponse.json(
@@ -205,7 +263,7 @@ export async function POST(req: NextRequest) {
           details: text?.slice(0, 1024),
           debug:
             process.env.NODE_ENV !== 'production'
-              ? { apifyEndpoint, actorInput, apolloUrlPreview: searchUrl }
+              ? { apifyEndpoint: safeApifyEndpoint, actorInput, apolloUrlPreview: searchUrl }
               : undefined,
         },
         { status: runRes.status },
@@ -216,9 +274,29 @@ export async function POST(req: NextRequest) {
     const runId = runJson?.data?.id ?? runJson?.id ?? null;
     const datasetId = runJson?.data?.defaultDatasetId ?? runJson?.defaultDatasetId ?? null;
 
+    await safeAppendAntoniaEvent({
+      eventType: 'search.provider_accepted',
+      organizationId,
+      actorId: userId,
+      actorType,
+      entityType: 'search',
+      entityId: requestId,
+      sourceSystem: 'apify-search',
+      sourceRoute: '/api/leads/apify',
+      provider: 'apify',
+      providerRequestId: runId,
+      requestId,
+      correlationId: requestId,
+      operationId: requestId,
+      status: 'accepted',
+      outcome: 'run_started',
+      metrics: { quotaCount: quota.count, quotaLimit: quota.limit },
+      payload: { hasRunId: Boolean(runId), hasDatasetId: Boolean(datasetId) },
+    });
+
     const payload: any = { ok: true, runId, datasetId };
     if (process.env.NODE_ENV !== 'production') {
-      payload.debug = { runUrl: apifyEndpoint, actorInput, apolloUrlPreview: searchUrl };
+      payload.debug = { runUrl: safeApifyEndpoint, actorInput, apolloUrlPreview: searchUrl };
     }
     return NextResponse.json(payload, { status: 200 });
   } catch (err: any) {

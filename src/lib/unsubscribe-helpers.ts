@@ -1,16 +1,25 @@
 import crypto from 'crypto';
 
-const SECRET_CANDIDATES = Array.from(new Set([
-    String(process.env.UNSUBSCRIBE_TOKEN_SECRET || '').trim(),
-    String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim(),
-    String(process.env.INTERNAL_API_SECRET || '').trim(),
-    String(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim(),
-    'anton-ia-unsubscribe-secret',
-].filter(Boolean)));
-const SECRET = SECRET_CANDIDATES[0];
-
 const TOKEN_VERSION = 'v1';
 const TOKEN_TTL_DAYS = Number(process.env.UNSUBSCRIBE_TOKEN_TTL_DAYS || 3650);
+
+function getSecureSecretCandidates() {
+    const candidates = Array.from(new Set([
+        String(process.env.UNSUBSCRIBE_TOKEN_SECRET || '').trim(),
+        String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim(),
+        String(process.env.INTERNAL_API_SECRET || '').trim(),
+    ].filter(Boolean)));
+
+    if (candidates.length === 0) {
+        throw new Error('Unsubscribe token secret is not configured. Set UNSUBSCRIBE_TOKEN_SECRET, SUPABASE_SERVICE_ROLE_KEY, or INTERNAL_API_SECRET.');
+    }
+
+    return candidates;
+}
+
+function getPrimarySecret() {
+    return getSecureSecretCandidates()[0];
+}
 
 function normalizeEmail(email: string) {
     return String(email || '').trim().toLowerCase();
@@ -26,8 +35,12 @@ function fromBase64Url(value: string) {
     return Buffer.from(padded, 'base64');
 }
 
-function getKey(secret = SECRET) {
+function getKey(secret: string) {
     return crypto.createHash('sha256').update(secret).digest();
+}
+
+function getSignaturePayload(email: string, userId: string, orgId?: string | null) {
+    return `${normalizeEmail(email)}:${String(userId || '').trim()}:${orgId ? String(orgId).trim() : ''}`;
 }
 
 export type ResolvedUnsubscribeRequest = {
@@ -37,20 +50,18 @@ export type ResolvedUnsubscribeRequest = {
 };
 
 export function generateUnsubscribeSignature(email: string, userId: string, orgId?: string | null): string {
-    const data = `${email}:${userId}:${orgId || ''}`;
-    return crypto.createHmac('sha256', SECRET).update(data).digest('hex');
+    return crypto.createHmac('sha256', getPrimarySecret()).update(getSignaturePayload(email, userId, orgId)).digest('hex');
 }
 
 export function verifyUnsubscribeSignature(email: string, userId: string, orgId: string | null | undefined, signature: string): boolean {
     if (!signature) return false;
-    for (const secret of SECRET_CANDIDATES) {
-        const expected = crypto.createHmac('sha256', secret).update(`${email}:${userId}:${orgId || ''}`).digest('hex');
-        try {
-            if (crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
-                return true;
-            }
-        } catch {
-            return false;
+    const provided = String(signature).trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(provided)) return false;
+
+    for (const secret of getSecureSecretCandidates()) {
+        const expected = crypto.createHmac('sha256', secret).update(getSignaturePayload(email, userId, orgId)).digest('hex');
+        if (crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(provided, 'hex'))) {
+            return true;
         }
     }
     return false;
@@ -58,7 +69,7 @@ export function verifyUnsubscribeSignature(email: string, userId: string, orgId:
 
 export function generateUnsubscribeToken(email: string, userId: string, orgId?: string | null): string {
     const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv('aes-256-gcm', getKey(), iv);
+    const cipher = crypto.createCipheriv('aes-256-gcm', getKey(getPrimarySecret()), iv);
     const expiresAt = TOKEN_TTL_DAYS > 0 ? Date.now() + TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000 : null;
     const payload = JSON.stringify({
         ver: TOKEN_VERSION,
@@ -79,13 +90,14 @@ export function parseUnsubscribeToken(token: string | null | undefined): Resolve
 
     const parts = raw.split('.');
     if (parts.length !== 4 || parts[0] !== TOKEN_VERSION) return null;
+    const secrets = getSecureSecretCandidates();
 
     try {
         const iv = fromBase64Url(parts[1]);
         const tag = fromBase64Url(parts[2]);
         const encrypted = fromBase64Url(parts[3]);
 
-        for (const secret of SECRET_CANDIDATES) {
+        for (const secret of secrets) {
             try {
                 const decipher = crypto.createDecipheriv('aes-256-gcm', getKey(secret), iv);
                 decipher.setAuthTag(tag);

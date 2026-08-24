@@ -22,7 +22,6 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { organizationService } from '@/lib/services/organization-service';
 
 export default function UnsubscribesPage() {
     const { toast } = useToast();
@@ -121,38 +120,18 @@ export default function UnsubscribesPage() {
         setTesting(true);
         setTestResult(null);
         try {
-            // Get current organization ID
-            const orgId = await organizationService.getCurrentOrganizationId();
-            console.log('[Test] Using organization:', orgId);
-
-            // We use providers/send to test. We assume Google as default provider or just check the blocking logic.
-            // The blocking logic runs BEFORE provider check.
-            const res = await fetch('/api/providers/send', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    provider: 'google', // Dummy provider, we just want to hit the block check
-                    to: testEmail,
-                    subject: 'Test de Bloqueo Antonia',
-                    htmlBody: '<p>Este es un correo de prueba para verificar bloqueos.</p>',
-                    organizationId: orgId // Send the organization ID
-                })
+            const res = await fetch(`/api/privacy/contactability?email=${encodeURIComponent(testEmail.trim())}`, {
+                cache: 'no-store',
             });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data?.error || 'No pudimos comprobar este correo.');
 
-            const data = await res.json();
-
-            if (res.status === 403) {
-                setTestResult({ status: 'blocked', message: '¡Correcto! El correo fue bloqueado: ' + data.error });
-            } else if (res.ok) {
-                setTestResult({ status: 'success', message: 'El correo NO fue bloqueado y se intentó enviar.' });
+            if (data?.status === 'blocked') {
+                setTestResult({ status: 'blocked', message: data?.description || 'Correcto: este correo no puede recibir envíos.' });
+            } else if (data?.status === 'warning') {
+                setTestResult({ status: 'success', message: data?.description || 'Este correo requiere revisión antes de contactar.' });
             } else {
-                // Determine if it was a block fail or just a system error (like no token)
-                // If "Not connected", it means it passed the block check!
-                if (data.error && (data.error.includes('Not connected') || data.error.includes('Unauthorized'))) {
-                    setTestResult({ status: 'success', message: 'No bloqueado (falló envío por falta de conexión, pero pasó el filtro).' });
-                } else {
-                    setTestResult({ status: 'error', message: 'Error inesperado: ' + (data.error || res.statusText) });
-                }
+                setTestResult({ status: 'success', message: 'No encontramos bloqueos para este correo. No se envió ningún mensaje.' });
             }
         } catch (e: any) {
             setTestResult({ status: 'error', message: 'Error de red: ' + e.message });

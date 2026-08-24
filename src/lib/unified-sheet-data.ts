@@ -61,9 +61,6 @@ function extractEmailFromEnriched(e: any): string | null {
   );
 
   const valid = candidates.find((c) => EMAIL_RE.test(c));
-  if (!valid && candidates.length) {
-    console.warn('[sheet] extractEmailFromEnriched: candidatos sin formato válido', candidates);
-  }
   return valid ?? null;
 }
 
@@ -130,15 +127,6 @@ function mapEnrichedLead(e: any, customMap: Record<string, CustomData>): Unified
     const gid = `lead_enriched|${String(idBase)}`;
     const custom = customMap[gid];
     const email = extractEmailFromEnriched(e);
-
-    if (!email) {
-      console.warn('[sheet] enriched sin email válido', {
-        id: e?.id ?? (e as any)?._id,
-        hasEmailsArray: Array.isArray((e as any)?.emails),
-        // cuidado con objetos enormes:
-        presentKeys: e ? Object.keys(e).slice(0, 20) : [],
-      });
-    }
 
     return {
       gid,

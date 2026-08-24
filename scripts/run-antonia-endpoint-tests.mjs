@@ -11,6 +11,7 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 const ALLOW_HIGH_RISK = String(process.env.ALLOW_HIGH_RISK || '').toLowerCase() === 'true';
 const CRON_SECRET = String(process.env.CRON_SECRET || '').trim();
 const INTERNAL_API_SECRET = String(process.env.INTERNAL_API_SECRET || '').trim();
+const FIREBASE_SCHEDULER_SECRET = String(process.env.FIREBASE_SCHEDULER_SECRET || '').trim();
 
 const METHOD_ORDER = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 const HIGH_RISK = new Set(['GET /api/cron/process-campaigns']);
@@ -44,14 +45,16 @@ const REQUEST_OVERRIDES = {
     expected: [200],
   },
   'GET /api/cron/antonia': {
-    query: { dryRun: true },
     headers: CRON_SECRET ? { 'x-cron-secret': CRON_SECRET } : {},
-    expected: [200],
+    expected: CRON_SECRET ? [410] : [401],
   },
   'GET /api/cron/process-campaigns': {
     query: { dryRun: true },
-    headers: CRON_SECRET ? { 'x-cron-secret': CRON_SECRET } : {},
-    expected: CRON_SECRET ? [200] : [401],
+    headers: FIREBASE_SCHEDULER_SECRET ? {
+      'x-firebase-scheduler-secret': FIREBASE_SCHEDULER_SECRET,
+      'x-scheduler-owner': 'firebase-functions',
+    } : {},
+    expected: FIREBASE_SCHEDULER_SECRET ? [200] : [401],
   },
   'GET /api/debug/apify-token': {
     expected: [200],
@@ -82,7 +85,13 @@ const REQUEST_OVERRIDES = {
   },
   'POST /api/research/n8n': {
     body: {},
-    expected: [400],
+    expected: [410],
+  },
+  'GET /api/research/n8n': {
+    expected: [410],
+  },
+  'GET /api/research/serpapi-account': {
+    expected: [410],
   },
   'POST /api/tracking/webhook': {
     body: [

@@ -738,7 +738,7 @@ async function appendStepsAfterApproval(params: {
     });
   }
 
-  if (actionType === 'campaign.launch' || actionType === 'campaign.resume' || actionType === 'email.bulk_send') {
+  if (actionType === 'campaign.launch' || actionType === 'campaign.resume') {
     await insertJobStepIfMissing({
       auth,
       job,

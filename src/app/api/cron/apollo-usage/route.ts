@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { captureApolloCreditUsageSnapshot } from '@/lib/server/apollo-usage';
+import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
-  const cronSecret = String(process.env.CRON_SECRET || '').trim();
-  const providedBearer = String(req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
-  const providedCronSecret = String(req.headers.get('x-cron-secret') || '').trim();
-  if (!cronSecret || (providedBearer !== cronSecret && providedCronSecret !== cronSecret)) {
+  if (!isFirebaseSchedulerRequest(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -18,7 +16,7 @@ export async function POST(req: NextRequest) {
       requestId: req.headers.get('x-request-id') || undefined,
       sourceRoute: 'POST /api/cron/apollo-usage',
     });
-    return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json(result, { headers: firebaseSchedulerResponseHeaders() });
   } catch (error) {
     console.error('[cron/apollo-usage] capture failed', error);
     return NextResponse.json(

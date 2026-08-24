@@ -8,6 +8,11 @@ type ContactHistoryLike = Partial<ContactedLead> & {
   last_reply_text?: string | null;
   replied_at?: string | null;
   reply_intent?: string | null;
+  delivery_status?: string | null;
+  bounce_category?: string | null;
+  bounce_reason?: string | null;
+  evaluation_status?: string | null;
+  campaign_followup_reason?: string | null;
 };
 
 type CandidateLike = {
@@ -16,6 +21,10 @@ type CandidateLike = {
   email?: string | null;
   linkedinUrl?: string | null;
   linkedin_url?: string | null;
+};
+
+type ReplyClassificationLike = {
+  intent?: unknown;
 };
 
 const REPLY_INTENTS = new Set([
@@ -28,8 +37,32 @@ const REPLY_INTENTS = new Set([
   'delivery_failure',
 ]);
 
+const OPT_OUT_REASONS = new Set([
+  'unsubscribe',
+  'unsubscribed',
+  'opt_out',
+  'opt-out',
+]);
+
+const TEMPORARY_DELIVERY_REASONS = new Set([
+  'mailbox_full',
+  'policy_block',
+  'temporary_failure',
+]);
+
+const PERMANENT_DELIVERY_REASONS = new Set([
+  'left_company',
+  'mailbox_not_found',
+  'domain_error',
+]);
+
 function normalize(value: unknown) {
   return String(value || '').trim().toLowerCase();
+}
+
+function hasExplicitOptOutText(history: ContactHistoryLike) {
+  const text = String(history.lastReplyText || history.last_reply_text || '').trim();
+  return /\b(?:do\s+not\s+contact|stop\s+(?:emailing|contacting)|remove\s+me|no\s+(?:contactarme|me\s+(?:contacten|escriban)|nos\s+contacten)|dar(?:me|te|se)\s+de\s+baja)\b/i.test(text);
 }
 
 function normalizeLinkedin(value: unknown) {
@@ -41,13 +74,50 @@ function normalizeLinkedin(value: unknown) {
 }
 
 export function hasLeadReplied(history: ContactHistoryLike) {
+  const deliveryStatus = normalize(history.deliveryStatus || history.delivery_status);
   return Boolean(
     history.repliedAt ||
     history.replied_at ||
     history.status === 'replied' ||
     REPLY_INTENTS.has(normalize(history.replyIntent || history.reply_intent)) ||
+    deliveryStatus === 'bounced' ||
+    deliveryStatus === 'soft_bounced' ||
     String(history.lastReplyText || history.last_reply_text || '').trim()
   );
+}
+
+export function shouldGloballySuppressReply(classification: ReplyClassificationLike | null | undefined) {
+  return classification?.intent === 'unsubscribe';
+}
+
+export function shouldPermanentlySuppressContact(history: ContactHistoryLike) {
+  const intent = normalize(history.replyIntent || history.reply_intent);
+  const followupReason = normalize(history.campaignFollowupReason || history.campaign_followup_reason);
+
+  if (intent === 'unsubscribe' || OPT_OUT_REASONS.has(followupReason) || hasExplicitOptOutText(history)) return true;
+
+  const evaluationStatus = normalize(history.evaluationStatus || history.evaluation_status);
+  const deliveryStatus = normalize(history.deliveryStatus || history.delivery_status);
+  const bounceCategory = normalize(history.bounceCategory || history.bounce_category);
+  const deliveryReason = bounceCategory || followupReason;
+  const isDeliveryFailure = intent === 'delivery_failure' ||
+    deliveryStatus === 'bounced' ||
+    deliveryStatus === 'soft_bounced' ||
+    Boolean(bounceCategory);
+
+  if (!isDeliveryFailure) return false;
+
+  if (
+    evaluationStatus === 'action_required' ||
+    deliveryStatus === 'soft_bounced' ||
+    TEMPORARY_DELIVERY_REASONS.has(deliveryReason)
+  ) {
+    return false;
+  }
+
+  return evaluationStatus === 'do_not_contact' ||
+    deliveryStatus === 'bounced' ||
+    PERMANENT_DELIVERY_REASONS.has(deliveryReason);
 }
 
 export function findPriorReplyMatch(candidate: CandidateLike, historyRows: ContactHistoryLike[]) {

@@ -1,11 +1,10 @@
 
 // src/lib/ai/style-mail.ts
 // Genera borradores aplicando un perfil de Email Studio sobre la investigación n8n.
-// Listo para reemplazar por un endpoint LLM en el futuro.
 
 import { ensureSubjectPrefix } from "@/lib/outreach-templates";
 import { renderTemplate } from "@/lib/template";
-import { applySignaturePlaceholders, buildSenderInfo } from "@/lib/signature-placeholders";
+import { applySignaturePlaceholders, buildSenderInfo, type CompanyProfileInfo, type SenderInfo } from "@/lib/signature-placeholders";
 import type { StyleProfile } from "@/lib/types";
 
 export type LeadInput = {
@@ -26,6 +25,11 @@ export type ResearchInput = {
   talkTracks?: string[];
   emailDraft?: { subject?: string; body?: string };
   company?: { name?: string; domain?: string };
+};
+
+type GenerateMailOptions = {
+  sender?: SenderInfo;
+  companyProfile?: CompanyProfileInfo;
 };
 
 function htmlToPlainParas(htmlOrText: string): string {
@@ -56,23 +60,75 @@ function htmlToPlainParas(htmlOrText: string): string {
   return s;
 }
 
+function normalizeTemplateFallbacks(template: string): string {
+  return template.replace(
+    /\{\{\s*cta\.duration\s*\|\|\s*["'][^"']*["']\s*\}\}/gi,
+    '{{cta.duration}}'
+  );
+}
+
+function normalizeCtaDuration(value?: string): string {
+  const duration = String(value || '').match(/\d{1,3}/)?.[0];
+  return duration || '15';
+}
+
+function normalizeForMatching(value?: string): string {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase();
+}
+
+function applyInstructionHints(body: string, profile: StyleProfile): string {
+  const instructions = normalizeForMatching(profile.instructions);
+  if (!instructions) return body;
+
+  let nextBody = body;
+  if (/\b(sin|evita|evitar)\s+(emojis?|emoticones?)\b/.test(instructions)) {
+    nextBody = nextBody.replace(/[\p{Extended_Pictographic}\uFE0F]/gu, '').trim();
+  }
+
+  const asksForBrevity = /\b(breve|corto|corta|conciso|concisa|directo|directa)\b/.test(instructions);
+  if (asksForBrevity) {
+    const words = nextBody.split(/\s+/);
+    if (words.length > 90) {
+      nextBody = `${words.slice(0, 90).join(' ')}…`;
+    }
+  }
+
+  return nextBody;
+}
+
 export function generateMailFromStyle(
   profile: StyleProfile,
   report: ResearchInput | null,
-  lead: LeadInput
+  lead: LeadInput,
+  options: GenerateMailOptions = {}
 ): { subject: string; body: string } {
-  const sender = buildSenderInfo();
+  const sender = options.sender || buildSenderInfo();
   const companyName = lead.companyName || report?.company?.name || "";
+  const companyProfile = {
+    name: options.companyProfile?.name || sender.company || '',
+    sector: options.companyProfile?.sector || '',
+    description: options.companyProfile?.description || '',
+    services: options.companyProfile?.services || '',
+    valueProposition: options.companyProfile?.valueProposition || '',
+    website: options.companyProfile?.website || sender.website || '',
+    domain: options.companyProfile?.domain || '',
+  };
   const leadFirstName = (lead.fullName || "").split(" ")[0] || "";
-  const ctaLabel = (profile as any)?.cta?.label as string | undefined;
-  const ctaDur = (profile as any)?.cta?.duration as string | undefined;
+  const ctaLabel = profile.cta?.label?.trim();
+  const ctaDuration = normalizeCtaDuration(profile.cta?.duration);
 
   // 1) Punto de partida: si el perfil tiene plantillas, úsalas; si no, usa el borrador del reporte (si existe).
-  let subject = (profile as any).subjectTemplate || report?.emailDraft?.subject || "Propuesta";
+  let subject = profile.subjectTemplate || report?.emailDraft?.subject || "Propuesta";
   let body =
-    (profile as any).bodyTemplate ||
+    profile.bodyTemplate ||
     report?.emailDraft?.body ||
-    `Hola {{lead.firstName}},\n\nViendo {{company.name}}, creo que podemos ayudar con: {{report.pains}}\n\n¿Te parece coordinar una llamada de 15 minutos esta semana?\n\nSaludos,\n{{sender.name}}\n{{sender.company}}`;
+    `Hola {{lead.firstName}},\n\nViendo {{company.name}}, creo que podemos ayudar con: {{report.pains}}\n\n¿Te parece coordinar una llamada de {{cta.duration}} minutos esta semana?\n\nSaludos,\n{{sender.name}}\n{{sender.company}}`;
+
+  subject = normalizeTemplateFallbacks(subject);
+  body = normalizeTemplateFallbacks(body);
 
   // 2) Contexto para placeholders
   const ctx = {
@@ -87,10 +143,11 @@ export function generateMailFromStyle(
       name: companyName,
       domain: lead.companyDomain || report?.company?.domain || "",
     },
+    companyProfile,
     sender,
     cta: {
       label: ctaLabel || '',
-      duration: ctaDur || '',
+      duration: ctaDuration,
     },
     report: {
       overview: report?.overview || "su iniciativa actual de crecimiento",
@@ -103,6 +160,7 @@ export function generateMailFromStyle(
 
   subject = renderTemplate(subject, ctx);
   body = renderTemplate(body, ctx);
+  body = body.replace(/\bde\s+min\b/gi, `de ${ctaDuration} min`);
 
   // 3) Ajustes rápidos según estilo (tono/longitud/cta)
   const tone = (profile.tone || "").toString().toLowerCase();
@@ -115,15 +173,19 @@ export function generateMailFromStyle(
   const length = (profile.length || "").toString().toLowerCase();
   if (length.includes("short") || length.includes("corto") || length.includes("breve")) {
     const words = body.split(/\s+/);
-    body = words.slice(0, 160).join(" ") + (words.length > 160 ? "…" : "");
-  }
-
-  if (ctaLabel || ctaDur) {
-    const hasCTA = /15 ?min|10 ?min|20 ?min|agendar|reunión|llamada/i.test(body);
-    if (!hasCTA) {
-      body += `\n\n${ctaLabel || `¿${ctaDur || "15"} min esta semana?`}`;
+    if (words.length > 100) {
+      body = `${words.slice(0, 100).join(" ")}…`;
     }
   }
+
+  if (ctaLabel || profile.cta?.duration) {
+    const hasCTA = /15 ?min|10 ?min|20 ?min|agendar|reunión|llamada/i.test(body);
+    if (!hasCTA) {
+      body += `\n\n${ctaLabel || `¿${ctaDuration} min esta semana?`}`;
+    }
+  }
+
+  body = applyInstructionHints(body, profile);
 
   // Firma y prefijo
   body = applySignaturePlaceholders(body, sender);

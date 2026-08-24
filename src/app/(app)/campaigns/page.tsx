@@ -9,24 +9,34 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { campaignsStorage, type CampaignStep, type CampaignStepAttachment } from '@/lib/services/campaigns-service';
+import { campaignsStorage, type CampaignStep } from '@/lib/services/campaigns-service';
 // UI-compatible Campaign type from service
 import type { Campaign } from '@/lib/services/campaigns-service';
 
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
-import { Trash2, Plus, Pause, Play, Eye, X, Sparkles, MessageSquare, Search as SearchIcon, SlidersHorizontal } from 'lucide-react';
+import { AlertCircle, ArrowLeft, CheckCircle2, ChevronDown, Eye, FileText, Loader2, MessageSquare, MoreHorizontal, Pause, Play, Plus, Search as SearchIcon, SlidersHorizontal, Sparkles, Trash2, X } from 'lucide-react';
 import { computeEligibilityForCampaign, type EligiblePreviewRow } from '@/lib/campaign-eligibility';
-import { microsoftAuthService } from '@/lib/microsoft-auth-service';
-import { googleAuthService } from '@/lib/google-auth-service';
 import type { ContactedLead } from '@/lib/types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { CommentsSection } from '@/components/comments-section';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { CampaignAnalytics } from '@/components/campaigns/CampaignAnalytics';
 import { CampaignFlow } from '@/components/campaigns/CampaignFlow';
 import { cn } from '@/lib/utils';
+import { assessCampaignDraftReadiness } from '@/lib/campaign-qa';
 import { profileService } from '@/lib/services/profile-service';
 import {
   type CampaignRunStatus,
@@ -42,7 +52,7 @@ import {
 
 type Mode = { kind: 'list' } | { kind: 'edit'; id?: string };
 
-type DraftStep = CampaignStep & { _files?: File[] };
+type DraftStep = CampaignStep;
 
 function buildDraftStep(index = 0, campaignType: CampaignType = 'reconnection'): DraftStep {
   const isReconnection = campaignType === 'reconnection';
@@ -71,19 +81,6 @@ function getCampaignTypeLabel(campaignType: CampaignType) {
   return campaignType === 'reconnection' ? 'Reconexión' : 'Seguimiento';
 }
 
-function getCampaignTypeDescription(campaignType: CampaignType) {
-  return campaignType === 'reconnection'
-    ? 'Promociona un nuevo servicio o vuelve a activar leads antiguos con personalización inteligente.'
-    : 'Automatiza follow-ups clásicos por offset para no perseguir manualmente cada lead contactado.';
-}
-
-function getCampaignEditorTitle(campaignType: CampaignType, hasId: boolean) {
-  if (hasId) {
-    return campaignType === 'reconnection' ? 'Gestionar campaña de reconexión' : 'Gestionar campaña de seguimiento';
-  }
-  return campaignType === 'reconnection' ? 'Nueva campaña de reconexión' : 'Nueva campaña de seguimiento';
-}
-
 function formatRunStatusLabel(status?: CampaignRunStatus | null) {
   switch (status) {
     case 'success': return 'OK';
@@ -92,15 +89,6 @@ function formatRunStatusLabel(status?: CampaignRunStatus | null) {
     case 'skipped': return 'Sin ejecutar';
     case 'idle': return 'Sin elegibles';
     default: return 'Sin ejecuciones';
-  }
-}
-
-function getRunStatusVariant(status?: CampaignRunStatus | null): 'default' | 'secondary' | 'destructive' | 'outline' {
-  switch (status) {
-    case 'success': return 'default';
-    case 'partial': return 'secondary';
-    case 'failed': return 'destructive';
-    default: return 'outline';
   }
 }
 
@@ -143,18 +131,6 @@ function formatPreviewDate(value: string | null) {
   return date.toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function fileToBase64(file: File): Promise<CampaignStepAttachment> {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => {
-      const base64 = String(fr.result || '').split(',')[1] || '';
-      resolve({ name: file.name, contentBytes: base64, contentType: file.type || undefined });
-    };
-    fr.onerror = reject;
-    fr.readAsDataURL(file);
-  });
-}
-
 import { useAuth } from '@/context/AuthContext';
 
 export default function CampaignsPage() {
@@ -163,13 +139,14 @@ export default function CampaignsPage() {
 
   const [mode, setMode] = useState<Mode>({ kind: 'list' });
   const [items, setItems] = useState<Campaign[]>([]);
+  const [loadingCampaigns, setLoadingCampaigns] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [previewCampaign, setPreviewCampaign] = useState<Campaign | null>(null);
   const [previewRows, setPreviewRows] = useState<EligiblePreviewRow[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [sendingId, setSendingId] = useState<string | null>(null);
 
   // AI Generation State
   const [aiOpen, setAiOpen] = useState(false);
@@ -180,6 +157,10 @@ export default function CampaignsPage() {
   // View Mode
   const [viewMode, setViewMode] = useState<'list' | 'flow'>('list');
   const [activeStepId, setActiveStepId] = useState<string | null>(null);
+  const [advancedBriefOpen, setAdvancedBriefOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [deliverySettingsOpen, setDeliverySettingsOpen] = useState(false);
+  const [exclusionsOpen, setExclusionsOpen] = useState(false);
 
   // Selección en la tabla de previsualización
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -220,6 +201,21 @@ export default function CampaignsPage() {
     ? draft.settings.audience.reactivation
     : null;
   const reconnectionSettings = draft.settings.reconnection;
+  const draftAudienceHasActiveSegment = reactivationAudience
+    ? reactivationAudience.includeOpenedNoReply ||
+      reactivationAudience.includeClickedNoReply ||
+      reactivationAudience.includeDeliveredNoOpen ||
+      reactivationAudience.includeNeutralReplies ||
+      reactivationAudience.includeNoSignal
+    : draft.campaignType !== 'reconnection';
+  const draftReadiness = useMemo(() => assessCampaignDraftReadiness({
+    name: draft.name,
+    campaignType: draft.campaignType,
+    steps: draft.steps,
+    offerName: reconnectionSettings.brief.offerName,
+    offerSummary: reconnectionSettings.brief.offerSummary,
+    hasActiveAudienceSegment: draftAudienceHasActiveSegment,
+  }), [draft.campaignType, draft.name, draft.steps, draftAudienceHasActiveSegment, reconnectionSettings.brief.offerName, reconnectionSettings.brief.offerSummary]);
 
   const metricsByCampaignId = useMemo(() => {
     const leadMap = new Map((contacted || []).map((l: any) => [String(l.leadId || l.id || ''), l]));
@@ -259,9 +255,7 @@ export default function CampaignsPage() {
     return {
       total: items.length,
       active: active.length,
-      reconnection: items.filter((campaign) => campaign.campaignType === 'reconnection').length,
-      followUp: items.filter((campaign) => campaign.campaignType === 'follow_up').length,
-      missingAutomation: active.filter((campaign) => !campaign.lastRunAt).length,
+      paused: items.length - active.length,
     };
   }, [items]);
 
@@ -308,16 +302,32 @@ export default function CampaignsPage() {
     return stats;
   }, [contacted, draft.excludedLeadIds, reactivationAudience]);
 
-  useEffect(() => {
-    async function load() {
-      if (authLoading) return;
-      if (!user) return; // or handle unauthenticated state
-
-      setItems(await campaignsStorage.get());
-      setContacted(await contactedLeadsStorage.get());
+  const loadCampaignData = useCallback(async () => {
+    if (authLoading) return;
+    if (!user) {
+      setLoadingCampaigns(false);
+      return;
     }
-    load();
+
+    setLoadingCampaigns(true);
+    setLoadError(null);
+    try {
+      const [campaigns, contactedLeads] = await Promise.all([
+        campaignsStorage.get(),
+        contactedLeadsStorage.get(),
+      ]);
+      setItems(campaigns);
+      setContacted(contactedLeads);
+    } catch (error: any) {
+      setLoadError(error?.message || 'No se pudieron cargar las campañas.');
+    } finally {
+      setLoadingCampaigns(false);
+    }
   }, [authLoading, user]);
+
+  useEffect(() => {
+    void loadCampaignData();
+  }, [loadCampaignData]);
 
   function updateReactivationSettings(patch: Partial<CampaignReactivationSettings>) {
     setDraft((current) => ({
@@ -403,6 +413,10 @@ export default function CampaignsPage() {
 
   function startCreate(campaignType: CampaignType) {
     setDraft(buildDraftState(campaignType));
+    setCommentsOpen(false);
+    setAdvancedBriefOpen(false);
+    setDeliverySettingsOpen(false);
+    setExclusionsOpen(false);
     setMode({ kind: 'edit' });
   }
 
@@ -415,6 +429,10 @@ export default function CampaignsPage() {
       excludedLeadIds: [...c.excludedLeadIds],
       settings: c.settings || createDefaultCampaignSettings({ campaignType: c.campaignType || 'follow_up' }),
     });
+    setCommentsOpen(false);
+    setAdvancedBriefOpen(false);
+    setDeliverySettingsOpen(false);
+    setExclusionsOpen(false);
     setMode({ kind: 'edit', id: c.id });
   }
 
@@ -429,55 +447,8 @@ export default function CampaignsPage() {
     setDraft((d) => ({ ...d, steps: d.steps.filter((s) => s.id !== stepId) }));
   }
 
-  function onStepFile(e: React.ChangeEvent<HTMLInputElement>, stepId: string) {
-    const files = Array.from(e.target.files || []);
-    setDraft((d) => ({
-      ...d,
-      steps: d.steps.map((s) => (s.id === stepId ? { ...s, _files: files } : s)),
-    }));
-  }
-
-  async function buildAttachments(step: DraftStep): Promise<CampaignStepAttachment[]> {
-    if (!step._files?.length) return step.attachments || [];
-    const att = await Promise.all(step._files.map(fileToBase64));
-    return [...(step.attachments || []), ...att];
-  }
-
   async function saveCampaign() {
-    if (!draft.name.trim()) {
-      toast({ variant: 'destructive', title: 'Nombre requerido', description: 'La campaña debe tener un nombre.' });
-      return;
-    }
-    if (!draft.steps.length) {
-      toast({ variant: 'destructive', title: 'Agrega al menos un paso', description: 'Necesitas un paso de seguimiento.' });
-      return;
-    }
-    if (draft.campaignType === 'reconnection' && draft.settings.reconnection.enabled && !draft.settings.reconnection.brief.offerSummary.trim() && !draft.settings.reconnection.brief.offerName.trim()) {
-      toast({
-        variant: 'destructive',
-        title: 'Describe qué vas a promocionar',
-        description: 'Agrega al menos un resumen o nombre del servicio para que la IA personalice la campaña de reconexion.',
-      });
-      return;
-    }
-    if (draft.campaignType === 'reconnection' && draft.settings.audience?.kind === 'reactivation') {
-      const audience = draft.settings.audience.reactivation;
-      const hasActiveSegment =
-        audience.includeOpenedNoReply ||
-        audience.includeClickedNoReply ||
-        audience.includeDeliveredNoOpen ||
-        audience.includeNeutralReplies ||
-        audience.includeNoSignal;
-
-      if (!hasActiveSegment) {
-        toast({
-          variant: 'destructive',
-          title: 'Activa al menos un segmento',
-          description: 'Selecciona qué tipo de leads reactivados quieres incluir en esta campaña.',
-        });
-        return;
-      }
-    }
+    const safeName = draft.name.trim() || (draft.campaignType === 'reconnection' ? 'Campaña de reconexión sin título' : 'Campaña de seguimiento sin título');
     setSaving(true);
     try {
       const steps: CampaignStep[] = [];
@@ -488,7 +459,8 @@ export default function CampaignsPage() {
           offsetDays: Math.max(0, Number.isFinite(+s.offsetDays) ? Number(s.offsetDays) : 0),
           subject: s.subject || '',
           bodyHtml: s.bodyHtml || '',
-          attachments: await buildAttachments(s),
+          attachments: s.attachments || [],
+          variantB: s.variantB,
         });
       }
       const normalizedSettings = {
@@ -502,21 +474,24 @@ export default function CampaignsPage() {
       if (draft.id) {
         await campaignsStorage.update(draft.id, {
           campaignType: draft.campaignType,
-          name: draft.name,
+          name: safeName,
           steps,
           excludedLeadIds: draft.excludedLeadIds,
-          settings: normalizedSettings
+          settings: normalizedSettings,
+          isPaused: true,
         });
-        toast({ title: 'Campaña actualizada', description: 'Se guardaron los cambios.' });
+        toast({ title: 'Borrador guardado', description: 'La campaña quedó pausada para que puedas revisarla antes de activarla.' });
       } else {
-        await campaignsStorage.add({
+        const created = await campaignsStorage.add({
           campaignType: draft.campaignType,
-          name: draft.name,
+          name: safeName,
           steps,
           excludedLeadIds: draft.excludedLeadIds,
-          settings: normalizedSettings
+          settings: normalizedSettings,
+          isPaused: true,
         });
-        toast({ title: 'Campaña creada', description: 'Ya puedes previsualizar elegibles.' });
+        if (!created) throw new Error('No se pudo confirmar la campaña guardada.');
+        toast({ title: 'Borrador guardado', description: 'La campaña quedó pausada. Revísala antes de activarla.' });
       }
       setItems(await campaignsStorage.get());
       setMode({ kind: 'list' });
@@ -528,9 +503,40 @@ export default function CampaignsPage() {
   }
 
   async function togglePause(c: Campaign) {
-    const next = await campaignsStorage.togglePause(c.id, !c.isPaused);
-    setItems(await campaignsStorage.get());
-    toast({ title: next?.isPaused ? 'Campaña pausada' : 'Campaña reanudada' });
+    try {
+      if (c.isPaused) {
+        const audience = c.settings?.audience?.kind === 'reactivation' ? c.settings.audience.reactivation : null;
+        const readiness = assessCampaignDraftReadiness({
+          name: c.name,
+          campaignType: c.campaignType,
+          steps: c.steps,
+          offerName: c.settings?.reconnection?.brief?.offerName,
+          offerSummary: c.settings?.reconnection?.brief?.offerSummary,
+          hasActiveAudienceSegment: audience
+            ? audience.includeOpenedNoReply || audience.includeClickedNoReply || audience.includeDeliveredNoOpen || audience.includeNeutralReplies || audience.includeNoSignal
+            : c.campaignType !== 'reconnection',
+        });
+        if (!readiness.ready) {
+          toast({
+            variant: 'destructive',
+            title: 'Completa la revisión antes de activar',
+            description: readiness.issues[0],
+          });
+          startEdit(c);
+          return;
+        }
+      }
+
+      const next = await campaignsStorage.togglePause(c.id, !c.isPaused);
+      if (!next) throw new Error('No se pudo confirmar el nuevo estado.');
+      setItems(await campaignsStorage.get());
+      toast({
+        title: next.isPaused ? 'Campaña pausada' : 'Campaña activada',
+        description: next.isPaused ? 'No se realizarán nuevos envíos.' : 'La campaña quedó lista para su próxima ejecución.',
+      });
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'No se pudo cambiar el estado', description: error?.message || 'Inténtalo de nuevo.' });
+    }
   }
 
   function askDelete(id: string) {
@@ -543,11 +549,15 @@ export default function CampaignsPage() {
 
   async function confirmDelete() {
     if (!deletingId) return;
-    const removed = await campaignsStorage.remove(deletingId);
-    setDeletingId(null);
-    setItems(await campaignsStorage.get());
-    if (removed > 0) toast({ title: 'Campaña eliminada' });
-    else toast({ variant: 'destructive', title: 'No se pudo eliminar' });
+    try {
+      const removed = await campaignsStorage.remove(deletingId);
+      if (removed <= 0) throw new Error('La campaña no se pudo eliminar.');
+      setItems(await campaignsStorage.get());
+      setDeletingId(null);
+      toast({ title: 'Campaña eliminada' });
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'No se pudo eliminar', description: error?.message || 'Inténtalo de nuevo.' });
+    }
   }
 
   function onExcludeToggle(leadId: string, checked: boolean) {
@@ -587,217 +597,21 @@ export default function CampaignsPage() {
     }
   }, [toast]);
 
-
-  // --- Helpers de render de plantilla (con fallback) ---
-  function renderTemplate(tpl: string, lead: ContactedLead, sender: { name?: string | null } = {}) {
-    const base = String(tpl ?? '');
-    const out = base
-      .replace(/{{\s*lead\.name\s*}}/gi, lead?.name ?? '')
-      .replace(/{{\s*company\s*}}/gi, lead?.company ?? '')
-      .replace(/{{\s*sender\.name\s*}}/gi, String(sender?.name ?? ''));
-    // Evita mandar vacío: si quedó en blanco tras reemplazos, devuelve algo mínimo
-    const trimmed = out.replace(/\s+/g, ' ').trim();
-    return trimmed.length ? out : '<div></div>';
-  }
-
-  // Genera texto plano rápido desde HTML (para Gmail)
-  function htmlToPlainText(html: string) {
-    return (html || '')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/p>/gi, '\n\n')
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<[^>]+>/g, '')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }
-
-  // --- Normalización de cuerpo: texto plano -> HTML con párrafos ---
-  function isLikelyHtml(s: string) {
-    // Si ya tiene etiquetas comunes, asumimos HTML y no tocamos.
-    return /<\s*(p|div|br|table|ul|ol|li|img|a|span|strong|em)\b/i.test(s);
-  }
-  function escapeHtml(s: string) {
-    return s
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  }
-  /**
-   * Si el usuario escribió texto con saltos de línea en el textarea,
-   * lo convertimos a HTML preservando párrafos y <br/>.
-   * - Doble salto: nuevo párrafo
-   * - Salto simple: <br/>
-   */
-  function normalizeBodyHtml(input: string) {
-    const raw = String(input ?? '');
-    if (!raw.trim()) return '<div></div>';
-    if (isLikelyHtml(raw)) return raw; // ya es HTML
-    const blocks = raw.split(/\n{2,}/).map(b => b.replace(/\r/g, ''));
-    const html = blocks
-      .map(b => `<p>${escapeHtml(b).replace(/\n/g, '<br/>')}</p>`)
-      .join('');
-    return html;
-  }
-
-  // Busca en storage por múltiples claves (leadId | id | email). Devuelve null si no existe.
-  function findContactedByLead(leadId: string, email?: string | null): ContactedLead | null {
-    const all = contacted || [];
-    const wantId = String(leadId || '').trim().toLowerCase();
-    const wantEmail = String(email || '').trim().toLowerCase();
-    // 1) por leadId
-    let hit =
-      all.find((x: any) => String(x.leadId || '').trim().toLowerCase() === wantId) ||
-      // 2) por id (algunos storages usan id en vez de leadId)
-      all.find((x: any) => String(x.id || '').trim().toLowerCase() === wantId) ||
-      // 3) por email
-      (wantEmail
-        ? all.find((x: any) => String(x.email || '').trim().toLowerCase() === wantEmail)
-        : null);
-    return hit || null;
-  }
-
   // --- Envío manual (por fila de previsualización) ---
   const sendFollowUpNow = async (row: EligiblePreviewRow, provider: 'outlook' | 'gmail'): Promise<boolean> => {
-    const key = `${row.leadId}:${provider}`;
-    if (sendingId === key) return false;
-    setSendingId(key);
-    try {
-      const campaign = previewCampaign;
-      if (!campaign) throw new Error('Campaña no encontrada en el estado de previsualización.');
-
-      // Buscar contacto; permitir fallback por email desde la fila
-      const contactedFromStore = findContactedByLead(row.leadId, row.leadEmail);
-      const contacted: any =
-        contactedFromStore ??
-        (row.leadEmail
-          ? {
-            // Fallback mínimo para poder enviar aunque no exista en storage
-            leadId: row.leadId,
-            name: row.leadName ?? '',
-            email: row.leadEmail,
-            company: '',
-            status: 'pending',
-          }
-          : null);
-      if (!contacted) throw new Error('No se pudo resolver el contacto: falta email.');
-
-      const step = campaign.steps[row.nextStepIdx];
-      if (!step) throw new Error('Paso no encontrado.');
-
-      const personalizationRes = await fetch('/api/campaigns/personalize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          campaignId: campaign.id,
-          leadId: row.leadId,
-          leadEmail: row.leadEmail,
-          stepIndex: row.nextStepIdx,
-          matchReason: row.matchReason,
-          daysSinceLastContact: row.daysSinceLastContact,
-        }),
-      });
-
-      const personalizationPayload = await personalizationRes.json().catch(() => ({}));
-      if (!personalizationRes.ok) {
-        throw new Error(personalizationPayload?.error || 'No se pudo personalizar el mensaje');
-      }
-
-      const subject = String(personalizationPayload.subject || '').trim();
-      let bodyHtml = normalizeBodyHtml(String(personalizationPayload.bodyHtml || ''));
-
-      const tracking = campaign.settings?.tracking;
-      const trackingEnabled = Boolean(tracking?.enabled);
-      const trackLinks = trackingEnabled && (tracking?.linkTracking ?? true);
-      const trackPixel = trackingEnabled && (tracking?.pixel ?? true);
-
-      if (trackingEnabled) {
-        const trackingId = String(contacted.id || contacted.leadId || row.leadId || '').trim();
-        const origin = window.location.origin;
-
-        if (trackLinks && trackingId && !bodyHtml.includes('/api/tracking/click')) {
-          bodyHtml = bodyHtml.replace(/href=("|')(?!(?:\/api\/tracking\/click\?id=))([^"']+)("|')/gi, (match, q, url) => {
-            if (String(url).startsWith('mailto:')) return match;
-            const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
-            return `href=${q}${trackingUrl}${q}`;
-          });
-        }
-
-        if (trackPixel && trackingId && !bodyHtml.includes('/api/tracking/open?id=')) {
-          const pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-          bodyHtml += `\n<br><img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
-        }
-      }
-
-      const subjectTrim = subject.replace(/\s+/g, ' ').trim();
-      const bodyTrim = bodyHtml.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-      if (!subjectTrim) throw new Error('El paso no tiene asunto luego de renderizar variables.');
-      if (!bodyTrim) throw new Error('El paso no tiene cuerpo luego de renderizar variables.');
-
-      // Use Server-Side Proxy
-      const res = await fetch('/api/providers/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider,
-          to: contacted.email,
-          subject,
-          htmlBody: bodyHtml,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Error al enviar correo');
-      }
-
-      // Update local records
-      const rec = campaign.sentRecords || {};
-      rec[String(row.leadId)] = { lastStepIdx: row.nextStepIdx, lastSentAt: new Date().toISOString() };
-      await campaignsStorage.update(campaign.id, { sentRecords: rec });
-
-      // Update contacted lead status
-      // Note: We don't get messageId/threadId back from the simple proxy yet, 
-      // but we can at least bump the step index.
-      if (provider === 'outlook' && (contactedLeadsStorage as any).bumpFollowupByConversationId && contacted.conversationId) {
-        await (contactedLeadsStorage as any).bumpFollowupByConversationId(contacted.conversationId, row.nextStepIdx);
-      } else if (provider === 'gmail' && (contactedLeadsStorage as any).bumpFollowupByThreadId && contacted.threadId) {
-        await (contactedLeadsStorage as any).bumpFollowupByThreadId(contacted.threadId, row.nextStepIdx);
-      }
-
-      toast({ title: 'Seguimiento enviado', description: `Se envió el paso #${row.nextStepIdx + 1} a ${contacted.name}.` });
-      return true;
-    } catch (e: any) {
-      console.error('[campaigns/send] Error:', e);
-      toast({ variant: 'destructive', title: 'No se pudo enviar', description: e?.message || 'Error desconocido' });
-      // Propaga para que el envío masivo cuente el fallo
-      throw e;
-    } finally {
-      setSendingId(null);
-    }
+    toast({
+      title: 'Revisión individual requerida',
+      description: `El paso ${row.nextStepIdx + 1} debe prepararse y aprobarse antes de enviar por ${provider === 'outlook' ? 'Outlook' : 'Gmail'}.`,
+    });
+    return false;
   };
 
   // Envío masivo (secuencial) de los seleccionados
   const sendBulk = async (provider: 'outlook' | 'gmail') => {
-    if (!previewCampaign || selectedIds.size === 0) return;
-    const toSend = previewRows.filter(r => selectedIds.has(r.leadId));
-    let ok = 0, fail = 0;
-    toast({ title: `Enviando ${toSend.length} seleccionados`, description: `Proveedor: ${provider}` });
-    for (const row of toSend) {
-      try {
-        const res = await sendFollowUpNow(row, provider);
-        ok += res ? 1 : 0;
-      } catch (err) {
-        console.warn('[campaigns/sendBulk] fallo en lead', row.leadId, err);
-        fail += 1;
-      }
-    }
     toast({
-      title: 'Envío masivo finalizado',
-      description: `Éxitos: ${ok} • Fallos: ${fail}`,
+      title: 'Revisión individual requerida',
+      description: `Los envíos de campaña en lote fueron retirados. Prepara cada correo para revisión antes de enviarlo por ${provider === 'outlook' ? 'Outlook' : 'Gmail'}.`,
     });
-    // Opcional: limpiar selección tras envío
-    setSelectedIds(new Set());
   };
 
   const toggleRow = (id: string, checked: boolean) => {
@@ -883,211 +697,227 @@ export default function CampaignsPage() {
   }
 
   return (
-    <div className="container mx-auto space-y-6">
-      <PageHeader title="Campañas" description="Separa reconexión inteligente y seguimiento clásico. Las campañas activas se revisan automáticamente desde el cron principal de ANTONIA." />
+    <div className="mx-auto space-y-6">
+      {mode.kind === 'list' && (
+        <PageHeader title="Campañas" description="Crea secuencias, revisa sus destinatarios y decide cuándo activarlas.">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="w-full rounded-full sm:w-auto">
+                <Plus aria-hidden="true" />
+                Nueva campaña
+                <ChevronDown aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72 rounded-2xl p-1.5">
+              <DropdownMenuLabel>Elige el objetivo</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="items-start py-2.5" onClick={() => startCreate('reconnection')}>
+                <Sparkles className="mt-0.5" aria-hidden="true" />
+                <span><span className="block font-medium">Volver a conectar</span><span className="block text-xs text-muted-foreground">Presenta una nueva propuesta a contactos anteriores.</span></span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className="items-start py-2.5" onClick={() => startCreate('follow_up')}>
+                <MessageSquare className="mt-0.5" aria-hidden="true" />
+                <span><span className="block font-medium">Hacer seguimiento</span><span className="block text-xs text-muted-foreground">Continúa conversaciones sin respuesta.</span></span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </PageHeader>
+      )}
 
       {mode.kind === 'list' && (
-        <>
-          <div className="grid gap-4 md:grid-cols-4">
-            <Card className="border-border/60 bg-card/80 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.14)]">
-              <CardHeader className="pb-2"><CardDescription>Total</CardDescription><CardTitle className="text-2xl">{campaignOverview.total}</CardTitle></CardHeader>
-            </Card>
-            <Card className="border-border/60 bg-card/80 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.14)]">
-              <CardHeader className="pb-2"><CardDescription>Activas</CardDescription><CardTitle className="text-2xl">{campaignOverview.active}</CardTitle></CardHeader>
-            </Card>
-            <Card className="border-border/60 bg-card/80 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.14)]">
-              <CardHeader className="pb-2"><CardDescription>Reconexión</CardDescription><CardTitle className="text-2xl">{campaignOverview.reconnection}</CardTitle></CardHeader>
-            </Card>
-            <Card className="border-border/60 bg-card/80 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.14)]">
-              <CardHeader className="pb-2"><CardDescription>Sin ejecución automática</CardDescription><CardTitle className="text-2xl">{campaignOverview.missingAutomation}</CardTitle></CardHeader>
-            </Card>
-          </div>
-
-          <Card>
-            <CardHeader>
+        <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/80 shadow-[0_20px_60px_-48px_rgba(15,23,42,0.24)]">
+          <CardHeader className="gap-4 border-b border-border/60 bg-muted/10">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <CardTitle>Mis campañas</CardTitle>
-                <CardDescription>Reconexión para difundir algo nuevo. Seguimiento para perseguir automáticamente mensajes ya enviados.</CardDescription>
+                <CardTitle className="text-xl tracking-tight">Tus campañas</CardTitle>
+                <CardDescription className="mt-1">Abre una campaña para editarla o revisa a quién se enviaría.</CardDescription>
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="mb-4 rounded-xl border bg-muted/20 p-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="space-y-2">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Filtrar y crear</div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant={campaignTypeFilter === 'all' ? 'secondary' : 'outline'} size="sm" onClick={() => setCampaignTypeFilter('all')}>Todas</Button>
-                      <Button variant={campaignTypeFilter === 'reconnection' ? 'secondary' : 'outline'} size="sm" onClick={() => setCampaignTypeFilter('reconnection')}>Reconexión</Button>
-                      <Button variant={campaignTypeFilter === 'follow_up' ? 'secondary' : 'outline'} size="sm" onClick={() => setCampaignTypeFilter('follow_up')}>Seguimiento</Button>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button variant="outline" onClick={() => startCreate('follow_up')}><Plus className="mr-2 h-4 w-4" />Nueva de seguimiento</Button>
-                    <Button onClick={() => startCreate('reconnection')}><Sparkles className="mr-2 h-4 w-4" />Nueva de reconexión</Button>
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span className="rounded-full border bg-background px-3 py-1">Activas: {campaignOverview.active}</span>
-                  <span className="rounded-full border bg-background px-3 py-1">Pendientes de revisar: {campaignOverview.missingAutomation}</span>
-                  <span className="rounded-full border bg-background px-3 py-1">Separadas por tipo para evitar mezclar reconexión con seguimiento</span>
-                </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" aria-label="Resumen de campañas">
+                <span><strong className="font-semibold text-foreground">{campaignOverview.total}</strong> total</span>
+                <span className="text-border" aria-hidden="true">•</span>
+                <span><strong className="font-semibold text-emerald-700 dark:text-emerald-400">{campaignOverview.active}</strong> activas</span>
+                <span className="text-border" aria-hidden="true">•</span>
+                <span><strong className="font-semibold text-foreground">{campaignOverview.paused}</strong> pausadas</span>
               </div>
-              <div className="border rounded-md overflow-x-auto">
-                <Table>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex w-full gap-1 overflow-x-auto rounded-xl bg-muted/50 p-1 sm:w-auto" aria-label="Filtrar campañas por tipo">
+                {([
+                  ['all', 'Todas'],
+                  ['reconnection', 'Reconexión'],
+                  ['follow_up', 'Seguimiento'],
+                ] as const).map(([value, label]) => (
+                  <Button key={value} variant={campaignTypeFilter === value ? 'secondary' : 'ghost'} size="sm" className="shrink-0 rounded-lg" onClick={() => setCampaignTypeFilter(value)}>
+                    {label}
+                  </Button>
+                ))}
+              </div>
+              <span className="text-xs text-muted-foreground">{filteredItems.length} {filteredItems.length === 1 ? 'campaña' : 'campañas'}</span>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {loadError ? (
+              <div className="p-6">
+                <Alert variant="destructive">
+                  <AlertCircle className="size-4" />
+                  <AlertTitle>No pudimos cargar tus campañas</AlertTitle>
+                  <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span>{loadError}</span>
+                    <Button variant="outline" size="sm" onClick={() => void loadCampaignData()}>Reintentar</Button>
+                  </AlertDescription>
+                </Alert>
+              </div>
+            ) : loadingCampaigns ? (
+              <div className="flex min-h-56 items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
+                <Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                Cargando campañas…
+              </div>
+            ) : filteredItems.length === 0 ? (
+              <div className="flex min-h-72 flex-col items-center justify-center px-6 py-12 text-center">
+                <div className="mb-4 flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary"><MessageSquare className="size-5" aria-hidden="true" /></div>
+                <h3 className="text-base font-semibold">{items.length === 0 ? 'Crea tu primera campaña' : 'No hay campañas en este filtro'}</h3>
+                <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
+                  {items.length === 0 ? 'Prepara una secuencia como borrador, revisa sus destinatarios y actívala cuando esté lista.' : 'Cambia el filtro para volver a ver tus campañas.'}
+                </p>
+                {items.length > 0 ? <Button variant="outline" className="mt-5 rounded-full" onClick={() => setCampaignTypeFilter('all')}>Ver todas</Button> : null}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table className="min-w-[860px]">
                   <TableHeader>
-                      <TableRow>
-                        <TableHead>Nombre</TableHead>
-                        <TableHead>Tipo</TableHead>
-                        <TableHead>Pasos</TableHead>
-                        <TableHead>Métricas</TableHead>
-                        <TableHead>Automatización</TableHead>
-                        <TableHead>Estado</TableHead>
-                        <TableHead className="text-right">Acciones</TableHead>
-                      </TableRow>
+                    <TableRow className="bg-muted/15 hover:bg-muted/15">
+                      <TableHead>Campaña</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead>Actividad</TableHead>
+                      <TableHead>Resultado</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
+                    </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredItems.length === 0 ? (
-                      <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No hay campañas para este filtro.</TableCell></TableRow>
-                    ) : filteredItems.map((c) => {
+                    {filteredItems.map((c) => {
                         const campaignSettings = c.settings || createDefaultCampaignSettings({ campaignType: c.campaignType });
-                        return <TableRow key={c.id}>
+                        const metrics = metricsByCampaignId[c.id] || { totalSent: 0, opened: 0, replied: 0, clicked: 0 };
+                        return <TableRow key={c.id} className="border-border/60 hover:bg-muted/15">
                         <TableCell>
-                          <div className="font-medium">{c.name}</div>
-                          {c.campaignType === 'reconnection' ? (
-                            <div className="text-xs text-muted-foreground">
-                              Reactivacion · {campaignSettings.audience?.reactivation.minDaysSinceLastContact ?? defaultCampaignReactivationSettings.minDaysSinceLastContact}d · {campaignSettings.reconnection?.brief?.offerName || getReactivationSummary(campaignSettings.audience?.reactivation || defaultCampaignReactivationSettings)}
-                            </div>
-                          ) : (
-                            <div className="text-xs text-muted-foreground">Seguimiento clasico por offset</div>
-                          )}
+                          <button type="button" onClick={() => startEdit(c)} className="max-w-[360px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                            <span className="block font-medium text-foreground hover:underline">{c.name}</span>
+                            <span className="mt-1 block text-xs text-muted-foreground">{getCampaignTypeLabel(c.campaignType)} · {c.steps.length} {c.steps.length === 1 ? 'paso' : 'pasos'}{c.campaignType === 'reconnection' && campaignSettings.reconnection?.brief?.offerName ? ` · ${campaignSettings.reconnection.brief.offerName}` : ''}</span>
+                          </button>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={c.campaignType === 'reconnection' ? 'default' : 'outline'}>{getCampaignTypeLabel(c.campaignType)}</Badge>
+                          <Badge variant="outline" className={cn('rounded-full', c.isPaused ? 'text-muted-foreground' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400')}>
+                            {c.isPaused ? 'Pausada' : 'Activa'}
+                          </Badge>
                         </TableCell>
-                        <TableCell>{c.steps.length}</TableCell>
+                        <TableCell><span className="text-sm">{formatRunStatusLabel(c.lastRunStatus)}</span><span className="mt-1 block text-xs text-muted-foreground">{formatRunAt(c.lastRunAt)}</span></TableCell>
+                        <TableCell><span className="text-sm font-medium">{metrics.totalSent} enviados</span><span className="mt-1 block text-xs text-muted-foreground">{metrics.opened} aperturas · {metrics.replied} respuestas</span></TableCell>
                         <TableCell>
-                          {(() => {
-                            const m = metricsByCampaignId[c.id] || { totalSent: 0, opened: 0, replied: 0, clicked: 0 };
-                            return (
-                              <div className="text-xs text-muted-foreground">
-                                Env: <span className="text-foreground font-medium">{m.totalSent}</span> · Abr: <span className="text-foreground font-medium">{m.opened}</span> · Clic: <span className="text-foreground font-medium">{m.clicked}</span> · Resp: <span className="text-foreground font-medium">{m.replied}</span>
-                              </div>
-                            );
-                          })()}
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <Badge variant={getRunStatusVariant(c.lastRunStatus)}>{formatRunStatusLabel(c.lastRunStatus)}</Badge>
-                            <div className="text-xs text-muted-foreground">Ultima revisión: {formatRunAt(c.lastRunAt)}</div>
-                            {c.lastRunSummary?.eligibleCount !== undefined ? (
-                              <div className="text-xs text-muted-foreground">
-                                Elegibles: <span className="text-foreground font-medium">{c.lastRunSummary.eligibleCount ?? 0}</span> · Enviados: <span className="text-foreground font-medium">{c.lastRunSummary.sentCount ?? 0}</span>
-                              </div>
-                            ) : null}
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button size="sm" variant="outline" className="rounded-full" onClick={() => doPreview(c)} disabled={previewLoading}>
+                              {previewLoading ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Eye aria-hidden="true" />}
+                              Revisar
+                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild><Button size="icon" variant="ghost" className="rounded-full" aria-label={`Más acciones para ${c.name}`}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-52 rounded-2xl p-1.5">
+                                <DropdownMenuItem onClick={() => startEdit(c)}>Editar campaña</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => void togglePause(c)}>{c.isPaused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}{c.isPaused ? 'Revisar y activar' : 'Pausar campaña'}</DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => askDelete(c.id)}><Trash2 aria-hidden="true" />Eliminar</DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
-                        </TableCell>
-                        <TableCell>{c.isPaused ? 'Pausada' : 'Activa'}</TableCell>
-                        <TableCell className="text-right space-x-2">
-                          <Button size="sm" variant="outline" onClick={() => doPreview(c)} disabled={previewLoading}><Eye className="mr-1 h-4 w-4" />{previewLoading ? 'Cargando...' : 'Previsualizar'}</Button>
-                          <Button size="sm" variant="secondary" onClick={() => startEdit(c)}>Editar</Button>
-                          <Button size="sm" variant="outline" onClick={() => togglePause(c)}>
-                            {c.isPaused ? <Play className="mr-1 h-4 w-4" /> : <Pause className="mr-1 h-4 w-4" />}
-                            {c.isPaused ? 'Reanudar' : 'Pausar'}
-                          </Button>
-                          <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => askDelete(c.id)}>
-                            <Trash2 className="mr-1 h-4 w-4" />Eliminar
-                          </Button>
                         </TableCell>
                       </TableRow>;
                     })}
                   </TableBody>
                 </Table>
               </div>
-            </CardContent>
-          </Card>
-        </>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {mode.kind === 'edit' && (
         <Tabs defaultValue="editor" className="space-y-6">
-          <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-            <div>
-              <div className="mb-2"><Badge variant={draft.campaignType === 'reconnection' ? 'default' : 'outline'}>{getCampaignTypeLabel(draft.campaignType)}</Badge></div>
-              <h2 className="text-2xl font-bold tracking-tight">{getCampaignEditorTitle(draft.campaignType, Boolean(draft.id))}</h2>
-              <p className="text-muted-foreground">{getCampaignTypeDescription(draft.campaignType)}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <TabsList>
-                <TabsTrigger value="editor">Editor</TabsTrigger>
-                <TabsTrigger value="analytics" disabled={!draft.id}>Analíticas</TabsTrigger>
-                <TabsTrigger value="settings">Configuración</TabsTrigger>
-              </TabsList>
-              <div className="h-6 w-px bg-border mx-2" />
-              <Button variant="outline" onClick={() => setMode({ kind: 'list' })}>Volver</Button>
-              <Button onClick={saveCampaign} disabled={saving}>{saving ? 'Guardando...' : 'Guardar Cambios'}</Button>
+          <div className="sticky top-14 z-20 -mx-2 rounded-2xl border border-border/60 bg-background/90 p-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/75 sm:mx-0 sm:p-4">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex min-w-0 items-center gap-3">
+                <Button size="icon" variant="ghost" className="shrink-0 rounded-full" onClick={() => setMode({ kind: 'list' })} aria-label="Volver a campañas">
+                  <ArrowLeft aria-hidden="true" />
+                </Button>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h1 className="truncate text-lg font-semibold tracking-tight sm:text-xl">{draft.name.trim() || 'Campaña sin título'}</h1>
+                    <Badge variant="outline" className="hidden shrink-0 rounded-full sm:inline-flex">{getCampaignTypeLabel(draft.campaignType)}</Badge>
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{draft.id ? 'Guardar los cambios pausará la campaña para una nueva revisión.' : 'La campaña se creará pausada.'}</p>
+                </div>
+              </div>
+              <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
+                <TabsList className="grid h-10 w-full grid-cols-3 rounded-xl sm:w-auto">
+                  <TabsTrigger value="editor" className="rounded-lg">Contenido</TabsTrigger>
+                  <TabsTrigger value="settings" className="rounded-lg">Audiencia</TabsTrigger>
+                  <TabsTrigger value="analytics" className="rounded-lg" disabled={!draft.id}>Resultados</TabsTrigger>
+                </TabsList>
+                <Button onClick={saveCampaign} disabled={saving} className="shrink-0 rounded-full">
+                  {saving ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}
+                  {saving ? 'Guardando…' : 'Guardar borrador'}
+                </Button>
+              </div>
             </div>
           </div>
 
           <TabsContent value="editor" className="space-y-6">
-            <div className="grid gap-6 lg:grid-cols-3">
-              <div className="lg:col-span-2 space-y-6">
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between">
-                    <CardTitle>Pasos de la secuencia</CardTitle>
+            <div className="mx-auto max-w-5xl space-y-6">
+                <Card className="rounded-2xl border-border/60 shadow-sm">
+                  <CardHeader className="gap-4 border-b border-border/60 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <CardTitle className="text-lg">1. Define la campaña</CardTitle>
+                      <CardDescription className="mt-1">Nómbrala y deja claro qué conversación quieres iniciar.</CardDescription>
+                    </div>
                     <div className="flex items-center gap-2">
-                      <div className="flex bg-muted p-1 rounded-md">
-                        <Button size="sm" variant={viewMode === 'list' ? 'secondary' : 'ghost'} className="h-7 px-2" onClick={() => setViewMode('list')}>Lista</Button>
-                        <Button size="sm" variant={viewMode === 'flow' ? 'secondary' : 'ghost'} className="h-7 px-2" onClick={() => setViewMode('flow')}>Flujo</Button>
+                      <div className="flex rounded-lg bg-muted p-1">
+                        <Button size="sm" variant={viewMode === 'list' ? 'secondary' : 'ghost'} className="h-8 rounded-md px-2.5" onClick={() => setViewMode('list')}>Editar</Button>
+                        <Button size="sm" variant={viewMode === 'flow' ? 'secondary' : 'ghost'} className="h-8 rounded-md px-2.5" onClick={() => setViewMode('flow')}>Ver flujo</Button>
                       </div>
-                      <Button variant="outline" size="sm" onClick={openAiGenerator}>
-                        <Sparkles className="mr-2 h-4 w-4" />
-                        IA
-                      </Button>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-6">
                     <div className="grid gap-2">
-                      <label className="text-sm font-medium">Nombre de la campaña</label>
-                      <Input value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
+                      <Label htmlFor="campaign-name">Nombre de la campaña</Label>
+                      <Input id="campaign-name" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} placeholder="Ej. Reconexión clientes de agosto" />
                     </div>
 
                     {draft.campaignType === 'reconnection' ? (
-                      <div className="rounded-lg border bg-muted/20 p-4 space-y-4">
+                      <div className="space-y-4 rounded-xl border border-border/60 bg-muted/15 p-4 sm:p-5">
                         <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                           <div>
-                            <div className="text-sm font-medium">Brief de reconexion</div>
+                            <div className="text-sm font-medium">Propuesta de reconexión</div>
                             <p className="text-xs text-muted-foreground">
-                              Describe el nuevo servicio o producto. Si un lead no tiene investigacion previa, la campaña la dispara automaticamente con n8n antes de personalizar el mensaje.
+                              Describe qué ofreces y para quién. Podrás generar una secuencia base y editarla antes de guardar.
                             </p>
                           </div>
-                          <div className="flex flex-wrap items-center gap-3">
-                            <div className="flex items-center gap-2">
-                              <Switch
-                                id="reconnection-enabled"
-                                checked={reconnectionSettings.enabled}
-                                onCheckedChange={(checked) => updateReconnectionSettings({ enabled: checked })}
-                              />
-                              <Label htmlFor="reconnection-enabled">Personalizacion inteligente</Label>
-                            </div>
-                            <Button type="button" variant="secondary" size="sm" onClick={openAiGenerator}>
-                              <Sparkles className="mr-2 h-4 w-4" />
+                          <Button type="button" variant="outline" size="sm" className="mt-2 rounded-full md:mt-0" onClick={openAiGenerator}>
+                              <Sparkles aria-hidden="true" />
                               Generar secuencia
-                            </Button>
-                          </div>
+                          </Button>
                         </div>
 
                         <div className="grid gap-4 md:grid-cols-2">
                           <div className="grid gap-1.5">
-                            <Label>Nombre del servicio</Label>
+                            <Label htmlFor="reconnection-offer-name">Nombre del servicio</Label>
                             <Input
+                              id="reconnection-offer-name"
                               value={reconnectionSettings.brief.offerName}
                               onChange={(e) => updateReconnectionBrief({ offerName: e.target.value })}
                               placeholder="Ej: Auditoria SEO continua"
                             />
                           </div>
                           <div className="grid gap-1.5">
-                            <Label>Audiencia ideal</Label>
+                            <Label htmlFor="reconnection-audience-hint">Audiencia ideal</Label>
                             <Input
+                              id="reconnection-audience-hint"
                               value={reconnectionSettings.brief.audienceHint}
                               onChange={(e) => updateReconnectionBrief({ audienceHint: e.target.value })}
                               placeholder="Ej: Leads de marketing y growth en SaaS B2B"
@@ -1096,8 +926,9 @@ export default function CampaignsPage() {
                         </div>
 
                         <div className="grid gap-1.5">
-                          <Label>Que quieres promocionar</Label>
+                          <Label htmlFor="reconnection-offer-summary">Qué quieres promocionar</Label>
                           <Textarea
+                            id="reconnection-offer-summary"
                             rows={4}
                             value={reconnectionSettings.brief.offerSummary}
                             onChange={(e) => updateReconnectionBrief({ offerSummary: e.target.value })}
@@ -1105,10 +936,19 @@ export default function CampaignsPage() {
                           />
                         </div>
 
+                        <Collapsible open={advancedBriefOpen} onOpenChange={setAdvancedBriefOpen}>
+                          <CollapsibleTrigger asChild>
+                            <Button type="button" variant="ghost" size="sm" className="-ml-3 text-muted-foreground">
+                              <ChevronDown className={cn('transition-transform', advancedBriefOpen && 'rotate-180')} aria-hidden="true" />
+                              {advancedBriefOpen ? 'Ocultar detalles opcionales' : 'Añadir detalles opcionales'}
+                            </Button>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent className="pt-4">
                         <div className="grid gap-4 md:grid-cols-2">
                           <div className="grid gap-1.5">
-                            <Label>Puntos de valor</Label>
+                            <Label htmlFor="reconnection-value-points">Puntos de valor</Label>
                             <Textarea
+                              id="reconnection-value-points"
                               rows={4}
                               value={toValuePointsText(reconnectionSettings.brief.valuePoints)}
                               onChange={(e) => updateReconnectionBrief({ valuePoints: parseValuePoints(e.target.value) })}
@@ -1117,16 +957,18 @@ export default function CampaignsPage() {
                           </div>
                           <div className="space-y-4">
                             <div className="grid gap-1.5">
-                              <Label>CTA sugerido</Label>
+                              <Label htmlFor="reconnection-cta">Llamado a la acción sugerido</Label>
                               <Input
+                                id="reconnection-cta"
                                 value={reconnectionSettings.brief.cta}
                                 onChange={(e) => updateReconnectionBrief({ cta: e.target.value })}
                                 placeholder="Ej: Te parece si lo vemos en 15 minutos?"
                               />
                             </div>
                             <div className="grid gap-1.5">
-                              <Label>Tono</Label>
+                              <Label htmlFor="reconnection-tone">Tono</Label>
                               <Input
+                                id="reconnection-tone"
                                 value={reconnectionSettings.brief.tone}
                                 onChange={(e) => updateReconnectionBrief({ tone: e.target.value })}
                                 placeholder="Ej: consultivo y cercano"
@@ -1135,12 +977,20 @@ export default function CampaignsPage() {
                             <div className="grid gap-3 pt-1">
                               <div className="flex items-center gap-2">
                                 <Switch
+                                  id="reconnection-enabled"
+                                  checked={reconnectionSettings.enabled}
+                                  onCheckedChange={(checked) => updateReconnectionSettings({ enabled: checked })}
+                                />
+                                <Label htmlFor="reconnection-enabled">Personalización inteligente</Label>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Switch
                                   id="reconnection-auto-research"
                                   checked={reconnectionSettings.autoResearchOnSend}
                                   onCheckedChange={(checked) => updateReconnectionSettings({ autoResearchOnSend: checked })}
                                   disabled={!reconnectionSettings.enabled}
                                 />
-                                <Label htmlFor="reconnection-auto-research">Investigar automaticamente con n8n si falta contexto</Label>
+                                <Label htmlFor="reconnection-auto-research">Completar contexto cuando falte información</Label>
                               </div>
                               <div className="flex items-center gap-2">
                                 <Switch
@@ -1154,18 +1004,20 @@ export default function CampaignsPage() {
                             </div>
                           </div>
                         </div>
+                          </CollapsibleContent>
+                        </Collapsible>
                       </div>
                     ) : (
-                      <div className="rounded-lg border border-dashed bg-muted/20 p-4">
+                      <div className="rounded-xl border border-border/60 bg-muted/15 p-4">
                         <div className="flex items-start justify-between gap-4">
                           <div>
-                            <div className="text-sm font-medium">Seguimiento clásico</div>
+                            <div className="text-sm font-medium">Secuencia de seguimiento</div>
                             <p className="text-xs text-muted-foreground mt-1">
-                              Esta campaña se dedica a enviar follow-ups automáticamente según los offsets definidos en cada paso. Ideal para no perseguir manualmente respuestas después del primer contacto.
+                              Define cuánto esperar entre mensajes y revisa el contenido antes de activar la campaña.
                             </p>
                           </div>
-                          <Button type="button" variant="secondary" size="sm" onClick={openAiGenerator}>
-                            <Sparkles className="mr-2 h-4 w-4" />
+                          <Button type="button" variant="outline" size="sm" className="shrink-0 rounded-full" onClick={openAiGenerator}>
+                            <Sparkles aria-hidden="true" />
                             Generar secuencia
                           </Button>
                         </div>
@@ -1175,130 +1027,73 @@ export default function CampaignsPage() {
                     {viewMode === 'list' ? (
                       <div className="space-y-4">
                         {draft.steps.map((s, idx) => (
-                          <div key={s.id} id={`step-${s.id}`} className={cn("relative border rounded-lg p-4 bg-card hover:border-primary/50 transition-colors", activeStepId === s.id && "border-primary ring-1 ring-primary bg-primary/5")}>
-                            <div className="absolute right-4 top-4">
-                              <Button size="sm" variant="ghost" onClick={() => removeStep(s.id)} className="h-8 w-8 p-0 text-muted-foreground hover:text-red-500">
-                                <X className="h-4 w-4" />
+                          <div key={s.id} id={`step-${s.id}`} className={cn('relative rounded-xl border border-border/60 bg-card p-4 transition-colors sm:p-5', activeStepId === s.id && 'border-primary/60 ring-1 ring-primary/30')}>
+                            <div className="mb-5 flex items-center gap-2 pr-10">
+                              <div className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                                {idx + 1}
+                              </div>
+                              <span className="text-sm font-semibold">{idx === 0 ? 'Primer mensaje' : `Mensaje ${idx + 1}`}</span>
+                              {idx > 0 && (
+                                <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                                  {s.offsetDays} {s.offsetDays === 1 ? 'día después' : 'días después'}
+                                </span>
+                              )}
+                              <Button type="button" size="icon" variant="ghost" onClick={() => removeStep(s.id)} disabled={draft.steps.length === 1} className="absolute right-5 size-8 text-muted-foreground hover:text-destructive" aria-label={`Eliminar paso ${idx + 1}`}>
+                                <X aria-hidden="true" />
                               </Button>
                             </div>
 
-                            <div className="mb-4 flex items-center gap-2">
-                              <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold">
-                                {idx + 1}
-                              </div>
-                              <span className="text-sm font-medium">Paso {idx + 1}</span>
-                              {idx > 0 && (
-                                <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                                  Espera {s.offsetDays} días
-                                </span>
-                              )}
-                            </div>
-
                             <div className="grid gap-4">
-                              <div className="flex items-center justify-between">
-                                <div className="grid md:grid-cols-2 gap-4 flex-1">
+                              <div className="grid gap-4 md:grid-cols-2">
                                   <div className="grid gap-1.5">
-                                    <label className="text-xs font-medium text-muted-foreground">Nombre del paso</label>
-                                    <Input className="h-8" value={s.name} onChange={(e) =>
+                                    <Label htmlFor={`step-name-${s.id}`}>Nombre del paso</Label>
+                                    <Input id={`step-name-${s.id}`} value={s.name} onChange={(e) =>
                                       setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, name: e.target.value } : x) }))
                                     } />
                                   </div>
                                   <div className="grid gap-1.5">
-                                    <label className="text-xs font-medium text-muted-foreground">Días de espera (Offset)</label>
-                                    <Input className="h-8" type="number" min={0} value={s.offsetDays}
+                                    <Label htmlFor={`step-offset-${s.id}`}>{idx === 0 ? 'Espera antes del primer mensaje' : 'Espera desde el mensaje anterior'}</Label>
+                                    <Input id={`step-offset-${s.id}`} type="number" min={0} value={s.offsetDays}
                                       onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, offsetDays: Number(e.target.value || 0) } : x) }))} />
                                   </div>
-                                </div>
-                                <div className="flex items-center gap-2 border-l pl-4 ml-4">
-                                  <Label htmlFor={`ab-toggle-${s.id}`} className="text-xs">Prueba A/B</Label>
-                                  <Switch id={`ab-toggle-${s.id}`} checked={!!s.variantB} onCheckedChange={(checked) => {
-                                    setDraft(d => ({
-                                      ...d,
-                                      steps: d.steps.map(x => x.id === s.id ? {
-                                        ...x,
-                                        variantB: checked ? { subject: '', bodyHtml: '' } : undefined
-                                      } : x)
-                                    }));
-                                  }} />
-                                </div>
                               </div>
-
-                              {s.variantB ? (
-                                <Tabs defaultValue="A" className="w-full">
-                                  <TabsList className="grid w-full grid-cols-2 h-8">
-                                    <TabsTrigger value="A" className="text-xs">Variante A (Original)</TabsTrigger>
-                                    <TabsTrigger value="B" className="text-xs">Variante B (Alternativa)</TabsTrigger>
-                                  </TabsList>
-                                  <TabsContent value="A" className="space-y-4 pt-4 border rounded-md p-4 mt-2">
-                                    <div className="grid gap-1.5">
-                                      <label className="text-xs font-medium text-muted-foreground">Asunto A</label>
-                                      <Input className="h-9" value={s.subject} placeholder="Hola {{lead.name}}..."
-                                        onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, subject: e.target.value } : x) }))} />
-                                    </div>
-                                    <div className="grid gap-1.5">
-                                      <label className="text-xs font-medium text-muted-foreground">Cuerpo A</label>
-                                      <Textarea rows={6} className="font-mono text-sm resize-none" value={s.bodyHtml} placeholder="Permite HTML básico y variables..."
-                                        onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, bodyHtml: e.target.value } : x) }))} />
-                                      <div className="text-[10px] text-muted-foreground flex gap-2">
-                                        <span>Variables:</span>
-                                        <code className="bg-muted px-1 rounded">{`{{lead.name}}`}</code>
-                                        <code className="bg-muted px-1 rounded">{`{{company}}`}</code>
-                                        <code className="bg-muted px-1 rounded">{`{{sender.name}}`}</code>
-                                      </div>
-                                    </div>
-                                  </TabsContent>
-                                  <TabsContent value="B" className="space-y-4 pt-4 border rounded-md p-4 mt-2 border-orange-200 bg-orange-50/30">
-                                    <div className="grid gap-1.5">
-                                      <label className="text-xs font-medium text-muted-foreground text-orange-800">Asunto B</label>
-                                      <Input className="h-9 border-orange-200" value={s.variantB?.subject || ''} placeholder="Variante B..."
-                                        onChange={(e) => setDraft((d) => ({
-                                          ...d,
-                                          steps: d.steps.map((x) => x.id === s.id ? { ...x, variantB: { ...x.variantB!, subject: e.target.value, bodyHtml: x.variantB!.bodyHtml } } : x)
-                                        }))} />
-                                    </div>
-                                    <div className="grid gap-1.5">
-                                      <label className="text-xs font-medium text-muted-foreground text-orange-800">Cuerpo B</label>
-                                      <Textarea rows={6} className="font-mono text-sm resize-none border-orange-200" value={s.variantB?.bodyHtml || ''} placeholder="Versión alternativa..."
-                                        onChange={(e) => setDraft((d) => ({
-                                          ...d,
-                                          steps: d.steps.map((x) => x.id === s.id ? { ...x, variantB: { ...x.variantB!, subject: x.variantB!.subject, bodyHtml: e.target.value } } : x)
-                                        }))} />
-                                    </div>
-                                  </TabsContent>
-                                </Tabs>
-                              ) : (
-                                <>
-                                  <div className="grid gap-1.5">
-                                    <label className="text-xs font-medium text-muted-foreground">Asunto</label>
-                                    <Input className="h-9" value={s.subject} placeholder="Hola {{lead.name}}..."
-                                      onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, subject: e.target.value } : x) }))} />
-                                  </div>
-                                  <div className="grid gap-1.5">
-                                    <label className="text-xs font-medium text-muted-foreground">Cuerpo del correo</label>
-                                    <Textarea rows={6} className="font-mono text-sm resize-none" value={s.bodyHtml} placeholder="Permite HTML básico y variables..."
-                                      onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, bodyHtml: e.target.value } : x) }))} />
-                                    <div className="text-[10px] text-muted-foreground flex gap-2">
-                                      <span>Variables:</span>
-                                      <code className="bg-muted px-1 rounded">{`{{lead.name}}`}</code>
-                                      <code className="bg-muted px-1 rounded">{`{{company}}`}</code>
-                                      <code className="bg-muted px-1 rounded">{`{{sender.name}}`}</code>
-                                    </div>
-                                  </div>
-                                </>
-                              )}
 
                               <div className="grid gap-1.5">
-                                <label className="text-xs font-medium text-muted-foreground">Adjuntar archivos</label>
-                                <Input className="text-xs" type="file" multiple onChange={(e) => onStepFile(e, s.id)} />
-                                {s.attachments?.length ? <div className="text-xs text-green-600 flex items-center gap-1"><Sparkles className="w-3 h-3" /> {s.attachments.length} archivos adjuntos listos</div> : null}
+                                <Label htmlFor={`step-subject-${s.id}`}>Asunto</Label>
+                                <Input id={`step-subject-${s.id}`} value={s.subject} placeholder="Ej. Una idea para {{company}}"
+                                  onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, subject: e.target.value } : x) }))} />
                               </div>
+                              <div className="grid gap-1.5">
+                                <Label htmlFor={`step-body-${s.id}`}>Mensaje</Label>
+                                <Textarea id={`step-body-${s.id}`} rows={7} className="resize-y text-sm leading-6" value={s.bodyHtml} placeholder="Escribe un mensaje breve y claro…"
+                                  onChange={(e) => setDraft((d) => ({ ...d, steps: d.steps.map((x) => x.id === s.id ? { ...x, bodyHtml: e.target.value } : x) }))} />
+                                <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+                                  <span>Variables:</span>
+                                  <code className="rounded bg-muted px-1.5 py-0.5">{`{{lead.name}}`}</code>
+                                  <code className="rounded bg-muted px-1.5 py-0.5">{`{{company}}`}</code>
+                                  <code className="rounded bg-muted px-1.5 py-0.5">{`{{sender.name}}`}</code>
+                                </div>
+                              </div>
+
+                              {(s.variantB || s.attachments?.length) ? (
+                                <Alert className="border-amber-500/30 bg-amber-500/5 text-foreground">
+                                  <AlertCircle className="size-4 text-amber-600 dark:text-amber-400" />
+                                  <AlertTitle>Funciones no disponibles en este flujo</AlertTitle>
+                                  <AlertDescription>
+                                    {s.variantB ? 'La variante A/B anterior se conservará, pero no se usará desde este editor. ' : ''}
+                                    {s.attachments?.length ? `${s.attachments.length} adjunto(s) anterior(es) se conservarán, pero el envío desde esta pantalla no los incluye.` : 'Las pruebas A/B y los adjuntos todavía no están habilitados.'}
+                                  </AlertDescription>
+                                </Alert>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">Pruebas A/B y adjuntos no disponibles en este flujo.</p>
+                              )}
                             </div>
                           </div>
                         ))}
 
-                        <Button variant="outline" className="w-full border-dashed py-6" onClick={addStep}>
-                          <Plus className="mr-2 h-4 w-4" />
-                          Añadir siguiente paso
+                        <Button type="button" variant="outline" className="w-full rounded-xl border-dashed py-6" onClick={addStep}>
+                          <Plus aria-hidden="true" />
+                          Añadir otro mensaje
                         </Button>
                       </div>
                     ) : (
@@ -1315,32 +1110,30 @@ export default function CampaignsPage() {
                             }, 100);
                           }}
                         />
-                        <div className="text-center text-xs text-muted-foreground">
-                          Haz clic en un paso para editar su contenido.
-                        </div>
-                        <Button variant="outline" className="w-full border-dashed py-6" onClick={addStep}>
-                          <Plus className="mr-2 h-4 w-4" />
-                          Añadir siguiente paso
+                        <Button type="button" variant="outline" className="w-full rounded-xl border-dashed py-6" onClick={addStep}>
+                          <Plus aria-hidden="true" />
+                          Añadir otro mensaje
                         </Button>
                       </div>
                     )}
                   </CardContent>
                 </Card>
-              </div>
 
-              <div className="lg:col-span-1">
                 {draft.id ? (
-                  <div className="sticky top-6 h-[calc(100vh-100px)]">
-                    <CommentsSection entityType="campaign" entityId={draft.id} />
-                  </div>
-                ) : (
-                  <Card className="h-full flex items-center justify-center p-6 text-center text-muted-foreground bg-muted/30 border-dashed">
-                    <div>
-                      <p>Guarda la campaña para habilitar los comentarios.</p>
-                    </div>
-                  </Card>
-                )}
-              </div>
+                  <Collapsible open={commentsOpen} onOpenChange={setCommentsOpen}>
+                    <Card className="rounded-2xl border-border/60">
+                      <CollapsibleTrigger asChild>
+                        <Button type="button" variant="ghost" className="h-auto w-full justify-between rounded-2xl px-5 py-4">
+                          <span className="flex items-center gap-2"><MessageSquare aria-hidden="true" />Comentarios</span>
+                          <ChevronDown className={cn('transition-transform', commentsOpen && 'rotate-180')} aria-hidden="true" />
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="max-h-[520px] overflow-y-auto border-t border-border/60 p-4">
+                        <CommentsSection entityType="campaign" entityId={draft.id} />
+                      </CollapsibleContent>
+                    </Card>
+                  </Collapsible>
+                ) : null}
             </div>
           </TabsContent>
 
@@ -1357,19 +1150,27 @@ export default function CampaignsPage() {
           </TabsContent>
 
           <TabsContent value="settings">
-            <Card>
-              <CardHeader>
-                <CardTitle>Audiencia, exclusiones y configuración</CardTitle>
+            <Card className="mx-auto max-w-5xl rounded-2xl border-border/60 shadow-sm">
+              <CardHeader className="border-b border-border/60">
+                <CardTitle className="text-lg">2. Define la audiencia</CardTitle>
                 <CardDescription>
                   {draft.campaignType === 'reconnection'
-                    ? 'Configura la audiencia de reconexión, filtros de elegibilidad y exclusiones.'
-                    : 'Configura tracking, horarios de envío y exclusiones para el seguimiento automático.'}
+                    ? 'Elige a quién volver a contactar y deja fuera a quien no deba participar.'
+                    : 'Revisa exclusiones y, si lo necesitas, ajusta las opciones de entrega.'}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
 
+                <Collapsible open={deliverySettingsOpen} onOpenChange={setDeliverySettingsOpen} className="rounded-xl border border-border/60 bg-muted/10">
+                  <CollapsibleTrigger asChild>
+                    <Button type="button" variant="ghost" className="h-auto w-full justify-between rounded-xl px-4 py-3.5 text-left">
+                      <span><span className="block text-sm font-medium">Opciones de entrega y medición</span><span className="mt-0.5 block text-xs font-normal text-muted-foreground">Horario y tracking opcionales</span></span>
+                      <ChevronDown className={cn('transition-transform', deliverySettingsOpen && 'rotate-180')} aria-hidden="true" />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-6 border-t border-border/60 p-4">
                 <div>
-                  <h3 className="text-sm font-medium mb-3">Envío Inteligente</h3>
+                  <h3 className="text-sm font-medium mb-3">Horario de envío</h3>
                   <div className="flex items-center gap-2 mb-4">
                     <Switch id="smart-sched"
                       checked={!!draft.settings?.smartScheduling?.enabled}
@@ -1382,20 +1183,20 @@ export default function CampaignsPage() {
                   {draft.settings?.smartScheduling?.enabled && (
                     <div className="grid gap-4 md:grid-cols-3 border p-4 rounded-md">
                       <div className="grid gap-1.5">
-                        <Label>Zona Horaria</Label>
-                        <Input value={draft.settings.smartScheduling.timezone} onChange={(e) =>
+                        <Label htmlFor="schedule-timezone">Zona horaria</Label>
+                        <Input id="schedule-timezone" value={draft.settings.smartScheduling.timezone} onChange={(e) =>
                           setDraft(d => ({ ...d, settings: { ...d.settings, smartScheduling: { ...d.settings.smartScheduling!, timezone: e.target.value } } }))
                         } />
                       </div>
                       <div className="grid gap-1.5">
-                        <Label>Hora Inicio (0-23)</Label>
-                        <Input type="number" min={0} max={23} value={draft.settings.smartScheduling.startHour} onChange={(e) =>
+                        <Label htmlFor="schedule-start-hour">Hora de inicio (0-23)</Label>
+                        <Input id="schedule-start-hour" type="number" min={0} max={23} value={draft.settings.smartScheduling.startHour} onChange={(e) =>
                           setDraft(d => ({ ...d, settings: { ...d.settings, smartScheduling: { ...d.settings.smartScheduling!, startHour: Number(e.target.value) } } }))
                         } />
                       </div>
                       <div className="grid gap-1.5">
-                        <Label>Hora Fin (0-23)</Label>
-                        <Input type="number" min={0} max={23} value={draft.settings.smartScheduling.endHour} onChange={(e) =>
+                        <Label htmlFor="schedule-end-hour">Hora de fin (0-23)</Label>
+                        <Input id="schedule-end-hour" type="number" min={0} max={23} value={draft.settings.smartScheduling.endHour} onChange={(e) =>
                           setDraft(d => ({ ...d, settings: { ...d.settings, smartScheduling: { ...d.settings.smartScheduling!, endHour: Number(e.target.value) } } }))
                         } />
                       </div>
@@ -1403,7 +1204,7 @@ export default function CampaignsPage() {
                   )}
                 </div>
 
-                <div className="h-px bg-border my-6" />
+                <div className="h-px bg-border" />
 
                 <div className="space-y-3">
                   <h3 className="text-sm font-medium">Tracking opcional</h3>
@@ -1474,15 +1275,15 @@ export default function CampaignsPage() {
                     </div>
                   )}
                 </div>
-
-                <div className="h-px bg-border my-6" />
+                  </CollapsibleContent>
+                </Collapsible>
 
                 {draft.campaignType === 'reconnection' ? (
                   <div className="space-y-4">
                     <div>
-                      <h3 className="text-sm font-medium">Reactivacion de leads</h3>
+                      <h3 className="text-sm font-medium">Segmentos de reconexión</h3>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Usa esta opcion para volver a contactar leads ya trabajados, priorizando senales reales de entrega o interes.
+                        Prioriza contactos anteriores según sus señales de interés y entrega.
                       </p>
                     </div>
 
@@ -1492,28 +1293,29 @@ export default function CampaignsPage() {
                         checked={draft.settings.audience?.kind === 'reactivation'}
                         onCheckedChange={toggleReactivationAudience}
                       />
-                      <Label htmlFor="reactivation-enabled">Activar filtros de reactivacion</Label>
+                      <Label htmlFor="reactivation-enabled">Usar segmentos de reconexión</Label>
                     </div>
 
                     {reactivationAudience ? (
                     <div className="space-y-4 border rounded-md p-4">
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid gap-4 md:grid-cols-3">
                         <div className="grid gap-1.5">
-                          <Label>Dias minimos desde el ultimo contacto</Label>
+                          <Label htmlFor="reactivation-min-days">Días mínimos desde el último contacto</Label>
                           <Input
+                            id="reactivation-min-days"
                             type="number"
                             min={0}
                             value={reactivationAudience.minDaysSinceLastContact}
                             onChange={(e) => updateReactivationSettings({ minDaysSinceLastContact: Number(e.target.value || 0) })}
                           />
                         </div>
-                        <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                        <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
                           <div className="font-medium">Resumen del segmento</div>
                           <div className="text-xs text-muted-foreground mt-1">
                             {getReactivationSummary(reactivationAudience)}
                           </div>
                         </div>
-                        <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                        <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
                           <div className="font-medium">Candidatos estimados</div>
                           <div className="text-xs text-muted-foreground mt-1">
                             {reactivationStats?.matched ?? 0} de {reactivationStats?.totalCandidates ?? 0} leads con email cumplen estos filtros.
@@ -1589,39 +1391,11 @@ export default function CampaignsPage() {
                       </div>
 
                       {reactivationStats ? (
-                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                          <div className="rounded-md border p-3">
-                            <div className="text-xs text-muted-foreground">Clicks sin reply</div>
-                            <div className="text-lg font-semibold">{reactivationStats.clicked}</div>
-                          </div>
-                          <div className="rounded-md border p-3">
-                            <div className="text-xs text-muted-foreground">Aperturas sin reply</div>
-                            <div className="text-lg font-semibold">{reactivationStats.opened}</div>
-                          </div>
-                          <div className="rounded-md border p-3">
-                            <div className="text-xs text-muted-foreground">Entregados sin apertura</div>
-                            <div className="text-lg font-semibold">{reactivationStats.delivered}</div>
-                          </div>
-                          <div className="rounded-md border p-3">
-                            <div className="text-xs text-muted-foreground">Replies neutrales</div>
-                            <div className="text-lg font-semibold">{reactivationStats.neutral}</div>
-                          </div>
-                          <div className="rounded-md border p-3">
-                            <div className="text-xs text-muted-foreground">Sin senal</div>
-                            <div className="text-lg font-semibold">{reactivationStats.noSignal}</div>
-                          </div>
-                          <div className="rounded-md border p-3">
-                            <div className="text-xs text-muted-foreground">Fallidos / invalidos</div>
-                            <div className="text-lg font-semibold">{reactivationStats.failedDelivery}</div>
-                          </div>
-                          <div className="rounded-md border p-3">
-                            <div className="text-xs text-muted-foreground">Do not contact</div>
-                            <div className="text-lg font-semibold">{reactivationStats.doNotContact}</div>
-                          </div>
-                          <div className="rounded-md border p-3">
-                            <div className="text-xs text-muted-foreground">Demasiado recientes</div>
-                            <div className="text-lg font-semibold">{reactivationStats.tooRecent}</div>
-                          </div>
+                        <div className="flex flex-wrap gap-x-5 gap-y-2 rounded-lg bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+                          <span><strong className="text-foreground">{reactivationStats.clicked}</strong> clics sin respuesta</span>
+                          <span><strong className="text-foreground">{reactivationStats.opened}</strong> aperturas sin respuesta</span>
+                          <span><strong className="text-foreground">{reactivationStats.delivered}</strong> entregados sin apertura</span>
+                          <span><strong className="text-foreground">{reactivationStats.failedDelivery + reactivationStats.doNotContact}</strong> excluidos por seguridad</span>
                         </div>
                       ) : null}
                     </div>
@@ -1632,15 +1406,19 @@ export default function CampaignsPage() {
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                    En seguimiento clásico no necesitas segmentar por reactivación: el sistema revisa automáticamente offsets, replies, unsubscribe y exclusiones para decidir a quién tocar en cada corrida.
+                  <div className="rounded-xl border border-border/60 bg-muted/10 p-4 text-sm text-muted-foreground">
+                    Los seguimientos usan el historial de contacto y detienen la secuencia cuando hay una respuesta, una baja o una exclusión.
                   </div>
                 )}
 
-                <div className="h-px bg-border my-6" />
-
-                <div className="space-y-3">
-                  <div className="text-sm font-medium">Leads contactados que NO participarán</div>
+                <Collapsible open={exclusionsOpen} onOpenChange={setExclusionsOpen} className="rounded-xl border border-border/60">
+                  <CollapsibleTrigger asChild>
+                    <Button type="button" variant="ghost" className="h-auto w-full justify-between rounded-xl px-4 py-3.5 text-left">
+                      <span><span className="block text-sm font-medium">Exclusiones manuales</span><span className="mt-0.5 block text-xs font-normal text-muted-foreground">{draft.excludedLeadIds.length} {draft.excludedLeadIds.length === 1 ? 'contacto excluido' : 'contactos excluidos'}</span></span>
+                      <ChevronDown className={cn('transition-transform', exclusionsOpen && 'rotate-180')} aria-hidden="true" />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-3 border-t border-border/60 p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Checkbox id="exclude-all" checked={draft.excludedLeadIds.length > 0 && draft.excludedLeadIds.length >= contacted.length}
                       onCheckedChange={(v) => excludeAll(Boolean(v))} />
@@ -1667,7 +1445,7 @@ export default function CampaignsPage() {
                           return (
                             <TableRow key={id}>
                               <TableCell>
-                                <Checkbox checked={checked} onCheckedChange={(v) => onExcludeToggle(id, Boolean(v))} />
+                                <Checkbox checked={checked} onCheckedChange={(v) => onExcludeToggle(id, Boolean(v))} aria-label={`Excluir a ${cl.name || cl.email}`} />
                               </TableCell>
                               <TableCell>{cl.name}</TableCell>
                               <TableCell>{cl.company || '—'}</TableCell>
@@ -1679,6 +1457,42 @@ export default function CampaignsPage() {
                       </TableBody>
                     </Table>
                   </div>
+                  </CollapsibleContent>
+                </Collapsible>
+
+                <div className="rounded-xl border border-border/60 bg-muted/10 p-4 sm:p-5">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex gap-3">
+                      <span className={cn('mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full', draftReadiness.ready ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400')}>
+                        {draftReadiness.ready ? <CheckCircle2 className="size-4" aria-hidden="true" /> : <FileText className="size-4" aria-hidden="true" />}
+                      </span>
+                      <div>
+                        <h3 className="text-sm font-semibold">3. Revisa antes de activar</h3>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          {draftReadiness.ready ? 'El contenido básico está completo. Guarda el borrador y revisa los destinatarios antes de activarlo.' : 'Puedes guardar ahora y completar estos puntos más tarde.'}
+                        </p>
+                        {!draftReadiness.ready ? (
+                          <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+                            {draftReadiness.issues.slice(0, 3).map((issue) => <li key={issue}>• {issue}</li>)}
+                          </ul>
+                        ) : null}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="shrink-0 rounded-full"
+                      disabled={!draft.id || !draftReadiness.ready || previewLoading}
+                      onClick={() => {
+                        const campaign = items.find((item) => item.id === draft.id);
+                        if (campaign) void doPreview(campaign);
+                      }}
+                    >
+                      <Eye aria-hidden="true" />
+                      Revisar destinatarios
+                    </Button>
+                  </div>
+                  {!draft.id ? <p className="mt-3 text-xs text-muted-foreground sm:text-right">Guarda el borrador para habilitar la revisión.</p> : null}
                 </div>
               </CardContent>
             </Card>
@@ -1688,11 +1502,12 @@ export default function CampaignsPage() {
 
       {/* === Modal de Previsualización === */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-[min(96vw,1100px)] p-0">
-          <div className="flex max-h-[80vh] flex-col">
-            <div className="sticky top-0 z-10 border-b bg-background/90 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <DialogContent className="max-h-[92vh] max-w-[min(96vw,1100px)] overflow-hidden p-0">
+          <div className="flex max-h-[92vh] flex-col">
+            <div className="sticky top-0 z-10 border-b bg-background/90 px-4 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 sm:px-6">
               <DialogHeader className="mb-2">
-                <DialogTitle>Leads elegibles</DialogTitle>
+                <DialogTitle>Revisar destinatarios</DialogTitle>
+                <DialogDescription>Verifica quién recibiría el siguiente mensaje antes de realizar un envío.</DialogDescription>
               </DialogHeader>
               {previewLoading ? null : (
                 <div className="space-y-4">
@@ -1700,6 +1515,7 @@ export default function CampaignsPage() {
                     <div className="relative">
                       <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                       <Input
+                        aria-label="Buscar destinatarios por nombre, email o empresa"
                         value={eligibleNameFilter}
                         onChange={(e) => setEligibleNameFilter(e.target.value)}
                         placeholder="Buscar por nombre, email o empresa"
@@ -1707,6 +1523,7 @@ export default function CampaignsPage() {
                       />
                     </div>
                     <select
+                      aria-label="Filtrar destinatarios por días desde el último contacto"
                       className="h-10 rounded-md border border-input bg-background px-3 text-sm"
                       value={eligibleDaysFilter}
                       onChange={(e) => setEligibleDaysFilter(e.target.value as 'all' | '7' | '14' | '30')}
@@ -1717,6 +1534,7 @@ export default function CampaignsPage() {
                       <option value="30">30+ días</option>
                     </select>
                     <select
+                      aria-label="Filtrar destinatarios por próximo paso"
                       className="h-10 rounded-md border border-input bg-background px-3 text-sm"
                       value={eligibleStepFilter}
                       onChange={(e) => setEligibleStepFilter(e.target.value)}
@@ -1725,6 +1543,7 @@ export default function CampaignsPage() {
                       {previewStepOptions.map((option) => <option key={option} value={option}>{option}</option>)}
                     </select>
                     <select
+                      aria-label="Filtrar destinatarios por industria"
                       className="h-10 rounded-md border border-input bg-background px-3 text-sm"
                       value={eligibleIndustryFilter}
                       onChange={(e) => setEligibleIndustryFilter(e.target.value)}
@@ -1734,9 +1553,10 @@ export default function CampaignsPage() {
                     </select>
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <div className="flex items-center gap-2">
                     <Checkbox
+                      aria-label="Seleccionar todos los destinatarios visibles"
                       checked={allSelected}
                       onCheckedChange={(v) => toggleAll(Boolean(v))}
                       aria-checked={allSelected ? 'true' : someSelected ? 'mixed' : 'false'}
@@ -1749,14 +1569,14 @@ export default function CampaignsPage() {
                     <SlidersHorizontal className="h-3.5 w-3.5" />
                     {filteredPreviewRows.length} de {previewRows.length} visibles
                   </div>
-                  <div className="ml-auto flex gap-2">
+                  <div className="flex flex-wrap gap-2 sm:ml-auto">
                     <Button
                       size="sm"
                       variant="secondary"
                       disabled={selectedCount === 0}
                       onClick={() => sendBulk('outlook')}
                     >
-                      Enviar seleccionados (Outlook)
+                       Revisión individual (Outlook)
                     </Button>
                     <Button
                       size="sm"
@@ -1764,7 +1584,7 @@ export default function CampaignsPage() {
                       disabled={selectedCount === 0}
                       onClick={() => sendBulk('gmail')}
                     >
-                      Enviar seleccionados (Gmail)
+                       Revisión individual (Gmail)
                     </Button>
                   </div>
                 </div>
@@ -1772,11 +1592,11 @@ export default function CampaignsPage() {
               )}
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+            <div className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-6">
               {previewLoading ? (
                 <div className="py-10 text-center text-sm text-muted-foreground">Calculando elegibles…</div>
               ) : (
-                <Table className="w-full">
+                <Table className="min-w-[760px]">
                   <TableHeader className="sticky top-0 z-10 bg-background">
                     <TableRow>
                       <TableHead className="w-10"></TableHead>
@@ -1824,18 +1644,16 @@ export default function CampaignsPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              disabled={sendingId === `${row.leadId}:outlook`}
                               onClick={() => sendFollowUpNow(row, 'outlook')}
                             >
-                              Enviar Outlook
+                               Revisar para Outlook
                             </Button>
                             <Button
                               size="sm"
                               variant="outline"
-                              disabled={sendingId === `${row.leadId}:gmail`}
                               onClick={() => sendFollowUpNow(row, 'gmail')}
                             >
-                              Enviar Gmail
+                               Revisar para Gmail
                             </Button>
                           </TableCell>
                         </TableRow>
@@ -1898,19 +1716,18 @@ export default function CampaignsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Diálogo de confirmación de borrado */}
-      {deletingId && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
-          <div className="bg-background border rounded-lg p-5 w-full max-w-md">
-            <div className="text-lg font-semibold mb-2">Eliminar campaña</div>
-            <p className="text-sm text-muted-foreground mb-4">Esta acción no se puede deshacer. ¿Eliminar definitivamente?</p>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={cancelDelete}>Cancelar</Button>
-              <Button onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">Eliminar</Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AlertDialog open={Boolean(deletingId)} onOpenChange={(open) => { if (!open) cancelDelete(); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar campaña</AlertDialogTitle>
+            <AlertDialogDescription>Esta acción no se puede deshacer. La campaña y su secuencia se eliminarán definitivamente.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={confirmDelete}>Eliminar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

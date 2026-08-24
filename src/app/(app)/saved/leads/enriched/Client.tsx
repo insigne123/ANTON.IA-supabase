@@ -3,92 +3,119 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 
 import { useRouter } from 'next/navigation';
-import { PageHeader } from '@/components/page-header';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import type { EnrichedLead, LeadResearchReport, StyleProfile } from '@/lib/types';
-import { upsertLeadReports, findReportForLead, leadResearchStorage, getLeadReports } from '@/lib/lead-research-storage';
-import { BackBar } from '@/components/back-bar';
+import { findReportForLead, leadResearchStorage, getLeadReports } from '@/lib/lead-research-storage';
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
-import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage, updateEnrichedLead } from '@/lib/services/enriched-leads-service';
-import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin, Phone, BrainCircuit, Clock3, Sparkles, CheckCircle2, AlertTriangle, MoreHorizontal } from 'lucide-react';
-import { extensionService } from '@/lib/services/extension-service';
+import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
+import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin, Phone, CheckCircle2, AlertTriangle, MoreHorizontal, ArrowLeft, ChevronDown, ListFilter, Search } from 'lucide-react';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { supabaseService } from '@/lib/supabase-service';
-import { getCompanyProfile } from '@/lib/data';
 import { supabase } from '@/lib/supabase';
-import { adaptLeadResearchResponseToReport, buildLeadResearchPayloadFromLead, getLeadResearchWarnings, hasMeaningfulLeadResearch } from '@/lib/lead-research';
-import { sendEmail } from '@/lib/outlook-email-service';
-import { sendGmailEmail } from '@/lib/gmail-email-service';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { hasMeaningfulLeadResearch } from '@/lib/lead-research';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { isResearched, markResearched, unmarkResearched } from '@/lib/researched-leads-storage';
-import { microsoftAuthService } from '@/lib/microsoft-auth-service';
+import { unmarkResearched } from '@/lib/researched-leads-storage';
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
 import { renderTemplate, buildPersonEmailContext } from '@/lib/template';
-import { buildSenderInfo, applySignaturePlaceholders } from '@/lib/signature-placeholders';
-import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
-import * as Quota from '@/lib/quota-client';
+import { buildEffectiveCompanyProfile, buildSenderInfo, applySignaturePlaceholders } from '@/lib/signature-placeholders';
 import { generateCompanyOutreachV2, ensureSubjectPrefix } from '@/lib/outreach-templates';
 import { emailDraftsStorage } from '@/lib/email-drafts-storage';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { getFirstNameSafe } from '@/lib/template';
 import { styleProfilesStorage } from '@/lib/style-profiles-storage';
 import { restyleDraftWithProfile } from '@/lib/email-style-restyle';
-import { profileService } from '@/lib/services/profile-service';
-import { generateLinkedinDraft } from '@/lib/ai/linkedin-templates';
-import { plannerService, ScheduleConfig } from '@/lib/services/planner-service';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
-import { CalendarIcon } from 'lucide-react';
+import { profileService, type Profile } from '@/lib/services/profile-service';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Progress } from '@/components/ui/progress';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Skeleton } from '@/components/ui/skeleton';
+import { haveSameSelection, retainVisibleSelection } from '@/lib/leads-workspace/selection';
+import {
+  MAX_RESEARCH_BATCH_SIZE,
+  buildResearchReport,
+  canShowResearchDraftAction,
+  researchDraftBlockReasonLabel,
+  researchReadinessFor,
+} from '@/lib/research-workspace';
+import { saveResearchWorkspaceHandoff } from '@/lib/research-workspace-handoff';
+import type { NativeResearchLeadStatus } from '@/lib/native-research-contracts';
+import NativeResearchReport from '@/components/research/NativeResearchReport';
+import ResearchWorkspace from '@/components/research/ResearchWorkspace';
 
 
 const extractDomainFromEmail = (email?: string | null) =>
   email && email.includes('@') ? email.split('@')[1].toLowerCase() : undefined;
 
-type ResearchLifecycleStatus = 'idle' | 'preparing' | 'queued' | 'in_progress' | 'completed' | 'partial' | 'insufficient_data' | 'failed';
-
-const RESEARCH_STANDARD_ESTIMATE_MS = 55000;
-
-function getResearchStageCopy(status: ResearchLifecycleStatus, elapsedMs: number) {
-  if (status === 'queued') return 'En cola para iniciar investigacion';
-  if (status === 'completed') return 'Investigacion completada';
-  if (status === 'partial') return 'Investigacion parcial lista';
-  if (status === 'insufficient_data') return 'Informacion limitada, armando resumen';
-  if (status === 'failed') return 'La investigacion encontro un error';
-
-  if (elapsedMs < 6000) return 'Preparando contexto del lead';
-  if (elapsedMs < 18000) return 'Analizando empresa, sitio y posicionamiento';
-  if (elapsedMs < 32000) return 'Buscando señales y contexto reciente';
-  if (elapsedMs < 46000) return 'Construyendo angulos, pains y oportunidades';
-  return 'Redactando borradores y guion de llamada';
+function isPendingEnrichmentStatus(status?: string | null) {
+  return String(status || '').trim().toLowerCase().startsWith('pending');
 }
 
-function getResearchProgressValue(status: ResearchLifecycleStatus, elapsedMs: number) {
-  if (status === 'completed' || status === 'partial') return 100;
-  if (status === 'failed') return 100;
-  if (status === 'insufficient_data') return 92;
-  if (status === 'queued') return 8;
+function nativeDraftRequestMessage(payload: any, fallback: string) {
+  const code = String(payload?.error || payload?.code || '').toLowerCase();
+  if (code.includes('auth')) return 'Tu sesión ya no está disponible. Vuelve a iniciar sesión e inténtalo nuevamente.';
+  if (code.includes('privacy') || code.includes('suppressed')) return 'No podemos continuar con este contacto por sus preferencias de privacidad.';
+  if (code.includes('setup') || code.includes('metadata')) return 'No pudimos preparar el email todavía. Inténtalo nuevamente en unos minutos.';
+  const resultMessage = String(payload?.result?.message || '').trim();
+  return resultMessage && resultMessage.length <= 300 ? resultMessage : fallback;
+}
 
-  const ratio = Math.min(elapsedMs / RESEARCH_STANDARD_ESTIMATE_MS, 0.95);
-  return Math.max(6, Math.round(ratio * 100));
+function isNativeResearchReport(status: NativeResearchLeadStatus | null | undefined) {
+  const review = nativeResearchReview(status);
+  return Boolean(
+    review
+    && status
+    && ['completed', 'partial'].includes(status.status)
+    && status.researchSnapshotId
+    && review.report.coverage.companyFacts > 0,
+  );
+}
+
+function hasNativeResearchResult(status: NativeResearchLeadStatus | null | undefined) {
+  return Boolean(
+    status?.result
+    && ['completed', 'partial', 'insufficient_data'].includes(status.status),
+  );
+}
+
+function nativeResearchReview(status: NativeResearchLeadStatus | null | undefined) {
+  if (!status?.result) return null;
+  const report = buildResearchReport(status.result);
+  const readiness = researchReadinessFor({
+    status: status.status,
+    lead: status.result.lead,
+    result: status.result,
+    snapshotId: status.researchSnapshotId,
+    evidenceCount: report.sources.length,
+    sourceCount: report.sources.length,
+  });
+  return { report, readiness };
+}
+
+function nativeResearchCanCreateDraft(lead: EnrichedLead, status: NativeResearchLeadStatus | null | undefined) {
+  const review = nativeResearchReview(status);
+  return Boolean(
+    lead.email
+    && status?.result
+    && review
+    && canShowResearchDraftAction({
+      readiness: review.readiness,
+      snapshotId: status.researchSnapshotId,
+      eligible: status.result.draftEligibility.eligible,
+      canCreateDraft: true,
+    }),
+  );
 }
 
 import { EnrichmentOptionsDialog } from '@/components/enrichment/enrichment-options-dialog';
-
-import { organizationService } from '@/lib/services/organization-service';
 
 export default function EnrichedLeadsClient() {
   const router = useRouter();
@@ -96,26 +123,36 @@ export default function EnrichedLeadsClient() {
   const [tick, setTick] = useState(0); // Force re-render
   // ... existing state
 
-  // --- Social Credits ---
-  const [socialCredits, setSocialCredits] = useState<number | null>(null);
-  const [socialEnabled, setSocialEnabled] = useState(true);
-
-  // ... existing useEffects
+  const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
 
   useEffect(() => {
-    // Load credits on mount
-    organizationService.getCredits().then(res => {
-      if (res) {
-        setSocialCredits(res.credits);
-        setSocialEnabled(res.enabled);
-      }
-    });
+    let active = true;
+
+    profileService.getCurrentProfile()
+      .then((profile) => {
+        if (!active) return;
+        setCurrentProfile(profile);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error('No se pudo cargar el perfil actual para leads enriquecidos', error);
+        setCurrentProfile(null);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const [enriched, setEnriched] = useState<EnrichedLead[]>([]);
+  const [loadingLeads, setLoadingLeads] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [sel, setSel] = useState<Record<string, boolean>>({});           // selección para INVESTIGAR
   const [reports, setReports] = useState<LeadResearchReport[]>([]);
+  const [nativeResearchByLeadId, setNativeResearchByLeadId] = useState<Record<string, NativeResearchLeadStatus>>({});
   const [openReport, setOpenReport] = useState(false);
+  const [researchOpen, setResearchOpen] = useState(false);
+  const [creatingDraftId, setCreatingDraftId] = useState<string | null>(null);
   // Estados para Modal de llamada
   const [callModalOpen, setCallModalOpen] = useState(false);
   const [leadToCall, setLeadToCall] = useState<EnrichedLead | null>(null);
@@ -123,31 +160,10 @@ export default function EnrichedLeadsClient() {
   const [reportToView, setReportToView] = useState<LeadResearchReport | null>(null);
   const [reportLead, setReportLead] = useState<EnrichedLead | null>(null);
 
-  const [seqRunning, setSeqRunning] = useState(false);
-  const [seqDone, setSeqDone] = useState(0);
-  const [seqTotal, setSeqTotal] = useState(0);
-  const [researchUi, setResearchUi] = useState<{
-    leadName: string;
-    index: number;
-    total: number;
-    startedAt: number;
-    status: ResearchLifecycleStatus;
-    reportId?: string | null;
-    warning?: string | null;
-  }>({
-    leadName: '',
-    index: 0,
-    total: 0,
-    startedAt: 0,
-    status: 'idle',
-    reportId: null,
-    warning: null,
-  });
-  const [researchPulseMs, setResearchPulseMs] = useState(0);
-
   const [selectedToContact, setSelectedToContact] = useState<Set<string>>(new Set());
   const [openCompose, setOpenCompose] = useState(false);
-  const [composeList, setComposeList] = useState<Array<{ lead: EnrichedLead; subject: string; body: string }>>([]);
+  const [composeList, setComposeList] = useState<Array<{ lead: EnrichedLead; subject: string; body: string; researchSnapshotId: string | null }>>([]);
+  const [bulkOperationId, setBulkOperationId] = useState('');
   const [sendingBulk, setSendingBulk] = useState(false);
   const [sendProgress, setSendProgress] = useState({ done: 0, total: 0 });
   const [bulkProvider, setBulkProvider] = useState<'outlook' | 'gmail'>('outlook');
@@ -157,12 +173,6 @@ export default function EnrichedLeadsClient() {
   const [usePixel, setUsePixel] = useState(true);
   const [useLinkTracking, setUseLinkTracking] = useState(false);
   const [useReadReceipt, setUseReadReceipt] = useState(false);
-
-  // Bulk LinkedIn State
-  const [openBulkLinkedin, setOpenBulkLinkedin] = useState(false);
-  const [bulkLinkedinRunning, setBulkLinkedinRunning] = useState(false);
-  const [bulkLinkedinProgress, setBulkLinkedinProgress] = useState<{ current: number; total: number; currentName: string }>({ current: 0, total: 0, currentName: '' });
-  const bulkLinkedinStopRef = useRef(false);
 
   // Editor IA inline (dentro del modal actual, sin abrir otro <Dialog/>)
   const [showBulkEditor, setShowBulkEditor] = useState(false);
@@ -186,12 +196,17 @@ export default function EnrichedLeadsClient() {
         companyDomain: l.companyDomain,
         title: l.title,
         sourceOpportunityId: l.sourceOpportunityId,
-        clientRef: l.id
+        clientRef: l.id,
+        existingRecordId: l.id,
       }));
+      const operationId = uuid();
 
       const res = await fetch('/api/opportunities/enrich-apollo', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': operationId,
+        },
         body: JSON.stringify({
           leads: payloadLeads,
           revealEmail: opts.revealEmail,
@@ -225,6 +240,7 @@ export default function EnrichedLeadsClient() {
             // Merge important fields, keep ID
             toUpdate.push({
               ...existing, // Keep original creation date, etc
+              fullName: incoming.fullName || existing.fullName,
               apolloId: incoming.apolloId || existing.apolloId,
               email: incoming.email || existing.email,
               emailStatus: incoming.emailStatus || existing.emailStatus,
@@ -272,22 +288,6 @@ export default function EnrichedLeadsClient() {
     setOpenEnrichOptions(true);
   }
 
-  // --- LinkedIn Modal ---
-  const [openLinkedin, setOpenLinkedin] = useState(false);
-  const [linkedinLead, setLinkedinLead] = useState<EnrichedLead | null>(null);
-  const [linkedinMessage, setLinkedinMessage] = useState('');
-  const [sendingLinkedin, setSendingLinkedin] = useState(false);
-
-  // --- Campaign Schedule Modal ---
-  const [openSchedule, setOpenSchedule] = useState(false);
-  const [scheduleConfig, setScheduleConfig] = useState<ScheduleConfig>({
-    startDate: new Date(),
-    msgsPerDay: 50,
-    skipWeekends: true,
-    channel: 'linkedin'
-  });
-  const [scheduling, setScheduling] = useState(false);
-
   // ===== Filtros (incluye/excluye) =====
   const [showFilters, setShowFilters] = useState(false);
   const [fIncCompany, setFIncCompany] = useState('');
@@ -313,12 +313,43 @@ export default function EnrichedLeadsClient() {
   const [titleFilter, setTitleFilter] = useState('');
   const [industryFilter, setIndustryFilter] = useState('all');
   const [phoneFilter, setPhoneFilter] = useState<'all' | 'ready' | 'pending' | 'missing'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
   const [createdFrom, setCreatedFrom] = useState('');
   const [createdTo, setCreatedTo] = useState('');
 
+  const loadNativeResearchStatuses = useCallback(async (leads: EnrichedLead[]) => {
+    const leadIds = Array.from(new Set(leads.map((lead) => String(lead.id || '').trim()).filter(Boolean)));
+    if (leadIds.length === 0) {
+      setNativeResearchByLeadId({});
+      return;
+    }
+
+    try {
+      const chunks = Array.from({ length: Math.ceil(leadIds.length / 200) }, (_, index) => leadIds.slice(index * 200, (index + 1) * 200));
+      const responses = await Promise.all(chunks.map(async (leadIdsChunk) => {
+        const response = await fetch('/api/native-research/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ leadIds: leadIdsChunk }),
+        });
+        if (!response.ok) throw new Error('NATIVE_RESEARCH_LEAD_STATUS_FAILED');
+        const payload = await response.json();
+        return Array.isArray(payload?.items) ? payload.items as NativeResearchLeadStatus[] : [];
+      }));
+      const next = Object.fromEntries(responses.flat().map((item) => [item.leadId, item]));
+      setNativeResearchByLeadId(next);
+    } catch (error) {
+      console.warn('[enriched-leads] Native research status lookup failed:', error);
+    }
+  }, []);
+
   const loadData = useCallback(async () => {
-    const e = await enrichedLeadsStorageGet();
-    const saved = await supabaseService.getLeads();
+    setLoadError('');
+    try {
+      const [e, saved] = await Promise.all([
+        enrichedLeadsStorageGet(),
+        supabaseService.getLeads(),
+      ]);
 
       const patched = e.map((x) => {
         if (x.companyName && x.companyDomain) return x;
@@ -344,11 +375,18 @@ export default function EnrichedLeadsClient() {
 
       setEnriched(patched);
       setReports(getLeadReports());
-    setStyleProfiles(styleProfilesStorage.list());
-  }, []);
+      setStyleProfiles(styleProfilesStorage.list());
+      await loadNativeResearchStatuses(patched);
+    } catch (error) {
+      console.error('[enriched-leads] Load failed:', error);
+      setLoadError('No pudimos cargar tus leads enriquecidos. Vuelve a intentarlo.');
+    } finally {
+      setLoadingLeads(false);
+    }
+  }, [loadNativeResearchStatuses]);
 
   const syncPendingPhoneLeads = useCallback(async (ids?: string[]) => {
-    const targetIds = (ids || enriched.filter((lead) => lead.enrichmentStatus === 'pending_phone').map((lead) => lead.id))
+    const targetIds = (ids || enriched.filter((lead) => isPendingEnrichmentStatus(lead.enrichmentStatus)).map((lead) => lead.id))
       .filter(Boolean)
       .slice(0, 50);
 
@@ -381,19 +419,7 @@ export default function EnrichedLeadsClient() {
   }, [enriched, loadData]);
 
   useEffect(() => {
-    if (!seqRunning || !researchUi.startedAt) {
-      setResearchPulseMs(0);
-      return;
-    }
-
-    const tick = () => setResearchPulseMs(Date.now() - researchUi.startedAt);
-    tick();
-    const intervalId = window.setInterval(tick, 1000);
-    return () => window.clearInterval(intervalId);
-  }, [seqRunning, researchUi.startedAt]);
-
-  useEffect(() => {
-    loadData();
+    void loadData();
 
     // Realtime Subscription
     const channel = supabase
@@ -409,7 +435,7 @@ export default function EnrichedLeadsClient() {
             const phoneFound = Boolean(newData.primary_phone) || newPhones.length > 0;
 
             // Detect Status Change: Pending -> Completed
-            if (newData.enrichment_status === 'completed' && oldData.enrichment_status === 'pending_phone') {
+            if (newData.enrichment_status === 'completed' && isPendingEnrichmentStatus(oldData.enrichment_status)) {
               if (phoneFound) {
                 toast({
                   title: '¡Teléfono encontrado!',
@@ -426,7 +452,7 @@ export default function EnrichedLeadsClient() {
             }
           }
           // Reload data
-          loadData();
+          void loadData();
         }
       )
       .subscribe();
@@ -439,7 +465,7 @@ export default function EnrichedLeadsClient() {
   // Listen for Auth Changes to reload data if session restores late
   useEffect(() => {
     const pendingIds = enriched
-      .filter((lead) => lead.enrichmentStatus === 'pending_phone')
+      .filter((lead) => isPendingEnrichmentStatus(lead.enrichmentStatus))
       .map((lead) => lead.id)
       .filter(Boolean);
 
@@ -469,33 +495,11 @@ export default function EnrichedLeadsClient() {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' || (event === 'INITIAL_SESSION' && session)) {
-        // Force reload when we are sure we have a user
-        enrichedLeadsStorageGet().then((e) => {
-          supabaseService.getLeads().then((saved) => {
-            const patched = e.map((x) => {
-              if (x.companyName && x.companyDomain) return x;
-              const match =
-                saved.find(s => x.linkedinUrl && s.linkedinUrl === x.linkedinUrl) ||
-                saved.find(s => `${s.name}|${s.company}`.toLowerCase() === `${x.fullName}|${x.companyName || ''}`.toLowerCase());
-              const fromEmail = extractDomainFromEmail(x.email);
-              const fromWebsite =
-                match?.companyWebsite
-                  ? (match.companyWebsite.startsWith('http') ? new URL(match.companyWebsite).hostname : match.companyWebsite)
-                    .replace(/^https?:\/\//, '').replace(/^www\./, '')
-                  : undefined;
-              return {
-                ...x,
-                companyName: x.companyName ?? match?.company ?? x.companyName ?? undefined,
-                companyDomain: x.companyDomain ?? fromWebsite ?? fromEmail ?? x.companyDomain ?? undefined,
-              };
-            });
-            setEnriched(patched);
-          });
-        });
+        void loadData();
       }
     });
     return () => subscription.unsubscribe();
-  }, []);
+  }, [loadData]);
 
   // 🔄 Refrescar si otro tab/página (compose) modifica el localStorage
   // DEPRECATED: Cloud sync handles this differently (realtime), removing local storage listener.
@@ -516,36 +520,42 @@ export default function EnrichedLeadsClient() {
     return e.id || e.email || e.linkedinUrl || `${e.fullName}|${e.companyName || ''}`;
   }, []);
 
-  /** Reporte (cualquier fuente: por ref, por dominio o por nombre). */
-  const hasReport = useCallback((e: EnrichedLead) => {
-    const ref = leadRefOf(e);
-    const byRef = reports.find(r => (r.meta?.leadRef || '') === ref);
-    if (byRef) return true;
-    const domain = e.companyDomain;
-    if (domain && reports.find(r => r.company.domain === domain)) return true;
-    const name = e.companyName;
-    if (name && reports.find(r => (r.company.name || '').toLowerCase() === name.toLowerCase())) return true;
-    return false;
-  }, [leadRefOf, reports]);
+  const nativeResearchForLead = useCallback((lead: EnrichedLead) => {
+    const leadId = String(lead.id || '').trim();
+    return leadId ? nativeResearchByLeadId[leadId] || null : null;
+  }, [nativeResearchByLeadId]);
 
-  /** Reporte estrictamente por referencia de lead (NO por dominio/nombre). */
-  const hasReportStrict = useCallback((e: EnrichedLead) => {
-    const ref = leadRefOf(e);
-    return !!reports.find(r => (r.meta?.leadRef || '') === ref);
-  }, [leadRefOf, reports]);
-
-  // Helper to inject link tracking (duplicated from compose, should be util but ok for now)
-  function rewriteLinksForTracking(html: string, trackingId: string): string {
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    // Unify regex with the robust one from EmailTestPage
-    return html.replace(/href=(["'])(http[^"']+)\1/gi, (match: string, quote: string, url: string) => {
-      if (url.includes('/api/tracking/click')) return match;
-      const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
-      return `href=${quote}${trackingUrl}${quote}`;
+  const reportForLead = useCallback((lead: EnrichedLead) => {
+    return findReportForLead({
+      leadId: leadRefOf(lead),
+      email: lead.email || null,
+      companyDomain: lead.organizationDomain || lead.companyDomain || null,
+      companyName: lead.companyName || null,
     });
-  }
+  }, [leadRefOf]);
 
-  const canContact = useCallback((lead: EnrichedLead) => hasReport(lead) && !!lead.email, [hasReport]);
+  /** Solo un reporte del mismo lead puede marcarlo como investigado. */
+  const hasReportStrict = useCallback((e: EnrichedLead) => {
+    if (isNativeResearchReport(nativeResearchForLead(e))) return true;
+    const refs = new Set([leadRefOf(e), e.email || '']
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter(Boolean));
+    return reports.some((report) => refs.has(String(report.meta?.leadRef || '').trim().toLowerCase()) && hasMeaningfulLeadResearch(report));
+  }, [leadRefOf, nativeResearchForLead, reports]);
+
+  const hasReport = hasReportStrict;
+  const hasViewableReport = useCallback(
+    (lead: EnrichedLead) => hasNativeResearchResult(nativeResearchForLead(lead)) || hasReport(lead),
+    [hasReport, nativeResearchForLead],
+  );
+
+  const canContact = useCallback((lead: EnrichedLead) => {
+    const native = nativeResearchForLead(lead);
+    if (native?.result) {
+      return nativeResearchCanCreateDraft(lead, native);
+    }
+    return hasReport(lead) && Boolean(lead.email);
+  }, [hasReport, nativeResearchForLead]);
 
   // Normaliza cadenas (quita acentos y pasa a minúsculas)
   const norm = useCallback((s?: string | null) =>
@@ -564,7 +574,7 @@ export default function EnrichedLeadsClient() {
     const fallbackPhone = lead.phoneNumbers?.length ? lead.phoneNumbers[0].sanitized_number : undefined;
     const shownPhone = lead.primaryPhone || fallbackPhone;
     if (shownPhone && shownPhone !== 'Not Found') return 'ready';
-    if (lead.enrichmentStatus === 'pending_phone') return 'pending';
+    if (isPendingEnrichmentStatus(lead.enrichmentStatus)) return 'pending';
     return 'missing';
   }, []);
 
@@ -598,6 +608,8 @@ export default function EnrichedLeadsClient() {
 
 
     return enriched.filter(e =>
+      (!searchTerm || [e.fullName, e.companyName, e.title, e.email, e.companyDomain]
+        .some((value) => norm(value).includes(norm(searchTerm)))) &&
       // INCLUIR: debe cumplir todos los grupos que el usuario haya escrito
       containsAny(e.companyName, incCompanies) &&
       containsAny(e.fullName, incLeads) &&
@@ -622,7 +634,11 @@ export default function EnrichedLeadsClient() {
       excludesAll(e.fullName, excLeads) &&
       excludesAll(e.title, excTitles)
     );
-  }, [enriched, applied, splitTerms, norm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo, getLeadPhoneState]);
+  }, [enriched, applied, splitTerms, norm, searchTerm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo, getLeadPhoneState]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, companyFilter, nameFilter, titleFilter, industryFilter, phoneFilter, createdFrom, createdTo, applied]);
 
   // Mantener número de página válido si cambia la cantidad total
   useEffect(() => {
@@ -642,34 +658,51 @@ export default function EnrichedLeadsClient() {
 
   // Elegibles totales (sobre la lista filtrada completa)
   const researchEligible = useMemo(
-    () => filtered.filter(e => !!e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)).length,
-    [filtered, leadRefOf, hasReportStrict]
+    () => filtered.filter(e => !!e.email && !hasReportStrict(e)).length,
+    [filtered, hasReportStrict]
   );
   const pendingPhoneCount = useMemo(
-    () => enriched.filter((lead) => lead.enrichmentStatus === 'pending_phone').length,
+    () => enriched.filter((lead) => isPendingEnrichmentStatus(lead.enrichmentStatus)).length,
     [enriched],
   );
 
   // === Métricas para los "seleccionar todos" ===
   const researchEligiblePage = useMemo(
-    // Elegible si: tiene email, NO está marcado investigado y NO tiene reporte por ref (otros leads no bloquean)
-    () => pageLeads.filter(e => e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)).length,
-    [pageLeads, leadRefOf, hasReportStrict]
+    () => pageLeads.filter(e => e.email && !hasReportStrict(e)).length,
+    [pageLeads, hasReportStrict]
   );
   const contactEligiblePage = useMemo(() => pageLeads.filter(canContact).length, [pageLeads, canContact]);
 
   const allResearchChecked = useMemo(
-    () => researchEligiblePage > 0 && pageLeads.filter(e => e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)).every(e => sel[e.id]),
-    [pageLeads, sel, researchEligiblePage, leadRefOf, hasReportStrict]
+    () => researchEligiblePage > 0 && pageLeads.filter(e => e.email && !hasReportStrict(e)).every(e => sel[e.id]),
+    [pageLeads, sel, researchEligiblePage, hasReportStrict]
   );
   const allContactChecked = useMemo(
     () => contactEligiblePage > 0 && pageLeads.filter(canContact).every(l => selectedToContact.has(l.id)),
     [pageLeads, selectedToContact, contactEligiblePage, canContact]
   );
+  const researchCount = Object.values(sel).filter(Boolean).length;
+
+  useEffect(() => {
+    const availableIds = enriched.map((lead) => lead.id);
+    const nextResearchSelection = retainVisibleSelection(
+      Object.keys(sel).filter((id) => sel[id]),
+      availableIds,
+    );
+    const currentResearchSelection = new Set(Object.keys(sel).filter((id) => sel[id]));
+    if (!haveSameSelection(currentResearchSelection, nextResearchSelection)) {
+      setSel(Object.fromEntries(Array.from(nextResearchSelection).map((id) => [id, true])));
+    }
+
+    const nextContactSelection = retainVisibleSelection(selectedToContact, availableIds);
+    if (!haveSameSelection(selectedToContact, nextContactSelection)) {
+      setSelectedToContact(nextContactSelection);
+    }
+  }, [enriched, sel, selectedToContact]);
 
   const anyInvestigated = useMemo(
-    () => enriched.some(e => isResearched(leadRefOf(e)) || hasReport(e)),
-    [enriched, leadRefOf, hasReport]
+    () => enriched.some(hasReportStrict),
+    [enriched, hasReportStrict]
   );
 
   const toggleAllResearch = (checked: boolean) => {
@@ -682,13 +715,41 @@ export default function EnrichedLeadsClient() {
       });
       return;
     }
+
+    const candidates = pageLeads.filter((lead) => (
+      lead.email && !hasReportStrict(lead) && !sel[lead.id]
+    ));
+    const remainingCapacity = Math.max(0, MAX_RESEARCH_BATCH_SIZE - researchCount);
+    const leadsToAdd = candidates.slice(0, remainingCapacity);
+
     setSel(prev => {
       const next = { ...prev };
-      pageLeads.forEach(e => {
-        if (e.email && !isResearched(leadRefOf(e)) && !hasReportStrict(e)) next[e.id] = true;
-      });
+      leadsToAdd.forEach((lead) => { next[lead.id] = true; });
       return next;
     });
+
+    if (leadsToAdd.length < candidates.length) {
+      toast({
+        title: `Puedes investigar hasta ${MAX_RESEARCH_BATCH_SIZE} leads`,
+        description: 'La selección actual se mantuvo. Desmarca algunos leads antes de agregar más.',
+      });
+    }
+  };
+
+  const toggleResearchLead = (leadId: string, checked: boolean) => {
+    if (!checked) {
+      setSel((prev) => ({ ...prev, [leadId]: false }));
+      return;
+    }
+    if (sel[leadId]) return;
+    if (researchCount >= MAX_RESEARCH_BATCH_SIZE) {
+      toast({
+        title: `Puedes investigar hasta ${MAX_RESEARCH_BATCH_SIZE} leads`,
+        description: 'Inicia esta selección o desmarca un lead antes de agregar otro.',
+      });
+      return;
+    }
+    setSel((prev) => ({ ...prev, [leadId]: true }));
   };
   const toggleAllContact = (checked: boolean) => {
     if (!checked) {
@@ -702,261 +763,74 @@ export default function EnrichedLeadsClient() {
     setSelectedToContact(next);
   };
 
-  const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+  const openResearchWorkspace = (
+    leadIds: Iterable<string> = Object.keys(sel).filter((id) => sel[id]),
+    options: { refresh?: boolean } = {},
+  ) => {
+    const selectedIds = Array.from(leadIds);
+    if (selectedIds.length === 0) return;
 
-  /** Obtiene el ID del usuario autenticado en Supabase para acciones del cliente. */
-  async function getUserIdOrFail(): Promise<string> {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.id) {
-      // Si no hay usuario, redirigir (aunque el middleware ya debería proteger)
-      toast({ variant: 'destructive', title: 'Error de sesión', description: 'No se detectó usuario. Recarga la página.' });
-      throw new Error('no_identity');
-    }
-    return user.id;
-  }
-
-  async function runOneInvestigation(e: EnrichedLead, userId: string, index: number, total: number) {
-    const leadRef = leadRefOf(e);
-    const realProfile = await profileService.getCurrentProfile();
-    const payload = buildLeadResearchPayloadFromLead({
-      lead: e,
-      userId,
-      userName: realProfile?.full_name,
-      userJobTitle: realProfile?.job_title,
-      sellerProfile: realProfile,
-    });
-
-    setResearchUi({
-      leadName: e.fullName,
-      index,
-      total,
-      startedAt: Date.now(),
-      status: 'preparing',
-      reportId: null,
-      warning: null,
-    });
-
-    const startRes = await fetch('/api/lead-research', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-App-Env': 'LeadFlowAI',
-      },
-      cache: 'no-store',
-      body: JSON.stringify(payload),
-    });
-
-    let initial: any = null;
-    let raw = '';
-    try {
-      initial = await startRes.json();
-    } catch {
-      raw = await startRes.text().catch(() => '');
-    }
-
-    if (!startRes.ok) {
-      const msg = initial?.message || initial?.error || raw || 'lead-research error';
-      throw new Error(msg);
-    }
-
-    let final = initial;
-    const reportId = String(initial?.report_id || '').trim() || null;
-    const warnings = getLeadResearchWarnings(initial);
-    setResearchUi((prev) => ({
-      ...prev,
-      status: (String(initial?.status || 'in_progress') as ResearchLifecycleStatus),
-      reportId,
-      warning: warnings[0] || null,
-    }));
-
-    if (reportId && ['queued', 'in_progress'].includes(String(initial?.status || ''))) {
-      for (let attempt = 0; attempt < 18; attempt++) {
-        await sleep(4000);
-        const pollRes = await fetch(`/api/lead-research/${encodeURIComponent(reportId)}`, {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-          cache: 'no-store',
-        });
-
-        let polled: any = null;
-        try {
-          polled = await pollRes.json();
-        } catch {
-          polled = null;
-        }
-
-        if (!pollRes.ok) {
-          throw new Error(polled?.message || polled?.error || `lead-research poll error ${pollRes.status}`);
-        }
-
-        final = polled;
-        const nextWarnings = getLeadResearchWarnings(polled);
-        setResearchUi((prev) => ({
-          ...prev,
-          status: (String(polled?.status || 'in_progress') as ResearchLifecycleStatus),
-          warning: nextWarnings[0] || prev.warning || null,
-        }));
-
-        if (['completed', 'partial', 'insufficient_data', 'failed'].includes(String(polled?.status || ''))) {
-          break;
-        }
-      }
-    }
-
-    // Espejo local de cuota
-    Quota.incClientQuota('research');
-
-    const report = adaptLeadResearchResponseToReport(final, leadRef);
-    upsertLeadReports([report]);
-    setReports(getLeadReports());
-
-    setResearchUi((prev) => ({
-      ...prev,
-      status: (String(final?.status || 'completed') as ResearchLifecycleStatus),
-      warning: getLeadResearchWarnings(final)[0] || prev.warning || null,
-    }));
-
-    if (hasMeaningfulLeadResearch(report) && ['completed', 'partial'].includes(String(final?.status || ''))) {
-      markResearched([leadRef]);
-    }
-
-    if (String(final?.status || '') === 'insufficient_data') {
+    const availableIds = new Set(enriched.map((lead) => lead.id));
+    if (selectedIds.some((id) => !availableIds.has(id))) {
       toast({
         variant: 'destructive',
-        title: `Investigacion limitada para ${e.fullName}`,
-        description: 'El backend no encontro suficiente informacion util para generar un reporte comercial fuerte.',
+        title: 'La lista cambió',
+        description: 'Actualiza la lista antes de abrir la investigación. Tu selección no se modificó.',
       });
-    } else if (getLeadResearchWarnings(final).length > 0) {
-      toast({
-        title: `Investigacion completada con advertencias`,
-        description: getLeadResearchWarnings(final)[0],
-      });
-    }
-  }
-
-  async function investigateOneByOne() {
-    if (seqRunning) return;
-    const selectedLeadsForResearch = Object.keys(sel).filter(id => sel[id]);
-    const selected = enriched.filter(e => selectedLeadsForResearch.includes(e.id));
-    if (selected.length === 0) return;
-
-    // Preflight: verifica que el proxy al motor de research este disponible
-    try {
-      const health = await fetch('/api/lead-research', { method: 'GET', cache: 'no-store' }).then(r => r.json());
-      if (!health?.endpoint) {
-        toast({
-          variant: 'destructive',
-          title: 'Backend sin lead research configurado',
-          description: 'Configura el webhook de n8n para investigacion y vuelve a publicar.',
-        });
-        return;
-      }
-    } catch { /* ignoramos si falla el GET, el POST igual reportará */ }
-
-    if (!Quota.canUseClientQuota('research')) {
-      toast({ variant: 'destructive', title: 'Límite diario alcanzado', description: `Has llegado al límite de investigaciones por hoy.` });
       return;
     }
 
-    setSeqRunning(true);
-    setSeqDone(0);
-    setSeqTotal(selected.length);
-
-    try {
-      // Obtener identidad UNA vez para toda la cola.
-      const userId = await getUserIdOrFail().catch((err) => {
-        console.warn('[research] identity error', err);
-        toast({
-          variant: 'destructive',
-          title: 'Sesion no disponible',
-          description: 'Recarga la pagina para continuar con la investigación.',
-        });
-        throw new Error('missing user id');
-      });
-
-      for (let idx = 0; idx < selected.length; idx++) {
-        const e = selected[idx];
-        // NO bloqueamos por dominio/nombre: solo si ya existe reporte para ESTE leadRef
-        if (hasReportStrict(e)) {
-          setSeqDone(prev => prev + 1);
-          continue;
-        }
-
-        let lastErr: any = null;
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          try {
-            await runOneInvestigation(e, userId, idx + 1, selected.length);
-            lastErr = null;
-            break;
-          } catch (err: any) {
-            lastErr = err;
-            if (String(err?.message || '').includes('missing user id')) {
-              // No reintentes si no hay identidad
-              break;
-            }
-            await sleep(1500);
-          }
-        }
-        if (lastErr) {
-          console.error(`Investigación falló para ${e.companyName}:`, lastErr?.message);
-          setResearchUi(prev => ({
-            ...prev,
-            leadName: e.fullName,
-            index: idx + 1,
-            total: selected.length,
-            status: 'failed',
-            warning: lastErr?.message || null,
-          }));
-          toast({
-            variant: "destructive",
-            title: `Investigación falló para ${e.companyName}`,
-            description: lastErr?.message || 'Error desconocido en el motor de investigación.'
-          });
-        }
-        setSeqDone(prev => prev + 1);
-        await sleep(1200);
-      }
-    } finally {
-      setSeqRunning(false);
-      setResearchUi(prev => ({ ...prev, status: prev.status === 'failed' ? 'failed' : 'idle' }));
-      setResearchPulseMs(0);
-      // Refresh credits
-      organizationService.getCredits().then(res => {
-        if (res) setSocialCredits(res.credits);
-      });
-      toast({ title: 'Investigación completa', description: `Procesados ${selected.length} leads con n8n.` });
+    const handoff = saveResearchWorkspaceHandoff({
+      source: 'enriched-leads',
+      leadIds: selectedIds,
+      refresh: options.refresh === true,
+    });
+    if (!handoff.ok) {
+      toast({ variant: 'destructive', title: 'No pudimos abrir la investigación', description: handoff.message });
+      return;
     }
-  }
+
+    setResearchOpen(true);
+  };
+
   function clearInvestigationFor(lead: EnrichedLead) {
     if (!confirm(`¿Borrar investigación para ${lead.fullName}?`)) return;
     const ref = leadRefOf(lead);
-    const domain = (lead.companyDomain || '').trim();
 
-    leadResearchStorage.removeWhere(r => {
-      const rRef = (r?.meta?.leadRef || '').trim();
-      const rDom = (r?.company?.domain || '').trim();
-      return Boolean((ref && rRef === ref) || (domain && rDom === domain));
+    const removedCount = leadResearchStorage.removeWhere(r => {
+      const reportRef = (r?.meta?.leadRef || '').trim().toLowerCase();
+      return [ref, lead.email || ''].some((value) => reportRef === String(value).trim().toLowerCase() && reportRef.length > 0);
     });
 
-    toast({ title: 'Investigación eliminada', description: `Se borraron los datos de ${lead.fullName}.` });
-    setTick(t => t + 1);
+    unmarkResearched([ref]);
+    setSelectedToContact((current) => {
+      const next = new Set(current);
+      next.delete(lead.id);
+      return next;
+    });
+    setReports(getLeadReports());
+    setReportToView(null);
+    setReportLead(null);
+    setOpenReport(false);
+    toast({
+      title: 'Investigación eliminada',
+      description: removedCount > 0 ? `Se borraron los datos de ${lead.fullName}.` : 'No se encontró un reporte para borrar.',
+    });
   }
 
-  /** Borra reportes de investigación y desmarca "investigado" para TODOS los leads visibles. */
+  /** Borra reportes de investigación de los leads visibles y limpia marcas legacy. */
   function clearInvestigations() {
     if (!enriched.length) return;
     const ok = confirm('¿Borrar todos los reportes e investigaciones de los leads listados? Podrás investigarlos nuevamente.');
     if (!ok) return;
 
-    // 1) Construir referencias y dominios objetivo
+    // 1) Construir referencias exactas de los leads objetivo.
     const refs = enriched.map(leadRefOf).filter(Boolean);
-    const domains = new Set(enriched.map(e => (e.companyDomain || '').trim()).filter(Boolean));
 
-    // 2) Eliminar reportes (cualquier reporte que haga match por leadRef o por dominio)
+    // 2) Eliminar solo reportes ligados a estos leads, nunca los de otro contacto de la empresa.
     const removedCount = leadResearchStorage.removeWhere((r) => {
-      const ref = (r?.meta?.leadRef || '').trim();
-      const dom = (r?.company?.domain || '').trim();
-      return Boolean((ref && refs.includes(ref)) || (dom && domains.has(dom)));
+      const ref = (r?.meta?.leadRef || '').trim().toLowerCase();
+      return Boolean(ref && refs.map((value) => value.toLowerCase()).includes(ref));
     });
 
     // 3) Desmarcar "investigado"
@@ -984,12 +858,9 @@ export default function EnrichedLeadsClient() {
     if (!ok) return;
 
     const refs = targets.map(leadRefOf).filter(Boolean);
-    const domains = new Set(targets.map(e => (e.companyDomain || '').trim()).filter(Boolean));
-
     const removedCount = leadResearchStorage.removeWhere((r) => {
-      const ref = (r?.meta?.leadRef || '').trim();
-      const dom = (r?.company?.domain || '').trim();
-      return Boolean((ref && refs.includes(ref)) || (dom && domains.has(dom)));
+      const ref = (r?.meta?.leadRef || '').trim().toLowerCase();
+      return Boolean(ref && refs.map((value) => value.toLowerCase()).includes(ref));
     });
 
     unmarkResearched(refs);
@@ -1011,11 +882,9 @@ export default function EnrichedLeadsClient() {
     const ok = confirm(`¿Borrar la investigación de ${lead.fullName}?`);
     if (!ok) return;
     const ref = leadRefOf(lead);
-    const dom = (lead.companyDomain || '').trim();
     const removedCount = leadResearchStorage.removeWhere((r) => {
-      const rref = (r?.meta?.leadRef || '').trim();
-      const rdom = (r?.company?.domain || '').trim();
-      return (!!ref && rref === ref) || (!!dom && rdom === dom);
+      const rref = (r?.meta?.leadRef || '').trim().toLowerCase();
+      return [ref, lead.email || ''].some((value) => rref === String(value).trim().toLowerCase() && rref.length > 0);
     });
     unmarkResearched([ref]);
     const nextSel = new Set<string>(selectedToContact); nextSel.delete(lead.id);
@@ -1028,283 +897,9 @@ export default function EnrichedLeadsClient() {
     });
   }
 
-  function openLinkedinCompose(lead: EnrichedLead) {
-    if (!lead.linkedinUrl) return;
-    setLinkedinLead(lead);
-
-    // Contextual AI Generation
-    const rep = findReportForLead({ leadId: leadRefOf(lead), companyDomain: lead.companyDomain || null, companyName: lead.companyName || null });
-    const draft = generateLinkedinDraft(lead, rep);
-
-    setLinkedinMessage(draft);
-    setOpenLinkedin(true);
-  }
-
-  function isLinkedinPendingInviteError(error?: string) {
-    const text = String(error || '').toLowerCase();
-    return text.includes('connection request already pending') || text.includes('already pending');
-  }
-
-  function getLinkedinPendingInviteMessage() {
-    return {
-      title: 'Invitacion ya pendiente',
-      description: 'Este perfil ya tiene una solicitud de conexion pendiente en LinkedIn. No es un problema de Premium ni de la extension.',
-    };
-  }
-
-  async function handleBulkLinkedin() {
-    // 1. Get selected leads with LinkedIn URLs
-    const leadsToProcess = enriched.filter(l => selectedToContact.has(l.id) && l.linkedinUrl);
-
-    if (leadsToProcess.length === 0) {
-      toast({ title: 'No hay leads válidos', description: 'Selecciona leads que tengan URL de LinkedIn.' });
-      return;
-    }
-
-    // 2. Validate Extension
-    if (!extensionService.isInstalled) {
-      toast({
-        variant: 'destructive',
-        title: 'Extensión no detectada',
-        description: 'Instala la extensión de Chrome de Anton.IA para usar esta función.'
-      });
-      return;
-    }
-
-    // 3. Warning for large selections
-    if (leadsToProcess.length > 20) {
-      const confirmed = confirm(
-        `⚠️ Vas a contactar ${leadsToProcess.length} leads.\n\n` +
-        `Esto tomará aproximadamente ${Math.round(leadsToProcess.length * 7.5 / 60)} minutos.\n\n` +
-        `Procesar muchos leads aumenta el riesgo de detección por LinkedIn.\n\n` +
-        `¿Deseas continuar?`
-      );
-      if (!confirmed) return;
-    }
-
-    // Reset stop flag
-    bulkLinkedinStopRef.current = false;
-
-    setBulkLinkedinRunning(true);
-    setBulkLinkedinProgress({ current: 0, total: leadsToProcess.length, currentName: '' });
-
-    let processedCount = 0;
-    let successCount = 0;
-    let failCount = 0;
-    let skippedCount = 0;
-
-    for (const lead of leadsToProcess) {
-      // Check stop flag
-      if (bulkLinkedinStopRef.current) {
-        console.log('[Bulk LinkedIn] Stopped by user');
-        toast({ title: 'Proceso detenido', description: `Procesados: ${processedCount} de ${leadsToProcess.length}` });
-        break;
-      }
-
-      setBulkLinkedinProgress(prev => ({ ...prev, currentName: lead.fullName || 'Desconocido', current: processedCount + 1 }));
-
-      try {
-        // 2. Generate message using same logic as single contact
-        const company = getCompanyProfile() || {};
-        const rep = findReportForLead({
-          leadId: leadRefOf(lead),
-          companyDomain: lead.companyDomain || null,
-          companyName: lead.companyName || null
-        });
-
-        const draft = generateLinkedinDraft(lead, rep);
-        const messageBody = draft || `Hola ${getFirstNameSafe(lead.fullName)}, me gustaría conectar contigo.`;
-
-        // 3. Send via Extension
-        console.log(`[Bulk LinkedIn] Processing ${lead.fullName}...`);
-        const res = await extensionService.sendLinkedinDM(lead.linkedinUrl!, messageBody);
-
-        // 4. Log Result
-        if (res.success) {
-          successCount++;
-          // Log directly since handleLogCall signature doesn't match
-          await contactedLeadsStorage.add({
-            id: uuid(),
-            leadId: lead.id,
-            name: lead.fullName || 'Desconocido',
-            email: lead.email || '',
-            company: lead.companyName,
-            role: lead.title,
-            industry: lead.industry || undefined,
-            city: lead.city || lead.country || undefined,
-            country: lead.country || undefined,
-            subject: `LinkedIn: Mensaje enviado automáticamente.\n\n${messageBody}`,
-            sentAt: new Date().toISOString(),
-            status: 'sent',
-            provider: 'linkedin',
-            lastUpdateAt: new Date().toISOString(),
-          });
-
-          // Remove from enriched list and storage
-          await removeEnrichedLeadById(lead.id);
-          setEnriched(prev => prev.filter(e => e.id !== lead.id));
-
-          // Remove from selection
-          setSelectedToContact(prev => {
-            const next = new Set(prev);
-            next.delete(lead.id);
-            return next;
-          });
-        } else {
-          if (isLinkedinPendingInviteError(res.error)) {
-            skippedCount++;
-            const info = getLinkedinPendingInviteMessage();
-            console.warn('[Bulk LinkedIn] Invite already pending for:', lead.fullName);
-            toast({
-              title: `${info.title}: ${lead.fullName}`,
-              description: info.description,
-            });
-          } else {
-            failCount++;
-            console.error('[Bulk LinkedIn] Failed for:', lead.fullName, res.error);
-            toast({
-              title: `Error: ${lead.fullName}`,
-              description: res.error || 'No se pudo enviar el mensaje',
-              variant: 'destructive'
-            });
-          }
-        }
-
-      } catch (err) {
-        failCount++;
-        console.error('[Bulk LinkedIn] Exception:', err);
-        toast({
-          title: `Error: ${lead.fullName}`,
-          description: 'Error inesperado al procesar',
-          variant: 'destructive'
-        });
-      }
-
-      processedCount++;
-
-      // 5. Wait safely between contacts (5-10s random delay)
-      if (processedCount < leadsToProcess.length && !bulkLinkedinStopRef.current) {
-        const delayTime = 5000 + Math.random() * 5000;
-        console.log(`[Bulk LinkedIn] Waiting ${Math.round(delayTime / 1000)}s before next contact...`);
-        await new Promise(r => setTimeout(r, delayTime));
-      }
-    }
-
-    setBulkLinkedinRunning(false);
-    setOpenBulkLinkedin(false);
-
-    toast({
-      title: 'Proceso finalizado',
-      description: `Procesados: ${processedCount} | Exitosos: ${successCount} | Omitidos: ${skippedCount} | Fallidos: ${failCount}`
-    });
-  }
-
-  async function handleScheduleCampaign() {
-    // Get selected leads
-    const selectedIds = Array.from(selectedToContact);
-    const leadsToSchedule = enriched.filter(e => selectedIds.includes(e.id)).map(e => ({
-      id: e.id,
-      name: e.fullName,
-      company: e.companyName,
-      email: e.email, // Assuming email is always present for contacting
-      linkedinUrl: e.linkedinUrl,
-      role: e.title,
-      industry: (e as any).industry // safe cast if property exists in enriched lead,
-    }));
-
-    // Validation
-    if (scheduleConfig.channel === 'linkedin') {
-      const missingUrl = leadsToSchedule.filter(l => !l.linkedinUrl).length;
-      if (missingUrl > 0) {
-        toast({ variant: 'destructive', title: 'Error', description: `${missingUrl} leads no tienen URL de LinkedIn.` });
-        return;
-      }
-    }
-
-    setScheduling(true);
-    try {
-      const plan = plannerService.calculateSchedule(leadsToSchedule, scheduleConfig);
-      await plannerService.saveSchedule(plan);
-
-      toast({ title: 'Campaña Agendada', description: `Se programaron ${plan.length} envíos.` });
-      setOpenSchedule(false);
-      router.push('/planner');
-    } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error', description: e.message });
-    } finally {
-      setScheduling(false);
-    }
-  }
-
-  async function handleSendLinkedin() {
-    if (!linkedinLead || !linkedinMessage) return;
-    setSendingLinkedin(true);
-
-    try {
-      // 1. Check Extension
-      if (!extensionService.isInstalled) {
-        toast({
-          variant: 'destructive',
-          title: 'Extensión no detectada',
-          description: 'Instala la extensión de Chrome de Anton.IA para enviar DMs.'
-        });
-        setSendingLinkedin(false);
-        return;
-      }
-
-      // 2. Send Command
-      const res = await extensionService.sendLinkedinDM(linkedinLead.linkedinUrl!, linkedinMessage);
-
-      if (res.success) {
-        // 3. Save Log
-        await contactedLeadsStorage.add({
-          id: uuid(),
-          leadId: linkedinLead.id,
-          name: linkedinLead.fullName,
-          email: linkedinLead.email || '',
-          company: linkedinLead.companyName,
-          role: linkedinLead.title,
-          industry: linkedinLead.industry,
-          city: linkedinLead.city,
-          country: linkedinLead.country,
-
-          subject: 'LinkedIn DM',
-          status: 'sent',
-          provider: 'linkedin', // New provider
-          linkedinThreadUrl: linkedinLead.linkedinUrl, // Best proxy for now
-          linkedinMessageStatus: 'sent',
-          sentAt: new Date().toISOString(),
-
-          // Tech fields
-          lastUpdateAt: new Date().toISOString()
-        });
-
-        toast({ title: 'Mensaje Enviado', description: 'La extensión procesó el envío correctamente.' });
-        setOpenLinkedin(false);
-
-        // Optional: Remove from enriched?
-        // await removeEnrichedLeadById(linkedinLead.id);
-      } else {
-        console.error('Extension returned error:', res.error);
-        if (isLinkedinPendingInviteError(res.error)) {
-          const info = getLinkedinPendingInviteMessage();
-          toast({ title: info.title, description: info.description });
-          setOpenLinkedin(false);
-        } else {
-          toast({ variant: 'destructive', title: 'Error en Envio', description: res.error });
-        }
-      }
-
-    } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Excepción', description: e.message });
-    } finally {
-      setSendingLinkedin(false);
-    }
-  }
-
   async function buildComposeDrafts(source: 'investigation' | 'style', styleName?: string) {
-    const company = getCompanyProfile() || {};
-    const sender = buildSenderInfo();
+    const company = buildEffectiveCompanyProfile(currentProfile);
+    const sender = buildSenderInfo(currentProfile);
     const overrides = emailDraftsStorage.getMap();
     const profile = source === 'style'
       ? (styleProfiles.find(p => p.name === styleName) || styleProfiles[0] || null)
@@ -1314,7 +909,7 @@ export default function EnrichedLeadsClient() {
       enriched
       .filter(l => selectedToContact.has(l.id))
       .map(async (l) => {
-        const rep = findReportForLead({ leadId: leadRefOf(l), companyDomain: l.companyDomain || null, companyName: l.companyName || null });
+        const rep = reportForLead(l);
         const seed = rep?.cross?.emailDraft
           ? { subject: rep.cross.emailDraft.subject, body: rep.cross.emailDraft.body }
           : (() => {
@@ -1363,154 +958,81 @@ export default function EnrichedLeadsClient() {
           body = ov.body || body;
         }
 
-        return { lead: l, subject: subj, body };
+        return {
+          lead: l,
+          subject: subj,
+          body,
+          researchSnapshotId: String(rep?.raw?.research_snapshot_id || '').trim() || null,
+        };
       })
     );
 
     return drafts;
   }
 
-  async function openBulkCompose() {
-    try {
-      const styleName = selectedStyleName || styleProfiles[0]?.name || '';
-      const drafts = await buildComposeDrafts(draftSource, styleName);
-
-      setComposeList(drafts);
-      if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
-      setBulkProvider('outlook');
-      setOpenCompose(true);
-    } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo preparar el borrador.' });
-    }
+  function openBulkCompose() {
+    openResearchWorkspace(selectedToContact);
   }
 
-  async function sendBulk() {
-    const items = composeList;
-    if (!items?.length) return;
-
-    setSendingBulk(true);
-    setSendProgress({ done: 0, total: items.length });
-    const removedIds = new Set<string>();
-
-    for (let i = 0; i < items.length; i++) {
-      const { lead, subject, body } = items[i];
-      try {
-        let res: any = null;
-        const trackingId = uuid(); // Pre-generate ID for tracking
-        let finalHtmlBody = body.replace(/\n/g, '<br/>');
-
-        // 2. Rewrite Links if enabled
-        if (useLinkTracking) {
-          finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
-        }
-
-        // 3. Inject Pixel if enabled
-        if (usePixel) {
-          const origin = typeof window !== 'undefined' ? window.location.origin : '';
-          let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-          const profile = getCompanyProfile();
-          if (profile?.logo && profile.logo.startsWith('http')) {
-            pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
-          }
-          // FIX: Removed display:none to prevent blocking by email clients
-          const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
-          finalHtmlBody += `\n<br>${trackingPixel}`;
-        }
-
-        if (bulkProvider === 'outlook') {
-          res = await sendEmail({
-            to: lead.email!,
-            subject,
-            htmlBody: finalHtmlBody,
-            requestReceipts: useReadReceipt,
-          });
-        } else {
-          // Gmail
-          res = await sendGmailEmail({
-            to: lead.email!,
-            subject,
-            html: finalHtmlBody,
-          });
-        }
-        Quota.incClientQuota('contact');
-        await contactedLeadsStorage.add({
-          id: trackingId, // Use the same ID
-          leadId: lead.id,
-          name: lead.fullName,
-          email: lead.email!,
-          company: lead.companyName,
-          role: lead.title,
-          industry: lead.industry,
-          city: lead.city,
-          country: lead.country,
-          subject,
-          sentAt: new Date().toISOString(),
-          status: 'sent',
-          provider: bulkProvider,
-          // Campos según proveedor
-          messageId: bulkProvider === 'outlook' ? res?.messageId : res?.id,
-          conversationId: bulkProvider === 'outlook' ? res?.conversationId : undefined,
-          internetMessageId: bulkProvider === 'outlook' ? res?.internetMessageId : undefined,
-          threadId: bulkProvider === 'gmail' ? res?.threadId : undefined,
-          lastUpdateAt: new Date().toISOString(),
-        });
-
-        // ✅ mover fuera de Enriquecidos si el envío fue OK
-        await removeEnrichedLeadById(lead.id);
-        removedIds.add(lead.id);
-      } catch (e: any) {
-        console.error(`send mail error (${bulkProvider})`, lead.email, e?.message);
-      }
-      setSendProgress(p => ({ ...p, done: p.done + 1 }));
-      await new Promise(res => setTimeout(res, 500));
-    }
-
-    setSendingBulk(false);
-    setOpenCompose(false);
-    // Actualiza UI y selecciones
-    if (removedIds.size) {
-      setEnriched(prev => prev.filter(x => !removedIds.has(x.id)));
-      setSelectedToContact(new Set(Array.from(selectedToContact).filter(id => !removedIds.has(id))));
-    }
-    toast({
-      title: 'Listo',
-      description: `Enviados por ${bulkProvider}: ${items.length}. Quitados de Enriquecidos: ${removedIds.size}`,
-    });
+  function sendBulk() {
+    openResearchWorkspace(selectedToContact);
   }
 
-  const goContact = (id: string, subject?: string, body?: string) => {
-    const url = new URL(window.location.origin + `/contact/compose`);
-    url.searchParams.set('id', id);
-    if (subject) url.searchParams.set('subject', subject);
-    if (body) url.searchParams.set('body', body);
-    router.push(url.toString());
-  };
-
-  async function generateEmailFromReportFor(e: EnrichedLead) {
-    const report = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
-    if (!report?.cross?.emailDraft) {
-      toast({ title: 'Sin borrador de IA', description: 'Investiga con n8n y asegúrate de que el reporte incluya borrador.' });
-      if (report) openReportFor(e);
+  async function generateEmailFromReportFor(lead: EnrichedLead) {
+    if (!canContact(lead)) {
+      toast({
+        title: 'El email aún no está disponible',
+        description: 'Necesitamos un email válido y evidencia suficiente antes de preparar el borrador.',
+      });
       return;
     }
-    const company = getCompanyProfile() || {};
-    const sender = buildSenderInfo();
-    const ctx = buildPersonEmailContext({
-      lead: { name: e.fullName, email: e.email!, title: e.title, company: e.companyName },
-      company: { name: e.companyName, domain: e.companyDomain },
-      sender,
-    });
-    let subj = renderTemplate(report.cross.emailDraft.subject || '', ctx);
-    let body = renderTemplate(report.cross.emailDraft.body || '', ctx);
-    body = applySignaturePlaceholders(body, sender);
-    subj = ensureSubjectPrefix(subj, ctx.lead.firstName);
-    goContact(e.id, subj, body);
+    const nativeStatus = nativeResearchForLead(lead);
+    if (nativeStatus?.result && nativeStatus.result.draftEligibility.eligible !== true) {
+      toast({
+        title: 'El email aún no está disponible',
+        description: researchDraftBlockReasonLabel(nativeStatus.result.draftEligibility.blockReason),
+      });
+      return;
+    }
+    const report = reportForLead(lead);
+    const researchSnapshotId = String(
+      nativeStatus?.researchSnapshotId
+      || report?.raw?.research_snapshot_id
+      || report?.raw?.researchSnapshotId
+      || '',
+    ).trim();
+    if (!researchSnapshotId) {
+      toast({ title: 'Necesitamos actualizar la investigación', description: 'Este reporte no tiene un snapshot listo para crear el email.' });
+      openResearchWorkspace([lead.id]);
+      return;
+    }
+
+    setCreatingDraftId(lead.id);
+    try {
+      const response = await fetch('/api/native-drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `native-draft:${researchSnapshotId}` },
+        body: JSON.stringify({ researchSnapshotId }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.draft?.draftId) {
+        throw new Error(nativeDraftRequestMessage(payload, 'No pudimos preparar el email.'));
+      }
+      const draftId = encodeURIComponent(payload.draft.draftId);
+      const versionId = payload.draft.versionId ? `&versionId=${encodeURIComponent(payload.draft.versionId)}` : '';
+      router.push(`/contact/compose?draftId=${draftId}${versionId}`);
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'No se pudo crear el email', description: error instanceof Error ? error.message : 'Inténtalo nuevamente.' });
+    } finally {
+      setCreatingDraftId(null);
+    }
   }
 
   function openReportFor(e: EnrichedLead) {
-    const rep = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain || null, companyName: e.companyName || null });
-    if (!rep?.cross) {
-      toast({ title: 'Sin reporte', description: 'Investiga con n8n antes de abrir el reporte.' });
+    const native = nativeResearchForLead(e);
+    const rep = reportForLead(e);
+    if (!hasNativeResearchResult(native) && !rep?.cross) {
+      toast({ title: 'Sin reporte', description: 'Investiga este lead antes de abrir su reporte.' });
       return;
     }
     setReportToView(rep);
@@ -1562,16 +1084,20 @@ export default function EnrichedLeadsClient() {
   async function handleDeleteEnriched(id: string) {
     const ok = confirm('¿Eliminar este lead de Enriquecidos?');
     if (!ok) return;
-    const next = await removeEnrichedLeadById(id);
-    setEnriched(next);
-    // limpia selecciones
-    setSel(prev => { const p = { ...prev }; delete p[id]; return p; });
-    const s = new Set(selectedToContact); s.delete(id); setSelectedToContact(s);
-    toast({ title: 'Eliminado', description: 'Se quitó el lead de Enriquecidos.' });
+    try {
+      const next = await removeEnrichedLeadById(id);
+      setEnriched(next);
+      // limpia selecciones
+      setSel(prev => { const p = { ...prev }; delete p[id]; return p; });
+      const s = new Set(selectedToContact); s.delete(id); setSelectedToContact(s);
+      toast({ title: 'Eliminado', description: 'Se quitó el lead de Enriquecidos.' });
+    } catch (error) {
+      console.error('[enriched-leads] Delete failed:', error);
+      toast({ variant: 'destructive', title: 'No se pudo eliminar', description: 'El lead sigue en la lista. Inténtalo nuevamente.' });
+    }
   }
 
   // Contadores para toda la selección (no solo la página actual)
-  const researchCount = Object.values(sel).filter(Boolean).length;
   const contactCount = selectedToContact.size;
 
   // ---------- Export helpers ----------
@@ -1587,52 +1113,85 @@ export default function EnrichedLeadsClient() {
   ]);
   const buildRows = (list: EnrichedLead[]) => list.map(toRow);
   const handleExportCsv = () => {
-    if (!enriched.length) return;
-    exportToCsv(exportHeaders, buildRows(enriched), 'enriched-leads.csv');
+    if (!filtered.length) return;
+    exportToCsv(exportHeaders, buildRows(filtered), 'enriched-leads.csv');
   };
   const handleExportXlsx = async () => {
-    if (!enriched.length) return;
-    await exportToXlsx(exportHeaders, buildRows(enriched), 'enriched-leads.xlsx');
+    if (!filtered.length) return;
+    await exportToXlsx(exportHeaders, buildRows(filtered), 'enriched-leads.xlsx');
   };
 
+  const clearFilters = () => {
+    setSearchTerm('');
+    setCompanyFilter('');
+    setNameFilter('');
+    setTitleFilter('');
+    setIndustryFilter('all');
+    setPhoneFilter('all');
+    setCreatedFrom('');
+    setCreatedTo('');
+    setFIncCompany('');
+    setFIncLead('');
+    setFIncTitle('');
+    setFExcCompany('');
+    setFExcLead('');
+    setFExcTitle('');
+    setApplied({ incCompany: '', incLead: '', incTitle: '', excCompany: '', excLead: '', excTitle: '' });
+    setPage(1);
+  };
+
+  const hasActiveFilters = Boolean(
+    searchTerm || companyFilter || nameFilter || titleFilter || industryFilter !== 'all' ||
+    phoneFilter !== 'all' || createdFrom || createdTo || Object.values(applied).some(Boolean),
+  );
+
+  const phoneReadyCount = useMemo(
+    () => enriched.filter((lead) => getLeadPhoneState(lead) === 'ready').length,
+    [enriched, getLeadPhoneState],
+  );
+  const nativeReportToView = reportLead ? nativeResearchForLead(reportLead) : null;
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Leads enriquecidos"
-        description="Selecciona leads, investiga con n8n y luego contacta con mejor contexto comercial."
-      />
-      <BackBar fallbackHref="/saved/leads" className="mb-2" />
-
-      {socialCredits !== null && (
-        <div className={`mb-4 rounded-[24px] border px-4 py-3 text-sm ${socialCredits > 0 ? 'border-border/60 bg-card/85 text-foreground dark:bg-card/70' : 'border-border/60 bg-card/75 text-muted-foreground dark:bg-card/60'}`}>
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-muted text-base text-foreground">⚡</span>
-            <div className="min-w-0 flex-1">
-              <div className="font-medium">Investigación profunda en LinkedIn</div>
-              <div className="text-sm opacity-90">
-                {socialCredits} crédito{socialCredits === 1 ? '' : 's'} disponibles{socialCredits === 0 ? '. Se usará investigación estándar.' : '.'}
-              </div>
-            </div>
+    <div className="space-y-4 pb-8">
+      <header className="flex flex-col gap-4 border-b border-border/60 pb-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <Button variant="ghost" size="sm" className="-ml-3 mb-1 rounded-full text-muted-foreground" onClick={() => router.push('/saved/leads')}>
+            <ArrowLeft className="h-4 w-4" />
+            Guardados
+          </Button>
+          <div className="flex items-baseline gap-2">
+            <h1 className="text-2xl font-semibold tracking-[-0.025em] sm:text-[2rem]">Leads enriquecidos</h1>
+            <span className="text-sm tabular-nums text-muted-foreground">{enriched.length}</span>
           </div>
+          <p className="mt-1 text-sm text-muted-foreground">Investiga contactos, revisa su contexto y prepara el siguiente contacto.</p>
         </div>
-      )}
+        <Button
+          className="w-full rounded-full sm:w-auto"
+          onClick={openBulkCompose}
+          disabled={contactCount === 0 || loadingLeads}
+            title={contactCount === 0 ? 'Selecciona leads con reporte y email' : 'Abrir la investigación de los leads seleccionados'}
+          >
+          Abrir investigación {contactCount > 0 ? `(${contactCount})` : ''}
+        </Button>
+      </header>
 
-      <div className="mb-4 max-w-xl">
-        <DailyQuotaProgress kinds={['research']} compact title="Cuota de investigación" />
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-border/60 bg-card/70 px-4 py-3 text-sm shadow-[0_14px_35px_-32px_rgba(15,23,42,0.28)]">
+        <span><strong className="font-semibold tabular-nums">{phoneReadyCount}</strong> <span className="text-muted-foreground">con teléfono</span></span>
+        <span><strong className="font-semibold tabular-nums">{researchEligible}</strong> <span className="text-muted-foreground">por investigar</span></span>
+        {pendingPhoneCount > 0 ? <span><strong className="font-semibold tabular-nums">{pendingPhoneCount}</strong> <span className="text-muted-foreground">actualizando teléfono</span></span> : null}
+        <span className="ml-auto text-xs text-muted-foreground">{filtered.length} visibles</span>
       </div>
 
       {pendingPhoneCount > 0 ? (
-        <Alert className="border-blue-200 bg-blue-50/70 text-blue-950">
+        <Alert className="border-sky-500/25 bg-sky-500/5 text-foreground dark:border-sky-400/25">
           <RotateCw className={`h-4 w-4 ${syncingPendingPhones ? 'animate-spin' : 'animate-pulse'}`} />
-          <AlertTitle>Telefonos en proceso</AlertTitle>
+          <AlertTitle>Actualizando teléfonos</AlertTitle>
           <AlertDescription className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <span>
-              {pendingPhoneCount} lead{pendingPhoneCount === 1 ? '' : 's'} siguen esperando telefono desde el proveedor. Si no llega nada tras un rato, el estado se cerrara automaticamente como completado sin telefono.
-            </span>
+            <span className="text-muted-foreground">{pendingPhoneCount} {pendingPhoneCount === 1 ? 'contacto sigue' : 'contactos siguen'} en proceso. La lista se actualizará automáticamente.</span>
             <Button
               variant="outline"
               size="sm"
-              className="border-blue-300 bg-white text-blue-900 hover:bg-blue-100"
+              className="rounded-full bg-background"
               onClick={() => syncPendingPhoneLeads()}
               disabled={syncingPendingPhones}
             >
@@ -1643,159 +1202,86 @@ export default function EnrichedLeadsClient() {
         </Alert>
       ) : null}
 
-      <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/85 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/70">
-        <CardHeader className="gap-5 border-b border-border/60 bg-muted/10 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-3">
-            <div className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground">Leads enriquecidos</div>
-            <CardTitle className="text-2xl font-semibold tracking-tight">{filtered.length} de {enriched.length} listos para revisar</CardTitle>
-            <CardDescription>
-              {researchEligible === 0
-                ? 'No hay leads con email para investigar.'
-                : 'Solo se investigan los que tienen email revelado.'}
-            </CardDescription>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs">
-              <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">Con teléfono: {enriched.filter((lead) => getLeadPhoneState(lead) === 'ready').length}</span>
-              <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">Pendientes: {pendingPhoneCount}</span>
-              <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">Sin teléfono: {enriched.filter((lead) => getLeadPhoneState(lead) === 'missing').length}</span>
-              <span className="rounded-full border border-border/60 bg-background/70 px-3 py-1">Investigables: {researchEligible}</span>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 lg:max-w-[760px] lg:justify-end">
-            <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/80 p-1">
-              <Button
-                variant="ghost"
-                className="h-9 rounded-full px-4 shadow-none"
-                onClick={() => setShowFilters(v => !v)}
-                title="Mostrar u ocultar filtros"
-              >
-                Filtrar
-              </Button>
-              <Button
-                variant="ghost"
-                className="h-9 rounded-full px-4 shadow-none"
-                onClick={handleExportCsv}
-                disabled={enriched.length === 0}
-                title={enriched.length === 0 ? 'No hay datos para exportar' : 'Exportar CSV'}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                CSV
-              </Button>
-              <Button
-                variant="ghost"
-                className="h-9 rounded-full px-4 shadow-none"
-                onClick={handleExportXlsx}
-                disabled={enriched.length === 0}
-                title={enriched.length === 0 ? 'No hay datos para exportar' : 'Exportar XLSX'}
-              >
-                <FileSpreadsheet className="mr-2 h-4 w-4" />
-                XLSX
-              </Button>
+      <Card className="overflow-hidden rounded-3xl border-border/60 bg-card/85 shadow-[0_18px_50px_-44px_rgba(15,23,42,0.28)] dark:bg-card/70">
+        <CardContent className="p-0">
+          <div className="space-y-3 border-b border-border/60 bg-muted/10 p-4 sm:p-5">
+            <Collapsible open={showFilters} onOpenChange={setShowFilters}>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="h-10 rounded-full border-border/70 bg-background/90 pl-10"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="Buscar por lead, empresa, cargo o email"
+                  aria-label="Buscar leads enriquecidos"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <CollapsibleTrigger asChild>
+                    <Button type="button" variant="outline" size="sm" className="rounded-full" aria-expanded={showFilters}>
+                      <ListFilter className="h-4 w-4" />
+                      Filtros
+                      <ChevronDown className={`h-4 w-4 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
+                    </Button>
+                </CollapsibleTrigger>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="rounded-full" disabled={filtered.length === 0}>
+                      <Download className="h-4 w-4" />
+                      Exportar ({filtered.length})
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={handleExportCsv}><Download className="mr-2 h-4 w-4" />CSV</DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleExportXlsx}><FileSpreadsheet className="mr-2 h-4 w-4" />Excel</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
 
-            <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/80 p-1">
-              <Button
-                className="h-9 rounded-full px-4 shadow-none"
-                onClick={openBulkCompose}
-                disabled={selectedToContact.size === 0}
-                title={selectedToContact.size === 0 ? 'Selecciona leads aptos para contactar' : 'Abrir borradores para los seleccionados'}
-              >
-                Contactar {selectedToContact.size > 0 ? `(${selectedToContact.size})` : ''}
-              </Button>
-              <Button
-                variant="ghost"
-                className="h-9 rounded-full px-4 shadow-none"
-                onClick={() => investigateOneByOne()}
-                disabled={seqRunning || researchCount === 0}
-                title={researchCount === 0 ? 'Selecciona leads con email que aun no tengan investigacion' : 'Investigar los leads seleccionados'}
-              >
-                {seqRunning ? 'Investigando...' : `Investigar ${researchCount > 0 ? `(${researchCount})` : ''}`}
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full shadow-none" aria-label="Más acciones">
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuItem onClick={() => initiateEnrichment(enriched.filter(e => selectedToContact.has(e.id)))} disabled={selectedToContact.size === 0}>
-                    Reintentar enriquecimiento
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setOpenBulkLinkedin(true)} disabled={selectedToContact.size === 0}>
-                    Contactar por LinkedIn
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={clearInvestigationsSelected} disabled={selectedToContact.size === 0}>
-                    Borrar investigaciones de seleccionados
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={clearInvestigations} disabled={!anyInvestigated} className="text-destructive focus:text-destructive">
-                    Borrar todas las investigaciones
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
           {/* Panel de filtros (colapsable) */}
-          {showFilters && (
-            <div className="mb-4 rounded-xl border bg-muted/30 p-4">
-              <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <Input value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} placeholder="Busqueda rapida por empresa" />
-                <Input value={nameFilter} onChange={e => setNameFilter(e.target.value)} placeholder="Busqueda rapida por nombre" />
-                <Input value={titleFilter} onChange={e => setTitleFilter(e.target.value)} placeholder="Busqueda rapida por cargo" />
-                <select className="h-10 rounded-md border bg-background px-3 py-2 text-sm" value={industryFilter} onChange={(e) => setIndustryFilter(e.target.value)}>
-                  <option value="all">Todas las industrias</option>
-                  {industryOptions.map((industry) => <option key={industry} value={industry}>{industry}</option>)}
-                </select>
-                <select className="h-10 rounded-md border bg-background px-3 py-2 text-sm" value={phoneFilter} onChange={(e) => setPhoneFilter(e.target.value as any)}>
-                  <option value="all">Todos los telefonos</option>
-                  <option value="ready">Telefono listo</option>
-                  <option value="pending">En proceso</option>
-                  <option value="missing">Sin telefono</option>
-                </select>
-                <Input type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} />
-                <Input type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} />
-                <div className="flex items-center text-xs text-muted-foreground">Usa estos filtros para limpiar rápido la lista antes de investigar o contactar.</div>
+              <CollapsibleContent>
+            <div className="rounded-2xl border border-border/60 bg-background/60 p-4">
+              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-1.5"><Label htmlFor="enriched-company">Empresa</Label><Input id="enriched-company" value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} placeholder="Contiene…" /></div>
+                <div className="space-y-1.5"><Label htmlFor="enriched-name">Nombre</Label><Input id="enriched-name" value={nameFilter} onChange={e => setNameFilter(e.target.value)} placeholder="Contiene…" /></div>
+                <div className="space-y-1.5"><Label htmlFor="enriched-title">Cargo</Label><Input id="enriched-title" value={titleFilter} onChange={e => setTitleFilter(e.target.value)} placeholder="Contiene…" /></div>
+                <div className="space-y-1.5"><Label>Industria</Label><Select value={industryFilter} onValueChange={setIndustryFilter}><SelectTrigger aria-label="Filtrar por industria"><SelectValue placeholder="Todas" /></SelectTrigger><SelectContent><SelectItem value="all">Todas</SelectItem>{industryOptions.map((industry) => <SelectItem key={industry} value={industry}>{industry}</SelectItem>)}</SelectContent></Select></div>
+                <div className="space-y-1.5"><Label>Teléfono</Label><Select value={phoneFilter} onValueChange={(value) => setPhoneFilter(value as typeof phoneFilter)}><SelectTrigger aria-label="Filtrar por estado del teléfono"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem><SelectItem value="ready">Disponible</SelectItem><SelectItem value="pending">En proceso</SelectItem><SelectItem value="missing">Sin teléfono</SelectItem></SelectContent></Select></div>
+                <div className="space-y-1.5"><Label htmlFor="enriched-from">Creado desde</Label><Input id="enriched-from" type="date" value={createdFrom} onChange={(e) => setCreatedFrom(e.target.value)} /></div>
+                <div className="space-y-1.5"><Label htmlFor="enriched-to">Creado hasta</Label><Input id="enriched-to" type="date" value={createdTo} onChange={(e) => setCreatedTo(e.target.value)} /></div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir · Empresa</div>
-                  <Input value={fIncCompany} onChange={e => setFIncCompany(e.target.value)} placeholder="contiene… (separa con comas)" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir · Nombre</div>
-                  <Input value={fIncLead} onChange={e => setFIncLead(e.target.value)} placeholder="contiene… (separa con comas)" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Incluir · Cargo</div>
-                  <Input value={fIncTitle} onChange={e => setFIncTitle(e.target.value)} placeholder="contiene… (separa con comas)" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Excluir · Empresa</div>
-                  <Input value={fExcCompany} onChange={e => setFExcCompany(e.target.value)} placeholder="no contenga… (separa con comas)" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Excluir · Nombre</div>
-                  <Input value={fExcLead} onChange={e => setFExcLead(e.target.value)} placeholder="no contenga… (separa con comas)" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground mb-1">Excluir · Cargo</div>
-                  <Input value={fExcTitle} onChange={e => setFExcTitle(e.target.value)} placeholder="no contenga… (separa con comas)" />
-                </div>
+                  <div>
+                    <Label htmlFor="enriched-include-company" className="text-xs font-semibold uppercase text-muted-foreground">Incluir · Empresa</Label>
+                    <Input id="enriched-include-company" className="mt-1" value={fIncCompany} onChange={e => setFIncCompany(e.target.value)} placeholder="contiene… (separa con comas)" />
+                  </div>
+                  <div>
+                    <Label htmlFor="enriched-include-name" className="text-xs font-semibold uppercase text-muted-foreground">Incluir · Nombre</Label>
+                    <Input id="enriched-include-name" className="mt-1" value={fIncLead} onChange={e => setFIncLead(e.target.value)} placeholder="contiene… (separa con comas)" />
+                  </div>
+                  <div>
+                    <Label htmlFor="enriched-include-title" className="text-xs font-semibold uppercase text-muted-foreground">Incluir · Cargo</Label>
+                    <Input id="enriched-include-title" className="mt-1" value={fIncTitle} onChange={e => setFIncTitle(e.target.value)} placeholder="contiene… (separa con comas)" />
+                  </div>
+                  <div>
+                    <Label htmlFor="enriched-exclude-company" className="text-xs font-semibold uppercase text-muted-foreground">Excluir · Empresa</Label>
+                    <Input id="enriched-exclude-company" className="mt-1" value={fExcCompany} onChange={e => setFExcCompany(e.target.value)} placeholder="no contenga… (separa con comas)" />
+                  </div>
+                  <div>
+                    <Label htmlFor="enriched-exclude-name" className="text-xs font-semibold uppercase text-muted-foreground">Excluir · Nombre</Label>
+                    <Input id="enriched-exclude-name" className="mt-1" value={fExcLead} onChange={e => setFExcLead(e.target.value)} placeholder="no contenga… (separa con comas)" />
+                  </div>
+                  <div>
+                    <Label htmlFor="enriched-exclude-title" className="text-xs font-semibold uppercase text-muted-foreground">Excluir · Cargo</Label>
+                    <Input id="enriched-exclude-title" className="mt-1" value={fExcTitle} onChange={e => setFExcTitle(e.target.value)} placeholder="no contenga… (separa con comas)" />
+                  </div>
               </div>
-              <div className="mt-3 flex justify-end gap-2">
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setCompanyFilter(''); setNameFilter(''); setTitleFilter(''); setIndustryFilter('all'); setPhoneFilter('all'); setCreatedFrom(''); setCreatedTo('');
-                    setFIncCompany(''); setFIncLead(''); setFIncTitle('');
-                    setFExcCompany(''); setFExcLead(''); setFExcTitle('');
-                    setApplied({ incCompany: '', incLead: '', incTitle: '', excCompany: '', excLead: '', excTitle: '' });
-                  }}
-                >
-                  Limpiar
-                </Button>
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <Button variant="ghost" onClick={clearFilters} disabled={!hasActiveFilters}>Limpiar</Button>
 
                 <Button
                   onClick={() => {
@@ -1810,74 +1296,145 @@ export default function EnrichedLeadsClient() {
                     setPage(1);
                   }}
                 >
-                  Filtrar
+                  Aplicar términos
                 </Button>
-
-                <Button variant="outline" onClick={() => setShowFilters(false)}>Ocultar</Button>
               </div>
             </div>
-          )}
-
-          <div className="mb-4 rounded-2xl border border-border/60 bg-muted/15 px-4 py-3 text-sm text-muted-foreground">
-            Para contactar o programar envíos, marca la columna <span className="font-medium text-foreground">Cont.</span>. Esa selección solo se habilita si el lead tiene email y ya cuenta con reporte de investigación.
+              </CollapsibleContent>
+            </Collapsible>
           </div>
 
-          {seqRunning && (
-            <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/70 p-4">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm font-medium text-blue-900">
-                    <BrainCircuit className="h-4 w-4" />
-                    Investigacion en progreso
-                  </div>
-                  <div className="text-lg font-semibold text-slate-900">
-                    {researchUi.leadName ? `Analizando a ${researchUi.leadName}` : 'Preparando investigacion'}
-                  </div>
-                  <div className="text-sm text-slate-600">
-                    {getResearchStageCopy(researchUi.status, researchPulseMs)} · Lead {Math.max(researchUi.index, seqDone + 1)}/{seqTotal}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 border border-blue-100">
-                      <Clock3 className="h-3.5 w-3.5" />
-                      Estimado 45-60s por lead
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 border border-blue-100">
-                      <Sparkles className="h-3.5 w-3.5" />
-                      ETA actual ~{Math.max(0, Math.ceil((RESEARCH_STANDARD_ESTIMATE_MS - Math.min(researchPulseMs, RESEARCH_STANDARD_ESTIMATE_MS)) / 1000))}s
-                    </span>
-                    {researchUi.reportId ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 border border-blue-100">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        Reporte #{researchUi.reportId.slice(0, 8)}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="w-full max-w-xl space-y-2">
-                  <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-slate-600">
-                    <span>{researchUi.status === 'queued' ? 'En cola' : researchUi.status === 'in_progress' ? 'Procesando' : 'Investigando'}</span>
-                    <span>{getResearchProgressValue(researchUi.status, researchPulseMs)}%</span>
-                  </div>
-                  <Progress value={getResearchProgressValue(researchUi.status, researchPulseMs)} className="h-2.5 bg-blue-100" />
-                  {researchUi.warning ? (
-                    <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-none" />
-                      <span>{researchUi.warning}</span>
-                    </div>
-                  ) : (
-                    <div className="text-xs text-slate-500">Mantén esta pestaña abierta. El progreso se actualizará automáticamente mientras se construye el reporte.</div>
-                  )}
-                </div>
+          <div className="p-4 sm:p-5">
+          {loadError ? (
+            <Alert className="border-destructive/25 bg-destructive/5">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              <AlertTitle>No pudimos cargar los leads</AlertTitle>
+              <AlertDescription className="flex flex-col items-start gap-3 text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                <span>{loadError}</span>
+                <Button variant="outline" size="sm" onClick={() => { setLoadingLeads(true); void loadData(); }}>Reintentar</Button>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {(researchCount > 0 || contactCount > 0) ? (
+            <div className="sticky top-14 z-20 mb-4 flex flex-col gap-3 rounded-2xl border border-primary/20 bg-background/95 p-3 shadow-lg shadow-black/5 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
+              <div className="text-sm font-medium" aria-live="polite">
+                {researchCount > 0 ? `${researchCount} para investigar · máximo ${MAX_RESEARCH_BATCH_SIZE}` : ''}
+                {researchCount > 0 && contactCount > 0 ? ' · ' : ''}
+                {contactCount > 0 ? `${contactCount} para revisar en Investigación` : ''}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={() => { setSel({}); setSelectedToContact(new Set()); }}>Cancelar</Button>
+                 {researchCount > 0 ? <Button variant="secondary" size="sm" onClick={() => openResearchWorkspace()}>Investigar selección ({researchCount})</Button> : null}
+                 {contactCount > 0 ? <Button size="sm" onClick={openBulkCompose}>Abrir investigación ({contactCount})</Button> : null}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Más acciones para la selección"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <DropdownMenuItem onClick={() => initiateEnrichment(filtered.filter(e => selectedToContact.has(e.id)))} disabled={contactCount === 0}>Actualizar datos</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={clearInvestigationsSelected} disabled={contactCount === 0}>Borrar investigación de seleccionados</DropdownMenuItem>
+                    <DropdownMenuItem onClick={clearInvestigations} disabled={!anyInvestigated} className="text-destructive focus:text-destructive">Borrar todas las investigaciones</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
-          )}
-          <div className="rounded-md border overflow-x-auto">
-            <Table>
+          ) : null}
+
+          {loadingLeads ? (
+            <div className="overflow-hidden rounded-2xl border border-border/60" aria-busy="true" aria-live="polite">
+              <span className="sr-only">Cargando leads enriquecidos</span>
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="grid grid-cols-[32px_minmax(0,1fr)] items-center gap-3 border-b border-border/50 p-4 last:border-b-0 md:grid-cols-[40px_minmax(180px,1fr)_minmax(140px,0.8fr)_160px] md:gap-4">
+                  <Skeleton className="h-4 w-4" />
+                  <div className="space-y-2"><Skeleton className="h-4 w-36" /><Skeleton className="h-3 w-28" /></div>
+                  <Skeleton className="hidden h-4 w-28 md:block" />
+                  <Skeleton className="hidden h-8 w-24 md:ml-auto md:block" />
+                </div>
+              ))}
+            </div>
+          ) : !loadError ? (
+          <>
+          <div className="space-y-3 lg:hidden">
+            {pageLeads.map((e) => {
+              const native = nativeResearchForLead(e);
+              const viewable = hasViewableReport(e);
+              const draftable = canContact(e);
+              const researching = ['queued', 'running'].includes(native?.status || '');
+              return (
+                <article key={e.id} className="rounded-2xl border border-border/60 bg-background/60 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="truncate font-semibold">{e.fullName || 'Lead sin nombre'}</h2>
+                      <p className="mt-0.5 truncate text-sm text-muted-foreground">{e.title || 'Sin cargo'} · {e.companyName || 'Sin empresa'}</p>
+                    </div>
+                    {viewable ? (
+                      native?.status === 'insufficient_data' || !isNativeResearchReport(native) ? (
+                        <span className="shrink-0 text-xs font-medium text-amber-700 dark:text-amber-300">Información limitada</span>
+                      ) : <span className="shrink-0 text-xs font-medium text-emerald-700 dark:text-emerald-300">Investigado</span>
+                    ) : researching ? <span className="shrink-0 text-xs font-medium text-sky-700 dark:text-sky-300">En curso</span> : null}
+                  </div>
+
+                  <div className="mt-3 space-y-1 text-sm text-muted-foreground">
+                    <p className="truncate">{e.email && e.email !== 'Not Found' ? e.email : e.emailStatus === 'locked' ? 'Email no revelado' : 'Sin email'}</p>
+                    <p className="truncate">{e.companyDomain || 'Sin dominio'}</p>
+                    {e.linkedinUrl ? <a className="inline-flex text-xs font-medium text-primary underline-offset-4 hover:underline" href={e.linkedinUrl} target="_blank" rel="noreferrer">LinkedIn</a> : null}
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-muted/25 p-2 text-xs">
+                    <label className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1">
+                      <Checkbox
+                        checked={!!sel[e.id]}
+                        onCheckedChange={(value) => toggleResearchLead(e.id, Boolean(value))}
+                        disabled={!e.email || hasReportStrict(e)}
+                        aria-label={`Seleccionar ${e.fullName || 'lead'} para investigar`}
+                      />
+                      <span className="truncate">Investigar</span>
+                    </label>
+                    <label className="flex min-w-0 items-center gap-2 rounded-lg px-1 py-1">
+                      <Checkbox
+                        checked={selectedToContact.has(e.id)}
+                        onCheckedChange={(value) => {
+                          const next = new Set(selectedToContact);
+                          if (value) next.add(e.id);
+                          else next.delete(e.id);
+                          setSelectedToContact(next);
+                        }}
+                        disabled={!draftable}
+                        aria-label={`Seleccionar ${e.fullName || 'lead'} para revisar en Investigación`}
+                      />
+                      <span className="truncate">Revisar</span>
+                    </label>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    {viewable ? <Button size="sm" variant="outline" className="rounded-full" onClick={() => openReportFor(e)}>Ver investigación</Button> : null}
+                    {draftable ? (
+                      <Button size="sm" className="rounded-full" onClick={() => void generateEmailFromReportFor(e)} disabled={creatingDraftId === e.id}>
+                        {creatingDraftId === e.id ? 'Creando…' : 'Crear email'}
+                      </Button>
+                    ) : !viewable ? (
+                      <Button size="sm" className="rounded-full" onClick={() => openResearchWorkspace([e.id])} disabled={!e.email}>Investigar</Button>
+                    ) : null}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" aria-label={`Más acciones para ${e.fullName}`}><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => initiateEnrichment([e])}>Actualizar datos</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDeleteEnriched(e.id)}><Trash2 className="mr-2 h-4 w-4" />Eliminar</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          <div className="hidden overflow-x-auto rounded-2xl border border-border/60 bg-background/60 lg:block">
+            <Table className="min-w-[960px]">
               <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12 text-center" title="Marcar para investigar con n8n">
+                <TableRow className="bg-muted/20 hover:bg-muted/20">
+                  <TableHead className="w-12 text-center" title="Marcar para investigar">
                     <div className="flex flex-col items-center gap-1">
-                      <span className="text-[10px] uppercase text-muted-foreground">Inv.</span>
+                      <span className="text-[10px] uppercase text-muted-foreground">Invest.</span>
                       <Checkbox
                         checked={allResearchChecked}
                         disabled={researchEligiblePage === 0}
@@ -1886,25 +1443,22 @@ export default function EnrichedLeadsClient() {
                       />
                     </div>
                   </TableHead>
-                  <TableHead className="w-12 text-center" title="Marcar para CONTACTAR por email">
+                  <TableHead className="w-12 text-center" title="Marcar para revisar en Investigación">
                     <div className="flex flex-col items-center gap-1">
-                      <span className="text-[10px] uppercase text-muted-foreground">Cont.</span>
+                      <span className="text-[10px] uppercase text-muted-foreground">Rev.</span>
                       <Checkbox
                         checked={contactEligiblePage > 0 ? allContactChecked : false}
                         disabled={contactEligiblePage === 0}
                         onCheckedChange={(v) => toggleAllContact(Boolean(v))}
-                        aria-label="Seleccionar todos para contactar"
+                        aria-label="Seleccionar todos para revisar en Investigación"
                       />
                     </div>
                   </TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Cargo</TableHead>
+                  <TableHead>Lead</TableHead>
                   <TableHead>Empresa</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Teléfono</TableHead>
-                  <TableHead>LinkedIn</TableHead>
-                  <TableHead>Dominio</TableHead>
-                  <TableHead className="w-64 text-right">Acciones</TableHead>
+                  <TableHead>Contacto</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead className="w-52 text-right"><span className="sr-only">Acciones</span></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1913,19 +1467,19 @@ export default function EnrichedLeadsClient() {
                     <TableCell className="py-3 text-center">
                       <Checkbox
                         checked={!!sel[e.id]}
-                        onCheckedChange={(v) => setSel(prev => ({ ...prev, [e.id]: Boolean(v) }))}
+                        onCheckedChange={(v) => toggleResearchLead(e.id, Boolean(v))}
                         disabled={
                           !e.email ||
-                          isResearched(leadRefOf(e)) ||
                           hasReportStrict(e)
                         }
                         title={
                           !e.email
                             ? 'Este lead no tiene email revelado'
-                            : isResearched(leadRefOf(e)) || hasReportStrict(e)
+                            : hasReportStrict(e)
                               ? 'Este lead ya fue investigado'
                               : ''
                         }
+                        aria-label={`Seleccionar ${e.fullName || 'lead'} para investigar`}
                       />
                     </TableCell>
                     <TableCell className="py-3 text-center">
@@ -1938,59 +1492,56 @@ export default function EnrichedLeadsClient() {
                           else next.delete(e.id);
                           setSelectedToContact(next);
                         }}
+                        aria-label={`Seleccionar ${e.fullName || 'lead'} para revisar en Investigación`}
                       />
                     </TableCell>
                     <TableCell className="py-3">
-                      <div className="max-w-[160px] font-medium leading-6">{e.fullName}</div>
+                      <div className="max-w-[200px] truncate font-medium">{e.fullName}</div>
+                      <div className="max-w-[220px] truncate text-xs text-muted-foreground">{e.title || 'Sin cargo'}</div>
                     </TableCell>
                     <TableCell className="py-3">
-                      <div className="max-w-[220px] text-sm leading-6 text-muted-foreground line-clamp-2">{e.title || '—'}</div>
-                    </TableCell>
-                    <TableCell className="py-3">
-                      <div className="max-w-[160px] truncate">{e.companyName || '—'}</div>
+                      <div className="max-w-[180px] truncate font-medium">{e.companyName || '—'}</div>
+                      <div className="max-w-[180px] truncate text-xs text-muted-foreground">{e.companyDomain || 'Sin dominio'}</div>
                     </TableCell>
                     <TableCell className="py-3">
                       {(!e.email || e.email === 'Not Found')
                         ? (e.emailStatus === 'locked'
-                          ? '(locked)'
-                          : <span className="text-muted-foreground text-xs italic">Not Found</span>)
+                          ? <span className="text-xs text-muted-foreground">Email no revelado</span>
+                          : <span className="text-xs text-muted-foreground">Sin email</span>)
                         : <div className="max-w-[260px] truncate">{e.email}</div>}
-                    </TableCell>
-                    <TableCell className="py-3">
                       {(() => {
                         const fallbackPhone = e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined;
                         const shownPhone = e.primaryPhone || fallbackPhone;
 
-                        if (e.primaryPhone === 'Not Found' || (!shownPhone && e.enrichmentStatus !== 'pending_phone')) {
-                          return <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600">Sin telefono</span>;
+                        if (e.primaryPhone === 'Not Found' || (!shownPhone && !isPendingEnrichmentStatus(e.enrichmentStatus))) {
+                          return <div className="mt-1 text-xs text-muted-foreground">Sin teléfono</div>;
                         }
 
                         if (shownPhone) {
                           return (
-                            <div
-                              className="flex cursor-pointer items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 transition-colors group hover:bg-emerald-100/70"
+                            <button
+                              type="button"
+                              className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-emerald-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-emerald-300"
                               onClick={() => {
-                                const rep = findReportForLead({ leadId: leadRefOf(e), companyDomain: e.companyDomain, companyName: e.companyName });
+                                  const rep = reportForLead(e);
                                 setLeadToCall(e);
                                 setReportToView(rep || null); // Reusamos estado o pasamos directo
                                 setCallModalOpen(true);
                               }}
-                              title="Clic para abrir Terminal de Llamada"
+                              aria-label={`Llamar a ${e.fullName} al ${shownPhone}`}
                             >
-                              <div className="flex items-center gap-1 text-sm font-medium text-emerald-700 group-hover:text-emerald-900">
-                                <Phone className="h-3 w-3" />
-                                <span>{shownPhone}</span>
-                              </div>
+                              <Phone className="h-3 w-3" />
+                              <span>{shownPhone}</span>
                               {e.phoneNumbers && e.phoneNumbers.length > 1 && (
                                 <span className="text-[10px] text-muted-foreground">+{e.phoneNumbers.length - 1}</span>
                               )}
-                            </div>
+                            </button>
                           );
                         }
 
-                        if (e.enrichmentStatus === 'pending_phone') {
+                        if (isPendingEnrichmentStatus(e.enrichmentStatus)) {
                           return (
-                            <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-medium text-blue-700" title="Esperando actualización del proveedor...">
+                            <div className="mt-1 inline-flex items-center gap-1.5 text-xs text-sky-700 dark:text-sky-300" title="Actualizando teléfono">
                               <RotateCw className="h-3 w-3 animate-spin" />
                               En proceso
                             </div>
@@ -2000,31 +1551,50 @@ export default function EnrichedLeadsClient() {
                         return <span className="text-muted-foreground text-xs italic">—</span>;
                       })()}
                     </TableCell>
-                    <TableCell className="py-3">{e.linkedinUrl ? <a className="underline underline-offset-4" target="_blank" href={e.linkedinUrl}>Perfil</a> : '—'}</TableCell>
                     <TableCell className="py-3">
-                      <div className="max-w-[150px] truncate">{e.companyDomain || '—'}</div>
+                      {hasViewableReport(e) ? (
+                        nativeResearchForLead(e)?.status === 'insufficient_data' || !isNativeResearchReport(nativeResearchForLead(e)) ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-300"><AlertTriangle className="h-3.5 w-3.5" />Información limitada</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" />Investigado</span>
+                        )
+                      ) : ['queued', 'running'].includes(nativeResearchForLead(e)?.status || '') ? (
+                        <span className="text-xs font-medium text-sky-700 dark:text-sky-300">Investigación en curso</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Pendiente de investigación</span>
+                      )}
+                      {e.linkedinUrl ? <a className="mt-1 block text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground" target="_blank" rel="noreferrer" href={e.linkedinUrl}>LinkedIn</a> : null}
                     </TableCell>
                     <TableCell className="py-3">
-                      <div className="flex min-w-[200px] items-center justify-end gap-2">
-                        <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/80 p-1">
-                          <Button size="sm" variant="ghost" className="h-8 rounded-full px-3" onClick={() => openReportFor(e)}>Reporte</Button>
-                          <Button size="sm" className="h-8 rounded-full px-3 shadow-none" onClick={() => generateEmailFromReportFor(e)} disabled={!canContact(e)}>Contactar</Button>
-                        </div>
-                        <div className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/80 p-1">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 rounded-full"
-                            onClick={() => openLinkedinCompose(e)}
-                            disabled={!e.linkedinUrl}
-                            title="Contactar por LinkedIn"
-                          >
-                            <Linkedin className="h-4 w-4" />
-                          </Button>
-                          <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" onClick={() => handleDeleteEnriched(e.id)} title="Eliminar">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                      <div className="flex min-w-[180px] items-center justify-end gap-1">
+                          {hasViewableReport(e) ? <Button size="sm" variant="outline" className="h-8 rounded-full px-3" onClick={() => openReportFor(e)}>Ver investigación</Button> : null}
+                          {canContact(e) ? (
+                            <Button
+                              size="sm"
+                              className="h-8 rounded-full px-3 shadow-none"
+                              onClick={() => void generateEmailFromReportFor(e)}
+                              disabled={creatingDraftId === e.id}
+                            >
+                              {creatingDraftId === e.id ? 'Creando…' : 'Crear email'}
+                            </Button>
+                          ) : !hasViewableReport(e) ? (
+                            <Button
+                              size="sm"
+                              className="h-8 rounded-full px-3 shadow-none"
+                              onClick={() => openResearchWorkspace([e.id])}
+                              disabled={!e.email}
+                            >
+                              Investigar
+                            </Button>
+                          ) : null}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" aria-label={`Más acciones para ${e.fullName}`}><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => initiateEnrichment([e])}>Actualizar datos</DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDeleteEnriched(e.id)}><Trash2 className="mr-2 h-4 w-4" />Eliminar</DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -2032,14 +1602,25 @@ export default function EnrichedLeadsClient() {
               </TableBody>
             </Table>
           </div>
+          </>
+          ) : null}
+
+          {!loadingLeads && !loadError && pageLeads.length === 0 ? (
+            <div className="flex min-h-56 flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 px-6 text-center">
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-muted/60"><Search className="h-5 w-5 text-muted-foreground" /></div>
+              <h2 className="mt-4 font-medium">{enriched.length === 0 ? 'Aún no hay leads enriquecidos' : 'No hay resultados con estos filtros'}</h2>
+              <p className="mt-1 max-w-md text-sm text-muted-foreground">{enriched.length === 0 ? 'Enriquece leads guardados para investigarlos y preparar tu contacto.' : 'Ajusta la búsqueda o limpia los filtros para volver a ver la lista.'}</p>
+              <Button className="mt-4" size="sm" variant={enriched.length === 0 ? 'default' : 'outline'} onClick={() => enriched.length === 0 ? router.push('/saved/leads') : clearFilters()}>{enriched.length === 0 ? 'Ver guardados' : 'Limpiar filtros'}</Button>
+            </div>
+          ) : null}
           {/* Paginador inferior (igual al superior) */}
-          <div className="flex items-center justify-between mt-3 text-sm">
+          {!loadingLeads && !loadError && total > 0 ? <div className="mt-3 flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between">
             <div className="text-muted-foreground">
               Mostrando {total === 0 ? 0 : startIdx + 1}–{endIdx} de {total}
             </div>
             <div className="flex items-center gap-1">
-              <Button variant="outline" size="sm" onClick={() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === 1}>«</Button>
-              <Button variant="outline" size="sm" onClick={() => { setPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === 1}>‹</Button>
+              <Button variant="outline" size="sm" aria-label="Primera página" onClick={() => { setPage(1); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === 1}>«</Button>
+              <Button variant="outline" size="sm" aria-label="Página anterior" onClick={() => { setPage(p => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === 1}>‹</Button>
               {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
                 const half = 3;
                 let start = Math.max(1, page - half);
@@ -2059,61 +1640,144 @@ export default function EnrichedLeadsClient() {
                   </Button>
                 );
               })}
-              <Button variant="outline" size="sm" onClick={() => { setPage(p => Math.min(totalPages, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === totalPages}>›</Button>
-              <Button variant="outline" size="sm" onClick={() => { setPage(totalPages); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === totalPages}>»</Button>
+              <Button variant="outline" size="sm" aria-label="Página siguiente" onClick={() => { setPage(p => Math.min(totalPages, p + 1)); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === totalPages}>›</Button>
+              <Button variant="outline" size="sm" aria-label="Última página" onClick={() => { setPage(totalPages); window.scrollTo({ top: 0, behavior: 'smooth' }); }} disabled={page === totalPages}>»</Button>
             </div>
+          </div> : null}
           </div>
         </CardContent>
       </Card>
 
+      <Sheet open={researchOpen} onOpenChange={(open) => {
+        setResearchOpen(open);
+        if (!open) void loadNativeResearchStatuses(enriched);
+      }}>
+        <SheetContent side="right" className="h-dvh w-full overflow-y-auto overscroll-contain px-4 py-5 sm:max-w-5xl sm:px-6 sm:py-6 lg:px-8">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Investigación de leads</SheetTitle>
+            <SheetDescription>Investiga los leads enriquecidos y prepara un email con evidencia.</SheetDescription>
+          </SheetHeader>
+          <ResearchWorkspace embedded scope="leads" onClose={() => {
+            setResearchOpen(false);
+            void loadNativeResearchStatuses(enriched);
+          }} />
+        </SheetContent>
+      </Sheet>
+
       <Dialog open={openReport} onOpenChange={setOpenReport}>
-        <DialogContent className="max-w-4xl max-h-[90vh]" onEscapeKeyDown={() => setOpenReport(false)}>
-          <DialogHeader>
-            <DialogTitle>Reporte · {reportToView?.cross?.company.name}</DialogTitle>
+        <DialogContent className="flex max-h-[90vh] max-w-4xl flex-col gap-0 overflow-hidden rounded-[28px] p-0" onEscapeKeyDown={() => setOpenReport(false)}>
+          <DialogHeader className="border-b border-border/60 px-5 py-4 sm:px-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">Investigación</div>
+                <DialogTitle className="mt-1 text-xl">{nativeReportToView?.result?.lead.companyName || reportToView?.cross?.company.name || reportLead?.companyName || 'Reporte del lead'}</DialogTitle>
+                <DialogDescription className="mt-1 leading-5">
+                  Revisa el estado, la calidad y la evidencia antes de crear el email.
+                </DialogDescription>
+              </div>
+              {reportLead && !hasNativeResearchResult(nativeReportToView) && canContact(reportLead) ? <Button size="sm" onClick={() => { void generateEmailFromReportFor(reportLead); setOpenReport(false); }}>Crear email</Button> : null}
+            </div>
           </DialogHeader>
-          {reportToView?.cross && reportLead && (
-            <div className="w-full flex justify-end mb-2">
+          {reportToView?.cross && reportLead && !hasNativeResearchResult(nativeReportToView) && (
+            <div className="flex justify-end px-5 pt-3 sm:px-6">
               <Button
-                variant="destructive"
+                variant="ghost"
                 size="sm"
                 onClick={() => clearInvestigationFor(reportLead)}
                 title="Eliminar investigación de este lead"
+                className="h-8 text-muted-foreground hover:text-destructive"
               >
-                <Eraser className="h-4 w-4 mr-1" /> Eliminar investigación de este lead
+                <Eraser className="mr-1 h-4 w-4" /> Eliminar investigación
               </Button>
             </div>
           )}
-          {reportToView?.cross && (
-            <ScrollArea className="h-[calc(90vh-180px)] pr-4">
-              <div className="space-y-4 text-sm leading-relaxed">
-                <div className="text-lg font-semibold">{reportToView.cross.company.name}</div>
+          {hasNativeResearchResult(nativeReportToView) && nativeReportToView?.result && reportLead ? (
+            <ScrollArea className="min-h-0 flex-1">
+              <NativeResearchReport
+                result={nativeReportToView.result}
+                status={nativeReportToView.status}
+                researchSnapshotId={nativeReportToView.researchSnapshotId}
+                canCreateDraft={canContact(reportLead)}
+                creatingDraft={creatingDraftId === reportLead.id}
+                onCreateDraft={() => {
+                  void generateEmailFromReportFor(reportLead);
+                  setOpenReport(false);
+                }}
+                onRefresh={() => {
+                  setOpenReport(false);
+                  openResearchWorkspace([reportLead.id], { refresh: true });
+                }}
+                className="px-5 py-5 sm:px-6 sm:py-6"
+              />
+            </ScrollArea>
+          ) : reportToView?.cross ? (
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="space-y-4 px-5 pb-6 pt-4 text-sm leading-relaxed sm:px-6">
+                <section className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                  <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-primary">Ángulo recomendado</div>
+                  <p className="mt-2 text-base font-medium text-foreground">
+                    {reportToView.cross.leadContext?.iceBreaker || reportToView.cross.nextSteps?.[0]?.action || reportToView.cross.valueProps?.[0] || 'Revisa la investigación y adapta el mensaje al contexto del lead.'}
+                  </p>
+                  {reportToView.cross.leadContext?.communicationStyle && <p className="mt-2 text-xs text-muted-foreground">Tono sugerido: {reportToView.cross.leadContext.communicationStyle}</p>}
+                </section>
+
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {[
+                    { label: 'Necesidad', value: reportToView.cross.pains?.[0] || 'Sin necesidad confirmada' },
+                    { label: 'Cómo ayudar', value: reportToView.cross.valueProps?.[0] || 'Sin propuesta confirmada' },
+                    { label: 'Siguiente paso', value: reportToView.cross.nextSteps?.[0]?.action || 'Personalizar el mensaje antes de contactar' },
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-xl border border-border/60 bg-muted/20 p-3">
+                      <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">{item.label}</div>
+                      <p className="mt-1.5 text-sm text-foreground">{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {reportToView.cross.overview && <p className="rounded-xl border border-border/60 bg-background p-4 text-sm text-muted-foreground">{reportToView.cross.overview}</p>}
+
+                <Collapsible>
+                  <CollapsibleTrigger asChild>
+                    <Button type="button" variant="outline" size="sm" className="w-full justify-between rounded-xl">
+                      Ver investigación completa
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-4 space-y-4">
 
                 {/* --- Social Context / LinkedIn --- */}
                 {reportToView.cross.leadContext && (reportToView.cross.leadContext.iceBreaker || reportToView.cross.leadContext.recentActivitySummary || reportToView.cross.leadContext.profileSummary) && (
-                  <div className="border border-blue-200 bg-blue-50 rounded-lg p-4 shadow-sm">
-                    <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-blue-900">
+                  <div className="rounded-lg border border-sky-500/25 bg-sky-500/5 p-4 shadow-sm dark:border-sky-400/25">
+                    <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
                       <Linkedin className="h-5 w-5" />
                       Contexto Social (LinkedIn)
                     </h3>
                     <div className="space-y-3">
                       {reportToView.cross.leadContext.iceBreaker && (
-                        <div className="bg-white p-3 rounded-md border border-blue-200 shadow-sm">
-                          <strong className="text-blue-800 block mb-2 text-sm">💬 Icebreaker Sugerido:</strong>
-                          <p className="italic text-gray-800 text-sm leading-relaxed">"{reportToView.cross.leadContext.iceBreaker}"</p>
+                        <div className="rounded-md border border-border/60 bg-background/80 p-3 shadow-sm">
+                          <strong className="mb-2 block text-sm text-foreground">Inicio sugerido:</strong>
+                          <p className="text-sm italic leading-relaxed text-muted-foreground">"{reportToView.cross.leadContext.iceBreaker}"</p>
                         </div>
                       )}
 
                       {reportToView.cross.leadContext.recentActivitySummary && (
-                        <div className="bg-white p-3 rounded-md border border-blue-200">
-                          <strong className="text-blue-800 block mb-2 text-sm">📊 Resumen de Actividad:</strong>
-                          <p className="text-gray-700 text-sm leading-relaxed">{reportToView.cross.leadContext.recentActivitySummary}</p>
+                        <div className="rounded-md border border-border/60 bg-background/80 p-3">
+                          <strong className="mb-2 block text-sm text-foreground">Actividad reciente:</strong>
+                          <p className="text-sm leading-relaxed text-muted-foreground">{reportToView.cross.leadContext.recentActivitySummary}</p>
                         </div>
                       )}
 
                       {reportToView.cross.leadContext.profileSummary && (
-                        <div className="pt-3 border-t border-blue-200">
-                          <strong className="text-blue-800 block mb-2 text-sm">👤 Resumen de Perfil:</strong>
-                          <p className="text-gray-600 text-sm leading-relaxed">{reportToView.cross.leadContext.profileSummary}</p>
+                        <div className="border-t border-border/60 pt-3">
+                          <strong className="mb-2 block text-sm text-foreground">Resumen de perfil:</strong>
+                          <p className="text-sm leading-relaxed text-muted-foreground">{reportToView.cross.leadContext.profileSummary}</p>
+                        </div>
+                      )}
+
+                      {reportToView.cross.leadContext.communicationStyle && (
+                        <div className="border-t border-border/60 pt-3">
+                          <strong className="mb-2 block text-sm text-foreground">Tono sugerido:</strong>
+                          <p className="text-sm leading-relaxed text-muted-foreground">{reportToView.cross.leadContext.communicationStyle}</p>
                         </div>
                       )}
                     </div>
@@ -2145,6 +1809,24 @@ export default function EnrichedLeadsClient() {
                     <h4 className="text-xs font-semibold uppercase text-muted-foreground">Pains</h4>
                     <ul className="list-disc pl-5">
                       {reportToView.cross.pains.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  </section>
+                )}
+
+                {reportToView.cross.opportunities?.length > 0 && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Oportunidades</h4>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.opportunities.map((x, i) => <li key={i}>{x}</li>)}
+                    </ul>
+                  </section>
+                )}
+
+                {reportToView.cross.risks?.length > 0 && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Riesgos</h4>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.risks.map((x, i) => <li key={i}>{x}</li>)}
                     </ul>
                   </section>
                 )}
@@ -2193,9 +1875,47 @@ export default function EnrichedLeadsClient() {
                   </section>
                 )}
 
+                {reportToView.cross.nextSteps?.length ? (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase text-muted-foreground">Siguientes pasos</h4>
+                    <ul className="space-y-2">
+                      {reportToView.cross.nextSteps.map((step, i) => (
+                        <li key={i} className="rounded-md border bg-muted/40 p-3">
+                          <div className="font-medium">{step.action}</div>
+                          {step.why ? <div className="mt-1 text-xs text-muted-foreground">{step.why}</div> : null}
+                          {step.priority ? <div className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground">Prioridad: {step.priority}</div> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+
+                {reportToView.cross.contradictions?.length ? (
+                  <section className="rounded border border-amber-500/25 bg-amber-500/10 p-3">
+                    <div className="mb-2 text-xs font-semibold uppercase text-foreground">Puntos a validar</div>
+                    <ul className="list-disc pl-5">
+                      {reportToView.cross.contradictions.map((item, i) => <li key={i}>{item}</li>)}
+                    </ul>
+                  </section>
+                ) : null}
+
+                {reportToView.cross.confidence && Object.keys(reportToView.cross.confidence).length > 0 ? (
+                  <section className="rounded border border-emerald-500/25 bg-emerald-500/10 p-3">
+                    <div className="mb-2 text-xs font-semibold uppercase text-foreground">Confianza por bloque</div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {Object.entries(reportToView.cross.confidence).map(([key, value]) => (
+                        <div key={key} className="rounded-md border border-border/60 bg-background/80 px-3 py-2 text-sm">
+                          <div className="font-medium capitalize">{key}</div>
+                          <div className="text-xs text-muted-foreground">{Math.round(Number(value) * 100)}%</div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+
                 {reportToView.raw?.buyer_intelligence && (
-                  <section className="border rounded p-3 bg-emerald-50/60">
-                    <div className="text-xs font-semibold uppercase text-emerald-700 mb-2">Buyer intelligence</div>
+                  <section className="rounded border border-emerald-500/25 bg-emerald-500/10 p-3">
+                    <div className="mb-2 text-xs font-semibold uppercase text-foreground">Inteligencia comercial</div>
                     <div className="grid gap-2 md:grid-cols-2 text-sm">
                       <div><strong>Fit score:</strong> {reportToView.raw.buyer_intelligence.fit_score ?? '—'}</div>
                       <div><strong>Ángulo recomendado:</strong> {reportToView.raw.buyer_intelligence.recommended_angle || '—'}</div>
@@ -2211,8 +1931,8 @@ export default function EnrichedLeadsClient() {
                 )}
 
                 {reportToView.raw?.outreach_pack?.call_script && (
-                  <section className="border rounded p-3 bg-amber-50/50">
-                    <div className="text-xs font-semibold uppercase text-amber-800 mb-2">Guion de llamada</div>
+                  <section className="rounded border border-amber-500/25 bg-amber-500/10 p-3">
+                    <div className="mb-2 text-xs font-semibold uppercase text-foreground">Guion de llamada</div>
                     <div className="space-y-2 text-sm">
                       {reportToView.raw.outreach_pack.call_script.opening ? <p><strong>Apertura:</strong> {reportToView.raw.outreach_pack.call_script.opening}</p> : null}
                       {Array.isArray(reportToView.raw.outreach_pack.call_script.discovery_questions) && reportToView.raw.outreach_pack.call_script.discovery_questions.length > 0 ? (
@@ -2238,34 +1958,42 @@ export default function EnrichedLeadsClient() {
                     </ul>
                   </section>
                 ) : null}
+                  </CollapsibleContent>
+                </Collapsible>
               </div>
             </ScrollArea>
-          )}
+          ) : null}
         </DialogContent>
       </Dialog>
 
       <Dialog open={openCompose} onOpenChange={setOpenCompose}>
-        <DialogContent className="max-w-4xl max-h-[92vh] overflow-hidden flex flex-col" onEscapeKeyDown={() => setOpenCompose(false)}>
-          <DialogHeader><DialogTitle>Contactar {composeList.length} leads</DialogTitle></DialogHeader>
+        <DialogContent className="flex max-h-[92vh] max-w-5xl flex-col gap-0 overflow-hidden rounded-[28px] p-0" onEscapeKeyDown={() => setOpenCompose(false)}>
+          <DialogHeader className="border-b border-border/60 px-5 py-4 sm:px-6">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">Revisión de borradores</div>
+                <DialogTitle className="mt-1 text-xl">Revisa {composeList.length} borradores</DialogTitle>
+                <DialogDescription className="mt-1">Cada mensaje se personaliza antes de enviarse.</DialogDescription>
+              </div>
+              <Button variant="outline" size="sm" className="w-fit rounded-full" onClick={() => setShowBulkEditor(v => !v)} disabled={composeList.length === 0}>
+                {showBulkEditor ? 'Cerrar edición IA' : 'Editar todos con IA'}
+              </Button>
+            </div>
+          </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-          {/* Fuente del borrador + Perfil de estilo + Proveedor */}
-          <div className="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+          <div className="sticky top-0 z-10 grid grid-cols-1 gap-3 border-b border-border/60 bg-background/95 px-5 py-4 backdrop-blur sm:grid-cols-3 sm:px-6">
             <div className="col-span-1">
-              <div className="text-xs text-muted-foreground mb-1">Fuente del borrador</div>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="draft-source" value="investigation" checked={draftSource === 'investigation'} onChange={() => {
+              <div className="mb-1.5 text-xs font-medium text-muted-foreground">Origen del borrador</div>
+              <div className="grid grid-cols-2 rounded-xl border border-border/60 bg-muted/30 p-1">
+                <Button type="button" size="sm" variant={draftSource === 'investigation' ? 'secondary' : 'ghost'} className="rounded-lg" onClick={() => {
                     setDraftSource('investigation');
                     if (openCompose) {
                       void buildComposeDrafts('investigation', selectedStyleName || styleProfiles[0]?.name || '').then(setComposeList).catch((e: any) => {
                         toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo actualizar el borrador.' });
                       });
                     }
-                  }} />
-                        Investigación (n8n)
-                </label>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="draft-source" value="style" checked={draftSource === 'style'} onChange={() => {
+                  }}>Investigación</Button>
+                <Button type="button" size="sm" variant={draftSource === 'style' ? 'secondary' : 'ghost'} className="rounded-lg" onClick={() => {
                     const nextStyle = selectedStyleName || styleProfiles[0]?.name || '';
                     setDraftSource('style');
                     if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
@@ -2274,15 +2002,14 @@ export default function EnrichedLeadsClient() {
                         toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo aplicar la personalizacion.' });
                       });
                     }
-                  }} />
-                  Estilo (Email Studio)
-                </label>
+                  }}>Estilo</Button>
               </div>
             </div>
             <div className="col-span-1">
-              <div className="text-xs text-muted-foreground mb-1">Perfil de estilo</div>
+              <label htmlFor="bulk-style" className="mb-1.5 block text-xs font-medium text-muted-foreground">Perfil de estilo</label>
               <select
-                className="h-9 w-full rounded-md border bg-background px-2 text-sm disabled:opacity-50"
+                id="bulk-style"
+                className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm disabled:opacity-50"
                 disabled={draftSource !== 'style' || styleProfiles.length === 0}
                 value={selectedStyleName}
                 onChange={(e) => {
@@ -2301,47 +2028,25 @@ export default function EnrichedLeadsClient() {
               </select>
             </div>
             <div className="col-span-1">
-              <div className="text-xs text-muted-foreground mb-1">Proveedor de envío</div>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="bulk-provider" value="outlook" checked={bulkProvider === 'outlook'} onChange={() => setBulkProvider('outlook')} />
-                  Outlook
-                </label>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="radio" name="bulk-provider" value="gmail" checked={bulkProvider === 'gmail'} onChange={() => setBulkProvider('gmail')} />
-                  Gmail
-                </label>
+              <div className="mb-1.5 text-xs font-medium text-muted-foreground">Proveedor</div>
+              <div className="grid grid-cols-2 rounded-xl border border-border/60 bg-muted/30 p-1">
+                <Button type="button" size="sm" variant={bulkProvider === 'outlook' ? 'secondary' : 'ghost'} className="rounded-lg" onClick={() => setBulkProvider('outlook')}>Outlook</Button>
+                <Button type="button" size="sm" variant={bulkProvider === 'gmail' ? 'secondary' : 'ghost'} className="rounded-lg" onClick={() => setBulkProvider('gmail')}>Gmail</Button>
               </div>
             </div>
-          </div>
-          {/* Barra superior del modal: ayuda y botón de edición IA */}
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-xs text-muted-foreground">
-              Revisa y ajusta los borradores antes de enviar. Proveedor: <strong>{bulkProvider}</strong>
-            </div>
-            <Button variant="secondary" onClick={() => setShowBulkEditor(v => !v)} disabled={composeList.length === 0}>
-              {showBulkEditor ? 'Ocultar editor IA' : 'Editar con IA (todos)'}
-            </Button>
           </div>
 
-          {/* Editor IA masivo inline */}
           {showBulkEditor && (
-            <div className="mb-3 border rounded-md p-3 bg-muted/40">
-              <div className="text-sm text-muted-foreground mb-1">
-                Describe cómo quieres modificar los correos (se aplicará a todos). Ejemplos:
-                <ul className="list-disc pl-5 mt-1">
-                  <li>Agrega una línea: "Hemos trabajado con empresas relacionadas al outsourcing".</li>
-                  <li>Añade al asunto "Piloto gratis".</li>
-                  <li>
-                    Menciona colaboración con <code>{'{{company.name}}'}</code> si aplica.
-                  </li>
-                </ul>
-              </div>
+            <div className="mx-5 mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:mx-6">
+              <label htmlFor="bulk-ai-instruction" className="text-sm font-medium">Cambio para todos los borradores</label>
+              <p className="mt-1 text-xs text-muted-foreground">Ejemplo: haz el cierre más directo y reduce cada mensaje a tres párrafos.</p>
               <Textarea
+                id="bulk-ai-instruction"
                 value={editInstruction}
                 onChange={(e) => setEditInstruction(e.target.value)}
-                rows={5}
-                placeholder='Ej: Agrega una línea: "Hemos trabajado con empresas relacionadas al outsourcing".'
+                rows={3}
+                className="mt-3"
+                placeholder="Describe el ajuste que quieres aplicar..."
               />
               <div className="mt-2 flex gap-2 justify-end">
                 <Button
@@ -2401,62 +2106,14 @@ export default function EnrichedLeadsClient() {
           )}
 
 
-          {/* Tracking Options (NEW) */}
-          <div className="mb-4 border border-border/50 rounded-md p-3 bg-muted/20">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Inyecta una imagen invisible para detectar apertura en tiempo real">
-                  <input
-                    type="checkbox"
-                    checked={usePixel}
-                    onChange={(e) => setUsePixel(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                  />
-                  Activar Tracking Pixel
-                  <span className="text-[10px] bg-green-500/10 text-green-600 px-1.5 py-0.5 rounded ml-1">Recomendado</span>
-                </label>
-                <p className="text-xs text-muted-foreground ml-6">
-                  Inserta un píxel invisible para detectar aperturas.
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Reescribe enlaces para saber si el usuario hizo clic">
-                  <input
-                    type="checkbox"
-                    checked={useLinkTracking}
-                    onChange={(e) => setUseLinkTracking(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                  />
-                  Track Link Clicks
-                </label>
-                <p className="text-xs text-muted-foreground ml-6">
-                  Hace rastreables los links de tus correos.
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer" title="Solicita confirmación de lectura estándar">
-                  <input
-                    type="checkbox"
-                    checked={useReadReceipt}
-                    onChange={(e) => setUseReadReceipt(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                  />
-                  Solicitar Confirmación
-                </label>
-                <p className="text-xs text-muted-foreground ml-6">
-                  Pide confirmación explícita al destinatario.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4 p-1">
+          <div className="space-y-3 px-5 py-4 sm:px-6">
             {composeList.map(({ lead, subject, body }, i) => (
-              <div key={lead.id} className="border rounded-lg p-3">
-                <div className="font-semibold text-sm">{lead.fullName} &lt;{lead.email}&gt;</div>
-                <div className="text-xs text-muted-foreground">{lead.title} @ {lead.companyName}</div>
+              <div key={lead.id} className="rounded-2xl border border-border/60 bg-card p-4">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+                  <div className="font-semibold text-sm">{lead.fullName} <span className="font-normal text-muted-foreground">· {lead.companyName}</span></div>
+                  <div className="text-xs text-muted-foreground">{lead.email}</div>
+                </div>
+                <div className="text-xs text-muted-foreground">{lead.title || 'Sin cargo'}</div>
 
                 <div className="mt-3 text-xs font-semibold">Asunto</div>
                 <Input
@@ -2481,7 +2138,7 @@ export default function EnrichedLeadsClient() {
                     });
                     emailDraftsStorage.set(lead.id, subject, v);
                   }}
-                  rows={10}
+                  rows={7}
                   aria-label={`Cuerpo para ${lead.fullName}`}
                   className="font-mono"
                 />
@@ -2492,13 +2149,9 @@ export default function EnrichedLeadsClient() {
                     size="sm"
                     onClick={() => {
                       // Regenerar orientado a persona con datos actuales
-                      const company = getCompanyProfile() || {};
-                      const sender = buildSenderInfo();
-                      const rep = findReportForLead({
-                        leadId: leadRefOf(lead),
-                        companyDomain: lead.companyDomain || null,
-                        companyName: lead.companyName || null
-                      });
+                      const company = buildEffectiveCompanyProfile(currentProfile);
+                      const sender = buildSenderInfo(currentProfile);
+                      const rep = reportForLead(lead);
                       const seed = rep?.cross?.emailDraft
                         ? { subject: rep.cross.emailDraft.subject, body: rep.cross.emailDraft.body }
                         : (() => {
@@ -2563,7 +2216,7 @@ export default function EnrichedLeadsClient() {
             ))}
           </div>
           </div>
-          <div className="mt-3 pt-3 border-t flex items-center justify-between shrink-0">
+           <div className="flex shrink-0 flex-col gap-3 border-t border-border/60 bg-background/95 px-5 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-6">
             {sendingBulk
               ? <div className="text-xs">Enviando… {sendProgress.done}/{sendProgress.total}</div>
               : <div className="text-xs text-muted-foreground">
@@ -2571,116 +2224,10 @@ export default function EnrichedLeadsClient() {
               </div>}
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setOpenCompose(false)} disabled={sendingBulk}>Cerrar</Button>
-              <Button onClick={sendBulk} disabled={sendingBulk || !composeList?.length}>
-                {sendingBulk ? 'Enviando…' : `Enviar todos (${bulkProvider})`}
+              <Button onClick={sendBulk} disabled={sendingBulk || selectedToContact.size === 0}>
+                 Revisar selección
               </Button>
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* LinkedIn Compose Modal */}
-      <Dialog open={openLinkedin} onOpenChange={setOpenLinkedin}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Contactar por LinkedIn</DialogTitle>
-            <CardDescription>
-              Se abrirá una pestaña de LinkedIn y la extensión escribirá por ti.
-            </CardDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="text-sm">
-              <strong>Para:</strong> {linkedinLead?.fullName}
-            </div>
-            <Textarea
-              value={linkedinMessage}
-              onChange={(e) => setLinkedinMessage(e.target.value)}
-              rows={6}
-              placeholder="Escribe tu mensaje aquí..."
-            />
-            <div className="text-xs text-muted-foreground">
-              * Antón.IA simulará escritura humana. No cierres la nueva pestaña inmediatamente.
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setOpenLinkedin(false)}>Cancelar</Button>
-              <Button onClick={handleSendLinkedin} disabled={sendingLinkedin}>
-                {sendingLinkedin ? 'Enviando...' : 'Enviar con Extensión'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Campaign Scheduler Modal */}
-      <Dialog open={openSchedule} onOpenChange={setOpenSchedule}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Agendar Campaña Inteligente</DialogTitle>
-            <CardDescription>
-              Distribuye {selectedToContact.size} leads automáticamente en el calendario.
-            </CardDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Canal</Label>
-              <Select
-                value={scheduleConfig.channel}
-                onValueChange={(v: any) => setScheduleConfig({ ...scheduleConfig, channel: v })}
-              >
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Canal" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="linkedin">LinkedIn DM</SelectItem>
-                  <SelectItem value="email">Email</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Inicio</Label>
-              <div className="col-span-3">
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className={`w-full justify-start text-left font-normal ${!scheduleConfig.startDate && "text-muted-foreground"}`}>
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {scheduleConfig.startDate ? format(scheduleConfig.startDate, "PPP", { locale: es }) : <span>Elegir fecha</span>}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={scheduleConfig.startDate} onSelect={(d) => d && setScheduleConfig({ ...scheduleConfig, startDate: d })} initialFocus />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Ritmo</Label>
-              <div className="col-span-3 flex items-center gap-2">
-                <Input
-                  type="number"
-                  value={scheduleConfig.msgsPerDay}
-                  onChange={(e) => setScheduleConfig({ ...scheduleConfig, msgsPerDay: parseInt(e.target.value) || 0 })}
-                  className="w-20"
-                />
-                <span className="text-sm text-muted-foreground">mensajes / día</span>
-              </div>
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Opciones</Label>
-              <div className="col-span-3 flex items-center gap-2">
-                <Checkbox
-                  id="skipWeekends"
-                  checked={scheduleConfig.skipWeekends}
-                  onCheckedChange={(c) => setScheduleConfig({ ...scheduleConfig, skipWeekends: Boolean(c) })}
-                />
-                <Label htmlFor="skipWeekends" className="text-sm font-normal">Saltar fines de semana</Label>
-              </div>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setOpenSchedule(false)}>Cancelar</Button>
-            <Button onClick={handleScheduleCampaign} disabled={scheduling}>
-              {scheduling ? 'Agendando...' : 'Confirmar Agenda'}
-            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -2701,75 +2248,6 @@ export default function EnrichedLeadsClient() {
         leadCount={leadsToEnrich.length}
       />
 
-      {/* Bulk LinkedIn Modal */}
-      <Dialog open={openBulkLinkedin} onOpenChange={(open) => {
-        // Prevent closing during execution
-        if (bulkLinkedinRunning && !open) {
-          const confirmed = confirm('¿Seguro que deseas detener el proceso? Los leads ya contactados se han registrado.');
-          if (confirmed) {
-            bulkLinkedinStopRef.current = true;
-          }
-          return;
-        }
-        setOpenBulkLinkedin(open);
-      }}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>{bulkLinkedinRunning ? 'Procesando Contactos LinkedIn' : '⚠️ Información Importante'}</DialogTitle>
-          </DialogHeader>
-
-          {!bulkLinkedinRunning ? (
-            <div className="space-y-4">
-              <div className="bg-amber-50 border-l-4 border-amber-500 p-4 text-amber-700">
-                <p className="font-bold">¡No minimices esta ventana!</p>
-                <p className="text-sm mt-1">
-                  Para que la automatización funcione correctamente, el navegador debe estar <strong>activo y visible</strong>.
-                  Si minimizas la ventana o cambias de pestaña por mucho tiempo, el navegador "congelará" el proceso para ahorrar batería.
-                </p>
-              </div>
-              <p className="text-sm text-gray-600">
-                Te recomendamos usar <strong>pantalla dividida</strong> o abrir esta app en una ventana separada visible.
-                El sistema contactará a <strong>{selectedToContact.size} leads</strong> uno por uno, con pausas de seguridad de 5-10 segundos.
-              </p>
-              <div className="flex justify-end gap-3 mt-4">
-                <Button variant="outline" onClick={() => setOpenBulkLinkedin(false)}>Cancelar</Button>
-                <Button onClick={handleBulkLinkedin}>Entendido, Comenzar</Button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-6 py-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold mb-2">{bulkLinkedinProgress.current} / {bulkLinkedinProgress.total}</div>
-                <p className="text-muted-foreground">Contactando a: <span className="font-medium text-foreground">{bulkLinkedinProgress.currentName}</span></p>
-              </div>
-
-              <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
-                <div
-                  className="bg-primary h-full transition-all duration-500"
-                  style={{ width: `${(bulkLinkedinProgress.current / bulkLinkedinProgress.total) * 100}%` }}
-                ></div>
-              </div>
-
-              <p className="text-xs text-center text-muted-foreground animate-pulse">
-                Por favor espera y mantén la ventana visible...
-              </p>
-
-              <div className="flex justify-center mt-4">
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => {
-                    bulkLinkedinStopRef.current = true;
-                    toast({ title: 'Deteniendo...', description: 'El proceso se detendrá después del lead actual.' });
-                  }}
-                >
-                  Detener Proceso
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

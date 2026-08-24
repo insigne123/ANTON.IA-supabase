@@ -1,5 +1,6 @@
 // src/lib/contacted-leads-storage.ts
 import type { ContactedLead } from './types';
+import { getBrowserStorage } from './browser-storage';
 
 const KEY = 'leadflow-contacted-leads';
 
@@ -25,10 +26,15 @@ function sanitize(items: any[]): ContactedLead[] {
 
 export const contactedLeadsStorage = {
   get(): ContactedLead[] {
-    if (typeof window === 'undefined') return [];
-    const raw = localStorage.getItem(KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return sanitize(parsed);
+    const storage = getBrowserStorage();
+    if (!storage) return [];
+    try {
+      const raw = storage.getItem(KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return sanitize(parsed);
+    } catch {
+      return [];
+    }
   },
   findByLeadId(leadId: string): ContactedLead | null {
     const all = this.get();
@@ -36,8 +42,9 @@ export const contactedLeadsStorage = {
     return all.find(x => (x.leadId || '').toLowerCase() === id) || null;
   },
   set(items: ContactedLead[]) {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(KEY, JSON.stringify(items));
+    const storage = getBrowserStorage();
+    if (!storage) return;
+    storage.setItem(KEY, JSON.stringify(items));
   },
   add(item: ContactedLead) {
     const all = this.get();

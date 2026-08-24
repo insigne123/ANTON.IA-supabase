@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, handleAuthError } from '@/lib/server/auth-utils';
-import { searchCompaniesWithPDL } from '@/lib/providers/pdl';
-import { isPdlFallbackEnabled, resolveLeadProvider } from '@/lib/server/provider-routing';
+import { resolveLeadProvider } from '@/lib/server/provider-routing';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -12,7 +11,7 @@ type Body = {
   companyName: string;      // tomado de la oportunidad guardada
   perPage?: number;         // default 8
   page?: number;            // default 1
-  provider?: 'apollo' | 'pdl';
+  provider?: unknown;
 };
 
 export async function POST(req: NextRequest) {
@@ -26,38 +25,17 @@ export async function POST(req: NextRequest) {
     const providerDecision = resolveLeadProvider({
       requestedProvider: provider,
       organizationId,
-      defaultProviderEnv: 'LEADS_PROVIDER_DEFAULT',
-      fallbackDefaultProvider: 'apollo',
     });
 
-    let providerUsed: 'apollo' | 'pdl' = providerDecision.provider;
-    let fallbackApplied = false;
-    let fallbackReason: string | undefined;
-    let candidates: any[] = [];
-
-    if (providerDecision.provider === 'pdl') {
-      try {
-        candidates = await searchOrgsPdl(companyName, perPage);
-      } catch (error: any) {
-        if (!isPdlFallbackEnabled()) {
-          throw error;
-        }
-        fallbackApplied = true;
-        fallbackReason = error?.message || 'pdl_company_search_failed';
-        providerUsed = 'apollo';
-        candidates = await searchOrgsApollo(companyName, perPage, page);
-      }
-    } else {
-      candidates = await searchOrgsApollo(companyName, perPage, page);
-    }
+    const providerUsed = providerDecision.provider;
+    const candidates = await searchOrgsApollo(companyName, perPage, page);
 
     const response = NextResponse.json({
       candidates,
       providerRequested: providerDecision.requestedProvider,
       providerUsed,
       providerDefault: providerDecision.defaultProvider,
-      fallbackApplied,
-      fallbackReason,
+      fallbackApplied: false,
       providerForcedReason: providerDecision.forcedApolloReason,
     });
     response.headers.set('x-provider-used', providerUsed);
@@ -115,34 +93,6 @@ async function searchOrgsApollo(companyName: string, perPage: number, page: numb
     .sort((a, b) => b.score - a.score);
 }
 
-async function searchOrgsPdl(companyName: string, perPage: number) {
-  const size = Math.max(1, Math.min(25, perPage));
-  const sql = `SELECT * FROM company WHERE ${containsClause('name', companyName)}`;
-  const result = await searchCompaniesWithPDL({
-    sql,
-    size,
-    dataInclude: ['id', 'name', 'website', 'linkedin_url'],
-  });
-
-  const orgs = Array.isArray(result.data) ? result.data : [];
-  const normTarget = normalizeName(companyName);
-
-  return orgs
-    .map((o: any) => {
-      const domain = cleanDomain(o.website) || undefined;
-      return {
-        id: o.id,
-        name: o.name,
-        website_url: o.website || (domain ? `https://${domain}` : undefined),
-        linkedin_url: o.linkedin_url,
-        primary_domain: domain,
-        logo: domain ? `https://logo.clearbit.com/${domain}` : undefined,
-        score: similarityScore(normTarget, normalizeName(o.name || '')),
-      };
-    })
-    .sort((a, b) => b.score - a.score);
-}
-
 /* helpers */
 
 function normalizeName(s: string) {
@@ -178,9 +128,4 @@ function cleanDomain(url?: string): string | null {
     const host = String(url).toLowerCase().replace(/^https?:\/\//, '');
     return host.startsWith('www.') ? host.slice(4) : host;
   }
-}
-
-function containsClause(field: string, value: string) {
-  const escaped = String(value || '').trim().replace(/'/g, "''").replace(/%/g, '').replace(/_/g, '');
-  return `${field} LIKE '%${escaped}%'`;
 }

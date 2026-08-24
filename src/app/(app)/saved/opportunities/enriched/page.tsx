@@ -15,42 +15,33 @@ import { EnrichedLeadDetailsDialog } from '@/components/enrichment/enriched-lead
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
 import { extractPrimaryEmail } from '@/lib/email-utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/lib/supabase';
-import { v4 as uuidv4 } from 'uuid';
 import DailyQuotaProgress from '@/components/quota/daily-quota-progress';
 import { Linkedin, Eraser, Filter, Trash2, Download, FileSpreadsheet, RotateCw, Phone, Send, Edit } from 'lucide-react';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
-import { buildN8nPayloadFromLead } from '@/lib/n8n-payload';
 import { styleProfilesStorage } from '@/lib/style-profiles-storage';
-import { getCompanyProfile } from '@/lib/data';
-import { buildSenderInfo, applySignaturePlaceholders } from '@/lib/signature-placeholders';
+import { buildEffectiveCompanyProfile, buildSenderInfo, applySignaturePlaceholders } from '@/lib/signature-placeholders';
 import { buildPersonEmailContext, renderTemplate } from '@/lib/template';
 import { ensureSubjectPrefix, generateCompanyOutreachV2 } from '@/lib/outreach-templates';
 import { restyleDraftWithProfile } from '@/lib/email-style-restyle';
-import * as Quota from '@/lib/quota-client';
+import { profileService, type Profile } from '@/lib/services/profile-service';
+import { adaptLeadResearchResponseToReport, isLeadResearchReadyForAutoContact } from '@/lib/lead-research';
+import { MAX_RESEARCH_BATCH_SIZE } from '@/lib/research-workspace';
+import { saveResearchWorkspaceHandoff } from '@/lib/research-workspace-handoff';
+import ResearchWorkspace from '@/components/research/ResearchWorkspace';
 
-
-function getClientUserId(): string {
-  try {
-    const KEY = 'lf.clientUserId';
-    let v = localStorage.getItem(KEY);
-    if (!v) { v = uuidv4(); localStorage.setItem(KEY, v); }
-    return v;
-  } catch { return 'anon'; }
-}
-
-async function getUserIdOrFail(): Promise<string> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.id) throw new Error('no_identity');
-  return user.id;
-}
 
 const displayDomain = (url: string) => { try { const u = new URL(url.startsWith('http') ? url : `https://${url}`); return u.hostname.replace(/^www\./, ''); } catch { return url.replace(/^https?:\/\//, '').replace(/^www\./, ''); } };
 const asHttp = (url: string) => url.startsWith('http') ? url : `https://${url}`;
+
+function isPendingEnrichmentStatus(status?: string | null) {
+  return String(status || '').trim().toLowerCase().startsWith('pending');
+}
 
 export default function EnrichedOpportunitiesPage() {
   const router = useRouter();
@@ -58,11 +49,11 @@ export default function EnrichedOpportunitiesPage() {
 
   const [enriched, setEnriched] = useState<EnrichedOppLead[]>([]);
   const [sel, setSel] = useState<Record<string, boolean>>({});
-  const [researching, setResearching] = useState(false);
-  const [researchProgress, setResearchProgress] = useState({ done: 0, total: 0 });
   const [reportToView, setReportToView] = useState<LeadResearchReport | null>(null);
   const [reportLead, setReportLead] = useState<EnrichedOppLead | null>(null);
   const [openReport, setOpenReport] = useState(false);
+  const [researchOpen, setResearchOpen] = useState(false);
+  const [creatingDraftId, setCreatingDraftId] = useState<string | null>(null);
 
   // Details Modal
   const [detailsLead, setDetailsLead] = useState<EnrichedOppLead | null>(null);
@@ -100,6 +91,7 @@ export default function EnrichedOpportunitiesPage() {
   const [draftSource, setDraftSource] = useState<'investigation' | 'style'>('investigation');
   const [selectedStyleName, setSelectedStyleName] = useState<string>('');
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
+  const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
 
   // Bulk Editor
   const [showBulkEditor, setShowBulkEditor] = useState(false);
@@ -126,6 +118,25 @@ export default function EnrichedOpportunitiesPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'enriched_opportunities' }, () => loadData())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    profileService.getCurrentProfile()
+      .then((profile) => {
+        if (!active) return;
+        setCurrentProfile(profile);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error('No se pudo cargar el perfil actual para oportunidades enriquecidas', error);
+        setCurrentProfile(null);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Normalización
@@ -170,15 +181,25 @@ export default function EnrichedOpportunitiesPage() {
   // Helpers Referencias
   const leadRefOf = (e: EnrichedOppLead) => e.id || e.email || e.linkedinUrl || `${e.fullName}|${e.companyName || ''}`;
 
-  const hasReportStrict = (e: EnrichedOppLead) => !!e.report;
-  const isResearchedLead = (e: EnrichedOppLead) => !!e.report;
+  const normalizedReportFor = (e: EnrichedOppLead): LeadResearchReport | null => {
+    const report = e.report as unknown as LeadResearchReport | undefined;
+    if (!report) return null;
+    if (report.id && report.company && report.createdAt && report.cross) {
+      return {
+        ...report,
+        meta: { ...report.meta, leadRef: report.meta?.leadRef || leadRefOf(e) },
+      };
+    }
+    return adaptLeadResearchResponseToReport(report, leadRefOf(e));
+  };
+  const isResearchedLead = (e: EnrichedOppLead) => isLeadResearchReadyForAutoContact(normalizedReportFor(e));
 
   // Bulk Checks
   const researchEligiblePage = pageLeads.filter(e => e.email && !isResearchedLead(e)).length;
   const allResearchChecked = researchEligiblePage > 0 && pageLeads.filter(e => e.email && !isResearchedLead(e)).every(e => sel[e.id]);
 
   // CONTACT LOGIC: Must be researched + have email
-  const canContact = (e: EnrichedOppLead) => isResearchedLead(e) && !!e.email;
+  const canContact = (e: EnrichedOppLead) => !!e.email && isLeadResearchReadyForAutoContact(normalizedReportFor(e));
   const toggleAllContact = (checked: boolean) => {
     const next = new Set(selectedToContact);
     pageLeads.forEach(e => {
@@ -190,20 +211,76 @@ export default function EnrichedOpportunitiesPage() {
   };
   const contactEligiblePage = pageLeads.filter(canContact).length;
   const allContactChecked = contactEligiblePage > 0 && pageLeads.filter(canContact).every(e => selectedToContact.has(e.id));
+  const researchCount = Object.values(sel).filter(Boolean).length;
 
 
   const toggleAllResearch = (checked: boolean) => {
-    setSel(prev => {
+    if (!checked) {
+      setSel((prev) => {
+        const next = { ...prev };
+        pageLeads.forEach((lead) => delete next[lead.id]);
+        return next;
+      });
+      return;
+    }
+
+    const candidates = pageLeads.filter((lead) => lead.email && !isResearchedLead(lead) && !sel[lead.id]);
+    const remainingCapacity = Math.max(0, MAX_RESEARCH_BATCH_SIZE - researchCount);
+    const leadsToAdd = candidates.slice(0, remainingCapacity);
+    setSel((prev) => {
       const next = { ...prev };
-      if (!checked) {
-        pageLeads.forEach(e => delete next[e.id]);
-      } else {
-        pageLeads.forEach(e => {
-          if (e.email && !isResearchedLead(e)) next[e.id] = true;
-        });
-      }
+      leadsToAdd.forEach((lead) => { next[lead.id] = true; });
       return next;
     });
+
+    if (leadsToAdd.length < candidates.length) {
+      toast({
+        title: `Puedes investigar hasta ${MAX_RESEARCH_BATCH_SIZE} leads`,
+        description: 'La selección actual se mantuvo. Desmarca algunos leads antes de agregar más.',
+      });
+    }
+  };
+
+  const toggleResearchLead = (leadId: string, checked: boolean) => {
+    if (!checked) {
+      setSel((prev) => ({ ...prev, [leadId]: false }));
+      return;
+    }
+    if (sel[leadId]) return;
+    if (researchCount >= MAX_RESEARCH_BATCH_SIZE) {
+      toast({
+        title: `Puedes investigar hasta ${MAX_RESEARCH_BATCH_SIZE} leads`,
+        description: 'Inicia esta selección o desmarca un lead antes de agregar otro.',
+      });
+      return;
+    }
+    setSel((prev) => ({ ...prev, [leadId]: true }));
+  };
+
+  const openResearchWorkspace = (leadIds: Iterable<string> = Object.keys(sel).filter((id) => sel[id])) => {
+    const selectedIds = Array.from(leadIds);
+    if (selectedIds.length === 0) return;
+
+    const availableIds = new Set(enriched.map((lead) => lead.id));
+    if (selectedIds.some((id) => !availableIds.has(id))) {
+      toast({
+        variant: 'destructive',
+        title: 'La lista cambió',
+        description: 'Actualiza la lista antes de abrir la investigación. Tu selección no se modificó.',
+      });
+      return;
+    }
+
+    const handoff = saveResearchWorkspaceHandoff({
+      source: 'enriched-opportunities',
+      leadIds: selectedIds,
+    });
+    if (!handoff.ok) {
+      toast({ variant: 'destructive', title: 'No pudimos abrir la investigación', description: handoff.message });
+      return;
+    }
+
+    setResearchOpen(true);
   };
 
   // Acciones
@@ -280,136 +357,11 @@ export default function EnrichedOpportunitiesPage() {
     if (reportLead?.id === lead.id) setOpenReport(false);
   }
 
-  // N8N Research (mirrored from Leads Enriched for consistency)
-  const runOneInvestigation = async (e: EnrichedOppLead, userId: string) => {
-    const leadRef = leadRefOf(e);
-
-    // Usa tu builder (ya arma targetCompany/lead/userCompanyProfile)
-    const base = buildN8nPayloadFromLead(e as any) as any;
-
-    // Normaliza y asegura meta.leadRef dentro de companies[0]
-    const item = base?.companies?.[0]
-      ? { ...base.companies[0] }
-      : {
-        leadRef,
-        targetCompany: {
-          name: e.companyName || null,
-          domain: e.companyDomain || null,
-          linkedin: (e as any).companyLinkedinUrl || null,
-          country: (e as any).country || null,
-          industry: (e as any).industry || null,
-          website: e.companyDomain ? `https://${e.companyDomain}` : null,
-        },
-        lead: {
-          id: e.id,
-          fullName: e.fullName,
-          title: e.title,
-          email: e.email,
-          linkedinUrl: e.linkedinUrl,
-        },
-      };
-
-    if (!item.meta) item.meta = {};
-    if (!item.meta.leadRef) item.meta.leadRef = leadRef;
-    if (!item.leadRef) item.leadRef = leadRef;
-
-    // Obtener perfil real de la empresa desde Supabase
-    const { profileService } = await import('@/lib/services/profile-service');
-    const realProfile = await profileService.getCurrentProfile();
-    // Mapear campos de profiles -> n8n structure
-    const extended = realProfile?.signatures?.['profile_extended'] || {};
-    const effectiveCompanyProfile = {
-      name: realProfile?.company_name || realProfile?.full_name || 'Mi Empresa',
-      sector: extended.sector || '',
-      description: extended.description || '',
-      services: extended.services || '',
-      valueProposition: extended.valueProposition || '',
-      website: realProfile?.company_domain || '',
-    };
-
-    const payload = {
-      companies: [item],
-      userCompanyProfile: effectiveCompanyProfile,
-    };
-
-    // Enviamos el shape ANIDADO que n8n espera + trazabilidad
-    const res = await fetch('/api/research/n8n', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-User-Id': userId,
-        'X-App-Env': 'LeadFlowAI',
-      },
-      cache: 'no-store',
-      body: JSON.stringify(payload),
-    });
-
-    let data: any = null;
-    let text = '';
-    try { data = await res.json(); } catch { text = await res.text().catch(() => ''); }
-
-    if (!res.ok) {
-      const msg = data?.error
-        || (text?.startsWith('<') ? 'El backend devolvió HTML (error interno). Revisa /api/research/n8n.' : (text || 'n8n error'));
-      throw new Error(msg);
-    }
-
-    // Espejo local de cuota
-    Quota.incClientQuota('research');
-
-    // Normalización de reports (cross/meta.leadRef) - Para Oportunidades guardamos en DB
-    if (Array.isArray(data?.reports) && data.reports.length) {
-      const normalized = data.reports.map((r: any) => {
-        const out: any = { ...r };
-        if (!out.cross) out.cross = out.report || out.data || null;
-        if (!out.meta) out.meta = {};
-        if (!out.meta.leadRef) out.meta.leadRef = leadRef;
-        return out;
-      });
-      // Return first normalized report for cloud persistence
-      return { leadRef, report: normalized[0]?.cross || normalized[0] };
-    }
-
-    // Fallback: si no hay reports array, intenta usar el objeto directamente
-    return { leadRef, report: data };
-  };
-
-  const handleRunN8nResearch = async () => {
-    const ids = Object.keys(sel).filter(k => sel[k]);
-    if (!ids.length) return;
-    if (!Quota.canUseClientQuota('research', ids.length)) {
-      toast({ variant: 'destructive', title: 'Cupo insuficiente' });
-      return;
-    }
-    setResearching(true);
-    setResearchProgress({ done: 0, total: ids.length });
-    try {
-      const userId = await getUserIdOrFail();
-      let done = 0;
-      for (const id of ids) {
-        const t = enriched.find(e => e.id === id);
-        if (t) {
-          try {
-            const res = await runOneInvestigation(t, userId);
-            // Persistent storage update
-            await enrichedOpportunitiesStorage.update(t.id, { report: res.report });
-          } catch (e) { console.error(e); }
-        }
-        done++;
-        setResearchProgress({ done, total: ids.length });
-      }
-      toast({ title: 'Investigación completa' });
-      setSel({});
-      loadData(); // Reload data to show reports
-    } catch (e: any) { toast({ variant: 'destructive', title: 'Error', description: e.message }); }
-    finally { setResearching(false); }
-  };
-
   // --- BULK CONTACT LOGIC ---
   const buildComposeDrafts = async (source: 'investigation' | 'style', styleName?: string) => {
     const ids = Array.from(selectedToContact);
-    const company = getCompanyProfile() || {};
-    const sender = buildSenderInfo();
+    const company = buildEffectiveCompanyProfile(currentProfile);
+    const sender = buildSenderInfo(currentProfile);
     const profile = source === 'style'
       ? (styleProfiles.find(p => p.name === styleName) || styleProfiles[0] || null)
       : null;
@@ -418,10 +370,11 @@ export default function EnrichedOpportunitiesPage() {
       const l = enriched.find(x => x.id === id);
       if (!l || !canContact(l)) return null;
 
-      const seed = l.report?.emailDraft
+      const report = normalizedReportFor(l);
+      const seed = report?.cross?.emailDraft
         ? {
-          subject: l.report.emailDraft.subject || `Contacto: ${l.fullName}`,
-          body: l.report.emailDraft.body || `Hola ${l.fullName}, te contacto desde...`,
+          subject: report.cross.emailDraft.subject || `Contacto: ${l.fullName}`,
+          body: report.cross.emailDraft.body || `Hola ${l.fullName}, te contacto desde...`,
         }
         : (() => {
           const v2 = generateCompanyOutreachV2({
@@ -449,7 +402,7 @@ export default function EnrichedOpportunitiesPage() {
           baseBody: body,
           styleProfile: profile,
           lead: { id: l.id, fullName: l.fullName, email: l.email, title: l.title, companyName: l.companyName, companyDomain: l.companyDomain },
-          report: l.report || null,
+          report,
           companyProfile: company,
         });
         subject = styled.subject;
@@ -465,77 +418,58 @@ export default function EnrichedOpportunitiesPage() {
     return toCompose;
   };
 
-  const handleOpenBulkCompose = async () => {
-    if (selectedToContact.size === 0) return;
-    try {
-      const toCompose = await buildComposeDrafts(draftSource, selectedStyleName || styleProfiles[0]?.name || '');
-
-      setComposeList(toCompose);
-      setOpenCompose(true);
-    } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo preparar el borrador.' });
-    }
+  const handleOpenBulkCompose = () => {
+    openResearchWorkspace(selectedToContact);
   };
 
-  const handleSendBulk = async () => {
-    if (!confirm(`¿Enviar ${composeList.length} correos usando ${bulkProvider}?`)) return;
-    setSendingBulk(true);
+  const handleSendBulk = () => {
+    openResearchWorkspace(selectedToContact);
+  };
+
+  const createEmailFromReportFor = async (lead: EnrichedOppLead) => {
+    const report = normalizedReportFor(lead);
+    const researchSnapshotId = String(report?.raw?.research_snapshot_id || report?.raw?.researchSnapshotId || '').trim();
+    if (!researchSnapshotId) {
+      toast({ title: 'Necesitamos actualizar la investigación', description: 'Este reporte no tiene un snapshot listo para crear el email.' });
+      openResearchWorkspace([lead.id]);
+      return;
+    }
+
+    setCreatingDraftId(lead.id);
     try {
-      const userId = await getUserIdOrFail();
-      const payload = {
-        userId,
-        provider: bulkProvider,
-        tracking: { pixel: usePixel, links: useLinkTracking, readReceipt: useReadReceipt }, // Using local state options
-        emails: composeList.map(it => ({
-          to: [it.lead.email!], // Already validated has email
-          subject: it.subject,
-          text: it.body,
-          html: `<p>${it.body.replace(/\n/g, '<br/>')}</p>`,
-          leadId: it.lead.id
-        }))
-      };
-
-      const res = await fetch('/api/email/bulk-send', {
+      const response = await fetch('/api/native-drafts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `native-draft:${researchSnapshotId}` },
+        body: JSON.stringify({ researchSnapshotId }),
       });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Error al enviar');
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.draft?.draftId) {
+        throw new Error(payload?.error || 'No pudimos preparar el email.');
       }
-
-      const j = await res.json();
-      toast({ title: 'Envío completado', description: `Enviados: ${j.sentCount || 0}, Fallidos: ${j.failedCount || 0}` });
-      setOpenCompose(false);
-      setComposeList([]);
-      setSelectedToContact(new Set());
-    } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Error envío masivo', description: e.message });
+      const draftId = encodeURIComponent(payload.draft.draftId);
+      const versionId = payload.draft.versionId ? `&versionId=${encodeURIComponent(payload.draft.versionId)}` : '';
+      router.push(`/contact/compose?draftId=${draftId}${versionId}`);
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'No se pudo crear el email', description: error instanceof Error ? error.message : 'Inténtalo nuevamente.' });
     } finally {
-      setSendingBulk(false);
+      setCreatingDraftId(null);
     }
   };
 
 
   // Contadores
-  const researchEligible = useMemo(
-    () => filtered.filter(e => !!e.email && !isResearchedLead(e)).length,
-    [filtered]
-  );
+  const researchEligible = filtered.filter(e => !!e.email && !isResearchedLead(e)).length;
   const anyInvestigated = useMemo(
     () => enriched.some(e => !!e.report),
     [enriched]
   );
-  const researchCount = Object.values(sel).filter(Boolean).length;
   const contactCount = selectedToContact.size;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Oportunidades enriquecidas"
-        description="Selecciona, investiga con n8n y luego contacta."
+        description="Selecciona leads, reúne contexto y revisa cada borrador antes de contactar."
       />
       <BackBar fallbackHref="/saved/opportunities" className="mb-2" />
 
@@ -544,17 +478,17 @@ export default function EnrichedOpportunitiesPage() {
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle>Lista de oportunidades enriquecidas ({filtered.length} / {enriched.length})</CardTitle>
             <CardDescription>
               {researchEligible === 0
                 ? 'No hay leads con email para investigar.'
-                : 'Solo se investigan los que tienen email revelado.'}
+                : `Selecciona hasta ${MAX_RESEARCH_BATCH_SIZE} leads con email para investigarlos.`}
             </CardDescription>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
               onClick={() => setShowFilters(v => !v)}
@@ -580,14 +514,19 @@ export default function EnrichedOpportunitiesPage() {
               <Eraser className="mr-2 h-4 w-4" />
               Borrar investigaciones
             </Button>
-            <Button onClick={handleOpenBulkCompose} disabled={selectedToContact.size === 0}>
-              Contactar seleccionados ({selectedToContact.size})
+            <Button
+              onClick={handleOpenBulkCompose}
+              disabled={selectedToContact.size === 0}
+               title={selectedToContact.size === 0 ? 'Selecciona leads para continuar' : 'Revisar la selección antes de crear emails'}
+             >
+              Revisar selección ({selectedToContact.size})
             </Button>
             <Button
-              onClick={() => handleRunN8nResearch()}
-              disabled={researching || researchCount === 0}
-            >
-              {researching ? 'Investigando...' : `Investigar (n8n) (${researchCount})`}
+              onClick={() => openResearchWorkspace()}
+              disabled={researchCount === 0}
+               title={researchCount === 0 ? 'Selecciona al menos un lead para investigar' : 'Investigar la selección actual'}
+             >
+              Investigar selección ({researchCount}/{MAX_RESEARCH_BATCH_SIZE})
             </Button>
             <Button
               variant="outline"
@@ -637,18 +576,20 @@ export default function EnrichedOpportunitiesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-12 text-center" title="Marcar para INVESTIGAR con n8n">
+                  <TableHead className="w-12 text-center" title="Marcar para investigar">
                     <div className="flex flex-col items-center gap-1">
                       <span className="text-[10px] uppercase text-muted-foreground">Inv.</span>
                       <Checkbox
                         checked={allResearchChecked}
+                        disabled={researchEligiblePage === 0}
                         onCheckedChange={(v) => toggleAllResearch(Boolean(v))}
+                        aria-label="Seleccionar todos los leads visibles para investigar"
                       />
                     </div>
                   </TableHead>
-                  <TableHead className="w-12 text-center" title="Marcar para CONTACTAR por email">
+                  <TableHead className="w-12 text-center" title="Marcar para revisar en Investigación">
                     <div className="flex flex-col items-center gap-1">
-                      <span className="text-[10px] uppercase text-muted-foreground">Cont.</span>
+                      <span className="text-[10px] uppercase text-muted-foreground">Rev.</span>
                       <Checkbox
                         checked={contactEligiblePage > 0 ? allContactChecked : false}
                         disabled={contactEligiblePage === 0}
@@ -674,17 +615,18 @@ export default function EnrichedOpportunitiesPage() {
                   pageLeads.map((e) => {
                     const emailData = extractPrimaryEmail(e);
                     const hasEmail = !!emailData.email;
-                    const researched = !!e.report;
-                    const report = e.report;
-                    const pendingPhone = e.enrichmentStatus === 'pending_phone';
+                    const researched = isResearchedLead(e);
+                    const report = normalizedReportFor(e);
+                    const pendingPhone = isPendingEnrichmentStatus(e.enrichmentStatus);
 
                     return (
                       <TableRow key={e.id}>
                         <TableCell className="text-center">
                           <Checkbox
                             checked={!!sel[e.id]}
-                            onCheckedChange={(v) => setSel(prev => ({ ...prev, [e.id]: Boolean(v) }))}
+                            onCheckedChange={(v) => toggleResearchLead(e.id, Boolean(v))}
                             disabled={!hasEmail || researched}
+                            aria-label={`Seleccionar ${e.fullName || 'lead'} para investigar`}
                           />
                         </TableCell>
                         <TableCell className="text-center">
@@ -696,7 +638,8 @@ export default function EnrichedOpportunitiesPage() {
                               if (v) next.add(e.id); else next.delete(e.id);
                               setSelectedToContact(next);
                             }}
-                            title={!canContact(e) ? 'Debes investigar el lead antes de contactar' : 'Marcar para contactar'}
+                            title={!canContact(e) ? 'Debes investigar el lead antes de continuar' : 'Marcar para revisar en Investigación'}
+                            aria-label={`Seleccionar ${e.fullName || 'lead'} para revisar en Investigación`}
                           />
                         </TableCell>
                         <TableCell>
@@ -735,10 +678,16 @@ export default function EnrichedOpportunitiesPage() {
                           <Button size="icon" variant="ghost" title="Ver detalles completos" onClick={() => { setDetailsLead(e); setShowDetails(true); }}>
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => { setReportLead(e); setReportToView(report ? { leadRef: leadRefOf(e), cross: report } as any : null); setOpenReport(true); }}>
+                          <Button size="sm" variant="outline" onClick={() => { setReportLead(e); setReportToView(report); setOpenReport(true); }}>
                             {report ? 'Ver reporte' : 'Sin reporte'}
                           </Button>
-                          <Button size="sm" disabled={!canContact(e)}>Contactar</Button>
+                           <Button
+                             size="sm"
+                             disabled={!hasEmail || (researched && creatingDraftId === e.id)}
+                             onClick={() => researched ? void createEmailFromReportFor(e) : openResearchWorkspace([e.id])}
+                           >
+                             {researched ? (creatingDraftId === e.id ? 'Creando…' : 'Crear email') : 'Investigar'}
+                           </Button>
                           <Button size="icon" variant="ghost" disabled={!e.linkedinUrl} onClick={() => e.linkedinUrl && window.open(e.linkedinUrl, '_blank')}>
                             <Linkedin className="h-4 w-4" />
                           </Button>
@@ -765,6 +714,16 @@ export default function EnrichedOpportunitiesPage() {
         </CardContent>
       </Card>
 
+      <Sheet open={researchOpen} onOpenChange={setResearchOpen}>
+        <SheetContent side="right" showCloseButton={false} className="h-dvh w-full overflow-y-auto overscroll-contain px-4 py-5 sm:max-w-5xl sm:px-6 sm:py-6 lg:px-8">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Investigación de oportunidades</SheetTitle>
+            <SheetDescription>Investiga las oportunidades enriquecidas y prepara un email con evidencia.</SheetDescription>
+          </SheetHeader>
+          <ResearchWorkspace embedded scope="opportunities" onClose={() => setResearchOpen(false)} />
+        </SheetContent>
+      </Sheet>
+
       {/* REPORT MODAL */}
       <Dialog open={openReport} onOpenChange={setOpenReport}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
@@ -782,16 +741,22 @@ export default function EnrichedOpportunitiesPage() {
             <div className="space-y-4 text-sm">
               <p>{reportToView.cross.overview}</p>
               {reportToView.cross.pains?.length > 0 && <div><strong>Pains:</strong> <ul className="list-disc pl-5">{reportToView.cross.pains.map(p => <li key={p}>{p}</li>)}</ul></div>}
+              {reportToView.cross.opportunities?.length > 0 && <div><strong>Oportunidades:</strong> <ul className="list-disc pl-5">{reportToView.cross.opportunities.map(p => <li key={p}>{p}</li>)}</ul></div>}
+              {reportToView.cross.risks?.length > 0 && <div><strong>Riesgos:</strong> <ul className="list-disc pl-5">{reportToView.cross.risks.map(p => <li key={p}>{p}</li>)}</ul></div>}
+              {reportToView.cross.leadContext?.iceBreaker && <div><strong>Icebreaker:</strong> <p className="mt-1 italic">"{reportToView.cross.leadContext.iceBreaker}"</p></div>}
+              {reportToView.cross.leadContext?.recentActivitySummary && <div><strong>Actividad reciente:</strong> <p className="mt-1">{reportToView.cross.leadContext.recentActivitySummary}</p></div>}
               {reportToView.cross.emailDraft && (
                 <div className="bg-muted p-2 rounded">
                   <strong>Email Draft:</strong>
                   <div className="text-xs font-mono whitespace-pre-wrap mt-1">{reportToView.cross.emailDraft.body}</div>
                 </div>
               )}
+              {reportToView.cross.nextSteps?.length ? <div><strong>Siguientes pasos:</strong><ul className="mt-1 space-y-2">{reportToView.cross.nextSteps.map((step, i) => <li key={i} className="rounded-md border bg-muted/40 p-2"><div className="font-medium">{step.action}</div>{step.why ? <div className="text-xs text-muted-foreground mt-1">{step.why}</div> : null}</li>)}</ul></div> : null}
+              {reportToView.cross.sources?.length ? <div><strong>Fuentes:</strong><ul className="mt-1 space-y-1">{reportToView.cross.sources.map((s, i) => <li key={i}>• <a className="underline" href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a></li>)}</ul></div> : null}
             </div>
           ) : (
             <div className="p-4 text-center text-muted-foreground">
-              No hay reporte generado para este lead. Selecciónalo en la lista y pulsa "Investigar (n8n)".
+              No hay investigación disponible para este lead. Selecciónalo en la lista y abre Investigación para continuar.
             </div>
           )}
         </DialogContent>
@@ -801,7 +766,7 @@ export default function EnrichedOpportunitiesPage() {
       <Dialog open={openCompose} onOpenChange={setOpenCompose}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" onEscapeKeyDown={() => setOpenCompose(false)}>
           <DialogHeader>
-            <DialogTitle>Contactar {composeList.length} leads</DialogTitle>
+            <DialogTitle>Revisar {composeList.length} leads en Investigación</DialogTitle>
           </DialogHeader>
 
           <div className="mb-3 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
@@ -986,9 +951,8 @@ export default function EnrichedOpportunitiesPage() {
 
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="outline" onClick={() => setOpenCompose(false)}>Cancelar</Button>
-            <Button onClick={handleSendBulk} disabled={sendingBulk}>
-              {sendingBulk ? <RotateCw className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
-              Enviar Correos
+            <Button onClick={handleSendBulk} disabled={sendingBulk || selectedToContact.size === 0}>
+              Revisar selección
             </Button>
           </div>
         </DialogContent>

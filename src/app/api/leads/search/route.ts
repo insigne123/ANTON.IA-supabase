@@ -1,4 +1,5 @@
 // src/app/api/leads/search/route.ts
+import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { normalizeDomainList } from "@/lib/domain";
@@ -6,15 +7,16 @@ import {
   CompanyNameSearchRequestSchema,
   N8NRequestBodySchema,
   LinkedInProfileSearchRequestSchema,
-  LeadsResponseSchema,
-  type LeadsSearchParams
+  LeadsResponseSchema
 } from "@/lib/schemas/leads";
 import { normalizeFromN8N } from "@/lib/normalizers/n8n";
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
-import { enrichPersonWithPDL, pickPdlEmail, pickPdlPhones, searchCompaniesWithPDL, searchPeopleWithPDL } from '@/lib/providers/pdl';
-import { isPdlFallbackEnabled, resolveLeadProvider, resolveOrganizationIdForUser } from '@/lib/server/provider-routing';
+import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
+import { resolveLeadProvider, resolveOrganizationIdForUser } from '@/lib/server/provider-routing';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { partitionLinkedInProfileLeads } from '@/lib/linkedin-profile-result';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -29,27 +31,6 @@ const DEFAULT_LEAD_SEARCH_URL = "https://backend-antonia--backend-apollo-leads-p
 const LEAD_SEARCH_URL = process.env.ANTONIA_LEAD_SEARCH_URL || process.env.LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
 const TIMEOUT_MS = Number(process.env.LEADS_N8N_TIMEOUT_MS ?? 60000);
 const MAX_RETRIES = Number(process.env.LEADS_N8N_MAX_RETRIES ?? 0);
-const PDL_DATA_INCLUDE = [
-  'id',
-  'full_name',
-  'first_name',
-  'last_name',
-  'job_title',
-  'linkedin_url',
-  'image_url',
-  'work_email',
-  'recommended_personal_email',
-  'location_name',
-  'location_country',
-  'job_company_name',
-  'job_company_website',
-  'job_company_size',
-  'job_company_industry',
-  'mobile_phone',
-  'work_phone',
-  'phone_numbers',
-];
-
 function splitFullName(fullName?: string | null) {
   const parts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
   return {
@@ -79,9 +60,15 @@ function mapFlexibleLead(raw: any, index: number) {
       String(raw?.linkedin_url || raw?.linkedinUrl || raw?.linkedin_profile_url || '').trim() ||
       String(email || '').trim() ||
       `lead-${index + 1}`,
+    name: fullName || undefined,
     first_name: String(raw?.first_name || split.firstName || '').trim() || undefined,
     last_name: String(raw?.last_name || split.lastName || '').trim() || undefined,
     email: String(email || '').trim() || undefined,
+    org_name: String(raw?.org_name || raw?.organization_name || raw?.job_company_name || '').trim() || undefined,
+    organization_name: String(raw?.organization_name || raw?.org_name || raw?.job_company_name || '').trim() || undefined,
+    organization_id: String(organization?.id || raw?.organization_id || '').trim() || undefined,
+    organization_website: String(raw?.organization_website || organization?.website_url || raw?.organization_website_url || raw?.job_company_website || raw?.website_url || '').trim() || undefined,
+    industry: String(raw?.industry || organization?.industry || raw?.organization_industry || raw?.job_company_industry || '').trim() || undefined,
     title: String(raw?.title || raw?.job_title || raw?.headline || '').trim() || undefined,
     organization: {
       id: String(organization?.id || raw?.organization_id || '').trim() || undefined,
@@ -103,6 +90,12 @@ function mapFlexibleLead(raw: any, index: number) {
       String(raw?.photo_url || raw?.photoUrl || raw?.profile_photo_url || raw?.image_url || '').trim() || undefined,
     email_status: String(raw?.email_status || (email ? 'verified' : 'unknown')).trim() || undefined,
     apollo_id: String(raw?.apollo_id || raw?.apolloId || raw?.id || raw?.person_id || '').trim() || undefined,
+    city: String(raw?.city || '').trim() || undefined,
+    state: String(raw?.state || '').trim() || undefined,
+    country: String(raw?.country || '').trim() || undefined,
+    headline: String(raw?.headline || '').trim() || undefined,
+    seniority: String(raw?.seniority || '').trim() || undefined,
+    departments: Array.isArray(raw?.departments) ? raw.departments : undefined,
     primary_phone:
       String(raw?.primary_phone || raw?.primaryPhone || raw?.mobile_phone || raw?.work_phone || '').trim() || undefined,
     phone_numbers: Array.isArray(raw?.phone_numbers)
@@ -111,6 +104,22 @@ function mapFlexibleLead(raw: any, index: number) {
         ? raw.phoneNumbers
         : undefined,
     enrichment_status: String(raw?.enrichment_status || raw?.enrichmentStatus || '').trim() || undefined,
+    organization_domain: cleanDomain(
+      raw?.organization_domain ||
+      organization?.primary_domain ||
+      organization?.domain ||
+      raw?.job_company_website ||
+      raw?.website_url,
+    ),
+    organization_industry: String(raw?.organization_industry || organization?.industry || raw?.job_company_industry || '').trim() || undefined,
+    organization_size: typeof raw?.organization_size === 'number'
+      ? raw.organization_size
+      : typeof raw?.organization?.estimated_num_employees === 'number'
+        ? raw.organization.estimated_num_employees
+        : undefined,
+    page: typeof raw?.page === 'number' ? raw.page : undefined,
+    batch_run_id: String(raw?.batch_run_id || '').trim() || undefined,
+    updated_at: String(raw?.updated_at || '').trim() || undefined,
   };
 }
 
@@ -154,6 +163,7 @@ function pickLeadSearchMeta(json: unknown) {
     search_mode: source.search_mode,
     company_name: source.company_name,
     leads_count: source.leads_count,
+    warnings: Array.isArray(source.warnings) ? source.warnings : undefined,
     requested_reveal: source.requested_reveal,
     applied_reveal: source.applied_reveal,
     effective_reveal: source.effective_reveal,
@@ -426,6 +436,84 @@ async function resolveSearchUserId(req: NextRequest) {
   }
 
   return { userId: user.id };
+}
+
+async function reserveLeadSearchQuota(userId: string, organizationId?: string | null) {
+  const resolvedOrganizationId = organizationId || await resolveOrganizationIdForUser(userId);
+  if (!resolvedOrganizationId) {
+    return {
+      error: NextResponse.json({ error: 'ORGANIZATION_REQUIRED' }, { status: 403 }),
+    };
+  }
+
+  const limits = await getEffectiveDailyQuotaLimits({ userId, organizationId: resolvedOrganizationId });
+  const quota = await checkAndConsumeDailyQuota({
+    userId,
+    organizationId: resolvedOrganizationId,
+    resource: 'search',
+    limit: limits.leadSearch,
+  });
+
+  if (!quota.allowed) {
+    return {
+      error: NextResponse.json({
+        error: 'DAILY_SEARCH_QUOTA_EXCEEDED',
+        count: quota.count,
+        limit: quota.limit,
+        retryAt: quota.resetAtISO,
+      }, {
+        status: 429,
+        headers: { 'Cache-Control': 'private, no-store, max-age=0' },
+      }),
+    };
+  }
+
+  return { organizationId: resolvedOrganizationId, quota };
+}
+
+type SearchAuditContext = {
+  requestId: string;
+  userId: string;
+  organizationId?: string | null;
+  actorType: 'user' | 'agent';
+  searchMode: string;
+  providerRequested?: string | null;
+  providerUsed?: string | null;
+  quotaCount?: number;
+  quotaLimit?: number;
+  fallbackApplied?: boolean;
+};
+
+async function auditSearchResponse(response: NextResponse, context: SearchAuditContext) {
+  const succeeded = response.status >= 200 && response.status < 400;
+  await safeAppendAntoniaEvent({
+    eventKey: `search:${context.requestId}:${succeeded ? 'completed' : 'failed'}`,
+    eventType: succeeded ? 'search.completed' : 'search.failed',
+    organizationId: context.organizationId,
+    actorId: context.userId,
+    actorType: context.actorType,
+    entityType: 'search',
+    entityId: context.requestId,
+    sourceRoute: '/api/leads/search',
+    requestId: context.requestId,
+    correlationId: context.requestId,
+    operationId: context.requestId,
+    status: succeeded ? 'completed' : 'failed',
+    outcome: response.status === 429 ? 'quota_denied' : succeeded ? 'results_returned' : 'http_error',
+    severity: succeeded ? 'info' : response.status === 429 ? 'warning' : 'error',
+    metrics: {
+      httpStatus: response.status,
+      ...(context.quotaCount == null ? {} : { quotaCount: context.quotaCount }),
+      ...(context.quotaLimit == null ? {} : { quotaLimit: context.quotaLimit }),
+    },
+    payload: {
+      searchMode: context.searchMode,
+      providerRequested: context.providerRequested || null,
+      providerUsed: context.providerUsed || null,
+      fallbackApplied: Boolean(context.fallbackApplied),
+    },
+  });
+  return response;
 }
 
 function buildPeopleSearchLeadRow(person: any, options: {
@@ -863,6 +951,15 @@ async function callApolloProfileSearch(
   }
 }
 
+function looksLikeSingleLeadPayload(payload: any) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  return Boolean(
+    String(payload?.id || '').trim() ||
+    String(payload?.linkedin_url || '').trim() ||
+    String(payload?.email || '').trim()
+  );
+}
+
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -874,6 +971,13 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 }
 
 async function callLeadSearchService(payload: any, meta?: Record<string, unknown>) {
+  // This route is the browser-facing BFF. The backend secret is read only at
+  // runtime here and is never returned to, or accepted from, the browser.
+  const backendSecret = String(process.env.ENRICHMENT_SERVICE_SECRET || '').trim();
+  if (!backendSecret) {
+    return NextResponse.json({ error: 'BACKEND_AUTH_NOT_CONFIGURED', ...(meta || {}) }, { status: 503 });
+  }
+
   let attempt = 0;
   let lastErr: unknown = null;
 
@@ -886,6 +990,7 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
           headers: {
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "x-api-secret-key": backendSecret,
           },
           body: JSON.stringify(payload),
         },
@@ -898,8 +1003,6 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
       }
 
       const raw = await res.text();
-      console.log("Raw Response from Service:", raw);
-
       if (!raw || !raw.trim()) {
         throw new Error("SERVICE_EMPTY_BODY");
       }
@@ -928,6 +1031,19 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
         );
       }
 
+      if (payload?.search_mode === 'linkedin_profile') {
+        const { profileLeads, trackingIds } = partitionLinkedInProfileLeads(normalized.leads);
+        return NextResponse.json({
+          ...normalized,
+          ...responseMeta,
+          ...(meta || {}),
+          count: profileLeads.length,
+          leads_count: profileLeads.length,
+          leads: profileLeads,
+          ...(trackingIds.length > 0 ? { profile_tracking_ids: trackingIds } : {}),
+        }, { status: 200 });
+      }
+
       return NextResponse.json({ ...normalized, ...responseMeta, ...(meta || {}) }, { status: 200 });
     } catch (e) {
       lastErr = e;
@@ -947,325 +1063,8 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
   );
 }
 
-async function callPdlLeadSearch(currentParams: LeadsSearchParams[number], meta?: Record<string, unknown>) {
-  const maxResultsCap = Number(process.env.PDL_MAX_RESULTS ?? 200);
-  const requestedMax = Number(currentParams.max_results ?? 100);
-  const maxResults = Math.max(1, Math.min(Number.isFinite(requestedMax) ? requestedMax : 100, maxResultsCap));
-  const perPageCfg = Number(process.env.PDL_SEARCH_PAGE_SIZE ?? 100);
-  const perPage = Math.max(1, Math.min(perPageCfg, 100));
-
-  const sql = buildPdlSearchSql(currentParams);
-  const leads: any[] = [];
-  const seenIds = new Set<string>();
-  let scrollToken: string | undefined;
-  const maxPages = Math.max(1, Math.min(100, Number(process.env.PDL_SEARCH_MAX_PAGES ?? 10)));
-  let page = 1;
-
-  while (leads.length < maxResults && page <= maxPages) {
-    const remaining = maxResults - leads.length;
-    const size = Math.max(1, Math.min(perPage, remaining));
-
-    const result = await searchPeopleWithPDL({
-      sql,
-      size,
-      scrollToken,
-      dataInclude: PDL_DATA_INCLUDE,
-    });
-
-    const people = Array.isArray(result.data) ? result.data : [];
-    if (people.length === 0) break;
-
-    for (let i = 0; i < people.length; i++) {
-      if (leads.length >= maxResults) break;
-      const person = people[i] as any;
-
-      const firstName = String(person.first_name || '').trim();
-      const lastName = String(person.last_name || '').trim();
-      const fullName = String(person.full_name || '').trim();
-      const [derivedFirst, ...derivedRest] = fullName.split(/\s+/).filter(Boolean);
-      const finalFirst = firstName || derivedFirst || '';
-      const finalLast = lastName || derivedRest.join(' ') || '';
-      const id = String(person.id || '').trim() || String(person.linkedin_url || '').trim() || `${fullName || 'lead'}-${page}-${i}`;
-      if (seenIds.has(id)) continue;
-
-      leads.push({
-        id,
-        first_name: finalFirst || undefined,
-        last_name: finalLast || undefined,
-        email: pickPdlEmail(person) || undefined,
-        title: String(person.job_title || '').trim() || undefined,
-        organization: {
-          name: String(person.job_company_name || '').trim() || undefined,
-          domain: cleanDomain(person.job_company_website),
-        },
-        linkedin_url: String(person.linkedin_url || '').trim() || undefined,
-        photo_url: String(person.image_url || '').trim() || undefined,
-        email_status: pickPdlEmail(person) ? 'verified' : 'unknown',
-      });
-
-      seenIds.add(id);
-    }
-
-    if (!result.scrollToken || people.length < size) break;
-    scrollToken = result.scrollToken;
-    page++;
-  }
-
-  const normalized = LeadsResponseSchema.parse({
-    count: leads.length,
-    leads,
-  });
-
-  return NextResponse.json({ ...normalized, ...(meta || {}) }, { status: 200 });
-}
-
 function buildRevealFlags(email: boolean, phone: boolean) {
   return { email, phone };
-}
-
-function mapPdlPersonToLead(person: any, index: number, options?: { revealEmail?: boolean; revealPhone?: boolean }) {
-  const revealEmail = Boolean(options?.revealEmail);
-  const revealPhone = Boolean(options?.revealPhone);
-  const email = revealEmail ? pickPdlEmail(person) : undefined;
-  const phoneData = revealPhone ? pickPdlPhones(person) : { primaryPhone: null, phoneNumbers: undefined };
-  const fullName =
-    String(person?.full_name || '').trim() ||
-    `${String(person?.first_name || '').trim()} ${String(person?.last_name || '').trim()}`.trim() ||
-    'Unknown';
-
-  return {
-    id:
-      String(person?.id || '').trim() ||
-      String(person?.linkedin_url || '').trim() ||
-      String(email || '').trim() ||
-      `lead-${index + 1}`,
-    first_name: String(person?.first_name || '').trim() || splitFullName(fullName).firstName || undefined,
-    last_name: String(person?.last_name || '').trim() || splitFullName(fullName).lastName || undefined,
-    email: email || undefined,
-    title: String(person?.job_title || '').trim() || undefined,
-    organization: {
-      name: String(person?.job_company_name || '').trim() || undefined,
-      domain: cleanDomain(person?.job_company_website),
-      industry: String(person?.job_company_industry || '').trim() || undefined,
-      website_url: String(person?.job_company_website || '').trim() || undefined,
-    },
-    linkedin_url: String(person?.linkedin_url || '').trim() || undefined,
-    photo_url: String(person?.image_url || '').trim() || undefined,
-    email_status: email ? 'verified' : 'unknown',
-    primary_phone: phoneData.primaryPhone || undefined,
-    phone_numbers: phoneData.phoneNumbers,
-  };
-}
-
-async function callPdlProfileSearch(
-  params: {
-    linkedinUrl: string;
-    revealEmail: boolean;
-    revealPhone: boolean;
-  },
-  meta?: Record<string, unknown>
-) {
-  const requestedReveal = buildRevealFlags(params.revealEmail, params.revealPhone);
-  const result = await enrichPersonWithPDL({
-    linkedinUrl: params.linkedinUrl,
-    dataInclude: PDL_DATA_INCLUDE,
-  });
-
-  if (!result.matched || !result.person) {
-    return NextResponse.json(
-      {
-        count: 0,
-        leads: [],
-        requested_reveal: requestedReveal,
-        applied_reveal: requestedReveal,
-        effective_reveal: buildRevealFlags(false, false),
-        ...(meta || {}),
-      },
-      { status: 200 },
-    );
-  }
-
-  const lead = mapPdlPersonToLead(result.person, 0, {
-    revealEmail: params.revealEmail,
-    revealPhone: params.revealPhone,
-  });
-
-  const phoneNumbers = Array.isArray(lead.phone_numbers) ? lead.phone_numbers : [];
-  const phoneFound = params.revealPhone && phoneNumbers.length > 0;
-  const emailFound = params.revealEmail && Boolean(lead.email);
-  const responseBody: Record<string, unknown> = {
-    count: 1,
-    leads: [lead],
-    requested_reveal: requestedReveal,
-    applied_reveal: requestedReveal,
-    effective_reveal: buildRevealFlags(emailFound, phoneFound),
-    ...(meta || {}),
-  };
-
-  if (params.revealPhone && !phoneFound) {
-    responseBody.phone_enrichment = {
-      requested: true,
-      queued: false,
-      status: 'skipped',
-      message: 'No se encontro telefono para este perfil en la fuente disponible.',
-      webhook_url: null,
-      provider_status: typeof result.status === 'number' ? result.status : null,
-      provider_details: 'pdl_phone_not_found',
-    };
-    responseBody.provider_warnings = [
-      'La busqueda encontro el perfil, pero no habia telefono disponible en la fuente configurada.',
-    ];
-  }
-
-  return NextResponse.json(responseBody, { status: 200 });
-}
-
-async function searchPdlOrganizationCandidates(companyName: string, size = 8) {
-  const safeName = normalizeName(companyName);
-  if (!safeName) return [];
-
-  const result = await searchCompaniesWithPDL({
-    sql: `SELECT * FROM company WHERE ${containsClause('name', safeName)}`,
-    size: Math.max(1, Math.min(25, size)),
-    dataInclude: ['id', 'name', 'website', 'linkedin_url'],
-  });
-
-  const target = normalizeName(companyName);
-  const companies = Array.isArray(result.data) ? result.data : [];
-  return companies
-    .map((company: any) => {
-      const domain = cleanDomain(company?.website) || undefined;
-      return {
-        id: String(company?.id || '').trim() || domain || normalizeName(company?.name || '') || `org-${Math.random().toString(36).slice(2, 8)}`,
-        name: String(company?.name || '').trim() || 'Unknown',
-        primary_domain: domain,
-        website_url: String(company?.website || '').trim() || (domain ? `https://${domain}` : undefined),
-        linkedin_url: String(company?.linkedin_url || '').trim() || undefined,
-        match_score: similarityScore(target, normalizeName(company?.name || '')),
-      };
-    })
-    .sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
-}
-
-async function callPdlCompanyNameSearch(
-  params: {
-    companyName?: string;
-    titles?: string[];
-    maxResults?: number;
-    organizationDomains?: string[];
-    selectedOrganizationId?: string;
-    selectedOrganizationName?: string;
-    selectedOrganizationDomain?: string;
-  },
-  meta?: Record<string, unknown>
-) {
-  const companyName = String(params.companyName || params.selectedOrganizationName || '').trim();
-  const selectedOrganizationId = String(params.selectedOrganizationId || '').trim();
-  const selectedOrganizationName = String(params.selectedOrganizationName || '').trim();
-  const selectedOrganizationDomain = cleanDomain(params.selectedOrganizationDomain);
-  const normalizedTitles = (params.titles || []).map((value) => String(value).trim()).filter(Boolean).slice(0, 8);
-  const maxResults = Math.max(1, Math.min(Number(params.maxResults || 25) || 25, 200));
-  const organizationDomains = normalizeDomainList([
-    ...(params.organizationDomains || []),
-    selectedOrganizationDomain || undefined,
-  ]);
-
-  let selectedOrganization: any | undefined;
-  let candidateOrganizations: any[] = [];
-
-  if (companyName) {
-    candidateOrganizations = await searchPdlOrganizationCandidates(companyName, 8);
-  }
-
-  if (candidateOrganizations.length > 0) {
-    selectedOrganization = candidateOrganizations.find((candidate) => {
-      if (selectedOrganizationId && candidate.id === selectedOrganizationId) return true;
-      if (selectedOrganizationDomain && candidate.primary_domain === selectedOrganizationDomain) return true;
-      if (selectedOrganizationName && normalizeName(candidate.name) === normalizeName(selectedOrganizationName)) return true;
-      return false;
-    });
-  }
-
-  if (!selectedOrganization && !organizationDomains.length && candidateOrganizations.length > 1) {
-    return NextResponse.json(
-      {
-        count: 0,
-        leads: [],
-        company_name: companyName,
-        requires_organization_selection: true,
-        organization_candidates: candidateOrganizations,
-        ...(meta || {}),
-      },
-      { status: 200 },
-    );
-  }
-
-  if (!selectedOrganization && candidateOrganizations.length === 1) {
-    selectedOrganization = candidateOrganizations[0];
-  }
-
-  const finalDomains = normalizeDomainList([
-    ...organizationDomains,
-    selectedOrganization?.primary_domain,
-  ]);
-
-  const clauses: string[] = [];
-  if (finalDomains.length > 0) {
-    clauses.push(`(${finalDomains.map((domain) => containsClause('job_company_website', domain)).join(' OR ')})`);
-  } else if (companyName) {
-    clauses.push(`(${containsClause('job_company_name', companyName)})`);
-  }
-
-  if (normalizedTitles.length > 0) {
-    clauses.push(`(${normalizedTitles.map((title) => containsClause('job_title', title)).join(' OR ')})`);
-  }
-
-  clauses.push('(full_name IS NOT NULL)');
-  const sql = `SELECT * FROM person WHERE ${clauses.join(' AND ')}`;
-
-  const leads: any[] = [];
-  const seenIds = new Set<string>();
-  let page = 1;
-  let scrollToken: string | undefined;
-  const perPage = Math.max(1, Math.min(100, Math.min(maxResults, 50)));
-
-  while (leads.length < maxResults && page <= 10) {
-    const remaining = maxResults - leads.length;
-    const size = Math.max(1, Math.min(perPage, remaining));
-    const result = await searchPeopleWithPDL({
-      sql,
-      size,
-      scrollToken,
-      dataInclude: PDL_DATA_INCLUDE,
-    });
-
-    const people = Array.isArray(result.data) ? result.data : [];
-    if (people.length === 0) break;
-
-    for (let i = 0; i < people.length; i++) {
-      if (leads.length >= maxResults) break;
-      const lead = mapPdlPersonToLead(people[i], leads.length, { revealEmail: true, revealPhone: false });
-      const dedupeKey = String(lead.id || lead.linkedin_url || `${lead.first_name}-${lead.last_name}-${lead.organization?.domain || lead.organization?.name || ''}`).toLowerCase();
-      if (dedupeKey && seenIds.has(dedupeKey)) continue;
-      if (dedupeKey) seenIds.add(dedupeKey);
-      leads.push(lead);
-    }
-
-    if (!result.scrollToken || people.length < size) break;
-    scrollToken = result.scrollToken;
-    page++;
-  }
-
-  return NextResponse.json(
-    {
-      count: leads.length,
-      leads,
-      company_name: companyName || selectedOrganization?.name,
-      selected_organization: selectedOrganization,
-      ...(meta || {}),
-    },
-    { status: 200 },
-  );
 }
 
 export async function GET(req: NextRequest) {
@@ -1303,7 +1102,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'PROFILE_RECORD_FETCH_ERROR', message: String(json?.message || json?.error || raw || `HTTP_${response.status}`) }, { status: response.status === 200 ? 500 : response.status });
     }
 
-    return NextResponse.json(json || { lead: null }, { status: 200, headers: { 'Cache-Control': 'no-store' } });
+    const payload = json || { lead: null };
+    if (payload?.lead || payload?.error) {
+      return NextResponse.json(payload, { status: 200, headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    if (looksLikeSingleLeadPayload(payload)) {
+      return NextResponse.json(
+        { lead: mapFlexibleLead(payload, 0) },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    return NextResponse.json({ lead: null }, { status: 200, headers: { 'Cache-Control': 'no-store' } });
   } catch (error: any) {
     return NextResponse.json({ error: 'PROFILE_RECORD_FETCH_ERROR', message: error?.message || 'Unknown error' }, { status: 500 });
   }
@@ -1322,6 +1133,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "BAD_JSON" }, { status: 400 });
     }
 
+    const requestId = req.headers.get('x-request-id')?.trim() || randomUUID();
+    const actorType = req.headers.get('x-user-id')?.trim() ? 'agent' as const : 'user' as const;
+    let requestRecorded = false;
+    const recordSearchRequest = async (params: {
+      searchMode: string;
+      organizationId?: string | null;
+      providerRequested?: string | null;
+      providerUsed?: string | null;
+    }) => {
+      if (requestRecorded) return;
+      requestRecorded = true;
+      await safeAppendAntoniaEvent({
+        eventKey: `search:${requestId}:requested`,
+        eventType: 'search.requested',
+        organizationId: params.organizationId,
+        actorId: userId,
+        actorType,
+        entityType: 'search',
+        entityId: requestId,
+        sourceRoute: '/api/leads/search',
+        requestId,
+        correlationId: requestId,
+        operationId: requestId,
+        idempotencyKey: requestId,
+        status: 'started',
+        outcome: 'accepted',
+        metrics: { bodyIsArray: Array.isArray(body) },
+        payload: {
+          searchMode: params.searchMode,
+          providerRequested: params.providerRequested || null,
+          providerUsed: params.providerUsed || null,
+        },
+      });
+    };
+
     if (!Array.isArray(body)) {
       const profileParsed = LinkedInProfileSearchRequestSchema.safeParse(body);
       if (profileParsed.success) {
@@ -1331,6 +1177,25 @@ export async function POST(req: NextRequest) {
         ).trim();
         const organizationId = await resolveOrganizationIdForUser(userId);
         const requestedProvider = String((body as any)?.provider || '').trim().toLowerCase();
+        const providerDecision = resolveLeadProvider({ requestedProvider, organizationId });
+        await recordSearchRequest({
+          searchMode: 'linkedin_profile',
+          organizationId,
+          providerRequested: providerDecision.requestedProvider,
+          providerUsed: providerDecision.provider,
+        });
+        const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
+        if ('error' in quotaReservation && quotaReservation.error) {
+          return await auditSearchResponse(quotaReservation.error, {
+            requestId,
+            userId,
+            organizationId,
+            actorType,
+            searchMode: 'linkedin_profile',
+            providerRequested: providerDecision.requestedProvider,
+            providerUsed: providerDecision.provider,
+          });
+        }
         const profilePayload = {
           user_id: userId,
           search_mode: 'linkedin_profile',
@@ -1341,19 +1206,53 @@ export async function POST(req: NextRequest) {
 
         const response = await callLeadSearchService(profilePayload, {
           search_mode: 'linkedin_profile',
-          providerRequested: requestedProvider || null,
-          providerUsed: 'backend-antonia',
-          providerDefault: 'apollo',
+          providerRequested: providerDecision.requestedProvider,
+          providerUsed: providerDecision.provider,
+          providerDefault: providerDecision.defaultProvider,
+          providerForcedReason: providerDecision.forcedApolloReason,
           fallbackApplied: false,
         });
         response.headers.set('x-search-mode', 'linkedin_profile');
-        response.headers.set('x-provider-used', 'backend-antonia');
-        return response;
+        response.headers.set('x-provider-used', providerDecision.provider);
+        response.headers.set('x-quota-count', String(quotaReservation.quota.count));
+        response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
+        return await auditSearchResponse(response, {
+          requestId,
+          userId,
+          organizationId,
+          actorType,
+          searchMode: 'linkedin_profile',
+          providerRequested: providerDecision.requestedProvider,
+          providerUsed: providerDecision.provider,
+          quotaCount: quotaReservation.quota.count,
+          quotaLimit: quotaReservation.quota.limit,
+        });
       }
 
       const companyParsed = CompanyNameSearchRequestSchema.safeParse(body);
       if (companyParsed.success) {
         const companyReq = companyParsed.data;
+        const organizationId = await resolveOrganizationIdForUser(userId);
+        const requestedProvider = String((body as any)?.provider || '').trim().toLowerCase();
+        const providerDecision = resolveLeadProvider({ requestedProvider, organizationId });
+        await recordSearchRequest({
+          searchMode: 'company_name',
+          organizationId,
+          providerRequested: providerDecision.requestedProvider,
+          providerUsed: providerDecision.provider,
+        });
+        const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
+        if ('error' in quotaReservation && quotaReservation.error) {
+          return await auditSearchResponse(quotaReservation.error, {
+            requestId,
+            userId,
+            organizationId,
+            actorType,
+            searchMode: 'company_name',
+            providerRequested: providerDecision.requestedProvider,
+            providerUsed: providerDecision.provider,
+          });
+        }
         const organizationDomains = normalizeDomainList([
           ...(companyReq.organization_domains || []),
           ...(companyReq.organizationDomains || []),
@@ -1376,13 +1275,34 @@ export async function POST(req: NextRequest) {
           selected_organization_id: String(companyReq.selected_organization_id || '').trim() || undefined,
           selected_organization_name: String(companyReq.selected_organization_name || '').trim() || undefined,
           selected_organization_domain: normalizeDomainList([companyReq.selected_organization_domain])[0] || undefined,
+          selected_organization_website: String(companyReq.selected_organization_website || '').trim() || undefined,
+          selected_organization_industry: String(companyReq.selected_organization_industry || '').trim() || undefined,
+          selected_organization_size: companyReq.selected_organization_size ?? undefined,
         };
         const response = await callLeadSearchService(companyPayload, {
           search_mode: 'company_name',
           company_name: companyPayload.company_name || companyPayload.selected_organization_name,
+          providerRequested: providerDecision.requestedProvider,
+          providerUsed: providerDecision.provider,
+          providerDefault: providerDecision.defaultProvider,
+          providerForcedReason: providerDecision.forcedApolloReason,
+          fallbackApplied: false,
         });
         response.headers.set('x-search-mode', 'company_name');
-        return response;
+        response.headers.set('x-provider-used', providerDecision.provider);
+        response.headers.set('x-quota-count', String(quotaReservation.quota.count));
+        response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
+        return await auditSearchResponse(response, {
+          requestId,
+          userId,
+          organizationId,
+          actorType,
+          searchMode: 'company_name',
+          providerRequested: providerDecision.requestedProvider,
+          providerUsed: providerDecision.provider,
+          quotaCount: quotaReservation.quota.count,
+          quotaLimit: quotaReservation.quota.limit,
+        });
       }
 
       return NextResponse.json(
@@ -1413,53 +1333,57 @@ export async function POST(req: NextRequest) {
     const providerDecision = resolveLeadProvider({
       requestedProvider,
       organizationId,
-      defaultProviderEnv: 'LEADS_PROVIDER_DEFAULT',
-      fallbackDefaultProvider: 'apollo',
     });
 
-    let fallbackApplied = false;
-    let fallbackReason: string | undefined;
+    await recordSearchRequest({
+      searchMode: 'batch',
+      organizationId,
+      providerRequested: providerDecision.requestedProvider,
+      providerUsed: providerDecision.provider,
+    });
 
-    if (providerDecision.provider === 'pdl') {
-      try {
-        const response = await callPdlLeadSearch(currentParams, {
-          providerRequested: providerDecision.requestedProvider,
-          providerUsed: 'pdl',
-          providerDefault: providerDecision.defaultProvider,
-          providerForcedReason: providerDecision.forcedApolloReason,
-          fallbackApplied: false,
-        });
-        response.headers.set('x-provider-used', 'pdl');
-        return response;
-      } catch (error: any) {
-        if (!isPdlFallbackEnabled()) {
-          return NextResponse.json(
-            {
-              error: 'PDL_SEARCH_ERROR',
-              message: error?.message || 'PDL search failed',
-              providerRequested: providerDecision.requestedProvider,
-              providerUsed: 'pdl',
-              fallbackApplied: false,
-            },
-            { status: 502 },
-          );
-        }
-        fallbackApplied = true;
-        fallbackReason = error?.message || 'pdl_search_failed';
-      }
-    }
+    const fallbackApplied = false;
 
     if (USE_APIFY) {
+      await safeAppendAntoniaEvent({
+        eventKey: `search:${requestId}:bypassed:apify`,
+        eventType: 'search.bypassed',
+        organizationId,
+        actorId: userId,
+        actorType,
+        entityType: 'search',
+        entityId: requestId,
+        sourceRoute: '/api/leads/search',
+        requestId,
+        correlationId: requestId,
+        operationId: requestId,
+        status: 'bypassed',
+        outcome: 'apify_redirect',
+        severity: 'warning',
+        payload: { searchMode: 'batch', provider: 'apify' },
+      });
       const url = new URL(req.url);
       url.pathname = "/api/leads/apify";
       return NextResponse.redirect(url, 307);
     }
 
-    console.log("Current Params from request:", currentParams);
-    console.log("Authenticated User ID:", userId);
+    const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
+    if ('error' in quotaReservation && quotaReservation.error) {
+      return await auditSearchResponse(quotaReservation.error, {
+        requestId,
+        userId,
+        organizationId,
+        actorType,
+        searchMode: 'batch',
+        providerRequested: providerDecision.requestedProvider,
+        providerUsed: providerDecision.provider,
+        fallbackApplied,
+      });
+    }
 
     const newPayload = {
       user_id: userId || undefined,
+      search_mode: 'batch',
       industry_keywords: currentParams.industry_keywords,
       company_location: currentParams.company_location,
       titles: Array.isArray(currentParams.titles)
@@ -1468,12 +1392,10 @@ export async function POST(req: NextRequest) {
       seniorities: Array.isArray(currentParams.seniorities) ? currentParams.seniorities : [],
       employee_range: currentParams.employee_ranges,
       employee_ranges: currentParams.employee_ranges,
-      max_results: 100,
+      max_results: currentParams.max_results,
     };
 
     if (!newPayload.titles) newPayload.titles = [];
-
-    console.log("Outgoing Payload to Service:", JSON.stringify(newPayload, null, 2));
 
     const response = await callLeadSearchService(newPayload, {
       providerRequested: providerDecision.requestedProvider,
@@ -1481,10 +1403,22 @@ export async function POST(req: NextRequest) {
       providerDefault: providerDecision.defaultProvider,
       providerForcedReason: providerDecision.forcedApolloReason,
       fallbackApplied,
-      fallbackReason,
     });
     response.headers.set('x-provider-used', 'apollo');
-    return response;
+    response.headers.set('x-quota-count', String(quotaReservation.quota.count));
+    response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
+    return await auditSearchResponse(response, {
+      requestId,
+      userId,
+      organizationId,
+      actorType,
+      searchMode: 'batch',
+      providerRequested: providerDecision.requestedProvider,
+      providerUsed: 'apollo',
+      quotaCount: quotaReservation.quota.count,
+      quotaLimit: quotaReservation.quota.limit,
+      fallbackApplied,
+    });
   } catch (error: any) {
     console.error('[leads/search] Unhandled route error:', error);
     return NextResponse.json(
@@ -1508,115 +1442,4 @@ function cleanDomain(urlLike?: string | null): string | undefined {
     const host = raw.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.+$/, '');
     return host.startsWith('www.') ? host.slice(4) : host;
   }
-}
-
-function normalizeName(value: string) {
-  return String(value || '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/\b(grupo|the)\b/g, ' ')
-    .replace(/\b(s\.?a\.?|s\.?p\.?a\.?|ltda|llc|inc|corp(oration)?|company|co|gmbh|srl|s\.?l\.?|plc|ag|sa de cv)\b/g, ' ')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function similarityScore(a: string, b: string) {
-  if (!a || !b) return 0;
-  const setA = new Set(a.split(' ').filter(Boolean));
-  const setB = new Set(b.split(' ').filter(Boolean));
-  const intersection = Array.from(setA).filter((token) => setB.has(token)).length;
-  const union = new Set([...setA, ...setB]).size;
-  let score = union ? intersection / union : 0;
-  if (b.startsWith(a) || a.startsWith(b)) score += 0.25;
-  if (a.includes(b) || b.includes(a)) score += 0.15;
-  return Math.min(score, 1);
-}
-
-function buildPdlSearchSql(params: LeadsSearchParams[number]) {
-  const clauses: string[] = [];
-
-  const titles = String(params.titles || '')
-    .split(',')
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .slice(0, 6);
-  if (titles.length > 0) {
-    clauses.push(`(${titles.map((t) => containsClause('job_title', t)).join(' OR ')})`);
-  }
-
-  const industries = (params.industry_keywords || []).map((x) => String(x).trim()).filter(Boolean).slice(0, 8);
-  if (industries.length > 0) {
-    clauses.push(`(${industries.map((i) => containsClause('job_company_industry', i)).join(' OR ')})`);
-  }
-
-  const locations = (params.company_location || []).map((x) => String(x).trim()).filter(Boolean).slice(0, 8);
-  if (locations.length > 0) {
-    clauses.push(`(${locations.map((l) => containsClause('location_name', l)).join(' OR ')})`);
-  }
-
-  const employeeRanges = (params.employee_ranges || []).map((x) => String(x).trim()).filter(Boolean);
-  const employeeClause = buildEmployeeRangeClause(employeeRanges);
-  if (employeeClause) clauses.push(employeeClause);
-
-  clauses.push('(full_name IS NOT NULL)');
-  const where = clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '';
-  return `SELECT * FROM person${where}`;
-}
-
-function buildEmployeeRangeClause(ranges: string[]) {
-  const normalized = ranges
-    .map((range) => parseEmployeeRange(range))
-    .filter((x): x is { min?: number; max?: number } => !!x);
-
-  if (normalized.length === 0) return '';
-
-  const parts: string[] = [];
-  for (const range of normalized) {
-    if (typeof range.min === 'number' && typeof range.max === 'number') {
-      parts.push(`(job_company_size >= ${range.min} AND job_company_size <= ${range.max})`);
-      continue;
-    }
-    if (typeof range.min === 'number') {
-      parts.push(`(job_company_size >= ${range.min})`);
-      continue;
-    }
-    if (typeof range.max === 'number') {
-      parts.push(`(job_company_size <= ${range.max})`);
-    }
-  }
-
-  if (parts.length === 0) return '';
-  return `(${parts.join(' OR ')})`;
-}
-
-function parseEmployeeRange(input: string): { min?: number; max?: number } | null {
-  const normalized = String(input || '').trim();
-  if (!normalized) return null;
-
-  const plus = normalized.match(/^(\d+)\+$/);
-  if (plus) {
-    return { min: Number(plus[1]) };
-  }
-
-  const range = normalized.match(/^(\d+)\s*[-,]\s*(\d+)$/);
-  if (range) {
-    const a = Number(range[1]);
-    const b = Number(range[2]);
-    if (Number.isFinite(a) && Number.isFinite(b)) {
-      return a <= b ? { min: a, max: b } : { min: b, max: a };
-    }
-  }
-
-  const exact = Number(normalized);
-  if (Number.isFinite(exact) && exact > 0) {
-    return { min: exact, max: exact };
-  }
-
-  return null;
-}
-
-function containsClause(field: string, value: string) {
-  const escaped = String(value || '').trim().replace(/'/g, "''").replace(/%/g, '').replace(/_/g, '');
-  return `${field} LIKE '%${escaped}%'`;
 }

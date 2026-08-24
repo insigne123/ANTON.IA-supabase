@@ -1,254 +1,198 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { adaptLeadResearchResponseToReport } from '@/lib/lead-research';
-import { storeLeadResearchReport } from '@/lib/server/lead-research-reports';
 
+import { unwrapLeadResearchResponse } from '@/lib/lead-research';
+import {
+  applyLeadResearchAccessToPayload,
+  deriveLeadResearchAccess,
+  getLeadResearchIdentity,
+  type LeadResearchAccessContext,
+} from '@/lib/server/lead-research-access';
+import { getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
+import {
+  claimLeadResearchRequest,
+  completeLeadResearchRequestClaim,
+  consumeLeadResearchRequestQuota,
+  failLeadResearchRequestClaim,
+  markLeadResearchRequestProviderOutcomeUnknown,
+  markLeadResearchRequestProviderSubmitting,
+  releaseLeadResearchRequestClaim,
+  updateLeadResearchJobStatus,
+  type LeadResearchRequestJob,
+} from '@/lib/server/lead-research-jobs';
+import {
+  buildTerminalLeadResearchReport,
+  getLeadResearchProviderStatus,
+  storeLeadResearchReport,
+} from '@/lib/server/lead-research-reports';
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
 
-function hasN8nResearchWebhook() {
-  return Boolean(
-    String(process.env.N8N_RESEARCH_WEBHOOK_URL || '').trim() ||
-    String(process.env.N8N_WEBHOOK_URL || '').trim()
-  );
-}
+const DEFAULT_LEAD_RESEARCH_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-research';
 
-async function resolveUserId(req: NextRequest) {
-  const userIdFromHeader = req.headers.get('x-user-id')?.trim() || '';
-  if (userIdFromHeader) {
-    if (!isTrustedInternalRequest(req)) {
-      return { error: NextResponse.json({ error: 'UNAUTHORIZED_INTERNAL_REQUEST' }, { status: 401 }) };
-    }
-    return { userId: userIdFromHeader };
-  }
-
-  const supabase = createRouteHandlerClient({ cookies: (() => req.cookies) as any });
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.id) {
-    return { error: NextResponse.json({ error: 'UNAUTHORIZED', message: 'User must be logged in' }, { status: 401 }) };
-  }
-
-  return { userId: user.id };
-}
-
-function buildInternalN8nUrl(req: NextRequest) {
-  const candidates = [
-    process.env.CANONICAL_APP_URL,
-    process.env.NEXT_PUBLIC_APP_URL,
-    process.env.NEXT_PUBLIC_BASE_URL,
-    (() => {
-      const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || '';
-      const proto = req.headers.get('x-forwarded-proto') || 'https';
-      return host ? `${proto}://${host}` : '';
-    })(),
-    req.url,
-  ];
-
-  for (const candidate of candidates) {
-    const trimmed = String(candidate || '').trim();
-    if (!trimmed) continue;
-    try {
-      return new URL('/api/research/n8n', trimmed);
-    } catch {
-      continue;
-    }
-  }
-
-  return new URL('/api/research/n8n', req.url);
-}
-
-function buildLeadRef(body: any) {
+function getLeadResearchBaseUrl() {
   return String(
-    body?.lead_ref ||
-    body?.id ||
-    body?.email ||
-    body?.linkedinUrl ||
-    body?.fullName ||
-    body?.lead?.id ||
-    body?.lead?.email ||
-    body?.lead?.linkedin_url ||
-    `${body?.lead?.full_name || ''}|${body?.company?.name || body?.company?.domain || ''}`
+    process.env.ANTONIA_LEAD_RESEARCH_URL ||
+    process.env.LEAD_RESEARCH_URL ||
+    DEFAULT_LEAD_RESEARCH_URL,
   ).trim();
 }
 
-function mapSource(source: any) {
-  const url = String(source?.url || '').trim();
-  if (!url) return null;
+function buildLeadResearchUrl(reportId?: string) {
+  const base = getLeadResearchBaseUrl();
+  if (!base) return '';
+
+  try {
+    const url = new URL(base);
+    if (reportId) {
+      const cleanPath = url.pathname.replace(/\/$/, '');
+      url.pathname = `${cleanPath}/${encodeURIComponent(reportId)}`;
+      url.search = '';
+    }
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
+async function resolveAccess(req: NextRequest) {
+  const supabase = createRouteHandlerClient({ cookies: (() => req.cookies) as any });
+  const { data: { user } } = await supabase.auth.getUser();
+  const trustedInternal = isTrustedInternalRequest(req);
+  const access = await deriveLeadResearchAccess({
+    sessionUserId: user?.id,
+    trustedInternal,
+    internalUserId: req.headers.get('x-user-id'),
+    internalOrganizationId: req.headers.get('x-organization-id'),
+  });
+  if (!access) {
+    return { error: NextResponse.json({ error: 'UNAUTHORIZED', message: 'User must be logged in' }, { status: 401 }) };
+  }
+
+  return { access };
+}
+
+function parseJson(text: string) {
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text || 'INVALID_JSON_RESPONSE' };
+  }
+}
+
+function buildLeadRef(body: any) {
+  return getLeadResearchIdentity(body).leadRef;
+}
+
+function getLeadIdentity(body: any) {
+  return getLeadResearchIdentity(body);
+}
+
+function getLeadResearchRequestIdentity(req: NextRequest, body: any) {
+  return String(
+    req.headers.get('idempotency-key') ||
+    body?.idempotency_key ||
+    body?.idempotencyKey ||
+    body?.job_identity ||
+    body?.jobIdentity ||
+    ''
+  ).trim();
+}
+
+function reusableLeadResearchJobResponse(job: LeadResearchRequestJob) {
+  const resultPayload = job.resultPayload || {};
+  const recordedStatus = String(
+    resultPayload.provider_status || job.requestPayload.provider_status || job.status || 'queued',
+  ).trim().toLowerCase();
+  const recordedStatusIsActive = ['queued', 'running', 'in_progress', 'pending', 'processing'].includes(recordedStatus);
+  const status = job.requestClaimState === 'submitted'
+    && ['queued', 'running'].includes(job.status)
+    && !recordedStatusIsActive
+    ? 'in_progress'
+    : recordedStatus;
+  const payload = {
+    ...resultPayload,
+    ...(job.providerReportId ? { report_id: job.providerReportId } : {}),
+    status: job.requestClaimState === 'provider_unknown' ? 'unknown' : status,
+    ...(job.researchSnapshotId ? { research_snapshot_id: job.researchSnapshotId } : {}),
+    reused: true,
+  };
+
+  if (job.requestClaimState === 'provider_unknown') return { payload, status: 409 };
+  if (job.requestClaimState === 'provider_failed') return { payload, status: 502 };
+  if (['pre_provider', 'provider_submitting'].includes(job.requestClaimState)) {
+    return { payload: { ...payload, status: job.requestClaimState === 'pre_provider' ? 'queued' : 'in_progress' }, status: 202 };
+  }
   return {
-    title: String(source?.title || source?.name || '').trim() || undefined,
-    url,
+    payload,
+    status: ['queued', 'running', 'in_progress', 'pending', 'processing'].includes(status) ? 202 : 200,
   };
 }
 
-function buildEmptyCross(body: any) {
-  return {
-    company: {
-      name: String(body?.company?.name || 'Empresa').trim() || 'Empresa',
-      domain: String(body?.company?.domain || '').trim() || undefined,
-      linkedin: String(body?.company?.linkedin_url || '').trim() || undefined,
-      industry: String(body?.company?.industry || '').trim() || undefined,
-      country: String(body?.company?.country || '').trim() || undefined,
-      website: String(body?.company?.website_url || '').trim() || undefined,
-    },
-    overview: '',
-    pains: [],
-    opportunities: [],
-    risks: [],
-    valueProps: [],
-    useCases: [],
-    talkTracks: [],
-    subjectLines: [],
-    emailDraft: { subject: '', body: '' },
-    sources: [],
-  };
+function nextDayStartISOUTC() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).toISOString();
 }
 
-function normalizeN8nResearchResponse(payload: any, originalBody: any) {
-  const reports = Array.isArray(payload?.reports) ? payload.reports : [];
-  const firstReport = reports[0] || null;
-  const leadRef = buildLeadRef(originalBody);
-  const rawCross = firstReport?.cross || firstReport?.report || firstReport?.data || null;
-  const cross = rawCross && typeof rawCross === 'object'
-    ? {
-        ...buildEmptyCross(originalBody),
-        ...rawCross,
-        company: {
-          ...buildEmptyCross(originalBody).company,
-          ...(rawCross?.company || {}),
-        },
-        emailDraft: {
-          subject: String(rawCross?.emailDraft?.subject || '').trim(),
-          body: String(rawCross?.emailDraft?.body || '').trim(),
-        },
-        pains: Array.isArray(rawCross?.pains) ? rawCross.pains : [],
-        opportunities: Array.isArray(rawCross?.opportunities) ? rawCross.opportunities : [],
-        risks: Array.isArray(rawCross?.risks) ? rawCross.risks : [],
-        valueProps: Array.isArray(rawCross?.valueProps) ? rawCross.valueProps : [],
-        useCases: Array.isArray(rawCross?.useCases) ? rawCross.useCases : [],
-        talkTracks: Array.isArray(rawCross?.talkTracks) ? rawCross.talkTracks : [],
-        subjectLines: Array.isArray(rawCross?.subjectLines) ? rawCross.subjectLines : [],
-        sources: Array.isArray(rawCross?.sources) ? rawCross.sources.map(mapSource).filter(Boolean) : [],
-      }
-    : buildEmptyCross(originalBody);
-
-  const sources = Array.isArray(cross.sources) ? cross.sources : [];
-  const warnings = [
-    ...(Array.isArray(payload?.skipped) ? payload.skipped : []),
-    ...(Array.isArray(payload?.warnings) ? payload.warnings : []),
-    ...(payload?.error ? [String(payload.error)] : []),
-  ].filter(Boolean);
-
-  const hasMeaningfulContent = Boolean(
-    cross.overview ||
-    cross.pains.length ||
-    cross.opportunities.length ||
-    cross.talkTracks.length ||
-    sources.length
-  );
-
-  return {
-    report_id: String(firstReport?.id || `${leadRef || 'lead'}:${Date.now()}`),
-    lead_ref: leadRef || null,
-    status: hasMeaningfulContent ? 'completed' : 'insufficient_data',
-    provider: 'n8n',
-    generated_at: String(firstReport?.createdAt || new Date().toISOString()),
-    cache_hit: false,
-    warnings,
-    company: {
-      name: String(firstReport?.company?.name || cross.company.name || originalBody?.company?.name || 'Empresa'),
-      domain: String(firstReport?.company?.domain || cross.company.domain || originalBody?.company?.domain || '').trim() || undefined,
-      website_url: String(cross.company.website || originalBody?.company?.website_url || '').trim() || undefined,
-      linkedin_url: String(cross.company.linkedin || originalBody?.company?.linkedin_url || '').trim() || undefined,
-      industry: String(cross.company.industry || originalBody?.company?.industry || '').trim() || undefined,
-      country: String(cross.company.country || originalBody?.company?.country || '').trim() || undefined,
-      size: originalBody?.company?.size,
-    },
-    website_summary: {
-      overview: cross.overview || null,
-      services: Array.isArray(cross.useCases) ? cross.useCases : [],
-      sources,
-    },
-    signals: [],
-    existing_compat: {
-      cross,
-    },
-    sources,
-    diagnostics: {
-      provider: 'n8n',
-      report_count: reports.length,
-    },
-    raw: payload,
-  };
+async function releasePreProviderClaim(input: Parameters<typeof releaseLeadResearchRequestClaim>[0]) {
+  try {
+    return await releaseLeadResearchRequestClaim(input);
+  } catch (error) {
+    console.error('[lead-research] failed to release pre-provider claim:', error);
+    return false;
+  }
 }
 
-function buildLegacyN8nPayload(body: any, userId: string) {
-  const lead = body?.lead || {};
-  const company = body?.company || {};
-  const seller = body?.seller_context || {};
-  const userContext = body?.user_context || body?.userContext || {};
-  const leadRef = buildLeadRef(body);
+async function persistTerminalResearchReport(access: LeadResearchAccessContext, body: any, payload: any) {
+  const terminal = buildTerminalLeadResearchReport(payload, buildLeadRef(body));
+  if (!terminal) return null;
 
-  return {
-    companies: [
-      {
-        leadRef,
-        targetCompany: {
-          name: company?.name || body?.companyName || null,
-          domain: company?.domain || body?.companyDomain || null,
-          linkedin: company?.linkedin_url || company?.linkedin || null,
-          country: company?.country || null,
-          industry: company?.industry || null,
-          website: company?.website_url || company?.website || null,
-        },
-        lead: {
-          id: lead?.id || null,
-          fullName: lead?.full_name || lead?.fullName || null,
-          title: lead?.title || null,
-          email: lead?.email || null,
-          linkedinUrl: lead?.linkedin_url || lead?.linkedinUrl || null,
-        },
-        meta: {
-          leadRef,
-        },
-      },
-    ],
-    userCompanyProfile: {
-      name: seller?.company_name || 'Mi Empresa',
-      sector: seller?.sector || null,
-      description: seller?.description || null,
-      services: Array.isArray(seller?.services) ? seller.services : [],
-      valueProposition: seller?.value_proposition || seller?.valueProposition || null,
-      website: seller?.company_domain || null,
-    },
-    id: lead?.id || null,
-    fullName: lead?.full_name || lead?.fullName || null,
-    title: lead?.title || null,
-    email: lead?.email || null,
-    linkedinUrl: lead?.linkedin_url || lead?.linkedinUrl || null,
-    companyName: company?.name || body?.companyName || null,
-    companyDomain: company?.domain || body?.companyDomain || null,
-    userContext: {
-      id: userContext?.id || userId,
-      name: userContext?.name || null,
-      jobTitle: userContext?.job_title || userContext?.jobTitle || null,
-      company: {
-        name: seller?.company_name || null,
-        domain: seller?.company_domain || null,
-      },
-    },
-  };
+  try {
+    return await storeLeadResearchReport({
+      userId: access.userId,
+      organizationId: access.organizationId,
+      lead: {
+        id: body?.lead?.id || body?.id || null,
+        leadId: body?.lead?.id || body?.id || null,
+        name: body?.lead?.full_name || body?.lead?.fullName || body?.fullName || null,
+        email: body?.lead?.email || body?.email || null,
+        company: body?.company?.name || body?.companyName || null,
+        companyDomain: body?.company?.domain || body?.companyDomain || null,
+      } as any,
+      report: terminal.report,
+    });
+  } catch (cacheError) {
+    console.warn('[lead-research] cache store failed:', cacheError);
+    return false;
+  }
+}
+
+function withResearchSnapshotId(payload: any, researchSnapshotId: string | null) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+  const next = { ...payload };
+  delete next.research_snapshot_id;
+  if (next.report && typeof next.report === 'object' && !Array.isArray(next.report)) {
+    next.report = { ...next.report };
+    delete next.report.research_snapshot_id;
+    if (researchSnapshotId) next.report.research_snapshot_id = researchSnapshotId;
+  }
+  if (researchSnapshotId) next.research_snapshot_id = researchSnapshotId;
+  return next;
 }
 
 export async function GET() {
+  const endpoint = buildLeadResearchUrl();
   return NextResponse.json(
     {
       ok: true,
-      endpoint: '/api/research/n8n',
-      provider: 'n8n',
-      hasUrl: hasN8nResearchWebhook(),
+      endpoint: endpoint || null,
+      provider: 'lead-research',
+      hasUrl: Boolean(endpoint),
     },
     { status: 200 },
   );
@@ -256,7 +200,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const ctx = await resolveUserId(req);
+    const ctx = await resolveAccess(req);
     if ('error' in ctx) return ctx.error;
 
     let body: any;
@@ -266,77 +210,283 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'BAD_JSON' }, { status: 400 });
     }
 
-    const outgoing = buildLegacyN8nPayload({
-      ...body,
-      user_id: body?.user_id || ctx.userId,
-    }, ctx.userId);
+    const sourceBody = body && typeof body === 'object' ? body : {};
+    const outgoing = applyLeadResearchAccessToPayload(sourceBody, ctx.access);
+    if (!buildLeadRef(outgoing)) {
+      return NextResponse.json({ error: 'LEAD_RESEARCH_LEAD_REF_REQUIRED' }, { status: 400 });
+    }
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    };
-    const cookie = req.headers.get('cookie');
-    if (cookie) headers.cookie = cookie;
-    headers['x-user-id'] = ctx.userId;
-    const internalSecret = req.headers.get('x-internal-api-secret') || String(process.env.INTERNAL_API_SECRET || '').trim();
-    if (internalSecret) headers['x-internal-api-secret'] = internalSecret;
-
-    const res = await fetch(buildInternalN8nUrl(req), {
-      method: 'POST',
-      headers,
-      cache: 'no-store',
-      body: JSON.stringify(outgoing),
+    const clientRequestIdentity = getLeadResearchRequestIdentity(req, outgoing);
+    if (clientRequestIdentity.length > 200) {
+      return NextResponse.json({ error: 'LEAD_RESEARCH_REQUEST_IDENTITY_INVALID' }, { status: 400 });
+    }
+    const requestIdentity = clientRequestIdentity || `generated:${crypto.randomUUID()}`;
+    const leadIdentity = getLeadIdentity(outgoing);
+    const auditResearch = async (
+      eventType: string,
+      input: {
+        status?: string;
+        outcome?: string;
+        severity?: string;
+        providerReportId?: string | null;
+        errorCode?: string | null;
+        metrics?: Record<string, unknown>;
+        payload?: Record<string, unknown>;
+      } = {},
+    ) => safeAppendAntoniaEvent({
+      eventType,
+      organizationId: ctx.access.organizationId,
+      actorId: ctx.access.userId,
+      actorType: isTrustedInternalRequest(req) ? 'agent' : 'user',
+      entityType: 'research_job',
+      entityId: input.providerReportId || requestIdentity,
+      researchJobId: input.providerReportId || requestIdentity,
+      sourceSystem: 'lead-research',
+      sourceRoute: '/api/lead-research',
+      provider: 'lead-research',
+      requestId: requestIdentity,
+      correlationId: requestIdentity,
+      operationId: requestIdentity,
+      idempotencyKey: requestIdentity,
+      status: input.status,
+      outcome: input.outcome,
+      severity: input.severity,
+      errorCode: input.errorCode,
+      metrics: input.metrics || {},
+      payload: {
+        hasLeadId: Boolean(leadIdentity.leadId),
+        hasEmail: Boolean(leadIdentity.email),
+        hasCompanyDomain: Boolean(leadIdentity.companyDomain),
+        ...(input.payload || {}),
+      },
     });
 
-    const text = await res.text();
-    let payload: any = null;
+    await auditResearch('research.requested', {
+      status: 'started',
+      outcome: 'accepted',
+      metrics: { idempotencyProvided: Boolean(clientRequestIdentity) },
+    });
+    const claim = await claimLeadResearchRequest({
+      ...ctx.access,
+      ...leadIdentity,
+      requestIdempotencyKey: requestIdentity,
+      requestPayload: outgoing,
+    });
+    if (!claim.claimed) {
+      await auditResearch('research.replayed', {
+        status: claim.job.status,
+        outcome: 'idempotent_replay',
+        severity: 'info',
+        providerReportId: claim.job.providerReportId,
+        metrics: { requestClaimState: claim.job.requestClaimState },
+      });
+      const reusable = reusableLeadResearchJobResponse(claim.job);
+      return NextResponse.json(reusable.payload, {
+        status: reusable.status,
+        headers: { 'Cache-Control': 'no-store' },
+      });
+    }
+    const claimToken = claim.claimToken!;
+    const ownedClaim = {
+      ...ctx.access,
+      jobId: claim.job.id,
+      claimToken,
+    };
+
+    const endpoint = buildLeadResearchUrl();
+    if (!endpoint) {
+      await releasePreProviderClaim({
+        ...ownedClaim,
+        errorCode: 'lead_research_url_missing',
+        errorMessage: 'Lead research provider URL is missing.',
+      });
+      await auditResearch('research.failed', {
+        status: 'failed',
+        outcome: 'provider_url_missing',
+        severity: 'error',
+        errorCode: 'lead_research_url_missing',
+      });
+      return NextResponse.json({ error: 'LEAD_RESEARCH_URL_MISSING' }, { status: 500 });
+    }
+
+    let quota: Awaited<ReturnType<typeof consumeLeadResearchRequestQuota>>;
     try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = { error: text || 'INVALID_N8N_RESPONSE' };
+      const limits = await getEffectiveDailyQuotaLimits({
+        userId: ctx.access.userId,
+        organizationId: ctx.access.organizationId || undefined,
+      });
+      quota = await consumeLeadResearchRequestQuota({
+        ...ownedClaim,
+        limit: limits.research,
+      });
+    } catch (error) {
+      await releasePreProviderClaim({
+        ...ownedClaim,
+        errorCode: 'research_quota_unavailable',
+        errorMessage: 'Research quota could not be reserved before provider submission.',
+      });
+      throw error;
+    }
+    if (!quota.allowed) {
+      await releasePreProviderClaim({
+        ...ownedClaim,
+        errorCode: 'daily_research_quota_exceeded',
+        errorMessage: 'Daily research quota exceeded.',
+      });
+      await auditResearch('research.failed', {
+        status: 'denied',
+        outcome: 'quota_denied',
+        severity: 'warning',
+        errorCode: 'daily_research_quota_exceeded',
+        metrics: { count: quota.count, limit: quota.limit },
+      });
+      return NextResponse.json({
+        error: 'DAILY_RESEARCH_QUOTA_EXCEEDED',
+        count: quota.count,
+        limit: quota.limit,
+        retryAt: nextDayStartISOUTC(),
+      }, {
+        status: 429,
+        headers: { 'Cache-Control': 'no-store' },
+      });
+    }
+
+    try {
+      await markLeadResearchRequestProviderSubmitting(ownedClaim);
+      await auditResearch('research.provider_submitting', {
+        status: 'submitting',
+        outcome: 'claim_marked',
+        metrics: { quotaCount: quota.count, quotaLimit: quota.limit },
+      });
+    } catch (error) {
+      await releasePreProviderClaim({
+        ...ownedClaim,
+        errorCode: 'provider_submission_not_started',
+        errorMessage: 'Provider submission did not start.',
+      });
+      throw error;
+    }
+
+    let res: Response;
+    let payload: any;
+    try {
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'Idempotency-Key': requestIdentity,
+        },
+        cache: 'no-store',
+        body: JSON.stringify(outgoing),
+      });
+      payload = parseJson(await res.text());
+    } catch (error: any) {
+      try {
+        await markLeadResearchRequestProviderOutcomeUnknown({
+          ...ownedClaim,
+          errorCode: 'provider_outcome_unknown',
+          errorMessage: error?.message || 'The provider outcome is unknown and cannot be retried safely.',
+        });
+      } catch (persistError) {
+        console.error('[lead-research] failed to persist unknown provider outcome:', persistError);
+      }
+      await auditResearch('research.failed', {
+        status: 'unknown',
+        outcome: 'provider_outcome_unknown',
+        severity: 'error',
+        errorCode: 'provider_outcome_unknown',
+      });
+      return NextResponse.json({
+        error: 'LEAD_RESEARCH_PROVIDER_OUTCOME_UNKNOWN',
+        message: 'The provider outcome is unknown. This request will not be submitted again automatically.',
+      }, { status: 502, headers: { 'Cache-Control': 'no-store' } });
     }
 
     if (!res.ok) {
+      const errorMessage = String(payload?.message || payload?.error || `Provider returned HTTP ${res.status}`);
+      await failLeadResearchRequestClaim({
+        ...ownedClaim,
+        errorCode: `provider_http_${res.status}`,
+        errorMessage,
+        resultPayload: {
+          ...(payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {}),
+          provider_http_status: res.status,
+        },
+      });
+      await auditResearch('research.failed', {
+        status: 'failed',
+        outcome: 'provider_http_error',
+        severity: 'error',
+        errorCode: `provider_http_${res.status}`,
+        metrics: { providerHttpStatus: res.status },
+      });
       return NextResponse.json(payload, {
         status: res.status,
         headers: { 'Cache-Control': 'no-store' },
       });
     }
 
-    const normalized = normalizeN8nResearchResponse(payload, body);
-
-    try {
-      const { data: member } = await createRouteHandlerClient({ cookies: (() => req.cookies) as any })
-        .from('organization_members')
-        .select('organization_id')
-        .eq('user_id', ctx.userId)
-        .limit(1)
-        .maybeSingle();
-
-      const report = adaptLeadResearchResponseToReport(normalized, normalized.lead_ref || buildLeadRef(body));
-      await storeLeadResearchReport({
-        userId: ctx.userId,
-        organizationId: body?.organization_id || member?.organization_id || null,
-        lead: {
-          id: body?.lead?.id || body?.id || null,
-          leadId: body?.lead?.id || body?.id || null,
-          name: body?.lead?.full_name || body?.lead?.fullName || body?.fullName || null,
-          email: body?.lead?.email || body?.email || null,
-          company: body?.company?.name || body?.companyName || null,
-          companyDomain: body?.company?.domain || body?.companyDomain || null,
-        } as any,
-        report,
+    const normalized = unwrapLeadResearchResponse(payload);
+    const providerReportId = String(normalized?.report_id || '').trim();
+    const status = getLeadResearchProviderStatus(normalized);
+    if (!providerReportId) {
+      await markLeadResearchRequestProviderOutcomeUnknown({
+        ...ownedClaim,
+        errorCode: 'invalid_provider_response',
+        errorMessage: 'Provider accepted the request without returning a report ID.',
       });
-    } catch (cacheError) {
-      console.warn('[lead-research] cache store failed:', cacheError);
+      await auditResearch('research.failed', {
+        status: 'unknown',
+        outcome: 'invalid_provider_response',
+        severity: 'error',
+        errorCode: 'invalid_provider_response',
+      });
+      return NextResponse.json({
+        error: 'LEAD_RESEARCH_REPORT_ID_MISSING',
+        message: 'Provider accepted the request without returning a report ID.',
+      }, { status: 502, headers: { 'Cache-Control': 'no-store' } });
     }
 
-    return NextResponse.json(normalized, {
-      status: 200,
+    await completeLeadResearchRequestClaim({
+      ...ownedClaim,
+      ...leadIdentity,
+      providerReportId,
+      status,
+      requestPayload: outgoing,
+    });
+
+    const persisted = await persistTerminalResearchReport(ctx.access, outgoing, payload);
+    if (persisted === false) {
+      throw new Error('LEAD_RESEARCH_REPORT_PERSIST_FAILED');
+    }
+    let researchSnapshotId: string | null = null;
+    if (!['queued', 'running', 'in_progress', 'pending', 'processing'].includes(status)) {
+      const terminal = buildTerminalLeadResearchReport(payload, buildLeadRef(outgoing));
+      researchSnapshotId = await updateLeadResearchJobStatus(providerReportId, ctx.access, status, terminal?.report);
+    }
+
+    await auditResearch(
+      ['queued', 'running', 'in_progress', 'pending', 'processing'].includes(status)
+        ? 'research.provider_accepted'
+        : 'research.completed',
+      {
+        status,
+        outcome: 'provider_accepted',
+        providerReportId,
+        metrics: {
+          providerHttpStatus: res.status,
+          hasResearchSnapshot: Boolean(researchSnapshotId),
+        },
+      },
+    );
+
+    return NextResponse.json(withResearchSnapshotId(payload, researchSnapshotId), {
+      status: res.status,
       headers: { 'Cache-Control': 'no-store' },
     });
   } catch (error: any) {
-    console.error('[lead-research] n8n proxy error:', error);
+    console.error('[lead-research] proxy error:', error);
     return NextResponse.json({ error: 'LEAD_RESEARCH_PROXY_ERROR', message: error?.message || 'Unknown proxy error' }, { status: 500 });
   }
 }

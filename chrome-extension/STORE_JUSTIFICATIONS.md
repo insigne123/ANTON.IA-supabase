@@ -4,28 +4,19 @@ Copia y pega estas justificaciones en la pestaña "Prácticas de privacidad" (Pr
 
 ## 1. Justificación de Permisos (Permissions)
 
-### **activeTab**
-Permite que la extensión interactúe con la página actual (LinkedIn) solo cuando la automatización es activada explícitamente por el usuario desde la aplicación principal, garantizando que no se monitoree la actividad general de navegación.
-
-### **scripting**
-Es necesario para inyectar el script de contenido (`content.js`) que realiza la tarea de automatización solicitada por el usuario: escribir el borrador del mensaje en el chat de LinkedIn.
-
-### **storage**
-Se utiliza estrictamente para almacenar configuraciones locales del usuario y el estado temporal de los mensajes en cola. No se suben datos personales a servidores externos a través de este permiso.
-
 ### **tabs**
-Necesario para gestionar la navegación: detectar si ya existe una pestaña de LinkedIn abierta para reusarla (activarla) en lugar de abrir múltiples pestañas, mejorando la experiencia del usuario.
+Necesario para abrir o reutilizar el perfil público de LinkedIn seleccionado por el usuario y devolver el resultado de la acción a Anton.IA.
 
 ### **Host Permissions (Permisos de Host)**
-Necesario para `https://www.linkedin.com/*` donde se ejecuta la acción de mensajería, y para comunicarse con la aplicación web de origen (`localhost` o dominio de Anton.IA) mediante `externally_connectable` para recibir las instrucciones de envío.
+Necesario para `https://www.linkedin.com/*` donde se ejecuta el mensaje directo solicitado, y para comunicarse con la aplicación web de Anton.IA que origina la acción y recibe su confirmación.
 
 ---
 
 ## 2. Uso de Datos (Data Usage)
 
-Debes marcar las casillas correspondientes. Generalmente:
-*   **¿La extensión recolecta datos del usuario?**: NO (si solo es local y no tienes analítica propia en la extensión).
-*   Si te obliga a marcar algo por usar `storage`, marca que se usa para "Funcionalidad de la aplicación" (App Functionality).
+La extensión maneja la URL de perfil de LinkedIn seleccionada, el texto de mensaje aprobado por el usuario y el estado visible necesario para confirmar el mensaje saliente. Declara las categorías más cercanas a **Website content** y **Personal communications** con el único propósito **App functionality**.
+
+No vende datos, no los usa para publicidad o solvencia crediticia, no usa código remoto y no monitorea conversaciones en segundo plano.
 
 ## 3. Código Remoto (Remote Code)
 La extensión **NO** utiliza código remoto (todo está empaquetado en el ZIP). Debes certificar que no usas código remoto (fetch de JS externo).

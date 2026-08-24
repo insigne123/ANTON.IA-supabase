@@ -24,20 +24,19 @@ Esta carpeta define como mejorar interfaces en este proyecto sin caer en UI gene
 - `https://screensdesign.com/` para flujos de producto y experiencia de app
 - `https://toolfolio.io/` para descubrir mas recursos, tooling y librerias
 
-## Skills recomendadas
+## Skills instaladas en este repo
 
-- `apple-hig-designer`
-- `hig-foundations`
-- `accessibility-tester`
-- `frontend-design`
-- `ui-ux-pro-max`
-- `web-design-guidelines`
-- `vercel-react-best-practices`
+- `premium-layout-composer`
+- `form-ux-patterns`
+- `empty-states-microcopy`
+- `component-api-consistency`
+- `wcag-remediator`
 
-Tambien quedaron instaladas fuentes externas para ampliar criterio:
+## Referencias externas validadas
 
-- `anthropics/skills`
-- `vercel-labs/agent-skills`
+- `uipro-cli`: CLI comunitaria que instala UI/UX Pro Max para OpenCode y otros asistentes
+- `ui-skills`: pack comunitario con baseline UI, accesibilidad y motion
+- `onemore-design`: pack comunitario centrado en patrones HIG
 
 ## Regla principal
 

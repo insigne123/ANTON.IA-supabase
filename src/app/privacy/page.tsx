@@ -2,39 +2,39 @@ import Link from 'next/link';
 import { ArrowLeft, Shield } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { legalConfig } from '@/lib/legal-config';
 
 export default function PrivacyPolicyPage() {
   const contactEmail = legalConfig.privacyContactEmail;
 
   return (
-    <div className="min-h-screen bg-background px-4 py-10 md:px-10">
+    <main className="min-h-screen bg-background px-4 py-10 md:px-10">
       <div className="mx-auto max-w-4xl">
         <div className="mb-6 flex flex-wrap items-center gap-3">
-          <Link href="/login">
-            <Button variant="ghost" className="gap-2">
+          <Button asChild variant="ghost" className="gap-2">
+            <Link href="/login">
               <ArrowLeft className="h-4 w-4" />
               Volver a acceso
-            </Button>
-          </Link>
-          <Link href="/privacy/request">
-            <Button variant="secondary" className="gap-2">
+            </Link>
+          </Button>
+          <Button asChild variant="secondary" className="gap-2">
+            <Link href="/privacy/request">
               <Shield className="h-4 w-4" />
               Solicitar derechos
-            </Button>
-          </Link>
-          <Link href="/privacy/extension">
-            <Button variant="outline" className="gap-2">
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="gap-2">
+            <Link href="/privacy/extension">
               <Shield className="h-4 w-4" />
               Ver politica de la extension
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-3xl font-bold">Politica de Privacidad - Plataforma {legalConfig.productName}</CardTitle>
+            <h1 className="text-3xl font-bold">Politica de Privacidad - Plataforma {legalConfig.productName}</h1>
             <p className="text-muted-foreground">Ultima actualizacion: {legalConfig.lastUpdatedLabel}</p>
           </CardHeader>
           <CardContent className="prose max-w-none space-y-5 dark:prose-invert">
@@ -73,7 +73,7 @@ export default function PrivacyPolicyPage() {
               <h2 className="text-xl font-semibold">4. De donde pueden venir los datos</h2>
               <ul className="list-disc pl-5">
                 <li>Directamente del usuario o de su organizacion al usar la plataforma.</li>
-                <li>De integraciones autorizadas por el propio usuario, como Google o Microsoft.</li>
+                <li>De integraciones autorizadas por el propio usuario.</li>
                 <li>De fuentes publicas o de proveedores de datos y enriquecimiento activados por la organizacion usuaria.</li>
                 <li>De respuestas e interacciones generadas dentro de las campanas o flujos de contacto.</li>
               </ul>
@@ -83,7 +83,7 @@ export default function PrivacyPolicyPage() {
               <h2 className="text-xl font-semibold">5. Con quien podemos compartir datos</h2>
               <p>
                 Podemos trabajar con proveedores de infraestructura, autenticacion, correo, IA, analitica, busqueda o enriquecimiento de datos.
-                Esto puede incluir servicios como Supabase, Google, Microsoft, OpenAI, n8n y otros proveedores habilitados por la organizacion usuaria.
+                Esto puede incluir proveedores de infraestructura, autenticacion, correo, IA, analitica, busqueda o enriquecimiento habilitados por la organizacion usuaria.
                 Compartimos datos solo cuando es necesario para operar la funcionalidad solicitada, mantener la seguridad del servicio o cumplir obligaciones legales.
               </p>
             </section>
@@ -157,6 +157,6 @@ export default function PrivacyPolicyPage() {
           &copy; {new Date().getFullYear()} {legalConfig.productName}. Todos los derechos reservados.
         </div>
       </div>
-    </div>
+    </main>
   );
 }

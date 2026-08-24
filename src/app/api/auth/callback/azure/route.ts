@@ -3,24 +3,46 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { tokenService } from '@/lib/services/token-service';
 
+function getBaseUrl(req: NextRequest) {
+    const forwardedHost = req.headers.get('x-forwarded-host');
+    const forwardedProto = req.headers.get('x-forwarded-proto');
+
+    if (forwardedHost && forwardedProto) {
+        return `${forwardedProto}://${forwardedHost}`;
+    }
+
+    return req.nextUrl.origin || process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+}
+
+function buildOutlookRedirect(baseUrl: string, params: Record<string, string>) {
+    const url = new URL('/outlook', baseUrl);
+    Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+    return NextResponse.redirect(url);
+}
+
 export async function GET(req: NextRequest) {
     const searchParams = req.nextUrl.searchParams;
     const code = searchParams.get('code');
+    const baseUrl = getBaseUrl(req);
 
     const error = searchParams.get('error');
     const errorDescription = searchParams.get('error_description');
 
     if (error) {
-        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=${error}&details=${errorDescription}`);
+        return buildOutlookRedirect(baseUrl, {
+            error,
+            ...(errorDescription ? { details: errorDescription } : {}),
+        });
     }
 
     if (!code) {
-        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=no_code`);
+        return buildOutlookRedirect(baseUrl, { error: 'no_code' });
     }
 
     try {
         const supabase = createRouteHandlerClient({ cookies });
         const tenantId = process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'common';
+        const redirectUri = `${baseUrl}/api/auth/callback/azure`;
 
         const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
             method: 'POST',
@@ -29,9 +51,9 @@ export async function GET(req: NextRequest) {
                 code,
                 client_id: process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID!,
                 client_secret: process.env.AZURE_AD_CLIENT_SECRET!,
-                redirect_uri: `${process.env.NEXT_PUBLIC_BASE_URL}/api/auth/callback/azure`,
+                redirect_uri: redirectUri,
                 grant_type: 'authorization_code',
-                scope: 'offline_access User.Read Mail.Send',
+                scope: 'offline_access User.Read Mail.Send Mail.Read',
             }),
         });
 
@@ -39,23 +61,28 @@ export async function GET(req: NextRequest) {
 
         if (!tokenRes.ok) {
             console.error('Azure token exchange failed:', tokens);
-            return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=token_exchange_failed&details=${tokens.error || 'unknown'}`);
+            return buildOutlookRedirect(baseUrl, {
+                error: 'token_exchange_failed',
+                details: String(tokens.error || 'unknown'),
+            });
         }
 
         if (!tokens.refresh_token) {
             console.warn('No refresh token returned from Azure');
-            return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=no_refresh_token`);
+            return buildOutlookRedirect(baseUrl, { error: 'no_refresh_token' });
         }
 
         const saveErr = await tokenService.saveToken(supabase, 'outlook', tokens.refresh_token);
         if (saveErr) {
-            return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=db_save_failed`);
+            return buildOutlookRedirect(baseUrl, {
+                error: 'db_save_failed',
+                details: String((saveErr as any)?.message || 'no_session'),
+            });
         }
 
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-        return NextResponse.redirect(`${baseUrl}/outlook?connected=true`);
+        return buildOutlookRedirect(baseUrl, { connected: 'true' });
     } catch (error) {
         console.error('Error exchanging Azure code:', error);
-        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/outlook?error=exchange_failed`);
+        return buildOutlookRedirect(baseUrl, { error: 'exchange_failed' });
     }
 }

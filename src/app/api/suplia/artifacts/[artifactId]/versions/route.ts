@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
+import { handleAuthError, requireSupliaAuth } from '@/lib/server/auth-utils';
 import { listSupliaArtifactVersions, restoreSupliaArtifactVersion } from '@/lib/server/suplia-artifacts';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ artifactId: string }> }) {
   try {
-    const auth = await requireAuth();
+    const auth = await requireSupliaAuth();
     const { artifactId } = await params;
     const versions = await listSupliaArtifactVersions(auth, artifactId);
     return NextResponse.json({ versions });
@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ art
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ artifactId: string }> }) {
   try {
-    const auth = await requireAuth();
+    const auth = await requireSupliaAuth();
     const { artifactId } = await params;
     const body = await req.json().catch(() => ({}));
     const versionId = String(body?.versionId || '').trim();

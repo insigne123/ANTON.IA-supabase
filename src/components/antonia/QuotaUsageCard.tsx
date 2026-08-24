@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { RefreshCw } from 'lucide-react';
@@ -12,6 +11,11 @@ interface QuotaData {
   investigations: { used: number; limit: number };
   contacts: { used: number; limit: number };
   date: string;
+}
+
+function formatQuotaDate(date: string) {
+  const [year, month, day] = date.split('-');
+  return year && month && day ? `${day}-${month}-${year}` : date;
 }
 
 export function QuotaUsageCard() {
@@ -57,7 +61,7 @@ export function QuotaUsageCard() {
           </span>
         </div>
         <div className="relative">
-          <Progress value={percentage} className="h-2" />
+          <Progress value={percentage} className="h-2" aria-label={`${label}: ${used} de ${limit}`} />
           <div
             className={`absolute top-0 left-0 h-2 rounded-full transition-all ${colorClass}`}
             style={{ width: `${Math.min(percentage, 100)}%` }}
@@ -91,11 +95,12 @@ export function QuotaUsageCard() {
           <div className="flex justify-between items-start">
             <CardTitle>Uso de Cuotas Diarias</CardTitle>
             <button
+              type="button"
               onClick={fetchQuota}
-              className="p-2 hover:bg-gray-100 rounded-md transition-colors"
-              title="Reintentar"
+              className="rounded-md p-2 transition-colors hover:bg-muted"
+              aria-label="Reintentar cargar cuotas"
             >
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
         </CardHeader>
@@ -115,15 +120,16 @@ export function QuotaUsageCard() {
           <div>
             <CardTitle>Uso de Cuotas Diarias</CardTitle>
             <CardDescription>
-              Se reinicia a medianoche • {new Date(quota.date).toLocaleDateString()}
+              Se reinicia a medianoche • {formatQuotaDate(quota.date)}
             </CardDescription>
           </div>
           <button
+            type="button"
             onClick={fetchQuota}
-            className="p-2 hover:bg-gray-100 rounded-md transition-colors"
-            title="Actualizar"
+            className="rounded-md p-2 transition-colors hover:bg-muted"
+            aria-label="Actualizar cuotas"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
       </CardHeader>

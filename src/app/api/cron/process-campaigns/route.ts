@@ -7,24 +7,62 @@ import { buildCampaignPersonalization } from '@/lib/server/campaign-reconnection
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { prepareOutboundEmail } from '@/lib/email-outbound';
 import { findPriorReplyMatch, hasLeadReplied } from '@/lib/contact-history-guard';
-import { buildThreadKey, deriveLifecycleState, safeInsertEmailEvent } from '@/lib/email-observability';
 import { decryptTokenRecords, encryptStoredToken } from '@/lib/server/token-crypto';
+import { syncRepliesForOrganization } from '@/lib/server/reply-sync';
+import { createLegacyReadyEmailDraftV1, createMessagingSendMetadataV1 } from '@/lib/messaging-contracts';
+import { ensureMessagingDraftV1 } from '@/lib/server/messaging-drafts';
+import { dispatchOutboundMessage, OutboundPreProviderDeferredError } from '@/lib/server/outbound-dispatch';
+import { getEffectiveDailyQuotaLimits, reserveOutboundContactQuota } from '@/lib/server/daily-quota-store';
+import { campaignDeliveryProgressByRecipient } from '@/lib/server/campaign-deliveries';
+import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
 
 export const dynamic = 'force-dynamic';
 
+type CampaignAudienceInput = {
+    campaignId: unknown;
+    campaignType?: unknown;
+    audienceKind?: unknown;
+    lead: {
+        campaign_id?: unknown;
+        data?: {
+            campaign_id?: unknown;
+            campaignId?: unknown;
+        } | null;
+    };
+};
+
+function doesLeadBelongToCampaignAudience(input: CampaignAudienceInput) {
+    const campaignId = String(input.campaignId || '').trim();
+    if (!campaignId) return false;
+
+    const campaignType = String(input.campaignType || '').trim().toLowerCase();
+    const audienceKind = String(input.audienceKind || '').trim().toLowerCase();
+    if (campaignType === 'reconnection') {
+        return audienceKind === 'reactivation';
+    }
+
+    const lineageIds = [
+        input.lead.campaign_id,
+        input.lead.data?.campaign_id,
+        input.lead.data?.campaignId,
+    ]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+
+    return lineageIds.length > 0 && lineageIds.every((lineageId) => lineageId === campaignId);
+}
+
 export async function GET(req: NextRequest) {
     try {
-        const authHeader = req.headers.get('authorization');
-        const cronSecret = String(process.env.CRON_SECRET || '').trim();
-        const providedBearer = String(authHeader || '').replace(/^Bearer\s+/i, '').trim();
-        const providedCronSecret = String(req.headers.get('x-cron-secret') || '').trim();
-
-        if (!cronSecret || (providedBearer !== cronSecret && providedCronSecret !== cronSecret)) {
+        if (!isFirebaseSchedulerRequest(req)) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
         const dryRunParam = String(req.nextUrl.searchParams.get('dryRun') || '').toLowerCase();
-        const dryRun = dryRunParam === '1' || dryRunParam === 'true' || dryRunParam === 'yes';
+        const requestedDryRun = dryRunParam === '1' || dryRunParam === 'true' || dryRunParam === 'yes';
+        // Campaign automation can prepare eligibility, never delivery. Every
+        // message must move into the reviewed draft flow before provider send.
+        const dryRun = true;
         const includeDetailsParam = String(req.nextUrl.searchParams.get('includeDetails') || '').toLowerCase();
         const includeDetails = includeDetailsParam === '1' || includeDetailsParam === 'true' || includeDetailsParam === 'yes';
 
@@ -41,16 +79,18 @@ export async function GET(req: NextRequest) {
         });
 
         // 2. Get all users with tokens
-        const { data: rawTokens } = await supabase.from('provider_tokens').select('*');
-        const tokens = decryptTokenRecords(rawTokens);
-        if (!tokens || tokens.length === 0) {
-            return NextResponse.json({ message: 'No tokens found' });
+        const { data: tokenOwners, error: tokenOwnersError } = await supabase.from('provider_tokens').select('user_id');
+        if (tokenOwnersError) throw tokenOwnersError;
+        if (!tokenOwners || tokenOwners.length === 0) {
+            return NextResponse.json({ message: 'No tokens found' }, { headers: firebaseSchedulerResponseHeaders() });
         }
 
         const results: any[] = [];
+        const deferredCodes = new Set<string>();
         const summary = {
             sent: 0,
             failed: 0,
+            deferred: 0,
             eligibleDryRun: 0,
             blockedUnsubscribed: 0,
             blockedDomain: 0,
@@ -59,47 +99,57 @@ export async function GET(req: NextRequest) {
         const domainCache = new Map<string, Set<string>>();
 
         // 3. Process each user
-        const users = [...new Set(tokens.map(t => t.user_id))];
+        const users = [...new Set(tokenOwners.map((token) => token.user_id))];
 
         for (const userId of users) {
+            const { data: rawUserTokens, error: userTokensError } = await supabase
+                .from('provider_tokens')
+                .select('*')
+                .eq('user_id', userId);
+            if (userTokensError) throw userTokensError;
+            const tokens = decryptTokenRecords(rawUserTokens);
+
             // Get user's active campaigns
-            const { data: campaigns } = await supabase
+            const { data: campaigns, error: campaignsError } = await supabase
                 .from('campaigns')
                 .select('*')
                 .eq('user_id', userId)
                 .eq('status', 'active');
+            if (campaignsError) throw campaignsError;
 
             if (!campaigns || campaigns.length === 0) continue;
 
-            const campaignIds = campaigns.map((c: any) => c.id).filter(Boolean);
+            // Preserve the pre-send reply check. The independent replySyncTick
+            // lowers sync latency; this guard prevents a stale reply from being
+            // followed up when the two schedules overlap.
+            if (!dryRun) {
+                const campaignOrganizationIds = Array.from(new Set<string>(campaigns.map((campaign: any) => String(campaign.organization_id || '').trim()).filter(Boolean)));
+                for (const organizationId of campaignOrganizationIds) {
+                    await syncRepliesForOrganization(supabase, { organizationId, userId, limit: 300 }).catch((error) => {
+                        console.warn('[process-campaigns] reply sync skipped:', error?.message || error);
+                    });
+                }
+            }
+
+            const campaignIds = campaigns
+                .filter((campaign: any) => String(campaign.organization_id || '').trim())
+                .map((campaign: any) => campaign.id)
+                .filter(Boolean);
             const stepsByCampaign: Record<string, any[]> = {};
 
             if (campaignIds.length > 0) {
-                const { data: stepsRows } = await supabase
+                const { data: stepsRows, error: stepsError } = await supabase
                     .from('campaign_steps')
                     .select('*')
                     .in('campaign_id', campaignIds)
                     .order('order_index', { ascending: true });
+                if (stepsError) throw stepsError;
 
                 (stepsRows || []).forEach((s: any) => {
                     if (!stepsByCampaign[s.campaign_id]) stepsByCampaign[s.campaign_id] = [];
                     stepsByCampaign[s.campaign_id].push(s);
                 });
             }
-
-            // Get user's contacted leads
-            const { data: leads } = await supabase
-                .from('contacted_leads')
-                .select('*')
-                .eq('user_id', userId);
-
-            if (!leads || leads.length === 0) continue;
-            const priorReplyRows = leads.filter((lead: any) => hasLeadReplied({
-                repliedAt: lead.replied_at,
-                status: lead.status,
-                replyIntent: lead.reply_intent,
-                lastReplyText: lead.last_reply_text,
-            } as any));
 
             // Process campaigns
             const isWithinSmartWindow = (settings?: any) => {
@@ -128,18 +178,30 @@ export async function GET(req: NextRequest) {
             };
 
             for (const campaign of campaigns) {
+                const organizationId = String(campaign.organization_id || '').trim();
+                if (!organizationId) {
+                    results.push({
+                        campaignId: campaign.id,
+                        status: 'skipped',
+                        reason: 'missing_organization_id',
+                    });
+                    continue;
+                }
+
                 const settings = normalizeCampaignSettings(campaign.settings);
                 const steps = stepsByCampaign[campaign.id] || [];
                 const excluded: string[] = campaign.excluded_lead_ids || [];
+                // Legacy records only prevent re-sending historical rows until they are backfilled.
                 const sentRecords: Record<string, any> = { ...(campaign.sent_records || {}) };
-                let campaignDirty = false;
                 const campaignSummary = {
                     campaignId: campaign.id,
                     campaignName: campaign.name,
                     campaignType: campaign.campaign_type || (settings.audience?.kind === 'reactivation' ? 'reconnection' : 'follow_up'),
                     eligibleCount: 0,
                     sentCount: 0,
+                    replayedCount: 0,
                     failedCount: 0,
+                    deferredCount: 0,
                     blockedUnsubscribed: 0,
                     blockedDomain: 0,
                     skippedMissingToken: 0,
@@ -151,6 +213,19 @@ export async function GET(req: NextRequest) {
                 const trackLinks = trackingEnabled && (tracking?.linkTracking ?? true);
                 const trackPixel = trackingEnabled && (tracking?.pixel ?? true);
 
+                const { data: leads, error: leadsError } = await supabase
+                    .from('contacted_leads')
+                    .select('*')
+                    .eq('user_id', userId)
+                    .eq('organization_id', organizationId);
+                if (leadsError) throw leadsError;
+                const priorReplyRows = (leads || []).filter((lead: any) => hasLeadReplied({
+                    repliedAt: lead.replied_at,
+                    status: lead.status,
+                    replyIntent: lead.reply_intent,
+                    lastReplyText: lead.last_reply_text,
+                } as any));
+
                 if (!steps.length) {
                     if (!dryRun) {
                         await supabase
@@ -161,7 +236,9 @@ export async function GET(req: NextRequest) {
                                 last_run_summary: { ...campaignSummary, reason: 'missing_steps' },
                                 updated_at: new Date().toISOString(),
                             })
-                            .eq('id', campaign.id);
+                            .eq('id', campaign.id)
+                            .eq('user_id', userId)
+                            .eq('organization_id', organizationId);
                     }
                     continue;
                 }
@@ -175,10 +252,20 @@ export async function GET(req: NextRequest) {
                                 last_run_summary: { ...campaignSummary, reason: 'outside_smart_window' },
                                 updated_at: new Date().toISOString(),
                             })
-                            .eq('id', campaign.id);
+                            .eq('id', campaign.id)
+                            .eq('user_id', userId)
+                            .eq('organization_id', organizationId);
                     }
                     continue;
                 }
+
+                const { data: deliveryRows, error: deliveriesError } = await supabase
+                    .from('campaign_deliveries')
+                    .select('recipient_key, step_index, delivery_state, sent_at, completed_at')
+                    .eq('organization_id', organizationId)
+                    .eq('campaign_id', campaign.id);
+                if (deliveriesError) throw deliveriesError;
+                const deliveryProgress = campaignDeliveryProgressByRecipient(deliveryRows || []);
 
                 const getUnsubscribedSet = async (orgId?: string | null) => {
                     const key = `${orgId || 'none'}:${userId}`;
@@ -194,7 +281,8 @@ export async function GET(req: NextRequest) {
                             .select('email, user_id, organization_id')
                             .or(`user_id.eq.${userId},and(user_id.is.null,organization_id.is.null)`);
 
-                    const { data } = await query;
+                    const { data, error } = await query;
+                    if (error) throw error;
                     const set = new Set((data || []).map((r: any) => String(r.email || '').toLowerCase()));
                     unsubCache.set(key, set);
                     return set;
@@ -209,21 +297,29 @@ export async function GET(req: NextRequest) {
                         return empty;
                     }
 
-                    const { data } = await supabase
+                    const { data, error } = await supabase
                         .from('excluded_domains')
                         .select('domain')
                         .eq('organization_id', orgId);
+                    if (error) throw error;
                     const set = new Set((data || []).map((r: any) => String(r.domain || '').toLowerCase()));
                     domainCache.set(key, set);
                     return set;
                 };
 
                 // Check eligibility
-                for (const lead of leads) {
+                for (const lead of leads || []) {
                     const currentNow = new Date();
                     let audienceMatchReason: string | undefined;
                     const leadKey = String(lead.lead_id || lead.id || '').trim();
                     if (!leadKey) continue;
+
+                    if (!doesLeadBelongToCampaignAudience({
+                        campaignId: campaign.id,
+                        campaignType: campaign.campaign_type,
+                        audienceKind: settings.audience?.kind,
+                        lead,
+                    })) continue;
 
                     // Skip if excluded or replied
                     if (excluded.includes(leadKey)) continue;
@@ -235,8 +331,8 @@ export async function GET(req: NextRequest) {
 
                     const email = String(lead.email || '').trim().toLowerCase();
                     const domain = email.split('@')[1] || '';
-                    const unsubscribed = await getUnsubscribedSet(campaign.organization_id);
-                    const blockedDomains = await getBlockedDomains(campaign.organization_id);
+                    const unsubscribed = await getUnsubscribedSet(organizationId);
+                    const blockedDomains = await getBlockedDomains(organizationId);
 
                     if (email && unsubscribed.has(email)) {
                         summary.blockedUnsubscribed += 1;
@@ -250,7 +346,9 @@ export async function GET(req: NextRequest) {
                                     evaluation_status: 'do_not_contact',
                                     last_update_at: new Date().toISOString(),
                                 } as any)
-                                .eq('id', lead.id);
+                                .eq('id', lead.id)
+                                .eq('user_id', userId)
+                                .eq('organization_id', organizationId);
                         }
                         continue;
                     }
@@ -266,7 +364,9 @@ export async function GET(req: NextRequest) {
                                     campaign_followup_reason: 'domain_blocked',
                                     last_update_at: new Date().toISOString(),
                                 } as any)
-                                .eq('id', lead.id);
+                                .eq('id', lead.id)
+                                .eq('user_id', userId)
+                                .eq('organization_id', organizationId);
                         }
                         continue;
                     }
@@ -298,7 +398,16 @@ export async function GET(req: NextRequest) {
                     }
 
                     // Determine next step
-                    const record = sentRecords[leadKey];
+                    const durableRecord = deliveryProgress.get(leadKey);
+                    const legacyRecord = sentRecords[leadKey];
+                    const legacyStepIdx = Number(legacyRecord?.lastStepIdx);
+                    const record = durableRecord && (
+                        !legacyRecord
+                        || !Number.isInteger(legacyStepIdx)
+                        || durableRecord.stepIndex >= legacyStepIdx
+                    )
+                        ? { lastStepIdx: durableRecord.stepIndex, lastSentAt: durableRecord.sentAt }
+                        : legacyRecord;
                     let nextStepIdx = 0;
                     if (record) {
                         nextStepIdx = record.lastStepIdx + 1;
@@ -339,7 +448,7 @@ export async function GET(req: NextRequest) {
                         summary.eligibleDryRun += 1;
                         results.push({
                             lead: lead.email,
-                            status: 'eligible_dry_run',
+                            status: 'manual_review_required',
                             campaignId: campaign.id,
                             step: nextStepIdx,
                             provider: tokenProvider,
@@ -353,7 +462,11 @@ export async function GET(req: NextRequest) {
                         continue;
                     }
 
-                    const userToken = tokens.find(t => t.user_id === userId && t.provider === tokenProvider);
+                    const userToken = tokens.find((token: any) => {
+                        if (token.user_id !== userId || token.provider !== tokenProvider) return false;
+                        return !Object.prototype.hasOwnProperty.call(token, 'organization_id')
+                            || String(token.organization_id || '').trim() === organizationId;
+                    });
 
                     if (!userToken) {
                         console.log(`No token for user ${userId} provider ${tokenProvider}`);
@@ -377,11 +490,15 @@ export async function GET(req: NextRequest) {
                             const refreshed = await refreshMicrosoftToken(userToken.refresh_token, process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID!, process.env.AZURE_AD_CLIENT_SECRET!, process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID!);
                             accessToken = refreshed.access_token;
                             if (refreshed.refresh_token) {
-                                await supabase
+                                let tokenUpdate = supabase
                                     .from('provider_tokens')
                                     .update({ refresh_token: encryptStoredToken(refreshed.refresh_token), updated_at: new Date().toISOString() })
                                     .eq('user_id', userId)
                                     .eq('provider', 'outlook');
+                                if (Object.prototype.hasOwnProperty.call(userToken, 'organization_id')) {
+                                    tokenUpdate = tokenUpdate.eq('organization_id', organizationId);
+                                }
+                                await tokenUpdate;
                             }
                         }
                     } catch (e) {
@@ -442,7 +559,7 @@ export async function GET(req: NextRequest) {
                                 bouncedAt: lead.bounced_at,
                             } as any,
                             userId,
-                            organizationId: campaign.organization_id,
+                            organizationId,
                             matchReason: audienceMatchReason,
                             daysSinceLastContact: diffDays,
                         });
@@ -467,57 +584,95 @@ export async function GET(req: NextRequest) {
                             body += `\n<br>${trackingPixel}`;
                         }
 
-                        const unsubscribeUrl = generateUnsubscribeLink(lead.email, userId, campaign.organization_id || null);
+                        const unsubscribeUrl = generateUnsubscribeLink(lead.email, userId, organizationId);
                         const prepared = prepareOutboundEmail({ html: body, unsubscribeUrl });
                         body = prepared.html;
 
-                        let sendResult: any = null;
-                        if (tokenProvider === 'google') {
-                            sendResult = await sendGmail(accessToken, lead.email, subject, body, { textBody: prepared.text, unsubscribeUrl });
-                        } else {
-                            sendResult = await sendOutlook(accessToken, lead.email, subject, body, { textBody: prepared.text, unsubscribeUrl });
-                        }
-
-                        const threadKey = buildThreadKey({
-                            provider: tokenProvider === 'google' ? 'gmail' : 'outlook',
-                            threadId: sendResult?.threadId,
-                            conversationId: sendResult?.conversationId,
-                            internetMessageId: sendResult?.internetMessageId,
-                            messageId: sendResult?.id || sendResult?.messageId,
+                        const providerLabel = tokenProvider === 'google' ? 'gmail' : 'outlook';
+                        const requestedAt = new Date().toISOString();
+                        const idempotencyKey = `campaign:${campaign.id}:${lead.id}:step:${nextStepIdx}`;
+                        const draft = createLegacyReadyEmailDraftV1({
+                            organizationId,
+                            userId,
+                            idempotencyKey,
+                            requestedAt,
+                            leadRef: lead.lead_id || lead.id,
+                            displayName: lead.name,
+                            to: lead.email,
+                            subject,
+                            text: prepared.text,
+                            html: body,
                         });
-
-                        // Update records
-                        sentRecords[leadKey] = { lastStepIdx: nextStepIdx, lastSentAt: new Date().toISOString() };
-                        campaignDirty = true;
-
-                        // Update lead
-                        await supabase.from('contacted_leads').update({
-                            last_follow_up_at: new Date().toISOString(),
-                            last_step_idx: nextStepIdx,
-                            follow_up_count: (lead.follow_up_count || 0) + 1,
-                            thread_key: threadKey,
-                            lifecycle_state: deriveLifecycleState(lead.lifecycle_state || lead.status, 'sent'),
-                            last_event_type: 'sent',
-                            last_event_at: new Date().toISOString(),
-                        }).eq('id', lead.id);
-
-                        await safeInsertEmailEvent(supabase, {
-                            organization_id: campaign.organization_id,
-                            contacted_id: lead.id,
-                            lead_id: lead.lead_id || null,
-                            provider: tokenProvider === 'google' ? 'gmail' : 'outlook',
-                            event_type: 'sent',
-                            event_source: 'campaign_cron',
-                            event_at: new Date().toISOString(),
-                            thread_key: threadKey,
-                            message_id: sendResult?.id || sendResult?.messageId || null,
-                            internet_message_id: sendResult?.internetMessageId || null,
-                            meta: {
-                                subject,
-                                stepIndex: nextStepIdx,
-                                campaignId: campaign.id,
+                        await ensureMessagingDraftV1(draft);
+                        const messagingMetadata = createMessagingSendMetadataV1(draft, {
+                            idempotencyKey,
+                            provider: providerLabel,
+                            requestedAt,
+                        });
+                        const dispatchResult = await dispatchOutboundMessage({
+                            draft,
+                            metadata: messagingMetadata,
+                            provider: {
+                                async send({ dispatchId }) {
+                                    let quota;
+                                    try {
+                                        const quotaLimits = await getEffectiveDailyQuotaLimits({
+                                            userId,
+                                            organizationId,
+                                        });
+                                        quota = await reserveOutboundContactQuota({
+                                            dispatchId,
+                                            userId,
+                                            organizationId,
+                                            limit: quotaLimits.contact,
+                                        });
+                                    } catch (error) {
+                                        throw new OutboundPreProviderDeferredError(
+                                            'Contact quota could not be reserved. The provider was not invoked.',
+                                            { code: 'quota_reservation_unavailable', cause: error },
+                                        );
+                                    }
+                                    if (!quota.allowed) {
+                                        return {
+                                            outcome: 'deferred' as const,
+                                            code: 'daily_quota_exceeded',
+                                            message: `Daily quota exceeded for contact. Used ${quota.count}/${quota.limit}.`,
+                                        };
+                                    }
+                                    const result = tokenProvider === 'google'
+                                        ? await sendGmail(accessToken, lead.email, subject, body, { textBody: prepared.text, unsubscribeUrl, idempotencyKey })
+                                        : await sendOutlook(accessToken, lead.email, subject, body, { textBody: prepared.text, unsubscribeUrl, idempotencyKey });
+                                    const providerMessageId = String(result?.id || result?.messageId || result?.internetMessageId || '').trim();
+                                    return { outcome: 'accepted' as const, providerMessageId, response: result };
+                                },
                             },
                         });
+                        if (dispatchResult.status === 'deferred') {
+                            const deferredCode = dispatchResult.dispatch.errorCode || 'OUTBOUND_DEFERRED';
+                            deferredCodes.add(deferredCode);
+                            summary.deferred += 1;
+                            campaignSummary.deferredCount += 1;
+                            results.push({
+                                lead: lead.email,
+                                status: 'deferred',
+                                code: deferredCode,
+                                error: dispatchResult.dispatch.errorMessage,
+                                retry: dispatchResult.retry,
+                            });
+                            continue;
+                        }
+                        if (dispatchResult.status !== 'sent') {
+                            throw new Error(dispatchResult.dispatch.errorMessage || `Dispatch ${dispatchResult.status}`);
+                        }
+                        deliveryProgress.set(leadKey, {
+                            stepIndex: nextStepIdx,
+                            sentAt: dispatchResult.dispatch.completedAt || requestedAt,
+                        });
+                        if (dispatchResult.replayed) {
+                            campaignSummary.replayedCount += 1;
+                            results.push({ lead: lead.email, status: 'replayed' });
+                            continue;
+                        }
 
                         summary.sent += 1;
                         campaignSummary.sentCount += 1;
@@ -531,36 +686,50 @@ export async function GET(req: NextRequest) {
                     }
                 }
 
-                if (campaignDirty || !dryRun) {
-                    const lastRunStatus = campaignSummary.sentCount > 0 && campaignSummary.failedCount > 0
+                if (!dryRun) {
+                    const successfulCount = campaignSummary.sentCount + campaignSummary.replayedCount;
+                    const lastRunStatus = successfulCount > 0 && campaignSummary.failedCount > 0
                         ? 'partial'
-                        : campaignSummary.sentCount > 0
+                        : successfulCount > 0
                             ? 'success'
-                            : campaignSummary.failedCount > 0
-                                ? 'failed'
-                                : (campaignSummary.skippedMissingToken > 0 || campaignSummary.skippedUnsupportedProvider > 0)
+                             : campaignSummary.failedCount > 0
+                                 ? 'failed'
+                                 : campaignSummary.deferredCount > 0
+                                     ? 'skipped'
+                                 : (campaignSummary.skippedMissingToken > 0 || campaignSummary.skippedUnsupportedProvider > 0)
                                     ? 'skipped'
                                     : 'idle';
                     await supabase
                         .from('campaigns')
                         .update({
-                            sent_records: sentRecords,
                             last_run_at: dryRun ? campaign.last_run_at || null : new Date().toISOString(),
                             last_run_status: dryRun ? campaign.last_run_status || null : lastRunStatus,
                             last_run_summary: dryRun ? campaign.last_run_summary || {} : campaignSummary,
                             updated_at: new Date().toISOString(),
                         })
-                        .eq('id', campaign.id);
+                        .eq('id', campaign.id)
+                        .eq('user_id', userId)
+                        .eq('organization_id', organizationId);
                 }
             }
         }
 
+        const deferredCode = deferredCodes.size === 1
+            ? deferredCodes.values().next().value
+            : 'OUTBOUND_DEFERRED';
+        const deferredStatus = deferredCodes.size === 1 && deferredCodes.has('daily_quota_exceeded') ? 429 : 503;
         return NextResponse.json({
             dryRun,
+            requestedDryRun,
+            manualReviewRequired: true,
             processed: results.length,
             summary,
             resultCount: results.length,
             results: includeDetails ? results.slice(0, 200) : [],
+            ...(summary.deferred > 0 ? { code: deferredCode } : {}),
+        }, {
+            status: summary.deferred > 0 ? deferredStatus : 200,
+            headers: firebaseSchedulerResponseHeaders(),
         });
 
     } catch (e: any) {

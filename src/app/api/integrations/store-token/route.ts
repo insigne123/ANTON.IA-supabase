@@ -1,6 +1,7 @@
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export async function POST(request: Request) {
     try {
@@ -26,8 +27,8 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Invalid provider' }, { status: 400 });
         }
 
-        // provider_tokens is the source of truth for connectivity
-        const { data, error } = await supabase
+        // Refresh tokens are server-only; expose only connection state after auth.
+        const { data, error } = await getSupabaseAdminClient()
             .from('provider_tokens')
             .select('provider')
             .eq('user_id', userId)
@@ -56,7 +57,7 @@ export async function GET(request: Request) {
         }
 
         // Get connection status for all providers
-        const { data, error } = await supabase
+        const { data, error } = await getSupabaseAdminClient()
             .from('provider_tokens')
             .select('provider')
             .eq('user_id', user.id);

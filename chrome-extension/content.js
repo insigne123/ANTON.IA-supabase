@@ -1,18 +1,11 @@
 console.log('Anton.IA LinkedIn Script Active');
 
 const MESSAGE_BUTTON_TEXTS = ['message', 'mensaje', 'send message', 'enviar mensaje'];
-const CONNECT_BUTTON_TEXTS = ['connect', 'conectar'];
-const MORE_BUTTON_TEXTS = ['more', 'mas'];
-const ADD_NOTE_TEXTS = ['add a note', 'anadir una nota', 'agregar una nota', 'personalize', 'personalizar'];
-const SEND_BUTTON_TEXTS = ['send', 'enviar', 'done', 'listo', 'connect', 'conectar'];
+const SEND_BUTTON_TEXTS = ['send', 'enviar'];
 const DISMISS_BUTTON_TEXTS = ['dismiss', 'cerrar', 'close', 'cancel', 'cancelar', 'no thanks', 'no, gracias', 'got it'];
-const PENDING_BUTTON_TEXTS = ['pending', 'pendiente', 'invitation sent', 'invitacion enviada', 'request sent', 'solicitud enviada'];
-const FLOW_WAIT_MS = 12000;
 const FLOW_POLL_MS = 350;
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log('[Anton.IA Content] Received message:', request.action);
-
     if (request.action === 'PING') {
         sendResponse({ status: 'ready' });
         return false;
@@ -48,119 +41,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
 });
 
-let lastProcessedMessage = null;
-let replyObserver = null;
-let observedChatContainer = null;
-
-if (location.href.includes('messaging')) {
-    startReplyObserver();
-}
-
-let lastUrl = location.href;
-new MutationObserver(() => {
-    const url = location.href;
-    if (url !== lastUrl) {
-        lastUrl = url;
-        if (url.includes('messaging/thread')) {
-            console.log('Anton.IA: Thread detected, starting observer...');
-            startReplyObserver();
-        }
-    }
-}).observe(document, { subtree: true, childList: true });
-
-function startReplyObserver() {
-    const chatContainer = document.querySelector('.msg-s-message-list-container');
-
-    if (!chatContainer) {
-        setTimeout(startReplyObserver, 2000);
-        return;
-    }
-
-    if (observedChatContainer === chatContainer && replyObserver) {
-        return;
-    }
-
-    if (replyObserver) {
-        replyObserver.disconnect();
-    }
-
-    console.log('Anton.IA: Observer attached to chat container');
-
-    observedChatContainer = chatContainer;
-    replyObserver = new MutationObserver((mutationsList) => {
-        for (const mutation of mutationsList) {
-            if (mutation.type === 'childList') {
-                checkLastMessage();
-            }
-        }
-    });
-
-    replyObserver.observe(chatContainer, { childList: true, subtree: true });
-    checkLastMessage();
-}
-
-function checkLastMessage() {
-    const items = document.querySelectorAll('.msg-s-event-listitem');
-    if (items.length === 0) return;
-
-    const lastItem = items[items.length - 1];
-    const isMine = lastItem.innerHTML.includes('msg-s-message-group--is-mine') ||
-        lastItem.closest('.msg-s-message-group--is-mine');
-
-    if (!isMine) {
-        const textElement = lastItem.querySelector('.msg-s-event-listitem__body');
-        const text = textElement ? textElement.innerText : '';
-
-        if (text && text !== lastProcessedMessage) {
-            console.log('Anton.IA: Reply Detected!', text.substring(0, 20) + '...');
-            lastProcessedMessage = text;
-
-            chrome.runtime.sendMessage({
-                action: 'REPLY_DETECTED',
-                replyText: text,
-                linkedinThreadUrl: location.href,
-                profileUrl: extractProfileFromThread(),
-            });
-        }
-    }
-}
-
-function extractProfileFromThread() {
-    const headerLink = document.querySelector('.msg-thread-section__sender a.msg-thread-section__sender-link');
-    return headerLink ? headerLink.href : null;
-}
-
 async function runDMFlow(profileUrl, message) {
-    console.log('[Anton.IA Content] Starting runDMFlow...');
-
     if (!isOnRequestedProfile(profileUrl)) {
-        console.log('[Anton.IA Content] URL/Path mismatch. Redirecting...', {
-            current: normalizePath(window.location.href),
-            target: normalizePath(profileUrl),
-        });
-        window.location.href = profileUrl;
-        return { success: false, error: 'Redirecting to profile...' };
+        return { success: false, error: 'LinkedIn no abrió el perfil solicitado. Reintenta desde el lead.' };
     }
 
     await delay(1500);
     await closeBlockingDialog();
 
-    const profileRoot = getPrimaryProfileRoot();
-    const hadMessageButton = !!findMessageButton(profileRoot || document);
-
-    console.log('[Anton.IA Content] Strategy 1: Attempting Direct Message...');
     const directMessageResult = await tryDirectMessage(message);
     if (directMessageResult) {
         return directMessageResult;
     }
 
-    if (hadMessageButton) {
-        console.warn('[Anton.IA Content] Message button exists but composer did not open. Skipping connect fallback.', getStateSnapshot());
-        return { success: false, error: 'Could not open LinkedIn message composer' };
-    }
-
-    console.log('[Anton.IA Content] Strategy 2: Attempting Connect + Note...');
-    return handleConnectFlow(message);
+    // Never turn a requested DM into a connection request without a separate user action.
+    return { success: false, error: 'No se pudo abrir el mensaje directo. No enviamos una solicitud de conexión automáticamente.' };
 }
 
 async function tryDirectMessage(message) {
@@ -194,7 +89,7 @@ async function tryDirectMessage(message) {
     }
 
     if (state.kind === 'upsell' || state.kind === 'dialog') {
-        console.warn('[Anton.IA Content] Message flow opened a blocking dialog. Falling back to Connect flow.', {
+        console.warn('[Anton.IA Content] Message flow opened a blocking dialog.', {
             kind: state.kind,
             text: (state.text || '').slice(0, 160),
         });
@@ -202,11 +97,12 @@ async function tryDirectMessage(message) {
         return null;
     }
 
-    console.warn('[Anton.IA Content] Message flow did not produce an editor. Falling back.', getStateSnapshot());
+    console.warn('[Anton.IA Content] Message flow did not produce an editor.');
     return null;
 }
 
 async function sendMessageInEditor(editor, message) {
+    const outgoingCountBefore = getOutgoingMessageCount();
     setElementText(editor, message);
     await delay(900);
 
@@ -222,7 +118,7 @@ async function sendMessageInEditor(editor, message) {
 
     const sendBtn = findSendButton(editor.closest('form') || editor.closest('.msg-overlay-conversation-bubble') || document);
     if (!sendBtn) {
-        console.error('[Anton.IA Content] Send button not found in DM editor.', getStateSnapshot());
+        console.error('[Anton.IA Content] Send button not found in DM editor.');
         throw new Error('Send button not found in DM editor');
     }
 
@@ -231,148 +127,45 @@ async function sendMessageInEditor(editor, message) {
         throw new Error('Send button is disabled after writing the message');
     }
 
-    console.log('[Anton.IA Content] Clicking Send button:', describeElement(sendBtn));
     safeClick(sendBtn);
-    await delay(1200);
-
-    return { success: true, status: 'Message sent via DM' };
-}
-
-async function handleConnectFlow(message) {
-    await closeBlockingDialog();
-
-    const profileRoot = getPrimaryProfileRoot();
-    let connectBtn = findConnectButton(profileRoot);
-
-    if (!connectBtn) {
-        console.log('[Anton.IA Content] Connect button not visible. Checking More menu...');
-        const moreBtn = findMoreButton(profileRoot);
-        if (moreBtn) {
-            console.log('[Anton.IA Content] Opening More menu:', describeElement(moreBtn));
-            safeClick(moreBtn);
-            await delay(900);
-            connectBtn = findConnectButton(document);
-        }
+    const confirmed = await waitForOutgoingMessage(message, outgoingCountBefore);
+    if (!confirmed) {
+        return { success: false, error: 'LinkedIn no confirmó el mensaje enviado. Revisa la conversación antes de reintentar.' };
     }
 
-    if (!connectBtn) {
-        throw new Error('Could not find Connect button on this profile');
-    }
-
-    if (isPendingButton(connectBtn)) {
-        console.log('[Anton.IA Content] Connection request already pending on action button.');
-        return { success: false, error: 'Connection request already pending' };
-    }
-
-    console.log('[Anton.IA Content] Clicking Connect button:', describeElement(connectBtn));
-    safeClick(connectBtn);
-
-    let state = await waitForState(() => getConnectState({ profileRoot }), FLOW_WAIT_MS, FLOW_POLL_MS);
-    if (state.kind === 'idle') {
-        console.warn('[Anton.IA Content] No recognizable state after first Connect click. Retrying once.', getStateSnapshot());
-        await delay(900);
-        const retryBtn = findConnectButton(profileRoot) || findConnectButton(document);
-        if (retryBtn) {
-            safeClick(retryBtn);
-            state = await waitForState(() => getConnectState({ profileRoot }), 8000, FLOW_POLL_MS);
-        }
-    }
-
-    if (state.kind === 'quick-success') {
-        return { success: true, status: 'Connection request sent (Quick Connect)' };
-    }
-
-    if (state.kind === 'pending') {
-        return { success: false, error: 'Connection request already pending' };
-    }
-
-    if (state.kind === 'limit') {
-        throw new Error('Weekly invitation limit reached');
-    }
-
-    if (state.kind === 'note-prompt') {
-        console.log('[Anton.IA Content] Add note prompt detected. Clicking Add note.');
-        safeClick(state.addNoteBtn);
-        state = await waitForState(() => getConnectState({ profileRoot }), 6000, 250);
-    }
-
-    if (state.kind === 'send-prompt') {
-        console.log('[Anton.IA Content] Connect dialog has direct send action. Submitting without note.');
-        safeClick(state.sendBtn);
-        await delay(1200);
-        if (findPendingIndicator(profileRoot) || findSuccessToast()) {
-            return { success: true, status: 'Connection request sent' };
-        }
-        return { success: true, status: 'Connection request submitted' };
-    }
-
-    if (state.kind === 'note-editor') {
-        console.log('[Anton.IA Content] Note editor detected. Typing custom note.');
-        setElementText(state.editor, message);
-        await delay(700);
-
-        if (!textLooksApplied(state.editor, message)) {
-            setElementText(state.editor, message);
-            await delay(600);
-        }
-
-        const sendBtn = findSendButton(state.dialog || document);
-        if (!sendBtn) {
-            throw new Error('Could not find Send button in LinkedIn connect dialog');
-        }
-
-        if (isElementDisabled(sendBtn)) {
-            throw new Error('Connect dialog send button stayed disabled');
-        }
-
-        safeClick(sendBtn);
-        await delay(1200);
-
-        if (findPendingIndicator(profileRoot) || findSuccessToast()) {
-            return { success: true, status: 'Connection request sent with note' };
-        }
-        return { success: true, status: 'Connection request submitted with note' };
-    }
-
-    console.error('[Anton.IA Content] Connect flow ended in an unknown state.', getStateSnapshot());
-    throw new Error('Connect click did not produce a recognizable LinkedIn state');
-}
-
-function getConnectState(context = {}) {
-    const pending = findPendingIndicator(context.profileRoot);
-    if (pending) return { kind: 'pending', pending };
-
-    const toast = findSuccessToast();
-    if (toast) return { kind: 'quick-success', toast };
-
-    if (context.profileRoot) {
-        const connectButton = findConnectButton(context.profileRoot);
-        const messageButton = findMessageButton(context.profileRoot);
-        if (!connectButton && messageButton) return { kind: 'quick-success', messageButton };
-    }
-
-    const dialog = getDialogRoot();
-    const editor = findNoteEditor(dialog || document);
-    if (editor) return { kind: 'note-editor', editor, dialog };
-
-    if (!dialog) return { kind: 'idle' };
-
-    const dialogText = normalizeText(dialog.innerText || '');
-    if (isInvitationLimitText(dialogText)) return { kind: 'limit', dialog, dialogText };
-
-    const addNoteBtn = findActionElement(ADD_NOTE_TEXTS, { root: dialog });
-    if (addNoteBtn) return { kind: 'note-prompt', dialog, addNoteBtn, dialogText };
-
-    const sendBtn = findSendButton(dialog);
-    if (sendBtn) return { kind: 'send-prompt', dialog, sendBtn, dialogText };
-
-    return { kind: 'dialog', dialog, dialogText };
+    return { success: true, status: 'confirmed_dm', linkedinThreadUrl: location.href };
 }
 
 function isOnRequestedProfile(profileUrl) {
-    const currentPath = normalizePath(window.location.href);
-    const targetPath = normalizePath(profileUrl);
-    return currentPath.includes(targetPath) || targetPath.includes(currentPath);
+    try {
+        const current = new URL(window.location.href);
+        const target = new URL(profileUrl);
+        return current.hostname.replace(/^www\./i, '').toLowerCase() === 'linkedin.com'
+            && target.hostname.replace(/^www\./i, '').toLowerCase() === 'linkedin.com'
+            && normalizePath(current.href) === normalizePath(target.href);
+    } catch {
+        return false;
+    }
+}
+
+function getOutgoingMessageCount() {
+    return document.querySelectorAll('.msg-s-message-group--is-mine, .msg-s-event-listitem .msg-s-message-group--is-mine').length;
+}
+
+async function waitForOutgoingMessage(message, countBefore) {
+    const expected = normalizeText(message);
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < 8000) {
+        const outgoing = Array.from(document.querySelectorAll('.msg-s-message-group--is-mine, .msg-s-event-listitem'))
+            .filter((node) => node.classList.contains('msg-s-message-group--is-mine') || node.querySelector('.msg-s-message-group--is-mine'));
+        const hasNewMessage = outgoing.length > countBefore;
+        const hasExpectedText = outgoing.some((node) => normalizeText(node.innerText || '').includes(expected));
+        if (hasNewMessage && hasExpectedText) return true;
+        await delay(350);
+    }
+
+    return false;
 }
 
 function normalizePath(urlStr) {
@@ -435,16 +228,7 @@ function getProfileActionRoots() {
             root: document,
             excludeTexts: ['message ads', 'messaging'],
         });
-        const connectBtn = findActionElement(CONNECT_BUTTON_TEXTS, {
-            root: document,
-            excludeTexts: ['connected', 'connections', 'pending', 'message', 'mensaje'],
-        });
-        const moreBtn = findActionElement(MORE_BUTTON_TEXTS, {
-            root: document,
-            excludeTexts: ['more relevant', 'more filters'],
-        });
-
-        for (const button of [messageBtn, connectBtn, moreBtn]) {
+        for (const button of [messageBtn]) {
             const container = getActionContainerForButton(button);
             if (container && !roots.includes(container)) roots.push(container);
         }
@@ -605,48 +389,12 @@ function getDialogRoot() {
     return null;
 }
 
-function findNoteEditor(root) {
-    const scope = root || document;
-    const selectors = [
-        'textarea[name="message"]',
-        '#custom-message',
-        '.artdeco-modal textarea',
-        '[role="dialog"] textarea',
-        '.artdeco-modal [contenteditable="true"][role="textbox"]',
-        '[role="dialog"] [contenteditable="true"]',
-    ];
-
-    for (const selector of selectors) {
-        const element = Array.from(scope.querySelectorAll(selector)).find(isElementVisible);
-        if (element) return element;
-    }
-    return null;
-}
-
 function findMessageButton(root) {
     return findActionElement(MESSAGE_BUTTON_TEXTS, {
         root: root || getPrimaryProfileRoot() || document,
         excludeTexts: ['message ads', 'messaging'],
     }) || (!root ? findActionElement(MESSAGE_BUTTON_TEXTS, {
         excludeTexts: ['message ads', 'messaging'],
-    }) : null);
-}
-
-function findConnectButton(root) {
-    return findActionElement(CONNECT_BUTTON_TEXTS, {
-        root: root || getPrimaryProfileRoot() || document,
-        excludeTexts: ['connected', 'connections', 'pending', 'message', 'mensaje'],
-    }) || (!root ? findActionElement(CONNECT_BUTTON_TEXTS, {
-        excludeTexts: ['connected', 'connections', 'pending', 'message', 'mensaje'],
-    }) : null);
-}
-
-function findMoreButton(root) {
-    return findActionElement(MORE_BUTTON_TEXTS, {
-        root: root || getPrimaryProfileRoot() || document,
-        excludeTexts: ['more relevant', 'more filters'],
-    }) || (!root ? findActionElement(MORE_BUTTON_TEXTS, {
-        excludeTexts: ['more relevant', 'more filters'],
     }) : null);
 }
 
@@ -663,35 +411,6 @@ function findSendButton(root) {
             'button',
         ],
     });
-}
-
-function findPendingIndicator(root) {
-    const roots = root ? [root] : getProfileActionRoots();
-
-    for (const scope of roots) {
-        const candidates = getActionCandidates(scope, {
-            includeDisabled: true,
-            selectors: ['button', '[role="button"]', 'a[role="button"]', 'span'],
-        });
-
-        for (const node of candidates) {
-            if (node.closest('aside')) continue;
-            if (isPendingButton(node)) return node;
-        }
-    }
-
-    return null;
-}
-
-function findSuccessToast() {
-    const toast = Array.from(document.querySelectorAll('.artdeco-toast-item, .artdeco-toast, [role="alert"]')).find(isElementVisible);
-    if (!toast) return null;
-
-    const text = normalizeText(toast.innerText || '');
-    if (!text) return toast;
-
-    const successHints = ['sent', 'enviado', 'pending', 'pendiente', 'invitation', 'invitacion', 'request'];
-    return successHints.some((hint) => text.includes(hint)) ? toast : null;
 }
 
 function findDismissButton() {
@@ -730,27 +449,6 @@ async function closeBlockingDialog() {
 
 function isUpsellText(text) {
     return ['premium', 'inmail', 'sales navigator', 'try premium', 'prueba premium', 'unlock'].some((token) => text.includes(token));
-}
-
-function isInvitationLimitText(text) {
-    return [
-        'weekly invitation limit',
-        'invitation limit',
-        'reach the invitation limit',
-        'reach your invitation limit',
-        'limite de invitaciones',
-        'llegaste al limite',
-    ].some((token) => text.includes(token));
-}
-
-function isPendingButton(node) {
-    if (!(node instanceof HTMLElement)) return false;
-    const label = normalizeText(getElementLabel(node));
-    if (!label) return false;
-
-    return PENDING_BUTTON_TEXTS.some((token) => {
-        return label === token || label.startsWith(`${token} `) || label.includes(` ${token}`);
-    });
 }
 
 function setElementText(node, value) {
@@ -810,18 +508,4 @@ function textLooksApplied(node, text) {
         : (node.innerText || node.textContent || '');
     const expected = normalizeText(String(text || '').slice(0, 18));
     return !!expected && normalizeText(current).includes(expected);
-}
-
-function getStateSnapshot() {
-    const dialog = getDialogRoot();
-    return {
-        url: location.href,
-        hasMessageEditor: !!getMessageEditor(),
-        hasNoteEditor: !!findNoteEditor(dialog || document),
-        hasPending: !!findPendingIndicator(getPrimaryProfileRoot()),
-        dialogText: dialog ? normalizeText(dialog.innerText || '').slice(0, 180) : '',
-        visibleButtons: getActionCandidates(document, { includeDisabled: true })
-            .slice(0, 10)
-            .map((node) => describeElement(node)),
-    };
 }

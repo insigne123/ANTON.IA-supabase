@@ -10,7 +10,7 @@ import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { deleteContactedCascade } from '@/lib/delete-contacted-cascade';
-import { Trash2 } from 'lucide-react';
+import { Loader2, RefreshCw, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import type { ContactedLead } from '@/lib/types';
 import { resolveReplyContent } from '@/lib/reply-content-resolver';
@@ -28,6 +28,7 @@ export default function ContactedRepliedPage() {
   const [suggestion, setSuggestion] = useState<string>('');
   const [draftDecision, setDraftDecision] = useState<string>('');
   const [selected, setSelected] = useState<ContactedLead | null>(null);
+  const [syncingReplies, setSyncingReplies] = useState(false);
 
   const refresh = async () => setItems(await contactedLeadsStorage.get());
   useEffect(() => { refresh(); }, []);
@@ -111,6 +112,28 @@ export default function ContactedRepliedPage() {
     }
   }
 
+  async function syncReplies() {
+    setSyncingReplies(true);
+    try {
+      const res = await fetch('/api/replies/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 500 }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'No se pudo sincronizar respuestas');
+      await refresh();
+      toast({
+        title: 'Respuestas sincronizadas',
+        description: `Revisados: ${data.scanned || 0}. Nuevas respuestas: ${data.synced || 0}.`,
+      });
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'No se pudo sincronizar', description: e?.message || 'Intenta nuevamente en unos segundos.' });
+    } finally {
+      setSyncingReplies(false);
+    }
+  }
+
   async function removeAll(it: ContactedLead) {
     const ok = confirm('Eliminar este hilo respondido y todo su rastro local?');
     if (!ok) return;
@@ -130,7 +153,13 @@ export default function ContactedRepliedPage() {
         title="Leads Respondidos"
         description="Hilos donde el contacto ya respondió. Ordenados por la respuesta más reciente."
       />
-      <div className="mb-3"><Link href="/contacted"><Button variant="outline">← Volver a enviados</Button></Link></div>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <Link href="/contacted"><Button variant="outline">← Volver a enviados</Button></Link>
+        <Button variant="secondary" onClick={syncReplies} disabled={syncingReplies}>
+          {syncingReplies ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+          Sincronizar respuestas
+        </Button>
+      </div>
 
       <Card>
         <CardContent>

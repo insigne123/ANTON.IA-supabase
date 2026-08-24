@@ -37,10 +37,8 @@ function list(value: unknown, fallback: string) {
 
 function providerLabel(value: unknown) {
   const provider = clean(value).toLowerCase();
-  if (provider === 'apollo') return 'Apollo';
-  if (provider === 'pdl') return 'People Data Labs';
-  if (provider === 'auto') return 'automatico segun disponibilidad';
-  return provider || 'automatico segun disponibilidad';
+  if (provider === 'apollo' || provider === 'pdl' || provider === 'auto') return 'Apollo';
+  return 'Apollo';
 }
 
 export function buildSupliaJobIntroMessage(job: JobLike) {
@@ -67,7 +65,7 @@ export function buildSupliaJobIntroMessage(job: JobLike) {
     '1. Ordenar el objetivo y proponer un plan de trabajo.',
     '2. Pedirte aprobacion del plan antes de seguir.',
     '3. Definir ICP y criterios de busqueda.',
-    '4. Dejar la busqueda externa como aprobacion separada antes de usar Apollo/PDL.',
+    '4. Dejar la busqueda externa como aprobacion separada antes de usar Apollo.',
     '',
     'Te ire contando que estoy haciendo en este hilo.',
   ].join('\n');

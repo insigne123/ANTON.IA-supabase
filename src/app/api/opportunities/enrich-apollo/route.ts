@@ -2,30 +2,206 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
+import { createHash } from 'node:crypto';
 import { v4 as uuid } from 'uuid';
-import { checkAndConsumeDailyQuota, getDailyQuotaStatus } from '@/lib/server/daily-quota-store';
-import crypto from 'crypto';
+import {
+  claimEnrichmentQuotaOperation,
+  completeEnrichmentQuotaOperation,
+  getEnrichmentQuotaOperation,
+  getEffectiveDailyQuotaLimits,
+  markEnrichmentQuotaOperationSubmitted,
+  releaseEnrichmentQuotaOperation,
+  type EnrichmentQuotaOperationClaim,
+} from '@/lib/server/daily-quota-store';
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
-import { enrichPersonWithPDL, pickPdlEmail, pickPdlPhones } from '@/lib/providers/pdl';
-import { isPdlFallbackEnabled, resolveLeadProvider, resolveOrganizationIdForUser } from '@/lib/server/provider-routing';
+import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
+import { resolveLeadProvider } from '@/lib/server/provider-routing';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const DAILY_LIMIT = 50;
 const DEFAULT_ENRICHMENT_SERVICE_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/enrich';
 
 const ALLOWED_TABLES = new Set(['enriched_opportunities', 'enriched_leads']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TRUE_FLAG_VALUES = new Set(['1', 'true', 'yes', 'on']);
+const FALSE_FLAG_VALUES = new Set(['0', 'false', 'no', 'off']);
+type EnrichmentMode = 'normal' | 'deep';
+
 function isUuid(x?: string | null) {
   const v = String(x || '').trim();
   return !!v && UUID_RE.test(v);
 }
+
 function resolveTableName(raw?: string) {
   const v = String(raw || '').trim();
   if (!v) return null;
   return ALLOWED_TABLES.has(v) ? v : null;
 }
+
+function parseRequestedFlag(raw: unknown, defaultValue: boolean) {
+  if (raw == null) return { ok: true as const, value: defaultValue };
+  if (typeof raw === 'boolean') return { ok: true as const, value: raw };
+  if (typeof raw === 'number') {
+    if (raw === 1) return { ok: true as const, value: true };
+    if (raw === 0) return { ok: true as const, value: false };
+    return { ok: false as const };
+  }
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase();
+    if (!normalized) return { ok: true as const, value: defaultValue };
+    if (TRUE_FLAG_VALUES.has(normalized)) return { ok: true as const, value: true };
+    if (FALSE_FLAG_VALUES.has(normalized)) return { ok: true as const, value: false };
+  }
+  return { ok: false as const };
+}
+
+function resolveRequestedFields(revealEmail: boolean, revealPhone: boolean) {
+  const requestedFields: string[] = [];
+  if (revealEmail) requestedFields.push('email');
+  if (revealPhone) requestedFields.push('phone');
+  return requestedFields;
+}
+
+function resolveRequestedEnrichmentLevel(mode: EnrichmentMode) {
+  return mode === 'deep' ? 'deep' : 'basic';
+}
+
+function resolveEnrichmentMode(rawMode: unknown, trustedInternalCaller: boolean, revealPhone: boolean) {
+  const fieldDerivedMode: EnrichmentMode = revealPhone ? 'deep' : 'normal';
+  const normalizedMode = String(rawMode ?? '').trim().toLowerCase();
+
+  if (!normalizedMode) {
+    return { ok: true as const, mode: fieldDerivedMode };
+  }
+  if (normalizedMode !== 'normal' && normalizedMode !== 'deep') {
+    return { ok: false as const, error: 'invalid enrichment mode' };
+  }
+  if (!trustedInternalCaller) {
+    return { ok: false as const, error: 'explicit enrichment mode is reserved for internal requests' };
+  }
+  if (normalizedMode !== fieldDerivedMode) {
+    return { ok: false as const, error: 'enrichment mode does not match requested fields' };
+  }
+
+  return { ok: true as const, mode: normalizedMode as EnrichmentMode };
+}
+
+function resolveQuotaResource(mode: EnrichmentMode): 'enrich' | 'investigate' {
+  return mode === 'deep' ? 'investigate' : 'enrich';
+}
+
+function resolveEnrichmentOperationId(req: NextRequest, body: { operationId?: unknown; idempotencyKey?: unknown }) {
+  const candidates = [
+    req.headers.get('idempotency-key'),
+    req.headers.get('x-idempotency-key'),
+    body.operationId,
+    body.idempotencyKey,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  const unique = [...new Set(candidates)];
+  if (unique.length === 0) {
+    return { ok: false as const, error: 'IDEMPOTENCY_KEY_REQUIRED' };
+  }
+  if (unique.length > 1) {
+    return { ok: false as const, error: 'IDEMPOTENCY_KEY_CONFLICT' };
+  }
+  if (unique[0].length > 200) {
+    return { ok: false as const, error: 'IDEMPOTENCY_KEY_TOO_LONG' };
+  }
+  return { ok: true as const, operationId: unique[0] };
+}
+
+function buildEnrichmentRequestFingerprint(params: {
+  leads: EnrichInput['leads'];
+  revealEmail: boolean;
+  revealPhone: boolean;
+  mode: EnrichmentMode;
+  tableName: string;
+}) {
+  const normalized = {
+    version: 1,
+    revealEmail: params.revealEmail,
+    revealPhone: params.revealPhone,
+    mode: params.mode,
+    tableName: params.tableName,
+    leads: params.leads.map((lead) => ({
+      fullName: String(lead.fullName || '').trim(),
+      linkedinUrl: normalizeLinkedin(String(lead.linkedinUrl || '').trim()),
+      companyName: String(lead.companyName || '').trim(),
+      companyDomain: cleanDomain(String(lead.companyDomain || '').trim()) || '',
+      title: String(lead.title || '').trim(),
+      sourceOpportunityId: String(lead.sourceOpportunityId || '').trim(),
+      clientRef: String(lead.clientRef || '').trim(),
+      email: String(lead.email || '').trim().toLowerCase(),
+      existingRecordId: String(lead.existingRecordId || '').trim(),
+      apolloId: String(lead.apolloId || '').trim(),
+      id: String(lead.id || '').trim(),
+    })),
+  };
+  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+}
+
+function resolveApolloProviderConfiguration() {
+  if (!String(process.env.APOLLO_API_KEY || '').trim()) {
+    return { ok: false as const, error: 'APOLLO_API_KEY missing' };
+  }
+  const externalUrl = (process.env.ENRICHMENT_SERVICE_URL || DEFAULT_ENRICHMENT_SERVICE_URL).trim();
+  const backendSecret = (
+    process.env.BACKEND_ENRICH_SECRET ||
+    process.env.ENRICHMENT_SERVICE_SECRET ||
+    process.env.API_SECRET_KEY ||
+    ''
+  ).trim();
+  if (!externalUrl) return { ok: false as const, error: 'ENRICHMENT_SERVICE_URL missing' };
+  try {
+    const parsed = new URL(externalUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('unsupported protocol');
+  } catch {
+    return { ok: false as const, error: 'ENRICHMENT_SERVICE_URL invalid' };
+  }
+  if (!backendSecret) return { ok: false as const, error: 'ENRICHMENT_SERVICE_SECRET missing' };
+  return { ok: true as const, externalUrl, backendSecret };
+}
+
+function operationUsage(claim: EnrichmentQuotaOperationClaim) {
+  return {
+    consumed: claim.consumed,
+    count: claim.count,
+    limit: claim.limit,
+    reused: claim.reused,
+  };
+}
+
+function operationStateResponse(claim: EnrichmentQuotaOperationClaim) {
+  if (claim.responsePayload && claim.responseStatus) {
+    const response = NextResponse.json({
+      ...claim.responsePayload,
+      operationId: claim.operationId,
+      operationStatus: claim.status,
+      usage: operationUsage(claim),
+    }, { status: claim.responseStatus });
+    if (claim.reused) response.headers.set('x-idempotent-replay', 'true');
+    response.headers.set('x-operation-id', claim.operationId);
+    return response;
+  }
+
+  const unknown = claim.providerState === 'unknown';
+  const response = NextResponse.json({
+    error: unknown ? 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN' : 'ENRICHMENT_OPERATION_PROCESSING',
+    operationId: claim.operationId,
+    operationStatus: claim.status,
+    providerState: claim.providerState,
+    usage: operationUsage(claim),
+  }, { status: unknown ? 409 : 202 });
+  response.headers.set('retry-after', unknown ? '0' : '5');
+  response.headers.set('x-idempotent-replay', 'true');
+  response.headers.set('x-operation-id', claim.operationId);
+  return response;
+}
+
+class ProviderOutcomeUnknownError extends Error {}
 
 // Lazy initialization to avoid build-time evaluation of env vars
 function getSupabaseAdmin() {
@@ -35,22 +211,31 @@ function getSupabaseAdmin() {
   );
 }
 
-const memQuota: Record<string, { count: number; day: string }> = {};
-function todayKey() {
-  const d = new Date();
-  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
-}
-function memGet(userId: string) {
-  const k = todayKey();
-  const q = memQuota[userId];
-  if (!q || q.day !== k) memQuota[userId] = { count: 0, day: k };
-  return memQuota[userId];
+async function resolveRequiredOrganizationId(userId: string, requestedOrganizationId?: string) {
+  const { data, error } = await getSupabaseAdmin()
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', userId)
+    .limit(50);
+
+  if (error) throw error;
+
+  const memberships = Array.isArray(data)
+    ? data.map((row: any) => String(row?.organization_id || '').trim()).filter(Boolean)
+    : [];
+  if (memberships.length === 0) return null;
+  if (requestedOrganizationId) {
+    return memberships.includes(requestedOrganizationId) ? requestedOrganizationId : null;
+  }
+
+  return memberships[0];
 }
 
 type EnrichInput = {
-  revealEmail?: boolean;
-  revealPhone?: boolean;
-  provider?: 'apollo' | 'pdl';
+  revealEmail?: boolean | string | number | null;
+  revealPhone?: boolean | string | number | null;
+  mode?: 'normal' | 'deep';
+  provider?: unknown;
   leads: Array<{
     fullName: string;
     linkedinUrl?: string;
@@ -68,11 +253,13 @@ type EnrichInput = {
 
 export async function POST(req: NextRequest) {
   const userIdFromHeader = req.headers.get('x-user-id')?.trim() || '';
+  const organizationIdFromHeader = req.headers.get('x-organization-id')?.trim() || '';
+  const trustedInternalCaller = Boolean(userIdFromHeader && isTrustedInternalRequest(req));
 
   let userId = userIdFromHeader;
 
   if (userIdFromHeader) {
-    if (!isTrustedInternalRequest(req)) {
+    if (!trustedInternalCaller) {
       return NextResponse.json({ error: 'unauthorized internal request' }, { status: 401 });
     }
   } else {
@@ -83,58 +270,253 @@ export async function POST(req: NextRequest) {
     }
     userId = user.id;
   }
+  if (organizationIdFromHeader && !trustedInternalCaller) {
+    return NextResponse.json({ error: 'unauthorized internal organization request' }, { status: 401 });
+  }
+
+  let claimedOperation: EnrichmentQuotaOperationClaim | null = null;
+  let claimedOrganizationId = '';
+  let claimedResource: 'enrich' | 'investigate' = 'enrich';
+  let providerStarted = false;
 
   try {
-    const body = await req.json() as EnrichInput & { tableName?: string };
-    const { leads, revealEmail = true, revealPhone = false } = body;
-    const shouldRevealEmail = Boolean(revealEmail);
-    const shouldRevealPhone = Boolean(revealPhone);
+    const body = await req.json() as EnrichInput & {
+      tableName?: string;
+      resource?: unknown;
+      operationId?: unknown;
+      idempotencyKey?: unknown;
+    };
+    const { leads } = body;
+    const parsedRevealEmail = parseRequestedFlag(body.revealEmail, true);
+    const parsedRevealPhone = parseRequestedFlag(body.revealPhone, false);
+
+    if (!parsedRevealEmail.ok || !parsedRevealPhone.ok) {
+      return NextResponse.json({ error: 'invalid reveal flags' }, { status: 400 });
+    }
+
+    const shouldRevealEmail = parsedRevealEmail.value;
+    const shouldRevealPhone = parsedRevealPhone.value;
+    if (body.resource != null) {
+      return NextResponse.json({ error: 'quota resource cannot be requested by clients' }, { status: 400 });
+    }
+    const resolvedMode = resolveEnrichmentMode(body.mode, trustedInternalCaller, shouldRevealPhone);
+    if (!resolvedMode.ok) {
+      return NextResponse.json({ error: resolvedMode.error }, { status: 400 });
+    }
+    const enrichmentMode = resolvedMode.mode;
+    const quotaResource = resolveQuotaResource(enrichmentMode);
     const tableName = resolveTableName(body.tableName) || 'enriched_opportunities';
     if (body.tableName && !resolveTableName(body.tableName)) {
       return NextResponse.json({ error: `invalid tableName: ${String(body.tableName)}` }, { status: 400 });
     }
     if (!Array.isArray(leads) || leads.length === 0) return NextResponse.json({ error: 'leads requerido' }, { status: 400 });
+    if (!shouldRevealEmail && !shouldRevealPhone) {
+      return NextResponse.json({ error: 'at least one enrichment field is required' }, { status: 400 });
+    }
+    const operationIdentity = resolveEnrichmentOperationId(req, body);
+    if (!operationIdentity.ok) {
+      return NextResponse.json({ error: operationIdentity.error }, { status: 400 });
+    }
 
-    const organizationId = await resolveOrganizationIdForUser(userId);
+    let organizationId: string | null;
+    try {
+      organizationId = await resolveRequiredOrganizationId(userId, organizationIdFromHeader || undefined);
+    } catch (error) {
+      console.error('[enrich-apollo] Organization lookup failed:', error);
+      return NextResponse.json({ error: 'QUOTA_INFRASTRUCTURE_UNAVAILABLE' }, { status: 503 });
+    }
+    if (!organizationId) {
+      return NextResponse.json({ error: 'ORGANIZATION_REQUIRED' }, { status: 403 });
+    }
     const providerDecision = resolveLeadProvider({
       requestedProvider: body.provider,
       organizationId,
-      defaultProviderEnv: 'ENRICHMENT_PROVIDER_DEFAULT',
-      fallbackDefaultProvider: 'apollo',
     });
 
-    let providerUsed: 'apollo' | 'pdl' = providerDecision.provider;
-    let fallbackApplied = false;
-    let fallbackReason: string | undefined;
+    const auditEnrichment = async (
+      eventType: string,
+      input: {
+        status?: string;
+        outcome?: string;
+        severity?: string;
+        provider?: string | null;
+        errorCode?: string | null;
+        metrics?: Record<string, unknown>;
+        payload?: Record<string, unknown>;
+      } = {},
+    ) => safeAppendAntoniaEvent({
+      eventType,
+      organizationId,
+      actorId: userId,
+      actorType: trustedInternalCaller ? 'agent' : 'user',
+      entityType: 'enrichment_operation',
+      entityId: operationIdentity.operationId,
+      sourceSystem: 'enrich-apollo',
+      sourceRoute: '/api/opportunities/enrich-apollo',
+      provider: input.provider || providerDecision.provider,
+      requestId: operationIdentity.operationId,
+      correlationId: operationIdentity.operationId,
+      operationId: operationIdentity.operationId,
+      idempotencyKey: operationIdentity.operationId,
+      status: input.status,
+      outcome: input.outcome,
+      severity: input.severity,
+      errorCode: input.errorCode,
+      metrics: {
+        leadCount: leads.length,
+        mode: enrichmentMode,
+        quotaResource,
+        tableName,
+        ...(input.metrics || {}),
+      },
+      payload: {
+        revealEmail: shouldRevealEmail,
+        revealPhone: shouldRevealPhone,
+        providerRequested: providerDecision.requestedProvider,
+        ...(input.payload || {}),
+      },
+    });
 
-    if (providerDecision.provider === 'pdl') {
-      try {
-        return await handlePdlEnrichment({
-          req,
-          userId,
-          body,
-          tableName,
-          providerDecision,
-          organizationId,
+    await auditEnrichment('enrichment.requested', {
+      status: 'started',
+      outcome: 'accepted',
+      severity: 'info',
+      metrics: { idempotencyProvided: true },
+    });
+
+    const requestFingerprint = buildEnrichmentRequestFingerprint({
+      leads,
+      revealEmail: shouldRevealEmail,
+      revealPhone: shouldRevealPhone,
+      mode: enrichmentMode,
+      tableName,
+    });
+    try {
+      const existingOperation = await getEnrichmentQuotaOperation({
+        userId,
+        organizationId,
+        resource: quotaResource,
+        operationId: operationIdentity.operationId,
+        requestFingerprint,
+      });
+      if (existingOperation) {
+        await auditEnrichment('enrichment.replayed', {
+          status: existingOperation.status,
+          outcome: 'idempotent_replay',
+          provider: providerDecision.provider,
+          metrics: { operationState: existingOperation.status },
         });
-      } catch (error: any) {
-        if (!isPdlFallbackEnabled()) {
-          return NextResponse.json(
-            {
-              error: 'PDL_ENRICHMENT_ERROR',
-              message: error?.message || 'PDL enrichment failed',
-              providerRequested: providerDecision.requestedProvider,
-              providerUsed: 'pdl',
-              fallbackApplied: false,
-            },
-            { status: 502 },
-          );
-        }
-        providerUsed = 'apollo';
-        fallbackApplied = true;
-        fallbackReason = error?.message || 'pdl_enrichment_failed';
+        return operationStateResponse(existingOperation);
       }
+    } catch (error) {
+      if (/operation id was already used/i.test(String((error as any)?.message || ''))) {
+        return NextResponse.json({ error: 'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST' }, { status: 409 });
+      }
+      console.error('[enrich-apollo] Quota operation replay lookup failed:', error);
+      return NextResponse.json({ error: 'QUOTA_INFRASTRUCTURE_UNAVAILABLE' }, { status: 503 });
     }
+
+    const apolloConfiguration = resolveApolloProviderConfiguration();
+    if (!apolloConfiguration.ok) {
+      return NextResponse.json({ error: apolloConfiguration.error }, { status: 500 });
+    }
+
+    let dailyLimit: number;
+    try {
+      const limits = await getEffectiveDailyQuotaLimits({ userId, organizationId });
+      dailyLimit = quotaResource === 'investigate' ? limits.research : limits.enrich;
+    } catch (error) {
+      console.error('[enrich-apollo] Quota limit resolution failed:', error);
+      return NextResponse.json({ error: 'QUOTA_INFRASTRUCTURE_UNAVAILABLE' }, { status: 503 });
+    }
+
+    try {
+      claimedOperation = await claimEnrichmentQuotaOperation({
+        userId,
+        organizationId,
+        resource: quotaResource,
+        operationId: operationIdentity.operationId,
+        requestFingerprint,
+        limit: dailyLimit,
+        count: leads.length,
+      });
+    } catch (error) {
+      console.error('[enrich-apollo] Atomic quota operation claim failed:', error);
+      if (String((error as any)?.code || '') === '22023'
+        && /operation id was already used/i.test(String((error as any)?.message || ''))) {
+        return NextResponse.json({ error: 'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST' }, { status: 409 });
+      }
+      return NextResponse.json({ error: 'QUOTA_INFRASTRUCTURE_UNAVAILABLE' }, { status: 503 });
+    }
+    claimedOrganizationId = organizationId;
+    claimedResource = quotaResource;
+    if (!claimedOperation.claimed || !claimedOperation.allowed || !claimedOperation.claimToken) {
+      await auditEnrichment('enrichment.failed', {
+        status: claimedOperation.status,
+        outcome: claimedOperation.allowed ? 'operation_not_claimed' : 'quota_denied',
+        severity: 'warning',
+        provider: providerDecision.provider,
+        errorCode: claimedOperation.allowed ? null : 'daily_quota_exceeded',
+        metrics: operationUsage(claimedOperation),
+      });
+    }
+    if (!claimedOperation.claimed || !claimedOperation.allowed || !claimedOperation.claimToken) {
+      return operationStateResponse(claimedOperation);
+    }
+
+    const operationClaimToken = claimedOperation.claimToken;
+    const operationMutationIdentity = {
+      userId,
+      organizationId,
+      resource: quotaResource,
+      operationId: operationIdentity.operationId,
+      claimToken: operationClaimToken,
+    };
+    const ensureProviderSubmitted = async () => {
+      if (providerStarted) return;
+      await markEnrichmentQuotaOperationSubmitted(operationMutationIdentity);
+      providerStarted = true;
+      await auditEnrichment('enrichment.provider_submitting', {
+        status: 'submitting',
+        outcome: 'claim_marked',
+        provider: providerDecision.provider,
+      });
+    };
+    const finalizeOperation = async (payload: Record<string, any>, status: number, providerUsed?: 'apollo') => {
+      const responsePayload = {
+        ...payload,
+        operationId: operationIdentity.operationId,
+        operationStatus: status >= 200 && status < 300 ? 'completed' : 'failed',
+        usage: operationUsage(claimedOperation!),
+      };
+      await completeEnrichmentQuotaOperation({
+        ...operationMutationIdentity,
+        status: status >= 200 && status < 300 ? 'completed' : 'failed',
+        responseStatus: status,
+        responsePayload,
+      });
+      await auditEnrichment(status >= 200 && status < 300 ? 'enrichment.completed' : 'enrichment.failed', {
+        status: responsePayload.operationStatus,
+        outcome: status >= 200 && status < 300 ? 'provider_completed' : 'provider_failed',
+        severity: status >= 200 && status < 300 ? 'info' : 'error',
+        provider: providerUsed || providerDecision.provider,
+        metrics: {
+          responseStatus: status,
+          ...operationUsage(claimedOperation!),
+        },
+        payload: {
+          providerUsed: providerUsed || providerDecision.provider,
+          fallbackApplied,
+        },
+      });
+      const response = NextResponse.json(responsePayload, { status });
+      response.headers.set('x-operation-id', operationIdentity.operationId);
+      if (providerUsed) response.headers.set('x-provider-used', providerUsed);
+      return response;
+    };
+
+    const providerUsed = providerDecision.provider;
+    const fallbackApplied = false;
 
     const serverLogs: string[] = [];
     const log = (...args: any[]) => {
@@ -143,89 +525,31 @@ export async function POST(req: NextRequest) {
       serverLogs.push(msg);
     };
 
-    console.log('[enrich-hybrid] Start', {
+    console.log('[enrich-apollo] Start', {
       count: leads.length,
       revealEmail: shouldRevealEmail,
       revealPhone: shouldRevealPhone,
-      enrichmentLevel: shouldRevealPhone ? 'deep' : 'basic',
+      requestedFields: resolveRequestedFields(shouldRevealEmail, shouldRevealPhone),
+      enrichmentLevel: resolveRequestedEnrichmentLevel(enrichmentMode),
+      quotaResource,
       providerUsed,
       fallbackApplied,
     });
 
-    // Quota Check
-    const apiKey = process.env.APOLLO_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: 'APOLLO_API_KEY missing' }, { status: 500 });
+    const { externalUrl, backendSecret } = apolloConfiguration;
 
-    const externalUrl = (
-      process.env.ENRICHMENT_SERVICE_URL ||
-      DEFAULT_ENRICHMENT_SERVICE_URL
-    ).trim();
-    const backendSecret = (
-      process.env.BACKEND_ENRICH_SECRET ||
-      process.env.ENRICHMENT_SERVICE_SECRET ||
-      process.env.API_SECRET_KEY ||
-      ''
-    ).trim();
-
-    if (!externalUrl) {
-      return NextResponse.json({ error: 'ENRICHMENT_SERVICE_URL missing' }, { status: 500 });
-    }
-
-    if (!backendSecret) {
-      return NextResponse.json({ error: 'ENRICHMENT_SERVICE_SECRET missing' }, { status: 500 });
-    }
-
-    let quotaStatus = { count: 0, limit: DAILY_LIMIT };
-    let useMemQuota = false;
-    const dayKey = new Date().toISOString().slice(0, 10);
-    const secret = process.env.QUOTA_FALLBACK_SECRET || '';
-    const incomingTicket = req.headers.get('x-quota-ticket')?.trim() || '';
-
-    try {
-      quotaStatus = await getDailyQuotaStatus({ userId, resource: 'enrich', limit: DAILY_LIMIT });
-    } catch (e) {
-      useMemQuota = true;
-      if (secret) {
-        const parsed = verifyTicket(incomingTicket, secret);
-        quotaStatus = parsed && parsed.userId === userId && parsed.dayKey === dayKey
-          ? { count: parsed.count, limit: DAILY_LIMIT }
-          : { count: 0, limit: DAILY_LIMIT };
-      } else {
-        quotaStatus = { count: memGet(userId).count, limit: DAILY_LIMIT };
-      }
-    }
-
-    let stoppedByQuota = false;
-    let consumed = 0;
     const enrichedOut: any[] = [];
     const providerErrors: string[] = [];
 
     for (const l of leads) {
-      if (quotaStatus.count >= quotaStatus.limit) { stoppedByQuota = true; break; }
-
-      // Consume Quota
-      if (!useMemQuota) {
-        try {
-          const { allowed } = await checkAndConsumeDailyQuota({ userId, resource: 'enrich', limit: DAILY_LIMIT });
-          if (!allowed) { stoppedByQuota = true; break; }
-          quotaStatus.count++; consumed++;
-        } catch { useMemQuota = true; quotaStatus.count++; consumed++; }
-      } else {
-        if (quotaStatus.count >= DAILY_LIMIT) { stoppedByQuota = true; break; }
-        quotaStatus.count++; consumed++;
-      }
-
       const providedId = typeof l.id === 'string' ? l.id.trim() : '';
       const clientRef = typeof l.clientRef === 'string' ? l.clientRef.trim() : '';
       const existingRecordId = typeof l.existingRecordId === 'string' ? l.existingRecordId.trim() : '';
 
-      // Retry/update mode: when we explicitly point to an existing DB row via existingRecordId
-      // or when the caller only provides clientRef (common in the Enriched Leads UI).
-      const isRetry = Boolean(existingRecordId || (!providedId && clientRef));
+      // Retry/update mode is explicit. A source lead id is not an enriched_leads row yet.
+      const isRetry = Boolean(existingRecordId);
       const enrichedId =
         existingRecordId ||
-        (isUuid(providedId) ? providedId : '') ||
-        (isRetry ? clientRef : '') ||
         uuid();
 
       // Prefer explicit Apollo ID; fallback to providedId when it is not a UUID (often Apollo person id)
@@ -233,6 +557,8 @@ export async function POST(req: NextRequest) {
         (typeof l.apolloId === 'string' && l.apolloId.trim() ? l.apolloId.trim() : undefined) ||
         (!isUuid(providedId) && providedId ? providedId : undefined);
       let emailResult: any = null;
+      let providerImmediateStatus: string | undefined;
+      const requestedFields = resolveRequestedFields(shouldRevealEmail, shouldRevealPhone);
 
       // [STEP 1] Ensure Row Exists
       if (!isRetry) {
@@ -295,14 +621,12 @@ export async function POST(req: NextRequest) {
           reveal_phone: shouldRevealPhone,
           revealEmail: shouldRevealEmail,
           revealPhone: shouldRevealPhone,
-          enrichment_level: shouldRevealPhone ? 'deep' : 'basic',
+          enrichment_level: resolveRequestedEnrichmentLevel(enrichmentMode),
           requested_data: {
             email: shouldRevealEmail,
             phone: shouldRevealPhone,
           },
-          requested_fields: shouldRevealPhone
-            ? (shouldRevealEmail ? ['email', 'phone'] : ['phone'])
-            : (shouldRevealEmail ? ['email'] : []),
+          requested_fields: requestedFields,
         };
 
         // Add optional fields if available
@@ -316,7 +640,8 @@ export async function POST(req: NextRequest) {
         log('[enrich-consolidated] Calling new enrichment API:', externalUrl);
         log('[enrich-consolidated] Payload:', JSON.stringify(enrichmentPayload));
 
-        // Call the new consolidated enrichment API
+        // Persist the no-retry provider boundary immediately before the first provider request.
+        await ensureProviderSubmitted();
         const enrichRes = await fetch(externalUrl, {
           method: 'POST',
           headers: {
@@ -329,16 +654,25 @@ export async function POST(req: NextRequest) {
         log('[enrich-consolidated] Response status:', enrichRes.status);
 
         if (enrichRes.ok) {
-          const enrichData = await enrichRes.json();
+          let enrichData: any;
+          try {
+            enrichData = await enrichRes.json();
+          } catch (error: any) {
+            throw new ProviderOutcomeUnknownError(error?.message || 'Enrichment provider response could not be parsed');
+          }
           log('[enrich-consolidated] Success:', JSON.stringify(enrichData));
+          providerImmediateStatus = String(enrichData?.enrichment_status || '').trim() || undefined;
 
           if (enrichData.success && enrichData.extracted_data) {
             const extracted = enrichData.extracted_data;
             const normalizedPhoneNumbers = shouldRevealPhone ? (extracted.phone_numbers || []) : [];
             const normalizedPrimaryPhone = shouldRevealPhone ? (extracted.primary_phone || null) : null;
-            const normalizedEnrichmentStatus = shouldRevealPhone
-              ? (extracted.enrichment_status || 'pending_phone')
-              : 'completed';
+            const normalizedEnrichmentStatus = resolveImmediateEnrichmentStatus({
+              requestedPhone: shouldRevealPhone,
+              primaryPhone: normalizedPrimaryPhone,
+              phoneNumbers: normalizedPhoneNumbers,
+              providerStatus: extracted.enrichment_status || enrichData.enrichment_status,
+            });
 
             // Map the response to our database structure
             const updateData: any = {
@@ -382,7 +716,8 @@ export async function POST(req: NextRequest) {
                 companyDomain: extracted.organization_domain || cleanDomain(l.companyDomain),
                 emailStatus: extracted.email_status,
                 apolloId: foundApolloId,
-                requestedEnrichmentLevel: shouldRevealPhone ? 'deep' : 'basic',
+                requestedEnrichmentLevel: resolveRequestedEnrichmentLevel(enrichmentMode),
+                requestedFields,
                 requestedRevealPhone: shouldRevealPhone,
                 requestedRevealEmail: shouldRevealEmail,
               }
@@ -428,6 +763,10 @@ export async function POST(req: NextRequest) {
           providerErrors.push(errorText || `HTTP_${enrichRes.status}`);
         }
       } catch (e: any) {
+        if (e instanceof ProviderOutcomeUnknownError) throw e;
+        if (providerStarted && (e?.name === 'AbortError' || /fetch failed|network|timeout|abort/i.test(String(e?.message || e)))) {
+          throw new ProviderOutcomeUnknownError(e?.message || 'Enrichment provider outcome is unknown');
+        }
         log('[ERROR] Enrichment exception:', e?.message || e);
         providerErrors.push(String(e?.message || e || 'unknown_enrichment_error'));
       }
@@ -437,11 +776,12 @@ export async function POST(req: NextRequest) {
       const outPhoneNumbers = (emailResult?.phoneNumbers ?? null) as any;
       const outPrimaryPhone = (emailResult?.primaryPhone ?? null) as any;
       const outLinkedin = (emailResult?.linkedinUrl || l.linkedinUrl || '').trim();
-      const outStatus =
-        emailResult?.enrichmentStatus ||
-        (shouldRevealPhone
-          ? ((outPrimaryPhone || (Array.isArray(outPhoneNumbers) && outPhoneNumbers.length)) ? 'completed' : 'pending_phone')
-          : 'completed');
+      const outStatus = resolveImmediateEnrichmentStatus({
+        requestedPhone: shouldRevealPhone,
+        primaryPhone: outPrimaryPhone,
+        phoneNumbers: outPhoneNumbers,
+        providerStatus: emailResult?.enrichmentStatus || providerImmediateStatus,
+      });
 
       enrichedOut.push({
         id: enrichedId,
@@ -449,8 +789,10 @@ export async function POST(req: NextRequest) {
         sourceOpportunityId: l.sourceOpportunityId,
         apolloId: foundApolloId,
         fullName: emailResult?.fullName || l.fullName,
+        firstName: String(emailResult?.fullName || l.fullName || '').trim().split(/\s+/)[0] || undefined,
         companyName: emailResult?.companyName || l.companyName,
         title: emailResult?.title || l.title,
+        headline: emailResult?.headline,
         email: emailResult?.email || l.email,
         emailStatus: emailResult?.emailStatus || 'unknown',
         linkedinUrl: normalizeLinkedin(outLinkedin),
@@ -459,6 +801,9 @@ export async function POST(req: NextRequest) {
         location: emailResult?.location,
         phoneNumbers: outPhoneNumbers,
         primaryPhone: outPrimaryPhone,
+        seniority: emailResult?.seniority,
+        departments: emailResult?.departments,
+        photoUrl: emailResult?.photoUrl,
         enrichmentStatus: outStatus,
         createdAt: new Date().toISOString()
       });
@@ -466,350 +811,101 @@ export async function POST(req: NextRequest) {
       await sleep(100);
     } // end for
 
+    if (!providerStarted) {
+      await releaseEnrichmentQuotaOperation(operationMutationIdentity);
+      claimedOperation = null;
+      return NextResponse.json({ error: 'ENRICHMENT_PRE_PROVIDER_FAILURE' }, { status: 500 });
+    }
+
     const responsePayload: any = {
       enriched: enrichedOut,
-      usage: { consumed },
       debug: { serverLogs },
+      requestedData: {
+        email: shouldRevealEmail,
+        phone: shouldRevealPhone,
+      },
       providerRequested: providerDecision.requestedProvider,
       providerUsed,
       providerDefault: providerDecision.defaultProvider,
       providerForcedReason: providerDecision.forcedApolloReason,
       fallbackApplied,
-      fallbackReason,
     };
-    if (enrichedOut.length === 0 && providerErrors.length > 0) {
+    if (enrichedOut.length > 0 && providerErrors.length === enrichedOut.length) {
       responsePayload.error = providerErrors[0];
+      return await finalizeOperation(responsePayload, 502, providerUsed);
     }
 
-    if (useMemQuota && secret) {
-      const token = signTicket({ userId, dayKey, count: quotaStatus.count }, secret);
-      responsePayload.ticket = token;
-      const res = NextResponse.json(responsePayload, { status: 200 });
-      res.headers.set('x-quota-ticket', token);
-      res.headers.set('x-provider-used', providerUsed);
-      return res;
-    }
-    const res = NextResponse.json(responsePayload, { status: 200 });
-    res.headers.set('x-provider-used', providerUsed);
-    return res;
+    return await finalizeOperation(responsePayload, 200, providerUsed);
 
   } catch (e: any) {
-    console.error('Fatal Hybrid Error', e);
+    if (claimedOperation?.claimToken && !providerStarted && claimedOrganizationId) {
+      try {
+        await releaseEnrichmentQuotaOperation({
+          userId,
+          organizationId: claimedOrganizationId,
+          resource: claimedResource,
+          operationId: claimedOperation.operationId,
+          claimToken: claimedOperation.claimToken,
+        });
+        claimedOperation = null;
+      } catch (releaseError) {
+        console.error('[enrich-apollo] Failed to release pre-provider operation:', releaseError);
+      }
+    }
+    if (e instanceof ProviderOutcomeUnknownError && claimedOperation) {
+      const payload = {
+        error: 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN',
+        message: e.message,
+        operationId: claimedOperation.operationId,
+        operationStatus: 'failed',
+        providerState: 'unknown',
+        usage: operationUsage(claimedOperation),
+      };
+      if (claimedOperation.claimToken && claimedOrganizationId) {
+        try {
+          await completeEnrichmentQuotaOperation({
+            userId,
+            organizationId: claimedOrganizationId,
+            resource: claimedResource,
+            operationId: claimedOperation.operationId,
+            claimToken: claimedOperation.claimToken,
+            status: 'failed',
+            responseStatus: 502,
+            responsePayload: payload,
+          });
+        } catch (completionError) {
+          console.error('[enrich-apollo] Failed to cache ambiguous provider outcome:', completionError);
+        }
+      }
+      const response = NextResponse.json(payload, { status: 502 });
+      response.headers.set('x-operation-id', claimedOperation.operationId);
+      await safeAppendAntoniaEvent({
+        eventType: 'enrichment.failed',
+        organizationId: claimedOrganizationId,
+        actorId: userId,
+        actorType: trustedInternalCaller ? 'agent' : 'user',
+        entityType: 'enrichment_operation',
+        entityId: claimedOperation.operationId,
+        sourceSystem: 'enrich-apollo',
+        sourceRoute: '/api/opportunities/enrich-apollo',
+        requestId: claimedOperation.operationId,
+        correlationId: claimedOperation.operationId,
+        operationId: claimedOperation.operationId,
+        idempotencyKey: claimedOperation.operationId,
+        status: 'failed',
+        outcome: 'provider_outcome_unknown',
+        severity: 'error',
+        errorCode: 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN',
+        metrics: operationUsage(claimedOperation),
+        payload: { providerState: 'unknown' },
+      });
+      return response;
+    }
+    console.error('[enrich-apollo] Fatal error', e);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
 
-async function handlePdlEnrichment(params: {
-  req: NextRequest;
-  userId: string;
-  body: EnrichInput & { tableName?: string };
-  tableName: string;
-  providerDecision: any;
-  organizationId?: string | null;
-}) {
-  const { req, userId, body, tableName, providerDecision, organizationId = null } = params;
-  const { leads, revealEmail = true, revealPhone = false } = body;
-  const shouldRevealEmail = Boolean(revealEmail);
-  const shouldRevealPhone = Boolean(revealPhone);
-
-  const serverLogs: string[] = [];
-  const log = (...args: any[]) => {
-    const msg = args.map((a) => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
-    console.log('[enrich-pdl]', msg);
-    serverLogs.push(msg);
-  };
-
-  let quotaStatus = { count: 0, limit: DAILY_LIMIT };
-  let useMemQuota = false;
-  const dayKey = new Date().toISOString().slice(0, 10);
-  const secret = process.env.QUOTA_FALLBACK_SECRET || '';
-  const incomingTicket = req.headers.get('x-quota-ticket')?.trim() || '';
-
-  try {
-    quotaStatus = await getDailyQuotaStatus({ userId, resource: 'enrich', limit: DAILY_LIMIT });
-  } catch {
-    useMemQuota = true;
-    if (secret) {
-      const parsed = verifyTicket(incomingTicket, secret);
-      quotaStatus = parsed && parsed.userId === userId && parsed.dayKey === dayKey
-        ? { count: parsed.count, limit: DAILY_LIMIT }
-        : { count: 0, limit: DAILY_LIMIT };
-    } else {
-      quotaStatus = { count: memGet(userId).count, limit: DAILY_LIMIT };
-    }
-  }
-
-  let consumed = 0;
-  const enrichedOut: any[] = [];
-  let successfulMatches = 0;
-  let fatalPdlError: string | null = null;
-
-  for (const l of leads) {
-    if (quotaStatus.count >= quotaStatus.limit) break;
-
-    if (!useMemQuota) {
-      try {
-        const { allowed } = await checkAndConsumeDailyQuota({ userId, resource: 'enrich', limit: DAILY_LIMIT });
-        if (!allowed) break;
-        quotaStatus.count++;
-        consumed++;
-      } catch {
-        useMemQuota = true;
-        quotaStatus.count++;
-        consumed++;
-      }
-    } else {
-      if (quotaStatus.count >= DAILY_LIMIT) break;
-      quotaStatus.count++;
-      consumed++;
-    }
-
-    const providedId = typeof l.id === 'string' ? l.id.trim() : '';
-    const clientRef = typeof l.clientRef === 'string' ? l.clientRef.trim() : '';
-    const existingRecordId = typeof l.existingRecordId === 'string' ? l.existingRecordId.trim() : '';
-    const isRetry = Boolean(existingRecordId || (!providedId && clientRef));
-    const enrichedId =
-      existingRecordId ||
-      (isUuid(providedId) ? providedId : '') ||
-      (isRetry ? clientRef : '') ||
-      uuid();
-
-    const foundApolloId: string | undefined =
-      (typeof l.apolloId === 'string' && l.apolloId.trim() ? l.apolloId.trim() : undefined) ||
-      (!isUuid(providedId) && providedId ? providedId : undefined);
-
-    if (!isRetry) {
-      const initialRow = {
-        id: enrichedId,
-        user_id: userId,
-        organization_id: organizationId,
-        full_name: l.fullName,
-        email: l.email || undefined,
-        company_name: l.companyName,
-        title: l.title,
-        linkedin_url: l.linkedinUrl,
-        created_at: new Date().toISOString(),
-        phone_numbers: [],
-        primary_phone: null,
-        enrichment_status: shouldRevealPhone ? 'pending_phone' : 'completed',
-        data: {
-          sourceOpportunityId: l.sourceOpportunityId,
-          companyDomain: cleanDomain(l.companyDomain),
-          apolloId: foundApolloId,
-        },
-      };
-
-      const { error: insertError } = await getSupabaseAdmin().from(tableName).insert(initialRow);
-      if (insertError) {
-        const code = (insertError as any)?.code;
-        if (code !== '23505') {
-          log('[ERROR] Failed to insert initial row', insertError.message);
-          continue;
-        }
-      }
-    } else if (shouldRevealPhone) {
-      await getSupabaseAdmin().from(tableName).update({ enrichment_status: 'pending_phone' }).eq('id', enrichedId);
-    }
-
-    let emailResult: any = null;
-
-    try {
-      const pdl = await enrichPersonWithPDL({
-        linkedinUrl: l.linkedinUrl,
-        email: l.email,
-        fullName: l.fullName,
-        companyName: l.companyName,
-        companyDomain: cleanDomain(l.companyDomain),
-        dataInclude: [
-          'id',
-          'full_name',
-          'first_name',
-          'last_name',
-          'job_title',
-          'job_title_role',
-          'linkedin_url',
-          'image_url',
-          'summary',
-          'location_locality',
-          'location_region',
-          'location_country',
-          'work_email',
-          'recommended_personal_email',
-          'mobile_phone',
-          'work_phone',
-          'phone_numbers',
-          'job_company_name',
-          'job_company_website',
-          'job_company_size',
-          'job_company_industry',
-        ],
-      });
-
-      if (pdl.matched && pdl.person) {
-        successfulMatches++;
-        const person = pdl.person;
-        const email = shouldRevealEmail ? (pickPdlEmail(person) || l.email || undefined) : (l.email || undefined);
-        const phoneSelection = shouldRevealPhone
-          ? pickPdlPhones(person)
-          : { primaryPhone: null as string | null, phoneNumbers: [] as any[] };
-
-        const fullName =
-          String(person.full_name || '').trim() ||
-          `${String(person.first_name || '').trim()} ${String(person.last_name || '').trim()}`.trim() ||
-          l.fullName;
-
-        const city = String(person.location_locality || '').trim() || undefined;
-        const state = String(person.location_region || '').trim() || undefined;
-        const country = String(person.location_country || '').trim() || undefined;
-        const companyDomain = cleanDomain(person.job_company_website || l.companyDomain);
-        const enrichmentStatus = shouldRevealPhone
-          ? ((phoneSelection.primaryPhone || phoneSelection.phoneNumbers.length > 0) ? 'completed' : 'pending_phone')
-          : 'completed';
-
-        const updateData: any = {
-          organization_id: organizationId,
-          full_name: fullName,
-          email,
-          email_status: email ? 'verified' : 'not_found',
-          title: person.job_title || l.title,
-          linkedin_url: person.linkedin_url || l.linkedinUrl,
-          company_name: person.job_company_name || l.companyName,
-          city,
-          state,
-          country,
-          headline: person.summary || null,
-          photo_url: person.image_url || null,
-          seniority: person.job_title_role || null,
-          departments: null,
-          organization_domain: companyDomain,
-          organization_industry: person.job_company_industry || null,
-          organization_size: typeof person.job_company_size === 'number' ? person.job_company_size : null,
-          phone_numbers: phoneSelection.phoneNumbers,
-          primary_phone: phoneSelection.primaryPhone,
-          enrichment_status: enrichmentStatus,
-          updated_at: new Date().toISOString(),
-          data: {
-            sourceOpportunityId: l.sourceOpportunityId,
-            companyDomain,
-            apolloId: foundApolloId,
-            provider: 'pdl',
-            pdlLikelihood: person.likelihood ?? null,
-            requestedEnrichmentLevel: shouldRevealPhone ? 'deep' : 'basic',
-            requestedRevealPhone: shouldRevealPhone,
-            requestedRevealEmail: shouldRevealEmail,
-          },
-        };
-
-        const { error: updateError } = await getSupabaseAdmin()
-          .from(tableName)
-          .update(updateData)
-          .eq('id', enrichedId);
-
-        if (updateError) {
-          log('[ERROR] Failed to update PDL enriched data', updateError.message);
-        }
-
-        const location = [city, state, country].filter(Boolean).join(', ') || undefined;
-        emailResult = {
-          fullName,
-          email,
-          emailStatus: email ? 'verified' : 'not_found',
-          linkedinUrl: updateData.linkedin_url,
-          companyName: updateData.company_name,
-          title: updateData.title,
-          companyDomain,
-          industry: updateData.organization_industry,
-          location,
-          phoneNumbers: phoneSelection.phoneNumbers,
-          primaryPhone: phoneSelection.primaryPhone,
-          seniority: updateData.seniority,
-          departments: updateData.departments,
-          headline: updateData.headline,
-          photoUrl: updateData.photo_url,
-          enrichmentStatus,
-        };
-      } else {
-        log('[WARN] PDL did not match lead', l.fullName, l.companyName || '');
-      }
-    } catch (e: any) {
-      const message = e?.message || String(e);
-      log('[ERROR] PDL enrichment exception:', message);
-      const normalized = String(message).toLowerCase();
-      const isHttpError = /^PDL_HTTP_\d+/.test(String(message));
-      const isNotFound = /^PDL_HTTP_404/.test(String(message));
-      const isNetworkError =
-        normalized.includes('fetch failed') ||
-        normalized.includes('network') ||
-        normalized.includes('timeout') ||
-        normalized.includes('abort');
-
-      if (!fatalPdlError && ((isHttpError && !isNotFound) || isNetworkError)) {
-        fatalPdlError = String(message);
-      }
-    }
-
-    const outPhoneNumbers = (emailResult?.phoneNumbers ?? null) as any;
-    const outPrimaryPhone = (emailResult?.primaryPhone ?? null) as any;
-    const outLinkedin = (emailResult?.linkedinUrl || l.linkedinUrl || '').trim();
-    const outStatus =
-      emailResult?.enrichmentStatus ||
-      (shouldRevealPhone
-        ? ((outPrimaryPhone || (Array.isArray(outPhoneNumbers) && outPhoneNumbers.length)) ? 'completed' : 'pending_phone')
-        : 'completed');
-
-    enrichedOut.push({
-      id: enrichedId,
-      clientRef: clientRef || undefined,
-      sourceOpportunityId: l.sourceOpportunityId,
-      apolloId: foundApolloId,
-      fullName: emailResult?.fullName || l.fullName,
-      companyName: emailResult?.companyName || l.companyName,
-      title: emailResult?.title || l.title,
-      email: emailResult?.email || l.email,
-      emailStatus: emailResult?.emailStatus || 'unknown',
-      linkedinUrl: normalizeLinkedin(outLinkedin),
-      companyDomain: emailResult?.companyDomain || cleanDomain(l.companyDomain),
-      industry: emailResult?.industry,
-      location: emailResult?.location,
-      phoneNumbers: outPhoneNumbers,
-      primaryPhone: outPrimaryPhone,
-      enrichmentStatus: outStatus,
-      createdAt: new Date().toISOString(),
-    });
-
-    await sleep(80);
-  }
-
-  if (fatalPdlError && successfulMatches === 0) {
-    throw new Error(fatalPdlError);
-  }
-
-  const responsePayload: any = {
-    enriched: enrichedOut,
-    usage: { consumed },
-    debug: { serverLogs },
-    providerRequested: providerDecision.requestedProvider,
-    providerUsed: 'pdl',
-    providerDefault: providerDecision.defaultProvider,
-    providerForcedReason: providerDecision.forcedApolloReason,
-    fallbackApplied: false,
-  };
-
-  if (useMemQuota && secret) {
-    const token = signTicket({ userId, dayKey, count: quotaStatus.count }, secret);
-    responsePayload.ticket = token;
-    const res = NextResponse.json(responsePayload, { status: 200 });
-    res.headers.set('x-quota-ticket', token);
-    res.headers.set('x-provider-used', 'pdl');
-    return res;
-  }
-
-  const res = NextResponse.json(responsePayload, { status: 200 });
-  res.headers.set('x-provider-used', 'pdl');
-  return res;
-}
-
-/* Identical helpers as before */
 function normalizeLinkedin(url: string) {
   if (!url) return url;
   try {
@@ -834,20 +930,35 @@ function cleanDomain(x?: string) {
   }
 }
 
-function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
+function hasAnyPhone(primaryPhone: any, phoneNumbers: any) {
+  return Boolean(primaryPhone) || (Array.isArray(phoneNumbers) && phoneNumbers.length > 0);
+}
 
-function signTicket(payload: any, secret: string): string {
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const sig = crypto.createHmac('sha256', secret).update(body).digest('base64url');
-  return `${body}.${sig}`;
+function resolveImmediateEnrichmentStatus(params: {
+  requestedPhone: boolean;
+  primaryPhone: any;
+  phoneNumbers: any;
+  providerStatus?: string | null;
+}) {
+  const providerStatus = String(params.providerStatus || '').trim().toLowerCase();
+  if (!params.requestedPhone) {
+    return providerStatus || 'completed';
+  }
+
+  if (hasAnyPhone(params.primaryPhone, params.phoneNumbers)) {
+    return 'completed';
+  }
+
+  if (providerStatus.startsWith('pending')) {
+    return providerStatus;
+  }
+
+  if (providerStatus === 'failed') {
+    return 'failed';
+  }
+
+  return 'pending_phone';
 }
-function verifyTicket(token: string, secret: string): any {
-  try {
-    const [body, sig] = token.split('.');
-    if (!body || !sig) return null;
-    const expect = crypto.createHmac('sha256', secret).update(body).digest('base64url');
-    if (expect !== sig) return null;
-    return JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-  } catch { return null; }
-}
+
+function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 

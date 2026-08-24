@@ -59,6 +59,46 @@ test('selects only new older messages for incremental compaction', () => {
   assert.deepEqual(toCompact.map((item) => item.id), ['msg-5', 'msg-6', 'msg-7']);
 });
 
+test('uses accumulated token estimate when provided with compacted history', () => {
+  const messages = [message(11, 'nuevo dato'), message(12, 'respuesta nueva')];
+  const compaction: SupliaConversationCompaction = {
+    version: 1,
+    summary: 'Resumen previo.',
+    compactedThroughMessageId: 'msg-10',
+    compactedThroughCreatedAt: new Date(Date.UTC(2026, 0, 1, 0, 10)).toISOString(),
+    sourceMessageCount: 10,
+    sourceTokenEstimate: 500,
+  };
+  const freshEstimate = estimateSupliaMessagesTokens(messages);
+  const context = buildSupliaPromptConversationContext({
+    messages,
+    compaction,
+    thresholdTokens: 1000,
+    tokenEstimate: 500 + freshEstimate,
+  });
+
+  assert.equal(context.mode, 'full');
+  assert.equal(context.summary, 'Resumen previo.');
+  assert.equal(context.tokenEstimate, 500 + freshEstimate);
+  assert.equal(context.omittedMessageCount, 10);
+});
+
+test('partial post-compaction message list selects the same new compaction window', () => {
+  const messages = Array.from({ length: 20 }, (_, index) => message(index + 1, `mensaje ${index + 1}`));
+  const compaction: SupliaConversationCompaction = {
+    version: 1,
+    summary: 'Resumen previo.',
+    compactedThroughMessageId: 'msg-10',
+    compactedThroughCreatedAt: messages[9].createdAt,
+  };
+
+  const fullWindow = getSupliaMessagesNeedingCompaction(messages, compaction, 5);
+  const partialWindow = getSupliaMessagesNeedingCompaction(messages.slice(10), compaction, 5);
+
+  assert.deepEqual(fullWindow.map((item) => item.id), ['msg-11', 'msg-12', 'msg-13', 'msg-14', 'msg-15']);
+  assert.deepEqual(partialWindow.map((item) => item.id), fullWindow.map((item) => item.id));
+});
+
 test('estimates token count from message content', () => {
   const messages = [message(1, 'x'.repeat(400))];
   assert.ok(estimateSupliaMessagesTokens(messages) >= 100);
