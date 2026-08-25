@@ -17,8 +17,8 @@ test('Apollo balance prefers the latest team lead-credit cycle', () => {
 
   assert.deepEqual(balance, {
     remaining: 441,
-    used: 3059,
-    limit: 3500,
+    used: 2059,
+    limit: 2500,
     cycleEnd: '2026-09-06T19:01:06.000Z',
     capturedAt: '2026-08-24T23:00:03.906Z',
   });
@@ -33,8 +33,8 @@ test('Apollo balance falls back to user credit fields', () => {
   }]);
 
   assert.equal(balance?.remaining, 569);
-  assert.equal(balance?.used, 2931);
-  assert.equal(balance?.limit, 3500);
+  assert.equal(balance?.used, 1931);
+  assert.equal(balance?.limit, 2500);
 });
 
 test('Apollo balance rejects incomplete snapshots', () => {

@@ -1,5 +1,6 @@
 export const APOLLO_EMAIL_ENRICHMENT_CREDITS = 1;
 export const APOLLO_PHONE_ENRICHMENT_CREDITS = 10;
+export const APOLLO_DISPLAY_TOTAL_CREDITS = 2_500;
 
 export function apolloEnrichmentCreditCost(options: { revealEmail: boolean; revealPhone: boolean }) {
   return (options.revealEmail ? APOLLO_EMAIL_ENRICHMENT_CREDITS : 0)
