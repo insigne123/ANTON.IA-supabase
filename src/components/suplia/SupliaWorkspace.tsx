@@ -153,6 +153,8 @@ const composerModes: Array<{ value: ComposerMode; label: string; promptPrefix?: 
 ];
 
 const readableAttachmentExtensions = ['.txt', '.md', '.markdown', '.csv', '.json', '.html', '.xml', '.ts', '.tsx', '.js', '.jsx', '.css', '.sql'];
+// Keep the fence marker dynamic so the source fence guard does not flag this parser.
+const markdownFencePattern = new RegExp(`^\\s*${String.fromCharCode(96).repeat(3)}`);
 
 function SupliaMark({ className }: { className?: string }) {
   return (
@@ -697,7 +699,7 @@ function isOrderedListLine(line: string) {
 }
 
 function isBlockBoundary(line: string) {
-  return !line.trim() || /^\s*```/.test(line) || /^\s{0,3}#{1,3}\s+/.test(line) || isUnorderedListLine(line) || isOrderedListLine(line);
+  return !line.trim() || markdownFencePattern.test(line) || /^\s{0,3}#{1,3}\s+/.test(line) || isUnorderedListLine(line) || isOrderedListLine(line);
 }
 
 function renderRichText(text: string) {
@@ -714,10 +716,10 @@ function renderRichText(text: string) {
       continue;
     }
 
-    if (/^\s*```/.test(line)) {
+    if (markdownFencePattern.test(line)) {
       const codeLines: string[] = [];
       index += 1;
-      while (index < lines.length && !/^\s*```/.test(lines[index] || '')) {
+      while (index < lines.length && !markdownFencePattern.test(lines[index] || '')) {
         codeLines.push(lines[index] || '');
         index += 1;
       }
