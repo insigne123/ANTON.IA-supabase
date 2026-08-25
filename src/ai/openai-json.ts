@@ -57,6 +57,10 @@ function chatCompletionsUrl(baseUrl: string) {
   return normalized.endsWith('/chat/completions') ? normalized : `${normalized}/chat/completions`;
 }
 
+function usesDefaultTemperatureOnly(model: string) {
+  return /^gpt-5(?:[.-]|$)/i.test(model);
+}
+
 function getStructuredProviderConfig(requestedProvider?: StructuredProvider): StructuredProviderConfig {
   const provider = getStructuredProvider(requestedProvider);
 
@@ -149,6 +153,21 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
   const model = opts.openAiModel || config.defaultModel;
   const temperature = opts.temperature ?? 0.3;
   const startedAt = Date.now();
+  const requestBody = {
+    model,
+    ...(usesDefaultTemperatureOnly(model) ? {} : { temperature }),
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content: 'You are a strict JSON generator. Return valid JSON only.',
+      },
+      {
+        role: 'user',
+        content: opts.prompt,
+      },
+    ],
+  };
 
   const res = await fetch(chatCompletionsUrl(config.baseUrl), {
     method: 'POST',
@@ -156,21 +175,7 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
       'Authorization': `Bearer ${config.apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model,
-      temperature,
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a strict JSON generator. Return valid JSON only.',
-        },
-        {
-          role: 'user',
-          content: opts.prompt,
-        },
-      ],
-    }),
+    body: JSON.stringify(requestBody),
     cache: 'no-store',
   });
 

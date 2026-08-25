@@ -31,10 +31,12 @@ test('uses Luna on Chat Completions for generic OpenAI generation', async () => 
       prompt: 'Return a value.',
       schema: z.object({ value: z.string() }),
       provider: 'openai',
+      temperature: 0.2,
     });
     assert.deepEqual(result, { value: 'ok' });
     assert.equal(requestedUrl, 'https://api.openai.com/v1/chat/completions');
     assert.equal(requestedBody.model, 'gpt-5.6-luna');
+    assert.equal(requestedBody.temperature, undefined);
   } finally {
     globalThis.fetch = originalFetch;
     if (previous.apiKey === undefined) delete process.env.OPENAI_API_KEY;
