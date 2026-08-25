@@ -174,6 +174,9 @@ function pickLeadSearchMeta(json: unknown) {
     organization_candidates: Array.isArray(source.organization_candidates) ? source.organization_candidates : undefined,
     selected_organization: source.selected_organization,
     includes_similar_titles: source.includes_similar_titles,
+    search_strategy: source.search_strategy,
+    matched_organizations: source.matched_organizations,
+    enrichment_requested: source.enrichment_requested,
     debug_logs: Array.isArray(source.debug_logs) ? source.debug_logs : undefined,
   };
 }
@@ -1262,7 +1265,6 @@ export async function POST(req: NextRequest) {
           companyReq.organizationDomain,
           companyReq.company_domain,
           companyReq.companyDomain,
-          companyReq.selected_organization_domain,
         ]);
         const companyPayload = {
           user_id: userId,
@@ -1274,10 +1276,6 @@ export async function POST(req: NextRequest) {
           organization_domains: organizationDomains.length ? organizationDomains : undefined,
           selected_organization_id: String(companyReq.selected_organization_id || '').trim() || undefined,
           selected_organization_name: String(companyReq.selected_organization_name || '').trim() || undefined,
-          selected_organization_domain: normalizeDomainList([companyReq.selected_organization_domain])[0] || undefined,
-          selected_organization_website: String(companyReq.selected_organization_website || '').trim() || undefined,
-          selected_organization_industry: String(companyReq.selected_organization_industry || '').trim() || undefined,
-          selected_organization_size: companyReq.selected_organization_size ?? undefined,
         };
         const response = await callLeadSearchService(companyPayload, {
           search_mode: 'company_name',
@@ -1385,11 +1383,14 @@ export async function POST(req: NextRequest) {
       user_id: userId || undefined,
       search_mode: 'batch',
       industry_keywords: currentParams.industry_keywords,
+      company_keywords: currentParams.company_keywords,
       company_location: currentParams.company_location,
+      person_locations: currentParams.person_locations,
       titles: Array.isArray(currentParams.titles)
         ? currentParams.titles
         : (typeof currentParams.titles === 'string' && currentParams.titles.length > 0 ? [currentParams.titles] : []),
       seniorities: Array.isArray(currentParams.seniorities) ? currentParams.seniorities : [],
+      include_similar_titles: currentParams.include_similar_titles,
       employee_range: currentParams.employee_ranges,
       employee_ranges: currentParams.employee_ranges,
       max_results: currentParams.max_results,

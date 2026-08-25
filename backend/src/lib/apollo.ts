@@ -31,8 +31,76 @@ function firstText(...values: unknown[]) {
 }
 
 function asNumber(value: unknown) {
+  if (value === null || value === undefined || value === '') return undefined;
   const number = Number(value);
   return Number.isFinite(number) ? number : undefined;
+}
+
+function normalizeComparable(value: unknown) {
+  return asText(value)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+const INDUSTRY_ALIASES: Record<string, string> = {
+  'recursos humanos': 'human resources',
+  tecnologia: 'technology',
+  salud: 'healthcare',
+  finanzas: 'finance',
+  fabricacion: 'manufacturing',
+  educacion: 'education',
+  construccion: 'construction',
+};
+
+const INDUSTRY_TAG_IDS = Object.fromEntries(Object.entries({
+  'Human Resources': '5567e0e37369640e5ac10c00',
+  Technology: '5494458a746564006c840200',
+  Healthcare: '5494458a746564006c840100',
+  Finance: '5494458a746564006c840000',
+  Manufacturing: '5494458a746564006c840300',
+  Retail: '5567ced173696450cb580000',
+  Education: '5494458a746564006c840500',
+  Accounting: '5567ce1f7369643b78570000',
+  'Architecture & Planning': '5567cdb77369645401080000',
+  'Apparel & Fashion': '5567cd82736964540d0b0000',
+  Automotive: '5567cdf27369644cfd800000',
+  'Building Materials': '5567e1a17369641ea9d30100',
+  Biotechnology: '5567d08e7369645dbc4b0000',
+  'Environment Services': '5567ce5b736964540d280000',
+  'Electrical/Electronic Manufacturing': '5567cd4c73696439c9030000',
+  'Computer Software': '5567cd4e7369643b70010000',
+  Entertainment: '5567cdd37369643b80510000',
+  'Education Management': '5567ce9e736964540d540000',
+  Construction: '5567cd4773696439dd350000',
+  'Financial Services': '5567cdd67369643e64020000',
+  'Government Administration': '5567cd527369643981050000',
+  Hospitality: '5567ce9d7369643bc19c0000',
+  'Health, Wellness & Fitness': '5567cddb7369644d250c0000',
+  'Higher Education': '5567cd4c73696453e1300000',
+  'Information Services': '5567e0c97369640d2b3b1600',
+}).map(([name, id]) => [normalizeComparable(name), id])) as Record<string, string>;
+
+function canonicalIndustry(value: unknown) {
+  const normalized = normalizeComparable(value);
+  return INDUSTRY_ALIASES[normalized] || normalized;
+}
+
+export function resolveApolloIndustryFilters(requestedIndustries: string[]) {
+  const tagIds = new Set<string>();
+  const keywordFallbacks = new Set<string>();
+
+  for (const requestedIndustry of requestedIndustries) {
+    const canonical = canonicalIndustry(requestedIndustry);
+    const tagId = INDUSTRY_TAG_IDS[canonical];
+    if (tagId) tagIds.add(tagId);
+    else if (requestedIndustry.trim()) keywordFallbacks.add(requestedIndustry.trim());
+  }
+
+  return { tagIds: [...tagIds], keywordFallbacks: [...keywordFallbacks] };
 }
 
 function buildPhoneNumbers(person: JsonRecord) {
@@ -61,18 +129,37 @@ function buildPhoneNumbers(person: JsonRecord) {
   return [...unique.values()];
 }
 
-function mapPersonToLead(value: unknown) {
+function mapPersonToLead(
+  value: unknown,
+  organizations: Array<NonNullable<ReturnType<typeof mapOrganization>>> = [],
+) {
   const person = asRecord(value);
   if (!person) return null;
 
   const organization = asRecord(person.organization) || {};
+  const organizationId = firstText(organization.id, person.organization_id);
+  const organizationName = firstText(organization.name, person.organization_name);
+  const organizationContext = organizations.find((candidate) => (
+    (organizationId && candidate.id === organizationId)
+    || (organizationName && normalizeComparable(candidate.name) === normalizeComparable(organizationName))
+  ));
   const id = firstText(person.id, person.person_id, person.apollo_id, person.linkedin_url);
   if (!id) return null;
 
   const firstName = firstText(person.first_name);
-  const lastName = firstText(person.last_name);
+  const lastName = firstText(person.last_name, person.last_name_obfuscated);
   const fullName = firstText(person.name, person.full_name, [firstName, lastName].filter(Boolean).join(' '));
-  const organizationDomain = firstText(organization.primary_domain, organization.domain, person.organization_domain);
+  const organizationDomain = firstText(
+    organization.primary_domain,
+    organization.domain,
+    person.organization_domain,
+    organizationContext?.primary_domain,
+  );
+  const organizationIndustry = firstText(
+    organization.industry,
+    person.organization_industry,
+    organizationContext?.industry,
+  );
   const phoneNumbers = buildPhoneNumbers(person);
 
   return {
@@ -94,17 +181,21 @@ function mapPersonToLead(value: unknown) {
     departments: asArray(person.departments).map(asText).filter(Boolean).slice(0, 20),
     primary_phone: firstText(person.phone_number, person.mobile_phone, person.work_phone) || phoneNumbers[0]?.sanitized_number,
     phone_numbers: phoneNumbers,
-    organization_name: firstText(organization.name, person.organization_name),
+    organization_name: firstText(organization.name, person.organization_name, organizationContext?.name),
     organization_domain: organizationDomain,
-    organization_industry: firstText(organization.industry, person.organization_industry),
-    organization_size: asNumber(organization.estimated_num_employees ?? person.organization_size),
+    organization_industry: organizationIndustry,
+    organization_size: asNumber(
+      organization.estimated_num_employees
+      ?? person.organization_size
+      ?? organizationContext?.estimated_num_employees,
+    ),
     organization: {
-      id: firstText(organization.id, person.organization_id),
-      name: firstText(organization.name, person.organization_name),
+      id: firstText(organization.id, person.organization_id, organizationContext?.id),
+      name: firstText(organization.name, person.organization_name, organizationContext?.name),
       domain: organizationDomain,
-      industry: firstText(organization.industry, person.organization_industry),
-      website_url: firstText(organization.website_url, person.organization_website),
-      linkedin_url: firstText(organization.linkedin_url),
+      industry: organizationIndustry,
+      website_url: firstText(organization.website_url, person.organization_website, organizationContext?.website_url),
+      linkedin_url: firstText(organization.linkedin_url, organizationContext?.linkedin_url),
     },
   };
 }
@@ -180,23 +271,50 @@ async function searchPeople(params: {
   organizationIds?: string[];
   apiKey: string;
   config: GatewayConfig;
+  organizations?: Array<NonNullable<ReturnType<typeof mapOrganization>>>;
 }) {
-  const query = new URLSearchParams();
-  query.set('per_page', String(params.input.maxResults));
-  query.set('page', '1');
-  appendAll(query, 'person_titles[]', params.input.titles);
-  appendAll(query, 'person_seniorities[]', params.input.seniorities);
-  appendAll(query, 'q_organization_keyword_tags[]', params.input.industryKeywords);
-  appendAll(query, 'organization_locations[]', params.input.companyLocations);
-  appendAll(query, 'organization_num_employees_ranges[]', params.input.employeeRanges);
-  appendAll(query, 'q_organization_domains_list[]', params.domains || []);
-  appendAll(query, 'q_organization_ids[]', params.organizationIds || []);
+  const organizationIdChunks = params.organizationIds?.length
+    ? Array.from({ length: Math.ceil(params.organizationIds.length / 50) }, (_, index) => (
+      params.organizationIds!.slice(index * 50, (index + 1) * 50)
+    ))
+    : [[]];
+  const people = new Map<string, NonNullable<ReturnType<typeof mapPersonToLead>>>();
+  const industryFilters = resolveApolloIndustryFilters(params.input.industryKeywords);
 
-  const payload = await requestApollo(`/mixed_people/search?${query.toString()}`, {}, params.apiKey, params.config);
-  return asArray(payload.people)
-    .map(mapPersonToLead)
-    .filter((person): person is NonNullable<typeof person> => person !== null)
-    .slice(0, params.input.maxResults);
+  for (const organizationIds of organizationIdChunks) {
+    const remaining = params.input.maxResults - people.size;
+    if (remaining <= 0) break;
+
+    const query = new URLSearchParams();
+    query.set('per_page', String(Math.min(100, remaining)));
+    query.set('page', '1');
+    appendAll(query, 'person_titles[]', params.input.titles);
+    if (params.input.titles.length > 0) {
+      query.set('include_similar_titles', String(params.input.includeSimilarTitles));
+    }
+    appendAll(query, 'person_seniorities[]', params.input.seniorities);
+    appendAll(query, 'person_locations[]', params.input.personLocations);
+    appendAll(query, 'organization_locations[]', params.input.companyLocations);
+    appendAll(query, 'organization_num_employees_ranges[]', params.input.employeeRanges);
+    appendAll(query, 'q_organization_domains_list[]', params.domains || []);
+    appendAll(query, 'organization_ids[]', organizationIds);
+    // Verified against People API Search on 2026-08-25; Apollo's public OpenAPI currently omits these filters.
+    // Keep the request fail-closed so a provider contract change cannot return an unfiltered lead set.
+    appendAll(query, 'organization_industry_tag_ids[]', industryFilters.tagIds);
+    appendAll(query, 'q_organization_keyword_tags[]', [
+      ...params.input.companyKeywords,
+      ...industryFilters.keywordFallbacks,
+    ]);
+
+    const payload = await requestApollo(`/mixed_people/api_search?${query.toString()}`, {}, params.apiKey, params.config);
+    for (const value of asArray(payload.people)) {
+      const person = mapPersonToLead(value, params.organizations);
+      if (person && !people.has(person.id)) people.set(person.id, person);
+      if (people.size >= params.input.maxResults) break;
+    }
+  }
+
+  return [...people.values()];
 }
 
 async function findOrganizations(name: string, apiKey: string, config: GatewayConfig) {
@@ -277,13 +395,22 @@ export async function executeLeadSearch(input: LeadSearchInput, apiKey: string, 
       }
     }
 
-    const leads = await searchPeople({ input, domains, organizationIds, apiKey, config });
+    const organizationContext = candidates.length === 1 ? candidates : [];
+    const leads = await searchPeople({
+      input,
+      domains,
+      organizationIds,
+      apiKey,
+      config,
+      organizations: organizationContext,
+    });
     return {
       count: leads.length,
       leads,
       search_mode: 'company_name',
       company_name: input.companyName || input.selectedOrganizationName,
-      ...(candidates.length === 1 ? { selected_organization: candidates[0] } : {}),
+      enrichment_requested: false,
+      ...(organizationContext.length === 1 ? { selected_organization: organizationContext[0] } : {}),
     };
   }
 
@@ -292,6 +419,8 @@ export async function executeLeadSearch(input: LeadSearchInput, apiKey: string, 
     count: leads.length,
     leads,
     search_mode: 'batch',
+    search_strategy: 'people',
+    enrichment_requested: false,
   };
 }
 

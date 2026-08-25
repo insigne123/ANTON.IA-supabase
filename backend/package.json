@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/lib/gateway.test.ts src/lib/validation.test.ts"
+    "test": "node --import tsx --test src/lib/gateway.test.ts src/lib/validation.test.ts src/lib/apollo.test.ts"
   },
   "dependencies": {
     "next": "16.3.2",

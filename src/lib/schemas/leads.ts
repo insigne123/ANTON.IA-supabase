@@ -111,31 +111,47 @@ export const LeadSearchResponseSchema = LeadsResponseSchema.extend({
   organization_candidates: z.array(CompanySearchOrganizationSchema).optional(),
   selected_organization: CompanySearchOrganizationSchema.optional(),
   includes_similar_titles: z.boolean().optional(),
+  search_strategy: z.enum(['people', 'organizations_then_people']).optional(),
+  matched_organizations: z.number().int().nonnegative().optional(),
+  enrichment_requested: z.boolean().optional(),
 }).passthrough();
 
-/** === Payload que espera n8n (array con 1 item) ===
- * Cambios:
- * - industry_keywords: requerido con al menos 1 string no vacío (texto libre → lo pondremos en un array).
- * - company_location: requerido con al menos 1 string no vacío.
- * - employee_ranges: requerido con al menos 1 string no vacío.
- */
+/** Legacy array envelope used by the browser-facing lead-search route. */
 const nonEmptyString = z.string().trim().min(1, "requerido");
 
 export const N8NRequestItemSchema = z.object({
-  industry_keywords: z.array(nonEmptyString).min(1, "industry_keywords requiere al menos 1 valor"),
-  company_location: z.array(nonEmptyString).min(1, "company_location requiere al menos 1 valor"),
-  employee_ranges: z.array(nonEmptyString).min(1, "employee_ranges requiere al menos 1 valor"),
+  industry_keywords: z.array(nonEmptyString).optional().default([]),
+  company_keywords: z.array(nonEmptyString).optional().default([]),
+  company_location: z.array(nonEmptyString).optional().default([]),
+  person_locations: z.array(nonEmptyString).optional().default([]),
+  employee_ranges: z.array(nonEmptyString).optional().default([]),
 
-  titles: z.string().optional().default(""),
+  titles: z.union([z.string(), z.array(nonEmptyString)]).optional().default(""),
   seniorities: z.array(z.string()).optional().default([]),
+  include_similar_titles: z.boolean().optional().default(true),
 
   per_page_orgs: z.number().int().positive().max(200).optional().default(100),
   per_page_people: z.number().int().positive().max(200).optional().default(100),
   max_org_pages: z.number().int().positive().max(50).optional().default(3),
   max_people_pages_per_chunk: z.number().int().positive().max(50).optional().default(2),
-  enrich: z.boolean().optional().default(true),
+  enrich: z.boolean().optional().default(false),
 
   max_results: z.number().int().positive().max(5000).optional(),
+}).superRefine((value, ctx) => {
+  const hasTitles = Array.isArray(value.titles) ? value.titles.length > 0 : value.titles.trim().length > 0;
+  if (!hasTitles
+    && value.seniorities.length === 0
+    && value.industry_keywords.length === 0
+    && value.company_keywords.length === 0
+    && value.company_location.length === 0
+    && value.person_locations.length === 0
+    && value.employee_ranges.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'agrega al menos un filtro de búsqueda',
+      path: ['filters'],
+    });
+  }
 });
 
 export const N8NRequestBodySchema = z.array(N8NRequestItemSchema).min(1);

@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
-import { companySizes } from '@/lib/data';
+import { companySizes, industries } from '@/lib/data';
 import type { Lead as UILaed, SavedSearch } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Search, Save, X, ChevronDown, Loader2, Bookmark, BookmarkPlus, Trash2, Info, AlertCircle, Building2, CheckCircle2, Mail, Phone, SlidersHorizontal } from 'lucide-react';
@@ -54,6 +54,7 @@ import {
   normalizeSavedSearchCriteria,
   savedSearchNamesMatch,
   type LeadSearchMode,
+  type LeadSearchFilters,
 } from '@/lib/search/saved-search-criteria';
 
 function MultiCheckDropdown({
@@ -62,12 +63,14 @@ function MultiCheckDropdown({
   value,
   onChange,
   placeholder = 'Seleccionar',
+  disabled = false,
 }: {
   label?: string;
   options: { value: string; label: string }[];
   value: string[];
   onChange: (next: string[]) => void;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   const triggerId = React.useId();
   const toggle = (val: string, checked: boolean) => {
@@ -86,7 +89,7 @@ function MultiCheckDropdown({
       {label ? <Label htmlFor={triggerId}>{label}</Label> : null}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button id={triggerId} variant="outline" role="combobox" className="justify-between w-full">
+          <Button id={triggerId} variant="outline" role="combobox" className="justify-between w-full" disabled={disabled}>
             <span className="truncate">{buttonText}</span>
             <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
           </Button>
@@ -96,6 +99,7 @@ function MultiCheckDropdown({
             <DropdownMenuCheckboxItem
               key={opt.value}
               checked={value.includes(opt.value)}
+              disabled={disabled}
               onCheckedChange={(c) => toggle(opt.value, Boolean(c))}
               className="capitalize"
             >
@@ -120,7 +124,7 @@ function getFriendlySearchErrorMessage(message?: string) {
     return 'Revisa la URL de LinkedIn e intenta nuevamente.';
   }
 
-  if (lower.includes('industria') || lower.includes('ubicacion') || lower.includes('ubicación') || lower.includes('tamano') || lower.includes('tamaño') || lower.includes('obligatorio') || lower.startsWith('debes')) {
+  if (lower.includes('industria') || lower.includes('ubicacion') || lower.includes('ubicación') || lower.includes('tamano') || lower.includes('tamaño') || lower.includes('obligatorio') || lower.includes('al menos un filtro') || lower.startsWith('debes')) {
     return raw;
   }
 
@@ -350,7 +354,54 @@ function splitTitlesInput(value?: string) {
     .filter(Boolean);
 }
 
+function splitFilterInput(value?: string) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 const DEFAULT_FILTERS = DEFAULT_LEAD_SEARCH_FILTERS;
+
+const INDUSTRY_LABELS_ES: Record<string, string> = {
+  'Human Resources': 'Recursos humanos',
+  Technology: 'Tecnología',
+  Healthcare: 'Salud',
+  Finance: 'Finanzas',
+  Manufacturing: 'Manufactura',
+  Retail: 'Comercio minorista',
+  Education: 'Educación',
+  Accounting: 'Contabilidad',
+  'Architecture & Planning': 'Arquitectura y planificación',
+  'Apparel & Fashion': 'Moda y confección',
+  Automotive: 'Automotriz',
+  'Building Materials': 'Materiales de construcción',
+  Biotechnology: 'Biotecnología',
+  'Environment Services': 'Servicios ambientales',
+  'Electrical/Electronic Manufacturing': 'Fabricación eléctrica y electrónica',
+  'Computer Software': 'Software',
+  Entertainment: 'Entretenimiento',
+  'Education Management': 'Gestión educativa',
+  Construction: 'Construcción',
+  'Financial Services': 'Servicios financieros',
+  'Government Administration': 'Administración pública',
+  Hospitality: 'Hotelería y hospitalidad',
+  'Health, Wellness & Fitness': 'Salud, bienestar y fitness',
+  'Higher Education': 'Educación superior',
+  'Information Services': 'Servicios de información',
+};
+
+function hasBatchSearchFilters(filters: LeadSearchFilters) {
+  return Boolean(
+    filters.industry.trim()
+    || splitFilterInput(filters.companyKeywords).length
+    || splitFilterInput(filters.location).length
+    || splitFilterInput(filters.personLocation).length
+    || filters.sizeRange.trim()
+    || splitTitlesInput(filters.title).length
+    || filters.seniorities.length,
+  );
+}
 
 type SearchMode = LeadSearchMode;
 
@@ -371,6 +422,7 @@ export default function SearchPage() {
   const profileStatusAbortRef = useRef<AbortController | null>(null);
   const submittingRef = useRef(false);
   const searchRunIdRef = useRef(0);
+  const criteriaRef = useRef<HTMLFieldSetElement | null>(null);
   const profilePhoneToastStateRef = useRef<'idle' | 'found' | 'missing'>('idle');
 
   // Saved Searches State
@@ -427,6 +479,7 @@ export default function SearchPage() {
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
 
   const handleFilterChange = (field: keyof typeof filters, value: any) => {
+    setError('');
     if (field === 'searchMode') {
       setAdvancedFiltersOpen(value === 'linkedin_profile');
     }
@@ -534,7 +587,7 @@ export default function SearchPage() {
 
       setCompanyCandidates([]);
       setCompanySelectionPending(false);
-      setSelectedOrganization(result.selected_organization || (candidates.length === 1 ? candidates[0] : null));
+      setSelectedOrganization((current) => result.selected_organization || (candidates.length === 1 ? candidates[0] : current));
       setProfileSearchNotice(null);
       setLastProfilePhoneStatus(null);
       setProfilePhonePollingIds([]);
@@ -660,6 +713,29 @@ export default function SearchPage() {
     countQuota?: boolean;
     selectedOrg?: CompanySearchOrganization | null;
   } = {}) => {
+    const organization = selectedOrg || selectedOrganization;
+    let validationMessage = '';
+    if (filters.searchMode === 'linkedin_profile' && !normalizeLinkedinProfileUrl(filters.linkedinUrl)) {
+      validationMessage = 'La URL de LinkedIn no es valida.';
+    } else if (filters.searchMode === 'company_name'
+      && !filters.companyName.trim()
+      && !organization
+      && splitDomainInput(filters.companyDomains).length === 0) {
+      validationMessage = 'Debes indicar un nombre de empresa o al menos un dominio.';
+    } else if (filters.searchMode === 'filters' && !hasBatchSearchFilters(filters)) {
+      validationMessage = 'Agrega al menos un filtro para iniciar la búsqueda.';
+    }
+
+    if (validationMessage) {
+      const friendlyMessage = getFriendlySearchErrorMessage(validationMessage);
+      setError(friendlyMessage);
+      window.requestAnimationFrame(() => criteriaRef.current?.focus());
+      if (filters.searchMode !== 'filters') {
+        toast({ title: 'Revisa los criterios', description: friendlyMessage });
+      }
+      return;
+    }
+
     if (submittingRef.current) return;
     submittingRef.current = true;
     const searchRunId = ++searchRunIdRef.current;
@@ -691,10 +767,6 @@ export default function SearchPage() {
 
       if (filters.searchMode === 'linkedin_profile') {
         const linkedinUrl = normalizeLinkedinProfileUrl(filters.linkedinUrl);
-        if (!linkedinUrl) {
-          throw new Error('La URL de LinkedIn no es valida.');
-        }
-
         result = await searchLinkedInProfileLead({
           search_mode: 'linkedin_profile',
           linkedin_url: linkedinUrl,
@@ -706,10 +778,6 @@ export default function SearchPage() {
         const organization = selectedOrg || selectedOrganization;
         const organizationDomains = splitDomainInput(filters.companyDomains);
 
-        if (!companyName && !organization && organizationDomains.length === 0) {
-          throw new Error('Debes indicar un nombre de empresa o al menos un dominio.');
-        }
-
         result = await searchCompanyNameLeads({
           search_mode: 'company_name',
           company_name: companyName || organization?.name,
@@ -719,38 +787,30 @@ export default function SearchPage() {
           max_results: Math.max(1, Number(filters.maxResults) || 25),
           selected_organization_id: organization?.id,
           selected_organization_name: organization?.name,
-          selected_organization_domain: organization?.primary_domain || undefined,
-          selected_organization_website: organization?.website_url || undefined,
-          selected_organization_industry: organization?.industry || undefined,
-          selected_organization_size: organization?.estimated_num_employees ?? undefined,
         }, abortRef.current.signal);
       } else {
         const industryKeywords = [filters.industry.trim()].filter(Boolean);
-        const locations = filters.location.split(',').map(s => s.trim()).filter(Boolean);
-        const sizeRanges = filters.sizeRange.split(',').map(s => s.trim()).filter(Boolean);
-
-        if (!industryKeywords.length) {
-          throw new Error('El campo "Industria" es obligatorio.');
-        }
-        if (!locations.length) {
-          throw new Error('Debes indicar al menos un país/ubicación.');
-        }
-        if (!sizeRanges.length) {
-          throw new Error('Debes seleccionar al menos un tamaño de empresa.');
-        }
+        const companyKeywords = splitFilterInput(filters.companyKeywords);
+        const companyLocations = splitFilterInput(filters.location);
+        const personLocations = splitFilterInput(filters.personLocation);
+        const sizeRanges = [filters.sizeRange.trim()].filter(Boolean);
+        const titles = splitTitlesInput(filters.title);
 
         const payload: LeadsSearchParams = [{
           industry_keywords: industryKeywords,
-          company_location: locations,
+          company_keywords: companyKeywords,
+          company_location: companyLocations,
+          person_locations: personLocations,
           employee_ranges: sizeRanges,
-          titles: filters.title.trim(),
+          titles,
           seniorities: filters.seniorities,
+          include_similar_titles: true,
           per_page_orgs: 100,
           per_page_people: 100,
-          max_org_pages: 3,
-          max_people_pages_per_chunk: 2,
-          enrich: true,
-          max_results: 500,
+          max_org_pages: 1,
+          max_people_pages_per_chunk: 1,
+          enrich: false,
+          max_results: Math.max(1, Math.min(100, Number(filters.maxResults) || 25)),
         }];
         result = await searchLeads(payload, abortRef.current.signal);
       }
@@ -1092,6 +1152,8 @@ export default function SearchPage() {
     }
   };
 
+  const missingFilterError = error.toLowerCase().includes('al menos un filtro');
+
   return (
     <div className="mx-auto max-w-[1440px] space-y-5 py-2">
       <PageHeader
@@ -1173,6 +1235,15 @@ export default function SearchPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-5 p-4 sm:p-5">
+          <fieldset
+            ref={criteriaRef}
+            disabled={isLoading}
+            tabIndex={-1}
+            aria-invalid={missingFilterError || undefined}
+            aria-describedby={filters.searchMode === 'filters' ? 'filterRequirement' : undefined}
+            className="min-w-0 space-y-5 border-0 p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+          <legend className="sr-only">Criterios de búsqueda</legend>
           <div className="grid h-10 w-full grid-cols-3 rounded-xl border border-border/60 bg-muted/60 p-1 sm:w-[420px]" role="group" aria-label="Modo de búsqueda">
             {([
               ['filters', 'Filtros'],
@@ -1187,7 +1258,7 @@ export default function SearchPage() {
                   aria-pressed={active}
                   onClick={() => handleFilterChange('searchMode', value)}
                   className={cn(
-                    'inline-flex items-center justify-center whitespace-nowrap rounded-lg px-2 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                    'inline-flex items-center justify-center whitespace-nowrap rounded-lg px-2 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
                     active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
@@ -1280,7 +1351,7 @@ export default function SearchPage() {
                         <Input id="maxResults" type="number" min={1} max={100} value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', Math.min(100, Math.max(1, Number(event.target.value) || 25)))} />
                       </div>
                       <div className="md:col-span-2">
-                        <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" />
+                        <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" disabled={isLoading} />
                       </div>
                     </div>
                   </CollapsibleContent>
@@ -1298,20 +1369,46 @@ export default function SearchPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-3">
+                <p id="filterRequirement" className={cn('text-sm text-muted-foreground', missingFilterError && 'font-medium text-destructive')}>
+                  {missingFilterError
+                    ? error
+                    : 'Todos los campos son opcionales, pero necesitas completar al menos uno para buscar.'}
+                </p>
+                <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="industry">Industria *</Label>
-                    <Input id="industry" placeholder="Ej. Recursos Humanos" value={filters.industry} onChange={(event) => handleFilterChange('industry', event.target.value)} required />
+                    <Label htmlFor="industry">Industria</Label>
+                    <Select value={filters.industry || 'all'} onValueChange={(value) => handleFilterChange('industry', value === 'all' ? '' : value)}>
+                      <SelectTrigger id="industry"><SelectValue placeholder="Cualquier industria" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all" disabled={isLoading}>Cualquier industria</SelectItem>
+                        {industries.map((industry) => <SelectItem key={industry} value={industry} disabled={isLoading}>{INDUSTRY_LABELS_ES[industry] || industry}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Usa las categorías compatibles con el filtro exacto de Apollo.</p>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="location">Ubicación *</Label>
-                    <Input id="location" placeholder="Ej. Chile, Argentina" value={filters.location} onChange={(event) => handleFilterChange('location', event.target.value)} required />
+                   <div className="space-y-2">
+                     <Label htmlFor="companyKeywords">Palabras clave de empresa</Label>
+                     <Input id="companyKeywords" aria-describedby="companyKeywordsHelp" placeholder="Ej. payroll, onboarding" value={filters.companyKeywords} onChange={(event) => handleFilterChange('companyKeywords', event.target.value)} />
+                     <p id="companyKeywordsHelp" className="text-xs text-muted-foreground">Busca términos asociados a la actividad o propuesta de la empresa. Separa varios con comas.</p>
+                   </div>
+                   <div className="space-y-2">
+                     <Label htmlFor="location">Sede de la empresa</Label>
+                     <Input id="location" aria-describedby="companyLocationHelp" placeholder="Ej. Chile, Argentina" value={filters.location} onChange={(event) => handleFilterChange('location', event.target.value)} />
+                     <p id="companyLocationHelp" className="text-xs text-muted-foreground">Filtra por la ubicación de la organización, no por la residencia del lead.</p>
+                   </div>
+                   <div className="space-y-2">
+                     <Label htmlFor="personLocation">Ubicación del lead</Label>
+                     <Input id="personLocation" aria-describedby="personLocationHelp" placeholder="Ej. Santiago, Buenos Aires" value={filters.personLocation} onChange={(event) => handleFilterChange('personLocation', event.target.value)} />
+                     <p id="personLocationHelp" className="text-xs text-muted-foreground">Filtra por la ubicación personal o laboral del prospecto.</p>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="sizeRange">Tamaño de empresa *</Label>
-                    <Select name="sizeRange" value={filters.sizeRange} onValueChange={(value) => handleFilterChange('sizeRange', value)}>
-                      <SelectTrigger id="sizeRange" aria-required="true"><SelectValue placeholder="Selecciona un tamaño" /></SelectTrigger>
-                      <SelectContent>{companySizes.map((size) => <SelectItem key={size} value={size}>{size.replace('+', ' o más')}</SelectItem>)}</SelectContent>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="sizeRange">Tamaño de empresa</Label>
+                    <Select name="sizeRange" value={filters.sizeRange || 'all'} onValueChange={(value) => handleFilterChange('sizeRange', value === 'all' ? '' : value)}>
+                      <SelectTrigger id="sizeRange"><SelectValue placeholder="Cualquier tamaño" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all" disabled={isLoading}>Cualquier tamaño</SelectItem>
+                        {companySizes.map((size) => <SelectItem key={size} value={size} disabled={isLoading}>{size.replace('+', ' o más')}</SelectItem>)}
+                      </SelectContent>
                     </Select>
                   </div>
                 </div>
@@ -1319,25 +1416,33 @@ export default function SearchPage() {
                   <CollapsibleTrigger asChild>
                     <Button type="button" variant="ghost" size="sm" className="px-0 text-muted-foreground hover:bg-transparent hover:text-foreground">
                       <SlidersHorizontal className="h-4 w-4" />
-                      Cargo y nivel
+                      Cargo, nivel y volumen
                       <ChevronDown className={`h-4 w-4 transition-transform ${advancedFiltersOpen ? 'rotate-180' : ''}`} />
                     </Button>
                   </CollapsibleTrigger>
                   <CollapsibleContent className="pt-2">
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                       <div className="space-y-2">
                         <Label htmlFor="title">Cargo o posición</Label>
                         <Input id="title" placeholder="Ej. Marketing Director" value={filters.title} onChange={(event) => handleFilterChange('title', event.target.value)} />
                       </div>
-                      <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" />
+                      <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" disabled={isLoading} />
+                      <div className="space-y-2">
+                        <Label htmlFor="filterMaxResults">Máximo de resultados</Label>
+                        <Input id="filterMaxResults" type="number" min={1} max={100} value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', Math.min(100, Math.max(1, Number(event.target.value) || 25)))} />
+                      </div>
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  La búsqueda no enriquece contactos. Puedes enriquecerlos después desde Leads guardados.
+                </p>
               </div>
             )}
           </div>
+          </fieldset>
 
-          <div className="flex flex-col-reverse gap-2 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-end">
+          <div className="sticky bottom-2 z-10 flex flex-col gap-2 rounded-xl border border-border/70 bg-card/95 p-2 pt-2 shadow-lg backdrop-blur sm:static sm:flex-row sm:items-center sm:justify-end sm:rounded-none sm:border-x-0 sm:border-b-0 sm:bg-transparent sm:p-0 sm:pt-4 sm:shadow-none sm:backdrop-blur-none">
             <Button variant="ghost" className="shadow-none" onClick={handleClear} disabled={isLoading}><X className="h-4 w-4" />Limpiar</Button>
             {isLoading ? <Button variant="outline" className="shadow-none" onClick={handleAbort}>Cancelar</Button> : null}
             <Button className="shadow-none sm:min-w-36" onClick={handleSearch} disabled={isLoading}>
@@ -1395,9 +1500,10 @@ export default function SearchPage() {
                 {companyCandidates.map((candidate) => (
                   <button
                     key={candidate.id}
-                    type="button"
+                   type="button"
+                    disabled={isLoading}
                     onClick={() => handleSelectOrganization(candidate)}
-                    className="rounded-xl border border-border/60 bg-background p-3 text-left transition hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="rounded-xl border border-border/60 bg-background p-3 text-left transition hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <div className="font-medium">{candidate.name}</div>
                     <div className="mt-1 text-sm text-muted-foreground">
@@ -1418,7 +1524,7 @@ export default function SearchPage() {
         <CardHeader className="flex flex-col gap-3 border-b border-border/60 bg-muted/10 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="space-y-1">
             <h2 className="text-lg font-semibold tracking-tight">Resultados</h2>
-            <CardDescription>
+            <CardDescription role="status" aria-live="polite" aria-atomic="true">
               {isLoading
                 ? 'Buscando leads que coincidan con tus criterios…'
                 : leads.length > 0
@@ -1442,12 +1548,12 @@ export default function SearchPage() {
           </Button>
         </CardHeader>
         <CardContent className="p-4 sm:p-5">
-          {error ? (
-            <Alert className="mb-4 rounded-2xl border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          {error && !missingFilterError ? (
+            <Alert role="alert" className="mb-4 rounded-2xl border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
               <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
               <AlertTitle>No pudimos completar la búsqueda</AlertTitle>
               <AlertDescription className="space-y-3 text-amber-800 dark:text-amber-100/80">
-                <p>{error}</p>
+                <p id="searchValidationError">{error}</p>
                 <div className="flex flex-wrap gap-2 pt-1">
                   <Button size="sm" variant="outline" className="border-amber-300 bg-background/80 text-foreground hover:bg-background dark:border-amber-500/40" onClick={handleSearch} disabled={isLoading}>
                     Intentar de nuevo
@@ -1460,7 +1566,7 @@ export default function SearchPage() {
             </Alert>
           ) : null}
           {isLoading ? (
-            <div className="space-y-2" role="status" aria-live="polite" aria-label="Buscando leads">
+            <div className="space-y-2" aria-busy="true" aria-label="Buscando leads">
               {Array.from({ length: 4 }).map((_, index) => (
                 <div key={index} className="flex items-center gap-3 rounded-xl border border-border/60 p-3">
                   <Skeleton className="h-4 w-4" />
@@ -1471,7 +1577,6 @@ export default function SearchPage() {
                   </div>
                 </div>
               ))}
-              <span className="sr-only">Buscando leads…</span>
             </div>
           ) : pagedLeads.length > 0 ? (
             <>

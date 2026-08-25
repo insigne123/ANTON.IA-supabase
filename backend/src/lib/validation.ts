@@ -21,8 +21,11 @@ export type LeadSearchInput = {
   titles: string[];
   seniorities: string[];
   industryKeywords: string[];
+  companyKeywords: string[];
   companyLocations: string[];
+  personLocations: string[];
   employeeRanges: string[];
+  includeSimilarTitles: boolean;
   maxResults: number;
 };
 
@@ -50,6 +53,31 @@ function boundedText(maxLength = 160) {
 
 function boundedTextList(maxLength = 160) {
   return z.array(boundedText(maxLength)).max(MAX_FILTER_ITEMS, `must contain at most ${MAX_FILTER_ITEMS} values`).optional().default([]);
+}
+
+export function normalizeApolloEmployeeRange(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/\s+empleados?$/, '').trim();
+  const bounded = normalized.match(/^(\d+)\s*(?:-|,|a)\s*(\d+)$/);
+  if (bounded) {
+    const minimum = Number(bounded[1]);
+    const maximum = Number(bounded[2]);
+    if (minimum >= 0 && maximum >= minimum && maximum <= 10_000_000) return `${minimum},${maximum}`;
+    return null;
+  }
+
+  const openEnded = normalized.match(/^(\d+)\s*\+$/);
+  if (openEnded) {
+    const minimum = Number(openEnded[1]);
+    return minimum <= 10_000_000 ? `${minimum},10000000` : null;
+  }
+  return null;
+}
+
+function employeeRangeList() {
+  const employeeRange = boundedText(80)
+    .refine((value) => normalizeApolloEmployeeRange(value) !== null, 'must use min,max, min-max, or min+')
+    .transform((value) => normalizeApolloEmployeeRange(value)!);
+  return z.array(employeeRange).max(MAX_FILTER_ITEMS, `must contain at most ${MAX_FILTER_ITEMS} values`).optional().default([]);
 }
 
 function normalizeDomain(value: string) {
@@ -105,9 +133,12 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
     titles: boundedTextList(),
     seniorities: boundedTextList(),
     industry_keywords: boundedTextList(),
+    company_keywords: boundedTextList(),
     company_location: boundedTextList(),
-    employee_range: boundedTextList(80),
-    employee_ranges: boundedTextList(80),
+    person_locations: boundedTextList(),
+    employee_range: employeeRangeList(),
+    employee_ranges: employeeRangeList(),
+    include_similar_titles: z.boolean().optional().default(true),
     // The BFF historically accepts up to 5,000. Keep that contract bounded,
     // then clamp provider work to the backend's stricter runtime cap below.
     max_results: z.number().int().min(1).max(5_000).optional(),
@@ -127,7 +158,9 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
       && input.titles.length === 0
       && input.seniorities.length === 0
       && input.industry_keywords.length === 0
+      && input.company_keywords.length === 0
       && input.company_location.length === 0
+      && input.person_locations.length === 0
       && input.employee_range.length === 0
       && input.employee_ranges.length === 0) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['search_mode'], message: 'at least one bounded search filter is required' });
@@ -147,18 +180,23 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
       revealEmail: input.reveal_email ?? true,
       revealPhone: input.reveal_phone ?? false,
       companyName: input.company_name,
-      organizationDomains: [...new Set([
-        ...input.organization_domains,
-        ...(input.selected_organization_domain ? [input.selected_organization_domain] : []),
-      ])],
+      organizationDomains: input.selected_organization_id
+        ? []
+        : [...new Set([
+          ...input.organization_domains,
+          ...(input.selected_organization_domain ? [input.selected_organization_domain] : []),
+        ])],
       selectedOrganizationId: input.selected_organization_id,
       selectedOrganizationName: input.selected_organization_name,
       selectedOrganizationDomain: input.selected_organization_domain,
       titles: input.titles,
       seniorities: input.seniorities,
       industryKeywords: input.industry_keywords,
+      companyKeywords: input.company_keywords,
       companyLocations: input.company_location,
+      personLocations: input.person_locations,
       employeeRanges: [...new Set([...input.employee_range, ...input.employee_ranges])],
+      includeSimilarTitles: input.include_similar_titles,
       maxResults: Math.min(input.max_results ?? 50, config.maxSearchResults),
     },
   };

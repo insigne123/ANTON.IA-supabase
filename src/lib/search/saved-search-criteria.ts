@@ -1,11 +1,13 @@
-export const SAVED_SEARCH_CRITERIA_VERSION = 2;
+export const SAVED_SEARCH_CRITERIA_VERSION = 3;
 
 export type LeadSearchMode = 'filters' | 'linkedin_profile' | 'company_name';
 
 export interface LeadSearchFilters {
   searchMode: LeadSearchMode;
   industry: string;
+  companyKeywords: string;
   location: string;
+  personLocation: string;
   title: string;
   sizeRange: string;
   seniorities: string[];
@@ -25,7 +27,9 @@ export interface SavedSearchCriteriaEnvelope {
 export const DEFAULT_LEAD_SEARCH_FILTERS: LeadSearchFilters = {
   searchMode: 'filters',
   industry: '',
+  companyKeywords: '',
   location: '',
+  personLocation: '',
   title: '',
   sizeRange: '',
   seniorities: [],
@@ -122,7 +126,9 @@ export function normalizeSavedSearchCriteria(criteria: unknown): LeadSearchFilte
   return {
     searchMode: normalizeMode(firstDefined(source, ['searchMode', 'search_mode', 'mode']), source),
     industry: asString(firstDefined(source, ['industry', 'industryKeyword', 'industry_keywords'])),
+    companyKeywords: asString(firstDefined(source, ['companyKeywords', 'company_keywords', 'keywords'])),
     location: asString(firstDefined(source, ['location', 'companyLocation', 'company_location', 'locations'])),
+    personLocation: asString(firstDefined(source, ['personLocation', 'person_location', 'person_locations'])),
     title: asString(firstDefined(source, ['title', 'titles', 'jobTitle', 'job_title'])),
     sizeRange: asString(firstDefined(source, ['sizeRange', 'size_range', 'employeeRange', 'employee_ranges'])),
     seniorities: asStringArray(firstDefined(source, ['seniorities', 'managementLevels', 'management_levels'])),
