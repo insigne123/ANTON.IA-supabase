@@ -1619,9 +1619,14 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
             employee_ranges: companySize ? [companySize] : [],
             max_results: 100
         };
+        const backendSecret = String(process.env.ENRICHMENT_SERVICE_SECRET || process.env.API_SECRET_KEY || '').trim();
+        if (!backendSecret) throw new Error('ENRICHMENT_SERVICE_SECRET missing');
         const response = await fetch(fallbackUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-secret-key': backendSecret,
+            },
             body: JSON.stringify(searchPayload)
         });
         if (!response.ok) {
@@ -5953,7 +5958,7 @@ export const antoniaTick = functions.scheduler.onSchedule({
     schedule: 'every 1 minutes',
     timeoutSeconds: 540,
     memory: '1GiB',
-    secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'INTERNAL_API_SECRET']
+    secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'INTERNAL_API_SECRET', 'ENRICHMENT_SERVICE_SECRET']
 }, async () => {
     await runAntoniaTick();
 });
@@ -6045,7 +6050,7 @@ export const antoniaTickHttp = functions.https.onRequest({
     timeoutSeconds: 540,
     memory: '1GiB',
     invoker: 'private',
-    secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ANTONIA_MANUAL_TICK_SECRET', 'INTERNAL_API_SECRET']
+    secrets: ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ANTONIA_MANUAL_TICK_SECRET', 'INTERNAL_API_SECRET', 'ENRICHMENT_SERVICE_SECRET']
 } as any, async (req: any, res: any) => {
     try {
         const secret = String(process.env.ANTONIA_MANUAL_TICK_SECRET || '').trim();

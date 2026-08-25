@@ -36,6 +36,8 @@ test('Firebase scheduled Functions own the Antonia worker and its private manual
     assert.match(scheduledTick, /schedule: 'every 1 minutes'/);
     assert.match(manualTick, /invoker: 'private'/);
     assert.match(manualTick, /ANTONIA_MANUAL_TICK_SECRET/);
+    assert.match(scheduledTick, /ENRICHMENT_SERVICE_SECRET/);
+    assert.match(manualTick, /ENRICHMENT_SERVICE_SECRET/);
     assert.match(manualTick, /hasManualTickAuthorization/);
     assert.match(functionsSource, /x-manual-trigger-secret/);
     assert.doesNotMatch(manualTick, /\bANTONIA_TICK_SECRET\b|invoker: 'public'|x-cron-secret/);
