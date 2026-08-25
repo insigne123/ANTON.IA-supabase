@@ -1,5 +1,6 @@
 // Cliente robusto para Microsoft Graph (Outlook)
 import { microsoftAuthService } from './microsoft-auth-service';
+import { mapDurableSendReceipt, type DurableSendReceipt } from './outbound-send-receipt';
 
 // --- Types ---
 export type SendEmailInput = {
@@ -14,10 +15,11 @@ export type SendEmailInput = {
   researchSnapshotId?: string | null;
   draftId?: string | null;
   versionId?: string | null;
+  organizationId: string;
   idempotencyKey: string;
 };
 
-export type SendEmailResult = {
+export type SendEmailResult = DurableSendReceipt & {
   messageId: string;
   internetMessageId?: string;
   conversationId?: string;
@@ -66,6 +68,9 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   if (!hasCanonicalDraft) {
     throw new Error('Selecciona un borrador aprobado antes de enviar.');
   }
+  if (!String(input.organizationId || '').trim()) {
+    throw new Error('No se pudo confirmar la organización del borrador.');
+  }
   if (input.attachments?.length) {
     throw new Error('Los adjuntos todavia no estan disponibles en el envio idempotente de Outlook.');
   }
@@ -81,18 +86,21 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       provider: 'outlook',
       draftId: input.draftId,
       versionId: input.versionId,
+      organizationId: input.organizationId,
       idempotencyKey: input.idempotencyKey,
     }),
   });
 
-  const payload = await res.json().catch(() => ({}));
-  if (!res.ok || !payload?.success) {
+  const payload = await res.json().catch(() => null);
+  const durableReceipt = mapDurableSendReceipt(payload);
+  if (!durableReceipt) {
     throw new Error(payload?.error || payload?.graph?.error?.message || `Outlook send failed (${res.status})`);
   }
 
   const providerResponse = payload?.receipt?.providerResponse || {};
   return {
-    messageId: payload?.receipt?.providerMessageId || providerResponse?.messageId || providerResponse?.id,
+    ...durableReceipt,
+    messageId: durableReceipt.providerMessageId || providerResponse?.messageId || providerResponse?.id || '',
     internetMessageId: providerResponse?.internetMessageId,
     conversationId: providerResponse?.conversationId,
   };

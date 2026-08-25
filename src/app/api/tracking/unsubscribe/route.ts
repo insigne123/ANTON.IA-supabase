@@ -21,24 +21,16 @@ export async function POST(req: NextRequest) {
             process.env.SUPABASE_SERVICE_ROLE_KEY!
         );
 
-        // Insert into blacklist
-        const payload: any = {
-            email,
-            user_id: userId,
-            reason: 'User clicked unsubscribe (manual confirmation)'
-        };
-        if (orgId) payload.organization_id = orgId;
-
-        const { error } = await supabaseAdmin
-            .from('unsubscribed_emails')
-            .insert(payload);
+        const { error } = await supabaseAdmin.rpc('record_scoped_unsubscribe_v2', {
+            p_email: email,
+            p_user_id: userId,
+            p_organization_id: orgId,
+            p_reason: 'User clicked unsubscribe (manual confirmation)',
+        });
 
         if (error) {
-            // Duplicate key means already unsubscribed, return success
-            if (error.code !== '23505') {
-                console.error('Unsubscribe API Error:', error);
-                return NextResponse.json({ error: "Server Error" }, { status: 500 });
-            }
+            console.error('Unsubscribe API Error:', error);
+            return NextResponse.json({ error: "Server Error" }, { status: 500 });
         }
 
         return NextResponse.json({ success: true, email });

@@ -35,6 +35,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { CampaignAnalytics } from '@/components/campaigns/CampaignAnalytics';
 import { CampaignFlow } from '@/components/campaigns/CampaignFlow';
+import { CampaignReviewInbox } from '@/components/campaigns-v2/CampaignReviewInbox';
 import { cn } from '@/lib/utils';
 import { assessCampaignDraftReadiness } from '@/lib/campaign-qa';
 import { profileService } from '@/lib/services/profile-service';
@@ -138,6 +139,7 @@ export default function CampaignsPage() {
   const { user, loading: authLoading } = useAuth();
 
   const [mode, setMode] = useState<Mode>({ kind: 'list' });
+  const [campaignInboxEnabled, setCampaignInboxEnabled] = useState<boolean | null>(null);
   const [items, setItems] = useState<Campaign[]>([]);
   const [loadingCampaigns, setLoadingCampaigns] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -700,32 +702,50 @@ export default function CampaignsPage() {
     <div className="mx-auto space-y-6">
       {mode.kind === 'list' && (
         <PageHeader title="Campañas" description="Crea secuencias, revisa sus destinatarios y decide cuándo activarlas.">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button className="w-full rounded-full sm:w-auto">
-                <Plus aria-hidden="true" />
-                Nueva campaña
-                <ChevronDown aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-72 rounded-2xl p-1.5">
-              <DropdownMenuLabel>Elige el objetivo</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="items-start py-2.5" onClick={() => startCreate('reconnection')}>
-                <Sparkles className="mt-0.5" aria-hidden="true" />
-                <span><span className="block font-medium">Volver a conectar</span><span className="block text-xs text-muted-foreground">Presenta una nueva propuesta a contactos anteriores.</span></span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="items-start py-2.5" onClick={() => startCreate('follow_up')}>
-                <MessageSquare className="mt-0.5" aria-hidden="true" />
-                <span><span className="block font-medium">Hacer seguimiento</span><span className="block text-xs text-muted-foreground">Continúa conversaciones sin respuesta.</span></span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {campaignInboxEnabled === true ? (
+            <Button className="w-full rounded-full sm:w-auto" onClick={() => startCreate('reconnection')}>
+              <Plus aria-hidden="true" />
+              Nueva reconexión
+            </Button>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button className="w-full rounded-full sm:w-auto">
+                  <Plus aria-hidden="true" />
+                  Nueva campaña
+                  <ChevronDown aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72 rounded-2xl p-1.5">
+                <DropdownMenuLabel>Elige el objetivo</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="items-start py-2.5" onClick={() => startCreate('reconnection')}>
+                  <Sparkles className="mt-0.5" aria-hidden="true" />
+                  <span><span className="block font-medium">Volver a conectar</span><span className="block text-xs text-muted-foreground">Presenta una nueva propuesta a contactos anteriores.</span></span>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="items-start py-2.5" onClick={() => startCreate('follow_up')}>
+                  <MessageSquare className="mt-0.5" aria-hidden="true" />
+                  <span><span className="block font-medium">Hacer seguimiento</span><span className="block text-xs text-muted-foreground">Continúa conversaciones sin respuesta.</span></span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </PageHeader>
       )}
 
       {mode.kind === 'list' && (
-        <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/80 shadow-[0_20px_60px_-48px_rgba(15,23,42,0.24)]">
+        <CampaignReviewInbox onEnabledChange={setCampaignInboxEnabled} />
+      )}
+
+      {mode.kind === 'list' && (
+        <section className={campaignInboxEnabled === true ? 'space-y-3 pt-2' : undefined} aria-labelledby={campaignInboxEnabled === true ? 'legacy-campaigns-heading' : undefined}>
+          {campaignInboxEnabled === true ? (
+            <div>
+              <h2 id="legacy-campaigns-heading" className="text-base font-semibold">Campañas anteriores</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Consulta o edita las secuencias creadas con el flujo anterior.</p>
+            </div>
+          ) : null}
+          <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/80 shadow-[0_20px_60px_-48px_rgba(15,23,42,0.24)]">
           <CardHeader className="gap-4 border-b border-border/60 bg-muted/10">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -835,7 +855,8 @@ export default function CampaignsPage() {
               </div>
             )}
           </CardContent>
-        </Card>
+          </Card>
+        </section>
       )}
 
       {mode.kind === 'edit' && (

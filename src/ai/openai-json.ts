@@ -30,7 +30,7 @@ export type StructuredResult<T extends z.ZodTypeAny> = {
   telemetry: StructuredTelemetry;
 };
 
-const DEFAULT_OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const DEFAULT_OPENAI_MODEL = 'gpt-5.6-luna';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_GLM_MODEL = process.env.GLM_MODEL || 'glm-5.2';
 const DEFAULT_GLM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';

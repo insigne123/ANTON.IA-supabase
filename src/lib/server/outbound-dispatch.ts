@@ -12,6 +12,7 @@ import {
   finalizeCampaignDeliveryOutcome,
   isCampaignDispatchKey,
 } from '@/lib/server/campaign-deliveries';
+import { finalizeCampaignV2DispatchOutcome } from '@/lib/server/campaigns-v2/dispatch-finalization';
 
 export type OutboundDispatchStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'deferred' | 'unknown';
 
@@ -41,10 +42,12 @@ export type OutboundDispatch = {
   reconciliationClaimedAt?: string | null;
   reconciledAt?: string | null;
   reconciliationDetails?: Record<string, unknown> | null;
+  campaignRecipientStepId?: string | null;
 };
 
 export type OutboundSentHistoryFinalizer = (dispatch: OutboundDispatch) => Promise<unknown>;
 export type OutboundCampaignDeliveryFinalizer = (dispatch: OutboundDispatch) => Promise<unknown>;
+export type OutboundCampaignV2Finalizer = (dispatch: OutboundDispatch) => Promise<unknown>;
 
 export type OutboundPendingClaim = {
   created: boolean;
@@ -76,6 +79,14 @@ export interface OutboundDispatchRepository {
       errorCode?: string | null;
       errorMessage: string;
       providerResponse?: Record<string, unknown> | null;
+      completedAt: string;
+    },
+  ): Promise<OutboundDispatch>;
+  markPreProviderFailed(
+    dispatchId: string,
+    input: {
+      databaseCode: string;
+      errorMessage: string;
       completedAt: string;
     },
   ): Promise<OutboundDispatch>;
@@ -257,6 +268,7 @@ function mapDispatchRow(row: any): OutboundDispatch {
     reconciliationClaimedAt: row.reconciliation_claimed_at ?? null,
     reconciledAt: row.reconciled_at ?? null,
     reconciliationDetails: row.reconciliation_details ?? null,
+    campaignRecipientStepId: row.campaign_recipient_step_id ?? null,
   };
 }
 
@@ -370,33 +382,21 @@ export function createSupabaseOutboundDispatchRepository(
     },
 
     async markSending(dispatchId, input) {
-      const { data, error } = await client
-        .from('outbound_dispatches')
-        .update({
-          status: 'sending',
-          started_at: input.startedAt,
-          completed_at: null,
-          provider_message_id: null,
-          provider_response: null,
-          error_code: null,
-          error_message: null,
-          updated_at: input.startedAt,
-          attempt_count: input.expectedAttemptCount + 1,
-        })
-        .eq('id', dispatchId)
-        .in('status', ['pending', 'deferred'])
-        .eq('attempt_count', input.expectedAttemptCount)
-        .select('*')
-        .maybeSingle();
+      const { data, error } = await client.rpc('claim_outbound_dispatch_sending_v2', {
+        p_dispatch_id: dispatchId,
+        p_started_at: input.startedAt,
+        p_expected_attempt_count: input.expectedAttemptCount,
+      });
       if (error) throw error;
-      if (data) {
-        const dispatch = mapDispatchRow(data);
+      if (!data || typeof data !== 'object' || typeof data.claimed !== 'boolean' || !data.dispatch) {
+        throw new Error('Invalid outbound dispatch sending claim result.');
+      }
+      const dispatch = mapDispatchRow(data.dispatch);
+      if (data.claimed) {
         await recordOutboundDispatchEvent(dispatch);
         return { claimed: true, dispatch };
       }
-      const current = await findById(dispatchId);
-      if (current) return { claimed: false, dispatch: current };
-      throw new Error(`Outbound dispatch ${dispatchId} no longer exists.`);
+      return { claimed: false, dispatch };
     },
 
     markSent(dispatchId, input) {
@@ -416,6 +416,21 @@ export function createSupabaseOutboundDispatchRepository(
         status: 'failed',
         provider_response: input.providerResponse ?? null,
         error_code: input.errorCode ?? null,
+        error_message: input.errorMessage,
+        completed_at: input.completedAt,
+        updated_at: input.completedAt,
+      });
+    },
+
+    markPreProviderFailed(dispatchId, input) {
+      return updateState(dispatchId, ['pending', 'deferred'], {
+        status: 'failed',
+        provider_message_id: null,
+        provider_response: {
+          providerInvoked: false,
+          databaseCode: input.databaseCode,
+        },
+        error_code: 'pre_provider_rejected',
         error_message: input.errorMessage,
         completed_at: input.completedAt,
         updated_at: input.completedAt,
@@ -469,10 +484,21 @@ export type OutboundDispatchDependencies = {
   now?: () => string;
   finalizeSentHistory?: OutboundSentHistoryFinalizer;
   finalizeCampaignDelivery?: OutboundCampaignDeliveryFinalizer;
+  finalizeCampaignV2Dispatch?: OutboundCampaignV2Finalizer;
 };
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function transactionRetryCode(error: unknown) {
+  const code = String((error as { code?: unknown } | null)?.code || '').trim();
+  return code === '40001' || code === '40P01' ? code : null;
+}
+
+function preProviderRejectionCode(error: unknown) {
+  const code = String((error as { code?: unknown } | null)?.code || '').trim();
+  return ['42501', '55000', '23514', 'P0002'].includes(code) ? code : null;
 }
 
 function createRetryMetadata(input: {
@@ -661,6 +687,32 @@ async function finalizeCampaignDelivery(
   return result;
 }
 
+async function finalizeCampaignV2RecipientStep(
+  result: OutboundDispatchResult,
+  dependencies?: { finalizeCampaignV2Dispatch?: OutboundCampaignV2Finalizer; client?: SupabaseClientLike },
+): Promise<OutboundDispatchResult> {
+  if (!dependencies?.finalizeCampaignV2Dispatch && !result.dispatch.campaignRecipientStepId) return result;
+  const finalize = dependencies?.finalizeCampaignV2Dispatch
+    ?? ((dispatch: OutboundDispatch) => finalizeCampaignV2DispatchOutcome(dispatch.id, dependencies?.client));
+  try {
+    await finalize(result.dispatch);
+  } catch (error) {
+    // A same-key replay retries this idempotent projection without another provider call.
+    console.error('[outbound-dispatch] failed to finalize Campaign V2 recipient step', {
+      dispatchId: result.dispatch.id,
+      error,
+    });
+  }
+  return result;
+}
+
+function shouldFinalizeCampaignV2RecipientStep(
+  dispatch: OutboundDispatch,
+  dependencies?: { finalizeCampaignV2Dispatch?: OutboundCampaignV2Finalizer },
+) {
+  return Boolean(dependencies?.finalizeCampaignV2Dispatch || dispatch.campaignRecipientStepId);
+}
+
 export async function reconcileUnknownOutboundDispatch(
   dispatchInput: OutboundDispatch,
   reconciler: OutboundDispatchReconciler,
@@ -669,6 +721,7 @@ export async function reconcileUnknownOutboundDispatch(
     now?: () => string;
     finalizeSentHistory?: OutboundSentHistoryFinalizer;
     finalizeCampaignDelivery?: OutboundCampaignDeliveryFinalizer;
+    finalizeCampaignV2Dispatch?: OutboundCampaignV2Finalizer;
   },
 ): Promise<OutboundReconciliationResult> {
   const dispatch = dispatchInput;
@@ -752,6 +805,12 @@ export async function reconcileUnknownOutboundDispatch(
       finalizeSentHistory: dependencies?.finalizeSentHistory,
     });
   }
+  if (shouldFinalizeCampaignV2RecipientStep(updated, dependencies)) {
+    await finalizeCampaignV2RecipientStep({ status: updated.status, dispatch: updated, replayed: false }, {
+      client,
+      finalizeCampaignV2Dispatch: dependencies?.finalizeCampaignV2Dispatch,
+    });
+  }
   return { dispatch: updated, reconciled: updated.status === 'sent' || updated.status === 'failed' };
 }
 
@@ -769,7 +828,10 @@ export async function dispatchOutboundMessage(
   const now = dependencies?.now ?? (() => new Date().toISOString());
   const finish = async (result: OutboundDispatchResult) => {
     await finalizeCampaignDelivery(result, dependencies);
-    return finalizeConfirmedSentHistory(result, dependencies);
+    await finalizeConfirmedSentHistory(result, dependencies);
+    return shouldFinalizeCampaignV2RecipientStep(result.dispatch, dependencies)
+      ? finalizeCampaignV2RecipientStep(result, dependencies)
+      : result;
   };
 
   let claim: OutboundPendingClaim;
@@ -809,6 +871,9 @@ export async function dispatchOutboundMessage(
   }
   if (claim.created) {
     await finalizeCampaignDelivery({ status: claim.dispatch.status, dispatch: claim.dispatch, replayed: false }, dependencies);
+    if (shouldFinalizeCampaignV2RecipientStep(claim.dispatch, dependencies)) {
+      await finalizeCampaignV2RecipientStep({ status: claim.dispatch.status, dispatch: claim.dispatch, replayed: false }, dependencies);
+    }
   }
   if (!claim.created) {
     if (
@@ -822,7 +887,7 @@ export async function dispatchOutboundMessage(
     if (claim.dispatch.status === 'failed') {
       await releaseQuota(repository, claim.dispatch.id);
     }
-    if (claim.dispatch.status !== 'deferred') return finish(replay(claim.dispatch));
+    if (!['pending', 'deferred'].includes(claim.dispatch.status)) return finish(replay(claim.dispatch));
   }
 
   let dispatch = claim.dispatch;
@@ -834,9 +899,44 @@ export async function dispatchOutboundMessage(
     dispatch = sendingClaim.dispatch;
     if (sendingClaim.claimed) {
       await finalizeCampaignDelivery({ status: dispatch.status, dispatch, replayed: false }, dependencies);
+      if (shouldFinalizeCampaignV2RecipientStep(dispatch, dependencies)) {
+        await finalizeCampaignV2RecipientStep({ status: dispatch.status, dispatch, replayed: false }, dependencies);
+      }
     }
     if (!sendingClaim.claimed || dispatch.status !== 'sending') return finish(replay(dispatch));
   } catch (error) {
+    const retryCode = transactionRetryCode(error);
+    if (retryCode) {
+      // The database transaction was aborted before provider invocation. Keep the
+      // durable claim retryable instead of recording an ambiguous delivery outcome.
+      const current = await repository.findById(dispatch.id);
+      if (!current) throw error;
+      const retry = createRetryMetadata({
+        phase: 'pre_provider',
+        code: retryCode,
+        retryAfterMs: 1_000,
+        at: now(),
+      });
+      return finish({
+        status: current.status,
+        dispatch: current,
+        replayed: false,
+        ...(['pending', 'deferred'].includes(current.status) ? { retry } : {}),
+      });
+    }
+    const rejectionCode = preProviderRejectionCode(error);
+    if (rejectionCode) {
+      const current = await repository.findById(dispatch.id);
+      if (!current) throw error;
+      if (!['pending', 'deferred'].includes(current.status)) return finish(replay(current));
+      const at = now();
+      const failed = await repository.markPreProviderFailed(current.id, {
+        databaseCode: rejectionCode,
+        errorMessage: `Provider delivery was rejected before invocation: ${errorMessage(error)}`,
+        completedAt: at,
+      });
+      return finish({ status: failed.status, dispatch: failed, replayed: false });
+    }
     const at = now();
     const unknown = await recordUnknown(repository, dispatch, {
       code: 'persistence_error',
@@ -874,6 +974,23 @@ export async function dispatchOutboundMessage(
           ...(deferred.status === 'deferred' ? { retry: retryMetadataFromDispatch(deferred) ?? retry } : {}),
         });
       } catch (persistenceError) {
+        const retryCode = transactionRetryCode(persistenceError);
+        if (retryCode) {
+          const current = await repository.findById(dispatch.id);
+          if (!current) throw persistenceError;
+          const persistenceRetry = createRetryMetadata({
+            phase: 'pre_provider',
+            code: retryCode,
+            retryAfterMs: 1_000,
+            at,
+          });
+          return finish({
+            status: current.status,
+            dispatch: current,
+            replayed: false,
+            retry: persistenceRetry,
+          });
+        }
         const unknown = await recordUnknown(repository, dispatch, {
           code: 'persistence_error',
           message: `The provider was not invoked, but the deferral could not be persisted: ${errorMessage(persistenceError)}`,

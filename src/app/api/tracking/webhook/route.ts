@@ -8,8 +8,10 @@ import { syncLeadAutopilotToCrm } from '@/lib/server/crm-autopilot';
 import { createAntoniaException } from '@/lib/server/antonia-exceptions';
 import { maybeEscalateReplyReviewFromContactedId } from '@/lib/server/antonia-reply-escalation';
 import { buildThreadKey, deriveLifecycleState, safeInsertEmailEvent } from '@/lib/email-observability';
-import { shouldGloballySuppressReply } from '@/lib/contact-history-guard';
-import { ingestInboundReply, recordInboundUnsubscribe } from '@/lib/server/inbound-reply-ingestion';
+import {
+    ingestInboundReply,
+    safetyStopCampaignRecipientFromContacted,
+} from '@/lib/server/inbound-reply-ingestion';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -36,12 +38,16 @@ async function resolveContactedLeadForEvent(params: {
     eventType: string;
     contactedId?: string | null;
     leadId?: string | null;
+    recipientEmail?: string | null;
     messageId?: string | null;
     internetMessageId?: string | null;
     threadId?: string | null;
     conversationId?: string | null;
 }) {
     const { supabase, eventType } = params;
+    const leadId = String(params.leadId || '').trim();
+    const recipientEmail = String(params.recipientEmail || '').trim().toLowerCase();
+    if (!leadId || (!params.contactedId && !recipientEmail)) return null;
     const select = 'id, user_id, email, organization_id, mission_id, engagement_score, click_count, opened_at, clicked_at, replied_at, campaign_followup_allowed, reply_intent, name, company, role, lead_id, provider, status, lifecycle_state, message_id, internet_message_id, thread_id, conversation_id';
     const attempts: Array<{ field: string; value?: string | null }> = [
         { field: 'id', value: String(params.contactedId || '').trim() || null },
@@ -53,36 +59,41 @@ async function resolveContactedLeadForEvent(params: {
 
     for (const attempt of attempts) {
         if (!attempt.value) continue;
-        const { data } = await supabase
+        let query = supabase
             .from('contacted_leads')
             .select(select)
             .eq(attempt.field, attempt.value)
+            .eq('lead_id', leadId);
+        if (recipientEmail) query = query.eq('email', recipientEmail);
+        const { data: rows, error } = await query
             .order('sent_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
+            .limit(2);
+        if (error) throw error;
 
-        if (data) return data;
+        if ((rows || []).length === 1) return rows[0];
     }
 
-    const leadId = String(params.leadId || '').trim();
-    if (!leadId) return null;
-
-    const { data: rows } = await supabase
+    if (!recipientEmail) return null;
+    const { data: rows, error } = await supabase
         .from('contacted_leads')
         .select(select)
         .eq('lead_id', leadId)
+        .eq('email', recipientEmail)
         .order('sent_at', { ascending: false })
         .limit(2);
+    if (error) throw error;
 
     const list = rows || [];
-    if (list.length <= 1) return list[0] || null;
-
-    if (eventType === 'reply') {
-        console.warn('[Tracking] Ambiguous reply event; skipping fallback by lead_id', { leadId, count: list.length });
-        return null;
+    if (list.length === 1) return list[0];
+    if (list.length > 1) {
+        console.warn('[Tracking] Ambiguous event; skipping fallback by lead and recipient', {
+            eventType,
+            leadId,
+            recipientEmail,
+            count: list.length,
+        });
     }
-
-    return list[0] || null;
+    return null;
 }
 
 function fallbackFailureFromEvent(type: string, rawText: string) {
@@ -188,6 +199,7 @@ export async function POST(req: Request) {
                 eventType,
                 contactedId,
                 leadId,
+                recipientEmail: email,
                 messageId,
                 internetMessageId: replyToInternetMessageId || internetMessageId,
                 threadId,
@@ -287,6 +299,10 @@ export async function POST(req: Request) {
                 updateData.bounced_at = timestamp;
                 updateData.bounce_category = failure.bounceCategory;
                 updateData.bounce_reason = failure.bounceReason;
+                await safetyStopCampaignRecipientFromContacted(supabase, {
+                    contactedId: (contacted as any).id,
+                    reason: 'recipient_bounced',
+                });
                 if (orgId && leadId) {
                     await syncLeadAutopilotToCrm(supabase, {
                         organizationId: orgId,
@@ -410,15 +426,6 @@ export async function POST(req: Request) {
                 });
 
                 if (!ingestion.inserted) continue;
-
-                if (shouldGloballySuppressReply(classification) && recipientEmail) {
-                    const suppression = await recordInboundUnsubscribe(supabase, {
-                        contactedId: (contacted as any).id,
-                        recipientEmail,
-                        eventKey: ingestion.eventKey,
-                    });
-                    if (!suppression.recorded) continue;
-                }
 
                 if (!detectedFailure) {
                     const leadSummary = {

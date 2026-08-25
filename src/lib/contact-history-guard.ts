@@ -23,10 +23,6 @@ type CandidateLike = {
   linkedin_url?: string | null;
 };
 
-type ReplyClassificationLike = {
-  intent?: unknown;
-};
-
 const REPLY_INTENTS = new Set([
   'meeting_request',
   'positive',
@@ -84,10 +80,6 @@ export function hasLeadReplied(history: ContactHistoryLike) {
     deliveryStatus === 'soft_bounced' ||
     String(history.lastReplyText || history.last_reply_text || '').trim()
   );
-}
-
-export function shouldGloballySuppressReply(classification: ReplyClassificationLike | null | undefined) {
-  return classification?.intent === 'unsubscribe';
 }
 
 export function shouldPermanentlySuppressContact(history: ContactHistoryLike) {

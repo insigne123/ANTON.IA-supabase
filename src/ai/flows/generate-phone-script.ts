@@ -4,6 +4,7 @@
  */
 
 import { ai } from '@/ai/genkit';
+import { generateStructured } from '@/ai/openai-json';
 import { z } from 'genkit';
 
 const GeneratePhoneScriptInputSchema = z.object({
@@ -25,21 +26,18 @@ export async function generatePhoneScript(
     return generatePhoneScriptFlow(input);
 }
 
-const prompt = ai.definePrompt({
-    name: 'generatePhoneScriptPrompt',
-    input: { schema: GeneratePhoneScriptInputSchema },
-    output: { schema: GeneratePhoneScriptOutputSchema },
-    prompt: `Idioma: Español (Latinoamérica - Chile, Colombia, Perú). Tono: Conversacional, seguro, consultivo (no robot de telemarketing).
+function phoneScriptPrompt(input: z.infer<typeof GeneratePhoneScriptInputSchema>) {
+    return `Idioma: Español (Latinoamérica - Chile, Colombia, Perú). Tono: Conversacional, seguro, consultivo (no robot de telemarketing).
 Objetivo: Generar un GUION TELEFÓNICO estructurado y altamente personalizado para llamar a este prospecto.
 
 MI EMPRESA:
-{{json companyProfile}}
+${JSON.stringify(input.companyProfile)}
 
 REPORTE DE INVESTIGACIÓN (Pains, Use Cases, Noticias, Contexto LinkedIn):
-{{json report}}
+${JSON.stringify(input.report)}
 
 PROSPECTO (Lead):
-{{json lead}}
+${JSON.stringify(input.lead)}
 
 CONTEXTO IMPORTANTE:
 - Si el reporte incluye "leadContext" con datos de LinkedIn (profileSummary, iceBreaker, recentActivitySummary), ÚSALOS para personalizar el guion.
@@ -90,8 +88,8 @@ IMPORTANTE:
 - Evita jerga excesiva o tecnicismos innecesarios
 - Si no hay suficiente información para personalizar, usa un enfoque más general pero mantén el tono consultivo
 - Adapta expresiones regionales si conoces el país del prospecto (Chile: "bacán", Colombia: "chévere", Perú: "chevere/genial")
-`,
-});
+`;
+}
 
 const generatePhoneScriptFlow = ai.defineFlow(
     {
@@ -100,7 +98,12 @@ const generatePhoneScriptFlow = ai.defineFlow(
         outputSchema: GeneratePhoneScriptOutputSchema,
     },
     async (input) => {
-        const { output } = await prompt(input);
+        const output = await generateStructured({
+            prompt: phoneScriptPrompt(input),
+            schema: GeneratePhoneScriptOutputSchema,
+            temperature: 0.3,
+            provider: 'openai',
+        });
         if (!output) {
             throw new Error('Failed to generate phone script.');
         }

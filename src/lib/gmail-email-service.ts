@@ -1,5 +1,7 @@
 // Fachada cliente para envío Gmail idempotente mediante el backend.
 
+import { mapDurableSendReceipt, type DurableSendReceipt } from './outbound-send-receipt';
+
 export type GmailSendInput = {
   to: string;
   subject: string;
@@ -13,16 +15,25 @@ export type GmailSendInput = {
   researchSnapshotId?: string | null;
   draftId?: string | null;
   versionId?: string | null;
+  organizationId: string;
   idempotencyKey?: string;
 };
 
-export async function sendGmailEmail(input: GmailSendInput): Promise<{ id: string; threadId: string; }> {
+export type GmailSendResult = DurableSendReceipt & {
+  id: string;
+  threadId: string;
+};
+
+export async function sendGmailEmail(input: GmailSendInput): Promise<GmailSendResult> {
   const hasCanonicalDraft = Boolean(input.draftId && input.versionId);
   if (Boolean(input.draftId) !== Boolean(input.versionId)) {
     throw new Error('draftId y versionId deben enviarse juntos.');
   }
   if (!hasCanonicalDraft) {
     throw new Error('Selecciona un borrador aprobado antes de enviar.');
+  }
+  if (!String(input.organizationId || '').trim()) {
+    throw new Error('No se pudo confirmar la organización del borrador.');
   }
   if (input.attachments?.length) {
     throw new Error('Los adjuntos todavia no estan disponibles en el envio idempotente de Gmail.');
@@ -39,26 +50,27 @@ export async function sendGmailEmail(input: GmailSendInput): Promise<{ id: strin
       provider: 'google',
       draftId: input.draftId,
       versionId: input.versionId,
+      organizationId: input.organizationId,
       idempotencyKey: input.idempotencyKey,
     }),
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    console.error('[gmail/send] backend error', res.status, text);
-    let message = text;
-    try { message = JSON.parse(text)?.error || text; } catch {}
-    throw new Error(message || 'Fallo al enviar correo con Gmail');
-  }
-  const data = await res.json();
-  if (!data?.success || data?.status !== 'sent') {
-    throw new Error(data?.error || 'El envio de Gmail sigue pendiente de confirmacion.');
+  const data = await res.json().catch(() => null);
+  const durableReceipt = mapDurableSendReceipt(data);
+  if (!durableReceipt) {
+    const message = typeof data?.error === 'string'
+      ? data.error
+      : typeof data?.message === 'string'
+        ? data.message
+        : `Fallo al enviar correo con Gmail (${res.status})`;
+    throw new Error(message);
   }
   const providerResponse = data?.receipt?.providerResponse || {};
-  if (!providerResponse?.threadId) {
+  if (durableReceipt.status === 'sent' && !providerResponse?.threadId) {
     console.warn('[gmail/send] La respuesta no incluyó threadId; revisar backend/permiso gmail.readonly si luego quieres leer/trackear el hilo.');
   }
   return {
-    id: data?.receipt?.providerMessageId || providerResponse?.id || '',
+    ...durableReceipt,
+    id: durableReceipt.providerMessageId || providerResponse?.id || '',
     threadId: providerResponse?.threadId || '',
   };
 }

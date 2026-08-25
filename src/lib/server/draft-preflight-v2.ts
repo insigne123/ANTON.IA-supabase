@@ -175,7 +175,20 @@ function ctaSentenceCount(body: string) {
   return sentenceParts(body).filter((sentence) => draftCtaCue.test(sentence)).length;
 }
 
-function hasVisiblePersonalization(
+const personalizationStopWords = new Set([
+  'actualidad', 'ademas', 'ayuda', 'ayudan', 'como', 'comunica', 'desde', 'donde', 'empresa',
+  'equipos', 'esta', 'este', 'estos', 'figura', 'hacia', 'para', 'publica', 'sobre', 'tiene',
+  'trabajo', 'una', 'unas', 'uno', 'unos',
+]);
+
+function materialPersonalizationTerms(value: string) {
+  return normalizeForMatch(value)
+    .split(' ')
+    .map((term) => term.replace(/(?:es|os|as|s)$/u, ''))
+    .filter((term) => term.length >= 4 && !personalizationStopWords.has(term));
+}
+
+function hasGroundedPersonalization(
   context: DraftContextV2,
   personalization: DraftPersonalizationProvenanceV2[],
   content: string,
@@ -183,10 +196,13 @@ function hasVisiblePersonalization(
   const evidenceById = new Map(context.evidence.map((evidence) => [evidence.evidenceId, evidence]));
   const normalizedContent = normalizeForMatch(content);
   return personalization.every((item) => {
-    const statement = normalizeForMatch(draftEvidencePersonalizationStatementV2(
+    const statement = draftEvidencePersonalizationStatementV2(
       evidenceById.get(item.evidenceId)?.statement || '',
-    ));
-    return Boolean(statement && normalizedContent.includes(statement));
+    );
+    const materialTerms = [...new Set(materialPersonalizationTerms(statement))];
+    const matchedTerms = materialTerms.filter((term) => normalizedContent.includes(term));
+    const minimumMatches = Math.min(3, materialTerms.length);
+    return Boolean(statement && minimumMatches > 0 && matchedTerms.length >= minimumMatches);
   });
 }
 
@@ -305,8 +321,8 @@ export function validateDraftPreflightV2(
       add('source_url_invalid', 'La URL de fuente no coincide con la evidencia declarada.', 'research');
     }
   }
-  if (output.personalization.length > 0 && !hasVisiblePersonalization(context, output.personalization, `${subject} ${body}`)) {
-    add('personalization_invalid', 'El contenido debe incluir literalmente la evidencia seleccionada para personalizar.', 'body');
+  if (output.personalization.length > 0 && !hasGroundedPersonalization(context, output.personalization, `${subject} ${body}`)) {
+    add('personalization_invalid', 'La personalización debe conservar los conceptos materiales de la evidencia seleccionada.', 'body');
   }
 
   const hypothesesById = new Map(context.hypotheses.map((hypothesis) => [hypothesis.claimId, hypothesis]));

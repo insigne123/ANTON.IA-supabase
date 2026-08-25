@@ -49,7 +49,7 @@ test('draft preflight passes an evidence-backed message with exactly one approve
   assert.equal(result.preflight.errors.length, 0);
 });
 
-test('draft preflight rejects provenance when only company terms and a paraphrase are visible', () => {
+test('draft preflight accepts a faithful natural paraphrase of supported evidence', () => {
   const context = draftContextFixture();
   const output = validOutput();
   const result = validateDraftPreflightV2(context, {
@@ -60,8 +60,8 @@ test('draft preflight rejects provenance when only company terms and a paraphras
     ),
   }, { now: new Date('2026-08-22T12:00:00.000Z') });
 
-  assert.equal(result.valid, false);
-  assert.ok(result.issues.some((issue) => issue.code === 'personalization_invalid'));
+  assert.equal(result.valid, true);
+  assert.ok(!result.issues.some((issue) => issue.code === 'personalization_invalid'));
 });
 
 test('draft preflight accepts an arbitrary exact CTA without requiring a known CTA cue', () => {
@@ -124,6 +124,21 @@ test('draft preflight blocks unresolved placeholders, prohibited phrases, duplic
   assert.ok(result.issues.some((issue) => issue.code === 'source_url_invalid'));
 });
 
+test('draft preflight rejects generic corporate language that makes outreach feel automated', () => {
+  const context = draftContextFixture();
+  const output = validOutput();
+  const result = validateDraftPreflightV2(context, {
+    ...output,
+    body: output.body.replace(
+      'En Northstar ayudamos a equipos que quieren ordenar tareas repetitivas',
+      'En Northstar nos especializamos en ayudar a equipos que quieren ordenar tareas repetitivas',
+    ),
+  });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some((issue) => issue.code === 'prohibited_phrase'));
+});
+
 test('draft preflight blocks duplicate sentences and unsupported hypothesis provenance', () => {
   const context = draftContextFixture();
   const output = validOutput();
@@ -139,7 +154,7 @@ test('draft preflight blocks duplicate sentences and unsupported hypothesis prov
   assert.ok(result.issues.some((issue) => issue.code === 'hypothesis_invalid'));
 });
 
-test('person-scoped provenance requires the full evidence statement, not person terms', () => {
+test('person-scoped provenance rejects generic copy without material role evidence', () => {
   const baseContext = draftContextFixture();
   const context = {
     ...baseContext,
@@ -151,6 +166,13 @@ test('person-scoped provenance requires the full evidence statement, not person 
   const output = validOutput();
   const result = validateDraftPreflightV2(context, {
     ...output,
+    body: `Hola Ada,
+
+Quería compartirte una idea breve que podría ser útil para ordenar tareas repetitivas y liberar tiempo del equipo sin cambiar de golpe su forma habitual de trabajar.
+
+En Northstar partimos observando el flujo actual y elegimos un primer ajuste pequeño, medible y fácil de adoptar. Así la conversación comienza por el contexto real antes de proponer una alternativa concreta.
+
+${context.constraints.cta.exactText}`,
     personalization,
   }, { now: new Date('2026-08-22T12:00:00.000Z') });
 

@@ -18,7 +18,39 @@ env:
     availability: [RUNTIME]
 
   - variable: OPENAI_MODEL
-    value: gpt-4o-mini
+    value: gpt-5.6-luna
+    availability: [RUNTIME]
+
+  - variable: OPENAI_EMAIL_MODEL
+    value: gpt-5.6-luna
+    availability: [RUNTIME]
+
+  - variable: OPENAI_FAST_MODEL
+    value: gpt-5.6-luna
+    availability: [RUNTIME]
+
+  - variable: OPENAI_BALANCED_MODEL
+    value: gpt-5.6-luna
+    availability: [RUNTIME]
+
+  - variable: OPENAI_ORCHESTRATOR_MODEL
+    value: gpt-5.6-terra
+    availability: [RUNTIME]
+
+  - variable: OPENAI_REASONING_MODEL
+    value: gpt-5.6-terra
+    availability: [RUNTIME]
+
+  - variable: NATIVE_RESEARCH_REPORT_MODEL
+    value: gpt-5.6-terra
+    availability: [RUNTIME]
+
+  - variable: OPENAI_CRITICAL_MODEL
+    value: gpt-5.6-sol
+    availability: [RUNTIME]
+
+  - variable: OPENAI_FALLBACK_MODEL
+    value: gpt-5.6-luna
     availability: [RUNTIME]
 
   - variable: AI_PROVIDER

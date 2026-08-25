@@ -13,6 +13,10 @@ import {
   type GeneratedOutreachFromDraftContextV2,
 } from '@/ai/flows/generate-outreach-from-report';
 import {
+  OutreachSequenceContextV2Schema,
+  type OutreachSequenceContextV2,
+} from '@/lib/campaigns-v2/outreach-sequence-context';
+import {
   buildDraftContextV2,
   createDefaultDraftWritingStyleV2,
   normalizeDraftSellerProfileV2,
@@ -117,7 +121,7 @@ export type NativeDraftGenerationResult =
     context: DraftContextV2;
     preflight: MessagingPreflightV1;
     issues: DraftPreflightIssueV2[];
-    generation: { provider: 'openai'; model: string; promptVersion: 'native-draft/v2' };
+    generation: { provider: 'openai'; model: string; promptVersion: 'native-draft/v3' };
   }
   | {
     status: 'blocked';
@@ -175,6 +179,17 @@ export class NativeDraftPreflightError extends Error {
 
 function text(value: unknown) {
   return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+export function campaignFollowUpDraftIds(input: NativeDraftAccess & { stepId: string }) {
+  const identity = canonicalSha256({
+    schemaVersion: 'campaign-follow-up-draft/v1',
+    stepId: text(input.stepId),
+  });
+  return {
+    draftId: deterministicMessagingUuid(`native-draft:${input.organizationId}:${input.userId}:${identity}`),
+    versionId: deterministicMessagingUuid(`native-version:${input.organizationId}:${input.userId}:${identity}`),
+  };
 }
 
 export function normalizeNativeDraftBody(value: unknown) {
@@ -566,8 +581,16 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   styleProfileId?: string | null;
   styleName?: string | null;
   idempotencyKey?: string | null;
+  instruction?: string | null;
+  sequenceContext?: OutreachSequenceContextV2;
+  campaignRecipientStepId?: string | null;
 }, dependencies?: NativeDraftGenerationDependencies): Promise<NativeDraftGenerationResult> {
   const now = dependencies?.now?.() || new Date();
+  const instruction = text(input.instruction);
+  if (instruction.length > 1_000) throw new Error('NATIVE_DRAFT_INSTRUCTION_INVALID');
+  const sequenceContext = input.sequenceContext
+    ? OutreachSequenceContextV2Schema.parse(input.sequenceContext)
+    : undefined;
   const snapshotRow = await (dependencies?.getSnapshot?.({ snapshotId: input.snapshotId, access: input })
     || getNativeSnapshot({ snapshotId: input.snapshotId, access: input }));
   if (!snapshotRow?.payload) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
@@ -594,26 +617,62 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   });
 
   if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
-  const identity = canonicalSha256({
+  const campaignRecipientStepId = text(input.campaignRecipientStepId);
+  const identity = campaignRecipientStepId ? null : canonicalSha256({
     schemaVersion: 'native-draft/v2',
     idempotencyKey: text(input.idempotencyKey) || null,
+    instruction: instruction || null,
+    sequenceContext: sequenceContext || null,
     snapshotId: snapshot.id,
     snapshotHash: context.research.contentHash,
     recipientEmail: email,
     styleHash: style.contentHash,
   });
-  const draftId = deterministicMessagingUuid(`native-draft:${input.organizationId}:${input.userId}:${identity}`);
-  const versionId = deterministicMessagingUuid(`native-version:${input.organizationId}:${input.userId}:${identity}`);
+  const campaignIds = campaignRecipientStepId
+    ? campaignFollowUpDraftIds({ ...input, stepId: campaignRecipientStepId })
+    : null;
+  const draftId = campaignIds?.draftId
+    || deterministicMessagingUuid(`native-draft:${input.organizationId}:${input.userId}:${identity}`);
+  const versionId = campaignIds?.versionId
+    || deterministicMessagingUuid(`native-version:${input.organizationId}:${input.userId}:${identity}`);
   const findPersistedDraft = dependencies?.findPersistedDraft || ((request) => getMessagingDraftVersionV1(request));
   const existing = await findPersistedDraft({ ...input, draftId, versionId });
   if (existing) {
+    const loadMetadata = dependencies?.loadMetadata || loadNativeDraftMetadata;
+    const persistMetadata = dependencies?.persistMetadata || persistNativeDraftMetadata;
+    try {
+      const metadata = await loadMetadata({ ...input, versionId: existing.versionId });
+      if (!metadata) {
+        await persistMetadata({
+          versionId: existing.versionId,
+          draftId: existing.draftId,
+          organizationId: input.organizationId,
+          userId: input.userId,
+          researchSnapshotId: input.snapshotId,
+          generationMethod: 'model',
+          provider: 'openai',
+          model: 'persisted-recovery',
+          promptVersion: 'native-draft/v3',
+          styleProfileId: style.id,
+          claimIds: unique(requiredReportAwareDraftPersonalizationV2(context).map((item) => item.claimId)),
+        });
+      }
+    } catch (error) {
+      console.error('[native-drafts] metadata recovery failed:', error);
+      return failureResult({
+        context,
+        code: 'generation_metadata_persist_failed',
+        message: 'No se pudo reparar la trazabilidad del borrador; no puede aprobarse ni enviarse.',
+        now,
+      });
+    }
     return {
       status: 'drafted',
       draft: existing,
       context,
       preflight: existing.preflight,
       issues: [],
-      generation: { provider: 'openai', model: 'persisted', promptVersion: 'native-draft/v2' },
+      generation: { provider: 'openai', model: 'persisted', promptVersion: 'native-draft/v3' },
     };
   }
 
@@ -636,7 +695,11 @@ export async function createNativeDraft(input: NativeDraftAccess & {
     const generate = dependencies?.generate || generateOutreachFromDraftContextV2;
     let generated: GeneratedOutreachFromDraftContextV2;
     try {
-      generated = await generate({ context });
+      generated = await generate({
+        context,
+        ...(instruction ? { instruction } : {}),
+        ...(sequenceContext ? { sequenceContext } : {}),
+      });
     } catch (error) {
       console.warn('[native-drafts] OpenAI generation failed:', error);
       return failureResult({
@@ -653,6 +716,8 @@ export async function createNativeDraft(input: NativeDraftAccess & {
       try {
         generated = await generate({
           context,
+          ...(instruction ? { instruction } : {}),
+          ...(sequenceContext ? { sequenceContext } : {}),
           rewrite: {
             previous: generatedOutput,
             errors: validation.issues.map((issue) => issue.message),

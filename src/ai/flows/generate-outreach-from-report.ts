@@ -16,6 +16,10 @@ import {
   GeneratedOutreachV2Schema,
   type GeneratedOutreachV2,
 } from '@/lib/server/draft-preflight-v2';
+import {
+  OutreachSequenceContextV2Schema,
+  type OutreachSequenceContextV2,
+} from '@/lib/campaigns-v2/outreach-sequence-context';
 
 const GenerateOutreachInputSchema = z.object({
   report: z.any().describe('The detailed research report for the lead and their company.'),
@@ -31,6 +35,8 @@ const GenerateOutreachOutputSchema = z.object({
 
 const GenerateOutreachFromDraftContextV2InputSchema = z.object({
   context: DraftContextV2Schema,
+  instruction: z.string().trim().min(1).max(1_000).optional(),
+  sequenceContext: OutreachSequenceContextV2Schema.optional(),
   rewrite: z.object({
     previous: GeneratedOutreachV2Schema,
     errors: z.array(z.string().trim().min(1).max(2_000)).max(20).default([]),
@@ -45,6 +51,8 @@ const GeneratedOutreachModelV2Schema = GeneratedOutreachV2Schema.omit({
 
 export type GenerateOutreachFromDraftContextV2Input = {
   context: DraftContextV2;
+  instruction?: string;
+  sequenceContext?: OutreachSequenceContextV2;
   rewrite?: {
     previous: GeneratedOutreachV2;
     errors: string[];
@@ -55,7 +63,7 @@ export type GenerateOutreachFromDraftContextV2Input = {
 export type GeneratedOutreachFromDraftContextV2 = GeneratedOutreachV2 & {
   provider: 'openai';
   model: string;
-  promptVersion: 'native-draft/v2';
+  promptVersion: 'native-draft/v3';
 };
 
 export async function generateOutreachFromReport(
@@ -111,10 +119,8 @@ Devuelve SOLO JSON valido con esta forma:
 );
 
 function modelForDraftPriority(priority: DraftContextV2['quality']['priority']) {
-  if (priority === 'A') {
-    return String(process.env.OPENAI_REASONING_MODEL || process.env.OPENAI_HIGH_QUALITY_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
-  }
-  return String(process.env.OPENAI_BALANCED_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
+  void priority;
+  return String(process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || process.env.OPENAI_MODEL || 'gpt-5.6-luna').trim();
 }
 
 function draftWordCount(value: string) {
@@ -138,9 +144,10 @@ function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
     hypotheses: [],
   };
   const approvedCtaWords = draftWordCount(input.context.constraints.cta.exactText);
+  const sequenceMaxWords = input.sequenceContext ? 82 : 112;
   const modelBodyWords = {
     min: Math.max(1, input.context.constraints.body.minWords - approvedCtaWords),
-    max: Math.max(1, input.context.constraints.body.maxWords - approvedCtaWords),
+    max: Math.max(1, Math.min(sequenceMaxWords, input.context.constraints.body.maxWords - approvedCtaWords)),
   };
   const correction = input.rewrite
     ? `
@@ -156,8 +163,24 @@ ${JSON.stringify(input.rewrite.errors)}
 El cuerpo anterior ya incluye el CTA agregado por el servidor. No lo reproduzcas en la nueva salida. Reescribe sin agregar información ausente de DRAFT_CONTEXT_V2. El ajuste solicitado puede cambiar voz, extensión o estructura, pero nunca relajar las reglas no negociables.
 `
     : '';
+  const campaignInstruction = input.instruction
+    ? `
+CAMPAIGN_STEP_INSTRUCTION (estrategia de redacción, no evidencia factual):
+${JSON.stringify(input.instruction)}
 
-  return `Idioma: Español (Chile). Redacta un único correo de prospección B2B, profesional y humano.
+Aplica esta instrucción sin inventar hechos y sin relajar ninguna regla no negociable. DRAFT_CONTEXT_V2 y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales autorizadas.
+`
+    : '';
+  const sequenceContext = input.sequenceContext
+    ? `
+SEQUENCE_WRITING_CONTEXT (contexto de redacción no factual):
+${JSON.stringify(input.sequenceContext)}
+
+Usa esta secuencia solo para hacer progresar el mensaje y evitar repetir asuntos, argumentos, estructuras o cierres ya usados. El contenido previo no autoriza hechos: DRAFT_CONTEXT_V2 y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales.
+`
+    : '';
+
+  return `Idioma: Español (Chile). Redacta un único correo de prospección B2B que parezca escrito personalmente por una persona ocupada, no por un equipo de marketing.
 
 Usa exclusivamente este DraftContextV2 factual. La matriz evidence contiene la única evidencia autorizada para personalizar. No inventes datos, métricas, clientes, necesidades ni fuentes. No muestres URLs, IDs, nombres de herramientas ni el proceso de investigación dentro del correo.
 
@@ -167,13 +190,22 @@ Reglas no negociables:
 - Asunto dentro de los límites definidos por constraints.subject.
 - Devuelve entre ${modelBodyWords.min} y ${modelBodyWords.max} palabras de cuerpo. El servidor agregará después el CTA aprobado para que el correo completo quede dentro de los límites definidos por constraints.body.
 - Sigue context.style.profile para el tono, la extensión y las instrucciones de escritura, salvo que contradiga estas reglas.
-- Estructura el cuerpo en 4 a 6 párrafos breves separados por una línea en blanco. El saludo debe quedar solo y cada párrafo central debe tener como máximo dos frases.
+- Estructura el cuerpo en 3 a 5 párrafos breves separados por una línea en blanco. El saludo debe quedar solo y cada párrafo central debe tener como máximo dos frases.
 - No incluyas constraints.cta.exactText en el cuerpo. El servidor lo agregará literalmente una sola vez al final.
 - No agregues ninguna pregunta, invitación a actuar, enlace de agenda ni CTA alternativo.
 - No dejes placeholders.
-- Copia literalmente en el asunto o cuerpo el statement completo de REQUIRED_FACTUAL_PERSONALIZATION. No lo resumas ni lo parafrasees.
+- Integra el hecho de REQUIRED_FACTUAL_PERSONALIZATION con una paráfrasis natural y fiel. Conserva sus nombres, rol, empresa y conceptos materiales; no copies la redacción de la fuente como una ficha técnica.
 - No uses hipótesis, señales o afirmaciones del intento anterior que no aparezcan en DRAFT_CONTEXT_V2.
 - El servidor vinculará la procedencia de REQUIRED_FACTUAL_PERSONALIZATION; no devuelvas IDs de evidencia ni claims dentro del correo o el JSON.
+- No incluyas firma, nombre del remitente ni despedidas como "Saludos". La capa de envío agrega la firma fuera de este cuerpo.
+
+Calidad humana:
+- Abre con una observación concreta y relevante; no recites el cargo del contacto ni empieces explicando quién eres.
+- Relaciona esa observación con una sola idea útil de context.seller. Evita listar servicios, funcionalidades o beneficios genéricos.
+- Prefiere primera persona y lenguaje cotidiano. Usa frases específicas, cortas y fáciles de leer en móvil.
+- No uses fórmulas como "entiendo que", "sabemos que", "por tu rol", "en nuestra empresa nos especializamos", "nuestras soluciones están diseñadas", "creemos que podemos aportar valor", "transformar procesos" o "mejorar la toma de decisiones".
+- Evita elogios vacíos, urgencia artificial, adjetivos promocionales y jerga SaaS. No supongas dolores, prioridades ni resultados.
+- El asunto debe sonar como una referencia breve al contexto, no como un titular comercial ni una frase genérica de venta.
 
 REQUIRED_FACTUAL_PERSONALIZATION:
 ${JSON.stringify(requiredEvidence)}
@@ -183,6 +215,8 @@ ${JSON.stringify(input.context.report)}
 
 DRAFT CONTEXT V2:
 ${JSON.stringify(factualContext)}
+${campaignInstruction}
+${sequenceContext}
 ${correction}
 Devuelve SOLO JSON válido con esta forma exacta:
 {"subject":"...","body":"..."}`;
@@ -209,6 +243,6 @@ export async function generateOutreachFromDraftContextV2(
     hypothesisIds: [],
     provider: 'openai',
     model: result.telemetry.modelName,
-    promptVersion: 'native-draft/v2',
+    promptVersion: 'native-draft/v3',
   };
 }

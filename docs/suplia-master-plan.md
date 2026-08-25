@@ -344,23 +344,22 @@ SUPL.IA ya usa router de modelos por tier.
 
 ### Defaults vigentes
 
-- `fast`: `gpt-5.4-nano`
-- `balanced`: `gpt-5.4-mini`
-- `orchestrator`: `gpt-5.4-mini`
-- `reasoning`: `gpt-5.4`
-- `critical`: `gpt-5.5`
-- fallback legacy: `gpt-4o-mini`
+- `fast`: `gpt-5.6-luna`
+- `balanced`: `gpt-5.6-luna`
+- `orchestrator`: `gpt-5.6-terra`
+- `reasoning`: `gpt-5.6-terra`
+- `critical`: `gpt-5.6-sol`
+- fallback: `gpt-5.6-luna`
 
 ### Recomendacion tecnica
 
-Migrar SUPL.IA a `Responses API` para tool calling real y dejar `chat/completions` como compatibilidad para flows heredados.
+Mantener `chat/completions`: soporta los modelos vigentes y evita una migracion de API innecesaria para este cambio de configuracion.
 
 ### Regla de uso
 
-- tareas simples: `fast`
-- drafting y resumenes: `balanced`
+- clasificaciones, emails y tareas simples o de alto volumen: `fast` o `balanced`
 - tool planning y orquestacion diaria: `orchestrator`
-- decisiones comerciales complejas: `reasoning`
+- estrategia, razonamiento y sintesis de reportes: `reasoning`
 - acciones sensibles, bulk y compliance: `critical`
 
 ## Tool registry objetivo

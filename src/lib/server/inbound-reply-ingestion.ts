@@ -54,6 +54,21 @@ export function createStableInboundMessageId(input: {
   return `internal:${createHash('sha256').update(seed, 'utf8').digest('hex')}`;
 }
 
+export async function safetyStopCampaignRecipientFromContacted(supabase: any, input: {
+  contactedId: string;
+  reason: 'recipient_replied' | 'recipient_bounced';
+}) {
+  const { data, error } = await supabase.rpc('safety_stop_campaign_recipient_from_contacted_v2', {
+    p_contacted_id: text(input.contactedId),
+    p_reason: input.reason,
+  });
+  if (error) throw error;
+  if (!data || typeof data !== 'object' || typeof data.matched !== 'boolean') {
+    throw new Error('Invalid Campaign V2 contacted safety-stop result');
+  }
+  return data as { matched: boolean; reason?: string; campaignSafetyStop?: Record<string, unknown> };
+}
+
 export async function ingestInboundReply(supabase: any, input: InboundReplyIngestionInput): Promise<InboundReplyIngestionResult> {
   const { data, error } = await supabase.rpc('ingest_inbound_reply_v1', {
     p_contacted_id: text(input.contactedId),
@@ -78,18 +93,4 @@ export async function ingestInboundReply(supabase: any, input: InboundReplyInges
     throw new Error('Invalid inbound reply ingestion result');
   }
   return data as InboundReplyIngestionResult;
-}
-
-export async function recordInboundUnsubscribe(supabase: any, input: {
-  contactedId: string;
-  recipientEmail: string;
-  eventKey: string;
-}) {
-  const { data, error } = await supabase.rpc('record_inbound_unsubscribe_v1', {
-    p_contacted_id: input.contactedId,
-    p_recipient_email: input.recipientEmail,
-    p_event_key: input.eventKey,
-  });
-  if (error) throw error;
-  return data as { recorded: boolean; reason: string };
 }

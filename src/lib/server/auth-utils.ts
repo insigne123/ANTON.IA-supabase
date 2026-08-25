@@ -23,16 +23,14 @@ export type AuthContext = {
  *   return handleAuthError(e);
  * }
  */
-export async function requireAuth() {
+export async function requireAuth(): Promise<AuthContext> {
     const supabase = createRouteHandlerClient({ cookies });
 
-    // 1. Check Session
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session) {
+    // Verify the cookie-backed token with Supabase Auth before trusting its user.
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
         throw new AuthError('Unauthorized', 401);
     }
-
-    const user = session.user;
 
     // 2. Resolve Organization (Active or Primary)
     // First check metadata/cookies if we store active org there, otherwise query DB

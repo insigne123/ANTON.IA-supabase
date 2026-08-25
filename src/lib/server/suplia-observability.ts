@@ -10,11 +10,9 @@ export type OpenAiUsage = {
 };
 
 const MODEL_COSTS_USD_PER_1K: Record<string, { input: number; output: number }> = {
-  'gpt-4o-mini': { input: 0.00015, output: 0.0006 },
-  'gpt-5.4-nano': { input: 0.00005, output: 0.0002 },
-  'gpt-5.4-mini': { input: 0.00015, output: 0.0006 },
-  'gpt-5.4': { input: 0.001, output: 0.004 },
-  'gpt-5.5': { input: 0.002, output: 0.008 },
+  'gpt-5.6-luna': { input: 0.0002, output: 0.0012 },
+  'gpt-5.6-terra': { input: 0.002, output: 0.012 },
+  'gpt-5.6-sol': { input: 0.004, output: 0.02 },
 };
 
 export function normalizeOpenAiUsage(usage?: OpenAiUsage | null) {

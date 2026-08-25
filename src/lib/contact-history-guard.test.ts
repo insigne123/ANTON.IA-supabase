@@ -5,17 +5,9 @@ import { readFile } from 'node:fs/promises';
 import {
   findPriorReplyMatch,
   hasLeadReplied,
-  shouldGloballySuppressReply,
   shouldPermanentlySuppressContact,
 } from '@/lib/contact-history-guard';
 import { detectDeliveryFailure } from '@/lib/delivery-failure-detector';
-
-const suppressionCallSites = await Promise.all([
-  ['tracking webhook', new URL('../app/api/tracking/webhook/route.ts', import.meta.url)],
-  ['reply classification route', new URL('../app/api/replies/classify/route.ts', import.meta.url)],
-  ['scheduler reply route', new URL('../app/api/scheduler/reply/route.ts', import.meta.url)],
-  ['provider reply sync', new URL('./server/reply-sync.ts', import.meta.url)],
-].map(async ([name, url]) => ({ name: String(name), source: await readFile(url as URL, 'utf8') })));
 
 const repairMigration = await readFile(
   new URL('../../supabase/migrations/20260813110000_remove_legacy_negative_reply_suppressions.sql', import.meta.url),
@@ -48,33 +40,6 @@ test('unsubscribe permanently suppresses future contact', () => {
     lastReplyText: 'Please do not contact me again.',
   } as any), true);
 });
-
-test('only an explicit unsubscribe classification creates global reply suppression', () => {
-  assert.equal(shouldGloballySuppressReply({ intent: 'unsubscribe' }), true);
-  assert.equal(shouldGloballySuppressReply({ intent: 'negative' }), false);
-  assert.equal(shouldGloballySuppressReply({ intent: 'auto_reply' }), false);
-  assert.equal(shouldGloballySuppressReply({ intent: 'neutral' }), false);
-  assert.equal(shouldGloballySuppressReply({ intent: 'delivery_failure' }), false);
-  assert.equal(shouldGloballySuppressReply({ intent: 'unknown' }), false);
-  assert.equal(shouldGloballySuppressReply(null), false);
-});
-
-for (const { name, source } of suppressionCallSites) {
-  test(`${name} gates its global unsubscribe write with the shared reply guard`, () => {
-    const guardIndex = source.indexOf('if (shouldGloballySuppressReply(');
-    const rpcWriteIndex = source.indexOf('await recordInboundUnsubscribe(', guardIndex);
-    const directWriteIndex = source.indexOf(".from('unsubscribed_emails')", guardIndex);
-    const writeIndex = rpcWriteIndex >= 0 ? rpcWriteIndex : directWriteIndex;
-
-    assert.ok(guardIndex >= 0, 'shared suppression guard is missing');
-    assert.ok(writeIndex > guardIndex, 'unsubscribe write must be after the shared suppression guard');
-    if (rpcWriteIndex < 0) {
-      assert.equal(source.match(/\.from\('unsubscribed_emails'\)/g)?.length, 1);
-      assert.match(source, /reason:\s*'reply:unsubscribe'/);
-      assert.doesNotMatch(source, /reason:\s*`reply:\$\{/);
-    }
-  });
-}
 
 test('legacy repair deletes only the exact negative-reply suppression reason', () => {
   const deleteStatements = repairMigration.match(/delete\s+from\s+public\.unsubscribed_emails[\s\S]*?;/gi) || [];

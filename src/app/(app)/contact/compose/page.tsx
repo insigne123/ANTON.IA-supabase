@@ -1,7 +1,8 @@
 
 'use client';
+import Link from 'next/link';
 import { Suspense } from 'react';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
@@ -14,7 +15,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import { sendEmail } from '@/lib/outlook-email-service';
-import { getCompanyProfile } from '@/lib/data';
 import type { EnrichedLead, EnrichedOppLead, StyleProfile } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
@@ -36,11 +36,23 @@ import { CampaignQaPanel } from '@/components/commercial/CampaignQaPanel';
 import { useContactability } from '@/hooks/use-contactability';
 import { assessCampaignQa } from '@/lib/campaign-qa';
 import { resolveManualEmailOperation, type ManualEmailOperation } from '@/lib/manual-send-idempotency';
+import { FirstContactFollowUpPlan } from '@/components/campaigns-v2/FirstContactFollowUpPlan';
+import {
+  campaignV2DispatchReceipt,
+  campaignV2SendAvailability,
+  loadCampaignV2RecipientStepSendContext,
+  loadFirstContactFollowUpPlan,
+  resolveCampaignV2SendKey,
+  type FirstContactFollowUpPlan as FirstContactFollowUpPlanData,
+} from '@/lib/campaigns-v2-client';
+import type { CampaignV2RecipientStepSendContextResponse } from '@/lib/campaigns-v2/contracts';
+import type { DurableSendReceipt } from '@/lib/outbound-send-receipt';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Switch } from '@/components/ui/switch';
-import { ArrowLeft, CheckCircle2, ChevronDown, FileText, Loader2, RefreshCw, SendHorizontal, Settings2, Sparkles } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChevronDown, FileText, Loader2, RefreshCw, SendHorizontal, Sparkles } from 'lucide-react';
 
 type AnyLead = EnrichedLead | EnrichedOppLead | any;
+
+const canonicalDeliveryOptions = { pixel: false, links: false, readReceipt: false } as const;
 
 function htmlToPlainParas(htmlOrText: string): string {
   if (!htmlOrText) return '';
@@ -57,12 +69,32 @@ function htmlToPlainParas(htmlOrText: string): string {
   return s;
 }
 
+function formatFollowUpDate(value?: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat('es-CL', {
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function nextFollowUpStep(plan?: FirstContactFollowUpPlanData | null) {
+  if (!plan) return null;
+  return plan.steps.find((step) => !['sent', 'completed', 'cancelled', 'stopped'].includes(String(step.state || '').toLowerCase()))
+    || plan.steps[0]
+    || null;
+}
+
 function ComposeInner() {
   const { toast } = useToast();
   const router = useRouter();
   const sp = useSearchParams();
   const id = sp.get('id') || '';
   const nativeDraftId = sp.get('draftId') || '';
+  const campaignStepId = sp.get('campaignStepId') || '';
   const isCanonicalDraft = Boolean(nativeDraftId);
   const [lead, setLead] = useState<AnyLead | null>(null);
   const [leadLoading, setLeadLoading] = useState(Boolean(id) && !isCanonicalDraft);
@@ -88,6 +120,89 @@ function ComposeInner() {
   const [styleProfilesError, setStyleProfilesError] = useState(false);
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
   const [sendOperation, setSendOperation] = useState<ManualEmailOperation | null>(null);
+  const [sendReceipt, setSendReceipt] = useState<DurableSendReceipt | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendProvider, setSendProvider] = useState<'outlook' | 'gmail'>('outlook');
+  const [campaignSendContext, setCampaignSendContext] = useState<CampaignV2RecipientStepSendContextResponse | null>(null);
+  const [campaignSendContextLoading, setCampaignSendContextLoading] = useState(Boolean(campaignStepId));
+  const [campaignSendContextError, setCampaignSendContextError] = useState<string | null>(null);
+  const [campaignSendContextReloadKey, setCampaignSendContextReloadKey] = useState(0);
+  const [followUpPlan, setFollowUpPlan] = useState<FirstContactFollowUpPlanData | null>(null);
+  const [followUpDirty, setFollowUpDirty] = useState(false);
+  const [followUpBusy, setFollowUpBusy] = useState(false);
+  const successHeadingRef = useRef<HTMLHeadingElement | null>(null);
+
+  const handleFollowUpPlanChange = useCallback((plan: FirstContactFollowUpPlanData | null) => {
+    setFollowUpPlan(plan);
+  }, []);
+
+  useEffect(() => {
+    setSendOperation(null);
+    setSendReceipt(null);
+    setSendError(null);
+    setFollowUpPlan(null);
+    setFollowUpDirty(false);
+    setFollowUpBusy(false);
+  }, [nativeDraftId]);
+
+  useEffect(() => {
+    if (!followUpDirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [followUpDirty]);
+
+  useEffect(() => {
+    if (!campaignStepId) {
+      setCampaignSendContext(null);
+      setCampaignSendContextLoading(false);
+      setCampaignSendContextError(null);
+      return;
+    }
+
+    let active = true;
+    const controller = new AbortController();
+    setCampaignSendContextLoading(true);
+    setCampaignSendContextError(null);
+
+    async function loadSendContext() {
+      try {
+        const context = await loadCampaignV2RecipientStepSendContext(campaignStepId, controller.signal);
+        if (!active) return;
+        setCampaignSendContext(context);
+        if (context.dispatch) {
+          setSendOperation(null);
+          setSendError(null);
+          setSendReceipt(campaignV2DispatchReceipt(context.dispatch));
+          if (context.dispatch.provider === 'gmail' || context.dispatch.provider === 'outlook') {
+            setSendProvider(context.dispatch.provider);
+          }
+        } else {
+          setSendReceipt(null);
+        }
+      } catch (error: any) {
+        if (!active || error?.name === 'AbortError') return;
+        setCampaignSendContext(null);
+        setCampaignSendContextError(error?.message || 'No pudimos confirmar el estado de este envío.');
+      } finally {
+        if (active) setCampaignSendContextLoading(false);
+      }
+    }
+
+    void loadSendContext();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [campaignStepId, campaignSendContextReloadKey]);
+
+  useEffect(() => {
+    if (sendReceipt?.status !== 'sent') return;
+    window.requestAnimationFrame(() => successHeadingRef.current?.focus());
+  }, [sendReceipt?.status]);
 
   function readComposeBuffer(leadId: string): AnyLead | null {
     try {
@@ -372,11 +487,7 @@ function ComposeInner() {
     };
   }, [buildBaseDraftForLead, draftSource, selectedStyleName, styleProfiles]);
 
-  const [usePixel, setUsePixel] = useState(true);
-  const [useReadReceipt, setUseReadReceipt] = useState(false);
-  const [useLinkTracking, setUseLinkTracking] = useState(false);
-  const [sendProvider, setSendProvider] = useState<'outlook' | 'gmail'>('outlook');
-  const [showDeliveryOptions, setShowDeliveryOptions] = useState(false);
+  const [showAiAdjustment, setShowAiAdjustment] = useState(false);
 
   useEffect(() => {
     if (!lead || nativeDraftId) return;
@@ -398,9 +509,9 @@ function ComposeInner() {
     email: composeEmail,
     subject,
     body,
-    usePixel,
-    useLinkTracking,
-    useReadReceipt,
+    usePixel: false,
+    useLinkTracking: false,
+    useReadReceipt: false,
     contactability: contactability.result,
     contactabilityLoading: Boolean(composeEmail) && contactability.loading,
     contactabilityError: contactability.error,
@@ -429,8 +540,61 @@ function ComposeInner() {
   );
   const shouldShowCampaignQa = !nativeDraftArchived
     && (!isCanonicalDraft || !nativeReviewRequired || campaignQaBlocksSend);
+  const campaignSendContextMismatch = Boolean(
+    campaignStepId
+    && campaignSendContext
+    && (
+      !campaignSendContext.nativeDraftId
+      || !campaignSendContext.nativeVersionId
+      || !nativeDraft?.organizationId
+      || campaignSendContext.organizationId !== nativeDraft.organizationId
+      || campaignSendContext.nativeDraftId !== nativeDraftId
+      || (
+        !campaignSendContext.dispatch
+        && nativeDraft?.versionId
+        && campaignSendContext.nativeVersionId !== nativeDraft.versionId
+      )
+    ),
+  );
+  const campaignDispatchVersionMismatch = Boolean(
+    campaignSendContext?.dispatch
+    && nativeDraft?.versionId
+    && campaignSendContext.nativeVersionId !== nativeDraft.versionId,
+  );
+  const campaignSendDecision = campaignSendContext
+    ? campaignV2SendAvailability(campaignSendContext)
+    : null;
+  const sendOrganizationId = String(campaignSendContext?.organizationId || nativeDraft?.organizationId || '').trim();
 
   const canContinueWithContact = () => {
+    if (followUpDirty || followUpBusy) {
+      toast({
+        title: followUpBusy ? 'Seguimientos en proceso' : 'Guarda los seguimientos',
+        description: followUpBusy
+          ? 'Espera a que termine la operación antes de enviar el correo inicial.'
+          : 'Hay cambios sin guardar en uno o más seguimientos.',
+      });
+      return false;
+    }
+    if (campaignStepId) {
+      if (campaignSendContextLoading || !campaignSendContext || campaignSendContextError || campaignSendContextMismatch || campaignDispatchVersionMismatch) {
+        toast({
+          variant: 'destructive',
+          title: 'No se puede confirmar el envío',
+          description: 'Actualiza el estado del seguimiento antes de intentar enviar.',
+        });
+        return false;
+      }
+      if (campaignSendDecision?.kind === 'blocked') {
+        toast({
+          title: 'Este envío no se puede repetir',
+          description: campaignSendContext.dispatch
+            ? 'Ya existe una confirmación durable para este intento. Revísala antes de continuar.'
+            : 'El seguimiento no está en un estado seguro para enviar.',
+        });
+        return false;
+      }
+    }
     if (isCanonicalDraft && (nativeDraftLoading || nativeDraftLoadError || nativeDraftArchived || nativeReviewRequired)) {
       toast({
         title: 'Revisa el correo antes de enviarlo',
@@ -455,17 +619,6 @@ function ComposeInner() {
     }
     return true;
   };
-
-  // Helper to inject link tracking
-  function rewriteLinksForTracking(html: string, trackingId: string): string {
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    // Unify regex with the robust one from EmailTestPage
-    return html.replace(/href=(["'])(http[^"']+)\1/gi, (match: string, quote: string, url: string) => {
-      if (url.includes('/api/tracking/click')) return match;
-      const trackingUrl = `${origin}/api/tracking/click?id=${trackingId}&url=${encodeURIComponent(url)}`;
-      return `href=${quote}${trackingUrl}${quote}`;
-    });
-  }
 
   const regenerate = async () => {
     if (!lead || nativeDraftId) return;
@@ -494,6 +647,10 @@ function ComposeInner() {
       setNativeDraft(payload.draft);
       setSubject(payload?.draft?.content?.subject || subject);
       setBody(payload?.draft?.content?.text || body);
+      if (campaignStepId) {
+        setCampaignSendContextLoading(true);
+        setCampaignSendContextReloadKey((value) => value + 1);
+      }
       toast({ title: 'Cambios guardados', description: 'Revisa el correo y confirma la revisión antes de enviarlo.' });
     } catch (error) {
       console.error('No se pudo guardar el correo', error);
@@ -515,6 +672,10 @@ function ComposeInner() {
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.draft) throw new Error('No se pudo confirmar la revisión.');
       setNativeDraft(payload.draft);
+      if (campaignStepId) {
+        setCampaignSendContextLoading(true);
+        setCampaignSendContextReloadKey((value) => value + 1);
+      }
       toast({ title: 'Correo revisado', description: 'Ya está listo para enviarse.' });
     } catch (error) {
       console.error('No se pudo confirmar la revisión del correo', error);
@@ -547,6 +708,10 @@ function ComposeInner() {
       setSubject(payload.draft?.content?.subject || '');
       setBody(payload.draft?.content?.text || '');
       setRewriteInstruction('');
+      if (campaignStepId) {
+        setCampaignSendContextLoading(true);
+        setCampaignSendContextReloadKey((value) => value + 1);
+      }
       toast({
         title: 'Correo ajustado',
         description: 'Creamos una nueva revisión. Confírmala antes de enviar.',
@@ -558,6 +723,70 @@ function ComposeInner() {
       setNativeDraftRewriting(false);
     }
   };
+
+  async function handleDurableSendResult(result: DurableSendReceipt, providerName: 'Outlook' | 'Gmail') {
+    setSendError(null);
+    setSendReceipt(result);
+
+    if (result.status !== 'sent') {
+      if (result.status === 'pending' || result.status === 'sending' || result.status === 'unknown') {
+        toast({
+          title: 'Estado por confirmar',
+          description: 'Conservamos la confirmación durable. No vuelvas a enviar este correo mientras se resuelve.',
+        });
+      }
+      return;
+    }
+
+    try {
+      if ((lead as any)?._sourceTable === 'opportunities') {
+        await enrichedOpportunitiesStorage.removeById((lead as any).id);
+      } else {
+        await enrichedLeadsStorage.removeById((lead as any).id);
+      }
+    } catch (error) {
+      console.error('El correo fue enviado, pero no pudimos retirar el lead de su lista de origen', error);
+    }
+
+    if (nativeDraftId && !campaignStepId) {
+      try {
+        const refreshed = await loadFirstContactFollowUpPlan(nativeDraftId);
+        if (refreshed.enabled) setFollowUpPlan(refreshed.plan);
+      } catch (error) {
+        console.error('No se pudo actualizar el resumen de seguimiento después del envío', error);
+      }
+    }
+
+    setSendOperation(null);
+    toast({ title: `Enviado con ${providerName}`, description: `Correo enviado a ${(lead as any)?.fullName || 'este contacto'}.` });
+  }
+
+  function resolveSendIdempotencyKey(input: {
+    email: string;
+    provider: 'outlook' | 'gmail';
+  }) {
+    const createNewKey = () => {
+      const operation = resolveManualEmailOperation(sendOperation, {
+        scope: campaignStepId ? `campaign-v2-step:${campaignStepId}` : 'manual-compose',
+        recipientId: String((lead as any).id || ''),
+        email: input.email,
+        subject,
+        body,
+        provider: input.provider,
+        deliveryOptions: canonicalDeliveryOptions,
+      }, uuid);
+      setSendOperation(operation);
+      return operation.idempotencyKey;
+    };
+
+    if (!campaignStepId) return createNewKey();
+    if (!campaignSendContext || campaignSendContextError || campaignSendContextMismatch || campaignDispatchVersionMismatch) {
+      throw new Error('No se pudo confirmar un contexto seguro para este envío.');
+    }
+    const idempotencyKey = resolveCampaignV2SendKey(campaignSendContext, createNewKey);
+    if (!idempotencyKey) throw new Error('Este seguimiento ya no admite un envío seguro.');
+    return idempotencyKey;
+  }
 
   const doSendOutlook = async () => {
     const { email } = extractPrimaryEmail(lead);
@@ -575,72 +804,36 @@ function ComposeInner() {
       return;
     }
     setIsLoading(true);
+    setSendError(null);
     try {
       const researchSnapshotId = String(findReportForLead({
         leadId: String((lead as any).id || ''),
         email,
       })?.raw?.research_snapshot_id || '').trim() || nativeDraft?.researchSnapshotId || null;
-      const operation = resolveManualEmailOperation(sendOperation, {
-        scope: 'manual-compose',
-        recipientId: String((lead as any).id || ''),
-        email,
-        subject,
-        body,
-        provider: 'outlook',
-        deliveryOptions: { pixel: usePixel, links: useLinkTracking, readReceipt: useReadReceipt },
-      }, uuid);
-      setSendOperation(operation);
-      const trackingId = operation.trackingId;
-      let finalHtmlBody = body.replace(/\n/g, '<br>');
+      const idempotencyKey = resolveSendIdempotencyKey({ email, provider: 'outlook' });
+      const finalHtmlBody = body.replace(/\n/g, '<br>');
 
-      // 2. Rewrite Links if enabled
-      if (useLinkTracking) {
-        finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
-      }
-
-      // 3. Inject Pixel if enabled
-      if (usePixel) {
-        // Use window.location.origin to get the current domain
-        const origin = typeof window !== 'undefined' ? window.location.origin : '';
-        let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-
-        // OPTIMIZATION: Redirect to logo if available
-        const profile = getCompanyProfile();
-        if (profile?.logo && profile.logo.startsWith('http')) {
-          pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
-        }
-
-        // FIX: Removed display:none to prevent blocking by email clients
-        const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
-        finalHtmlBody += `\n<br>${trackingPixel}`;
-      }
-
-      await sendEmail({
+      const result = await sendEmail({
         to: email,
         subject,
         htmlBody: finalHtmlBody,
-        requestReceipts: useReadReceipt, // Pass new option
+        requestReceipts: false,
         leadId: String((lead as any).id || ''),
         researchSnapshotId,
         draftId: nativeDraft?.draftId || null,
         versionId: nativeDraft?.versionId || null,
-        idempotencyKey: operation.idempotencyKey,
+        organizationId: sendOrganizationId,
+        idempotencyKey,
       });
-
-      // The dispatch finalizer owns authoritative history and quota writes.
-      // ✅ quitar de Oportunidades Enriquecidas (storage correcto)
-      // Remove from source
-      if ((lead as any)._sourceTable === 'opportunities') {
-        await enrichedOpportunitiesStorage.removeById((lead as any).id);
-      } else {
-        await enrichedLeadsStorage.removeById((lead as any).id);
-      }
-
-      toast({ title: 'Enviado con Outlook', description: `Correo enviado a ${(lead as any).fullName}.` });
-      setSendOperation(null);
-      router.back();
+      await handleDurableSendResult(result, 'Outlook');
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'No se pudo enviar con Outlook', description: e?.message || 'Revisa la conexion y vuelve a intentarlo.' });
+      const message = e?.message || 'Revisa la conexión y vuelve a intentarlo.';
+      setSendError(message);
+      if (campaignStepId) {
+        setCampaignSendContextLoading(true);
+        setCampaignSendContextReloadKey((value) => value + 1);
+      }
+      toast({ variant: 'destructive', title: 'No se pudo enviar con Outlook', description: message });
     } finally {
       setIsLoading(false);
     }
@@ -662,46 +855,16 @@ function ComposeInner() {
       return;
     }
     setIsLoading(true);
+    setSendError(null);
     try {
       const researchSnapshotId = String(findReportForLead({
         leadId: String((lead as any).id || ''),
         email,
       })?.raw?.research_snapshot_id || '').trim() || nativeDraft?.researchSnapshotId || null;
-      const operation = resolveManualEmailOperation(sendOperation, {
-        scope: 'manual-compose',
-        recipientId: String((lead as any).id || ''),
-        email,
-        subject,
-        body,
-        provider: 'gmail',
-        deliveryOptions: { pixel: usePixel, links: useLinkTracking, readReceipt: false },
-      }, uuid);
-      setSendOperation(operation);
-      const trackingId = operation.trackingId;
-      let finalHtmlBody = body.replace(/\n/g, '<br>');
+      const idempotencyKey = resolveSendIdempotencyKey({ email, provider: 'gmail' });
+      const finalHtmlBody = body.replace(/\n/g, '<br>');
 
-      // 2. Rewrite Links if enabled
-      if (useLinkTracking) {
-        finalHtmlBody = rewriteLinksForTracking(finalHtmlBody, trackingId);
-      }
-
-      // 3. Inject Pixel if enabled
-      if (usePixel) {
-        const origin = typeof window !== 'undefined' ? window.location.origin : '';
-        let pixelUrl = `${origin}/api/tracking/open?id=${trackingId}`;
-
-        // OPTIMIZATION: Redirect to logo
-        const profile = getCompanyProfile();
-        if (profile?.logo && profile.logo.startsWith('http')) {
-          pixelUrl += `&redirect=${encodeURIComponent(profile.logo)}`;
-        }
-
-        // FIX: Removed display:none
-        const trackingPixel = `<img src="${pixelUrl}" alt="" width="1" height="1" style="width:1px;height:1px;border:0;" />`;
-        finalHtmlBody += `\n<br>${trackingPixel}`;
-      }
-
-      await sendGmailEmail({
+      const result = await sendGmailEmail({
         to: email,
         subject: subject,
         html: finalHtmlBody,
@@ -709,29 +872,48 @@ function ComposeInner() {
         researchSnapshotId,
         draftId: nativeDraft?.draftId || null,
         versionId: nativeDraft?.versionId || null,
-        idempotencyKey: operation.idempotencyKey,
+        organizationId: sendOrganizationId,
+        idempotencyKey,
       });
-
-      // The dispatch finalizer owns authoritative history and quota writes.
-
-      // ✅ quitar de Oportunidades Enriquecidas (storage correcto)
-      if ((lead as any)._sourceTable === 'opportunities') {
-        await enrichedOpportunitiesStorage.removeById((lead as any).id);
-      } else {
-        await enrichedLeadsStorage.removeById((lead as any).id);
-      }
-      toast({ title: 'Enviado con Gmail', description: `Correo enviado a ${(lead as any).fullName}.` });
-      setSendOperation(null);
-      router.back();
+      await handleDurableSendResult(result, 'Gmail');
     } catch (e: any) {
-      toast({ variant: 'destructive', title: 'No se pudo enviar con Gmail', description: e?.message || 'Revisa la conexion y vuelve a intentarlo.' });
+      const message = e?.message || 'Revisa la conexión y vuelve a intentarlo.';
+      setSendError(message);
+      if (campaignStepId) {
+        setCampaignSendContextLoading(true);
+        setCampaignSendContextReloadKey((value) => value + 1);
+      }
+      toast({ variant: 'destructive', title: 'No se pudo enviar con Gmail', description: message });
     } finally {
       setIsLoading(false);
     }
   };
 
-  const loadError = nativeDraftLoadError || leadLoadError;
-  if (nativeDraftLoading || leadLoading) {
+  const safeRetryAvailable = Boolean(
+    sendReceipt
+    && (
+      (sendReceipt.status === 'deferred' && sendReceipt.retry?.retryable === true)
+      || (sendReceipt.status === 'pending' && Boolean(campaignStepId))
+    )
+    && (!campaignStepId || (
+      campaignSendContext?.dispatch
+        ? campaignSendDecision?.kind === 'safe_retry' && !campaignDispatchVersionMismatch
+        : Boolean(sendOperation)
+    ))
+  );
+
+  function retryDurableSend() {
+    if (!safeRetryAvailable || isLoading) return;
+    setSendReceipt(null);
+    setSendError(null);
+    void (sendProvider === 'outlook' ? doSendOutlook() : doSendGmail());
+  }
+
+  const loadError = campaignSendContextError
+    || (campaignSendContextMismatch ? 'El correo abierto ya no coincide con la versión autorizada para este seguimiento.' : null)
+    || nativeDraftLoadError
+    || leadLoadError;
+  if (nativeDraftLoading || leadLoading || campaignSendContextLoading) {
     return (
       <main aria-busy="true" className="mx-auto w-full max-w-4xl space-y-5 px-4 py-6 sm:px-6">
         <div className="space-y-1">
@@ -767,7 +949,11 @@ function ComposeInner() {
           <Button
             type="button"
             className="w-full sm:w-auto"
-            onClick={() => isCanonicalDraft ? setNativeDraftReloadKey((value) => value + 1) : setLeadReloadKey((value) => value + 1)}
+            onClick={() => {
+              if (campaignStepId) setCampaignSendContextReloadKey((value) => value + 1);
+              if (isCanonicalDraft) setNativeDraftReloadKey((value) => value + 1);
+              else setLeadReloadKey((value) => value + 1);
+            }}
           >
             Reintentar
           </Button>
@@ -797,8 +983,80 @@ function ComposeInner() {
     );
   }
 
+  if (sendReceipt?.status === 'sent') {
+    const activeFollowUpPlan = followUpPlan && ['pending_initial_send', 'active'].includes(followUpPlan.enrollmentState)
+      ? followUpPlan
+      : null;
+    const nextStep = nextFollowUpStep(activeFollowUpPlan);
+    const nextDate = formatFollowUpDate(activeFollowUpPlan?.nextDueAt || nextStep?.dueAt);
+    const hasFollowUpContext = Boolean(followUpPlan || campaignStepId);
+    return (
+      <main className="mx-auto flex min-h-[70vh] w-full max-w-2xl items-center px-4 py-8 sm:px-6">
+        <Card className="w-full overflow-hidden rounded-2xl border-emerald-200/80 shadow-[0_24px_70px_-50px_rgba(15,23,42,0.35)] dark:border-emerald-500/30">
+          <CardContent className="p-6 sm:p-8">
+            <div className="flex size-11 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+              <CheckCircle2 className="size-6" aria-hidden="true" />
+            </div>
+            <div className="mt-5 space-y-2">
+              <p className="text-xs font-medium uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">Envío confirmado</p>
+              <h1
+                ref={successHeadingRef}
+                tabIndex={-1}
+                className="rounded-sm text-2xl font-semibold tracking-[-0.03em] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:text-3xl"
+              >
+                Correo enviado
+              </h1>
+              <p className="text-sm leading-6 text-muted-foreground">
+                El mensaje para {(lead as any).fullName || composeEmail || 'este contacto'} quedó registrado correctamente.
+              </p>
+            </div>
+
+            <div className="mt-6 rounded-xl border border-border/60 bg-muted/20 px-4 py-3.5">
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Confirmación de envío</p>
+              <p className="mt-1 break-all font-mono text-sm text-foreground">{sendReceipt.dispatchId}</p>
+            </div>
+
+            {activeFollowUpPlan ? (
+              <div className="mt-4 rounded-xl border border-border/60 px-4 py-3.5">
+                <p className="text-sm font-medium">{nextStep ? `Próximo: ${nextStep.name}` : 'Seguimiento configurado'}</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  {nextDate
+                    ? `Programado para el ${nextDate}.`
+                    : `${activeFollowUpPlan.steps.length} ${activeFollowUpPlan.steps.length === 1 ? 'correo quedó preparado' : 'correos quedaron preparados'} para continuar después del envío inicial.`}
+                </p>
+              </div>
+            ) : null}
+
+            <div className="mt-7 flex justify-end">
+              <Button asChild className="min-h-11 w-full sm:w-auto">
+                <Link href={hasFollowUpContext ? '/campaigns' : '/saved/leads/enriched'}>
+                  {hasFollowUpContext ? 'Ver seguimiento' : 'Volver a leads'}
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
   const displayEmail = composeEmail;
   const send = sendProvider === 'outlook' ? doSendOutlook : doSendGmail;
+  const dispatchLocksCompose = Boolean(sendReceipt);
+  const composeControlsLocked = dispatchLocksCompose || isLoading || Boolean(sendOperation);
+  const leaveCompose = () => {
+    if (followUpDirty || followUpBusy) {
+      toast({
+        title: followUpBusy ? 'Hay una operación en curso' : 'Hay cambios sin guardar',
+        description: followUpBusy
+          ? 'Espera a que termine antes de salir.'
+          : 'Guarda los seguimientos antes de salir de esta pantalla.',
+      });
+      return;
+    }
+    router.back();
+  };
+  const isSafeRequestRetry = Boolean(sendError && sendOperation && !sendReceipt);
   const isSendBlocked = isLoading
     || nativeDraftSaving
     || nativeDraftApproving
@@ -806,13 +1064,18 @@ function ComposeInner() {
     || contactabilityChecking
     || campaignQaBlocksSend
     || nativeDraftArchived
-    || nativeReviewRequired;
+    || nativeReviewRequired
+    || followUpDirty
+    || followUpBusy
+    || Boolean(campaignStepId && campaignSendDecision?.kind === 'blocked')
+    || dispatchLocksCompose;
   const isReviewActionBlocked = nativeDraftApproving
     || nativeDraftSaving
     || nativeDraftRewriting
     || isLoading
     || contactabilityChecking
-    || campaignQaBlocksSend;
+    || campaignQaBlocksSend
+    || dispatchLocksCompose;
   const reviewStatus = nativeDraftArchived
     ? {
       title: 'Correo no disponible',
@@ -851,9 +1114,9 @@ function ComposeInner() {
             variant="outline"
             size="icon"
             className="mt-0.5 shrink-0 rounded-full"
-            onClick={() => router.back()}
+            onClick={leaveCompose}
             aria-label="Volver"
-            disabled={isLoading || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting}
+            disabled={isLoading || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || followUpBusy}
           >
             <ArrowLeft className="size-4" />
           </Button>
@@ -873,10 +1136,10 @@ function ComposeInner() {
               type="button"
               size="sm"
               variant={sendProvider === provider ? 'secondary' : 'ghost'}
-              className="h-8 rounded-full px-3"
+              className="min-h-11 rounded-full px-3"
               aria-label={`Usar ${provider === 'outlook' ? 'Outlook' : 'Gmail'} para enviar`}
               aria-pressed={sendProvider === provider}
-              disabled={isLoading || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting}
+              disabled={nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
               onClick={() => setSendProvider(provider)}
             >
               {provider === 'outlook' ? 'Outlook' : 'Gmail'}
@@ -901,6 +1164,57 @@ function ComposeInner() {
               </div>
             </div>
           </div>
+        ) : null}
+        {sendReceipt ? (
+          <Alert
+            variant={sendReceipt.status === 'failed' ? 'destructive' : 'default'}
+            className={sendReceipt.status === 'deferred'
+              ? 'border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100'
+              : undefined}
+          >
+            <AlertTitle>
+                {sendReceipt.status === 'deferred'
+                  ? 'Envío diferido'
+                  : sendReceipt.status === 'pending' && safeRetryAvailable
+                    ? 'Envío listo para reintentar'
+                  : sendReceipt.status === 'failed'
+                  ? 'No se pudo enviar'
+                  : 'Estado por confirmar'}
+            </AlertTitle>
+            <AlertDescription className="space-y-3">
+              <p>
+                {sendReceipt.status === 'deferred'
+                  ? 'El intento quedó registrado sin confirmar el envío. Reintenta sólo si aparece la opción segura.'
+                  : sendReceipt.status === 'pending' && safeRetryAvailable
+                    ? 'El proveedor no fue invocado. Puedes retomar de forma segura la misma operación de envío.'
+                  : sendReceipt.status === 'failed'
+                    ? 'El proveedor confirmó un fallo. El borrador se conserva sin cambios.'
+                    : 'No vuelvas a enviar este correo. Revisa su estado desde Campañas antes de realizar otra acción.'}
+              </p>
+              {sendReceipt.error?.message ? <p className="text-xs opacity-80">{sendReceipt.error.message}</p> : null}
+              <p className="break-all font-mono text-xs">Dispatch: {sendReceipt.dispatchId}</p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                {safeRetryAvailable ? (
+                  <Button type="button" variant="outline" size="sm" className="min-h-11" onClick={retryDurableSend} disabled={isLoading}>
+                    {isLoading ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+                    Reintentar de forma segura
+                  </Button>
+                ) : null}
+                <Button asChild variant="outline" size="sm" className="min-h-11">
+                  <Link href="/campaigns">Revisar en Campañas</Link>
+                </Button>
+              </div>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {sendError ? (
+          <Alert variant="destructive">
+            <AlertTitle>La solicitud no obtuvo confirmación</AlertTitle>
+            <AlertDescription className="space-y-3">
+              <p>{sendError}</p>
+              <p>Puedes reintentar con seguridad: conservaremos la misma operación y la misma clave de envío.</p>
+            </AlertDescription>
+          </Alert>
         ) : null}
         <ContactabilityStatusCard
           compact
@@ -947,7 +1261,7 @@ function ComposeInner() {
                   placeholder="Escribe un asunto"
                   className="h-11"
                   aria-describedby={isCanonicalDraft ? 'review-status' : undefined}
-                  disabled={nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting}
+                  disabled={nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
                 />
               </div>
               <div className="space-y-2">
@@ -960,83 +1274,109 @@ function ComposeInner() {
                   rows={16}
                   className="min-h-[390px] resize-y text-[15px] leading-7"
                   aria-describedby={isCanonicalDraft ? 'review-status' : undefined}
-                  disabled={nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting}
+                  disabled={nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
                 />
               </div>
             </CardContent>
           </Card>
+
+          {isCanonicalDraft && nativeDraft?.channel === 'email' && !campaignStepId && nativeDraft?.versionId ? (
+            <section aria-label="Seguimientos del correo inicial">
+              <FirstContactFollowUpPlan
+                draftId={nativeDraftId}
+                versionId={nativeDraft.versionId}
+                styleProfiles={styleProfiles}
+                disabled={nativeDraftArchived || hasNativeEdits || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
+                disabledReason={hasNativeEdits ? 'Guarda primero los cambios del correo inicial para continuar con la secuencia.' : null}
+                onPlanChange={handleFollowUpPlanChange}
+                onDirtyChange={setFollowUpDirty}
+                onBusyChange={setFollowUpBusy}
+              />
+            </section>
+          ) : null}
         </section>
 
         <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
           {isCanonicalDraft ? (
             <section aria-labelledby="ai-adjustment-heading">
-              <Card className="border-border/60">
-                <CardHeader className="pb-3">
-                  <CardTitle id="ai-adjustment-heading" className="flex items-center gap-2 text-base">
-                    <Sparkles className="size-4 text-primary" aria-hidden="true" />
-                    Ajustar con IA
-                  </CardTitle>
-                  <CardDescription>Cambia el tono o la estructura sin perder el contexto investigado.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="native-compose-style" className="text-xs font-medium text-muted-foreground">Estilo</Label>
-                    <select
-                      id="native-compose-style"
-                      className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={nativeDraftRewriting || styleProfiles.length === 0}
-                      value={selectedStyleName}
-                      onChange={(event) => {
-                        setSelectedStyleName(event.target.value);
-                        setRewriteError(null);
-                      }}
+              <Collapsible open={showAiAdjustment} onOpenChange={setShowAiAdjustment}>
+                <Card className="border-border/60">
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="flex h-auto w-full items-center justify-between rounded-xl px-4 py-3 text-left hover:bg-muted/50"
+                      disabled={composeControlsLocked}
                     >
-                      {styleProfiles.length === 0
-                        ? <option value="">Estilo actual del correo</option>
-                        : styleProfiles.map((profile) => (
-                          <option key={profile.id || profile.name} value={profile.name}>
-                            {profile.name}{profile.isDefault ? ' · Predeterminado' : ''}
-                          </option>
-                        ))}
-                    </select>
-                    {styleProfilesError ? (
-                      <p className="text-xs leading-5 text-muted-foreground">No pudimos cargar tus estilos. Aún puedes indicar el ajuste manualmente.</p>
-                    ) : null}
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="native-rewrite-instruction" className="text-xs font-medium text-muted-foreground">Qué quieres cambiar</Label>
-                    <Textarea
-                      id="native-rewrite-instruction"
-                      value={rewriteInstruction}
-                      onChange={(event) => {
-                        setRewriteInstruction(event.target.value);
-                        setRewriteError(null);
-                      }}
-                      rows={4}
-                      maxLength={1_000}
-                      placeholder="Ej. hazlo más directo, con párrafos más breves y un tono consultivo"
-                      className="min-h-24 resize-y leading-6"
-                      disabled={nativeDraftArchived || nativeDraftRewriting}
-                    />
-                  </div>
-                  {hasNativeEdits ? (
-                    <p className="text-xs leading-5 text-amber-700 dark:text-amber-300">Guarda primero tus cambios manuales para aplicar un ajuste con IA.</p>
-                  ) : null}
-                  <div aria-live="polite">
-                    {rewriteError ? <p className="text-sm leading-5 text-destructive">{rewriteError}</p> : null}
-                  </div>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full"
-                    onClick={() => void rewriteNativeDraftWithAi()}
-                    disabled={!rewriteInstruction.trim() || hasNativeEdits || nativeDraftArchived || nativeDraftRewriting || nativeDraftSaving || nativeDraftApproving}
-                  >
-                    {nativeDraftRewriting ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Sparkles data-icon="inline-start" />}
-                    {nativeDraftRewriting ? 'Ajustando…' : 'Aplicar ajuste'}
-                  </Button>
-                </CardContent>
-              </Card>
+                      <span id="ai-adjustment-heading" className="flex items-center gap-2 text-sm font-medium">
+                        <Sparkles className="size-4 text-primary" aria-hidden="true" /> Ajustar con IA
+                      </span>
+                      <ChevronDown className={`size-4 text-muted-foreground transition-transform ${showAiAdjustment ? 'rotate-180' : ''}`} aria-hidden="true" />
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <CardContent className="space-y-4 border-t border-border/60 pt-4">
+                      <p className="text-xs leading-5 text-muted-foreground">Cambia el tono o la estructura sin perder el contexto investigado.</p>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="native-compose-style" className="text-xs font-medium text-muted-foreground">Estilo</Label>
+                        <select
+                          id="native-compose-style"
+                          className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={nativeDraftRewriting || styleProfiles.length === 0 || composeControlsLocked}
+                          value={selectedStyleName}
+                          onChange={(event) => {
+                            setSelectedStyleName(event.target.value);
+                            setRewriteError(null);
+                          }}
+                        >
+                          {styleProfiles.length === 0
+                            ? <option value="">Estilo actual del correo</option>
+                            : styleProfiles.map((profile) => (
+                              <option key={profile.id || profile.name} value={profile.name}>
+                                {profile.name}{profile.isDefault ? ' · Predeterminado' : ''}
+                              </option>
+                            ))}
+                        </select>
+                        {styleProfilesError ? (
+                          <p className="text-xs leading-5 text-muted-foreground">No pudimos cargar tus estilos. Aún puedes indicar el ajuste manualmente.</p>
+                        ) : null}
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="native-rewrite-instruction" className="text-xs font-medium text-muted-foreground">Qué quieres cambiar</Label>
+                        <Textarea
+                          id="native-rewrite-instruction"
+                          value={rewriteInstruction}
+                          onChange={(event) => {
+                            setRewriteInstruction(event.target.value);
+                            setRewriteError(null);
+                          }}
+                          rows={4}
+                          maxLength={1_000}
+                          placeholder="Ej. hazlo más directo, con párrafos más breves y un tono consultivo"
+                          className="min-h-24 resize-y leading-6"
+                          disabled={nativeDraftArchived || nativeDraftRewriting || composeControlsLocked}
+                        />
+                      </div>
+                      {hasNativeEdits ? (
+                        <p className="text-xs leading-5 text-amber-700 dark:text-amber-300">Guarda primero tus cambios manuales para aplicar un ajuste con IA.</p>
+                      ) : null}
+                      <div aria-live="polite">
+                        {rewriteError ? <p className="text-sm leading-5 text-destructive">{rewriteError}</p> : null}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full"
+                        onClick={() => void rewriteNativeDraftWithAi()}
+                        disabled={!rewriteInstruction.trim() || hasNativeEdits || nativeDraftArchived || nativeDraftRewriting || nativeDraftSaving || nativeDraftApproving || composeControlsLocked}
+                      >
+                        {nativeDraftRewriting ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Sparkles data-icon="inline-start" />}
+                        {nativeDraftRewriting ? 'Ajustando…' : 'Aplicar ajuste'}
+                      </Button>
+                    </CardContent>
+                  </CollapsibleContent>
+                </Card>
+              </Collapsible>
             </section>
           ) : null}
 
@@ -1090,65 +1430,44 @@ function ComposeInner() {
             </section>
           ) : null}
 
-          <Collapsible open={showDeliveryOptions} onOpenChange={setShowDeliveryOptions}>
-            <Card className="border-border/60">
-              <CollapsibleTrigger asChild>
-                <Button type="button" variant="ghost" className="flex h-auto w-full items-center justify-between rounded-xl px-4 py-3 text-left hover:bg-muted/50">
-                  <span className="flex items-center gap-2 text-sm font-medium"><Settings2 className="size-4 text-muted-foreground" aria-hidden="true" />Opciones de seguimiento</span>
-                  <ChevronDown className={`size-4 text-muted-foreground transition-transform ${showDeliveryOptions ? 'rotate-180' : ''}`} aria-hidden="true" />
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <CardContent className="space-y-4 border-t border-border/60 pt-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <Label htmlFor="tracking-opens" className="text-sm font-medium">Detectar aperturas</Label>
-                      <p id="tracking-opens-description" className="mt-1 text-xs text-muted-foreground">Usa un píxel de seguimiento.</p>
-                    </div>
-                    <Switch id="tracking-opens" checked={usePixel} onCheckedChange={setUsePixel} aria-describedby="tracking-opens-description" />
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <Label htmlFor="tracking-clicks" className="text-sm font-medium">Medir clics</Label>
-                      <p id="tracking-clicks-description" className="mt-1 text-xs text-muted-foreground">Hace rastreables los enlaces.</p>
-                    </div>
-                    <Switch id="tracking-clicks" checked={useLinkTracking} onCheckedChange={setUseLinkTracking} aria-describedby="tracking-clicks-description" />
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <Label htmlFor="tracking-receipt" className="text-sm font-medium">Solicitar confirmación</Label>
-                      <p id="tracking-receipt-description" className="mt-1 text-xs text-muted-foreground">El destinatario puede rechazarla.</p>
-                    </div>
-                    <Switch id="tracking-receipt" checked={useReadReceipt} onCheckedChange={setUseReadReceipt} aria-describedby="tracking-receipt-description" />
-                  </div>
-                </CardContent>
-              </CollapsibleContent>
-            </Card>
-          </Collapsible>
         </aside>
       </div>
 
       <footer aria-label="Acciones del correo" className="sticky bottom-3 z-10 flex flex-col gap-3 rounded-2xl border border-border/60 bg-background/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
         <p id="send-summary" className="text-xs leading-5 text-muted-foreground">
-          {nativeDraftArchived
-            ? 'Este correo ya no está disponible.'
-            : hasNativeEdits
-              ? 'Guarda los cambios y vuelve a revisar el correo antes de enviarlo.'
-              : nativeReviewRequired
-                ? 'Este correo no se enviará hasta que confirmes la revisión.'
-                : `Se enviará por ${sendProvider === 'outlook' ? 'Outlook' : 'Gmail'}.`}
+          {sendReceipt
+            ? 'Este intento ya tiene una confirmación durable. Revisa su estado antes de continuar.'
+            : isSafeRequestRetry
+              ? 'El reintento conservará la misma operación y la misma clave de envío.'
+              : nativeDraftArchived
+                ? 'Este correo ya no está disponible.'
+                : campaignStepId && campaignSendDecision?.kind === 'blocked'
+                  ? 'Este seguimiento no está en un estado seguro para enviar.'
+                  : followUpBusy
+                    ? 'Espera a que termine la operación de seguimiento antes de continuar.'
+                  : followUpDirty
+                    ? 'Guarda los cambios pendientes de los seguimientos antes de enviar.'
+                  : hasNativeEdits
+                    ? 'Guarda los cambios y vuelve a revisar el correo antes de enviarlo.'
+                    : nativeReviewRequired
+                      ? 'Este correo no se enviará hasta que confirmes la revisión.'
+                      : `Se enviará por ${sendProvider === 'outlook' ? 'Outlook' : 'Gmail'}.`}
         </p>
         <div className="flex flex-col-reverse gap-2 sm:flex-row">
           <Button
             type="button"
             variant="outline"
             className="w-full sm:w-auto"
-            onClick={() => router.back()}
-            disabled={isLoading || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting}
+            onClick={leaveCompose}
+            disabled={isLoading || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || followUpBusy}
           >
             Cancelar
           </Button>
-          {nativeDraftArchived ? (
+          {sendReceipt ? (
+            <Button type="button" className="w-full sm:w-auto" disabled>
+              Envío registrado
+            </Button>
+          ) : nativeDraftArchived ? (
             <Button type="button" className="w-full sm:w-auto" disabled>
               Correo no disponible
             </Button>
@@ -1157,7 +1476,7 @@ function ComposeInner() {
               type="button"
               className="w-full sm:w-auto"
               onClick={() => void saveNativeDraft()}
-              disabled={nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || isLoading}
+              disabled={nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || isLoading || dispatchLocksCompose}
               aria-describedby="review-status"
             >
               {nativeDraftSaving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <FileText data-icon="inline-start" />}
@@ -1175,9 +1494,19 @@ function ComposeInner() {
               {nativeDraftApproving ? 'Confirmando…' : contactabilityChecking ? 'Verificando contacto…' : 'Revisar y aprobar'}
             </Button>
           ) : (
-            <Button type="button" className="w-full sm:w-auto" onClick={send} disabled={isSendBlocked} aria-describedby="send-summary">
-              {isLoading ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <SendHorizontal data-icon="inline-start" />}
-              {isLoading ? 'Enviando…' : contactabilityChecking ? 'Verificando…' : 'Enviar correo'}
+            <Button type="button" className="min-h-11 w-full sm:w-auto" onClick={send} disabled={isSendBlocked} aria-describedby="send-summary">
+              {isLoading
+                ? <Loader2 data-icon="inline-start" className="animate-spin" />
+                : isSafeRequestRetry
+                  ? <RefreshCw data-icon="inline-start" />
+                  : <SendHorizontal data-icon="inline-start" />}
+              {isLoading
+                ? 'Enviando…'
+                : contactabilityChecking
+                  ? 'Verificando…'
+                  : isSafeRequestRetry
+                    ? 'Reintentar envío seguro'
+                    : 'Enviar correo'}
             </Button>
           )}
         </div>

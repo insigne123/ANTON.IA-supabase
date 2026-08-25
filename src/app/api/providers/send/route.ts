@@ -61,6 +61,9 @@ export async function POST(req: NextRequest) {
         if (isCanonicalDraftSend && (!nativeDraftId || !nativeVersionId)) {
             return NextResponse.json({ error: 'draftId and versionId are required together' }, { status: 400 });
         }
+        if (isCanonicalDraftSend && !String(bodyOrgId || '').trim()) {
+            return NextResponse.json({ error: 'organizationId is required for an approved draft send' }, { status: 400 });
+        }
         // Browser-owned content is never eligible for a production send. The
         // branch below remains only for isolated test fixtures, not runtime.
         const allowLegacyFixtureSend = process.env.NODE_ENV === 'test'

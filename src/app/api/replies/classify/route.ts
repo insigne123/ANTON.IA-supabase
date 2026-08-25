@@ -6,11 +6,9 @@ import { detectDeliveryFailure } from '@/lib/delivery-failure-detector';
 import { notificationService } from '@/lib/services/notification-service';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { maybeEscalateReplyReviewFromContactedId } from '@/lib/server/antonia-reply-escalation';
-import { shouldGloballySuppressReply } from '@/lib/contact-history-guard';
 import {
   createStableInboundMessageId,
   ingestInboundReply,
-  recordInboundUnsubscribe,
 } from '@/lib/server/inbound-reply-ingestion';
 
 export const dynamic = 'force-dynamic';
@@ -121,14 +119,6 @@ export async function POST(req: NextRequest) {
 
     if (!ingestion.inserted) {
       return NextResponse.json({ success: true, duplicate: true, classification: failure || replyClassification });
-    }
-
-    if (shouldGloballySuppressReply(replyClassification) && row.email) {
-      await recordInboundUnsubscribe(getSupabaseAdminClient(), {
-        contactedId: row.id,
-        recipientEmail: row.email,
-        eventKey: ingestion.eventKey,
-      });
     }
 
     if (!row.reply_intent && row.organization_id && (intent === 'meeting_request' || intent === 'positive')) {

@@ -59,7 +59,10 @@ test('DraftContextV2 generation exposes only the server-selected factual evidenc
     assert.match(prompt, /"hypotheses":\[\]/);
     assert.match(prompt, /El servidor lo agregará literalmente una sola vez al final/);
     assert.match(prompt, /No agregues ninguna pregunta, invitación a actuar/);
-    assert.match(prompt, /Copia literalmente en el asunto o cuerpo el statement completo/);
+    assert.match(prompt, /paráfrasis natural y fiel/);
+    assert.match(prompt, /no por un equipo de marketing/);
+    assert.match(prompt, /No incluyas firma/);
+    assert.doesNotMatch(prompt, /gpt-4o-mini/);
     assert.doesNotMatch(prompt, /Acme necesita contratar urgentemente/);
     assert.doesNotMatch(prompt, /claim-acme-opportunity/);
   } finally {
@@ -104,6 +107,37 @@ test('DraftContextV2 generation consumes the validated report brief and prioriti
     assert.match(prompt, /No presentar hipótesis como necesidades confirmadas/);
     assert.match(prompt, /Ada Lovelace figura como Directora de Operaciones en Acme/);
     assert.doesNotMatch(prompt, /Acme publica que ayuda a equipos de operaciones a reducir trabajo manual/);
+  } finally {
+    if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousOpenAiKey;
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('DraftContextV2 generation labels a campaign step instruction as non-factual guidance', async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      const request = JSON.parse(String(init?.body || '{}'));
+      prompt = String(request.messages?.[1]?.content || '');
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ subject: 'Seguimiento breve', body: 'Contenido factual.' }) } }],
+        usage: {},
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    await generateOutreachFromDraftContextV2({
+      context: draftContextFixture(),
+      instruction: 'Retoma el valor principal sin repetir el correo inicial.',
+    });
+
+    assert.match(prompt, /CAMPAIGN_STEP_INSTRUCTION/);
+    assert.match(prompt, /Retoma el valor principal sin repetir el correo inicial/);
+    assert.match(prompt, /estrategia de redacción, no evidencia factual/);
+    assert.match(prompt, /sin relajar ninguna regla no negociable/);
   } finally {
     if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousOpenAiKey;

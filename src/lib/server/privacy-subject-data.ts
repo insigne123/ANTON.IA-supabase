@@ -15,6 +15,10 @@ export type PrivacySubjectLookupData = {
     messagingDrafts: number;
     messagingDraftVersions: number;
     outboundDispatches: number;
+    campaignV2Campaigns: number;
+    campaignV2Enrollments: number;
+    campaignV2SequenceSteps: number;
+    campaignV2RecipientSteps: number;
     emailEvents: number;
     leadResponses: number;
   };
@@ -30,6 +34,10 @@ export type PrivacySubjectLookupData = {
     messagingDrafts: Array<{ id: string; organization_id: string; user_id: string; research_snapshot_id: string | null; channel: string; lifecycle: string; current_revision: number; created_at: string; updated_at: string }>;
     messagingDraftVersions: Array<{ id: string; draft_id: string; organization_id: string; user_id: string; research_snapshot_id: string | null; revision: number; recipient: any; content: any; approval: any; preflight: any; payload: any; created_at: string }>;
     outboundDispatches: Array<{ id: string; organization_id: string; user_id: string; draft_id: string; version_id: string; channel: string; provider: string; status: string; metadata: any; provider_message_id: string | null; provider_response: any; error_code: string | null; error_message: string | null; requested_at: string; completed_at: string | null }>;
+    campaignV2Campaigns: Array<{ id: string; organization_id: string; user_id: string; name: string; v2_status: string; initial_native_draft_id: string; settings: any; created_at: string; updated_at: string }>;
+    campaignV2Enrollments: Array<{ id: string; campaign_id: string; sequence_version_id: string; organization_id: string; user_id: string; recipient_name: string | null; recipient_email: string; recipient_lead_ref: string | null; research_snapshot_id: string | null; status: string; initial_sent_at: string | null; stopped_at: string | null; completed_at: string | null; created_at: string; updated_at: string }>;
+    campaignV2SequenceSteps: Array<{ id: string; sequence_version_id: string; organization_id: string; user_id: string; step_index: number; name: string; offset_days: number; instruction: string; created_at: string }>;
+    campaignV2RecipientSteps: Array<{ id: string; enrollment_id: string; campaign_id: string; sequence_step_id: string; organization_id: string; user_id: string; step_index: number; state: string; due_at: string | null; native_draft_id: string | null; native_version_id: string | null; outbound_dispatch_id: string | null; contacted_id: string | null; sent_at: string | null; last_error: string | null; created_at: string; updated_at: string }>;
     emailEvents: Array<{ id: string; contacted_id: string | null; event_type: string; provider: string | null; event_at: string; meta: any }>;
     leadResponses: Array<{ id: string; lead_id: string | null; contacted_id?: string | null; type: string; content: string | null; created_at: string }>;
   };
@@ -68,6 +76,13 @@ export async function lookupPrivacySubjectData(rawEmail: string): Promise<Privac
   if (error) throw error;
 
   const result = data && typeof data === 'object' ? data as Record<string, unknown> : {};
+  const campaignV2 = result.campaignV2 && typeof result.campaignV2 === 'object'
+    ? result.campaignV2 as Record<string, unknown>
+    : {};
+  const campaignV2Campaigns = rows(campaignV2.campaigns);
+  const campaignV2Enrollments = rows(campaignV2.enrollments);
+  const campaignV2SequenceSteps = rows(campaignV2.sequenceSteps);
+  const campaignV2RecipientSteps = rows(campaignV2.recipientSteps);
   const profiles = rows(result.profiles);
   const leads = rows(result.leads);
   const enrichedLeads = rows(result.enrichedLeads);
@@ -122,6 +137,10 @@ export async function lookupPrivacySubjectData(rawEmail: string): Promise<Privac
       messagingDrafts: messagingDrafts.length,
       messagingDraftVersions: messagingDraftVersions.length,
       outboundDispatches: outboundDispatches.length,
+      campaignV2Campaigns: campaignV2Campaigns.length,
+      campaignV2Enrollments: campaignV2Enrollments.length,
+      campaignV2SequenceSteps: campaignV2SequenceSteps.length,
+      campaignV2RecipientSteps: campaignV2RecipientSteps.length,
       emailEvents: emailEvents.length,
       leadResponses: leadResponses.length,
     },
@@ -137,6 +156,10 @@ export async function lookupPrivacySubjectData(rawEmail: string): Promise<Privac
       messagingDrafts,
       messagingDraftVersions,
       outboundDispatches,
+      campaignV2Campaigns,
+      campaignV2Enrollments,
+      campaignV2SequenceSteps,
+      campaignV2RecipientSteps,
       emailEvents,
       leadResponses,
     },
@@ -195,39 +218,22 @@ export async function recordPrivacyRequestAction(input: {
 
 export async function applyPrivacyBlock(rawEmail: string, input: { reason?: string | null; requestId?: string | null; actorEmail?: string | null }) {
   const email = normalizePrivacyEmail(rawEmail);
-  const emailPattern = exactIlikePattern(email);
   const admin = getSupabaseAdminClient();
   const reason = String(input.reason || '').trim() || 'privacy_request_block';
 
-  const { data: updatedContacted, error: contactedError } = await admin
-    .from('contacted_leads')
-    .update({
-      campaign_followup_allowed: false,
-      campaign_followup_reason: 'privacy_request_block',
-      evaluation_status: 'do_not_contact',
-      last_update_at: new Date().toISOString(),
-    } as any)
-    .ilike('email', emailPattern)
-    .select('id');
-  if (contactedError) throw contactedError;
-
-  const { data: updatedLeads, error: leadsError } = await admin
-    .from('leads')
-    .update({ status: 'do_not_contact' } as any)
-    .ilike('email', emailPattern)
-    .select('id');
-  if (leadsError) throw leadsError;
-
-  const { error: unsubError } = await admin
-    .from('unsubscribed_emails')
-    .insert({ email, reason });
-  if (unsubError && unsubError.code !== '23505') throw unsubError;
+  const { data, error } = await admin.rpc('apply_privacy_suppression_v2', {
+    p_email: email,
+    p_reason: reason,
+  });
+  if (error) throw error;
+  const result = data && typeof data === 'object' ? data as Record<string, unknown> : {};
 
   const summary = {
     email,
     blocked: true,
-    updatedContactedCount: updatedContacted?.length || 0,
-    updatedLeadsCount: updatedLeads?.length || 0,
+    updatedContactedCount: Number(result.updatedContactedCount || 0),
+    updatedLeadsCount: Number(result.updatedLeadsCount || 0),
+    campaignSafetyStop: result.campaignSafetyStop || null,
   };
 
   await recordPrivacyRequestAction({
@@ -281,7 +287,7 @@ export async function deletePrivacySubjectData(rawEmail: string, input: { reason
       preservedProfilesCount: lookup.records.profiles.length,
       warnings: [
         ...lookup.warnings,
-        'El contacto quedó bloqueado. Vuelve a ejecutar la eliminación cuando termine el trabajo de investigación o generación que ya estaba en curso.',
+        'El contacto quedó bloqueado. Vuelve a ejecutar la eliminación cuando termine el trabajo o envío que ya estaba en curso.',
       ],
     };
     await recordPrivacyRequestAction({

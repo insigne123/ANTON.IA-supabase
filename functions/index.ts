@@ -5970,11 +5970,22 @@ export const campaignProcessingTick = functions.scheduler.onSchedule({
     memory: '1GiB',
     secrets: ['FIREBASE_SCHEDULER_SECRET'],
 }, async () => {
-    await invokeFirebaseSchedulerBridge({
-        name: 'campaign-processing',
-        path: '/api/cron/process-campaigns',
-        method: 'GET',
-    });
+    const results = await Promise.allSettled([
+        invokeFirebaseSchedulerBridge({
+            name: 'campaign-processing',
+            path: '/api/cron/process-campaigns?dryRun=true',
+            method: 'GET',
+        }),
+        invokeFirebaseSchedulerBridge({
+            name: 'campaign-v2-due-state',
+            path: '/api/cron/campaigns-v2',
+            method: 'POST',
+        }),
+    ]);
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failures.length > 0) {
+        throw new Error(`Campaign scheduler bridge failures: ${failures.map((failure) => String(failure.reason)).join('; ')}`);
+    }
 });
 
 export const outboundReconciliationTick = functions.scheduler.onSchedule({

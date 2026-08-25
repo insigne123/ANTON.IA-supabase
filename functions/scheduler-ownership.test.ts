@@ -11,6 +11,7 @@ const vercelConfig = JSON.parse(readFileSync('vercel.json', 'utf8')) as { crons?
 
 const firebaseBridgeRoutes = [
     'process-campaigns',
+    'campaigns-v2',
     'outbound-reconciliation',
     'reply-sync',
     'privacy-retention',
@@ -88,6 +89,20 @@ test('Firebase owns all production scheduler bridges and Vercel only schedules S
         assert.match(source, /isFirebaseSchedulerRequest/, `${route} must require the Firebase bridge`);
         assert.doesNotMatch(source, /CRON_SECRET|x-cron-secret/, `${route} must not accept Vercel cron credentials`);
     }
+
+    const campaignTick = sourceBlock('export const campaignProcessingTick =', 'export const outboundReconciliationTick =');
+    assert.match(campaignTick, /\/api\/cron\/process-campaigns\?dryRun=true/);
+    assert.match(campaignTick, /\/api\/cron\/campaigns-v2/);
+    assert.match(campaignTick, /name: 'campaign-v2-due-state'/);
+    assert.match(campaignTick, /Promise\.allSettled/);
+    assert.ok(
+        campaignTick.indexOf("name: 'campaign-processing'")
+        < campaignTick.indexOf('const failures = results.filter'),
+    );
+    assert.ok(
+        campaignTick.indexOf("name: 'campaign-v2-due-state'")
+        < campaignTick.indexOf('const failures = results.filter'),
+    );
 
     const replySyncSource = firebaseBridgeRoutes.find(({ route }) => route === 'reply-sync')!.source;
     assert.doesNotMatch(replySyncSource, /\.from\('provider_tokens'\)/);

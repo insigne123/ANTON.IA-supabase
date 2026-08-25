@@ -72,7 +72,10 @@ function metadataFor(draft: MessagingDraftV1, key = 'send:lead-1:revision-1') {
 class MemoryDispatchRepository implements OutboundDispatchRepository {
   readonly records = new Map<string, OutboundDispatch>();
   failMarkSent = false;
+  failMarkSendingCode: string | null = null;
+  failMarkDeferredCode: string | null = null;
   failReleaseQuota = false;
+  markUnknownCalls = 0;
   releasedQuota = 0;
   private sequence = 0;
 
@@ -111,6 +114,11 @@ class MemoryDispatchRepository implements OutboundDispatchRepository {
     dispatchId: string,
     input: { startedAt: string; expectedAttemptCount: number },
   ) {
+    if (this.failMarkSendingCode) {
+      throw Object.assign(new Error('transaction retry required before provider invocation'), {
+        code: this.failMarkSendingCode,
+      });
+    }
     const dispatch = await this.findById(dispatchId);
     if (!dispatch) throw new Error('missing dispatch');
     if (
@@ -168,6 +176,21 @@ class MemoryDispatchRepository implements OutboundDispatchRepository {
     });
   }
 
+  async markPreProviderFailed(
+    dispatchId: string,
+    input: { databaseCode: string; errorMessage: string; completedAt: string },
+  ) {
+    return this.patch(dispatchId, ['pending', 'deferred'], {
+      status: 'failed',
+      providerMessageId: null,
+      providerResponse: { providerInvoked: false, databaseCode: input.databaseCode },
+      errorCode: 'pre_provider_rejected',
+      errorMessage: input.errorMessage,
+      completedAt: input.completedAt,
+      updatedAt: input.completedAt,
+    });
+  }
+
   async markDeferred(
     dispatchId: string,
     input: {
@@ -177,6 +200,11 @@ class MemoryDispatchRepository implements OutboundDispatchRepository {
       completedAt: string;
     },
   ) {
+    if (this.failMarkDeferredCode) {
+      throw Object.assign(new Error('transaction retry required while persisting pre-provider deferral'), {
+        code: this.failMarkDeferredCode,
+      });
+    }
     return this.patch(dispatchId, ['sending'], {
       status: 'deferred',
       providerMessageId: null,
@@ -198,6 +226,7 @@ class MemoryDispatchRepository implements OutboundDispatchRepository {
       completedAt: string;
     },
   ) {
+    this.markUnknownCalls += 1;
     return this.patch(dispatchId, ['pending', 'sending', 'deferred', 'unknown'], {
       status: 'unknown',
       errorCode: input.errorCode ?? null,
@@ -340,6 +369,37 @@ test('campaign dispatches project pending, sending, confirmed, and replayed outc
   assert.equal(replayed.replayed, true);
   assert.equal(provider.calls(), 1);
   assert.deepEqual(deliveryStates, ['pending', 'sending', 'sent', 'sent']);
+});
+
+test('Campaign V2 dispatch projection runs after sent history and replays without another provider call', async () => {
+  const repository = new MemoryDispatchRepository();
+  const provider = countingProvider();
+  const draft = readyDraft();
+  const metadata = metadataFor(draft, 'campaign-v2:recipient-step-1');
+  const projections: string[] = [];
+  const dependencies = testDependencies(repository, {
+    async finalizeSentHistory() {
+      projections.push('history');
+    },
+    async finalizeCampaignV2Dispatch(dispatch) {
+      projections.push(`v2:${dispatch.status}`);
+    },
+  });
+
+  const first = await dispatchOutboundMessage({ draft, metadata, provider: provider.provider }, dependencies);
+  const replayed = await dispatchOutboundMessage({ draft, metadata, provider: provider.provider }, dependencies);
+
+  assert.equal(first.status, 'sent');
+  assert.equal(replayed.replayed, true);
+  assert.equal(provider.calls(), 1);
+  assert.deepEqual(projections, [
+    'v2:pending',
+    'v2:sending',
+    'history',
+    'v2:sent',
+    'history',
+    'v2:sent',
+  ]);
 });
 
 test('history finalization failure preserves the confirmed sent result for retry', async () => {
@@ -663,8 +723,22 @@ test('pending insert persistence ambiguity is unknown and never reaches the prov
   assert.equal(provider.calls(), 0);
 });
 
-test('pending, sending, and unknown duplicate states never call the provider', async () => {
-  for (const status of ['pending', 'sending', 'unknown'] as const) {
+test('a persisted pending duplicate can safely resume the provider claim', async () => {
+  const repository = new MemoryDispatchRepository();
+  const provider = countingProvider();
+  const draft = readyDraft();
+  const metadata = metadataFor(draft, 'key:pending-resume');
+  await repository.seed(metadata, 'pending');
+
+  const result = await dispatchOutboundMessage({ draft, metadata, provider: provider.provider }, testDependencies(repository));
+
+  assert.equal(result.status, 'sent');
+  assert.equal(result.replayed, false);
+  assert.equal(provider.calls(), 1);
+});
+
+test('sending and unknown duplicate states never call the provider', async () => {
+  for (const status of ['sending', 'unknown'] as const) {
     const repository = new MemoryDispatchRepository();
     const provider = countingProvider();
     const draft = readyDraft();
@@ -677,6 +751,92 @@ test('pending, sending, and unknown duplicate states never call the provider', a
     assert.equal(result.replayed, true);
     assert.equal(provider.calls(), 0);
   }
+});
+
+test('pre-provider serialization and deadlock failures remain retryable and never become unknown', async () => {
+  for (const code of ['40001', '40P01']) {
+    const repository = new MemoryDispatchRepository();
+    repository.failMarkSendingCode = code;
+    const provider = countingProvider();
+    const draft = readyDraft();
+    const metadata = metadataFor(draft, `key:pre-provider-${code}`);
+
+    const result = await dispatchOutboundMessage(
+      { draft, metadata, provider: provider.provider },
+      testDependencies(repository),
+    );
+
+    assert.equal(result.status, 'pending');
+    assert.equal(result.dispatch.status, 'pending');
+    assert.equal(result.dispatch.errorCode, null);
+    assert.equal(result.replayed, false);
+    assert.deepEqual(result.retry, {
+      retryable: true,
+      phase: 'pre_provider',
+      code,
+      retryAt: '2026-08-13T09:30:01.000Z',
+      retryAfterMs: 1_000,
+    });
+    assert.equal(provider.calls(), 0);
+    assert.equal(repository.markUnknownCalls, 0);
+  }
+});
+
+test('definitive pre-provider database rejections fail without invoking the provider', async () => {
+  for (const code of ['42501', '55000', '23514']) {
+    const repository = new MemoryDispatchRepository();
+    repository.failMarkSendingCode = code;
+    const provider = countingProvider();
+    const draft = readyDraft();
+    const metadata = metadataFor(draft, `key:pre-provider-rejected-${code}`);
+
+    const result = await dispatchOutboundMessage(
+      { draft, metadata, provider: provider.provider },
+      testDependencies(repository),
+    );
+
+    assert.equal(result.status, 'failed');
+    assert.equal(result.dispatch.status, 'failed');
+    assert.equal(result.dispatch.errorCode, 'pre_provider_rejected');
+    assert.deepEqual(result.dispatch.providerResponse, { providerInvoked: false, databaseCode: code });
+    assert.equal(result.dispatch.attemptCount, 0);
+    assert.equal(provider.calls(), 0);
+    assert.equal(repository.markUnknownCalls, 0);
+  }
+});
+
+test('serialization failure persisting a known pre-provider deferral never becomes unknown', async () => {
+  const repository = new MemoryDispatchRepository();
+  repository.failMarkDeferredCode = '40P01';
+  const draft = readyDraft();
+  const metadata = metadataFor(draft, 'key:pre-provider-deferral-deadlock');
+  let providerNetworkCalls = 0;
+  const provider: OutboundMessageProvider = {
+    async send() {
+      if (providerNetworkCalls > 0) throw new Error('unexpected provider invocation');
+      throw new OutboundPreProviderDeferredError(
+        'Provider quota could not be reserved before network invocation.',
+        { code: 'quota_reservation_unavailable' },
+      );
+    },
+  };
+
+  const result = await dispatchOutboundMessage(
+    { draft, metadata, provider },
+    testDependencies(repository),
+  );
+
+  assert.equal(result.status, 'sending');
+  assert.equal(result.dispatch.status, 'sending');
+  assert.deepEqual(result.retry, {
+    retryable: true,
+    phase: 'pre_provider',
+    code: '40P01',
+    retryAt: '2026-08-13T09:30:01.000Z',
+    retryAfterMs: 1_000,
+  });
+  assert.equal(providerNetworkCalls, 0);
+  assert.equal(repository.markUnknownCalls, 0);
 });
 
 test('reconciliation promotes an unknown dispatch only with provider evidence', async () => {

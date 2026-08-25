@@ -89,6 +89,7 @@ export const campaignsStorage = {
             let query = supabase
                 .from(TABLE_CAMPAIGNS)
                 .select('*')
+                .eq('outreach_version', 1)
                 .order('created_at', { ascending: false });
 
             if (orgId) {
@@ -138,6 +139,7 @@ export const campaignsStorage = {
                 .insert({
                     user_id: user.id,
                     organization_id: orgId,
+                    outreach_version: 1,
                     campaign_type: input.campaignType || inferCampaignType({ settings: input.settings }),
                     name: input.name,
                     // Safe by default: creating a campaign never activates delivery implicitly.
@@ -189,6 +191,7 @@ export const campaignsStorage = {
 
     async update(id: string, patch: Partial<Campaign>): Promise<Campaign | null> {
         try {
+            const orgId = await organizationService.getCurrentOrganizationId();
             const updateData: any = { updated_at: new Date().toISOString() };
             if (patch.name !== undefined) updateData.name = patch.name;
             if (patch.isPaused !== undefined) updateData.status = patch.isPaused ? 'paused' : 'active';
@@ -197,10 +200,15 @@ export const campaignsStorage = {
             if (patch.settings !== undefined) updateData.settings = patch.settings;
             if (patch.sentRecords !== undefined) updateData.sent_records = patch.sentRecords;
 
-            const { data: updatedCampaign, error } = await supabase
+            let updateQuery = supabase
                 .from(TABLE_CAMPAIGNS)
                 .update(updateData)
                 .eq('id', id)
+                .eq('outreach_version', 1);
+            updateQuery = orgId
+                ? updateQuery.or(`organization_id.eq.${orgId},organization_id.is.null`)
+                : updateQuery.is('organization_id', null);
+            const { data: updatedCampaign, error } = await updateQuery
                 .select('id')
                 .single();
 
@@ -246,7 +254,16 @@ export const campaignsStorage = {
     },
 
     async remove(id: string): Promise<number> {
-        const { error } = await supabase.from(TABLE_CAMPAIGNS).delete().eq('id', id);
+        const orgId = await organizationService.getCurrentOrganizationId();
+        let deleteQuery = supabase
+            .from(TABLE_CAMPAIGNS)
+            .delete()
+            .eq('id', id)
+            .eq('outreach_version', 1);
+        deleteQuery = orgId
+            ? deleteQuery.or(`organization_id.eq.${orgId},organization_id.is.null`)
+            : deleteQuery.is('organization_id', null);
+        const { error } = await deleteQuery;
         if (error) {
             console.error('Error removing campaign:', error);
             throw new Error('No se pudo eliminar la campaña.', { cause: error });

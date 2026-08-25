@@ -45,6 +45,7 @@ function mapRow(row: any): RepairableOutboundDispatch {
     reconciliationClaimedAt: row.reconciliation_claimed_at ?? null,
     reconciledAt: row.reconciled_at ?? null,
     reconciliationDetails: row.reconciliation_details ?? null,
+    campaignRecipientStepId: row.campaign_recipient_step_id ?? null,
     historyRepairStatus: row.history_repair_status || 'pending',
     historyRepairAttemptCount: Number(row.history_repair_attempt_count || 0),
     lastHistoryRepairAt: row.last_history_repair_at ?? null,

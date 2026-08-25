@@ -48,6 +48,8 @@ export const campaignsStorage = {
     const { data: campaigns, error: errC } = await supabase
       .from(TABLE_CAMPAIGNS)
       .select('*')
+      .eq('organization_id', orgId)
+      .eq('outreach_version', 1)
       .order('created_at', { ascending: false });
 
     if (errC || !campaigns) {
@@ -95,6 +97,7 @@ export const campaignsStorage = {
       .insert({
         user_id: user.id,
         organization_id: orgId,
+        outreach_version: 1,
         name: input.name,
         status: input.status,
         excluded_lead_ids: input.excludeLeadIds || []
@@ -142,6 +145,7 @@ export const campaignsStorage = {
     // a menos que el patch incluya steps.
 
     const updates: any = { updated_at: new Date().toISOString() };
+    const orgId = await organizationService.getCurrentOrganizationId();
     if (patch.name !== undefined) updates.name = patch.name;
     if (patch.status !== undefined) updates.status = patch.status;
     if (patch.excludeLeadIds !== undefined) updates.excluded_lead_ids = patch.excludeLeadIds;
@@ -149,7 +153,9 @@ export const campaignsStorage = {
     const { error } = await supabase
       .from(TABLE_CAMPAIGNS)
       .update(updates)
-      .eq('id', id);
+      .eq('id', id)
+      .eq('organization_id', orgId)
+      .eq('outreach_version', 1);
 
     if (error) console.error('Error updating campaign:', error);
 
@@ -166,10 +172,13 @@ export const campaignsStorage = {
   },
 
   async remove(id: string) {
+    const orgId = await organizationService.getCurrentOrganizationId();
     const { error } = await supabase
       .from(TABLE_CAMPAIGNS)
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('organization_id', orgId)
+      .eq('outreach_version', 1);
 
     return error ? 0 : 1;
   },

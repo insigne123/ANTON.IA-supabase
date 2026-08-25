@@ -8,16 +8,9 @@ import { notificationService } from '@/lib/services/notification-service';
 import { createAntoniaException } from '@/lib/server/antonia-exceptions';
 import { syncLeadAutopilotToCrm } from '@/lib/server/crm-autopilot';
 import { stripHtmlToText } from '@/lib/email-outbound';
-import { shouldGloballySuppressReply } from '@/lib/contact-history-guard';
-import {
-  ingestInboundReply,
-  recordInboundUnsubscribe,
-} from '@/lib/server/inbound-reply-ingestion';
+import { ingestInboundReply } from '@/lib/server/inbound-reply-ingestion';
 
-export {
-  ingestInboundReply,
-  recordInboundUnsubscribe,
-} from '@/lib/server/inbound-reply-ingestion';
+export { ingestInboundReply } from '@/lib/server/inbound-reply-ingestion';
 export type { InboundReplyIngestionResult } from '@/lib/server/inbound-reply-ingestion';
 
 type ContactedRow = {
@@ -323,15 +316,6 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
   });
 
   if (!ingestion.inserted) return false;
-
-  if (shouldGloballySuppressReply(classification) && row.email) {
-    const suppression = await recordInboundUnsubscribe(supabase, {
-      contactedId: row.id,
-      recipientEmail: normalizeEmail(row.email),
-      eventKey: ingestion.eventKey,
-    });
-    if (!suppression.recorded) return false;
-  }
 
   if (!failure && row.organization_id && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';

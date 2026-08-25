@@ -3,12 +3,11 @@ import type { SupliaMessage } from '@/lib/suplia/types';
 export type OpenAiModelTier = 'fast' | 'balanced' | 'orchestrator' | 'reasoning' | 'critical';
 export type AiModelProvider = 'openai' | 'glm';
 
-const DEFAULT_FAST_MODEL = 'gpt-5.4-nano';
-const DEFAULT_BALANCED_MODEL = 'gpt-5.4-mini';
-const DEFAULT_ORCHESTRATOR_MODEL = 'gpt-5.4-mini';
-const DEFAULT_REASONING_MODEL = 'gpt-5.4';
-const DEFAULT_CRITICAL_MODEL = 'gpt-5.5';
-const DEFAULT_LEGACY_FALLBACK_MODEL = 'gpt-4o-mini';
+const DEFAULT_FAST_MODEL = 'gpt-5.6-luna';
+const DEFAULT_BALANCED_MODEL = 'gpt-5.6-luna';
+const DEFAULT_ORCHESTRATOR_MODEL = 'gpt-5.6-terra';
+const DEFAULT_REASONING_MODEL = 'gpt-5.6-terra';
+const DEFAULT_CRITICAL_MODEL = 'gpt-5.6-sol';
 const DEFAULT_GLM_MODEL = 'glm-5.2';
 
 function env(name: string) {
@@ -87,7 +86,7 @@ export function getOpenAiModelsForTier(tier: OpenAiModelTier) {
   }
 
   const fallback = env('SUPLIA_OPENAI_FALLBACK_MODEL') || env('OPENAI_FALLBACK_MODEL') || DEFAULT_BALANCED_MODEL;
-  const legacyFallback = env('SUPLIA_OPENAI_LEGACY_FALLBACK_MODEL') || env('OPENAI_LEGACY_FALLBACK_MODEL') || DEFAULT_LEGACY_FALLBACK_MODEL;
+  const legacyFallback = env('SUPLIA_OPENAI_LEGACY_FALLBACK_MODEL') || env('OPENAI_LEGACY_FALLBACK_MODEL');
   const globalDefault = env('OPENAI_MODEL') || DEFAULT_BALANCED_MODEL;
 
   return compactModels([

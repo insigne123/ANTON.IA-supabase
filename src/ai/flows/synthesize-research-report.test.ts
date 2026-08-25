@@ -8,6 +8,32 @@ import {
 import { validateResearchReportDocumentCitationsV1 } from '@/lib/research-report-contracts';
 import { draftSnapshotFixture } from '@/lib/server/draft-v2-test-fixtures';
 
+test('defaults native research report synthesis to Terra', async () => {
+  const names = [
+    'NATIVE_RESEARCH_REPORT_MODEL',
+    'SUPLIA_OPENAI_REASONING_MODEL',
+    'OPENAI_REASONING_MODEL',
+  ] as const;
+  const previous = new Map(names.map((name) => [name, process.env[name]]));
+  names.forEach((name) => delete process.env[name]);
+  let selectedModel = '';
+
+  try {
+    await synthesizeResearchReportDocumentV1({ snapshot: draftSnapshotFixture() }, {
+      generate: async (input) => {
+        selectedModel = input.openAiModel;
+        throw new Error('stop after model selection');
+      },
+    });
+    assert.equal(selectedModel, 'gpt-5.6-terra');
+  } finally {
+    previous.forEach((value, name) => {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    });
+  }
+});
+
 test('OpenAI failure returns the deterministic cited fallback without invented person facts', async () => {
   const snapshot = draftSnapshotFixture({ includeRole: false });
   const generatedAt = '2026-08-24T18:10:00.000Z';

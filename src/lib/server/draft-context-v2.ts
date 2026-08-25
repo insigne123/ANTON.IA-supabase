@@ -34,6 +34,12 @@ export const DRAFT_PROHIBITED_PHRASES = [
   'language model',
   '100% garantizado',
   'garantizamos resultados',
+  'entiendo que',
+  'nos especializamos',
+  'nuestras soluciones',
+  'creemos que podemos aportar valor',
+  'transformando procesos manuales',
+  'mejorar la toma de decisiones',
 ] as const;
 
 const NullableTextSchema = z.string().trim().min(1).max(2_000).nullable();

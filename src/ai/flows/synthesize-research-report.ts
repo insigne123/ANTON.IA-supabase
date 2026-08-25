@@ -511,7 +511,10 @@ export async function synthesizeResearchReportDocumentV1(
       schema: ResearchReportSynthesisOutputV1Schema,
       temperature: 0.1,
       provider: 'openai',
-      openAiModel: process.env.NATIVE_RESEARCH_REPORT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      openAiModel: process.env.NATIVE_RESEARCH_REPORT_MODEL
+        || process.env.SUPLIA_OPENAI_REASONING_MODEL
+        || process.env.OPENAI_REASONING_MODEL
+        || 'gpt-5.6-terra',
     });
     const body = mergeModelWithCanonicalProjection(
       sanitizeModelSynthesisBody(ResearchReportSynthesisOutputV1Schema.parse(generated.data), snapshot),

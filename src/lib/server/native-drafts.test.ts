@@ -44,7 +44,7 @@ Por tu rol de Directora de Operaciones, pensé que podría ser útil compartir u
     hypothesisIds: [],
     provider: 'openai',
     model: 'test-model',
-    promptVersion: 'native-draft/v2',
+    promptVersion: 'native-draft/v3',
   };
 }
 
@@ -126,6 +126,42 @@ test('native drafting returns a failure result when OpenAI is unavailable and ne
   assert.equal(fixture.releaseCount(), 1);
 });
 
+test('native drafting repairs missing generation metadata before replaying a persisted draft', async () => {
+  const fixture = dependencies();
+  const campaignRecipientStepId = '60000000-0000-4000-8000-000000000001';
+  fixture.value.generate = async ({ context }) => generated(context);
+  fixture.value.persistMetadata = async () => {
+    throw new Error('metadata write unavailable');
+  };
+
+  const first = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+    campaignRecipientStepId,
+  }, fixture.value);
+  assert.equal(first.status, 'failed');
+  assert.equal(fixture.persisted.length, 1);
+
+  const persisted = fixture.persisted[0];
+  let repairedMetadata: any = null;
+  fixture.value.findPersistedDraft = async () => persisted;
+  fixture.value.loadMetadata = async () => null;
+  fixture.value.persistMetadata = async (input) => { repairedMetadata = input; };
+
+  const replay = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+    campaignRecipientStepId,
+  }, fixture.value);
+
+  assert.equal(replay.status, 'drafted');
+  assert.equal(fixture.claimCount(), 1);
+  assert.equal(repairedMetadata?.draftId, persisted.draftId);
+  assert.equal(repairedMetadata?.versionId, persisted.versionId);
+  assert.equal(repairedMetadata?.model, 'persisted-recovery');
+  assert.deepEqual(repairedMetadata?.claimIds, ['claim-acme-overview']);
+});
+
 test('suppressed historical snapshots never synthesize a report document', async () => {
   const fixture = dependencies();
   let ensureReportCalls = 0;
@@ -190,6 +226,44 @@ test('native drafting permits one corrective generation pass, then persists a tr
   assert.ok(result.draft.content.text?.endsWith(result.context.constraints.cta.exactText));
   assert.equal(fixture.persisted.length, 1);
   assert.deepEqual(fixture.metadata[0].claimIds, ['claim-acme-overview']);
+});
+
+test('native drafting passes a bounded campaign instruction and includes it in deterministic identity', async () => {
+  const firstFixture = dependencies();
+  const secondFixture = dependencies();
+  let receivedInstruction = '';
+  firstFixture.value.generate = async ({ context, instruction }) => {
+    receivedInstruction = instruction || '';
+    return generated(context);
+  };
+  secondFixture.value.generate = async ({ context }) => generated(context);
+
+  const first = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+    idempotencyKey: 'campaign-recipient-step:step-1',
+    instruction: 'Retoma el beneficio principal sin repetir el contacto inicial.',
+  }, firstFixture.value);
+  const second = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+    idempotencyKey: 'campaign-recipient-step:step-1',
+    instruction: 'Formula un cierre breve y directo.',
+  }, secondFixture.value);
+
+  assert.equal(receivedInstruction, 'Retoma el beneficio principal sin repetir el contacto inicial.');
+  assert.equal(first.status, 'drafted');
+  assert.equal(second.status, 'drafted');
+  if (first.status !== 'drafted' || second.status !== 'drafted') return;
+  assert.notEqual(first.draft.draftId, second.draft.draftId);
+  await assert.rejects(
+    () => createNativeDraft({
+      ...access,
+      snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+      instruction: 'x'.repeat(1_001),
+    }, dependencies().value),
+    /NATIVE_DRAFT_INSTRUCTION_INVALID/,
+  );
 });
 
 test('native drafting appends an arbitrary approved CTA exactly once on the server', async () => {
