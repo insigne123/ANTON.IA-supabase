@@ -9,12 +9,12 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import type { EnrichedLead, LeadResearchReport, StyleProfile } from '@/lib/types';
+import type { EnrichedLead, LeadResearchReport } from '@/lib/types';
 import { findReportForLead, leadResearchStorage, getLeadReports } from '@/lib/lead-research-storage';
 import { v4 as uuid } from 'uuid';
 import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import { removeEnrichedLeadById, getEnrichedLeads as enrichedLeadsStorageGet, enrichedLeadsStorage } from '@/lib/services/enriched-leads-service';
-import { Trash2, Download, FileSpreadsheet, RotateCw, Undo2, Save, Eraser, Linkedin, Phone, CheckCircle2, AlertTriangle, MoreHorizontal, ArrowLeft, ChevronDown, ListFilter, Search } from 'lucide-react';
+import { Trash2, Download, FileSpreadsheet, RotateCw, Eraser, Linkedin, Phone, CheckCircle2, AlertTriangle, MoreHorizontal, ArrowLeft, ChevronDown, ListFilter, Search } from 'lucide-react';
 import { PhoneCallModal } from '@/components/phone-call-modal';
 import { supabaseService } from '@/lib/supabase-service';
 import { supabase } from '@/lib/supabase';
@@ -23,15 +23,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { unmarkResearched } from '@/lib/researched-leads-storage';
 import { exportToCsv, exportToXlsx } from '@/lib/sheet-export';
-import { renderTemplate, buildPersonEmailContext } from '@/lib/template';
-import { buildEffectiveCompanyProfile, buildSenderInfo, applySignaturePlaceholders } from '@/lib/signature-placeholders';
-import { generateCompanyOutreachV2, ensureSubjectPrefix } from '@/lib/outreach-templates';
-import { emailDraftsStorage } from '@/lib/email-drafts-storage';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { styleProfilesStorage } from '@/lib/style-profiles-storage';
-import { restyleDraftWithProfile } from '@/lib/email-style-restyle';
-import { profileService, type Profile } from '@/lib/services/profile-service';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -52,10 +44,27 @@ import { saveResearchWorkspaceHandoff } from '@/lib/research-workspace-handoff';
 import type { NativeResearchLeadStatus } from '@/lib/native-research-contracts';
 import NativeResearchReport, { NativeResearchReportSkeleton } from '@/components/research/NativeResearchReport';
 import ResearchWorkspace from '@/components/research/ResearchWorkspace';
+import {
+  MAX_NATIVE_DRAFT_BATCH_SIZE,
+  createNativeDraftBatch,
+} from '@/lib/native-draft-batch';
 
 
 const extractDomainFromEmail = (email?: string | null) =>
   email && email.includes('@') ? email.split('@')[1].toLowerCase() : undefined;
+
+type PreparedNativeDraft = {
+  lead: EnrichedLead;
+  draftId: string;
+  versionId: string | null;
+  subject: string;
+  body: string;
+};
+
+type FailedNativeDraft = {
+  lead: EnrichedLead;
+  message: string;
+};
 
 function isPendingEnrichmentStatus(status?: string | null) {
   return String(status || '').trim().toLowerCase().startsWith('pending');
@@ -116,27 +125,6 @@ export default function EnrichedLeadsClient() {
   const [tick, setTick] = useState(0); // Force re-render
   // ... existing state
 
-  const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
-
-  useEffect(() => {
-    let active = true;
-
-    profileService.getCurrentProfile()
-      .then((profile) => {
-        if (!active) return;
-        setCurrentProfile(profile);
-      })
-      .catch((error) => {
-        if (!active) return;
-        console.error('No se pudo cargar el perfil actual para leads enriquecidos', error);
-        setCurrentProfile(null);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
   const [enriched, setEnriched] = useState<EnrichedLead[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -148,6 +136,8 @@ export default function EnrichedLeadsClient() {
   const [openReport, setOpenReport] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
   const [creatingDraftId, setCreatingDraftId] = useState<string | null>(null);
+  const [creatingDraftBatch, setCreatingDraftBatch] = useState(false);
+  const [draftBatchProgress, setDraftBatchProgress] = useState({ done: 0, total: 0 });
   const [nativeReportDetails, setNativeReportDetails] = useState<Record<string, ResearchReportDetail>>({});
   const [nativeReportDetailLoading, setNativeReportDetailLoading] = useState<Record<string, boolean>>({});
   const [nativeReportDetailErrors, setNativeReportDetailErrors] = useState<Record<string, string>>({});
@@ -156,7 +146,7 @@ export default function EnrichedLeadsClient() {
   const nativeResearchStatusRequestIdRef = useRef(0);
   const loadDataRequestIdRef = useRef(0);
   const nativeResearchStatusKnown = nativeResearchStatusState === 'ready';
-  const draftRequestPending = creatingDraftId !== null;
+  const draftRequestPending = creatingDraftId !== null || creatingDraftBatch;
   // Estados para Modal de llamada
   const [callModalOpen, setCallModalOpen] = useState(false);
   const [leadToCall, setLeadToCall] = useState<EnrichedLead | null>(null);
@@ -166,22 +156,8 @@ export default function EnrichedLeadsClient() {
 
   const [selectedToContact, setSelectedToContact] = useState<Set<string>>(new Set());
   const [openCompose, setOpenCompose] = useState(false);
-  const [composeList, setComposeList] = useState<Array<{ lead: EnrichedLead; subject: string; body: string; researchSnapshotId: string | null }>>([]);
-  const [bulkOperationId, setBulkOperationId] = useState('');
-  const [sendingBulk, setSendingBulk] = useState(false);
-  const [sendProgress, setSendProgress] = useState({ done: 0, total: 0 });
-  const [bulkProvider, setBulkProvider] = useState<'outlook' | 'gmail'>('outlook');
-  const [draftSource, setDraftSource] = useState<'investigation' | 'style'>('investigation');
-  const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
-  const [selectedStyleName, setSelectedStyleName] = useState<string>('');
-  const [usePixel, setUsePixel] = useState(true);
-  const [useLinkTracking, setUseLinkTracking] = useState(false);
-  const [useReadReceipt, setUseReadReceipt] = useState(false);
-
-  // Editor IA inline (dentro del modal actual, sin abrir otro <Dialog/>)
-  const [showBulkEditor, setShowBulkEditor] = useState(false);
-  const [editInstruction, setEditInstruction] = useState('');
-  const [applyingEdit, setApplyingEdit] = useState(false);
+  const [composeList, setComposeList] = useState<PreparedNativeDraft[]>([]);
+  const [failedComposeList, setFailedComposeList] = useState<FailedNativeDraft[]>([]);
 
   // --- Enrichment Options ---
   const [openEnrichOptions, setOpenEnrichOptions] = useState(false);
@@ -415,7 +391,6 @@ export default function EnrichedLeadsClient() {
       if (loadDataRequestIdRef.current !== requestId) return;
       setEnriched(patched);
       setReports(getLeadReports());
-      setStyleProfiles(styleProfilesStorage.list());
       await loadNativeResearchStatuses(patched);
     } catch (error) {
       if (loadDataRequestIdRef.current !== requestId) return;
@@ -801,9 +776,38 @@ export default function EnrichedLeadsClient() {
       setSelectedToContact(next);
       return;
     }
+
     const next = new Set<string>(selectedToContact);
-    pageLeads.forEach(l => { if (canContact(l)) next.add(l.id); });
+    const candidates = pageLeads.filter((lead) => canContact(lead) && !next.has(lead.id));
+    const remainingCapacity = Math.max(0, MAX_NATIVE_DRAFT_BATCH_SIZE - next.size);
+    candidates.slice(0, remainingCapacity).forEach((lead) => next.add(lead.id));
     setSelectedToContact(next);
+    if (candidates.length > remainingCapacity) {
+      toast({
+        title: `Puedes preparar hasta ${MAX_NATIVE_DRAFT_BATCH_SIZE} borradores a la vez`,
+        description: 'Prepara esta selección antes de agregar más leads.',
+      });
+    }
+  };
+
+  const toggleContactLead = (leadId: string, checked: boolean) => {
+    if (!checked) {
+      setSelectedToContact((current) => {
+        const next = new Set(current);
+        next.delete(leadId);
+        return next;
+      });
+      return;
+    }
+    if (selectedToContact.has(leadId)) return;
+    if (selectedToContact.size >= MAX_NATIVE_DRAFT_BATCH_SIZE) {
+      toast({
+        title: `Puedes preparar hasta ${MAX_NATIVE_DRAFT_BATCH_SIZE} borradores a la vez`,
+        description: 'Prepara esta selección o desmarca un lead antes de agregar otro.',
+      });
+      return;
+    }
+    setSelectedToContact((current) => new Set(current).add(leadId));
   };
 
   const openResearchWorkspace = (
@@ -941,85 +945,95 @@ export default function EnrichedLeadsClient() {
     });
   }
 
-  async function buildComposeDrafts(source: 'investigation' | 'style', styleName?: string) {
-    const company = buildEffectiveCompanyProfile(currentProfile);
-    const sender = buildSenderInfo(currentProfile);
-    const overrides = emailDraftsStorage.getMap();
-    const profile = source === 'style'
-      ? (styleProfiles.find(p => p.name === styleName) || styleProfiles[0] || null)
-      : null;
+  async function openBulkCompose() {
+    if (nativeDraftRequestRef.current || !nativeResearchStatusKnown) return;
+    const selectedLeads = enriched
+      .filter((lead) => selectedToContact.has(lead.id) && canContact(lead))
+      .slice(0, MAX_NATIVE_DRAFT_BATCH_SIZE);
+    if (selectedLeads.length === 0) {
+      toast({ title: 'Selecciona leads listos', description: 'Elige al menos un lead investigado con email válido.' });
+      return;
+    }
 
-    const drafts = await Promise.all(
-      enriched
-      .filter(l => selectedToContact.has(l.id))
-      .map(async (l) => {
-        const rep = reportForLead(l);
-        const seed = rep?.cross?.emailDraft
-          ? { subject: rep.cross.emailDraft.subject, body: rep.cross.emailDraft.body }
-          : (() => {
-            const v2 = generateCompanyOutreachV2({
-              leadFirstName: (l.fullName || '').split(' ')[0] || '',
-              companyName: l.companyName,
-              myCompanyProfile: company,
-            });
-            return { subject: v2.subjectBase, body: v2.body };
-          })();
+    const leadById = new Map(selectedLeads.map((lead) => [lead.id, lead]));
+    const missingSnapshot: FailedNativeDraft[] = [];
+    const targets = selectedLeads.flatMap((lead) => {
+      const nativeStatus = nativeResearchForLead(lead);
+      const report = reportForLead(lead);
+      const researchSnapshotId = String(
+        nativeStatus?.researchSnapshotId
+        || report?.raw?.research_snapshot_id
+        || report?.raw?.researchSnapshotId
+        || '',
+      ).trim();
+      if (!researchSnapshotId) {
+        missingSnapshot.push({ lead, message: 'La investigación necesita actualizarse antes de crear el borrador.' });
+        return [];
+      }
+      return [{ leadId: lead.id, researchSnapshotId }];
+    });
 
-        let subj = seed.subject || '';
-        let body = seed.body || '';
+    setComposeList([]);
+    setFailedComposeList(missingSnapshot);
+    setDraftBatchProgress({ done: missingSnapshot.length, total: selectedLeads.length });
+    setOpenCompose(true);
+    if (targets.length === 0) return;
 
-        const ctx = buildPersonEmailContext({
-          lead: { name: l.fullName, email: l.email!, title: l.title, company: l.companyName },
-          company: { name: l.companyName, domain: l.companyDomain },
-          sender,
-        });
-        subj = renderTemplate(subj, ctx);
-        body = renderTemplate(body, ctx);
-
-        if (profile) {
-          const styled = await restyleDraftWithProfile({
-            mode: 'leads',
-            baseSubject: subj,
-            baseBody: body,
-            styleProfile: profile,
-            lead: { id: l.id, fullName: l.fullName, email: l.email!, title: l.title, companyName: l.companyName, companyDomain: l.companyDomain, linkedinUrl: l.linkedinUrl },
-            report: rep?.cross || null,
-            companyProfile: company,
+    nativeDraftRequestRef.current = 'batch';
+    setCreatingDraftBatch(true);
+    try {
+      const results = await createNativeDraftBatch({
+        targets,
+        concurrency: 3,
+        onProgress: (done) => setDraftBatchProgress({ done: done + missingSnapshot.length, total: selectedLeads.length }),
+        createDraft: async (target) => {
+          const response = await fetch('/api/native-drafts', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Idempotency-Key': `native-draft:${target.researchSnapshotId}`,
+            },
+            body: JSON.stringify({ researchSnapshotId: target.researchSnapshotId }),
           });
-          subj = styled.subject;
-          body = styled.body;
-        }
+          const payload = await response.json().catch(() => null);
+          if (!response.ok || !payload?.draft?.draftId) {
+            throw new Error(researchDraftErrorMessage(payload, 'No pudimos preparar este borrador.'));
+          }
+          return payload.draft;
+        },
+      });
 
-        body = applySignaturePlaceholders(body, sender);
-
-        // Asegurar prefijo con el nombre SOLO en el asunto
-        subj = ensureSubjectPrefix(subj, ctx.lead.firstName);
-
-        // Aplicar override guardado, si existe
-        const ov = overrides[l.id];
-        if (ov?.subject || ov?.body) {
-          subj = ov.subject || subj;
-          body = ov.body || body;
-        }
-
-        return {
-          lead: l,
-          subject: subj,
-          body,
-          researchSnapshotId: String(rep?.raw?.research_snapshot_id || '').trim() || null,
-        };
-      })
-    );
-
-    return drafts;
-  }
-
-  function openBulkCompose() {
-    openResearchWorkspace(selectedToContact);
-  }
-
-  function sendBulk() {
-    openResearchWorkspace(selectedToContact);
+      const prepared = results.flatMap((result): PreparedNativeDraft[] => {
+        if (result.status !== 'drafted') return [];
+        const lead = leadById.get(result.target.leadId);
+        if (!lead) return [];
+        return [{
+          lead,
+          draftId: String(result.draft.draftId),
+          versionId: String(result.draft.versionId || '').trim() || null,
+          subject: String(result.draft.content?.subject || ''),
+          body: String(result.draft.content?.text || ''),
+        }];
+      });
+      const failed = results.flatMap((result): FailedNativeDraft[] => {
+        if (result.status !== 'failed') return [];
+        const lead = leadById.get(result.target.leadId);
+        return lead ? [{ lead, message: result.error }] : [];
+      });
+      const preparedIds = new Set(prepared.map((item) => item.lead.id));
+      setComposeList(prepared);
+      setFailedComposeList([...missingSnapshot, ...failed]);
+      setSelectedToContact((current) => new Set([...current].filter((leadId) => !preparedIds.has(leadId))));
+      toast({
+        title: prepared.length === 1 ? 'Borrador preparado' : `${prepared.length} borradores preparados`,
+        description: failed.length || missingSnapshot.length
+          ? 'Algunos leads necesitan revisión antes de volver a intentarlo.'
+          : 'Revísalos uno por uno antes de contactar. Nada se envió automáticamente.',
+      });
+    } finally {
+      if (nativeDraftRequestRef.current === 'batch') nativeDraftRequestRef.current = null;
+      setCreatingDraftBatch(false);
+    }
   }
 
   async function generateEmailFromReportFor(lead: EnrichedLead) {
@@ -1243,11 +1257,20 @@ export default function EnrichedLeadsClient() {
         </div>
         <Button
           className="w-full rounded-full sm:w-auto"
-          onClick={openBulkCompose}
-          disabled={contactCount === 0 || loadingLeads || !nativeResearchStatusKnown || draftRequestPending}
-            title={contactCount === 0 ? 'Selecciona leads con reporte y email' : 'Abrir la investigación de los leads seleccionados'}
-          >
-          Abrir investigación {contactCount > 0 ? `(${contactCount})` : ''}
+          onClick={() => {
+            if (contactCount > 0) void openBulkCompose();
+            else setOpenCompose(true);
+          }}
+          disabled={(contactCount === 0 && composeList.length === 0 && failedComposeList.length === 0) || loadingLeads || !nativeResearchStatusKnown || draftRequestPending}
+          title={contactCount > 0 ? 'Crear borradores para revisar antes de contactar' : composeList.length > 0 ? 'Volver a los borradores preparados' : 'Selecciona leads investigados con email'}
+        >
+          {creatingDraftBatch
+            ? `Preparando ${draftBatchProgress.done}/${draftBatchProgress.total}`
+            : contactCount > 0
+              ? `Crear borradores (${contactCount})`
+              : composeList.length > 0
+                ? `Ver borradores (${composeList.length})`
+                : 'Crear borradores'}
         </Button>
       </header>
 
@@ -1425,12 +1448,16 @@ export default function EnrichedLeadsClient() {
               <div className="text-sm font-medium" aria-live="polite">
                 {researchCount > 0 ? `${researchCount} para investigar · máximo ${MAX_RESEARCH_BATCH_SIZE}` : ''}
                 {researchCount > 0 && contactCount > 0 ? ' · ' : ''}
-                {contactCount > 0 ? `${contactCount} para revisar en Investigación` : ''}
+                {contactCount > 0 ? `${contactCount} borrador${contactCount === 1 ? '' : 'es'} · máximo ${MAX_NATIVE_DRAFT_BATCH_SIZE}` : ''}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Button variant="ghost" size="sm" onClick={() => { setSel({}); setSelectedToContact(new Set()); }}>Cancelar</Button>
                  {researchCount > 0 ? <Button variant="secondary" size="sm" onClick={() => openResearchWorkspace()} disabled={!nativeResearchStatusKnown || draftRequestPending}>Investigar selección ({researchCount})</Button> : null}
-                 {contactCount > 0 ? <Button size="sm" onClick={openBulkCompose} disabled={!nativeResearchStatusKnown || draftRequestPending}>Abrir investigación ({contactCount})</Button> : null}
+                 {contactCount > 0 ? (
+                   <Button size="sm" onClick={() => void openBulkCompose()} disabled={!nativeResearchStatusKnown || draftRequestPending}>
+                     {creatingDraftBatch ? `Preparando ${draftBatchProgress.done}/${draftBatchProgress.total}` : `Crear borradores (${contactCount})`}
+                   </Button>
+                 ) : null}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Más acciones para la selección"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-64">
@@ -1498,15 +1525,12 @@ export default function EnrichedLeadsClient() {
                       <Checkbox
                         checked={selectedToContact.has(e.id)}
                         onCheckedChange={(value) => {
-                          const next = new Set(selectedToContact);
-                          if (value) next.add(e.id);
-                          else next.delete(e.id);
-                          setSelectedToContact(next);
+                          toggleContactLead(e.id, Boolean(value));
                         }}
                         disabled={!nativeResearchStatusKnown || !draftable}
-                        aria-label={`Seleccionar ${e.fullName || 'lead'} para revisar en Investigación`}
+                        aria-label={`Seleccionar ${e.fullName || 'lead'} para crear un borrador`}
                       />
-                      <span className="truncate">Revisar</span>
+                      <span className="truncate">Borrador</span>
                     </label>
                   </div>
 
@@ -1536,7 +1560,7 @@ export default function EnrichedLeadsClient() {
             <Table className="min-w-[960px]">
               <TableHeader>
                 <TableRow className="bg-muted/20 hover:bg-muted/20">
-                  <TableHead className="w-12 text-center" title="Marcar para investigar">
+                  <TableHead className="sticky left-0 z-20 w-12 bg-muted/95 text-center backdrop-blur" title="Marcar para investigar">
                     <div className="flex flex-col items-center gap-1">
                       <span className="text-[10px] uppercase text-muted-foreground">Invest.</span>
                       <Checkbox
@@ -1547,14 +1571,14 @@ export default function EnrichedLeadsClient() {
                       />
                     </div>
                   </TableHead>
-                  <TableHead className="w-12 text-center" title="Marcar para revisar en Investigación">
+                  <TableHead className="sticky left-12 z-20 w-12 bg-muted/95 text-center backdrop-blur" title="Marcar para crear un borrador">
                     <div className="flex flex-col items-center gap-1">
-                      <span className="text-[10px] uppercase text-muted-foreground">Rev.</span>
+                      <span className="text-[10px] uppercase text-muted-foreground">Borr.</span>
                       <Checkbox
                         checked={contactEligiblePage > 0 ? allContactChecked : false}
                         disabled={!nativeResearchStatusKnown || contactEligiblePage === 0}
                         onCheckedChange={(v) => toggleAllContact(Boolean(v))}
-                        aria-label="Seleccionar todos para revisar en Investigación"
+                        aria-label="Seleccionar todos para crear borradores"
                       />
                     </div>
                   </TableHead>
@@ -1567,8 +1591,8 @@ export default function EnrichedLeadsClient() {
               </TableHeader>
               <TableBody>
                 {pageLeads.map(e => (
-                  <TableRow key={e.id} className="align-middle">
-                    <TableCell className="py-3 text-center">
+                  <TableRow key={e.id} className="group align-middle">
+                    <TableCell className="sticky left-0 z-10 bg-background py-3 text-center group-hover:bg-muted/50">
                       <Checkbox
                         checked={!!sel[e.id]}
                         onCheckedChange={(v) => toggleResearchLead(e.id, Boolean(v))}
@@ -1587,17 +1611,14 @@ export default function EnrichedLeadsClient() {
                         aria-label={`Seleccionar ${e.fullName || 'lead'} para investigar`}
                       />
                     </TableCell>
-                    <TableCell className="py-3 text-center">
+                    <TableCell className="sticky left-12 z-10 bg-background py-3 text-center group-hover:bg-muted/50">
                       <Checkbox
                         disabled={!nativeResearchStatusKnown || !canContact(e)}
                         checked={selectedToContact.has(e.id)}
                         onCheckedChange={(v) => {
-                          const next = new Set(selectedToContact);
-                          if (v) next.add(e.id);
-                          else next.delete(e.id);
-                          setSelectedToContact(next);
+                          toggleContactLead(e.id, Boolean(v));
                         }}
-                        aria-label={`Seleccionar ${e.fullName || 'lead'} para revisar en Investigación`}
+                        aria-label={`Seleccionar ${e.fullName || 'lead'} para crear un borrador`}
                       />
                     </TableCell>
                     <TableCell className="py-3">
@@ -2105,266 +2126,89 @@ export default function EnrichedLeadsClient() {
       </Dialog>
 
       <Dialog open={openCompose} onOpenChange={setOpenCompose}>
-        <DialogContent className="flex max-h-[92vh] max-w-5xl flex-col gap-0 overflow-hidden rounded-[28px] p-0" onEscapeKeyDown={() => setOpenCompose(false)}>
-          <DialogHeader className="border-b border-border/60 px-5 py-4 sm:px-6">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">Revisión de borradores</div>
-                <DialogTitle className="mt-1 text-xl">Revisa {composeList.length} borradores</DialogTitle>
-                <DialogDescription className="mt-1">Cada mensaje se personaliza antes de enviarse.</DialogDescription>
-              </div>
-              <Button variant="outline" size="sm" className="w-fit rounded-full" onClick={() => setShowBulkEditor(v => !v)} disabled={composeList.length === 0}>
-                {showBulkEditor ? 'Cerrar edición IA' : 'Editar todos con IA'}
-              </Button>
-            </div>
+        <DialogContent className="flex max-h-[92dvh] max-w-3xl flex-col gap-0 overflow-hidden rounded-[28px] p-0" onEscapeKeyDown={() => setOpenCompose(false)}>
+          <DialogHeader className="shrink-0 border-b border-border/60 px-5 py-5 pr-12 sm:px-6 sm:pr-12">
+            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">Borradores para revisión</div>
+            <DialogTitle className="mt-1 text-xl">
+              {creatingDraftBatch
+                ? `Preparando ${draftBatchProgress.done} de ${draftBatchProgress.total}`
+                : `${composeList.length} borrador${composeList.length === 1 ? '' : 'es'} preparado${composeList.length === 1 ? '' : 's'}`}
+            </DialogTitle>
+            <DialogDescription className="mt-1 leading-5">
+              Nada se envía automáticamente. Abre cada correo para editarlo, aprobarlo y elegir el proveedor.
+            </DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-          <div className="sticky top-0 z-10 grid grid-cols-1 gap-3 border-b border-border/60 bg-background/95 px-5 py-4 backdrop-blur sm:grid-cols-3 sm:px-6">
-            <div className="col-span-1">
-              <div className="mb-1.5 text-xs font-medium text-muted-foreground">Origen del borrador</div>
-              <div className="grid grid-cols-2 rounded-xl border border-border/60 bg-muted/30 p-1">
-                <Button type="button" size="sm" variant={draftSource === 'investigation' ? 'secondary' : 'ghost'} className="rounded-lg" onClick={() => {
-                    setDraftSource('investigation');
-                    if (openCompose) {
-                      void buildComposeDrafts('investigation', selectedStyleName || styleProfiles[0]?.name || '').then(setComposeList).catch((e: any) => {
-                        toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo actualizar el borrador.' });
-                      });
-                    }
-                  }}>Investigación</Button>
-                <Button type="button" size="sm" variant={draftSource === 'style' ? 'secondary' : 'ghost'} className="rounded-lg" onClick={() => {
-                    const nextStyle = selectedStyleName || styleProfiles[0]?.name || '';
-                    setDraftSource('style');
-                    if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
-                    if (openCompose && nextStyle) {
-                      void buildComposeDrafts('style', nextStyle).then(setComposeList).catch((e: any) => {
-                        toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo aplicar la personalizacion.' });
-                      });
-                    }
-                  }}>Estilo</Button>
+
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4 sm:px-6" aria-busy={creatingDraftBatch}>
+            {creatingDraftBatch ? (
+              <div className="flex min-h-36 flex-col items-center justify-center rounded-2xl border border-border/60 bg-muted/20 px-6 text-center" role="status" aria-live="polite">
+                <RotateCw className="h-5 w-5 animate-spin text-primary motion-reduce:animate-none" aria-hidden="true" />
+                <p className="mt-3 text-sm font-medium">Creando borradores con la investigación disponible</p>
+                <p className="mt-1 text-xs text-muted-foreground">Puedes cerrar esta ventana; la selección seguirá en esta página.</p>
               </div>
-            </div>
-            <div className="col-span-1">
-              <label htmlFor="bulk-style" className="mb-1.5 block text-xs font-medium text-muted-foreground">Perfil de estilo</label>
-              <select
-                id="bulk-style"
-                className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm disabled:opacity-50"
-                disabled={draftSource !== 'style' || styleProfiles.length === 0}
-                value={selectedStyleName}
-                onChange={(e) => {
-                  const nextStyle = e.target.value;
-                  setSelectedStyleName(nextStyle);
-                  if (openCompose && draftSource === 'style') {
-                    void buildComposeDrafts('style', nextStyle).then(setComposeList).catch((err: any) => {
-                      toast({ variant: 'destructive', title: 'Error', description: err?.message || 'No se pudo aplicar la personalizacion.' });
-                    });
-                  }
-                }}
-              >
-                {styleProfiles.length === 0 ? <option value="">(No hay estilos guardados)</option> :
-                  styleProfiles.map(p => <option key={p.name} value={p.name}>{p.name}</option>)
-                }
-              </select>
-            </div>
-            <div className="col-span-1">
-              <div className="mb-1.5 text-xs font-medium text-muted-foreground">Proveedor</div>
-              <div className="grid grid-cols-2 rounded-xl border border-border/60 bg-muted/30 p-1">
-                <Button type="button" size="sm" variant={bulkProvider === 'outlook' ? 'secondary' : 'ghost'} className="rounded-lg" onClick={() => setBulkProvider('outlook')}>Outlook</Button>
-                <Button type="button" size="sm" variant={bulkProvider === 'gmail' ? 'secondary' : 'ghost'} className="rounded-lg" onClick={() => setBulkProvider('gmail')}>Gmail</Button>
+            ) : null}
+
+            {failedComposeList.length > 0 ? (
+              <Alert className="border-amber-200 bg-amber-50/70 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>{failedComposeList.length} sin preparar</AlertTitle>
+                <AlertDescription>
+                  <ul className="mt-2 space-y-2">
+                    {failedComposeList.map(({ lead, message }) => (
+                      <li key={lead.id}><span className="font-medium">{lead.fullName || lead.email}</span>: {message}</li>
+                    ))}
+                  </ul>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {!creatingDraftBatch && composeList.length === 0 && failedComposeList.length === 0 ? (
+              <div className="flex min-h-36 flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 px-6 text-center">
+                <p className="text-sm font-medium">No hay borradores en esta revisión</p>
+                <p className="mt-1 text-xs text-muted-foreground">Selecciona leads investigados desde la tabla para preparar sus correos.</p>
               </div>
-            </div>
-          </div>
+            ) : null}
 
-          {showBulkEditor && (
-            <div className="mx-5 mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:mx-6">
-              <label htmlFor="bulk-ai-instruction" className="text-sm font-medium">Cambio para todos los borradores</label>
-              <p className="mt-1 text-xs text-muted-foreground">Ejemplo: haz el cierre más directo y reduce cada mensaje a tres párrafos.</p>
-              <Textarea
-                id="bulk-ai-instruction"
-                value={editInstruction}
-                onChange={(e) => setEditInstruction(e.target.value)}
-                rows={3}
-                className="mt-3"
-                placeholder="Describe el ajuste que quieres aplicar..."
-              />
-              <div className="mt-2 flex gap-2 justify-end">
-                <Button
-                  variant="outline"
-                  onClick={() => { setEditInstruction(''); setShowBulkEditor(false); }}
-                  disabled={applyingEdit}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  onClick={async () => {
-                    if (!editInstruction.trim() || !composeList.length) return;
-                    setApplyingEdit(true);
-                    try {
-                      const payload = {
-                        instruction: editInstruction.trim(),
-                        drafts: composeList.map(it => ({
-                          subject: it.subject,
-                          body: it.body,
-                          lead: {
-                            id: it.lead.id,
-                            fullName: it.lead.fullName,
-                            email: it.lead.email,
-                            title: it.lead.title,
-                            companyName: it.lead.companyName,
-                            companyDomain: it.lead.companyDomain,
-                            linkedinUrl: it.lead.linkedinUrl,
-                          },
-                        })),
-                      };
-                      const r = await fetch('/api/email/bulk-edit', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload),
-                      });
-                      const j = await r.json();
-                      if (!r.ok) throw new Error(j?.error || 'No se pudo aplicar la edición');
-                      const edited = (j?.drafts || []) as Array<{ subject: string; body: string }>;
-                      if (edited.length === composeList.length) {
-                        setComposeList(prev => prev.map((it, i) => ({ ...it, subject: edited[i].subject, body: edited[i].body })));
-                      }
-                      setShowBulkEditor(false);
-                      setEditInstruction('');
-                      toast({ title: 'Edición aplicada', description: `Se actualizaron ${edited.length} borradores.` });
-                    } catch (e: any) {
-                      toast({ variant: 'destructive', title: 'Error', description: e?.message || 'Falló la edición con IA' });
-                    } finally {
-                      setApplyingEdit(false);
-                    }
-                  }}
-                  disabled={applyingEdit || !editInstruction.trim() || composeList.length === 0}
-                >
-                  {applyingEdit ? 'Aplicando…' : 'Aplicar a todos'}
-                </Button>
-              </div>
-            </div>
-          )}
-
-
-          <div className="space-y-3 px-5 py-4 sm:px-6">
-            {composeList.map(({ lead, subject, body }, i) => (
-              <div key={lead.id} className="rounded-2xl border border-border/60 bg-card p-4">
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-                  <div className="font-semibold text-sm">{lead.fullName} <span className="font-normal text-muted-foreground">· {lead.companyName}</span></div>
-                  <div className="text-xs text-muted-foreground">{lead.email}</div>
-                </div>
-                <div className="text-xs text-muted-foreground">{lead.title || 'Sin cargo'}</div>
-
-                <div className="mt-3 text-xs font-semibold">Asunto</div>
-                <Input
-                  value={subject}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setComposeList(prev => {
-                      const next = [...prev]; next[i] = { ...next[i], subject: v }; return next;
-                    });
-                    emailDraftsStorage.set(lead.id, v, body);
-                  }}
-                  aria-label={`Asunto para ${lead.fullName}`}
-                />
-
-                <div className="mt-3 text-xs font-semibold">Cuerpo</div>
-                <Textarea
-                  value={body}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setComposeList(prev => {
-                      const next = [...prev]; next[i] = { ...next[i], body: v }; return next;
-                    });
-                    emailDraftsStorage.set(lead.id, subject, v);
-                  }}
-                  rows={7}
-                  aria-label={`Cuerpo para ${lead.fullName}`}
-                  className="font-mono"
-                />
-
-                <div className="mt-2 flex gap-2">
+            {composeList.map(({ lead, draftId, versionId, subject, body }) => (
+              <article key={draftId} className="rounded-2xl border border-border/60 bg-card p-4 shadow-sm shadow-black/[0.02]">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-semibold">{lead.fullName || 'Contacto'}</h3>
+                    <p className="truncate text-xs text-muted-foreground">{lead.email} · {lead.companyName || 'Sin empresa'}</p>
+                  </div>
                   <Button
-                    variant="outline"
                     size="sm"
+                    className="shrink-0 rounded-full"
                     onClick={() => {
-                      // Regenerar orientado a persona con datos actuales
-                      const company = buildEffectiveCompanyProfile(currentProfile);
-                      const sender = buildSenderInfo(currentProfile);
-                      const rep = reportForLead(lead);
-                      const seed = rep?.cross?.emailDraft
-                        ? { subject: rep.cross.emailDraft.subject, body: rep.cross.emailDraft.body }
-                        : (() => {
-                          const v2 = generateCompanyOutreachV2({
-                            leadFirstName: (lead.fullName || '').split(' ')[0] || '',
-                            companyName: lead.companyName,
-                            myCompanyProfile: company,
-                          });
-                          return { subject: v2.subjectBase, body: v2.body };
-                        })();
-                      const ctx = buildPersonEmailContext({
-                        lead: { name: lead.fullName, email: lead.email!, title: lead.title, company: lead.companyName },
-                        company: { name: lead.companyName, domain: lead.companyDomain },
-                        sender,
-                      });
-                      let subj = renderTemplate(seed.subject || '', ctx);
-                      let bod = renderTemplate(seed.body || '', ctx);
-                      bod = applySignaturePlaceholders(bod, sender);
-                      subj = ensureSubjectPrefix(subj, ctx.lead.firstName);
-
-                      setComposeList(prev => {
-                        const next = [...prev]; next[i] = { ...next[i], subject: subj, body: bod }; return next;
-                      });
-                      emailDraftsStorage.set(lead.id, subj, bod);
-                      toast({ title: 'Borrador regenerado', description: `Se personalizó para ${ctx.lead.firstName}.` });
+                      const version = versionId ? `&versionId=${encodeURIComponent(versionId)}` : '';
+                      router.push(`/contact/compose?draftId=${encodeURIComponent(draftId)}${version}`);
                     }}
-                    title="Regenerar con IA orientado a persona"
                   >
-                    <RotateCw className="h-4 w-4 mr-1" /> Regenerar
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      emailDraftsStorage.remove(lead.id);
-                      toast({ title: 'Borrador restaurado', description: 'Se eliminó la edición local.' });
-                      // Reabrimos el modal recomputando con overrides limpios
-                      setComposeList(prev => {
-                        const next = [...prev];
-                        // Simplemente recargamos sin override:
-                        // (Dejamos al usuario pulsar "Regenerar" si quiere 100% desde plantilla)
-                        return next;
-                      });
-                    }}
-                    title="Eliminar cambios guardados localmente"
-                  >
-                    <Undo2 className="h-4 w-4 mr-1" /> Restaurar
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      emailDraftsStorage.set(lead.id, subject, body);
-                      toast({ title: 'Guardado', description: 'Se guardó el borrador editado.' });
-                    }}
-                    title="Guardar cambios del borrador"
-                  >
-                    <Save className="h-4 w-4 mr-1" /> Guardar
+                    Revisar y contactar
                   </Button>
                 </div>
-              </div>
+                <div className="mt-4 rounded-xl border border-border/50 bg-muted/20 p-3">
+                  <p className="text-xs font-medium text-muted-foreground">Asunto</p>
+                  <p className="mt-1 text-sm font-medium">{subject}</p>
+                  <p className="mt-3 line-clamp-3 whitespace-pre-line text-sm leading-6 text-muted-foreground">{body}</p>
+                </div>
+              </article>
             ))}
           </div>
-          </div>
-           <div className="flex shrink-0 flex-col gap-3 border-t border-border/60 bg-background/95 px-5 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            {sendingBulk
-              ? <div className="text-xs">Enviando… {sendProgress.done}/{sendProgress.total}</div>
-              : <div className="text-xs text-muted-foreground">
-                Revisa y ajusta los borradores antes de enviar. Proveedor: <strong>{bulkProvider}</strong>
-              </div>}
+
+          <div className="flex shrink-0 flex-col gap-3 border-t border-border/60 bg-background/95 px-5 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <p className="text-xs text-muted-foreground">Cada borrador requiere revisión y aprobación antes del envío.</p>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setOpenCompose(false)} disabled={sendingBulk}>Cerrar</Button>
-              <Button onClick={sendBulk} disabled={sendingBulk || selectedToContact.size === 0}>
-                 Revisar selección
-              </Button>
+              <Button variant="outline" onClick={() => setOpenCompose(false)}>Cerrar</Button>
+              {composeList.length > 0 ? (
+                <Button onClick={() => {
+                  const first = composeList[0];
+                  const version = first.versionId ? `&versionId=${encodeURIComponent(first.versionId)}` : '';
+                  router.push(`/contact/compose?draftId=${encodeURIComponent(first.draftId)}${version}`);
+                }}>
+                  Revisar primero
+                </Button>
+              ) : null}
             </div>
           </div>
         </DialogContent>

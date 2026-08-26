@@ -35,7 +35,7 @@ function generated(context: DraftContextV2): GeneratedOutreachFromDraftContextV2
 
 Acme publica que ayuda a equipos de operaciones a reducir trabajo manual. En Northstar ayudamos a equipos que quieren ordenar tareas repetitivas sin imponer cambios bruscos a su forma de trabajo.
 
-Por tu rol de Directora de Operaciones, pensé que podría ser útil compartir un ejemplo práctico de cómo detectar procesos que consumen tiempo y priorizar los primeros ajustes. La idea es entender el contexto de Acme antes de proponer cualquier alternativa concreta.`,
+Pensé que podría ser útil compartir un ejemplo práctico de cómo detectar procesos que consumen tiempo y priorizar los primeros ajustes. La idea es entender el contexto de Acme antes de proponer cualquier alternativa concreta.`,
     personalization: [{
       evidenceId: evidence.evidenceId,
       claimId: 'claim-acme-overview',
@@ -384,7 +384,7 @@ Acme publica que ayuda a equipos de operaciones a reducir trabajo manual.
 
 En Northstar ayudamos a ordenar tareas repetitivas con un enfoque gradual, sin imponer cambios bruscos al equipo.
 
-Por tu rol de Directora de Operaciones, pensé que podía ser útil compartir una forma práctica de detectar procesos que consumen tiempo y priorizar los primeros ajustes según el contexto actual de Acme.`,
+Pensé que podía ser útil compartir una forma práctica de detectar procesos que consumen tiempo y priorizar los primeros ajustes según el contexto actual de Acme.`,
       };
     },
     appendRevision: async (parent, changes) => createChildMessagingDraftV1(parent, {

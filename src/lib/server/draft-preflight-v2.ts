@@ -201,7 +201,9 @@ function hasGroundedPersonalization(
     );
     const materialTerms = [...new Set(materialPersonalizationTerms(statement))];
     const matchedTerms = materialTerms.filter((term) => normalizedContent.includes(term));
-    const minimumMatches = Math.min(3, materialTerms.length);
+    // A faithful paraphrase often changes verbs and nouns. Two material terms
+    // still bind the copy to the selected evidence without requiring verbatim text.
+    const minimumMatches = Math.min(2, materialTerms.length);
     return Boolean(statement && minimumMatches > 0 && matchedTerms.length >= minimumMatches);
   });
 }
@@ -212,6 +214,18 @@ function containsHypothesisHedge(body: string) {
 
 function hasAbsoluteHypothesisLanguage(body: string) {
   return /\b(?:sabemos que|necesitan|requieren|requiere|estan buscando|están buscando|seguro que)\b/i.test(body);
+}
+
+function meaningfulTitle(value: unknown) {
+  const normalized = normalizeForMatch(value);
+  return normalized.length >= 6 && normalized.split(' ').length >= 2 ? normalized : '';
+}
+
+function contactTitles(context: DraftContextV2) {
+  return [...new Set([
+    meaningfulTitle(context.person.title),
+    meaningfulTitle(context.seller.jobTitle),
+  ].filter(Boolean))];
 }
 
 function duplicateSentence(body: string) {
@@ -275,6 +289,11 @@ export function validateDraftPreflightV2(
     const normalizedPhrase = normalizeForMatch(phrase);
     if (normalizedPhrase && normalizedContent.includes(normalizedPhrase)) {
       add('prohibited_phrase', `El correo contiene una frase prohibida: ${phrase}.`, 'body');
+    }
+  }
+  for (const title of contactTitles(context)) {
+    if (normalizedContent.includes(title)) {
+      add('prohibited_phrase', 'El correo no debe repetir literalmente el cargo formal del contacto o del remitente.', 'body');
     }
   }
 

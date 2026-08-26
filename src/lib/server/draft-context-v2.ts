@@ -40,6 +40,23 @@ export const DRAFT_PROHIBITED_PHRASES = [
   'creemos que podemos aportar valor',
   'transformando procesos manuales',
   'mejorar la toma de decisiones',
+  'por tu rol',
+  'por tu cargo',
+  'en tu cargo',
+  'seguimiento',
+  'follow-up',
+  'follow up',
+  'followup',
+  'ángulo',
+  'enfoque acotado',
+  'secuencia',
+  'estrategia de redacción',
+  'contexto de redacción',
+  'draft_context',
+  'required_factual_personalization',
+  'claim id',
+  'evidence id',
+  'preflight',
 ] as const;
 
 const NullableTextSchema = z.string().trim().min(1).max(2_000).nullable();
@@ -544,13 +561,13 @@ export function requiredReportAwareDraftPersonalizationV2(context: DraftContextV
     })),
   );
   candidates.sort((left, right) => {
+    if (left.subjectScope !== right.subjectScope) return left.subjectScope === 'company' ? -1 : 1;
     const leftIsReportAnchor = left.reportAnchorOrder !== undefined;
     const rightIsReportAnchor = right.reportAnchorOrder !== undefined;
     if (leftIsReportAnchor !== rightIsReportAnchor) return leftIsReportAnchor ? -1 : 1;
     if (left.reportAnchorOrder !== right.reportAnchorOrder) {
       return (left.reportAnchorOrder ?? Number.MAX_SAFE_INTEGER) - (right.reportAnchorOrder ?? Number.MAX_SAFE_INTEGER);
     }
-    if (left.subjectScope !== right.subjectScope) return left.subjectScope === 'company' ? -1 : 1;
     if (left.confidence !== right.confidence) return right.confidence - left.confidence;
     return `${left.evidenceId}:${left.claimId}`.localeCompare(`${right.evidenceId}:${right.claimId}`);
   });

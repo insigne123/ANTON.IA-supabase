@@ -27,7 +27,7 @@ function validOutput(): GeneratedOutreachV2 {
 
 Acme publica que ayuda a equipos de operaciones a reducir trabajo manual. En Northstar ayudamos a equipos que quieren ordenar tareas repetitivas sin imponer cambios bruscos a su forma de trabajo.
 
-Por tu rol de Directora de Operaciones, pensé que podría ser útil compartir un ejemplo práctico de cómo detectar procesos que consumen tiempo y priorizar los primeros ajustes. La idea es entender el contexto de Acme antes de proponer cualquier alternativa concreta.
+Pensé que podría ser útil compartir un ejemplo práctico de cómo detectar procesos que consumen tiempo y priorizar los primeros ajustes. La idea es entender el contexto de Acme antes de proponer cualquier alternativa concreta.
 
 ${context.constraints.cta.exactText}`,
     personalization: [{
@@ -59,6 +59,21 @@ test('draft preflight accepts a faithful natural paraphrase of supported evidenc
       'Acme comunica un foco claro en reducir tareas manuales de operaciones.',
     ),
   }, { now: new Date('2026-08-22T12:00:00.000Z') });
+
+  assert.equal(result.valid, true);
+  assert.ok(!result.issues.some((issue) => issue.code === 'personalization_invalid'));
+});
+
+test('draft preflight accepts concise copy that keeps two material evidence concepts', () => {
+  const context = draftContextFixture();
+  const output = validOutput();
+  const result = validateDraftPreflightV2(context, {
+    ...output,
+    body: output.body.replace(
+      'Acme publica que ayuda a equipos de operaciones a reducir trabajo manual.',
+      'Vi que Acme está poniendo foco en sus operaciones.',
+    ),
+  });
 
   assert.equal(result.valid, true);
   assert.ok(!result.issues.some((issue) => issue.code === 'personalization_invalid'));
@@ -137,6 +152,22 @@ test('draft preflight rejects generic corporate language that makes outreach fee
 
   assert.equal(result.valid, false);
   assert.ok(result.issues.some((issue) => issue.code === 'prohibited_phrase'));
+});
+
+test('draft preflight rejects internal sequence language and literal formal titles', () => {
+  const context = draftContextFixture();
+  const output = validOutput();
+  const variants = [
+    { ...output, subject: 'Seguimiento breve' },
+    { ...output, body: `${output.body}\n\nPensé en un ángulo acotado para este seguimiento.` },
+    { ...output, body: output.body.replace('Pensé que podría', 'Por tu rol de Directora de Operaciones, pensé que podría') },
+  ];
+
+  for (const variant of variants) {
+    const result = validateDraftPreflightV2(context, variant);
+    assert.equal(result.valid, false, JSON.stringify(variant));
+    assert.ok(result.issues.some((issue) => issue.code === 'prohibited_phrase'), JSON.stringify(variant));
+  }
 });
 
 test('draft preflight blocks duplicate sentences and unsupported hypothesis provenance', () => {

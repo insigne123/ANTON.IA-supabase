@@ -113,7 +113,7 @@ test('DraftContextV2 blocks a snapshot whose persisted artifact hash does not ma
   assert.equal(result.reason, 'research_artifact_invalid');
 });
 
-test('validated report anchors take priority in canonical draft personalization', () => {
+test('company evidence takes priority over a formal person role in draft personalization', () => {
   const snapshot = draftSnapshotFixture();
   const deterministic = buildDeterministicResearchReportDocumentV1({
     snapshot,
@@ -138,7 +138,7 @@ test('validated report anchors take priority in canonical draft personalization'
   assert.deepEqual(result.context.report?.outreachBrief.selectedFactualAnchorClaimIds, ['claim-ada-role']);
   assert.deepEqual(result.context.report?.outreachBrief.selectedHypothesisIds, ['claim-acme-opportunity']);
   assert.equal(result.context.report?.synthesis.method, 'fallback');
-  assert.equal(requiredReportAwareDraftPersonalizationV2(result.context)[0].claimId, 'claim-ada-role');
+  assert.equal(requiredReportAwareDraftPersonalizationV2(result.context)[0].claimId, 'claim-acme-overview');
 });
 
 test('dangling report references are rejected before they can enter DraftContextV2', () => {

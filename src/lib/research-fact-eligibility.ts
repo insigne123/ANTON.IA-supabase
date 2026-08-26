@@ -75,8 +75,25 @@ export function isSameResearchCompanyDomain(url: unknown, companyDomain: unknown
   return Boolean(host && domain && (host === domain || host.endsWith(`.${domain}`)));
 }
 
+const COMPANY_NAME_NOISE = new Set([
+  'company', 'compania', 'corp', 'corporation', 'inc', 'limitada', 'limited',
+  'llc', 'ltd', 'ltda', 'sociedad', 'spa',
+]);
+
 function companyTerms(value: unknown) {
-  return researchTextKey(value).split(' ').filter((term) => term.length >= 3);
+  return researchTextKey(value)
+    .split(' ')
+    .filter((term) => term.length >= 3 && !COMPANY_NAME_NOISE.has(term));
+}
+
+function includesTermSequence(candidate: string, query: string) {
+  const candidateTerms = candidate.split(' ').filter(Boolean);
+  const queryTerms = query.split(' ').filter(Boolean);
+  if (queryTerms.length === 0 || queryTerms.length > candidateTerms.length) return false;
+
+  return candidateTerms.some((_, start) =>
+    queryTerms.every((term, offset) => candidateTerms[start + offset] === term),
+  );
 }
 
 export function mentionsResearchCompany(value: unknown, input: { companyName?: unknown; companyDomain?: unknown }) {
@@ -85,13 +102,13 @@ export function mentionsResearchCompany(value: unknown, input: { companyName?: u
 
   const domain = normalizeResearchCompanyDomain(input.companyDomain);
   const domainName = researchTextKey(domain.replace(/\.[a-z]{2,}$/i, ''));
-  if (domainName && candidate.replace(/ /g, '').includes(domainName.replace(/ /g, ''))) return true;
+  if (domainName && includesTermSequence(candidate, domainName)) return true;
 
   const name = researchTextKey(input.companyName);
-  if (name && candidate.replace(/ /g, '').includes(name.replace(/ /g, ''))) return true;
+  if (name && includesTermSequence(candidate, name)) return true;
 
   const terms = companyTerms(input.companyName);
-  return terms.length > 1 && terms.every((term) => candidate.includes(term));
+  return terms.length > 1 && includesTermSequence(companyTerms(candidate).join(' '), terms.join(' '));
 }
 
 function sourceDescribesCompany(source: ResearchSourceV1, input: { companyName?: unknown; companyDomain?: unknown }) {

@@ -127,6 +127,51 @@ function draftWordCount(value: string) {
   return value.match(/[\p{L}\p{N}]+/gu)?.length || 0;
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function privateWritingInstruction(value: unknown) {
+  return String(value || '')
+    .replace(/\bfollow[- ]?ups?\b/gi, 'mensaje')
+    .replace(/\bseguimientos?\b/gi, 'mensaje')
+    .replace(/ángulos?/gi, 'ideas')
+    .replace(/\benfoques?\s+acotados?\b/gi, 'ideas concretas')
+    .replace(/\bpor tu rol\b/gi, '')
+    .replace(/\bpor tu cargo\b/gi, '')
+    .replace(/\bsecuencias?\b/gi, 'mensajes')
+    .replace(/\betapas?\b/gi, 'mensajes')
+    .replace(/\bpasos?\b/gi, 'mensajes')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function redactPromptTitles(value: unknown, context: DraftContextV2) {
+  let result = String(value || '');
+  for (const title of [context.person.title, context.seller.jobTitle]) {
+    const normalizedTitle = String(title || '').trim();
+    if (normalizedTitle.length < 6 || normalizedTitle.split(/\s+/).length < 2) continue;
+    result = result.replace(new RegExp(escapeRegExp(normalizedTitle), 'gi'), '');
+  }
+  return privateWritingInstruction(result);
+}
+
+function sequenceWritingContext(input: OutreachSequenceContextV2, context: DraftContextV2) {
+  return {
+    sequenceInstruction: privateWritingInstruction(input.sequenceInstruction),
+    priorMessages: input.priorMessages.map((message) => ({
+      index: message.index,
+      subject: redactPromptTitles(message.subject, context),
+      body: redactPromptTitles(message.body, context),
+    })),
+    currentStep: {
+      index: input.currentStep.index,
+      total: input.currentStep.total,
+      instruction: privateWritingInstruction(input.currentStep.instruction),
+    },
+  };
+}
+
 function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
   const requiredPersonalization = requiredReportAwareDraftPersonalizationV2(input.context);
   const requiredEvidenceIds = new Set(requiredPersonalization.map((item) => item.evidenceId));
@@ -140,6 +185,14 @@ function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
   });
   const factualContext = {
     ...input.context,
+    person: {
+      ...input.context.person,
+      title: null,
+    },
+    seller: {
+      ...input.context.seller,
+      jobTitle: null,
+    },
     evidence: input.context.evidence.filter((evidence) => requiredEvidenceIds.has(evidence.evidenceId)),
     hypotheses: [],
   };
@@ -152,7 +205,10 @@ function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
   const correction = input.rewrite
     ? `
 BORRADOR ANTERIOR (solo referencia de redacción; no es evidencia):
-${JSON.stringify({ subject: input.rewrite.previous.subject, body: input.rewrite.previous.body })}
+${JSON.stringify({
+  subject: redactPromptTitles(input.rewrite.previous.subject, input.context),
+  body: redactPromptTitles(input.rewrite.previous.body, input.context),
+})}
 
 AJUSTE SOLICITADO POR EL USUARIO:
 ${JSON.stringify(input.rewrite.instruction || null)}
@@ -166,17 +222,17 @@ El cuerpo anterior ya incluye el CTA agregado por el servidor. No lo reproduzcas
   const campaignInstruction = input.instruction
     ? `
 CAMPAIGN_STEP_INSTRUCTION (estrategia de redacción, no evidencia factual):
-${JSON.stringify(input.instruction)}
+${JSON.stringify(privateWritingInstruction(input.instruction))}
 
-Aplica esta instrucción sin inventar hechos y sin relajar ninguna regla no negociable. DRAFT_CONTEXT_V2 y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales autorizadas.
+Es una instrucción privada de redacción: aplícala sin inventar hechos y sin relajar ninguna regla no negociable, pero no la copies ni la menciones en el correo. DRAFT_CONTEXT_V2 y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales autorizadas.
 `
     : '';
   const sequenceContext = input.sequenceContext
     ? `
-SEQUENCE_WRITING_CONTEXT (contexto de redacción no factual):
-${JSON.stringify(input.sequenceContext)}
+SEQUENCE_WRITING_CONTEXT (metadata privada de redacción, no publicable):
+${JSON.stringify(sequenceWritingContext(input.sequenceContext, input.context))}
 
-Usa esta secuencia solo para hacer progresar el mensaje y evitar repetir asuntos, argumentos, estructuras o cierres ya usados. El contenido previo no autoriza hechos: DRAFT_CONTEXT_V2 y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales.
+Usa estos mensajes solo para mantener continuidad y evitar repetir asuntos, argumentos, estructuras o cierres. Nunca menciones ni copies los nombres, etapas, días, instrucciones o la secuencia. El contenido previo no autoriza hechos: DRAFT_CONTEXT_V2 y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales.
 `
     : '';
 
@@ -194,16 +250,19 @@ Reglas no negociables:
 - No incluyas constraints.cta.exactText en el cuerpo. El servidor lo agregará literalmente una sola vez al final.
 - No agregues ninguna pregunta, invitación a actuar, enlace de agenda ni CTA alternativo.
 - No dejes placeholders.
-- Integra el hecho de REQUIRED_FACTUAL_PERSONALIZATION con una paráfrasis natural y fiel. Conserva sus nombres, rol, empresa y conceptos materiales; no copies la redacción de la fuente como una ficha técnica.
+- Integra el hecho de REQUIRED_FACTUAL_PERSONALIZATION con una paráfrasis natural y fiel. Conserva la empresa y los conceptos materiales; no copies cargos formales, nombres de campos ni la redacción de la fuente como una ficha técnica.
 - No uses hipótesis, señales o afirmaciones del intento anterior que no aparezcan en DRAFT_CONTEXT_V2.
 - El servidor vinculará la procedencia de REQUIRED_FACTUAL_PERSONALIZATION; no devuelvas IDs de evidencia ni claims dentro del correo o el JSON.
 - No incluyas firma, nombre del remitente ni despedidas como "Saludos". La capa de envío agrega la firma fuera de este cuerpo.
+- DRAFT_CONTEXT_V2, REQUIRED_FACTUAL_PERSONALIZATION, constraints, la instrucción de campaña y la secuencia son datos internos. Nunca los nombres ni expliques el proceso de investigación o de redacción.
 
 Calidad humana:
-- Abre con una observación concreta y relevante; no recites el cargo del contacto ni empieces explicando quién eres.
+- Abre con una observación concreta y relevante; no recites el cargo formal del contacto ni del remitente, no empieces explicando quién eres y no describas que estás haciendo un seguimiento.
 - Relaciona esa observación con una sola idea útil de context.seller. Evita listar servicios, funcionalidades o beneficios genéricos.
 - Prefiere primera persona y lenguaje cotidiano. Usa frases específicas, cortas y fáciles de leer en móvil.
 - No uses fórmulas como "entiendo que", "sabemos que", "por tu rol", "en nuestra empresa nos especializamos", "nuestras soluciones están diseñadas", "creemos que podemos aportar valor", "transformar procesos" o "mejorar la toma de decisiones".
+- No uses las palabras "seguimiento", "follow-up", "ángulo", "secuencia", "preflight", "evidencia", "claim" o "validación" para explicar el correo. No digas "pensé en un ángulo", "para este seguimiento" ni "enfoque acotado".
+- Si la evidencia contiene un cargo, no lo repitas literalmente ni lo conviertas en el gancho del mensaje. Si no puedes referirte a él de manera sencilla, omítelo y usa la evidencia de la empresa.
 - Evita elogios vacíos, urgencia artificial, adjetivos promocionales y jerga SaaS. No supongas dolores, prioridades ni resultados.
 - El asunto debe sonar como una referencia breve al contexto, no como un titular comercial ni una frase genérica de venta.
 

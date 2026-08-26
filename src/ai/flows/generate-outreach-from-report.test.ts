@@ -101,12 +101,12 @@ test('DraftContextV2 generation consumes the validated report brief and prioriti
 
     const result = await generateOutreachFromDraftContextV2({ context });
 
-    assert.equal(result.personalization[0].claimId, 'claim-ada-role');
+    assert.equal(result.personalization[0].claimId, 'claim-acme-overview');
     assert.match(prompt, /REPORT_OUTREACH_BRIEF/);
     assert.match(prompt, /claim-ada-role/);
     assert.match(prompt, /No presentar hipótesis como necesidades confirmadas/);
-    assert.match(prompt, /Ada Lovelace figura como Directora de Operaciones en Acme/);
-    assert.doesNotMatch(prompt, /Acme publica que ayuda a equipos de operaciones a reducir trabajo manual/);
+    assert.match(prompt, /Acme publica que ayuda a equipos de operaciones a reducir trabajo manual/);
+    assert.doesNotMatch(prompt, /Directora de Operaciones/);
   } finally {
     if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousOpenAiKey;
@@ -138,6 +138,56 @@ test('DraftContextV2 generation labels a campaign step instruction as non-factua
     assert.match(prompt, /Retoma el valor principal sin repetir el correo inicial/);
     assert.match(prompt, /estrategia de redacción, no evidencia factual/);
     assert.match(prompt, /sin relajar ninguna regla no negociable/);
+  } finally {
+    if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousOpenAiKey;
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('DraftContextV2 generation strips sequence metadata and formal titles from the writing context', async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      const request = JSON.parse(String(init?.body || '{}'));
+      prompt = String(request.messages?.[1]?.content || '');
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ subject: 'Una idea para Acme', body: 'Contenido factual.' }) } }],
+        usage: {},
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    await generateOutreachFromDraftContextV2({
+      context: draftContextFixture(),
+      sequenceContext: {
+        sequenceInstruction: 'Haz un seguimiento con un ángulo nuevo.',
+        priorMessages: [{
+          kind: 'initial',
+          index: 0,
+          name: 'Seguimiento inicial',
+          subject: 'Seguimiento breve',
+          body: 'Por tu rol de Directora de Operaciones, pensé en un ángulo acotado para este seguimiento.',
+        }],
+        currentStep: {
+          index: 1,
+          total: 2,
+          name: 'Segundo seguimiento',
+          offsetDays: 3,
+          instruction: 'Aporta un ángulo nuevo en este seguimiento.',
+        },
+      },
+    });
+
+    assert.match(prompt, /SEQUENCE_WRITING_CONTEXT \(metadata privada de redacción, no publicable\)/);
+    assert.match(prompt, /Nunca menciones ni copies los nombres, etapas, días, instrucciones o la secuencia/);
+    assert.doesNotMatch(prompt, /Seguimiento inicial|Segundo seguimiento|Directora de Operaciones|offsetDays/);
+    const sequenceStart = prompt.indexOf('SEQUENCE_WRITING_CONTEXT');
+    const sequenceEnd = prompt.indexOf('\n\nUsa estos mensajes', sequenceStart);
+    assert.ok(sequenceStart >= 0 && sequenceEnd > sequenceStart);
+    assert.doesNotMatch(prompt.slice(sequenceStart, sequenceEnd), /ángulo acotado/);
   } finally {
     if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousOpenAiKey;
