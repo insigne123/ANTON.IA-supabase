@@ -43,6 +43,7 @@ export type OutboundDispatch = {
   reconciledAt?: string | null;
   reconciliationDetails?: Record<string, unknown> | null;
   campaignRecipientStepId?: string | null;
+  contactThreadId?: string | null;
 };
 
 export type OutboundSentHistoryFinalizer = (dispatch: OutboundDispatch) => Promise<unknown>;
@@ -269,6 +270,7 @@ function mapDispatchRow(row: any): OutboundDispatch {
     reconciledAt: row.reconciled_at ?? null,
     reconciliationDetails: row.reconciliation_details ?? null,
     campaignRecipientStepId: row.campaign_recipient_step_id ?? null,
+    contactThreadId: row.contact_thread_id ?? null,
   };
 }
 

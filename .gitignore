@@ -1,5 +1,6 @@
 .env*
 !.env.example
+!.env.test.example
 service-account.json
 *.secret.json
 

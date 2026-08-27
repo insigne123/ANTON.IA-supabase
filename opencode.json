@@ -5,9 +5,14 @@
     "docs/ui-ux/*.md"
   ],
   "mcp": {
-    "supabase": {
+    "supabase-production": {
       "type": "remote",
-      "url": "https://mcp.supabase.com/mcp?project_ref=yfdelflsheurzaicwayi&read_only=true",
+      "url": "https://mcp.supabase.com/mcp?project_ref=yfdelflsheurzaicwayi&read_only=true&features=database,docs",
+      "enabled": true
+    },
+    "supabase-nonprod": {
+      "type": "remote",
+      "url": "https://mcp.supabase.com/mcp?project_ref=htketmmhsfmucevvqmxi&features=database,docs",
       "enabled": true
     }
   }

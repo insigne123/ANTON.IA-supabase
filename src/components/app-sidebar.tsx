@@ -25,9 +25,9 @@ import {
 import Logo from './logo';
 import { useAuth } from '@/context/AuthContext';
 import { APP_VERSION } from '@/lib/app-version';
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { isOpportunitiesEnabled } from '@/lib/opportunities/access';
+import { WorkspaceSwitcher } from '@/components/organization/WorkspaceSwitcher';
 
 type NavItem = {
   href: string;
@@ -96,17 +96,7 @@ export function AppSidebar() {
           <SidebarTrigger className="hidden rounded-full border border-sidebar-border/80 bg-sidebar-accent/40 text-sidebar-foreground hover:bg-sidebar-accent md:flex" />
         </div>
 
-        <div className="rounded-[22px] border border-sidebar-border/70 bg-sidebar-accent/30 px-3.5 py-3 shadow-[0_18px_40px_-36px_rgba(15,23,42,0.45)]">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.2em] text-sidebar-foreground/65">Workspace</div>
-              <div className="mt-1 text-sm font-medium text-sidebar-foreground">Operación comercial</div>
-            </div>
-            <Badge variant="outline" className="rounded-full border-sidebar-border/80 bg-sidebar/60 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-sidebar-foreground/70">
-              Activo
-            </Badge>
-          </div>
-        </div>
+        <WorkspaceSwitcher />
       </SidebarHeader>
 
       <SidebarContent className="px-2 pb-3 pt-2">

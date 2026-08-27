@@ -1,0 +1,73 @@
+name: Supabase CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit, database, and integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify Supabase CLI
+        run: npx --no-install supabase --version
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Check TypeScript
+        run: npm run typecheck
+
+      - name: Start local Supabase
+        run: npm run db:start
+
+      - name: Reset local database and bootstrap QA fixtures
+        run: npm run test:reset
+
+      - name: Lint local database
+        run: npm run db:lint
+
+      - name: Run pgTAP database tests
+        run: npm run db:test
+
+      - name: Verify generated database types
+        run: |
+          npm run db:types
+          git diff --exit-code -- src/lib/database.types.ts
+
+      - name: Run local integration tests
+        run: npm run test:integration
+
+      - name: Verify prebuild is deterministic
+        run: |
+          npm run prebuild
+          git diff --exit-code -- src/lib/app-version.ts
+
+      - name: Stop local Supabase
+        if: always()
+        continue-on-error: true
+        run: npm run db:stop

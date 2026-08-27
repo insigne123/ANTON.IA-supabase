@@ -1,6 +1,11 @@
 -- Versioned research-to-messaging persistence and idempotent outbound dispatches.
 
-create extension if not exists pgcrypto;
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    create extension pgcrypto;
+  end if;
+end $$;
 
 create or replace function public.research_messaging_row_access(
   p_organization_id uuid,

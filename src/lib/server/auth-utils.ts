@@ -2,11 +2,14 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { isSupliaEnabled } from '@/lib/suplia/access';
+import { resolveActiveOrganization, type OrganizationMembership } from '@/lib/server/organization-context';
 
 export type AuthContext = {
     user: any;
     organizationId: string;
     organizationIds: string[];
+    organizationRole?: OrganizationMembership['role'];
+    memberships?: OrganizationMembership[];
     supabase: any;
 };
 
@@ -32,32 +35,26 @@ export async function requireAuth(): Promise<AuthContext> {
         throw new AuthError('Unauthorized', 401);
     }
 
-    // 2. Resolve Organization (Active or Primary)
-    // First check metadata/cookies if we store active org there, otherwise query DB
-    // For now, let's query the first organization they belong to.
-    const { data: memberships, error: memberError } = await supabase
-        .from('organization_members')
-        .select('organization_id, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true });
-
-    if (memberError) {
-        console.error('[Auth] Member query error:', memberError);
+    let resolved;
+    try {
+        resolved = await resolveActiveOrganization(supabase, user.id);
+    } catch (error) {
+        console.error('[Auth] Member query error:', error);
         throw new AuthError('Failed to verify organization membership', 500);
     }
 
-    const organizationIds = [...new Set((memberships || [])
-        .map((membership: any) => String(membership.organization_id || '').trim())
-        .filter(Boolean))];
-
-    if (organizationIds.length === 0) {
+    if (!resolved.active) {
         throw new AuthError('User does not belong to any organization', 403);
     }
 
+    const organizationIds = resolved.memberships.map((membership) => membership.organizationId);
+
     return {
         user,
-        organizationId: organizationIds[0],
+        organizationId: resolved.active.organizationId,
         organizationIds,
+        organizationRole: resolved.active.role,
+        memberships: resolved.memberships,
         supabase
     };
 }

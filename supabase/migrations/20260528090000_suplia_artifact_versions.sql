@@ -1,6 +1,11 @@
 -- SUPL.IA artifact metadata and version history
 
-create extension if not exists pgcrypto;
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    create extension pgcrypto;
+  end if;
+end $$;
 
 alter table public.suplia_artifacts
   add column if not exists source_message_id uuid references public.suplia_messages(id) on delete set null,

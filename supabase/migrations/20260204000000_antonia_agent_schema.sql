@@ -4,8 +4,14 @@
 -- - contacted_leads without organization_id / mission_id
 -- We only ADD columns/tables/indexes when missing.
 
--- Needed for gen_random_uuid()
-create extension if not exists pgcrypto;
+-- Avoid invoking CREATE EXTENSION on local stacks where pgcrypto is already
+-- provisioned but the migration role cannot read extension control files.
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    create extension pgcrypto;
+  end if;
+end $$;
 
 -- === LEADS (adds org/mission + enrichment fields used by worker) ===
 do $$

@@ -1,8 +1,9 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Building2, CalendarClock, GripVertical, Loader2, Mail, MoveRight } from 'lucide-react';
+import { Building2, CalendarClock, Clock3, GripVertical, Loader2, Mail, MessageSquareWarning, MoveRight } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -15,7 +16,16 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useAuth } from '@/context/AuthContext';
 import { PIPELINE_STAGES, type PipelineStage } from '@/lib/crm-types';
+import {
+    collaborationMemberName,
+    contactThreadConflictsWithLead,
+    isLeadClaimActive,
+    leadCollaborationService,
+    resolveLeadUuid,
+    type LeadCollaborationResult,
+} from '@/lib/services/lead-collaboration-service';
 import type { UnifiedRow } from '@/lib/unified-sheet-types';
 
 interface Props {
@@ -31,7 +41,17 @@ function formatDueDate(value: string) {
     return date.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' });
 }
 
+function formatClaimTime(value: string) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+}
+
 export function LeadCard({ lead, onClick, onStageChange, isSaving = false }: Props) {
+    const { organizationId, user } = useAuth();
+    const leadId = resolveLeadUuid(lead);
+    const [collaborationData, setCollaborationData] = useState<LeadCollaborationResult | null>(null);
+    const [claimClock, setClaimClock] = useState(() => Date.now());
     const {
         attributes,
         listeners,
@@ -45,6 +65,45 @@ export function LeadCard({ lead, onClick, onStageChange, isSaving = false }: Pro
         ? lead.stage as PipelineStage
         : 'inbox';
     const dueDate = lead.nextActionDueAt ? formatDueDate(lead.nextActionDueAt) : null;
+    const collaboration = collaborationData?.collaboration || null;
+    const claimIsActive = isLeadClaimActive(collaboration, claimClock);
+    const claimExpiry = claimIsActive && collaboration?.claim_expires_at
+        ? formatClaimTime(collaboration.claim_expires_at)
+        : null;
+    const threadConflict = leadId
+        ? contactThreadConflictsWithLead(collaborationData?.contactThread || null, leadId, user?.id)
+        : false;
+
+    useEffect(() => {
+        setCollaborationData(null);
+        if (!organizationId || !leadId) return;
+
+        let cancelled = false;
+        const unsubscribe = leadCollaborationService.subscribe(organizationId, leadId, (result) => {
+            if (!cancelled) setCollaborationData(result);
+        });
+        void leadCollaborationService.getCollaboration(organizationId, leadId)
+            .then((result) => {
+                if (!cancelled) setCollaborationData(result);
+            })
+            .catch(() => {
+                if (!cancelled) setCollaborationData(null);
+            });
+
+        return () => {
+            cancelled = true;
+            unsubscribe();
+        };
+    }, [leadId, organizationId]);
+
+    useEffect(() => {
+        setClaimClock(Date.now());
+        if (!collaboration?.claim_expires_at) return;
+        const expiresAt = new Date(collaboration.claim_expires_at).getTime();
+        if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return;
+        const timeout = window.setTimeout(() => setClaimClock(Date.now()), expiresAt - Date.now() + 50);
+        return () => window.clearTimeout(timeout);
+    }, [collaboration?.claim_expires_at]);
 
     return (
         <div
@@ -88,6 +147,30 @@ export function LeadCard({ lead, onClick, onStageChange, isSaving = false }: Pro
                         {dueDate && <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-300"><CalendarClock className="h-3.5 w-3.5" /><span>Próximo paso: {dueDate}</span></div>}
                     </div>
 
+                    {collaboration && collaborationData && (claimIsActive || threadConflict || collaboration.contact_state === 'suppressed') && (
+                        <div className="space-y-1.5 border-t border-border/60 pt-2 text-xs text-muted-foreground">
+                            {claimIsActive && collaboration.claimed_by_user_id && (
+                                <div className="flex min-w-0 items-center gap-1.5 text-sky-700 dark:text-sky-300">
+                                    <Clock3 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                                    <span className="truncate">
+                                        {collaborationMemberName(collaborationData.members, collaboration.claimed_by_user_id, user?.id)} está preparando
+                                        {claimExpiry ? ` · hasta ${claimExpiry}` : ''}
+                                    </span>
+                                </div>
+                            )}
+                            {(threadConflict || collaboration.contact_state === 'suppressed') && (
+                                <div className="flex min-w-0 items-center gap-1.5 text-amber-700 dark:text-amber-300">
+                                    <MessageSquareWarning className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                                    <span className="truncate">
+                                        {threadConflict
+                                            ? `Hilo activo: ${collaborationMemberName(collaborationData.members, collaborationData.contactThread?.last_sent_by_user_id || collaborationData.contactThread?.opened_by_user_id, user?.id)}`
+                                            : 'No contactar'}
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {lead.nextAction && (
                         <p className="line-clamp-2 rounded-md bg-muted/55 px-2 py-1.5 text-xs leading-4 text-foreground/80">
                             {lead.nextAction}
@@ -101,7 +184,7 @@ export function LeadCard({ lead, onClick, onStageChange, isSaving = false }: Pro
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" disabled={isSaving}>
-                                    {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MoveRight className="h-3.5 w-3.5" />}
+                                    {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" /> : <MoveRight className="h-3.5 w-3.5" />}
                                     {isSaving ? 'Guardando' : 'Mover'}
                                 </Button>
                             </DropdownMenuTrigger>

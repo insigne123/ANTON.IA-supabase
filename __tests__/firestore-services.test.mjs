@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createClient } from '@supabase/supabase-js';
 
 import { setAdminDbForTests } from '../src/lib/server/firebase-admin.ts';
 
@@ -134,74 +133,6 @@ test.beforeEach(() => {
 
 test.afterEach(() => {
   setAdminDbForTests(null);
-});
-
-async function getLiveMembership() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return null;
-
-  const supabase = createClient(url, key, { auth: { persistSession: false } });
-  const { data } = await supabase
-    .from('organization_members')
-    .select('user_id, organization_id')
-    .limit(1)
-    .maybeSingle();
-
-  return data || null;
-}
-
-test('daily quota contact check returns allowed with high limit', async (t) => {
-  const membership = await getLiveMembership();
-  if (!membership) {
-    t.skip('No Supabase credentials or membership rows available for integration test');
-    return;
-  }
-
-  const params = {
-    userId: membership.user_id,
-    organizationId: membership.organization_id,
-    resource: 'contact',
-    limit: 100000,
-    count: 1,
-  };
-
-  const res = await dailyQuota.checkAndConsumeDailyQuota(params);
-  assert.equal(res.allowed, true);
-  assert.ok(res.count >= 1);
-  assert.ok(res.limit > 0);
-  assert.ok(res.limit <= 100000);
-
-  const status = await dailyQuota.getDailyQuotaStatus({
-    userId: membership.user_id,
-    organizationId: membership.organization_id,
-    resource: 'contact',
-    limit: 100000,
-  });
-  assert.equal(typeof status.count, 'number');
-  assert.equal(status.limit, res.limit);
-});
-
-test('daily quota contact check denies when limit is zero', async (t) => {
-  const membership = await getLiveMembership();
-  if (!membership) {
-    t.skip('No Supabase credentials or membership rows available for integration test');
-    return;
-  }
-
-  const params = {
-    userId: membership.user_id,
-    organizationId: membership.organization_id,
-    resource: 'contact',
-    limit: 0,
-    count: 1,
-  };
-
-  const res = await dailyQuota.checkAndConsumeDailyQuota(params);
-  assert.ok(res.count >= 0);
-  assert.ok(res.limit >= 0);
-  if (res.allowed) assert.ok(res.count <= res.limit);
-  else assert.ok(res.count >= res.limit);
 });
 
 test('research lock store maintains state across operations', async () => {

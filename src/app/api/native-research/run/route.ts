@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
       options: parsed.options,
     });
 
-    if (process.env.NODE_ENV !== 'production' || String(process.env.NATIVE_RESEARCH_INLINE || '').toLowerCase() === 'true') {
+    if (String(process.env.NATIVE_RESEARCH_INLINE || '').trim().toLowerCase() === 'true') {
       void processNativeResearchQueue({ limit: parsed.leads.length, organizationId: auth.organizationId, userId: auth.user.id })
         .catch((error) => console.error('[native-research] inline batch worker failed:', error));
     }

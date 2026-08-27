@@ -211,6 +211,7 @@ export async function GET(req: NextRequest) {
         .from('unified_crm_data')
         .select('id, stage, owner, notes, next_action, next_action_due_at, autopilot_status, last_autopilot_event, updated_at')
         .eq('id', gid)
+        .eq('organization_id', organizationId)
         .maybeSingle();
       if (error && !isMissingTableError(error)) {
         console.warn('[commercial timeline] crm custom query failed:', error.message);

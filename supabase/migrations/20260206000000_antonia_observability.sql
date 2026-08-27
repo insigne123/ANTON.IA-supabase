@@ -4,7 +4,12 @@
 -- - Add task progress/heartbeat fields for real-time monitoring
 -- - Add lead-level event stream so the UI can explain exactly what happened
 
-create extension if not exists pgcrypto;
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    create extension pgcrypto;
+  end if;
+end $$;
 
 -- === Core tables ===
 

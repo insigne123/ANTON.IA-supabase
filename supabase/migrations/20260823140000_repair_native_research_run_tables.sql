@@ -2,7 +2,12 @@
 -- The original migration version is marked as applied remotely, but these
 -- durable run tables were missing from that deployed schema.
 
-create extension if not exists pgcrypto;
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    create extension pgcrypto;
+  end if;
+end $$;
 
 create table if not exists public.research_runs (
   id uuid primary key default gen_random_uuid(),

@@ -1,7 +1,12 @@
 -- Personal follow-up Campaign Outreach V2. This slice is deliberately isolated
 -- from legacy campaign scheduling and provider delivery.
 
-create extension if not exists pgcrypto;
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    create extension pgcrypto;
+  end if;
+end $$;
 
 alter table public.organizations
   add column if not exists feature_campaigns_v2_enabled boolean not null default false;

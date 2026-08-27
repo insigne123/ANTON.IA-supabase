@@ -1,3 +1,8 @@
+-- Replayability repair: this migration was historically applied after an
+-- earlier profiles table existed. Keep it safe on a blank local/nonprod replay.
+-- Production has this migration recorded already, so this does not change its
+-- deployed state.
+
 -- Create profiles table
 CREATE TABLE IF NOT EXISTS profiles (
   id uuid REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
@@ -8,17 +13,28 @@ CREATE TABLE IF NOT EXISTS profiles (
   updated_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS email text,
+  ADD COLUMN IF NOT EXISTS full_name text,
+  ADD COLUMN IF NOT EXISTS avatar_url text,
+  ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL;
+
+ALTER TABLE profiles
+  ALTER COLUMN updated_at SET DEFAULT timezone('utc'::text, now());
+
 -- Enable RLS
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
 -- Policies
 -- Public profiles: Everyone in the org should be able to see profiles of other members
 -- For now, let's allow authenticated users to view all profiles (simplest for collaboration)
+DROP POLICY IF EXISTS "Authenticated users can view profiles" ON profiles;
 CREATE POLICY "Authenticated users can view profiles"
   ON profiles FOR SELECT
   TO authenticated
   USING (true);
 
+DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
 CREATE POLICY "Users can update their own profile"
   ON profiles FOR UPDATE
   USING (auth.uid() = id);

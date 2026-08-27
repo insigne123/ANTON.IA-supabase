@@ -1,7 +1,12 @@
 -- Native research workspace, durable run progress, style profiles and templates.
 -- This migration is additive and keeps the legacy n8n projection available during cutover.
 
-create extension if not exists pgcrypto;
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    create extension pgcrypto;
+  end if;
+end $$;
 
 create table if not exists public.research_runs (
   id uuid primary key default gen_random_uuid(),

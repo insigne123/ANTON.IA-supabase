@@ -1,6 +1,11 @@
 -- Canonical append-only activity ledger for backend observability and usage mining.
 
-create extension if not exists pgcrypto;
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    create extension pgcrypto;
+  end if;
+end $$;
 
 create table if not exists public.antonia_event_ledger (
   id uuid primary key default gen_random_uuid(),

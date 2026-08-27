@@ -1,7 +1,12 @@
 -- Restore the Native Draft tables and column skipped by the original workspace migration.
 -- This is intentionally additive because the original migration is already recorded remotely.
 
-create extension if not exists pgcrypto;
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    create extension pgcrypto;
+  end if;
+end $$;
 
 create table if not exists public.email_style_profiles (
   id uuid primary key default gen_random_uuid(),

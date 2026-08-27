@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
+import { resolveActiveOrganization } from '@/lib/server/organization-context';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export type RequestAuthContext = {
@@ -63,13 +64,19 @@ export async function requireSessionOrTrustedInternalRequest(req: Request): Prom
 
   if (user) {
     const requestedOrganizationId = String(req.headers.get('x-organization-id') || '').trim() || null;
-    const membership = await findMembership(supabase, user.id, requestedOrganizationId);
-    if (!membership) {
+    let active;
+    try {
+      ({ active } = await resolveActiveOrganization(supabase, user.id, requestedOrganizationId));
+    } catch (error) {
+      console.error('[request-auth] Membership validation failed:', error);
+      throw new RequestAuthError('Failed to verify organization membership', 500);
+    }
+    if (!active) {
       throw new RequestAuthError('User does not belong to the requested organization', 403);
     }
     return {
       user,
-      organizationId: membership.organization_id,
+      organizationId: active.organizationId,
       supabase,
       source: 'session',
     };

@@ -1,6 +1,11 @@
 -- SUPL.IA provider/tool leases for cross-worker concurrency limits
 
-create extension if not exists pgcrypto;
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    create extension pgcrypto;
+  end if;
+end $$;
 
 alter table public.suplia_tool_runs
   add column if not exists token_usage jsonb;

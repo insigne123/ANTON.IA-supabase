@@ -1,7 +1,12 @@
 -- Phase 3 company-research artifacts are tenant-scoped, versioned, and leased
 -- so concurrent workers cannot repeat the same company research work.
 
-create extension if not exists pgcrypto;
+do $$
+begin
+  if not exists (select 1 from pg_extension where extname = 'pgcrypto') then
+    create extension pgcrypto;
+  end if;
+end $$;
 
 create table public.research_company_artifacts (
   id uuid primary key default gen_random_uuid(),

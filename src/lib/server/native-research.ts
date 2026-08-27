@@ -77,7 +77,7 @@ const PERSONAL_EMAIL_DOMAINS = new Set([
 
 export function isNativeResearchEnabled() {
   const configured = String(process.env.NATIVE_RESEARCH_ENABLED || '').trim();
-  return configured ? configured.toLowerCase() !== 'false' : process.env.NODE_ENV !== 'production';
+  return configured.toLowerCase() === 'true';
 }
 
 function assertNativeResearchEnabled() {

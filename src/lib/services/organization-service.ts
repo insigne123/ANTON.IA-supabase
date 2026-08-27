@@ -1,5 +1,23 @@
 import { supabase } from '@/lib/supabase';
-import { activityLogService } from './activity-log-service';
+
+type OrganizationRole = 'owner' | 'admin' | 'member';
+
+export type OrganizationListResponse = {
+    activeOrganizationId: string | null;
+    organizations: Array<{
+        id: string;
+        name: string;
+        role: OrganizationRole;
+        memberCount: number;
+    }>;
+};
+
+export type OrganizationDetailsResponse = {
+    organization: any;
+    members: any[];
+    invites: any[];
+    currentUserRole: OrganizationRole;
+};
 
 const currentOrganizationListeners = new Set<() => void>();
 
@@ -7,21 +25,15 @@ function notifyCurrentOrganizationChanged() {
     for (const listener of currentOrganizationListeners) listener();
 }
 
-async function detachUserOwnedRecordsFromOrganization(userId: string, orgId: string): Promise<boolean> {
-    const results = await Promise.all([
-        supabase.from('leads').update({ organization_id: null }).eq('organization_id', orgId).eq('user_id', userId),
-        supabase.from('enriched_leads').update({ organization_id: null }).eq('organization_id', orgId).eq('user_id', userId),
-        supabase.from('contacted_leads').update({ organization_id: null }).eq('organization_id', orgId).eq('user_id', userId),
-        supabase.from('campaigns').update({ organization_id: null }).eq('organization_id', orgId).eq('user_id', userId),
-    ]);
-
-    const firstError = results.find((result) => result.error)?.error;
-    if (firstError) {
-        console.error('Error detaching user-owned records from organization:', firstError);
-        return false;
-    }
-
-    return true;
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await fetch(path, {
+        ...init,
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', ...init?.headers },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || 'Organization request failed');
+    return payload as T;
 }
 
 export const organizationService = {
@@ -30,60 +42,42 @@ export const organizationService = {
         return () => currentOrganizationListeners.delete(listener);
     },
 
-    async getCurrentOrganizationId(knownUserId?: string | null): Promise<string | null> {
+    async listOrganizations(): Promise<OrganizationListResponse> {
+        return requestJson<OrganizationListResponse>('/api/organizations');
+    },
+
+    async getCurrentOrganizationId(_knownUserId?: string | null): Promise<string | null> {
         try {
-            const userId = String(knownUserId || '').trim() || (await supabase.auth.getUser()).data.user?.id;
-            if (!userId) return null;
-
-            // Get the first organization the user is a member of
-            const { data, error } = await supabase
-                .from('organization_members')
-                .select('organization_id')
-                .eq('user_id', userId)
-                .order('created_at', { ascending: true })
-                .limit(1)
-                .single();
-
-            if (error || !data) {
-                return null;
-            }
-
-            return data.organization_id;
+            return (await this.listOrganizations()).activeOrganizationId;
         } catch (error) {
             console.error('Error fetching organization ID:', error);
             return null;
         }
     },
 
-    async createOrganization(name: string): Promise<string | null> {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return null;
-
-        // Use RPC to create org and add member atomically
-        const { data, error } = await supabase
-            .rpc('create_new_organization', { org_name: name });
-
-        if (error) {
-            console.error('Error creating organization:', error);
-            return null;
-        }
-
+    async setCurrentOrganization(organizationId: string): Promise<boolean> {
+        await requestJson('/api/organizations/active', {
+            method: 'PUT',
+            body: JSON.stringify({ organizationId }),
+        });
         notifyCurrentOrganizationChanged();
-        return data; // Returns the new org ID
+        return true;
+    },
+
+    async createOrganization(name: string): Promise<string | null> {
+        const result = await requestJson<{ organizationId: string }>('/api/organizations', {
+            method: 'POST',
+            body: JSON.stringify({ name }),
+        });
+        notifyCurrentOrganizationChanged();
+        return result.organizationId;
     },
 
     async updateOrganization(orgId: string, updates: { name: string }): Promise<boolean> {
-        const { error } = await supabase
-            .from('organizations')
-            .update(updates)
-            .eq('id', orgId);
-
-        if (error) {
-            console.error('Error updating organization:', error);
-            return false;
-        }
-
-        await activityLogService.logActivity('update_organization', 'organization', orgId, updates);
+        await requestJson(`/api/organizations/${encodeURIComponent(orgId)}`, {
+            method: 'PATCH',
+            body: JSON.stringify(updates),
+        });
         return true;
     },
 
@@ -96,12 +90,10 @@ export const organizationService = {
             .select('social_search_credits, feature_social_search_enabled')
             .eq('id', orgId)
             .single();
-
         if (error) {
             console.error('Error fetching credits:', error);
             return null;
         }
-
         return {
             credits: Number(data.social_search_credits ?? 0),
             enabled: Boolean(data.feature_social_search_enabled),
@@ -109,162 +101,67 @@ export const organizationService = {
         };
     },
 
-    async getOrganizationDetails(): Promise<{ organization: any, members: any[] } | null> {
-        const orgId = await this.getCurrentOrganizationId();
+    async getOrganizationDetails(organizationId?: string | null): Promise<OrganizationDetailsResponse | null> {
+        const orgId = String(organizationId || '').trim() || await this.getCurrentOrganizationId();
         if (!orgId) return null;
-
-        const { data: org, error: orgError } = await supabase
-            .from('organizations')
-            .select('*')
-            .eq('id', orgId)
-            .single();
-
-        if (orgError) {
-            console.error('Error fetching organization details:', orgError);
-            return null;
-        }
-
-        const { data: members, error: membersError } = await supabase
-            .from('organization_members')
-            .select(`
-                *,
-                profiles:user_id (
-                    full_name,
-                    email,
-                    avatar_url
-                )
-            `)
-            .eq('organization_id', orgId);
-
-        if (membersError) {
-            console.error('Error fetching members:', membersError);
-            return { organization: org, members: [] };
-        }
-
-        return { organization: org, members: members || [] };
+        return requestJson<OrganizationDetailsResponse>(`/api/organizations/${encodeURIComponent(orgId)}`);
     },
 
-    async createInvite(email: string, role: 'admin' | 'member' = 'member'): Promise<{ token: string } | null> {
+    async createInvite(email: string, role: 'admin' | 'member' = 'member') {
         const orgId = await this.getCurrentOrganizationId();
         if (!orgId) return null;
-
-        const token = crypto.randomUUID();
-
-        const { error } = await supabase
-            .from('organization_invites')
-            .insert([{
-                organization_id: orgId,
-                email,
-                role,
-                token
-            }]);
-
-        if (error) {
-            console.error('Error creating invite:', error);
-            return null;
-        }
-
-        await activityLogService.logActivity('invite_member', 'member', undefined, { email, role });
-
-        return { token };
+        return requestJson<{ inviteUrl: string; expiresAt: string }>(
+            `/api/organizations/${encodeURIComponent(orgId)}/invites`,
+            { method: 'POST', body: JSON.stringify({ email, role }) },
+        );
     },
 
     async getInvites(): Promise<any[]> {
-        const orgId = await this.getCurrentOrganizationId();
-        if (!orgId) return [];
-
-        const { data, error } = await supabase
-            .from('organization_invites')
-            .select('*')
-            .eq('organization_id', orgId);
-
-        if (error) {
-            console.error('Error fetching invites:', error);
-            return [];
-        }
-
-        return data || [];
+        return (await this.getOrganizationDetails())?.invites || [];
     },
 
     async revokeInvite(inviteId: string): Promise<boolean> {
-        const { error } = await supabase
-            .from('organization_invites')
-            .delete()
-            .eq('id', inviteId);
-
-        if (error) {
-            console.error('Error revoking invite:', error);
-            return false;
-        }
-
+        const orgId = await this.getCurrentOrganizationId();
+        if (!orgId) return false;
+        await requestJson(`/api/organizations/${encodeURIComponent(orgId)}/invites/${encodeURIComponent(inviteId)}`, {
+            method: 'DELETE',
+        });
         return true;
     },
 
     async acceptInvite(token: string): Promise<boolean> {
-        const { data, error } = await supabase
-            .rpc('accept_invite', { invite_token: token });
-
-        if (error) {
-            console.error('Error accepting invite:', error);
-            throw error;
-        }
-
-        if (data) notifyCurrentOrganizationChanged();
-        return !!data;
+        await requestJson('/api/organizations/invites/accept', {
+            method: 'POST',
+            body: JSON.stringify({ token }),
+        });
+        notifyCurrentOrganizationChanged();
+        return true;
     },
 
     async leaveOrganization(orgId: string): Promise<boolean> {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return false;
-
-        const detached = await detachUserOwnedRecordsFromOrganization(user.id, orgId);
-        if (!detached) {
-            return false;
-        }
-
-        const { error } = await supabase
-            .from('organization_members')
-            .delete()
-            .eq('organization_id', orgId)
-            .eq('user_id', user.id);
-
-        if (error) {
-            console.error('Error leaving organization:', error);
-            return false;
-        }
+        await requestJson(`/api/organizations/${encodeURIComponent(orgId)}/leave`, { method: 'POST' });
         notifyCurrentOrganizationChanged();
         return true;
     },
 
     async deleteOrganization(orgId: string): Promise<boolean> {
-        // Only owners can delete (RLS enforced)
-        const { error } = await supabase
-            .from('organizations')
-            .delete()
-            .eq('id', orgId);
-
-        if (error) {
-            console.error('Error deleting organization:', error);
-            return false;
-        }
+        await requestJson(`/api/organizations/${encodeURIComponent(orgId)}`, { method: 'DELETE' });
         notifyCurrentOrganizationChanged();
         return true;
     },
 
-    async updateMemberRole(orgId: string, userId: string, newRole: 'admin' | 'member' | 'owner'): Promise<boolean> {
-        // Only owners/admins can update roles (RLS enforced)
-        const { error } = await supabase
-            .from('organization_members')
-            .update({ role: newRole })
-            .eq('organization_id', orgId)
-            .eq('user_id', userId);
-
-        if (error) {
-            console.error('Error updating member role:', error);
-            return false;
-        }
-
-        await activityLogService.logActivity('update_member', 'member', userId, { newRole });
+    async updateMemberRole(orgId: string, userId: string, role: OrganizationRole): Promise<boolean> {
+        await requestJson(`/api/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ role }),
+        });
         return true;
-    }
+    },
+
+    async removeMember(orgId: string, userId: string): Promise<boolean> {
+        await requestJson(`/api/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`, {
+            method: 'DELETE',
+        });
+        return true;
+    },
 };

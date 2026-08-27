@@ -14,10 +14,7 @@ export const revalidate = 0;
 export const runtime = 'nodejs';
 
 function shouldRunInline() {
-  if (String(process.env.NATIVE_RESEARCH_INLINE || '').trim()) {
-    return String(process.env.NATIVE_RESEARCH_INLINE).toLowerCase() === 'true';
-  }
-  return process.env.NODE_ENV !== 'production';
+  return String(process.env.NATIVE_RESEARCH_INLINE || '').trim().toLowerCase() === 'true';
 }
 
 export async function GET() {
