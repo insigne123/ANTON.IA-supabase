@@ -69,6 +69,37 @@ test('report contract rejects invented and paraphrased canonical statements', ()
   );
 });
 
+test('report narrative may paraphrase cited claims but cannot detach them from canonical evidence', () => {
+  const snapshot = draftSnapshotFixture();
+  const document = buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt });
+  const readable = structuredClone(document) as any;
+  readable.narrative.executiveSummary[0].text = 'Acme presenta una propuesta enfocada en reducir trabajo manual dentro de operaciones.';
+  assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(readable, snapshot));
+
+  const unsupported = structuredClone(readable) as any;
+  unsupported.narrative.executiveSummary[0].evidenceIds = ['evidence-ada'];
+  assert.throws(
+    () => validateResearchReportDocumentCitationsV1(unsupported, snapshot),
+    (error: any) => error instanceof ResearchReportCitationError && /does not support a cited claim/.test(error.message),
+  );
+
+  const wrongSection = structuredClone(readable) as any;
+  wrongSection.narrative.companyProfile[0].claimIds = ['claim-ada-role'];
+  wrongSection.narrative.companyProfile[0].evidenceIds = ['evidence-ada'];
+  assert.throws(
+    () => validateResearchReportDocumentCitationsV1(wrongSection, snapshot),
+    (error: any) => error instanceof ResearchReportCitationError && /wrong narrative section/.test(error.message),
+  );
+});
+
+test('report documents created before narrative v2 remain readable', () => {
+  const snapshot = draftSnapshotFixture();
+  const historical = structuredClone(buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt })) as any;
+  delete historical.narrative;
+  assert.equal(ResearchReportDocumentV1Schema.safeParse(historical).success, true);
+  assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(historical, snapshot));
+});
+
 test('report contract derives signal metadata from the cited canonical chain and fallback validates', () => {
   const raw = structuredClone(draftSnapshotFixture()) as any;
   raw.sources.push({

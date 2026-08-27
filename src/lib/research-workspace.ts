@@ -377,6 +377,7 @@ export function researchWarningLabel(warning: string): string {
     official_site_content_generic: 'El sitio oficial no ofreció contenido específico suficiente para respaldar el reporte.',
     whois_unavailable: 'Los datos de registro del dominio no estuvieron disponibles.',
     brand_unavailable: 'No pudimos confirmar señales públicas de marca.',
+    company_profile_unavailable: 'No pudimos consultar fuentes adicionales sobre la actividad de la empresa.',
     company_news_unavailable: 'Las noticias recientes de la empresa no estuvieron disponibles.',
     hiring_signals_unavailable: 'Las señales recientes de contratación no estuvieron disponibles.',
   };

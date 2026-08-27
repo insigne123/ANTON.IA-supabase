@@ -20,7 +20,7 @@ import { PageHeader } from '@/components/page-header';
 import NativeResearchReport, { NativeResearchReportSkeleton } from '@/components/research/NativeResearchReport';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
@@ -711,7 +711,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
             disabled={runLoading}
             aria-label="Actualizar el estado de la investigación"
           >
-            <RefreshCw className={runLoading ? 'animate-spin' : ''} />
+            <RefreshCw className={runLoading ? 'animate-spin motion-reduce:animate-none' : ''} />
             Actualizar estado
           </Button>
         ) : null}
@@ -749,7 +749,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
             <span>{runError}</span>
             {activeBatch ? (
               <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={() => void fetchRun(activeBatch.runId, batchLeads, true)} disabled={runLoading}>
-                {runLoading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                {runLoading ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <RefreshCw />}
                 Actualizar estado
               </Button>
             ) : null}
@@ -796,13 +796,13 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
         </Card>
       </section>
 
-      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(320px,0.72fr)_minmax(0,1.28fr)]">
         <section aria-labelledby="to-research-heading" className="min-w-0">
           <Card className="min-w-0 overflow-hidden rounded-[28px] border-border/60 shadow-[0_20px_60px_-48px_rgba(15,23,42,0.32)]">
             <CardHeader className="gap-4 border-b border-border/60 pb-4">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div className="min-w-0">
-                  <CardTitle id="to-research-heading" className="text-[1.35rem] tracking-[-0.03em]">Por investigar</CardTitle>
+                  <h2 id="to-research-heading" className="text-[1.35rem] font-semibold leading-none tracking-[-0.03em]">Por investigar</h2>
                   <CardDescription className="mt-1 max-w-xl leading-6">Selecciona los leads que quieres preparar con contexto antes de redactar.</CardDescription>
                 </div>
                 <div className="relative w-full sm:w-64">
@@ -840,7 +840,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                   disabled={researchUnavailable || selectionLocked || selectedLeads.length === 0}
                   aria-describedby={handoffPending ? 'research-handoff-help' : activeRunBlocksNewBatch ? 'research-batch-help' : undefined}
                 >
-                  {creatingBatch ? <Loader2 className="animate-spin" /> : <BrainCircuit />}
+                  {creatingBatch ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <BrainCircuit />}
                   {creatingBatch ? 'Guardando selección…' : handoffPending ? 'Preparando selección…' : selectedLeads.length ? `Investigar ${selectedLeads.length}` : 'Investigar selección'}
                 </Button>
               </div>
@@ -849,6 +849,14 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
             </CardHeader>
 
             <CardContent className="p-0">
+              {activeItem?.result ? (
+                <a
+                  href="#research-report-panel"
+                  className="mx-4 mt-3 inline-flex rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:mx-5"
+                >
+                  Ir al informe seleccionado
+                </a>
+              ) : null}
               {loadingLeads ? (
                 <div aria-busy="true" className="space-y-3 p-4 sm:p-5">
                   {[1, 2, 3, 4].map((item) => <Skeleton key={item} className="h-[104px] w-full rounded-2xl" />)}
@@ -935,12 +943,12 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
           </Card>
         </section>
 
-        <section aria-labelledby="research-detail-heading" className="min-w-0">
+        <section id="research-report-panel" aria-labelledby="research-detail-heading" className="min-w-0 outline-none" tabIndex={-1}>
           <Card className="min-w-0 overflow-hidden rounded-[28px] border-border/60 shadow-[0_20px_60px_-48px_rgba(15,23,42,0.32)]">
-            <CardHeader className="gap-2 border-b border-border/60 pb-4">
-              <CardTitle id="research-detail-heading" className="text-[1.35rem] tracking-[-0.03em]">Detalle de investigación</CardTitle>
+            {!activeItem?.result ? <CardHeader className="gap-2 border-b border-border/60 pb-4">
+              <h2 id="research-detail-heading" className="text-[1.35rem] font-semibold leading-none tracking-[-0.03em]">Detalle de investigación</h2>
               <CardDescription className="leading-6">Selecciona un lead para revisar su estado, evidencia y fuentes antes de redactar.</CardDescription>
-            </CardHeader>
+            </CardHeader> : <h2 id="research-detail-heading" className="sr-only">Informe de investigación</h2>}
             <CardContent className="space-y-5 p-4 sm:p-5">
               {runLoading && !activeRun ? (
                 <div aria-busy="true" className="space-y-3">
@@ -950,7 +958,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                 </div>
               ) : (
                 <>
-                  {readyItems.length > 0 ? (
+                  {!activeItem?.result ? <>{readyItems.length > 0 ? (
                     <div className="max-h-48 space-y-2 overflow-y-auto pr-1" aria-label="Leads listos para redactar">
                       {readyItems.map((item) => {
                         const selected = item.lead.key === activeLeadKey;
@@ -979,7 +987,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                     </div>
                   )}
 
-                  <Separator />
+                  <Separator /></> : null}
 
                   {!activeLead ? (
                     <div className="flex min-h-52 flex-col items-center justify-center px-4 py-8 text-center">
@@ -989,16 +997,16 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                     </div>
                   ) : (
                     <article aria-label={`Detalle de investigación de ${activeLead.fullName || activeLead.companyName || 'lead'}`} className="min-w-0 space-y-5">
-                      <header className="min-w-0">
+                      {!activeItem?.result ? <header className="min-w-0">
                         <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">{activeLead.companyName || 'Empresa'}{activeLead.title ? ` · ${activeLead.title}` : ''}</p>
                         <h2 className="mt-1 break-words text-xl font-semibold tracking-[-0.03em]">{activeLead.fullName || 'Lead sin nombre'}</h2>
                         <p className="mt-1 break-all text-sm text-muted-foreground">{activeLead.email || activeLead.companyDomain || 'Sin email ni dominio disponible'}</p>
-                      </header>
+                      </header> : null}
 
                       {isResearchInFlight(activeStatus) ? (
                         <div className="rounded-2xl border border-sky-200 bg-sky-50/75 p-4 dark:border-sky-500/30 dark:bg-sky-500/10">
                           <div className="flex items-start gap-3">
-                            <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-sky-700 dark:text-sky-300" aria-hidden="true" />
+                            <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-sky-700 motion-reduce:animate-none dark:text-sky-300" aria-hidden="true" />
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-sky-950 dark:text-sky-100">Estamos reuniendo señales públicas</p>
                               <p className="mt-1 text-xs leading-5 text-sky-900/75 dark:text-sky-100/75">El resultado se guarda en tu selección. Puedes seguir revisando otros leads.</p>
@@ -1016,19 +1024,6 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                         </div>
                       ) : activeItem?.result ? (
                         <>
-                          <div className={`flex items-start gap-3 rounded-2xl border p-4 ${activeStatus === 'insufficient_data' ? 'border-amber-200 bg-amber-50/75 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100' : 'border-emerald-200 bg-emerald-50/75 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100'}`}>
-                            {activeStatus === 'insufficient_data'
-                              ? <CircleAlert className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />
-                              : <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />}
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium">{activeStatus === 'insufficient_data' ? 'Reporte con información limitada' : 'Reporte guardado'}</p>
-                              <p className="mt-1 text-xs leading-5 opacity-80">
-                                {scope === 'leads'
-                                  ? 'La investigación queda disponible en tu lista de leads cuando vuelvas.'
-                                  : 'La investigación queda guardada en esta selección para que puedas revisarla.'}
-                              </p>
-                            </div>
-                          </div>
                           {activeReportDetailLoading ? (
                             <NativeResearchReportSkeleton />
                           ) : (
