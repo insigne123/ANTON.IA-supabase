@@ -648,7 +648,7 @@ export default function SearchPage() {
         setProfileSearchNotice({
           tone: 'warning',
           title: 'Perfil no disponible',
-          description: 'No encontramos información suficiente para crear un lead con esta URL.',
+          description: result.phone_enrichment?.message || 'No encontramos información suficiente para crear un lead con esta URL.',
           emailState,
           phoneState,
         });
@@ -796,8 +796,11 @@ export default function SearchPage() {
           reveal_phone: false,
         }, abortRef.current.signal);
 
-        const profile = result.leads[0];
-        if (profile && (filters.revealEmail || filters.revealPhone)) {
+        const profile: Lead = result.leads[0] || {
+          id: `profile-search:${linkedinUrl}`,
+          linkedin_url: linkedinUrl,
+        };
+        if (filters.revealEmail || filters.revealPhone) {
           try {
             const operationId = `profile-enrichment:${crypto.randomUUID()}`;
             const enrichment = await enrichLinkedInProfileLead({
@@ -809,11 +812,19 @@ export default function SearchPage() {
             }, abortRef.current.signal);
             const trackingId = enrichment.enriched?.[0]?.id;
             if (trackingId) {
+              const queuedLead: Lead = {
+                ...profile,
+                id: trackingId,
+                linkedin_url: profile.linkedin_url || linkedinUrl,
+                enrichment_status: 'pending',
+              };
               result = {
                 ...result,
-                leads: result.leads.map((lead, index) => index === 0
-                  ? { ...lead, id: trackingId, enrichment_status: 'pending' }
-                  : lead),
+                count: result.leads.length > 0 ? result.count : 1,
+                leads_count: result.leads.length > 0 ? result.leads_count : 1,
+                leads: result.leads.length > 0
+                  ? result.leads.map((lead, index) => index === 0 ? queuedLead : lead)
+                  : [queuedLead],
                 enrichment_requested: true,
                 profile_tracking_ids: [trackingId],
                 phone_enrichment: {

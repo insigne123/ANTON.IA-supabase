@@ -36,8 +36,10 @@ test('profile search queues requested contact data and polls the persisted profi
   assert.match(clientSource, /linkedinUrl: input\.linkedinUrl/);
   assert.match(clientSource, /json\?\.error === 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN'/);
   assert.match(searchPageSource, /await enrichLinkedInProfileLead\(/);
+  assert.match(searchPageSource, /const profile: Lead = result\.leads\[0\] \|\|/);
   assert.match(searchPageSource, /reveal_email: false,[\s\S]*reveal_phone: false/);
   assert.match(searchPageSource, /profile_tracking_ids: \[trackingId\]/);
+  assert.match(searchPageSource, /result\.leads\.length > 0[\s\S]*\[queuedLead\]/);
   assert.match(searchPageSource, /await getLinkedInProfileStatuses\(profilePhonePollingIds/);
   assert.match(searchPageSource, /emailSatisfied && phoneSatisfied && !isPendingEnrichmentStatus\(status\)/);
   assert.doesNotMatch(searchPageSource, /getLinkedInProfileLead\(/);

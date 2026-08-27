@@ -113,7 +113,9 @@ export async function enrichLinkedInProfileLead(input: {
         fullName: input.lead.name,
         linkedinUrl: input.linkedinUrl,
         companyName: input.lead.org_name || input.lead.organization_name,
-        companyDomain: input.lead.organization?.website_url,
+        companyDomain: input.lead.organization?.website_url
+          || input.lead.organization_website
+          || input.lead.organization_domain,
         title: input.lead.title,
         clientRef: input.lead.id,
         sourceProviderId: input.lead.source_provider_id,
