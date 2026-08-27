@@ -337,7 +337,8 @@ function safeHref(value: string) {
 
 function getToolRunTitle(toolRun: SupliaToolRun) {
   const name = toolRun.toolName.replace(/\./g, ' · ').replace(/_/g, ' ');
-  if (/apollo/i.test(toolRun.toolName)) return 'Apollo';
+  if (/fullenrich|prospecting\.search/i.test(toolRun.toolName)) return 'FullEnrich';
+  if (/apollo/i.test(toolRun.toolName)) return 'FullEnrich';
   if (/gmail|mailbox/i.test(toolRun.toolName)) return 'Gmail';
   if (/crm/i.test(toolRun.toolName)) return 'CRM';
   if (/email|campaign/i.test(toolRun.toolName)) return 'Email';
@@ -347,7 +348,8 @@ function getToolRunTitle(toolRun: SupliaToolRun) {
 
 function getToolVerb(toolRun: SupliaToolRun) {
   if (toolRun.status === 'running' || toolRun.status === 'queued') {
-    if (/apollo/i.test(toolRun.toolName)) return 'Buscando en Apollo';
+    if (/fullenrich|prospecting\.search/i.test(toolRun.toolName)) return 'Buscando con FullEnrich';
+    if (/apollo/i.test(toolRun.toolName)) return 'Buscando con FullEnrich';
     if (/gmail|mailbox/i.test(toolRun.toolName)) return 'Consultando Gmail';
     if (/crm/i.test(toolRun.toolName)) return 'Registrando en CRM';
     if (/web|serp|research/i.test(toolRun.toolName)) return 'Investigando en la web';
@@ -417,7 +419,8 @@ function getJobStatusLabel(status?: string | null, progressLabel?: string | null
 
 function formatProviderLabel(provider?: unknown) {
   const value = cleanText(provider).toLowerCase();
-  if (value === 'apollo') return 'Apollo';
+  if (value === 'fullenrich') return 'FullEnrich';
+  if (value === 'apollo') return 'FullEnrich';
   if (value === 'pdl') return 'People Data Labs';
   if (value === 'serpapi') return 'SerpAPI';
   if (value === 'brand.dev' || value === 'branddev') return 'Brand.dev';
@@ -2111,7 +2114,7 @@ export function SupliaWorkspace() {
               id={`${inputIdPrefix}-edit-${action.id}`}
               value={planEditText[action.id] || ''}
               onChange={(event) => setPlanEditText((prev) => ({ ...prev, [action.id]: event.target.value }))}
-              placeholder="Ej: enfocalo en empresas SaaS de 50-200 empleados, agrega una etapa para validar rubro y no uses Apollo todavia."
+              placeholder="Ej: enfocalo en empresas SaaS de 50-200 empleados y agrega una etapa para validar el rubro antes de buscar."
               className="mt-2 min-h-24 rounded-xl bg-white/70 text-sm dark:bg-black/20"
               disabled={isBusy}
             />
@@ -2504,7 +2507,7 @@ export function SupliaWorkspace() {
                   <DropdownMenuContent align="start" className="w-64 rounded-[13px]">
                     <DropdownMenuLabel>Herramientas</DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => startQuickAction('prospecting')}>Busqueda en Apollo</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => startQuickAction('prospecting')}>Busqueda con FullEnrich</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => startQuickAction('research')}>Investigacion web</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => startQuickAction('contact')}>Generar correo</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => startQuickAction('followup')}>Registrar seguimiento</DropdownMenuItem>

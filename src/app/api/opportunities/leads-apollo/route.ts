@@ -1,15 +1,12 @@
-// src/app/api/opportunities/leads-apollo/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import type { LeadFromApollo } from '@/lib/types';
-import { fetchWithLog } from '@/lib/debug';
-import * as San from '@/lib/input-sanitize';
-import { requireAuth, handleAuthError } from '@/lib/server/auth-utils';
+
+import type { LeadSearchResult } from '@/lib/types';
+import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
+import { requestFullEnrichSearch, FullEnrichSearchClientError } from '@/lib/server/fullenrich-search-client';
 import { resolveLeadProvider } from '@/lib/server/provider-routing';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-
-const BASE = 'https://api.apollo.io/api/v1';
 
 type Body = {
   personTitles?: string[];
@@ -20,264 +17,145 @@ type Body = {
   maxPages?: number;
   onlyVerifiedEmails?: boolean;
   similarTitles?: boolean;
-  dedupe?: 'smart' | 'id' | 'email' | 'none'; // default 'smart'
-  includeLockedEmails?: boolean; // default true (se muestran, pero no deduplican)
+  dedupe?: 'smart' | 'id' | 'email' | 'none';
+  includeLockedEmails?: boolean;
   provider?: unknown;
 };
 
-const LOCKED_RE = /email_not_unlocked@domain\.com/i;
 type SearchResult = {
-  leads: LeadFromApollo[];
+  leads: LeadSearchResult[];
   total: number;
   returned: number;
   domains: string[];
 };
 
-export async function POST(req: NextRequest) {
+function list(value: unknown, max = 20) {
+  return Array.isArray(value)
+    ? [...new Set(value.map((item) => String(item || '').trim()).filter(Boolean))].slice(0, max)
+    : [];
+}
+
+function cleanDomain(value: unknown) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  try {
+    return new URL(raw.startsWith('http') ? raw : `https://${raw}`).hostname.replace(/^www\./, '');
+  } catch {
+    return raw.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+  }
+}
+
+function mapLead(raw: any): LeadSearchResult {
+  const organization = raw?.organization && typeof raw.organization === 'object' ? raw.organization : {};
+  const sourceProviderId = String(raw?.source_provider_id || raw?.id || '').trim() || undefined;
+  const city = String(raw?.city || '').trim();
+  const state = String(raw?.state || '').trim();
+  const country = String(raw?.country || '').trim();
+  return {
+    id: sourceProviderId,
+    fullName: String(raw?.name || raw?.full_name || '').trim(),
+    title: String(raw?.title || raw?.headline || '').trim(),
+    linkedinUrl: String(raw?.linkedin_url || '').trim() || undefined,
+    location: [city, state, country].filter(Boolean).join(', ') || undefined,
+    companyName: String(raw?.organization_name || organization?.name || '').trim() || undefined,
+    companyDomain: cleanDomain(raw?.organization_domain || organization?.domain || organization?.primary_domain) || undefined,
+    sourceProvider: String(raw?.source_provider || 'fullenrich'),
+    sourceProviderId,
+  };
+}
+
+function dedupe(leads: LeadSearchResult[], strategy: Body['dedupe']) {
+  if (strategy === 'none') return leads;
+  const seen = new Set<string>();
+  return leads.filter((lead) => {
+    const key = strategy === 'email'
+      ? ''
+      : String(lead.id || lead.linkedinUrl || `${lead.fullName}|${lead.companyDomain || lead.companyName}|${lead.title}`).toLowerCase();
+    if (!key || seen.has(key)) return !key;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function searchCompanyName(companyName: string, input: Record<string, unknown>) {
+  let result = await requestFullEnrichSearch({
+    ...input,
+    search_mode: 'company_name',
+    company_name: companyName,
+  });
+  const candidates = Array.isArray(result.organization_candidates) ? result.organization_candidates : [];
+  if (result.requires_organization_selection && candidates[0]) {
+    const selected = candidates[0];
+    result = await requestFullEnrichSearch({
+      ...input,
+      search_mode: 'company_name',
+      company_name: companyName,
+      selected_organization_id: selected.id,
+      selected_organization_name: selected.name,
+      selected_organization_domain: selected.primary_domain,
+    });
+  }
+  return result;
+}
+
+async function searchLeads(body: Body): Promise<SearchResult> {
+  const domains = list(body.domains).map(cleanDomain).filter(Boolean);
+  const companyNames = list(body.companyNames, 5);
+  const maxResults = Math.max(1, Math.min(100, Number(body.perPage || 50) * Number(body.maxPages || 1)));
+  const input = {
+    titles: list(body.personTitles),
+    person_locations: list(body.personLocations),
+    include_similar_titles: body.similarTitles !== false,
+    max_results: maxResults,
+  };
+  const results: any[] = [];
+
+  if (domains.length > 0) {
+    results.push(await requestFullEnrichSearch({
+      ...input,
+      search_mode: 'batch',
+      organization_domains: domains,
+    }));
+  } else {
+    for (const companyName of companyNames) {
+      results.push(await searchCompanyName(companyName, input));
+    }
+  }
+
+  const leads = dedupe(results.flatMap((result) => Array.isArray(result?.leads) ? result.leads.map(mapLead) : []), body.dedupe || 'smart');
+  return {
+    leads,
+    total: leads.length,
+    returned: leads.length,
+    domains,
+  };
+}
+
+export async function POST(request: NextRequest) {
   try {
     const { organizationId } = await requireAuth();
-
-    // We could check quota here too if needed (e.g. 'leadSearch' quota)
-
-    const body = (await req.json()) as Body;
+    const body = await request.json() as Body;
     const providerDecision = resolveLeadProvider({
       requestedProvider: body.provider,
       organizationId,
     });
-
-    const providerUsed = providerDecision.provider;
-    const result = await searchLeadsWithApollo(body);
-
+    const result = await searchLeads(body);
     const response = NextResponse.json({
       ...result,
       providerRequested: providerDecision.requestedProvider,
-      providerUsed,
+      providerUsed: providerDecision.provider,
       providerDefault: providerDecision.defaultProvider,
+      providerForcedReason: providerDecision.forcedProviderReason,
       fallbackApplied: false,
-      providerForcedReason: providerDecision.forcedApolloReason,
     });
-    response.headers.set('x-provider-used', providerUsed);
+    response.headers.set('x-provider-used', 'fullenrich');
     return response;
-  } catch (e: any) {
-    const authRes = handleAuthError(e);
-    if (authRes.status !== 500 || e.name === 'AuthError') return authRes;
-
-    console.error("[leads-apollo] fatal", { message: e?.message, stack: e?.stack });
-    return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 });
-  }
-}
-
-async function searchLeadsWithApollo(body: Body): Promise<SearchResult> {
-  const {
-    personTitles = [],
-    domains = [],
-    companyNames = [],
-    personLocations,
-    perPage = 50,
-    maxPages = 10,
-    onlyVerifiedEmails = true,
-    similarTitles = true,
-    dedupe = 'smart',
-    includeLockedEmails = true,
-  } = body;
-
-  const apiKey = process.env.APOLLO_API_KEY;
-  if (!apiKey) throw new Error('APOLLO_API_KEY missing');
-
-  const domainSet = new Set<string>(domains.filter(Boolean).map((d) => d.toLowerCase()));
-  const namesToResolve = Array.from(new Set((companyNames || []).map(normalizeName).filter(Boolean)));
-
-  for (const name of namesToResolve) {
-    const dom = await resolveDomainFromNameApollo(name, apiKey);
-    if (dom) domainSet.add(dom.toLowerCase());
-  }
-
-  const domainList = Array.from(domainSet);
-  if (domainList.length === 0) {
-    return { leads: [], total: 0, returned: 0, domains: [] };
-  }
-
-  const rawTitles = (personTitles || []) as string[];
-  const cleanTitles = rawTitles.map(San.sanitizeTitle).filter(Boolean);
-
-  const rawLocs = (personLocations || []) as string[] | undefined;
-  const cleanLocs = rawLocs?.map(San.sanitizeLocation).filter(Boolean);
-
-  const leads: LeadFromApollo[] = [];
-  let page = 1;
-  const per = Math.max(1, Math.min(100, perPage));
-  const maxP = Math.max(1, Math.min(500, maxPages));
-
-  while (page <= maxP) {
-    const qs = new URLSearchParams();
-    cleanTitles.forEach((t) => qs.append('person_titles[]', t));
-    if (cleanTitles.length && similarTitles) {
-      qs.set('person_titles_similar', 'true');
-      qs.set('similar_titles', 'true');
+  } catch (error: any) {
+    const authResponse = handleAuthError(error);
+    if (authResponse.status !== 500 || error?.name === 'AuthError') return authResponse;
+    if (error instanceof FullEnrichSearchClientError) {
+      return NextResponse.json({ error: error.code }, { status: error.status });
     }
-    domainList.forEach((d) => qs.append('q_organization_domains_list[]', d));
-    cleanLocs?.forEach((l) => qs.append('person_locations[]', l));
-    if (onlyVerifiedEmails) qs.append('contact_email_status[]', 'verified');
-    qs.set('per_page', String(per));
-    qs.set('page', String(page));
-
-    const url = `${BASE}/mixed_people/search?${qs.toString()}`;
-    const res = await fetchWithLog('APOLLO people search', url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Api-Key': apiKey,
-        accept: 'application/json',
-        'Cache-Control': 'no-cache',
-      },
-    });
-
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`apollo_search_failed:${res.status}:${txt.slice(0, 300)}`);
-    }
-
-    const data = await res.json();
-    const people: any[] = data?.people ?? [];
-    for (const p of people) {
-      const rawEmail = p.email ?? undefined;
-      const isLocked = !!(rawEmail && LOCKED_RE.test(rawEmail));
-      const outEmail = includeLockedEmails ? rawEmail : (isLocked ? undefined : rawEmail);
-
-      leads.push({
-        id: p.id ?? p.person_id,
-        fullName: p.name ?? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim(),
-        title: p.title ?? p.headline ?? '',
-        email: outEmail,
-        lockedEmail: isLocked,
-        guessedEmail: p.email_status === 'guessed',
-        linkedinUrl: p.linkedin_url ?? undefined,
-        location: [p.city, p.state, p.country].filter(Boolean).join(', ') || undefined,
-        companyName: p.organization?.name ?? undefined,
-        companyDomain: p.organization?.primary_domain ?? undefined,
-      });
-    }
-
-    const nextPage = Number(data?.pagination?.next_page || 0);
-    const totalPages = Number(data?.pagination?.total_pages || 0);
-
-    if (totalPages > 0) {
-      if (page >= Math.min(totalPages, maxP)) break;
-      page++;
-      continue;
-    }
-    if (nextPage && page < maxP) {
-      page = nextPage;
-      continue;
-    }
-    if (people.length < per) break;
-    page++;
-  }
-
-  const final = dedupeLeads(leads, dedupe);
-  return { leads: final, total: leads.length, returned: final.length, domains: domainList };
-}
-
-function dedupeLeads(leads: LeadFromApollo[], dedupe: Body['dedupe']) {
-  let final = leads;
-
-  if (dedupe === 'id' || dedupe === 'smart') {
-    const seen = new Set<string>();
-    final = leads.filter((x) => {
-      const key =
-        (dedupe === 'id' ? x.id : undefined) ||
-        x.id || x.linkedinUrl || `${x.fullName}|${x.companyDomain || x.companyName}|${x.title}`;
-      const k = (key || '').toLowerCase();
-      if (!k) return true;
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
-  } else if (dedupe === 'email') {
-    const seen = new Set<string>();
-    final = leads.filter((x) => {
-      const k = x.email && !LOCKED_RE.test(x.email) ? x.email.toLowerCase() : '';
-      if (!k) return true;
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
-  }
-
-  return final;
-}
-
-/* ===== helpers: org search + matching ===== */
-
-async function resolveDomainFromNameApollo(companyNameRaw: string, apiKey: string): Promise<string | null> {
-  // pedimos hasta 5 y elegimos el más parecido; si no supera umbral, tomamos el primero
-  const qs = new URLSearchParams();
-  qs.set('per_page', '5');
-  qs.append('q_organization_name', companyNameRaw);
-  const url = `${BASE}/mixed_companies/search?${qs.toString()}`;
-
-  const r = await fetchWithLog('APOLLO org search', url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Api-Key': apiKey,
-      accept: 'application/json',
-      'Cache-Control': 'no-cache',
-    },
-  });
-  if (!r.ok) return null;
-
-  const j = await r.json();
-  const orgs: any[] = j?.organizations || [];
-  if (orgs.length === 0) return null;
-
-  const best = pickBestOrgMatch(companyNameRaw, orgs);
-  const chosen = best || orgs[0];
-  return chosen?.primary_domain || cleanDomain(chosen?.website_url) || null;
-}
-
-function pickBestOrgMatch(targetNameRaw: string, orgs: any[]) {
-  const target = normalizeName(targetNameRaw);
-  let best: any = null, bestScore = -1;
-  for (const org of orgs) {
-    const candidate = normalizeName(org?.name || '');
-    const score = similarityScore(target, candidate);
-    if (score > bestScore) { bestScore = score; best = org; }
-  }
-  return bestScore >= 0.45 ? best : null;
-}
-
-function normalizeName(s: string) {
-  return (s || '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/\b(grupo|the)\b/g, ' ')
-    .replace(/\b(s\.?a\.?|s\.?p\.?a\.?|ltda|llc|inc|corp(oration)?|company|co|gmbh|srl|s\.?l\.?|plc|ag|sa de cv)\b/g, ' ')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function similarityScore(a: string, b: string) {
-  if (!a || !b) return 0;
-  const A = new Set(a.split(' ').filter(Boolean));
-  const B = new Set(b.split(' ').filter(Boolean));
-  const inter = [...A].filter(t => B.has(t)).length;
-  const union = new Set([...A, ...B]).size;
-  let score = union ? inter / union : 0;
-  if (b.startsWith(a) || a.startsWith(b)) score += 0.25;
-  if (a.includes(b) || b.includes(a)) score += 0.15;
-  return Math.min(score, 1);
-}
-
-function cleanDomain(url?: string): string | null {
-  if (!url) return null;
-  try {
-    const u = new URL(url.startsWith('http') ? url : `https://${url}`);
-    const host = u.hostname.toLowerCase();
-    return host.startsWith('www.') ? host.slice(4) : host;
-  } catch {
-    const host = String(url).toLowerCase().replace(/^https?:\/\//, '');
-    return host.startsWith('www.') ? host.slice(4) : host;
+    return NextResponse.json({ error: 'FULLENRICH_SEARCH_FAILED' }, { status: 500 });
   }
 }

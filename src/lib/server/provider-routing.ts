@@ -1,18 +1,19 @@
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
-export type LeadProvider = 'apollo';
-type RequestedLeadProvider = 'apollo' | 'pdl';
+export type LeadProvider = 'fullenrich';
+type RequestedLeadProvider = 'fullenrich' | 'apollo' | 'pdl';
 
 export type ProviderDecision = {
   provider: LeadProvider;
   requestedProvider: RequestedLeadProvider | null;
   defaultProvider: LeadProvider;
-  forcedApolloReason?: string;
+  forcedProviderReason?: 'fullenrich_only';
 };
 
 function normalizeRequestedProvider(value: unknown): RequestedLeadProvider | null {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return null;
+  if (normalized === 'fullenrich') return 'fullenrich';
   if (normalized === 'apollo') return 'apollo';
   if (normalized === 'pdl') return 'pdl';
   return null;
@@ -27,11 +28,13 @@ export function resolveLeadProvider(params: {
   const requestedProvider = normalizeRequestedProvider(params.requestedProvider);
 
   return {
-    provider: 'apollo',
+    provider: 'fullenrich',
     requestedProvider,
-    defaultProvider: 'apollo',
-    // Accepting the retired value avoids breaking callers while preventing PDL execution.
-    forcedApolloReason: requestedProvider === 'pdl' ? 'apollo_only' : undefined,
+    defaultProvider: 'fullenrich',
+    // Retired provider names remain observable for callers, but can never run.
+    forcedProviderReason: requestedProvider && requestedProvider !== 'fullenrich'
+      ? 'fullenrich_only'
+      : undefined,
   };
 }
 

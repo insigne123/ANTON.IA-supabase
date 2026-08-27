@@ -5,10 +5,7 @@ import {
   consumeEndpointRateLimit,
   getGatewayConfig,
   getRequestId,
-  readBoundedJsonBody,
 } from '../../../lib/gateway';
-import { ApolloGatewayError, executeEnrichment, getApolloApiKey } from '../../../lib/apollo';
-import { validateEnrichmentInput } from '../../../lib/validation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -51,44 +48,11 @@ export async function POST(request: NextRequest) {
     return result;
   }
 
-  const body = await readBoundedJsonBody(request, config.maxRequestBytes);
-  if (!body.ok) {
-    finish(body.status, body.code);
-    return response({ error: body.code }, body.status, requestId);
-  }
-
-  const input = validateEnrichmentInput(body.value);
-  if (!input.ok) {
-    finish(400, 'INVALID_REQUEST');
-    return response({ error: 'INVALID_REQUEST', details: input.issues }, 400, requestId);
-  }
-
-  const apiKey = getApolloApiKey();
-  if (!apiKey) {
-    finish(503, 'APOLLO_PROVIDER_NOT_CONFIGURED');
-    return response({ error: 'APOLLO_PROVIDER_NOT_CONFIGURED' }, 503, requestId);
-  }
-
-  try {
-    const result = await executeEnrichment(input.value, apiKey, config);
-    finish(200, result.success ? 'COMPLETED' : 'NOT_FOUND', {
-      revealEmail: input.value.revealEmail,
-      revealPhone: input.value.revealPhone,
-      enrichmentLevel: input.value.enrichmentLevel,
-      rateLimitRemaining: rateLimit.remaining,
-    });
-    return response(result, 200, requestId);
-  } catch (error) {
-    if (error instanceof ApolloGatewayError) {
-      finish(error.status, error.code, {
-        revealEmail: input.value.revealEmail,
-        revealPhone: input.value.revealPhone,
-      });
-      return response({ error: error.code }, error.status, requestId);
-    }
-
-    console.error('[apollo-backend] enrich failed', { requestId, code: 'BACKEND_ERROR' });
-    finish(500, 'BACKEND_ERROR');
-    return response({ error: 'BACKEND_ERROR' }, 500, requestId);
-  }
+  // FullEnrich enrichment is asynchronous and requires callback records owned
+  // by the root BFF. This legacy internal endpoint deliberately cannot fall
+  // back to the old synchronous provider implementation.
+  finish(410, 'FULLENRICH_ENRICHMENT_BFF_ONLY', {
+    rateLimitRemaining: rateLimit.remaining,
+  });
+  return response({ error: 'FULLENRICH_ENRICHMENT_BFF_ONLY' }, 410, requestId);
 }

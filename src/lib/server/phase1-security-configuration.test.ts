@@ -41,9 +41,9 @@ test('provider connection checks use the authenticated server boundary', () => {
   }
 });
 
-test('App Hosting uses the buildpack and production OpenAI and Apollo settings', () => {
+test('App Hosting uses the buildpack and production OpenAI and FullEnrich settings', () => {
   assert.doesNotMatch(appHosting, /^build:/m);
-  assert.match(appHosting, /- variable: APOLLO_API_KEY\s+secret: APOLLO_API_KEY\s+availability: \[RUNTIME\]/);
+  assert.match(appHosting, /- variable: FULLENRICH_API_KEY\s+secret: FULLENRICH_API_KEY\s+availability: \[RUNTIME\]/);
   assert.match(appHosting, /- variable: OPENAI_API_KEY\s+secret: OPENAI_API_KEY\s+availability: \[RUNTIME\]/);
   assert.match(appHosting, /- variable: AI_PROVIDER\s+value: openai\s+availability: \[RUNTIME\]/);
   assert.doesNotMatch(appHosting, /- variable: GLM_API_KEY/);

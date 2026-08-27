@@ -15,10 +15,3 @@ export function normalizeLinkedinJob(item: any): JobOpportunity {
     postedTime: item?.postedTime ?? item?.publishedAt ?? undefined,
   };
 }
-
-// Export for API route compatibility - stub implementation
-// Export for API route compatibility - stub implementation
-export function buildApolloPeopleUrl(company: any, titles: string[], locations?: string[]): string {
-  // TODO: Implement proper Apollo people URL building
-  return '';
-}

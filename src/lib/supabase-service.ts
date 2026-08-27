@@ -26,6 +26,8 @@ function mapRowToLead(row: any): Lead {
         location: row.location,
         country: row.country,
         city: row.city,
+        sourceProvider: row.source_provider,
+        sourceProviderId: row.source_provider_id,
         apolloId: row.apollo_id,
         createdAt: row.created_at,
     } as Lead;
@@ -36,9 +38,6 @@ function mapLeadToRow(lead: Lead, userId: string, organizationId: string | null)
     // Validate UUID. If invalid, generate one locally so we always know the inserted ID.
     const isValidUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lead.id || '');
     const id = isValidUUID ? lead.id : uuidv4();
-
-    // If ID is not UUID, it's likely the Apollo ID we want to preserve
-    const apolloId = lead.apolloId || (!isValidUUID ? lead.id : undefined);
 
     return {
         id,
@@ -58,7 +57,9 @@ function mapLeadToRow(lead: Lead, userId: string, organizationId: string | null)
         location: lead.location,
         country: lead.country,
         city: lead.city,
-        apollo_id: apolloId,
+        apollo_id: lead.apolloId,
+        source_provider: lead.sourceProvider,
+        source_provider_id: lead.sourceProviderId,
     };
 }
 

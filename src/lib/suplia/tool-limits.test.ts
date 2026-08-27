@@ -3,23 +3,23 @@ import assert from 'node:assert/strict';
 
 import { getSupliaStepTimeoutMs, getSupliaToolLeasePolicy } from './tool-limits';
 
-test('external lead tools use Apollo leases, including legacy provider inputs', () => {
-  const env = { SUPLIA_APOLLO_CONCURRENCY_PER_ORG: '1', SUPLIA_TOOL_LEASE_TTL_SECONDS: '90' };
+test('external lead tools use FullEnrich leases, including legacy provider inputs', () => {
+  const env = { SUPLIA_FULLENRICH_CONCURRENCY_PER_ORG: '1', SUPLIA_TOOL_LEASE_TTL_SECONDS: '90' };
 
   assert.deepEqual(getSupliaToolLeasePolicy('prospecting.search_companies', { provider: 'apollo' }, env), {
-    resourceKey: 'provider:apollo',
+    resourceKey: 'provider:fullenrich',
     maxConcurrent: 1,
     ttlSeconds: 90,
   });
 
   assert.deepEqual(getSupliaToolLeasePolicy('prospecting.search_people', { provider: 'pdl' }, env), {
-    resourceKey: 'provider:apollo',
+    resourceKey: 'provider:fullenrich',
     maxConcurrent: 1,
     ttlSeconds: 90,
   });
 
   assert.deepEqual(getSupliaToolLeasePolicy('lead.enrich', { provider: 'pdl' }, env), {
-    resourceKey: 'provider:apollo',
+    resourceKey: 'provider:fullenrich',
     maxConcurrent: 1,
     ttlSeconds: 90,
   });

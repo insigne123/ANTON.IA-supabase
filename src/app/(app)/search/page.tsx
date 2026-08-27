@@ -48,7 +48,6 @@ import { Badge } from '@/components/ui/badge';
 import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
-import { APOLLO_EMAIL_ENRICHMENT_CREDITS, APOLLO_PHONE_ENRICHMENT_CREDITS, apolloEnrichmentCreditCost } from '@/lib/apollo-credit-costs';
 import {
   DEFAULT_LEAD_SEARCH_FILTERS,
   normalizeSavedSearchCriteria,
@@ -188,7 +187,8 @@ function normalizeLeadForUI(raw: Lead, options?: {
     companyWebsite,
     companyLinkedin,
     linkedinUrl,
-    apolloId: raw.apollo_id || undefined,
+    sourceProvider: raw.source_provider || (raw.apollo_id ? 'apollo' : undefined),
+    sourceProviderId: raw.source_provider_id || raw.apollo_id || undefined,
     phoneNumbers: revealPhone ? (phoneNumbers || null) : null,
     primaryPhone: revealPhone ? primaryPhone : null,
     enrichmentStatus: revealPhone || revealEmail ? enrichmentStatus : undefined,
@@ -327,7 +327,8 @@ function hasLeadPhone(lead: UILaed) {
 function mapLeadToEnriched(l: UILaed) {
   return {
     id: l.id,
-    apolloId: l.apolloId,
+    sourceProvider: l.sourceProvider,
+    sourceProviderId: l.sourceProviderId || l.apolloId,
     sourceOpportunityId: undefined,
     fullName: l.name,
     title: l.title,
@@ -1282,7 +1283,7 @@ export default function SearchPage() {
                     onChange={(event) => handleFilterChange('linkedinUrl', event.target.value)}
                     required
                   />
-                  <p className="text-xs text-muted-foreground">El correo se consulta por defecto. Activa el teléfono antes de buscar si también lo necesitas.</p>
+                  <p className="text-xs text-muted-foreground">Define qué datos laborales solicitarás al enriquecer los perfiles encontrados.</p>
                 </div>
                 <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
                   <CollapsibleTrigger asChild>
@@ -1296,15 +1297,15 @@ export default function SearchPage() {
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
                         <div>
-                          <Label htmlFor="revealEmail">Buscar correo</Label>
-                          <p className="text-xs text-muted-foreground">Incluye el correo cuando esté disponible · {APOLLO_EMAIL_ENRICHMENT_CREDITS} crédito Apollo.</p>
+                          <Label htmlFor="revealEmail">Correo laboral</Label>
+                          <p className="text-xs text-muted-foreground">Solicita únicamente direcciones de trabajo.</p>
                         </div>
                         <Switch id="revealEmail" checked={filters.revealEmail} onCheckedChange={(value) => handleFilterChange('revealEmail', value)} />
                       </div>
                       <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
                         <div>
-                          <Label htmlFor="revealPhone">Buscar teléfono</Label>
-                          <p className="text-xs text-muted-foreground">Puede tardar un poco más · {APOLLO_PHONE_ENRICHMENT_CREDITS} créditos Apollo.</p>
+                          <Label htmlFor="revealPhone">Teléfono</Label>
+                          <p className="text-xs text-muted-foreground">Se completa de forma asíncrona cuando está disponible.</p>
                         </div>
                         <Switch id="revealPhone" checked={filters.revealPhone} onCheckedChange={(value) => handleFilterChange('revealPhone', value)} />
                       </div>
@@ -1312,7 +1313,7 @@ export default function SearchPage() {
                   </CollapsibleContent>
                 </Collapsible>
                 <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
-                  Costo estimado por perfil: <strong className="font-medium text-foreground">{apolloEnrichmentCreditCost({ revealEmail: filters.revealEmail, revealPhone: filters.revealPhone })} créditos Apollo</strong>.
+                  El resultado inicial muestra datos profesionales. Los datos de contacto se actualizan en segundo plano.
                 </p>
               </div>
             ) : filters.searchMode === 'company_name' ? (

@@ -3,19 +3,22 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 export const INTERNAL_AUTH_HEADER = 'x-api-secret-key';
 export const INTERNAL_AUTH_ENV = 'ENRICHMENT_SERVICE_SECRET';
 
-type Environment = Record<string, string | undefined>;
+export type GatewayEnvironment = Record<string, string | undefined>;
+export const LEAD_PROVIDERS = ['fullenrich'] as const;
+export type LeadProvider = (typeof LEAD_PROVIDERS)[number];
 
 export type GatewayConfig = {
   maxRequestBytes: number;
   maxSearchResults: number;
   providerTimeoutMs: number;
+  defaultProvider: LeadProvider;
   rateLimitWindowMs: number;
   leadSearchMaxRequests: number;
   enrichMaxRequests: number;
 };
 
 function boundedInteger(
-  environment: Environment,
+  environment: GatewayEnvironment,
   name: string,
   fallback: number,
   minimum: number,
@@ -26,11 +29,17 @@ function boundedInteger(
   return Math.max(minimum, Math.min(maximum, Math.floor(value)));
 }
 
-export function getGatewayConfig(environment: Environment = process.env): GatewayConfig {
+function configuredLeadProvider(environment: GatewayEnvironment): LeadProvider {
+  const configured = String(environment.LEADS_PROVIDER_DEFAULT || '').trim().toLowerCase();
+  return LEAD_PROVIDERS.find((provider) => provider === configured) || 'fullenrich';
+}
+
+export function getGatewayConfig(environment: GatewayEnvironment = process.env): GatewayConfig {
   return {
     maxRequestBytes: boundedInteger(environment, 'APOLLO_BACKEND_MAX_REQUEST_BYTES', 65_536, 1_024, 262_144),
     maxSearchResults: boundedInteger(environment, 'APOLLO_BACKEND_MAX_SEARCH_RESULTS', 100, 1, 100),
     providerTimeoutMs: boundedInteger(environment, 'APOLLO_BACKEND_PROVIDER_TIMEOUT_MS', 20_000, 1_000, 60_000),
+    defaultProvider: configuredLeadProvider(environment),
     rateLimitWindowMs: boundedInteger(environment, 'APOLLO_BACKEND_RATE_LIMIT_WINDOW_MS', 60_000, 1_000, 3_600_000),
     leadSearchMaxRequests: boundedInteger(environment, 'APOLLO_BACKEND_LEAD_SEARCH_MAX_REQUESTS', 20, 1, 1_000),
     enrichMaxRequests: boundedInteger(environment, 'APOLLO_BACKEND_ENRICH_MAX_REQUESTS', 60, 1, 1_000),
@@ -48,11 +57,11 @@ export type InternalAuthResult =
   | { ok: true }
   | { ok: false; status: 401 | 503; code: 'INTERNAL_AUTH_REQUIRED' | 'INTERNAL_AUTH_NOT_CONFIGURED' };
 
-export function authenticateInternalRequest(headers: Headers, environment: Environment = process.env): InternalAuthResult {
+export function authenticateInternalRequest(headers: Headers, environment: GatewayEnvironment = process.env): InternalAuthResult {
   const expected = String(environment[INTERNAL_AUTH_ENV] || '').trim();
 
   // There is intentionally no local-development bypass. A missing production
-  // secret therefore fails closed instead of accidentally exposing Apollo.
+  // secret therefore fails closed instead of exposing the provider gateway.
   if (!expected) {
     return { ok: false, status: 503, code: 'INTERNAL_AUTH_NOT_CONFIGURED' };
   }
@@ -176,8 +185,8 @@ export type GatewayAuditEvent = {
 export function auditGatewayRequest(event: GatewayAuditEvent) {
   // Keep audit fields aggregate-only: Cloud Logging should never receive secrets
   // or request payloads containing contact data.
-  console.info('[apollo-backend-audit]', JSON.stringify({
-    service: 'apollo-backend',
+  console.info('[lead-provider-backend-audit]', JSON.stringify({
+    service: 'lead-provider-backend',
     timestamp: new Date().toISOString(),
     route: event.route,
     requestId: event.requestId,

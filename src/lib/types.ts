@@ -67,6 +67,8 @@ export interface Lead {
   location?: string;
   country?: string | null;
   city?: string | null;
+  sourceProvider?: string;
+  sourceProviderId?: string;
   apolloId?: string;
   phoneNumbers?: Array<{
     raw_number?: string | null;
@@ -218,7 +220,7 @@ export type CompanyTarget = {
   sourceJobIds: string[];
 };
 
-export type LeadFromApollo = {
+export type LeadSearchResult = {
   id?: string;
   fullName: string;
   title: string;
@@ -229,11 +231,15 @@ export type LeadFromApollo = {
   location?: string;
   companyName?: string;
   companyDomain?: string;
+  sourceProvider?: string;
+  sourceProviderId?: string;
 };
 
 export type EnrichedLead = {
   id: string;
-  apolloId?: string; // New field for integration
+  sourceProvider?: string;
+  sourceProviderId?: string;
+  apolloId?: string;
   organizationId?: string;
   sourceOpportunityId?: string;
   fullName: string;

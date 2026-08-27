@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { GatewayConfig } from './gateway';
+import type { GatewayConfig, LeadProvider } from './gateway';
 
 const MAX_FILTER_ITEMS = 20;
 
@@ -8,6 +8,7 @@ export type ValidationResult<T> =
   | { ok: false; issues: Array<{ path: string; message: string }> };
 
 export type LeadSearchInput = {
+  provider: LeadProvider;
   searchMode: 'batch' | 'company_name' | 'linkedin_profile';
   userId?: string;
   linkedinUrl?: string;
@@ -34,7 +35,7 @@ export type EnrichmentInput = {
   tableName?: 'enriched_opportunities' | 'enriched_leads';
   lead: {
     id?: string;
-    apolloId?: string;
+    sourceProviderId?: string;
     firstName?: string;
     lastName?: string;
     fullName?: string;
@@ -55,7 +56,7 @@ function boundedTextList(maxLength = 160) {
   return z.array(boundedText(maxLength)).max(MAX_FILTER_ITEMS, `must contain at most ${MAX_FILTER_ITEMS} values`).optional().default([]);
 }
 
-export function normalizeApolloEmployeeRange(value: string) {
+export function normalizeEmployeeRange(value: string) {
   const normalized = value.trim().toLowerCase().replace(/\s+empleados?$/, '').trim();
   const bounded = normalized.match(/^(\d+)\s*(?:-|,|a)\s*(\d+)$/);
   if (bounded) {
@@ -75,8 +76,8 @@ export function normalizeApolloEmployeeRange(value: string) {
 
 function employeeRangeList() {
   const employeeRange = boundedText(80)
-    .refine((value) => normalizeApolloEmployeeRange(value) !== null, 'must use min,max, min-max, or min+')
-    .transform((value) => normalizeApolloEmployeeRange(value)!);
+    .refine((value) => normalizeEmployeeRange(value) !== null, 'must use min,max, min-max, or min+')
+    .transform((value) => normalizeEmployeeRange(value)!);
   return z.array(employeeRange).max(MAX_FILTER_ITEMS, `must contain at most ${MAX_FILTER_ITEMS} values`).optional().default([]);
 }
 
@@ -116,6 +117,7 @@ function validLinkedinUrl(value: string) {
 
 export function validateLeadSearchInput(value: unknown, config: GatewayConfig): ValidationResult<LeadSearchInput> {
   const schema = z.object({
+    provider: z.literal('fullenrich').optional(),
     user_id: optionalIdentifier(),
     search_mode: z.enum(['batch', 'company_name', 'linkedin_profile']),
     linkedin_url: z.string().trim().max(500).optional()
@@ -162,7 +164,9 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
       && input.company_location.length === 0
       && input.person_locations.length === 0
       && input.employee_range.length === 0
-      && input.employee_ranges.length === 0) {
+      && input.employee_ranges.length === 0
+      && input.organization_domains.length === 0
+      && !input.selected_organization_id) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['search_mode'], message: 'at least one bounded search filter is required' });
     }
   });
@@ -174,6 +178,7 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
   return {
     ok: true,
     value: {
+      provider: input.provider ?? config.defaultProvider,
       searchMode: input.search_mode,
       userId: input.user_id,
       linkedinUrl: input.linkedin_url,
@@ -205,7 +210,7 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
 export function validateEnrichmentInput(value: unknown): ValidationResult<EnrichmentInput> {
   const leadSchema = z.object({
     id: optionalIdentifier(),
-    apollo_id: optionalIdentifier(),
+    source_provider_id: optionalIdentifier(),
     first_name: boundedText(100).optional(),
     last_name: boundedText(100).optional(),
     full_name: boundedText(200).optional(),
@@ -266,8 +271,8 @@ export function validateEnrichmentInput(value: unknown): ValidationResult<Enrich
   }
 
   const lead = input.lead;
-  if (!lead.id && !lead.apollo_id && !lead.linkedin_url && !(lead.first_name && lead.organization_name)) {
-    issues.push({ path: 'lead', message: 'an Apollo id, LinkedIn URL, or first name plus organization is required' });
+  if (!lead.id && !lead.source_provider_id && !lead.linkedin_url && !(lead.first_name && lead.organization_name)) {
+    issues.push({ path: 'lead', message: 'a provider id, LinkedIn URL, or first name plus organization is required' });
   }
 
   if (issues.length > 0) return { ok: false, issues: issues.slice(0, 10) };
@@ -279,7 +284,7 @@ export function validateEnrichmentInput(value: unknown): ValidationResult<Enrich
       tableName: input.table_name,
       lead: {
         id: input.lead.id,
-        apolloId: input.lead.apollo_id,
+        sourceProviderId: input.lead.source_provider_id,
         firstName: input.lead.first_name,
         lastName: input.lead.last_name,
         fullName: input.lead.full_name,

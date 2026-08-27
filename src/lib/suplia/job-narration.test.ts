@@ -7,7 +7,7 @@ test('job intro explains plan approval before external credits', () => {
   const message = buildSupliaJobIntroMessage({ job_type: 'prospecting_campaign' });
   assert.ok(message.includes('No voy a buscar leads'));
   assert.ok(message.includes('aprobacion del plan'));
-  assert.ok(message.includes('Apollo.'));
+  assert.ok(message.includes('FullEnrich.'));
 });
 
 test('plan approval message is explicit and safe', () => {

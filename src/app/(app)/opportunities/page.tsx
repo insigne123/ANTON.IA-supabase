@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@/components/ui/dialog';
-import { JobOpportunity, CompanyTarget, LeadFromApollo } from '@/lib/types';
+import { JobOpportunity, CompanyTarget, LeadSearchResult } from '@/lib/types';
 import { PageHeader } from '@/components/page-header';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -34,7 +34,7 @@ export default function OpportunitiesPage() {
   const [openLeadModal, setOpenLeadModal] = useState(false);
   const [leadTitles, setLeadTitles] = useState('Head of Talent, HR Manager, Recruiting Lead');
   const [personLocations, setPersonLocations] = useState('');
-  const [leads, setLeads] = useState<LeadFromApollo[]>([]);
+  const [leads, setLeads] = useState<LeadSearchResult[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [selLeadIdx, setSelLeadIdx] = useState<Record<number, boolean>>({});
   const [enriching, setEnriching] = useState(false);
@@ -264,14 +264,16 @@ export default function OpportunitiesPage() {
         title: l.title || undefined,
         sourceOpportunityId: (l as any).sourceJobId || undefined,
         clientRef: (l as any)?.id || `${l.fullName}-${i}`, // usa id para referencia cliente
-        // id: do not send (l as any).id because it is an Apollo ID (non-UUID), we want backend to gen UUID
-        apolloId: (l as any).id, // Send Apollo ID for precise enrichment
+        sourceProviderId: (l as any).sourceProvider === 'fullenrich'
+          ? ((l as any).sourceProviderId || (l as any).id)
+          : undefined,
       }));
 
       const res = await fetch('/api/opportunities/enrich-apollo', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Idempotency-Key': crypto.randomUUID(),
           'x-quota-ticket': getQuotaTicket() || '',
         },
         body: JSON.stringify({ leads: payloadLeads }),
@@ -301,7 +303,8 @@ export default function OpportunitiesPage() {
       const byRef = new Map(payloadLeads.map(pl => [pl.clientRef, pl]));
       const formatted = enriched.map((e: any) => ({
         id: e.id,
-        apolloId: e.apolloId,
+        sourceProvider: e.sourceProvider,
+        sourceProviderId: e.sourceProviderId,
         fullName: e.fullName,
         title: e.title,
         email: e.email,
@@ -326,8 +329,8 @@ export default function OpportunitiesPage() {
       if (consumed > 0) Quota.incClientQuota?.('enrich', consumed);
 
       toast({
-        title: 'Enriquecimiento listo',
-        description: `Añadidos a Enriquecidos: ${(addRes as any)?.addedCount ?? formatted.length}`,
+        title: 'Enriquecimiento en curso',
+        description: `Enviados a Enriquecidos: ${(addRes as any)?.addedCount ?? formatted.length}. Los datos aparecerán al finalizar.`,
       });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error al enriquecer', description: e.message || 'Fallo inesperado' });

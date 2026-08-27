@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { getGatewayConfig } from './gateway';
-import { normalizeApolloEmployeeRange, validateEnrichmentInput, validateLeadSearchInput } from './validation';
+import { normalizeEmployeeRange, validateEnrichmentInput, validateLeadSearchInput } from './validation';
 
 test('lead search validation requires filters and caps requested provider results', () => {
   const config = getGatewayConfig({ APOLLO_BACKEND_MAX_SEARCH_RESULTS: '100' });
@@ -25,12 +25,36 @@ test('lead search validation requires filters and caps requested provider result
   assert.equal(valid.ok, false);
 });
 
+test('lead search validation only accepts FullEnrich', () => {
+  const fullEnrichConfig = getGatewayConfig({ LEADS_PROVIDER_DEFAULT: 'fullenrich' });
+  const defaulted = validateLeadSearchInput({
+    search_mode: 'batch',
+    titles: ['Founder'],
+  }, fullEnrichConfig);
+  assert.equal(defaulted.ok, true);
+  if (defaulted.ok) assert.equal(defaulted.value.provider, 'fullenrich');
+
+  const rejectedApollo = validateLeadSearchInput({
+    provider: 'apollo',
+    search_mode: 'batch',
+    titles: ['Founder'],
+  }, fullEnrichConfig);
+  assert.equal(rejectedApollo.ok, false);
+
+  const unsupported = validateLeadSearchInput({
+    provider: 'unknown',
+    search_mode: 'batch',
+    titles: ['Founder'],
+  }, fullEnrichConfig);
+  assert.equal(unsupported.ok, false);
+});
+
 test('company searches accept selected-organization metadata but use its id as the provider filter', () => {
   const config = getGatewayConfig({ APOLLO_BACKEND_MAX_SEARCH_RESULTS: '100' });
   const company = validateLeadSearchInput({
     search_mode: 'company_name',
     company_name: 'Example Company',
-    selected_organization_id: 'apollo-organization-id',
+    selected_organization_id: 'fullenrich-organization-id',
     selected_organization_name: 'Example Company',
     selected_organization_domain: 'example.com',
     selected_organization_website: 'https://example.com',
@@ -41,7 +65,7 @@ test('company searches accept selected-organization metadata but use its id as t
   assert.equal(company.ok, true);
   if (company.ok) {
     assert.deepEqual(company.value.organizationDomains, []);
-    assert.equal(company.value.selectedOrganizationId, 'apollo-organization-id');
+    assert.equal(company.value.selectedOrganizationId, 'fullenrich-organization-id');
   }
 });
 
@@ -65,16 +89,16 @@ test('lead search normalizes employee ranges and keeps firmographic filters sepa
     assert.deepEqual(result.value.personLocations, ['Santiago']);
     assert.equal(result.value.includeSimilarTitles, false);
   }
-  assert.equal(normalizeApolloEmployeeRange('1,10'), '1,10');
-  assert.equal(normalizeApolloEmployeeRange('10-200 empleados'), '10,200');
-  assert.equal(normalizeApolloEmployeeRange('10000001+'), null);
-  assert.equal(normalizeApolloEmployeeRange('1-10000001'), null);
-  assert.equal(normalizeApolloEmployeeRange('invalid'), null);
+  assert.equal(normalizeEmployeeRange('1,10'), '1,10');
+  assert.equal(normalizeEmployeeRange('10-200 empleados'), '10,200');
+  assert.equal(normalizeEmployeeRange('10000001+'), null);
+  assert.equal(normalizeEmployeeRange('1-10000001'), null);
+  assert.equal(normalizeEmployeeRange('invalid'), null);
 });
 
 test('enrichment validation rejects conflicting aliases and broad provider matches', () => {
   const conflictingFlags = validateEnrichmentInput({
-    lead: { id: 'apollo-person-id' },
+    lead: { id: 'fullenrich-person-id' },
     reveal_email: true,
     revealEmail: false,
   });
@@ -87,7 +111,7 @@ test('enrichment validation rejects conflicting aliases and broad provider match
   assert.equal(broadMatch.ok, false);
 
   const valid = validateEnrichmentInput({
-    lead: { id: 'apollo-person-id' },
+    lead: { id: 'fullenrich-person-id' },
     reveal_email: true,
     reveal_phone: false,
     enrichment_level: 'basic',

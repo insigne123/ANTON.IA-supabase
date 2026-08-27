@@ -227,7 +227,7 @@ export default function SavedLeadsPage() {
     const { revealEmail, revealPhone } = opts;
     const chosen = leadsToEnrich;
 
-    // La cuota diaria interna cuenta leads procesados; los créditos Apollo se muestran por separado.
+    // La cuota diaria interna cuenta los leads enviados a enriquecimiento.
     const totalCost = chosen.length;
 
     if (!Quota.canUseClientQuota('enrich', totalCost)) {
@@ -249,7 +249,7 @@ export default function SavedLeadsPage() {
         companyDomain: l.companyWebsite ? displayDomain(l.companyWebsite) : undefined,
         clientRef: l.id,
         id: l.id,
-        apolloId: l.apolloId,
+        sourceProviderId: l.sourceProvider === 'fullenrich' ? l.sourceProviderId : undefined,
       }));
       const operationId = uuid();
 
@@ -267,7 +267,7 @@ export default function SavedLeadsPage() {
 
       // Print server-side logs for debugging
       if (j?.debug?.serverLogs && Array.isArray(j.debug.serverLogs)) {
-        console.groupCollapsed('[Server Logs] Apollo Enrichment');
+        console.groupCollapsed('[Server Logs] FullEnrich Enrichment');
         j.debug.serverLogs.forEach((l: string) => console.log(l));
         console.groupEnd();
       }
@@ -310,7 +310,8 @@ export default function SavedLeadsPage() {
         // Aseguramos que phoneNumbers y primaryPhone se pasen
         return {
           id: e.id,
-          apolloId: e.apolloId,
+          sourceProvider: e.sourceProvider,
+          sourceProviderId: e.sourceProviderId,
           fullName: e.fullName,
           title: e.title,
           email: e.email,
@@ -340,7 +341,9 @@ export default function SavedLeadsPage() {
         ...e,
         email: e.email || undefined,
         primaryPhone: e.primaryPhone || (e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined),
-        emailStatus: e.email ? (e.emailStatus || 'verified') : 'not_found',
+        emailStatus: e.email
+          ? (e.emailStatus || 'verified')
+          : String(e.enrichmentStatus || '').startsWith('pending') ? 'unknown' : 'not_found',
         enrichmentStatus: e.enrichmentStatus || ((e.primaryPhone || e.phoneNumbers?.length) ? 'completed' : (revealPhone ? 'pending_phone' : 'completed')),
       }));
 
@@ -359,14 +362,9 @@ export default function SavedLeadsPage() {
       setSavedLeads(prev => prev.filter(l => !toRemoveIds.has(l.id)));
       setSelLead({});
 
-      const foundCount = leadsToSave.filter(l => !!l.email || !!l.primaryPhone).length;
-      const pendingPhoneCount = leadsToSave.filter(l => String(l.enrichmentStatus || '').trim().toLowerCase().startsWith('pending')).length;
-
       toast({
-        title: 'Enriquecimiento completado',
-        description: pendingPhoneCount > 0
-          ? `Procesados: ${leadsToSave.length}. Con datos inmediatos: ${foundCount}. Telefonos en proceso: ${pendingPhoneCount}. Movidos a Enriquecidos.`
-          : `Procesados: ${leadsToSave.length}. Con datos: ${foundCount}. Movidos a Enriquecidos.`,
+        title: 'Enriquecimiento en curso',
+        description: `${leadsToSave.length} lead(s) enviados a Enriquecidos. Los datos aparecerán al finalizar.`,
       });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error', description: e.message || 'Ocurrió un error' });

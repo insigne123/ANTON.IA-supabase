@@ -115,7 +115,7 @@ export async function getEnrichmentQuotaOperation(params: {
   const operation = data as Record<string, any> | null;
   if (!operation) return null;
   if (String(operation.request_fingerprint || '') !== params.requestFingerprint) {
-    throw new Error('operation id was already used for a different enrichment request');
+    throw new Error('IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST');
   }
   // Quota denials may become claimable after reset or a limit change; the atomic RPC decides that case.
   if (!operation.quota_allowed && Number(operation.response_status) === 429) return null;

@@ -2802,6 +2802,8 @@ export type Database = {
           photo_url: string | null
           primary_phone: string | null
           seniority: string | null
+          source_provider: string | null
+          source_provider_id: string | null
           state: string | null
           title: string | null
           updated_at: string | null
@@ -2829,6 +2831,8 @@ export type Database = {
           photo_url?: string | null
           primary_phone?: string | null
           seniority?: string | null
+          source_provider?: string | null
+          source_provider_id?: string | null
           state?: string | null
           title?: string | null
           updated_at?: string | null
@@ -2856,6 +2860,8 @@ export type Database = {
           photo_url?: string | null
           primary_phone?: string | null
           seniority?: string | null
+          source_provider?: string | null
+          source_provider_id?: string | null
           state?: string | null
           title?: string | null
           updated_at?: string | null
@@ -2886,6 +2892,8 @@ export type Database = {
           organization_id: string | null
           phone_numbers: Json | null
           primary_phone: string | null
+          source_provider: string | null
+          source_provider_id: string | null
           title: string | null
           updated_at: string | null
           user_id: string | null
@@ -2904,6 +2912,8 @@ export type Database = {
           organization_id?: string | null
           phone_numbers?: Json | null
           primary_phone?: string | null
+          source_provider?: string | null
+          source_provider_id?: string | null
           title?: string | null
           updated_at?: string | null
           user_id?: string | null
@@ -2922,6 +2932,8 @@ export type Database = {
           organization_id?: string | null
           phone_numbers?: Json | null
           primary_phone?: string | null
+          source_provider?: string | null
+          source_provider_id?: string | null
           title?: string | null
           updated_at?: string | null
           user_id?: string | null
@@ -3219,6 +3231,8 @@ export type Database = {
           score: number
           score_reason: string | null
           score_tier: string
+          source_provider: string | null
+          source_provider_id: string | null
           status: string
           title: string
           user_id: string
@@ -3251,6 +3265,8 @@ export type Database = {
           score?: number
           score_reason?: string | null
           score_tier?: string
+          source_provider?: string | null
+          source_provider_id?: string | null
           status?: string
           title: string
           user_id: string
@@ -3283,6 +3299,8 @@ export type Database = {
           score?: number
           score_reason?: string | null
           score_tier?: string
+          source_provider?: string | null
+          source_provider_id?: string | null
           status?: string
           title?: string
           user_id?: string
@@ -4328,6 +4346,8 @@ export type Database = {
           photo_url: string | null
           primary_phone: string | null
           seniority: string | null
+          source_provider: string | null
+          source_provider_id: string | null
           state: string | null
           title: string | null
           updated_at: string
@@ -4362,6 +4382,8 @@ export type Database = {
           photo_url?: string | null
           primary_phone?: string | null
           seniority?: string | null
+          source_provider?: string | null
+          source_provider_id?: string | null
           state?: string | null
           title?: string | null
           updated_at?: string
@@ -4396,6 +4418,8 @@ export type Database = {
           photo_url?: string | null
           primary_phone?: string | null
           seniority?: string | null
+          source_provider?: string | null
+          source_provider_id?: string | null
           state?: string | null
           title?: string | null
           updated_at?: string

@@ -1652,10 +1652,12 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
         const orgName = lead.organization?.name || lead.org_name || lead.organization_name || lead.organizationName || lead.company_name || lead.companyName || lead.company || '';
         const orgDomain = lead.organization?.domain || lead.organization_domain || lead.company_domain || lead.companyDomain || lead.organization_website_url || lead.organizationWebsite || lead.website || null;
 
-        const apolloId = lead.apollo_id || lead.apolloId || lead.id || null;
+        const sourceProvider = String(lead.source_provider || lead.sourceProvider || 'fullenrich').trim() || 'fullenrich';
+        const sourceProviderId = lead.source_provider_id || lead.sourceProviderId || lead.id || null;
 
         return {
-            apolloId: apolloId ? String(apolloId) : null,
+            sourceProvider,
+            sourceProviderId: sourceProviderId ? String(sourceProviderId) : null,
             fullName,
             title: lead.title || '',
             email: lead.email || null,
@@ -1671,25 +1673,26 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
     const leads = normalized;
 
     if (leads.length > 0) {
-        // Deduplicate by apollo_id within the mission (best-effort)
-        const apolloIds = Array.from(new Set(leads.map((l: any) => l.apolloId).filter(Boolean)));
-        const existingApollo = new Set<string>();
+        // Deduplicate by provider identity within the mission (best-effort).
+        const sourceProviderIds = Array.from(new Set(leads.map((lead: any) => lead.sourceProviderId).filter(Boolean)));
+        const existingProviderIds = new Set<string>();
 
-        if (apolloIds.length > 0) {
+        if (sourceProviderIds.length > 0) {
             const { data: existing } = await supabase
                 .from('leads')
-                .select('apollo_id')
+                .select('source_provider, source_provider_id')
                 .eq('mission_id', task.mission_id)
-                .in('apollo_id', apolloIds);
+                .eq('source_provider', 'fullenrich')
+                .in('source_provider_id', sourceProviderIds);
             (existing || []).forEach((r: any) => {
-                if (r?.apollo_id) existingApollo.add(String(r.apollo_id));
+                if (r?.source_provider_id) existingProviderIds.add(String(r.source_provider_id));
             });
         }
 
         const blockedSamples: Array<{ name: string; title: string; company: string; reason: string }> = [];
         let blockedCount = 0;
         const leadsToInsert = leads
-            .filter((l: any) => !l.apolloId || !existingApollo.has(String(l.apolloId)))
+            .filter((lead: any) => !lead.sourceProviderId || !existingProviderIds.has(String(lead.sourceProviderId)))
             .filter((l: any) => {
                 if (!missionApplyIcpFilter) return true;
                 const fit = assessLegacySearchLeadFit(l, task.payload || {});
@@ -1724,7 +1727,8 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
                     industry: String(industry || '').trim() || null,
                     location: String(location || '').trim() || null,
 
-                    apollo_id: l.apolloId || null,
+                    source_provider: l.sourceProvider || 'fullenrich',
+                    source_provider_id: l.sourceProviderId || null,
                     status: 'saved',
                     created_at: nowIso
                 };
@@ -1770,7 +1774,8 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
                         company: row.company,
                         email: row.email,
                         linkedin_url: row.linkedin_url,
-                        apollo_id: row.apollo_id,
+                        source_provider: row.source_provider,
+                        source_provider_id: row.source_provider_id,
                     },
                     created_at: nowIso,
                 }))
@@ -1791,7 +1796,8 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
                 linkedinUrl: row.linkedin_url,
                 companyDomain: row.company_website,
                 email: row.email,
-                apolloId: row.apollo_id,
+                sourceProvider: row.source_provider,
+                sourceProviderId: row.source_provider_id,
                 location: row.location,
                 industry: row.industry,
             }));
@@ -1849,7 +1855,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
         // Find enriched leads that haven't been contacted
         let uncontactedQuery = supabase
             .from('leads')
-            .select('id, name, email, title, company, linkedin_url, company_website, apollo_id, industry, location')
+            .select('id, name, email, title, company, linkedin_url, company_website, source_provider, source_provider_id, apollo_id, industry, location')
             .eq('mission_id', task.mission_id)
             .eq('status', 'enriched')
             .limit(50);
@@ -2004,7 +2010,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
         console.log('[ENRICH] No stable leads in payload. Fetching from DB queue (status=saved)...');
         const { data: queued, error: qErr } = await supabase
             .from('leads')
-            .select('id, name, email, title, company, linkedin_url, company_website, apollo_id, industry, location')
+            .select('id, name, email, title, company, linkedin_url, company_website, source_provider, source_provider_id, apollo_id, industry, location')
             .eq('mission_id', task.mission_id)
             .eq('status', 'saved')
             .order('created_at', { ascending: false })
@@ -2064,7 +2070,10 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
         linkedinUrl: lead.linkedinUrl || lead.linkedin_url || null,
         companyDomain: lead.companyDomain || lead.company_domain || lead.company_website || lead.organization_website_url || null,
         email: lead.email || null,
-        apolloId: lead.apolloId || lead.apollo_id || null,
+        sourceProvider: lead.sourceProvider || lead.source_provider || (lead.apolloId || lead.apollo_id ? 'apollo' : 'fullenrich'),
+        sourceProviderId: (lead.sourceProvider || lead.source_provider || 'fullenrich') === 'fullenrich'
+            ? (lead.sourceProviderId || lead.source_provider_id || null)
+            : null,
         // Keep a reference (not used as identifier)
         sourceOpportunityId: lead.id
     }));
@@ -2123,6 +2132,40 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
 
         if (response.ok) {
             const data = await response.json();
+            if (response.status === 202) {
+                await safeInsertLeadEvents(
+                    supabase,
+                    leadsFormatted
+                        .filter((lead: any) => Boolean(lead?.id))
+                        .map((lead: any) => ({
+                            organization_id: task.organization_id,
+                            mission_id: task.mission_id,
+                            task_id: task.id,
+                            lead_id: String(lead.id),
+                            event_type: 'lead_enrich_queued',
+                            stage: 'enrich',
+                            outcome: 'queued',
+                            message: 'Enriquecimiento enviado a FullEnrich',
+                            meta: {
+                                revealPhone,
+                                enrichmentId: data?.enrichmentId || null,
+                                operationId: data?.operationId || enrichmentOperationId,
+                            },
+                            created_at: attemptAt,
+                        }))
+                );
+                await safeHeartbeatTask(supabase, task.id, {
+                    progress_current: leadsFormatted.length,
+                    progress_total: leadsFormatted.length,
+                    progress_label: `Enriquecimiento en curso para ${leadsFormatted.length} lead(s)`,
+                });
+                return {
+                    queued: true,
+                    queuedCount: leadsFormatted.length,
+                    enrichmentId: data?.enrichmentId || null,
+                    operationId: data?.operationId || enrichmentOperationId,
+                };
+            }
             const enrichedLeads = Array.isArray(data?.enriched) ? data.enriched : [];
             console.log(`[ENRICH] Successfully enriched ${enrichedLeads.length} leads`);
 
@@ -2330,7 +2373,7 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
 
         let q = supabase
             .from('leads')
-            .select('id, name, email, title, company, linkedin_url, company_website, apollo_id, industry, location')
+            .select('id, name, email, title, company, linkedin_url, company_website, source_provider, source_provider_id, apollo_id, industry, location')
             .eq('mission_id', task.mission_id)
             .eq('status', 'enriched')
             .not('email', 'is', null)
@@ -2459,7 +2502,9 @@ async function executeInvestigate(task: any, supabase: SupabaseClient) {
                 lead_ref: leadRef,
                 lead: {
                     id: lead.id,
-                    apollo_id: lead.apolloId || lead.apollo_id || lead.id || null,
+                    source_provider_id: (lead.sourceProvider || lead.source_provider) === 'fullenrich'
+                        ? (lead.sourceProviderId || lead.source_provider_id || null)
+                        : null,
                     full_name: identity.fullName || null,
                     first_name: identity.firstName || null,
                     last_name: identity.lastName || null,
@@ -6024,20 +6069,6 @@ export const privacyRetentionTick = functions.scheduler.onSchedule({
     await invokeFirebaseSchedulerBridge({
         name: 'privacy-retention',
         path: '/api/cron/privacy-retention',
-        method: 'POST',
-    });
-});
-
-export const apolloUsageTick = functions.scheduler.onSchedule({
-    schedule: '0 * * * *',
-    timeZone: 'Etc/UTC',
-    timeoutSeconds: 540,
-    memory: '1GiB',
-    secrets: ['FIREBASE_SCHEDULER_SECRET'],
-}, async () => {
-    await invokeFirebaseSchedulerBridge({
-        name: 'apollo-usage',
-        path: '/api/cron/apollo-usage',
         method: 'POST',
     });
 });

@@ -97,7 +97,7 @@ const IcpStrategySchema = z.object({
     risks: z.array(z.string()).default([]),
   })).default([]),
   searchPlan: z.object({
-    provider: z.literal('apollo').default('apollo'),
+    provider: z.literal('fullenrich').default('fullenrich'),
     companyQueries: z.array(z.string()).default([]),
     peopleTitles: z.array(z.string()).default([]),
     locations: z.array(z.string()).default([]),
@@ -243,7 +243,7 @@ function fallbackPlan(goal: string): z.infer<typeof PlannerSchema> {
       { key: 'prospector_approval', title: 'Aprobacion de busqueda', description: 'Preparar una busqueda externa para aprobacion humana.', agentName: 'prospector' },
     ],
     assumptions: ['El usuario quiere preparar prospeccion o campana sin ejecutar acciones sensibles automaticamente.'],
-    risks: ['Las busquedas en Apollo pueden consumir creditos y requieren aprobacion.'],
+    risks: ['Las busquedas externas pueden consumir creditos y requieren aprobacion.'],
   };
 }
 
@@ -264,7 +264,7 @@ function fallbackIcp(goal: string): z.infer<typeof IcpStrategySchema> {
       risks: ['ICP amplio; conviene validar los primeros resultados antes de escalar.'],
     }],
     searchPlan: {
-      provider: 'apollo',
+      provider: 'fullenrich',
       companyQueries: [query],
       peopleTitles: ['CEO', 'Founder', 'COO', 'Head of Operations', 'Commercial Director'],
       locations: [],
@@ -476,7 +476,7 @@ async function runProspector(execution: SupliaAgentExecution): Promise<SupliaAge
       status: 'waiting_approval',
       output: {
         waitingFor: 'prospecting.search_people',
-        searchPlan: { provider: 'apollo', companyNames, domains, peopleTitles, estimatedCreditUse },
+        searchPlan: { provider: 'fullenrich', companyNames, domains, peopleTitles, estimatedCreditUse },
       },
       reasoningSummary: 'La busqueda de personas queda preparada como aprobacion porque puede consumir creditos.',
       pendingActions: [{
@@ -490,7 +490,7 @@ async function runProspector(execution: SupliaAgentExecution): Promise<SupliaAge
           personLocations: asTextList(searchPlan.locations),
           perPage: 25,
           maxPages: 1,
-          provider: 'apollo',
+          provider: 'fullenrich',
           estimatedCreditUse,
           source: 'suplia_multiagent_job',
         },
@@ -502,7 +502,7 @@ async function runProspector(execution: SupliaAgentExecution): Promise<SupliaAge
   const peopleTitles = Array.isArray(searchPlan.peopleTitles) ? searchPlan.peopleTitles.map(safeText).filter(Boolean) : [];
   const locations = Array.isArray(searchPlan.locations) ? searchPlan.locations.map(safeText).filter(Boolean) : [];
   const companyName = companyQueries[0] || firstSentence(goal, 'empresas objetivo');
-  const provider = 'apollo';
+  const provider = 'fullenrich';
   const perPage = Math.max(1, Math.min(Math.floor(Number(searchPlan.maxCompanies || 8)), 25));
   const estimatedCreditUse = asRecord(searchPlan.estimatedCreditUse);
 
@@ -667,7 +667,7 @@ async function runEnricher(execution: SupliaAgentExecution): Promise<SupliaAgent
       description: `Completar datos de ${topLeads.length} lead${topLeads.length === 1 ? '' : 's'} con proveedor externo. Puede consumir creditos.`,
       payload: {
         leads: topLeads.map((lead) => lead.sourcePayload || lead),
-        provider: 'apollo',
+        provider: 'fullenrich',
         limit: topLeads.length,
         source: 'suplia_multiagent_job',
       },

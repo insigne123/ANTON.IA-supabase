@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { resolveLeadProvider } from './provider-routing';
 
-test('Apollo-only routing normalizes a legacy PDL request', () => {
+test('FullEnrich-only routing normalizes a legacy provider request', () => {
   const decision = resolveLeadProvider({
     requestedProvider: 'pdl',
     organizationId: 'legacy-pdl-organization',
@@ -12,14 +12,14 @@ test('Apollo-only routing normalizes a legacy PDL request', () => {
   });
 
   assert.deepEqual(decision, {
-    provider: 'apollo',
+    provider: 'fullenrich',
     requestedProvider: 'pdl',
-    defaultProvider: 'apollo',
-    forcedApolloReason: 'apollo_only',
+    defaultProvider: 'fullenrich',
+    forcedProviderReason: 'fullenrich_only',
   });
 });
 
-test('Apollo-only routing ignores retired provider defaults', () => {
+test('FullEnrich-only routing ignores retired provider defaults', () => {
   const original = process.env.LEADS_PROVIDER_DEFAULT;
   process.env.LEADS_PROVIDER_DEFAULT = 'pdl';
 
@@ -29,8 +29,8 @@ test('Apollo-only routing ignores retired provider defaults', () => {
       fallbackDefaultProvider: 'auto',
     });
 
-    assert.equal(decision.provider, 'apollo');
-    assert.equal(decision.defaultProvider, 'apollo');
+    assert.equal(decision.provider, 'fullenrich');
+    assert.equal(decision.defaultProvider, 'fullenrich');
     assert.equal(decision.requestedProvider, null);
   } finally {
     if (original === undefined) delete process.env.LEADS_PROVIDER_DEFAULT;

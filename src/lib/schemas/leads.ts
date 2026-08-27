@@ -42,6 +42,8 @@ export const LeadSchema = z.object({
   title: z.string().nullable().optional(),
   organization: LeadOrganizationSchema.optional(),
   photo_url: z.string().nullable().optional(),
+  source_provider: z.string().nullable().optional(),
+  source_provider_id: z.string().nullable().optional(),
   apollo_id: z.string().nullable().optional(),
   city: z.string().nullable().optional(),
   state: z.string().nullable().optional(),

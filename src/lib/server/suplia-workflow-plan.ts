@@ -30,7 +30,7 @@ function fallbackWorkflowPlan(goal: string): SupliaWorkflowPlan {
     assumptions: ['Usare el perfil de empresa disponible si falta algun dato especifico.', 'No consumire creditos externos sin una aprobacion separada.'],
     steps: [
       { title: 'Definir ICP', description: 'Aterrizar segmento, mercado, roles y senales de compra.', agentName: 'icp-strategist', requiresApproval: false },
-      { title: 'Preparar busqueda externa', description: 'Convertir el ICP en una busqueda Apollo revisable.', agentName: 'prospector', requiresApproval: true },
+      { title: 'Preparar busqueda externa', description: 'Convertir el ICP en una busqueda FullEnrich revisable.', agentName: 'prospector', requiresApproval: true },
       { title: 'Priorizar resultados', description: 'Ordenar empresas y contactos por fit antes de cualquier accion comercial.', agentName: 'company-scorer', requiresApproval: false },
     ],
     risks: ['La busqueda externa puede consumir creditos y requiere aprobacion.', 'Si el ICP queda amplio, los primeros resultados deben revisarse antes de escalar.'],
@@ -71,7 +71,7 @@ Instrucciones:
 - Crea un plan breve, concreto y aprobable.
 - Si faltan datos, usa supuestos explicitos basados en contexto guardado; no inventes hechos no disponibles.
 - No ejecutes herramientas ni prometas resultados.
-- Marca claramente que Apollo, Gmail, enriquecimiento o envios requieren aprobacion separada.
+- Marca claramente que FullEnrich, Gmail, enriquecimiento o envios requieren aprobacion separada.
 - Devuelve JSON estricto.
 `;
 

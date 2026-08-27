@@ -47,11 +47,17 @@ test('endpoint rate limiting is bounded and returns retry information', () => {
   assert.ok(third.retryAfterSeconds >= 1);
 });
 
+test('lead provider configuration uses a bounded default', () => {
+  assert.equal(getGatewayConfig({}).defaultProvider, 'fullenrich');
+  assert.equal(getGatewayConfig({ LEADS_PROVIDER_DEFAULT: 'fullenrich' }).defaultProvider, 'fullenrich');
+  assert.equal(getGatewayConfig({ LEADS_PROVIDER_DEFAULT: 'unknown' }).defaultProvider, 'fullenrich');
+});
+
 test('bounded JSON parsing rejects oversized request bodies before validation', async () => {
   const request = new Request('https://backend.example/api/enrich', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ lead: { id: 'apollo-person-id' } }),
+    body: JSON.stringify({ lead: { id: 'fullenrich-person-id' } }),
   });
 
   const result = await readBoundedJsonBody(request, 10);
@@ -66,4 +72,6 @@ test('App Hosting binds the shared secret at runtime only', () => {
   const config = readFileSync(new URL('../../apphosting.yaml', import.meta.url), 'utf8');
   assert.match(config, /variable: ENRICHMENT_SERVICE_SECRET\s+secret: ENRICHMENT_SERVICE_SECRET\s+availability: \[RUNTIME\]/);
   assert.doesNotMatch(config, /variable: ENRICHMENT_SERVICE_SECRET[\s\S]{0,160}availability: \[BUILD/);
+  assert.match(config, /variable: FULLENRICH_API_KEY\s+secret: FULLENRICH_API_KEY\s+availability: \[RUNTIME\]/);
+  assert.doesNotMatch(config, /variable: FULLENRICH_API_KEY[\s\S]{0,160}availability: \[BUILD/);
 });

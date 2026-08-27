@@ -11,7 +11,7 @@ const required = [
   'CRON_SECRET',
   'INTERNAL_API_SECRET',
   'FIREBASE_SCHEDULER_SECRET',
-  'APOLLO_WEBHOOK_SECRET',
+  'FULLENRICH_API_KEY',
 ]
 
 const aiProvider = String(process.env.SUPLIA_AI_PROVIDER || process.env.AI_PROVIDER || 'openai').trim().toLowerCase()

@@ -9,8 +9,8 @@ runConfig:
 
 env:
   # === Primary production providers ===
-  - variable: APOLLO_API_KEY
-    secret: APOLLO_API_KEY
+  - variable: FULLENRICH_API_KEY
+    secret: FULLENRICH_API_KEY
     availability: [RUNTIME]
 
   - variable: OPENAI_API_KEY
@@ -73,13 +73,13 @@ env:
     value: "false"
     availability: [BUILD, RUNTIME]
 
-  # === Lead providers (Apollo/PDL trial) ===
+  # === Lead provider ===
   - variable: LEADS_PROVIDER_DEFAULT
-    value: apollo
+    value: fullenrich
     availability: [RUNTIME]
 
   - variable: ENRICHMENT_PROVIDER_DEFAULT
-    value: apollo
+    value: fullenrich
     availability: [RUNTIME]
 
   - variable: PDL_TRIAL_ENABLED
@@ -110,16 +110,8 @@ env:
     value: "2"
     availability: [RUNTIME]
 
-  - variable: PDL_FALLBACK_TO_APOLLO
-    value: "true"
-    availability: [RUNTIME]
-
   - variable: LEADS_DISABLE_EXTERNAL_FALLBACK
-    value: "false"
-    availability: [RUNTIME]
-
-  - variable: APIFY_APOLLO_ACTOR_ID
-    value: code_crafter/apollo-io-scraper
+    value: "true"
     availability: [RUNTIME]
 
   - variable: NEXT_PUBLIC_GOOGLE_CLIENT_ID
@@ -142,20 +134,12 @@ env:
     value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search
     availability: [RUNTIME]
 
-  - variable: ENRICHMENT_SERVICE_URL
-    value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/enrich
-    availability: [RUNTIME]
-
   - variable: ENRICHMENT_SERVICE_SECRET
     secret: ENRICHMENT_SERVICE_SECRET
     availability: [RUNTIME]
 
   - variable: INTERNAL_API_SECRET
     secret: INTERNAL_API_SECRET
-    availability: [RUNTIME]
-
-  - variable: APOLLO_WEBHOOK_SECRET
-    secret: APOLLO_WEBHOOK_SECRET
     availability: [RUNTIME]
 
   - variable: DEBUG_API_ENABLED

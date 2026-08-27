@@ -16,7 +16,7 @@ function clean(value: unknown) {
 
 function providerFromInput(input: Record<string, unknown>, fallback = 'auto') {
   const provider = clean(input.provider || input.providerUsed);
-  if (provider === 'apollo' || provider === 'gmail' || provider === 'outlook') return provider;
+  if (provider === 'gmail' || provider === 'outlook') return provider;
   return fallback;
 }
 
@@ -29,16 +29,16 @@ export function getSupliaToolLeasePolicy(
 
   if (toolName === 'prospecting.search_companies' || toolName === 'prospecting.search_people') {
     return {
-      resourceKey: 'provider:apollo',
-      maxConcurrent: envInt(env, 'SUPLIA_APOLLO_CONCURRENCY_PER_ORG', 1, 1, 10),
+      resourceKey: 'provider:fullenrich',
+      maxConcurrent: envInt(env, 'SUPLIA_FULLENRICH_CONCURRENCY_PER_ORG', 1, 1, 10),
       ttlSeconds,
     };
   }
 
   if (toolName === 'lead.enrich' || toolName === 'lead.enrich_batch') {
     return {
-      resourceKey: 'provider:apollo',
-      maxConcurrent: envInt(env, 'SUPLIA_APOLLO_CONCURRENCY_PER_ORG', 1, 1, 10),
+      resourceKey: 'provider:fullenrich',
+      maxConcurrent: envInt(env, 'SUPLIA_FULLENRICH_CONCURRENCY_PER_ORG', 1, 1, 10),
       ttlSeconds,
     };
   }

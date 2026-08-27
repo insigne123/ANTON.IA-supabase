@@ -7,8 +7,13 @@ runConfig:
   memoryMiB: 512
 
 env:
-  - variable: APOLLO_API_KEY
-    secret: APOLLO_API_KEY
+  - variable: FULLENRICH_API_KEY
+    secret: FULLENRICH_API_KEY
+    availability: [RUNTIME]
+
+  # Only FullEnrich requests are accepted by this gateway.
+  - variable: LEADS_PROVIDER_DEFAULT
+    value: "fullenrich"
     availability: [RUNTIME]
 
   # Must have the same value as the root BFF's ENRICHMENT_SERVICE_SECRET.

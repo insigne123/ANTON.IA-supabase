@@ -16,6 +16,8 @@ function normalizeEmailKey(email?: string | null) {
 function mapRowToEnrichedLead(row: any): EnrichedLead {
     return {
         id: row.id,
+        sourceProvider: row.source_provider || row.data?.sourceProvider,
+        sourceProviderId: row.source_provider_id || row.data?.sourceProviderId,
         apolloId: row.apollo_id || row.data?.apolloId,
         organizationId: row.organization_id,
         sourceOpportunityId: row.data?.sourceOpportunityId,
@@ -107,6 +109,8 @@ function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string, organizationId
         phone_numbers: lead.phoneNumbers,
         primary_phone: lead.primaryPhone,
         enrichment_status: lead.enrichmentStatus ?? 'completed',
+        source_provider: lead.sourceProvider,
+        source_provider_id: lead.sourceProviderId,
 
         // Metadata
         updated_at: lead.updatedAt || new Date().toISOString(),
@@ -114,6 +118,8 @@ function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string, organizationId
         // Legacy data field for backwards compatibility
         data: {
             apolloId: lead.apolloId,
+            sourceProvider: lead.sourceProvider,
+            sourceProviderId: lead.sourceProviderId,
             sourceOpportunityId: lead.sourceOpportunityId,
             emailStatus: lead.emailStatus,
             companyDomain: lead.companyDomain,
