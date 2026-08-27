@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const migration = readFileSync('supabase/migrations/20260825120000_campaign_outreach_v2.sql', 'utf8');
+const migration = readFileSync('supabase/migrations/20260825120000_campaign_outreach_v2.sql', 'utf8').replace(/\r\n/g, '\n');
 const pregeneratedDraftMigration = readFileSync(
   'supabase/migrations/20260825170000_campaign_v2_pregenerated_followup_drafts.sql',
   'utf8',

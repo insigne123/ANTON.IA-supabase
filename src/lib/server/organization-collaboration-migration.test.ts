@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 const migration = readFileSync(
   resolve(process.cwd(), 'supabase/migrations/20260826120000_organization_collaboration_v1.sql'),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 
 test('collaboration rollout remains disabled and service-owned by default', () => {
   assert.match(migration, /collaboration_v1_enabled boolean not null default false/);
