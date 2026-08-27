@@ -102,4 +102,8 @@ test('builds safe search research queries', () => {
     supliaResearchTestInternals.buildSerpQuery('serp_company_news', { company: 'Acme', domain: 'acme.com' }),
     '"Acme" noticias novedades expansión alianza lanzamiento -site:acme.com',
   );
+  assert.equal(
+    supliaResearchTestInternals.buildSerpQuery('serp_company_profile', { company: 'Acme', domain: 'acme.com' }),
+    '"Acme" acme.com productos servicios industria empleados oficinas clientes',
+  );
 });

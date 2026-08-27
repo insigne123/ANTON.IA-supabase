@@ -31,6 +31,7 @@ import {
 } from '@/lib/native-research-contracts';
 import { canonicalJson } from '@/lib/messaging-contracts';
 import { assessResearchQuality } from '@/lib/native-research-quality';
+import { enrichCompanyResearchSnapshotV1 } from '@/ai/flows/enrich-company-research';
 import {
   completeLeadResearchRequestClaim,
   consumeLeadResearchRequestQuota,
@@ -61,6 +62,7 @@ import {
   researchBrand,
   researchBrandMentions,
   researchSerpCompanyNews,
+  researchSerpCompanyProfile,
   researchSerpJobsSignals,
   researchWhois,
 } from '@/lib/server/suplia-research-tools';
@@ -785,7 +787,13 @@ async function collectSearchSignals(input: {
     cache: !input.options.refresh,
   };
   const warnings: string[] = [];
-  const [news, jobs, mentions] = await Promise.all([
+  const [profile, news, jobs, mentions] = await Promise.all([
+    domain || input.lead.companyName
+      ? researchSerpCompanyProfile(providerInput, context).catch(() => {
+        warnings.push('company_profile_unavailable');
+        return null;
+      })
+      : Promise.resolve(null),
     domain || input.lead.companyName
       ? researchSerpCompanyNews(providerInput, context).catch((error: any) => {
         warnings.push('company_news_unavailable');
@@ -805,7 +813,7 @@ async function collectSearchSignals(input: {
       })
       : Promise.resolve(null),
   ]);
-  return { news: object(news), jobs: object(jobs), mentions: object(mentions), warnings };
+  return { profile: object(profile), news: object(news), jobs: object(jobs), mentions: object(mentions), warnings };
 }
 
 function createError(input: {
@@ -869,6 +877,7 @@ function buildSnapshot(input: {
   lead: NativeResearchLead;
   options: NativeResearchOptions;
   company: CompanySignals;
+  profile: Record<string, any>;
   news: Record<string, any>;
   jobs: Record<string, any>;
   mentions: Record<string, any>;
@@ -1019,7 +1028,8 @@ function buildSnapshot(input: {
   }
 
   const brandDescription = conciseSourceStatement(input.company.brand?.description);
-  if (brandDescription && !isGenericResearchText(brandDescription)) {
+  const brandIndustry = conciseSourceStatement(input.company.brand?.industry);
+  if ((brandDescription && !isGenericResearchText(brandDescription)) || brandIndustry) {
     const source = addSource({
       url: `https://brand.dev/retrieve/${encodeURIComponent(domain)}`,
       type: 'other',
@@ -1028,29 +1038,47 @@ function buildSnapshot(input: {
       reliability: 0.72,
       retrievedAt: companyFetchedAt,
     });
-    const itemEvidence = addEvidence({
-      statement: `${companyName}: ${brandDescription}`,
-      source,
-      kind: 'fact',
-      confidence: 0.72,
-      locator: { kind: 'provider_annotation', value: 'brand_description' },
-      extractedAt: companyFetchedAt,
-      extractionMethod: 'provider',
-    });
-    if (itemEvidence && source && isQualifiedResearchFactEvidence({
-      evidence: itemEvidence,
-      source,
-      companyName,
-      companyDomain: domain,
-    })) {
-      companyFactEvidence.push(itemEvidence);
-      addClaim({
-        kind: 'company_industry',
-        statement: itemEvidence.statement,
-        supportingEvidenceIds: [itemEvidence.id],
-        confidence: itemEvidence.confidence,
-        asOf: companyFetchedAt,
+    if (brandDescription && !isGenericResearchText(brandDescription)) {
+      const itemEvidence = addEvidence({
+        statement: `${companyName}: ${brandDescription}`,
+        source,
+        kind: 'fact',
+        confidence: 0.72,
+        locator: { kind: 'provider_annotation', value: 'brand_description' },
+        extractedAt: companyFetchedAt,
+        extractionMethod: 'provider',
       });
+      if (itemEvidence && source && isQualifiedResearchFactEvidence({ evidence: itemEvidence, source, companyName, companyDomain: domain })) {
+        companyFactEvidence.push(itemEvidence);
+        addClaim({
+          kind: 'company_overview',
+          statement: itemEvidence.statement,
+          supportingEvidenceIds: [itemEvidence.id],
+          confidence: itemEvidence.confidence,
+          asOf: companyFetchedAt,
+        });
+      }
+    }
+    if (brandIndustry) {
+      const itemEvidence = addEvidence({
+        statement: `${companyName} opera en la industria ${brandIndustry}.`,
+        source,
+        kind: 'fact',
+        confidence: 0.72,
+        locator: { kind: 'provider_annotation', value: 'brand_industry' },
+        extractedAt: companyFetchedAt,
+        extractionMethod: 'provider',
+      });
+      if (itemEvidence && source && isQualifiedResearchFactEvidence({ evidence: itemEvidence, source, companyName, companyDomain: domain })) {
+        companyFactEvidence.push(itemEvidence);
+        addClaim({
+          kind: 'company_industry',
+          statement: itemEvidence.statement,
+          supportingEvidenceIds: [itemEvidence.id],
+          confidence: itemEvidence.confidence,
+          asOf: companyFetchedAt,
+        });
+      }
     }
   }
 
@@ -1111,8 +1139,8 @@ function buildSnapshot(input: {
   }
 
   const searchEvidence: Array<{ evidence: ResearchEvidenceV1; source: ResearchSourceV1; kind: 'news' | 'jobs' | 'mentions' }> = [];
-  for (const kind of ['news', 'jobs', 'mentions'] as const) {
-    const payload = kind === 'news' ? input.news : kind === 'jobs' ? input.jobs : input.mentions;
+  for (const kind of ['profile', 'news', 'jobs', 'mentions'] as const) {
+    const payload = kind === 'profile' ? input.profile : kind === 'news' ? input.news : kind === 'jobs' ? input.jobs : input.mentions;
     const fetchedAt = isoDateOrNull(payload.fetchedAt) || now;
     const items = array(payload.items || payload.results || payload.organic_results).slice(0, 5);
     for (const item of items) {
@@ -1123,7 +1151,7 @@ function buildSnapshot(input: {
       const source = addSource({
         url: link,
         type: kind === 'news' ? 'news' : kind === 'jobs' ? 'jobs' : 'other',
-        title: title || 'Señal externa',
+        title: title || (kind === 'profile' ? 'Perfil de empresa' : 'Señal externa'),
         publisher: text(item?.source),
         provider: text(payload.provider) || 'serper',
         reliability: 0.64,
@@ -1131,15 +1159,27 @@ function buildSnapshot(input: {
         publishedAt: item?.date,
       });
       const itemEvidence = addEvidence({
-        statement: conciseSourceStatement(`${title || 'Señal externa'}${snippet ? `: ${snippet}` : ''}`),
+        statement: conciseSourceStatement(`${title || (kind === 'profile' ? companyName : 'Señal externa')}${snippet ? `: ${snippet}` : ''}`),
         source,
-        kind: 'event',
-        confidence: 0.64,
+        kind: kind === 'profile' ? 'fact' : 'event',
+        confidence: kind === 'profile' ? 0.68 : 0.64,
         locator: { kind: 'search_snippet', value: 'organic_result' },
         extractedAt: fetchedAt,
         observedAt: source?.publishedAt || fetchedAt,
       });
-      if (itemEvidence && source && isRelevantResearchSignal({
+      if (!itemEvidence || !source) continue;
+      if (kind === 'profile') {
+        if (isQualifiedResearchFactEvidence({ evidence: itemEvidence, source, companyName, companyDomain: domain })) {
+          companyFactEvidence.push(itemEvidence);
+          addClaim({
+            kind: 'company_overview',
+            statement: itemEvidence.statement,
+            supportingEvidenceIds: [itemEvidence.id],
+            confidence: itemEvidence.confidence,
+            asOf: fetchedAt,
+          });
+        }
+      } else if (isRelevantResearchSignal({
         evidence: itemEvidence,
         source,
         companyName,
@@ -1934,12 +1974,15 @@ async function processJob(job: NativeResearchJob) {
       lead,
       options,
       company: company.signals,
+      profile: search.profile,
       news: search.news,
       jobs: search.jobs,
       mentions: search.mentions,
       person,
       warnings: [...company.warnings, ...search.warnings, ...person.warnings],
     });
+    output.snapshot = await enrichCompanyResearchSnapshotV1(output.snapshot);
+    output.result.promptPack.claims = output.snapshot.claims.map((item) => item.statement).slice(0, 8);
     output.result.companyResearchCache = {
       hit: company.cacheHit,
       domain: company.signals.domain || null,

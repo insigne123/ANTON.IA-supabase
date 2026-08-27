@@ -115,7 +115,7 @@ test('a historical snapshot without a report is lazily synthesized and persisted
   assert.equal(upsertCalls, 1);
 });
 
-test('report persistence permits only fallback-to-model upgrades', () => {
+test('report persistence permits fallback-to-model and prompt-version upgrades', () => {
   const snapshot = draftSnapshotFixture();
   const document = buildDeterministicResearchReportDocumentV1({
     snapshot,
@@ -147,6 +147,7 @@ test('report persistence permits only fallback-to-model upgrades', () => {
   assert.equal(researchReportDocumentInternals.shouldPersistResearchReportTransition(fallback, 'fallback'), false);
   assert.equal(researchReportDocumentInternals.shouldPersistResearchReportTransition(model, 'model'), false);
   assert.equal(researchReportDocumentInternals.shouldPersistResearchReportTransition(model, 'fallback'), false);
+  assert.equal(researchReportDocumentInternals.shouldPersistResearchReportTransition({ ...model, promptVersion: 'legacy/v1' }, 'model'), true);
 });
 
 test('retryable fallback reports retry synthesis while model reports remain immutable', async () => {

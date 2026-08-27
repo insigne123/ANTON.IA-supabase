@@ -6,6 +6,7 @@ import {
 } from '@/lib/research-report-contracts';
 import { ResearchSnapshotV1Schema, type ResearchSnapshotV1 } from '@/lib/research-contracts';
 import {
+  RESEARCH_REPORT_PROMPT_VERSION,
   synthesizeResearchReportDocumentV1,
   type ResearchReportSynthesisResult,
 } from '@/ai/flows/synthesize-research-report';
@@ -46,8 +47,11 @@ export type EnsureResearchReportDocumentDependencies = {
 function shouldPersistResearchReportTransition(
   existing: StoredResearchReportDocument | null,
   incomingMethod: ResearchReportSynthesisResult['metadata']['generationMethod'],
+  incomingPromptVersion = RESEARCH_REPORT_PROMPT_VERSION,
 ) {
-  return !existing || (existing.generationMethod === 'fallback' && incomingMethod === 'model');
+  return !existing
+    || (existing.generationMethod === 'fallback' && incomingMethod === 'model')
+    || (incomingMethod === 'model' && existing.promptVersion !== incomingPromptVersion);
 }
 
 function text(value: unknown) {
@@ -127,7 +131,7 @@ export async function upsertResearchReportDocument(input: {
       userId: snapshot.scope.ownerUserId,
     },
   }, admin);
-  if (!shouldPersistResearchReportTransition(existing, input.synthesis.metadata.generationMethod)) return existing!;
+  if (!shouldPersistResearchReportTransition(existing, input.synthesis.metadata.generationMethod, input.synthesis.metadata.promptVersion)) return existing!;
 
   const document = validateResearchReportDocumentCitationsV1(input.synthesis.document, snapshot);
   const contentHash = canonicalSha256(document);
@@ -168,7 +172,7 @@ export async function upsertResearchReportDocument(input: {
       access: { organizationId: snapshot.scope.organizationId, userId: snapshot.scope.ownerUserId },
     }, admin);
     if (!existing) throw error;
-    if (!shouldPersistResearchReportTransition(existing, input.synthesis.metadata.generationMethod)) return existing;
+    if (!shouldPersistResearchReportTransition(existing, input.synthesis.metadata.generationMethod, input.synthesis.metadata.promptVersion)) return existing;
   }
 
   const { data, error } = await admin
@@ -177,7 +181,7 @@ export async function upsertResearchReportDocument(input: {
     .eq('research_snapshot_id', snapshot.id)
     .eq('organization_id', snapshot.scope.organizationId)
     .eq('user_id', snapshot.scope.ownerUserId)
-    .eq('generation_method', 'fallback')
+    .eq('prompt_version', existing.promptVersion)
     .select('*')
     .maybeSingle();
   if (error) throw error;
@@ -213,7 +217,9 @@ export async function ensureResearchReportDocument(input: {
   const existing = await load({ researchSnapshotId: snapshot.id, access: input.access });
   if (existing) {
     validateResearchReportDocumentCitationsV1(existing.document, snapshot);
-    if (!(existing.generationMethod === 'fallback' && existing.retryable)) return existing;
+    const needsRetry = existing.generationMethod === 'fallback' && existing.retryable;
+    const needsPromptUpgrade = existing.promptVersion !== RESEARCH_REPORT_PROMPT_VERSION;
+    if (!needsRetry && !needsPromptUpgrade) return existing;
   }
 
   const synthesize = dependencies.synthesize || synthesizeResearchReportDocumentV1;

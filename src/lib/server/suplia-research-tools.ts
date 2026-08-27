@@ -297,6 +297,7 @@ function buildSerpQuery(kind: string, input: Record<string, unknown>) {
   if (!base) throw new Error(`Falta company o domain para research.${kind}.`);
   const quotedCompany = company ? `"${company.replace(/"/g, '').slice(0, 180)}"` : domain;
 
+  if (kind === 'serp_company_profile') return [quotedCompany, domain, 'productos servicios industria empleados oficinas clientes'].filter(Boolean).join(' ');
   if (kind === 'serp_company_news') return `${quotedCompany} noticias novedades expansión alianza lanzamiento${domain ? ` -site:${domain}` : ''}`;
   if (kind === 'serp_competitors') return `${base} competidores alternativas mercado`;
   if (kind === 'serp_jobs_signals') return domain
@@ -306,7 +307,7 @@ function buildSerpQuery(kind: string, input: Record<string, unknown>) {
   return base;
 }
 
-async function researchSerp(input: Record<string, unknown>, context: SupliaToolContext, kind: 'serp_company_news' | 'serp_competitors' | 'serp_jobs_signals' | 'brand_mentions') {
+async function researchSerp(input: Record<string, unknown>, context: SupliaToolContext, kind: 'serp_company_profile' | 'serp_company_news' | 'serp_competitors' | 'serp_jobs_signals' | 'brand_mentions') {
   const query = asText(input.query) || buildSerpQuery(kind, input);
   const search = normalizeSerperSearchInput({
     organizationId: getResearchOrganizationId(context),
@@ -422,6 +423,10 @@ export async function researchBrand(input: Record<string, unknown>, context: Sup
 
 export async function researchSerpCompanyNews(input: Record<string, unknown>, context: SupliaToolContext) {
   return researchSerp(input, context, 'serp_company_news');
+}
+
+export async function researchSerpCompanyProfile(input: Record<string, unknown>, context: SupliaToolContext) {
+  return researchSerp(input, context, 'serp_company_profile');
 }
 
 export async function researchSerpCompetitors(input: Record<string, unknown>, context: SupliaToolContext) {

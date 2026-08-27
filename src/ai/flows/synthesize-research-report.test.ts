@@ -91,6 +91,12 @@ test('model synthesis drops an invalid extra block while preserving canonically 
     company: structuredClone(projection.company),
     signals: structuredClone(projection.signals),
     commercialHypotheses: structuredClone(projection.commercialHypotheses),
+    narrative: {
+      executiveSummary: [{ text: 'Acme ayuda a equipos de operaciones a reducir trabajo manual.', claimIds: ['claim-acme-overview'] }],
+      companyProfile: [{ text: 'Su propuesta se centra en reducir trabajo manual en operaciones.', claimIds: ['claim-acme-overview'] }],
+      leadContext: [],
+      commercialReading: [],
+    },
     outreachBrief: structuredClone(projection.outreachBrief),
   };
   modelBody.executiveSummary.facts.push({
@@ -108,6 +114,8 @@ test('model synthesis drops an invalid extra block while preserving canonically 
   assert.equal(result.metadata.generationMethod, 'model');
   assert.equal(result.metadata.retryable, false);
   assert.equal(result.document.executiveSummary.facts.some((block) => block.id === 'model-invalid-extra'), false);
+  assert.equal(result.document.narrative?.executiveSummary[0].text, 'Acme ayuda a equipos de operaciones a reducir trabajo manual.');
+  assert.deepEqual(result.document.narrative?.executiveSummary[0].evidenceIds, ['evidence-acme']);
   assert.ok(result.document.company.overview.length > 0);
   assert.ok(result.document.outreachBrief.factualAnchors.length > 0);
   assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(result.document, snapshot));

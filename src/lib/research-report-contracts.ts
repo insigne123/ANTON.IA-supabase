@@ -81,6 +81,19 @@ export const ResearchReportContradictionV1Schema = z.object({
 const reportFactList = z.array(ResearchReportFactualBlockV1Schema).max(20);
 const reportHypothesisList = z.array(ResearchReportHypothesisBlockV1Schema).max(20);
 
+export const ResearchReportNarrativeParagraphV1Schema = z.object({
+  text: nonEmptyText,
+  claimIds: uniqueIdentifiers,
+  evidenceIds: uniqueIdentifiers,
+}).strict();
+
+export const ResearchReportNarrativeV1Schema = z.object({
+  executiveSummary: z.array(ResearchReportNarrativeParagraphV1Schema).max(2),
+  companyProfile: z.array(ResearchReportNarrativeParagraphV1Schema).max(4),
+  leadContext: z.array(ResearchReportNarrativeParagraphV1Schema).max(2),
+  commercialReading: z.array(ResearchReportNarrativeParagraphV1Schema).max(3),
+}).strict();
+
 export const ResearchReportSynthesisOutputV1Schema = z.object({
   executiveSummary: z.object({ facts: reportFactList }).strict(),
   person: z.object({ verifiedFacts: reportFactList }).strict(),
@@ -158,6 +171,7 @@ export const ResearchReportDocumentV1Schema = z.object({
   commercialHypotheses: reportHypothesisList,
   gaps: z.array(ResearchReportGapV1Schema).max(20),
   contradictions: z.array(ResearchReportContradictionV1Schema).max(20),
+  narrative: ResearchReportNarrativeV1Schema.optional(),
   outreachBrief: z.object({
     factualAnchors: reportFactList,
     hypotheses: reportHypothesisList,
@@ -205,6 +219,8 @@ export type ResearchReportCitationV1 = z.infer<typeof ResearchReportCitationV1Sc
 export type ResearchReportFactualBlockV1 = z.infer<typeof ResearchReportFactualBlockV1Schema>;
 export type ResearchReportHypothesisBlockV1 = z.infer<typeof ResearchReportHypothesisBlockV1Schema>;
 export type ResearchReportSynthesisOutputV1 = z.infer<typeof ResearchReportSynthesisOutputV1Schema>;
+export type ResearchReportNarrativeParagraphV1 = z.infer<typeof ResearchReportNarrativeParagraphV1Schema>;
+export type ResearchReportNarrativeV1 = z.infer<typeof ResearchReportNarrativeV1Schema>;
 export type ResearchReportDocumentV1 = z.infer<typeof ResearchReportDocumentV1Schema>;
 
 export class ResearchReportCitationError extends Error {
@@ -350,6 +366,48 @@ export function validateResearchReportDocumentCitationsV1(
   document.commercialHypotheses.forEach((block, index) => validateBlock(block, `commercialHypotheses.${index}`, 'hypothesis'));
   document.outreachBrief.factualAnchors.forEach((block, index) => validateBlock(block, `outreachBrief.factualAnchors.${index}`, 'fact'));
   document.outreachBrief.hypotheses.forEach((block, index) => validateBlock(block, `outreachBrief.hypotheses.${index}`, 'hypothesis'));
+
+  if (document.narrative) {
+    const companyNarrativeKinds = new Set<ResearchClaimV1['kind']>([
+      'company_overview', 'company_identity', 'company_industry', 'company_service', 'company_size', 'company_priority',
+    ]);
+    const commercialNarrativeKinds = new Set<ResearchClaimV1['kind']>([
+      'company_priority', 'news_signal', 'hiring_signal', 'technology_signal', 'site_signal',
+      'pain_hypothesis', 'opportunity_hypothesis', 'risk_hypothesis', 'use_case_hypothesis',
+    ]);
+    Object.entries(document.narrative).forEach(([section, paragraphs]) => {
+      paragraphs.forEach((paragraph, index) => {
+        const citedClaims = paragraph.claimIds.flatMap((claimId) => {
+          const claim = claimsById.get(claimId);
+          if (!claim) {
+            issues.push(`narrative.${section}.${index} references unknown claim ${claimId}`);
+            return [];
+          }
+          const allowed = section === 'companyProfile'
+            ? claim.classification === 'fact' && claim.subjectScope === 'company' && companyNarrativeKinds.has(claim.kind)
+            : section === 'leadContext'
+              ? claim.classification === 'fact' && claim.subjectScope === 'person'
+              : section === 'commercialReading'
+                ? commercialNarrativeKinds.has(claim.kind)
+                : true;
+          if (!allowed) issues.push(`narrative.${section}.${index} cites claim ${claimId} from the wrong narrative section`);
+          return [claim];
+        });
+        paragraph.evidenceIds.forEach((evidenceId) => {
+          if (!evidenceById.has(evidenceId)) {
+            issues.push(`narrative.${section}.${index} references unknown evidence ${evidenceId}`);
+          } else if (!citedClaims.some((claim) => claim.supportingEvidenceIds.includes(evidenceId))) {
+            issues.push(`narrative.${section}.${index} evidence ${evidenceId} does not support a cited claim`);
+          }
+        });
+        citedClaims.forEach((claim) => {
+          if (!paragraph.evidenceIds.some((evidenceId) => claim.supportingEvidenceIds.includes(evidenceId))) {
+            issues.push(`narrative.${section}.${index} claim ${claim.id} has no cited canonical supporting evidence`);
+          }
+        });
+      });
+    });
+  }
 
   const contradictionsById = new Map(snapshot.contradictions.map((item) => [item.id, item]));
   document.contradictions.forEach((item, index) => {

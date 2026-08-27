@@ -438,6 +438,10 @@ test('maps technical research warnings into user-facing guidance', () => {
     researchWarningLabel('official_site_fetch_failed'),
     'No pudimos consultar el sitio oficial; se usaron otras fuentes.',
   );
+  assert.equal(
+    researchWarningLabel('company_profile_unavailable'),
+    'No pudimos consultar fuentes adicionales sobre la actividad de la empresa.',
+  );
   assert.equal(researchWarningLabel('custom_provider_error'), 'Hay una señal que conviene validar antes de contactar.');
   assert.equal(researchWarningLabel('Revisa la fecha de esta señal.'), 'Revisa la fecha de esta señal.');
 });

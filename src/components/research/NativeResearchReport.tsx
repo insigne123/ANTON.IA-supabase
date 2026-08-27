@@ -88,13 +88,15 @@ function dateLabel(value: string | null) {
   if (!value) return null;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
-  return new Intl.DateTimeFormat('es-CL', {
+  return reportDateFormatter.format(parsed);
+}
+
+const reportDateFormatter = new Intl.DateTimeFormat('es-CL', {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
     timeZone: 'UTC',
-  }).format(parsed);
-}
+});
 
 function EvidenceLink({ evidence }: { evidence: ResearchReportEvidence }) {
   const sourceUrl = safeResearchSourceUrl(evidence.sourceUrl);
@@ -165,6 +167,71 @@ function ClaimList({
   );
 }
 
+function NarrativeText({
+  paragraphs,
+  empty,
+  onShowEvidence,
+  showClassification = false,
+}: {
+  paragraphs: Array<{
+    text: string;
+    evidenceIds?: string[];
+    classification?: 'fact' | 'hypothesis' | 'signal';
+    observedAt?: string | null;
+  }>;
+  empty: string;
+  onShowEvidence?: () => void;
+  showClassification?: boolean;
+}) {
+  if (paragraphs.length === 0) {
+    return <p className="text-sm leading-7 text-muted-foreground">{empty}</p>;
+  }
+  return (
+    <div className="max-w-[72ch] space-y-4 text-[15px] leading-7 text-foreground/90 sm:text-base sm:leading-8">
+      {paragraphs.map((paragraph, index) => {
+        const observedAt = dateLabel(paragraph.observedAt || null);
+        const label = paragraph.classification === 'hypothesis'
+          ? 'Hipótesis'
+          : paragraph.classification === 'signal'
+            ? 'Señal pública'
+            : 'Verificado';
+        return (
+          <div key={`${paragraph.text}-${index}`}>
+            {showClassification && paragraph.classification ? (
+              <p className={cn(
+                'mb-1 text-[10px] font-semibold uppercase tracking-[0.13em]',
+                paragraph.classification === 'hypothesis' ? 'text-primary' : 'text-emerald-700 dark:text-emerald-300',
+              )}>
+                {label}{observedAt ? ` · ${observedAt}` : ''}
+              </p>
+            ) : null}
+            <p>{paragraph.text}</p>
+            {onShowEvidence && paragraph.evidenceIds?.length ? (
+              <button
+                type="button"
+                onClick={onShowEvidence}
+                className="mt-1.5 rounded-sm text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                Ver respaldo
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ClaimStatements({ claims }: { claims: ResearchReportClaim[] }) {
+  return (
+    <div className="space-y-2.5">
+      {claims.map((claim) => (
+        <p key={claim.id} className="text-sm leading-6 text-foreground/85">{claim.statement}</p>
+      ))}
+    </div>
+  );
+}
+
 function SectionHeading({
   id,
   eyebrow,
@@ -218,7 +285,7 @@ function CompanySections({ sections }: { sections: ResearchReportCompanySections
           <section key={section.key} className="grid gap-2 py-4 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-5">
             <h4 className="text-sm font-semibold text-foreground/90">{section.title}</h4>
             {claims.length > 0
-              ? <ClaimList claims={claims} />
+              ? <ClaimStatements claims={claims} />
               : <p className="text-sm leading-6 text-muted-foreground">{section.empty}</p>}
           </section>
         );
@@ -231,13 +298,14 @@ export function NativeResearchReportSkeleton({ className }: { className?: string
   return (
     <div className={cn('space-y-8', className)} aria-busy="true" aria-live="polite">
       <span className="sr-only">Cargando el reporte completo</span>
-      <div className="space-y-3 border-b border-border/60 pb-5">
-        <Skeleton className="h-5 w-40" />
-        <div className="grid grid-cols-3 gap-3"><Skeleton className="h-12" /><Skeleton className="h-12" /><Skeleton className="h-12" /></div>
+      <div className="space-y-3 border-b border-border/60 pb-6">
+        <Skeleton className="h-3 w-36" />
+        <Skeleton className="h-9 w-2/3" />
+        <Skeleton className="h-4 w-1/2" />
       </div>
-      <div className="space-y-3"><Skeleton className="h-5 w-36" /><Skeleton className="h-28 w-full rounded-2xl" /></div>
-      <div className="space-y-3"><Skeleton className="h-5 w-44" /><Skeleton className="h-40 w-full rounded-2xl" /></div>
-      <div className="space-y-3"><Skeleton className="h-5 w-40" /><Skeleton className="h-56 w-full rounded-2xl" /></div>
+      <div className="space-y-3"><Skeleton className="h-5 w-36" /><Skeleton className="h-32 w-full rounded-3xl" /></div>
+      <div className="space-y-3"><Skeleton className="h-5 w-44" /><Skeleton className="h-24 w-full rounded-2xl" /></div>
+      <div className="space-y-3"><Skeleton className="h-5 w-40" /><Skeleton className="h-44 w-full rounded-2xl" /></div>
     </div>
   );
 }
@@ -291,125 +359,161 @@ export function NativeResearchReport({
   const showCompanyContextGuidance = needsCompanyContext && refreshAvailable;
   const hasReviewPoints = report.gaps.length > 0 || report.contradictions.length > 0;
   const updatedAt = dateLabel(report.updatedAt);
+  const narrative = reportDocument?.narrative;
+  const canonicalClaimById = new Map((result.snapshot?.claims || []).map((claim) => [claim.id, claim]));
+  const canonicalEvidenceById = new Map((result.snapshot?.evidence || []).map((evidence) => [evidence.id, evidence]));
+  const canonicalSourceById = new Map((result.snapshot?.sources || []).map((source) => [source.id, source]));
+  const decorateNarrative = (paragraphs: NonNullable<typeof narrative>[keyof NonNullable<typeof narrative>]) => paragraphs.map((paragraph) => {
+    const claims = paragraph.claimIds.map((claimId) => canonicalClaimById.get(claimId)).filter(Boolean);
+    const classification: 'fact' | 'hypothesis' | 'signal' = claims.some((claim) => claim?.classification === 'hypothesis')
+      ? 'hypothesis'
+      : claims.some((claim) => ['news_signal', 'hiring_signal', 'technology_signal', 'site_signal'].includes(claim?.kind || ''))
+        ? 'signal'
+        : 'fact';
+    const evidence = paragraph.evidenceIds.map((evidenceId) => canonicalEvidenceById.get(evidenceId)).find(Boolean);
+    const source = evidence ? canonicalSourceById.get(evidence.sourceId) : null;
+    return {
+      ...paragraph,
+      classification,
+      observedAt: evidence?.observedAt || source?.publishedAt || source?.retrievedAt || null,
+    };
+  });
+  const claimParagraphs = (claims: ResearchReportClaim[]) => claims.map((claim) => ({
+    text: claim.statement,
+    evidenceIds: claim.evidence.map((item) => item.id),
+    classification: (claim.classification === 'hypothesis'
+      ? 'hypothesis'
+      : ['news_signal', 'hiring_signal', 'technology_signal', 'site_signal'].includes(claim.kind)
+        ? 'signal'
+        : 'fact') as 'fact' | 'hypothesis' | 'signal',
+    observedAt: claim.observedAt,
+  }));
+  const executiveNarrative = narrative ? decorateNarrative(narrative.executiveSummary) : claimParagraphs(report.executive);
+  const companyNarrative = narrative ? decorateNarrative(narrative.companyProfile) : [];
+  const leadNarrative = narrative ? decorateNarrative(narrative.leadContext) : [];
+  const commercialNarrative = narrative
+    ? decorateNarrative(narrative.commercialReading)
+    : claimParagraphs([...report.signals, ...report.opportunities]);
+  const evidenceClaims = [...new Map([
+    ...report.executive,
+    ...report.person.facts,
+    ...companySectionCopy.flatMap((section) => report.companySections[section.key]),
+    ...report.signals,
+    ...report.opportunities,
+  ].map((claim) => [claim.id, claim])).values()];
+  const companyName = result.lead.companyName || result.lead.companyDomain || 'la empresa';
+  const leadName = result.lead.fullName || result.lead.email || 'el contacto';
+  const showEvidence = () => {
+    setDetailsOpen(true);
+    window.requestAnimationFrame(() => document.getElementById(`${id}-details`)?.focus());
+  };
 
   return (
     <article className={cn('min-w-0 space-y-9', className)} aria-label="Reporte de investigación">
-      <header className="space-y-5 border-b border-border/60 pb-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex min-w-0 items-start gap-3" role="status" aria-live="polite">
-            {inFlight ? (
-              <Loader2 className="mt-0.5 size-5 shrink-0 animate-spin text-sky-600 motion-reduce:animate-none dark:text-sky-300" aria-hidden="true" />
-            ) : readiness === 'ready' ? (
-              <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
-            ) : (
-              <CircleAlert className={cn('mt-0.5 size-5 shrink-0', statusTone(status))} aria-hidden="true" />
-            )}
-            <div className="min-w-0">
-              <p className={cn('text-sm font-semibold', statusTone(status))}>{researchStatusLabel(status)}</p>
-              <p className={cn('mt-1 text-sm', readinessTone(readiness))}>{researchReadinessLabel(readiness)}</p>
-            </div>
+      <header className="space-y-6 border-b border-border/60 pb-7">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">Informe de investigación</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.035em] text-foreground sm:text-3xl">{companyName}</h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">Contexto empresarial y comercial para {leadName}.</p>
           </div>
-          {updatedAt ? <p className="text-xs text-muted-foreground">Actualizado el {updatedAt}</p> : null}
+          {updatedAt ? <p className="shrink-0 text-xs text-muted-foreground">Actualizado el {updatedAt}</p> : null}
         </div>
-        <dl className="grid grid-cols-3 divide-x divide-border/60 rounded-2xl bg-muted/[0.2] py-3 text-center tabular-nums">
-          {[
-            { label: 'Afirmaciones', value: report.coverage.claims },
-            { label: 'Evidencias', value: evidenceCount },
-            { label: 'Fuentes', value: sourceCount },
-          ].map((metric) => (
-            <div key={metric.label} className="min-w-0 px-2 sm:px-4">
-              <dt className="truncate text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{metric.label}</dt>
-              <dd className="text-lg font-semibold tracking-[-0.025em]">{metric.value}</dd>
-            </div>
-          ))}
-        </dl>
+        <div className="flex flex-col gap-2 border-t border-border/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-2.5" role="status" aria-live="polite">
+            {inFlight ? (
+              <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-sky-600 motion-reduce:animate-none dark:text-sky-300" aria-hidden="true" />
+            ) : readiness === 'ready' ? (
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-300" aria-hidden="true" />
+            ) : (
+              <CircleAlert className={cn('mt-0.5 size-4 shrink-0', statusTone(status))} aria-hidden="true" />
+            )}
+            <p className="min-w-0 text-sm">
+              <span className={cn('font-semibold', statusTone(status))}>{researchStatusLabel(status)}</span>
+              <span className="px-1.5 text-muted-foreground" aria-hidden="true">·</span>
+              <span className={readinessTone(readiness)}>{researchReadinessLabel(readiness)}</span>
+            </p>
+          </div>
+          <p className="text-xs text-muted-foreground">{sourceCount} {sourceCount === 1 ? 'fuente revisable' : 'fuentes revisables'}</p>
+        </div>
       </header>
 
       <section aria-labelledby={`${id}-executive`}>
         <SectionHeading
           id={`${id}-executive`}
           eyebrow="Resumen ejecutivo"
-          title="Lo esencial para decidir el siguiente paso"
-          description="Una síntesis de los hechos con mejor respaldo en la investigación."
+          title="Lo que conviene saber"
+          description="Síntesis de la empresa, el contacto y las señales con mejor respaldo."
         />
-        <div className="mt-4">
-          {report.executive.length > 0 ? (
-            <ClaimList claims={report.executive} tone="executive" />
-          ) : (
-            <p className="rounded-2xl border border-dashed border-border/70 px-4 py-4 text-sm leading-6 text-muted-foreground">
-              La evidencia disponible aún no permite preparar un resumen ejecutivo verificable.
-            </p>
-          )}
+        <div className="mt-4 rounded-3xl border border-border/70 bg-muted/[0.16] px-5 py-5 sm:px-6 sm:py-6">
+          <NarrativeText
+            paragraphs={executiveNarrative}
+            empty="La evidencia disponible aún no permite preparar un resumen ejecutivo verificable."
+            onShowEvidence={showEvidence}
+          />
         </div>
       </section>
 
       <section aria-labelledby={`${id}-person`}>
         <SectionHeading
           id={`${id}-person`}
-          eyebrow="Persona"
-          title="Contexto del contacto"
-          description="El contexto importado de tu lista se mantiene separado de los hechos encontrados en fuentes públicas."
+          eyebrow="Contacto"
+          title="Quién es y qué sabemos"
+          description="El contexto importado se distingue de la información encontrada en fuentes públicas."
         />
+        {leadNarrative.length > 0 ? (
+          <div className="mt-4">
+            <NarrativeText paragraphs={leadNarrative} empty="" onShowEvidence={showEvidence} />
+          </div>
+        ) : null}
         <div className="mt-4 rounded-2xl border border-border/70 bg-muted/[0.16] px-4 py-4 sm:px-5">
           <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">Contexto importado</p>
           {report.person.fields.length > 0
             ? <ImportedFields fields={report.person.fields} />
             : <p className="text-sm leading-6 text-muted-foreground">No hay contexto personal importado para este contacto.</p>}
         </div>
-        <div className="mt-5">
+        {!narrative && report.person.facts.length > 0 ? <div className="mt-5">
           <h4 className="text-sm font-semibold">Hechos públicos verificados</h4>
-          {report.person.facts.length > 0 ? (
-            <div className="mt-2"><ClaimList claims={report.person.facts} /></div>
-          ) : (
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              No encontramos hechos públicos de la persona con una coincidencia de identidad suficiente.
-            </p>
-          )}
-        </div>
+          <div className="mt-2"><ClaimStatements claims={report.person.facts} /></div>
+        </div> : null}
       </section>
 
       <section aria-labelledby={`${id}-company`}>
         <SectionHeading
           id={`${id}-company`}
           eyebrow="Empresa"
-          title="Actividad y contexto comercial"
-          description="Descripción, oferta, mercado y escala respaldados por fuentes revisables."
+          title="Qué hace y cómo opera"
+          description="Una lectura de su actividad, oferta, mercado y escala observable."
         />
+        {companyNarrative.length > 0 ? (
+          <div className="mt-4">
+            <NarrativeText paragraphs={companyNarrative} empty="" onShowEvidence={showEvidence} />
+          </div>
+        ) : null}
         {report.companyContext.length > 0 ? (
-          <div className="mt-4 border-l-2 border-border/70 pl-4">
+          <div className="mt-5 border-l-2 border-border/70 pl-4">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">Contexto de empresa importado</p>
             <ImportedFields fields={report.companyContext} />
           </div>
         ) : null}
-        <CompanySections sections={report.companySections} />
+        {companyNarrative.length === 0 ? <CompanySections sections={report.companySections} /> : null}
       </section>
 
-      <section aria-labelledby={`${id}-signals`}>
+      <section aria-labelledby={`${id}-commercial`}>
         <SectionHeading
-          id={`${id}-signals`}
-          eyebrow="Señales públicas"
-          title="Actividad con fecha"
-          description="Observaciones atribuibles que conviene confirmar antes de usarlas en una conversación."
+          id={`${id}-commercial`}
+          eyebrow="Lectura comercial"
+          title="Señales y temas para explorar"
+          description="Interpretación prudente de la actividad pública. Las hipótesis no representan necesidades confirmadas."
         />
-        {report.signals.length > 0 ? (
-          <div className="mt-3"><ClaimList claims={report.signals} tone="signal" /></div>
-        ) : (
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">No se encontraron señales públicas recientes y atribuibles.</p>
-        )}
-      </section>
-
-      <section aria-labelledby={`${id}-hypotheses`}>
-        <SectionHeading
-          id={`${id}-hypotheses`}
-          eyebrow="Hipótesis comerciales"
-          title="Temas para explorar, no necesidades confirmadas"
-          description="Estas posibilidades se apoyan en la evidencia disponible, pero deben validarse con el contacto."
-        />
-        {report.opportunities.length > 0 ? (
-          <div className="mt-4"><ClaimList claims={report.opportunities} tone="hypothesis" /></div>
-        ) : (
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">La evidencia no permite formular una hipótesis comercial citada.</p>
-        )}
+        <div className="mt-4 border-l-2 border-primary/30 pl-4 sm:pl-5">
+          <NarrativeText
+            paragraphs={commercialNarrative}
+            empty="La evidencia no permite formular todavía una lectura comercial citada."
+            onShowEvidence={showEvidence}
+            showClassification
+          />
+        </div>
       </section>
 
       {hasReviewPoints ? (
@@ -444,8 +548,8 @@ export function NativeResearchReport({
       ) : null}
 
       <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <section aria-labelledby={`${id}-details`} className="border-y border-border/60">
-          <h3 id={`${id}-details`} className="sr-only">Fuentes y calidad del reporte</h3>
+        <section id={`${id}-details`} aria-labelledby={`${id}-details-heading`} className="border-y border-border/60 outline-none" tabIndex={-1}>
+          <h3 id={`${id}-details-heading`} className="sr-only">Fuentes y calidad del reporte</h3>
           <CollapsibleTrigger asChild>
             <Button
               type="button"
@@ -478,6 +582,19 @@ export function NativeResearchReport({
                 </p>
               </div>
             </div>
+            {evidenceClaims.length > 0 ? (
+              <div className="border-t border-border/60 py-4">
+                <p className="font-medium">Base de afirmaciones</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">Hechos e hipótesis canónicas usados para construir la lectura del informe.</p>
+                <div className="mt-3"><ClaimList claims={evidenceClaims} /></div>
+              </div>
+            ) : null}
+            {companyNarrative.length > 0 ? (
+              <div className="border-t border-border/60 py-4">
+                <p className="font-medium">Perfil estructurado</p>
+                <CompanySections sections={report.companySections} />
+              </div>
+            ) : null}
             {result.warnings.length > 0 ? (
               <div className="border-t border-border/60 py-4">
                 <p className="font-medium">Puntos de calidad</p>
