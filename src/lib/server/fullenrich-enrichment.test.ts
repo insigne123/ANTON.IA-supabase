@@ -25,7 +25,7 @@ test('FullEnrich bulk contacts require a precise identity and only request work 
   }), {
     first_name: 'Ana',
     last_name: 'Perez',
-    company_domain: 'example.com',
+    domain: 'example.com',
     enrich_fields: ['contact.work_emails'],
     custom: { callback: 'one' },
   });
@@ -62,7 +62,8 @@ test('FullEnrich bulk submission uses Bearer auth, opaque custom data, and enric
     assert.equal(captured.url, 'https://app.fullenrich.com/api/v2/contact/enrich/bulk');
     assert.equal(new Headers(captured.init?.headers).get('authorization'), 'Bearer test-key');
     const payload = JSON.parse(String(captured.init?.body));
-    assert.deepEqual(payload.contacts[0], {
+    assert.match(payload.name, /^ANTON\.IA enrichment /);
+    assert.deepEqual(payload.data[0], {
       linkedin_url: 'https://www.linkedin.com/in/ana-perez',
       enrich_fields: ['contact.work_emails', 'contact.phones'],
       custom: { fullenrich_callback_id: '11111111-1111-4111-8111-111111111111' },

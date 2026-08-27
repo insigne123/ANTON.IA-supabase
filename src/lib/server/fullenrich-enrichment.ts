@@ -75,7 +75,7 @@ export function validateFullEnrichBulkContact(contact: FullEnrichBulkContact) {
     ...(linkedinUrl ? { linkedin_url: linkedinUrl } : {}),
     ...(!linkedinUrl && firstName ? { first_name: firstName } : {}),
     ...(!linkedinUrl && lastName ? { last_name: lastName } : {}),
-    ...(!linkedinUrl && companyDomain ? { company_domain: companyDomain } : {}),
+    ...(!linkedinUrl && companyDomain ? { domain: companyDomain } : {}),
     ...(!linkedinUrl && companyName ? { company_name: companyName } : {}),
     enrich_fields: enrichFields,
     custom: contact.custom,
@@ -147,9 +147,10 @@ export async function submitFullEnrichBulkEnrichment(input: {
         'Cache-Control': 'no-store',
       },
       body: JSON.stringify({
-        contacts,
+        name: `ANTON.IA enrichment ${new Date().toISOString()}`,
         webhook_url: input.webhookUrl,
         webhook_events: { contact_finished: input.webhookUrl },
+        data: contacts,
       }),
       signal: controller.signal,
     });
