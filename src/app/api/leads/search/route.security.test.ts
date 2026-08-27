@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8');
+const clientSource = readFileSync(new URL('../../../../lib/leads-client.ts', import.meta.url), 'utf8');
+const searchPageSource = readFileSync(new URL('../../../(app)/search/page.tsx', import.meta.url), 'utf8');
 
 test('lead-search BFF supplies the backend secret only from server runtime configuration', () => {
   assert.match(source, /process\.env\.ENRICHMENT_SERVICE_SECRET/);
@@ -26,4 +28,17 @@ test('company search BFF forwards selection identity without untrusted metadata'
   assert.doesNotMatch(source, /selected_organization_website:\s*String/);
   assert.doesNotMatch(source, /selected_organization_industry:\s*String/);
   assert.doesNotMatch(source, /selected_organization_size:\s*companyReq/);
+});
+
+test('profile search queues requested contact data and polls the persisted profile', () => {
+  assert.match(clientSource, /tableName: 'people_search_leads'/);
+  assert.match(clientSource, /'Idempotency-Key': input\.operationId/);
+  assert.match(clientSource, /linkedinUrl: input\.linkedinUrl/);
+  assert.match(clientSource, /json\?\.error === 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN'/);
+  assert.match(searchPageSource, /await enrichLinkedInProfileLead\(/);
+  assert.match(searchPageSource, /reveal_email: false,[\s\S]*reveal_phone: false/);
+  assert.match(searchPageSource, /profile_tracking_ids: \[trackingId\]/);
+  assert.match(searchPageSource, /await getLinkedInProfileStatuses\(profilePhonePollingIds/);
+  assert.match(searchPageSource, /emailSatisfied && phoneSatisfied && !isPendingEnrichmentStatus\(status\)/);
+  assert.doesNotMatch(searchPageSource, /getLinkedInProfileLead\(/);
 });

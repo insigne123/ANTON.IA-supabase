@@ -24,7 +24,8 @@ import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import * as Quota from '@/lib/quota-client';
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from '@/lib/search-config';
 import {
-  getLinkedInProfileLead,
+  enrichLinkedInProfileLead,
+  getLinkedInProfileStatuses,
   searchCompanyNameLeads,
   searchLeads,
   searchLinkedInProfileLead,
@@ -45,7 +46,6 @@ import { Switch } from '@/components/ui/switch';
 import { splitDomainInput } from '@/lib/domain';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import { Badge } from '@/components/ui/badge';
-import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import {
@@ -250,11 +250,21 @@ function buildLinkedInProfileNotice(params: {
   let title = 'Perfil encontrado';
   let description = 'Ya puedes revisar el resultado y decidir si quieres guardarlo.';
 
-  if (phoneState === 'queued') {
-    title = emailState === 'ready' ? 'Correo listo, telefono en camino' : 'Telefono en camino';
-    description = emailState === 'ready'
-      ? 'El correo ya esta disponible. El telefono aparecera en el resultado cuando este listo.'
-      : 'Encontramos el perfil y seguimos buscando el telefono. Puedes continuar trabajando mientras se actualiza.';
+  if (emailState === 'queued' || phoneState === 'queued') {
+    if (emailState === 'queued' && phoneState === 'queued') {
+      title = 'Datos de contacto en camino';
+      description = 'Encontramos el perfil y seguimos buscando el correo y el teléfono. El resultado se actualizará automáticamente.';
+    } else if (emailState === 'queued') {
+      title = 'Correo en camino';
+      description = phoneState === 'ready'
+        ? 'El teléfono ya está disponible. El correo aparecerá cuando esté listo.'
+        : 'Encontramos el perfil y seguimos buscando el correo. El resultado se actualizará automáticamente.';
+    } else {
+      title = emailState === 'ready' ? 'Correo listo, teléfono en camino' : 'Teléfono en camino';
+      description = emailState === 'ready'
+        ? 'El correo ya está disponible. El teléfono aparecerá cuando esté listo.'
+        : 'Encontramos el perfil y seguimos buscando el teléfono. El resultado se actualizará automáticamente.';
+    }
   } else if (emailRequested && emailState === 'missing' && phoneRequested && phoneState === 'missing') {
     tone = 'warning';
     title = 'Perfil sin datos de contacto visibles';
@@ -622,7 +632,9 @@ export default function SearchPage() {
         ? 'not_requested'
         : result.leads.some((lead) => hasVisibleLeadEmail(lead))
           ? 'ready'
-          : 'missing';
+          : phoneStatus === 'queued'
+            ? 'queued'
+            : 'missing';
       const phoneState: ProfileContactState = !filters.revealPhone
         ? 'not_requested'
         : phoneStatus === 'queued'
@@ -677,6 +689,15 @@ export default function SearchPage() {
               emailState,
               phoneState,
             }));
+      } else if (phoneStatus === 'failed' && result.phone_enrichment?.message) {
+        setProfilePhonePollingStartedAt(null);
+        setProfileSearchNotice({
+          tone: 'warning',
+          title: 'Perfil encontrado, contacto pendiente',
+          description: result.phone_enrichment.message,
+          emailState,
+          phoneState,
+        });
       } else if (phoneStatus === 'skipped' || phoneStatus === 'failed') {
         setProfilePhonePollingStartedAt(null);
         setProfileSearchNotice(buildLinkedInProfileNotice({
@@ -771,9 +792,60 @@ export default function SearchPage() {
         result = await searchLinkedInProfileLead({
           search_mode: 'linkedin_profile',
           linkedin_url: linkedinUrl,
-          reveal_email: filters.revealEmail,
-          reveal_phone: filters.revealPhone,
+          reveal_email: false,
+          reveal_phone: false,
         }, abortRef.current.signal);
+
+        const profile = result.leads[0];
+        if (profile && (filters.revealEmail || filters.revealPhone)) {
+          try {
+            const operationId = `profile-enrichment:${crypto.randomUUID()}`;
+            const enrichment = await enrichLinkedInProfileLead({
+              lead: profile,
+              revealEmail: filters.revealEmail,
+              revealPhone: filters.revealPhone,
+              operationId,
+              linkedinUrl,
+            }, abortRef.current.signal);
+            const trackingId = enrichment.enriched?.[0]?.id;
+            if (trackingId) {
+              result = {
+                ...result,
+                leads: result.leads.map((lead, index) => index === 0
+                  ? { ...lead, id: trackingId, enrichment_status: 'pending' }
+                  : lead),
+                enrichment_requested: true,
+                profile_tracking_ids: [trackingId],
+                phone_enrichment: {
+                  requested: true,
+                  queued: true,
+                  status: 'queued',
+                  message: 'Estamos buscando los datos de contacto solicitados.',
+                  webhook_url: null,
+                  provider_status: 202,
+                  provider_details: null,
+                },
+              };
+            }
+          } catch (enrichmentError: any) {
+            if (enrichmentError?.name === 'AbortError') throw enrichmentError;
+            const message = String(enrichmentError?.message || 'No pudimos iniciar la búsqueda de datos de contacto.');
+            result = {
+              ...result,
+              enrichment_requested: true,
+              phone_enrichment: {
+                requested: true,
+                queued: false,
+                status: 'failed',
+                message,
+                webhook_url: null,
+                provider_status: null,
+                provider_details: null,
+              },
+              provider_warnings: [...(result.provider_warnings || []), message],
+            };
+          }
+        }
       } else if (filters.searchMode === 'company_name') {
         const companyName = filters.companyName.trim();
         const organization = selectedOrg || selectedOrganization;
@@ -894,21 +966,32 @@ export default function SearchPage() {
     const maxAttempts = 18;
     const startedAt = Date.now();
     const maxDurationMs = maxAttempts * 5000;
-    const emailStateBeforePolling = profileSearchNotice?.emailState
-      || (filters.revealEmail ? 'missing' : 'not_requested');
-
-    const finishWithoutPhone = (description: string) => {
+    const finishWithoutContact = (description: string, items: Awaited<ReturnType<typeof getLinkedInProfileStatuses>> = []) => {
       if (cancelled) return;
+      const emailState: ProfileContactState = !filters.revealEmail
+        ? 'not_requested'
+        : items.some((item) => hasVisibleLeadEmail(item))
+          ? 'ready'
+          : 'missing';
+      const phoneState: ProfileContactState = !filters.revealPhone
+        ? 'not_requested'
+        : items.some((item) => hasVisibleLeadPhone(item))
+          ? 'ready'
+          : 'missing';
       setProfilePhonePollingIds([]);
       setProfilePhonePollingStartedAt(null);
       setLastProfilePhoneStatus('failed');
       profilePhoneToastStateRef.current = 'missing';
       setProfileSearchNotice({
         tone: 'warning',
-        title: 'Telefono no disponible por ahora',
+        title: filters.revealEmail && filters.revealPhone
+          ? 'Datos de contacto no disponibles'
+          : filters.revealEmail
+            ? 'Correo no disponible por ahora'
+            : 'Teléfono no disponible por ahora',
         description,
-        emailState: emailStateBeforePolling,
-        phoneState: filters.revealPhone ? 'missing' : 'not_requested',
+        emailState,
+        phoneState,
       });
     };
 
@@ -920,16 +1003,7 @@ export default function SearchPage() {
       profileStatusAbortRef.current = controller;
 
       try {
-        const items = (await Promise.all(
-          profilePhonePollingIds.map(async (id) => {
-            try {
-              return await getLinkedInProfileLead(id, controller.signal);
-            } catch (error: any) {
-              if (error?.name !== 'AbortError') failedAttempts += 1;
-              return null;
-            }
-          })
-        )).filter(Boolean) as Lead[];
+        const items = await getLinkedInProfileStatuses(profilePhonePollingIds, controller.signal);
         if (cancelled) return;
 
         if (items.length > 0) {
@@ -937,15 +1011,15 @@ export default function SearchPage() {
           const resolvedWithRequestedData = items.filter((item) => {
             const phoneNumbers = normalizeUiPhoneNumbers(item.phone_numbers);
             const hasPhone = Boolean(item.primary_phone || getPhoneFallback(phoneNumbers));
+            const hasEmail = hasVisibleLeadEmail(item);
+            const emailSatisfied = !filters.revealEmail || hasEmail;
             const phoneSatisfied = !filters.revealPhone || hasPhone;
-            return phoneSatisfied;
+            const status = String(item.enrichment_status || '').trim();
+            return emailSatisfied && phoneSatisfied && !isPendingEnrichmentStatus(status);
           });
           const stillPending = items.some((item) => {
-            const phoneNumbers = normalizeUiPhoneNumbers(item.phone_numbers);
-            const hasPhone = Boolean(item.primary_phone || getPhoneFallback(phoneNumbers));
-            const phoneMissing = filters.revealPhone && !hasPhone;
             const status = String(item.enrichment_status || '').trim();
-            return phoneMissing && isPendingEnrichmentStatus(status);
+            return isPendingEnrichmentStatus(status);
           });
 
           setLeads((prev) => {
@@ -954,7 +1028,9 @@ export default function SearchPage() {
               if (!item) return lead;
               const nextPhoneNumbersRaw = normalizeUiPhoneNumbers(item.phone_numbers) || lead.phoneNumbers;
               const nextPrimaryPhoneRaw = item.primary_phone || getPhoneFallback(nextPhoneNumbersRaw) || lead.primaryPhone || null;
-              const nextEmailRaw = String(item.email || '').trim() || lead.email || null;
+              const nextEmailRaw = hasVisibleLeadEmail(item)
+                ? String(item.email || '').trim()
+                : lead.email || null;
               const nextPhoneNumbers = filters.revealPhone ? (nextPhoneNumbersRaw || null) : null;
               const nextPrimaryPhone = filters.revealPhone ? nextPrimaryPhoneRaw : null;
               const nextEmail = filters.revealEmail ? nextEmailRaw : null;
@@ -970,25 +1046,24 @@ export default function SearchPage() {
               };
               return nextLead;
             });
-            const knownIds = new Set(updated.map((lead) => String(lead.id || '').trim()));
-            const newlyAvailable = items
-              .filter((item) => hasUsableLinkedInProfileData(item) && !knownIds.has(String(item.id || '').trim()))
-              .map((item) => normalizeLeadForUI(item, {
-                revealEmail: filters.revealEmail,
-                revealPhone: filters.revealPhone,
-              }));
-            return [...updated, ...newlyAvailable];
+            return updated;
           });
 
           if (resolvedWithRequestedData.length > 0) {
+            const emailReady = items.some((item) => hasVisibleLeadEmail(item));
+            const phoneReady = items.some((item) => hasVisibleLeadPhone(item));
             setProfilePhonePollingIds([]);
             setProfilePhonePollingStartedAt(null);
             setProfileSearchNotice({
               tone: 'info',
               title: 'Perfil actualizado',
-              description: 'El telefono ya esta visible en el resultado y puedes guardarlo sin salir de esta pantalla.',
-              emailState: items.some((item) => hasVisibleLeadEmail(item as any)) ? 'ready' : (filters.revealEmail ? 'missing' : 'not_requested'),
-              phoneState: 'ready',
+              description: filters.revealEmail && filters.revealPhone
+                ? 'El correo y el teléfono ya están visibles en el resultado.'
+                : filters.revealEmail
+                  ? 'El correo ya está visible en el resultado.'
+                  : 'El teléfono ya está visible en el resultado.',
+              emailState: filters.revealEmail ? (emailReady ? 'ready' : 'missing') : 'not_requested',
+              phoneState: filters.revealPhone ? (phoneReady ? 'ready' : 'missing') : 'not_requested',
             });
             setLastProfilePhoneStatus(null);
             if (profilePhoneToastStateRef.current !== 'found') {
@@ -1002,24 +1077,25 @@ export default function SearchPage() {
           }
 
           if (!stillPending) {
-            finishWithoutPhone('Encontramos el perfil, pero el proveedor no devolvio un telefono disponible.');
+            finishWithoutContact('Encontramos el perfil, pero el proveedor no devolvió todos los datos de contacto solicitados.', items);
             return;
           }
         }
 
         if (attempts >= maxAttempts || Date.now() - startedAt >= maxDurationMs) {
-          finishWithoutPhone(failedAttempts > 0
-            ? 'No pudimos confirmar el estado del telefono despues de varios intentos. Puedes volver a buscarlo.'
-            : 'El proveedor esta tardando mas de lo esperado. Puedes volver a intentarlo en unos minutos.');
+          finishWithoutContact(failedAttempts > 0
+            ? 'No pudimos confirmar los datos de contacto después de varios intentos. Puedes volver a buscarlos.'
+            : 'El proveedor está tardando más de lo esperado. Puedes volver a intentarlo en unos minutos.', items);
           return;
         }
 
         timeoutId = window.setTimeout(poll, 5000);
       } catch (error: any) {
         if (cancelled || error?.name === 'AbortError') return;
-        console.warn('[search] profile phone polling failed:', error?.message || error);
+        failedAttempts += 1;
+        console.warn('[search] profile contact polling failed:', error?.message || error);
         if (attempts >= maxAttempts || Date.now() - startedAt >= maxDurationMs) {
-          finishWithoutPhone('No pudimos confirmar el estado del telefono. Puedes volver a intentarlo.');
+          finishWithoutContact('No pudimos confirmar los datos de contacto. Puedes volver a intentarlo.');
           return;
         }
         timeoutId = window.setTimeout(poll, 5000);
@@ -1034,7 +1110,6 @@ export default function SearchPage() {
       profileStatusAbortRef.current?.abort();
       profileStatusAbortRef.current = null;
     };
-    // The notice is captured when polling starts; adding it as a dependency would restart the timer on every status update.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.searchMode, filters.revealEmail, filters.revealPhone, profilePhonePollingIds, toast]);
 
@@ -1471,7 +1546,7 @@ export default function SearchPage() {
                       <Mail className="h-4 w-4 text-muted-foreground" />
                       <span>Correo</span>
                       <Badge variant="outline" className={statusChipClasses(profileSearchNotice.emailState)}>
-                        {profileSearchNotice.emailState === 'ready' ? 'Disponible' : profileSearchNotice.emailState === 'missing' ? 'No disponible' : 'No solicitado'}
+                        {profileSearchNotice.emailState === 'ready' ? 'Disponible' : profileSearchNotice.emailState === 'queued' ? 'Buscando…' : profileSearchNotice.emailState === 'missing' ? 'No disponible' : 'No solicitado'}
                       </Badge>
                     </div>
                     <div className="inline-flex items-center gap-2 text-sm">

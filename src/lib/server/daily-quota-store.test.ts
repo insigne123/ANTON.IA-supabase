@@ -216,6 +216,9 @@ test('enrichment replays before provider configuration and claims before FullEnr
   assert.match(post, /resource,[\s\S]*operationId: operation\.operationId,[\s\S]*count: leads\.length/);
   assert.match(post, /body\.resource != null/);
   assert.match(post, /resolveMode\(body\.mode, trustedInternalCaller, revealPhone\.value\)/);
+  assert.match(enrichmentRoute, /'people_search_leads'/);
+  assert.match(enrichmentRoute, /input\.tableName === 'people_search_leads'/);
+  assert.match(enrichmentRoute, /organization_domain: cleanDomain\(lead\.companyDomain\)/);
   assert.match(post, /status: 403/);
   assert.match(post, /status: 503/);
   assert.match(enrichmentRoute, /FULLENRICH_API_KEY_NOT_CONFIGURED/);
@@ -250,7 +253,7 @@ test('quota operation retries replay prior consumption and never reacquire submi
   assert.match(existingBranch, /'response_payload', v_operation\.response_payload/);
 
   const post = enrichmentRoute.slice(enrichmentRoute.indexOf('export async function POST'));
-  assert.match(post, /if \(!claim\.claimed \|\| !claim\.allowed \|\| !claim\.claimToken\) return operationStateResponse\(claim\);/);
+  assert.match(post, /if \(!claim\.claimed \|\| !claim\.allowed \|\| !claim\.claimToken\) \{[\s\S]*return await operationStateResponse\(claim/);
   assert.match(post, /error instanceof FullEnrichEnrichmentError[\s\S]*completeEnrichmentQuotaOperation\(/);
   assert.match(post, /releaseEnrichmentQuotaOperation\(/);
 });
@@ -302,6 +305,16 @@ test('enrichment mode cannot be forged or made inconsistent with requested field
   assert.match(resolver, /explicit enrichment mode is reserved for internal requests/);
   assert.match(resolver, /enrichment mode does not match requested fields/);
   assert.match(enrichmentRoute, /function quotaResource[\s\S]*mode === 'deep' \? 'investigate' : 'enrich'/);
+});
+
+test('profile enrichment has stable targets and recoverable idempotent replays', () => {
+  assert.match(enrichmentRoute, /function profileTargetId[\s\S]*createHash\('sha256'\)/);
+  assert.match(enrichmentRoute, /from\('people_search_leads'\)\.upsert\([\s\S]*onConflict: 'id'/);
+  assert.match(enrichmentRoute, /async function operationTargets/);
+  assert.match(enrichmentRoute, /target_table', input\.tableName/);
+  assert.match(enrichmentRoute, /enriched\.length > 0 \? \{ queued: true, enriched \}/);
+  assert.match(enrichmentRoute, /callback binding failed after provider acceptance/);
+  assert.match(enrichmentRoute, /markTargetsFailed/);
 });
 
 test('backup enrichment delegates atomic quota authority and preserves unrelated usage increments', () => {

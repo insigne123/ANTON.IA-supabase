@@ -10,6 +10,7 @@ import type {
 
 const PATH = '/api/leads/search';
 const PROFILE_STATUS_PATH = '/api/leads/profile-status';
+const PROFILE_ENRICHMENT_PATH = '/api/opportunities/enrich-apollo';
 
 type SearchPayload = LeadsSearchParams | LinkedInProfileSearchRequest | CompanyNameSearchRequest;
 
@@ -82,6 +83,61 @@ export async function searchLinkedInProfileLead(
   signal?: AbortSignal,
 ): Promise<LeadSearchResponse> {
   return postSearch(body, signal);
+}
+
+export async function enrichLinkedInProfileLead(input: {
+  lead: Lead;
+  revealEmail: boolean;
+  revealPhone: boolean;
+  operationId: string;
+  linkedinUrl: string;
+}, signal?: AbortSignal): Promise<{
+  queued: boolean;
+  operationId: string;
+  operationStatus?: string;
+  enriched?: Array<{ id: string }>;
+}> {
+  const res = await fetch(PROFILE_ENRICHMENT_PATH, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': input.operationId,
+    },
+    body: JSON.stringify({
+      operationId: input.operationId,
+      provider: 'fullenrich',
+      tableName: 'people_search_leads',
+      revealEmail: input.revealEmail,
+      revealPhone: input.revealPhone,
+      leads: [{
+        fullName: input.lead.name,
+        linkedinUrl: input.linkedinUrl,
+        companyName: input.lead.org_name || input.lead.organization_name,
+        companyDomain: input.lead.organization?.website_url,
+        title: input.lead.title,
+        clientRef: input.lead.id,
+        sourceProviderId: input.lead.source_provider_id,
+      }],
+    }),
+    cache: 'no-store',
+    signal,
+  });
+
+  const json = await res.json().catch(() => null);
+  const providerOutcomeUnknown = json?.error === 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN'
+    && Array.isArray(json?.enriched)
+    && Boolean(json.enriched[0]?.id);
+  if (!res.ok && !providerOutcomeUnknown) {
+    if (res.status === 429) {
+      throw new Error('Alcanzaste el límite diario de enriquecimientos. El perfil seguirá disponible sin datos de contacto.');
+    }
+    throw new Error('No pudimos iniciar la búsqueda de datos de contacto. Inténtalo nuevamente.');
+  }
+  if ((!json?.queued && !providerOutcomeUnknown) || !Array.isArray(json?.enriched) || !json.enriched[0]?.id) {
+    throw new Error('No pudimos confirmar la búsqueda de datos de contacto. Inténtalo nuevamente.');
+  }
+
+  return { ...json, queued: true };
 }
 
 export async function searchCompanyNameLeads(

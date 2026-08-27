@@ -40,6 +40,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ALLOWED_TABLES = new Set<FullEnrichTargetTable>([
   'enriched_leads',
   'enriched_opportunities',
+  'people_search_leads',
 ]);
 const TRUE_FLAG_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const FALSE_FLAG_VALUES = new Set(['0', 'false', 'no', 'off']);
@@ -114,6 +115,13 @@ function splitFullName(value: unknown) {
     firstName: parts[0] || '',
     lastName: parts.slice(1).join(' '),
   };
+}
+
+function profileTargetId(userId: string, organizationId: string, linkedinUrl: string) {
+  const digest = createHash('sha256')
+    .update(`${organizationId}\n${userId}\n${linkedinUrl}`)
+    .digest('hex');
+  return `profile:${digest}`;
 }
 
 function parseRequestedFlag(raw: unknown, defaultValue: boolean) {
@@ -213,13 +221,44 @@ function operationUsage(claim: EnrichmentQuotaOperationClaim) {
   };
 }
 
-function operationStateResponse(claim: EnrichmentQuotaOperationClaim) {
+async function operationTargets(input: {
+  operationId: string;
+  userId: string;
+  organizationId: string;
+  resource: QuotaResource;
+  tableName: FullEnrichTargetTable;
+}) {
+  const admin: any = getSupabaseAdminClient();
+  const { data, error } = await admin
+    .from('fullenrich_enrichment_callbacks')
+    .select('target_id')
+    .eq('operation_id', input.operationId)
+    .eq('user_id', input.userId)
+    .eq('organization_id', input.organizationId)
+    .eq('quota_resource', input.resource)
+    .eq('target_table', input.tableName)
+    .order('created_at', { ascending: true });
+  if (error || !Array.isArray(data)) return [];
+  return data
+    .map((row: any) => text(row?.target_id, 100))
+    .filter(Boolean)
+    .map((id: string) => ({ id }));
+}
+
+async function operationStateResponse(claim: EnrichmentQuotaOperationClaim, context: {
+  userId: string;
+  organizationId: string;
+  resource: QuotaResource;
+  tableName: FullEnrichTargetTable;
+}) {
+  const enriched = await operationTargets({ operationId: claim.operationId, ...context });
   if (claim.responsePayload && claim.responseStatus) {
     const response = NextResponse.json({
       ...claim.responsePayload,
       operationId: claim.operationId,
       operationStatus: claim.status,
       usage: operationUsage(claim),
+      ...(enriched.length > 0 ? { enriched } : {}),
     }, { status: claim.responseStatus });
     if (claim.reused) response.headers.set('x-idempotent-replay', 'true');
     response.headers.set('x-operation-id', claim.operationId);
@@ -233,6 +272,7 @@ function operationStateResponse(claim: EnrichmentQuotaOperationClaim) {
     operationStatus: claim.status,
     providerState: claim.providerState,
     usage: operationUsage(claim),
+    ...(enriched.length > 0 ? { queued: true, enriched } : {}),
   }, { status: unknown ? 409 : 202 });
   response.headers.set('retry-after', unknown ? '0' : '5');
   response.headers.set('x-idempotent-replay', 'true');
@@ -246,6 +286,7 @@ async function resolveOrganizationId(userId: string, requestedOrganizationId?: s
     .from('organization_members')
     .select('organization_id')
     .eq('user_id', userId)
+    .order('created_at', { ascending: true })
     .limit(50);
   if (error) throw error;
 
@@ -297,7 +338,11 @@ async function prepareTargets(input: {
     if (existingRecordId && input.tableName === 'enriched_opportunities' && !isUuid(existingRecordId)) {
       throw new Error('INVALID_EXISTING_RECORD_ID');
     }
-    const id = existingRecordId || randomUUID();
+    const linkedinUrl = normalizeLinkedin(lead.linkedinUrl);
+    let id = existingRecordId || (input.tableName === 'people_search_leads' && linkedinUrl
+      ? profileTargetId(input.userId, input.organizationId, linkedinUrl)
+      : randomUUID());
+    let existingProfile = false;
     const sourceProviderId = text(lead.sourceProviderId || lead.source_provider_id, 200) || undefined;
     const name = splitFullName(lead.fullName);
     const metadata = {
@@ -307,7 +352,63 @@ async function prepareTargets(input: {
       companyDomain: cleanDomain(lead.companyDomain) || undefined,
     };
 
-    if (existingRecordId) {
+    if (input.tableName === 'people_search_leads') {
+      let profileQuery = admin
+        .from('people_search_leads')
+        .select('id')
+        .eq('user_id', input.userId)
+        .eq('organization_id', input.organizationId);
+
+      if (existingRecordId) {
+        profileQuery = profileQuery.eq('id', existingRecordId);
+      } else if (linkedinUrl) {
+        profileQuery = profileQuery.eq('linkedin_url', linkedinUrl);
+      } else {
+        profileQuery = profileQuery.eq('id', id);
+      }
+
+      const { data: profile, error: profileError } = await profileQuery.limit(1).maybeSingle();
+      if (profileError) throw profileError;
+      if (existingRecordId && !profile) throw new Error('ENRICHMENT_TARGET_NOT_FOUND');
+      if (profile?.id) {
+        id = String(profile.id);
+        existingProfile = true;
+      }
+    }
+
+    if (input.tableName === 'people_search_leads') {
+      const profileValues = {
+        name: name.fullName || null,
+        first_name: name.firstName || null,
+        last_name: name.lastName || null,
+        linkedin_url: linkedinUrl || null,
+        title: text(lead.title, 160) || null,
+        organization_name: text(lead.companyName, 200) || null,
+        organization_domain: cleanDomain(lead.companyDomain) || null,
+        enrichment_status: 'pending',
+        source_provider: 'fullenrich',
+        source_provider_id: sourceProviderId || null,
+        updated_at: now,
+      };
+
+      if (existingProfile) {
+        const { error } = await admin
+          .from('people_search_leads')
+          .update(profileValues)
+          .eq('id', id)
+          .eq('user_id', input.userId)
+          .eq('organization_id', input.organizationId);
+        if (error) throw error;
+      } else {
+        const { error } = await admin.from('people_search_leads').upsert({
+          id,
+          user_id: input.userId,
+          organization_id: input.organizationId,
+          ...profileValues,
+        }, { onConflict: 'id' });
+        if (error) throw error;
+      }
+    } else if (existingRecordId) {
       const { data: existing, error: existingError } = await admin
         .from(input.tableName)
         .select('id, data')
@@ -327,7 +428,7 @@ async function prepareTargets(input: {
           full_name: name.fullName || undefined,
           company_name: text(lead.companyName, 200) || undefined,
           title: text(lead.title, 160) || undefined,
-          linkedin_url: normalizeLinkedin(lead.linkedinUrl) || undefined,
+          linkedin_url: linkedinUrl || undefined,
           enrichment_status: 'pending',
           updated_at: now,
           source_provider: 'fullenrich',
@@ -347,7 +448,7 @@ async function prepareTargets(input: {
         email: text(lead.email, 320) || null,
         company_name: text(lead.companyName, 200) || null,
         title: text(lead.title, 160) || null,
-        linkedin_url: normalizeLinkedin(lead.linkedinUrl) || null,
+        linkedin_url: linkedinUrl || null,
         enrichment_status: 'pending',
         source_provider: 'fullenrich',
         source_provider_id: sourceProviderId || null,
@@ -367,6 +468,24 @@ async function prepareTargets(input: {
   }
 
   return targets;
+}
+
+async function markTargetsFailed(input: {
+  targets: PreparedTarget[];
+  tableName: FullEnrichTargetTable;
+  userId: string;
+  organizationId: string;
+}) {
+  const ids = input.targets.map((target) => target.id).filter(Boolean);
+  if (ids.length === 0) return;
+  const admin: any = getSupabaseAdminClient();
+  const { error } = await admin
+    .from(input.tableName)
+    .update({ enrichment_status: 'failed', updated_at: new Date().toISOString() })
+    .in('id', ids)
+    .eq('user_id', input.userId)
+    .eq('organization_id', input.organizationId);
+  if (error) throw error;
 }
 
 async function auditEnrichment(input: {
@@ -412,6 +531,8 @@ export async function POST(request: NextRequest) {
   let resource: QuotaResource = 'enrich';
   let providerSubmitted = false;
   let callbackIds: string[] = [];
+  let targetTable: FullEnrichTargetTable | null = null;
+  let preparedTargets: PreparedTarget[] = [];
 
   try {
     if (userIdFromHeader) {
@@ -452,6 +573,7 @@ export async function POST(request: NextRequest) {
 
     const tableName = body.tableName == null ? 'enriched_opportunities' : resolveTableName(body.tableName);
     if (!tableName) return NextResponse.json({ error: 'INVALID_ENRICHMENT_TARGET' }, { status: 400 });
+    targetTable = tableName;
     const leads = Array.isArray(body.leads) ? body.leads : [];
     if (leads.length === 0 || leads.length > MAX_ENRICHMENT_CONTACTS) {
       return NextResponse.json({ error: 'INVALID_ENRICHMENT_CONTACT_COUNT' }, { status: 400 });
@@ -481,7 +603,9 @@ export async function POST(request: NextRequest) {
       operationId: operation.operationId,
       requestFingerprint: fingerprint,
     });
-    if (existing) return operationStateResponse(existing);
+    if (existing) {
+      return await operationStateResponse(existing, { userId, organizationId, resource, tableName });
+    }
 
     const apiKey = text(process.env.FULLENRICH_API_KEY, 1_000);
     const webhookUrl = resolveFullEnrichWebhookUrl();
@@ -499,7 +623,9 @@ export async function POST(request: NextRequest) {
       limit: dailyLimit,
       count: leads.length,
     });
-    if (!claim.claimed || !claim.allowed || !claim.claimToken) return operationStateResponse(claim);
+    if (!claim.claimed || !claim.allowed || !claim.claimToken) {
+      return await operationStateResponse(claim, { userId, organizationId, resource, tableName });
+    }
 
     await auditEnrichment({
       eventType: 'enrichment.requested',
@@ -514,6 +640,7 @@ export async function POST(request: NextRequest) {
     });
 
     const targets = await prepareTargets({ leads, tableName, userId, organizationId });
+    preparedTargets = targets;
     const fields = requestedFields(revealEmail.value, revealPhone.value);
     const contacts = [];
     try {
@@ -554,6 +681,8 @@ export async function POST(request: NextRequest) {
     await bindFullEnrichEnrichmentCallbacks({
       callbackIds,
       providerEnrichmentId: submission.enrichmentId,
+    }).catch((error) => {
+      console.error('[fullenrich] callback binding failed after provider acceptance', error);
     });
 
     const responsePayload = {
@@ -602,6 +731,14 @@ export async function POST(request: NextRequest) {
     if (!providerSubmitted && callbackIds.length > 0) {
       await cancelFullEnrichEnrichmentCallbacks({ callbackIds, errorCode: 'pre_provider_failure' }).catch(() => undefined);
     }
+    if (!providerSubmitted && targetTable && callbackIds.length > 0) {
+      await markTargetsFailed({
+        targets: preparedTargets.slice(0, callbackIds.length),
+        tableName: targetTable,
+        userId,
+        organizationId,
+      }).catch(() => undefined);
+    }
     if (!providerSubmitted && claimToken && organizationId) {
       await releaseEnrichmentQuotaOperation({
         userId,
@@ -615,6 +752,14 @@ export async function POST(request: NextRequest) {
     if (error instanceof FullEnrichEnrichmentError) {
       if (providerSubmitted && !error.providerOutcomeUnknown && claimToken && organizationId) {
         await cancelFullEnrichEnrichmentCallbacks({ callbackIds, errorCode: 'provider_submission_failed' }).catch(() => undefined);
+        if (targetTable && callbackIds.length > 0) {
+          await markTargetsFailed({
+            targets: preparedTargets.slice(0, callbackIds.length),
+            tableName: targetTable,
+            userId,
+            organizationId,
+          }).catch(() => undefined);
+        }
         await completeEnrichmentQuotaOperation({
           userId,
           organizationId,
@@ -635,12 +780,25 @@ export async function POST(request: NextRequest) {
         error: error.providerOutcomeUnknown ? 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN' : error.code,
         ...(operationId ? { operationId } : {}),
         ...(providerSubmitted ? { operationStatus: 'submitted' } : {}),
+        ...(error.providerOutcomeUnknown && preparedTargets.length > 0
+          ? { queued: true, enriched: preparedTargets.map((target) => ({ id: target.id })) }
+          : {}),
       }, { status: error.status });
       if (operationId) response.headers.set('x-operation-id', operationId);
       return response;
     }
 
-    const errorCode = String((error as { message?: string } | null)?.message || 'ENRICHMENT_REQUEST_FAILED');
+    const internalErrorCode = String((error as { message?: string } | null)?.message || 'ENRICHMENT_REQUEST_FAILED');
+    const exposedErrors = new Set([
+      'FULLENRICH_CALLBACK_IN_FLIGHT',
+      'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',
+      'ENRICHMENT_TARGET_NOT_FOUND',
+      'INVALID_EXISTING_RECORD_ID',
+    ]);
+    const errorCode = exposedErrors.has(internalErrorCode) ? internalErrorCode : 'ENRICHMENT_REQUEST_FAILED';
+    if (errorCode === 'ENRICHMENT_REQUEST_FAILED') {
+      console.error('[fullenrich] enrichment request failed', error);
+    }
     const status = errorCode === 'FULLENRICH_CALLBACK_IN_FLIGHT'
       || errorCode === 'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST' ? 409
       : errorCode === 'ENRICHMENT_TARGET_NOT_FOUND' || errorCode === 'INVALID_EXISTING_RECORD_ID' ? 400
