@@ -44,7 +44,7 @@ import { DuplicateSavedSearchNameError, savedSearchesService } from '@/lib/servi
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { splitDomainInput } from '@/lib/domain';
-import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { getLinkedinProfileDisplayName, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
@@ -796,10 +796,27 @@ export default function SearchPage() {
           reveal_phone: false,
         }, abortRef.current.signal);
 
-        const profile: Lead = result.leads[0] || {
-          id: `profile-search:${linkedinUrl}`,
-          linkedin_url: linkedinUrl,
-        };
+        const fallbackName = getLinkedinProfileDisplayName(filters.linkedinUrl) || undefined;
+        const profile: Lead = result.leads[0]
+          ? { ...result.leads[0], name: result.leads[0].name || fallbackName }
+          : {
+              id: `profile-search:${linkedinUrl}`,
+              name: fallbackName,
+              linkedin_url: linkedinUrl,
+            };
+        if (result.leads.length === 0) {
+          result = {
+            ...result,
+            count: 1,
+            leads_count: 1,
+            leads: [profile],
+          };
+        } else if (profile.name && profile.name !== result.leads[0].name) {
+          result = {
+            ...result,
+            leads: result.leads.map((lead, index) => index === 0 ? profile : lead),
+          };
+        }
         if (filters.revealEmail || filters.revealPhone) {
           try {
             const operationId = `profile-enrichment:${crypto.randomUUID()}`;
