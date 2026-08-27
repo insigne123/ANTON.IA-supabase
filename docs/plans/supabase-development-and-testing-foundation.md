@@ -103,7 +103,7 @@ No incluye:
 - `npm run db:reset` reconstruye el stack local desde cero y aplica todas las
   migraciones antes de ejecutar `supabase/seed.sql`.
 - `npm run db:lint`, `npm run db:test` (112 aserciones pgTAP),
-  `npm run test:integration` (4 pruebas locales) y `npm test` (585 pruebas)
+  `npm run test:integration` (4 pruebas locales) y `npm test` (582 pruebas)
   pasan con el stack local.
 - `npm run test:env:local` genera `.env.test.local` desde
   `supabase status --output env`, valida que apunta a localhost y mantiene el

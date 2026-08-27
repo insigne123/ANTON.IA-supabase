@@ -289,7 +289,7 @@ expone directamente al navegador.
 - `npm run db:lint`: aprobado.
 - `npm run db:test`: 112 pruebas pgTAP aprobadas.
 - `npm run db:types`: tipos regenerados y `src/lib/database.types.ts` actualizado.
-- `npm run test:unit`: 585 pruebas aprobadas.
+- `npm run test:unit`: 582 pruebas aprobadas.
 - `npm run test:integration`: 4 pruebas aprobadas. La prueba de concurrencia
   atraviesa `dispatchOutboundMessage` y registra exactamente una invocacion al
   proveedor falso.
