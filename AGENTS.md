@@ -18,7 +18,10 @@ La direccion visual por defecto de esta app es Apple-like: claridad, foco, super
 
 - Usa Node 22 y ejecuta `npm run doctor` antes de diagnosticar el stack local.
 - Las pruebas usan `.env.test.local`; nunca cargues `.env.local` en una suite.
-- Produccion `yfdelflsheurzaicwayi` es solo lectura. No ejecutes migraciones, seeds ni pruebas contra ese proyecto.
+- Produccion `yfdelflsheurzaicwayi` admite migraciones solo con solicitud explicita del usuario y un release preparado.
+- Antes de escribir en produccion: completar reset, lint, pgTAP e integracion local; validar nonprod; revisar el dry-run; y confirmar backup o ventana de cambio.
+- En produccion usa solo migraciones pequenas, forward-only y una familia de tablas por vez. Verifica esquema, RLS y logs antes de activar un feature flag o ampliar el rollout.
+- Nunca ejecutes `reset`, seeds ni suites de prueba contra produccion.
 - Nonprod `htketmmhsfmucevvqmxi` admite escrituras solo con peticion explicita y despues de reset, lint, pgTAP e integracion local.
 - Prefiere `npm run test:reset` para reconstruir identidades y fixtures sinteticos.
 
