@@ -7,6 +7,10 @@ of truth. `supabase/config.toml` enables migration replay and runs
 `supabase/seed.sql` after a local reset. The seed is intentionally free of
 production data; Auth identities are provisioned by scripts after reset.
 
+`supabase/migrations-archive/` is evidence only. It contains migrations applied
+to a superseded nonproduction lineage and is never scanned by the CLI. Do not
+move archived files back into the active chain or mark them applied elsewhere.
+
 Database work is local-first:
 
 1. Author and review the migration locally.

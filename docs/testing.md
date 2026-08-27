@@ -33,7 +33,7 @@ this guard.
 | `npm run test:staging` | Approved nonproduction | Runs the limited connectivity and QA-identity smoke suite. |
 | `npm run test:collaboration:pilot` | Approved nonproduction | Runs the explicit collaboration concurrency/RLS pilot with a fake provider. |
 
-Current local baseline: 112 pgTAP assertions, 4 integration tests, and 582 unit
+Current local baseline: 112 pgTAP assertions, 4 integration tests, and 585 unit
 tests.
 
 There is currently no `test:e2e` package script. Do not describe ad hoc endpoint

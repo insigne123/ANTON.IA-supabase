@@ -1,4 +1,4 @@
--- Organization collaboration v1: active team data, durable lead attribution,
+-- Archived nonprod migration. Organization collaboration v1: active team data, durable lead attribution,
 -- secure invitations, and an atomic one-active-thread outbound boundary.
 
 alter table public.organizations

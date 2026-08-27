@@ -272,10 +272,11 @@ expone directamente al navegador.
 
 ## Rollout y Rollback
 
-1. La migracion se valida primero con `npm run test:reset` local.
+1. La cadena de migraciones se valida primero con `npm run test:reset` local.
 2. No se aplica a nonprod sin peticion explicita y gates completos.
-3. Antes de activar una organizacion se genera un reporte de emails repetidos y
-   potenciales hilos activos.
+3. Antes de activar una organizacion se genera un reporte de emails repetidos,
+   hilos sin enlazar, destinatarios invalidos y dispatches no resueltos. El RPC
+   rechaza la activacion si cualquiera de esos contadores es mayor que cero.
 4. El backfill elige el envio confirmado mas antiguo como raiz y el mas reciente
    como `last_contacted_at`; las ambiguedades quedan marcadas para revision.
 5. El rollout empieza con una organizacion piloto.
@@ -332,6 +333,38 @@ expone directamente al navegador.
 - El dry-run posterior confirma que nonprod esta al dia. Produccion no fue
   modificada.
 
+### Cadena canonica preparada el 2026-08-27
+
+- Las cuatro migraciones amplias aplicadas solo al piloto nonprod se conservaron
+  como evidencia en `supabase/migrations-archive/`; ya no forman parte de la
+  cadena activa que se propone para produccion.
+- La cadena activa divide reconciliacion, rollout, invitaciones, eventos, leads,
+  hilos, backfill, runtime, membresias y cada tabla CRM en migraciones
+  forward-only separadas bajo `20260827090000` a `20260827106000`.
+- El backfill de dispatches no elimina el trigger global. Usa
+  `session_replication_role` solo en la sesion de migracion, con `lock_timeout`
+  de 5 segundos y `statement_timeout` de 60 segundos.
+- Invitaciones legacy sin token valido quedan revocadas; roles legacy fuera de
+  `admin`/`member` se normalizan a `member`; duplicados activos conservan solo la
+  fila mas reciente; el token plaintext se elimina al finalizar.
+- La activacion es fail-closed para destinatarios ambiguos o invalidos,
+  dispatches `sending`/`unknown` y envios confirmados sin hilo.
+- Replay local, lint, 112 pgTAP, 4 integraciones y 585 pruebas unitarias del
+  candidato aislado aprobaron la cadena nueva. Debe ensayarse nuevamente en
+  nonprod desde esta misma linea antes de produccion.
+
+### Auditoria read-only de produccion del 2026-08-27
+
+- El dry-run de la linea anterior proponia seis migraciones y por eso fue
+  rechazado; no se ejecuto `db push --include-all`.
+- El esquema confirma que las dos migraciones historicas recuperadas de
+  `enriched_opportunities` ya estan materializadas. Su historial solo puede
+  repararse durante una ventana aprobada y con evidencia conservada.
+- Produccion no contiene una organizacion cuyo nombre incluya `Expro` ni cuentas
+  para `laramirez@grupoexpro.com` o `kmory@grupoexpro.com`.
+- `GrupoExpro` no se creara sin un owner designado. Tampoco se enviaran
+  invitaciones hasta completar backup/ventana, ensayo nonprod, dry-run y deploy.
+
 ### Activacion controlada
 
 Estas operaciones se ejecutan solo mediante una conexion segura con rol
@@ -344,8 +377,10 @@ o produccion sin autorizacion explicita.
 select public.organization_collaboration_rollout_report_v1('<organization-id>'::uuid);
 ```
 
-2. No activar si `inFlightOrUnknownDispatchCount` es mayor que cero. Revisar cada
-   entrada de `ambiguousRecipients` y documentar la decision antes de continuar.
+2. La activacion falla automaticamente si `ambiguousRecipientCount`,
+   `inFlightOrUnknownDispatchCount`, `unlinkedConfirmedDispatchCount` o
+   `invalidConfirmedRecipientCount` es mayor que cero. Resolver la evidencia y
+   generar un reporte nuevo antes de continuar.
 3. Activar una unica organizacion piloto con un motivo auditable:
 
 ```sql
@@ -385,12 +420,12 @@ npm run collaboration:pilot:enable
 | Fase | Estado | Nota |
 | --- | --- | --- |
 | 0. Documento y contratos | Completada | Decisiones y contratos registrados el 2026-08-26. |
-| 1. Esquema, RPC y RLS | Completada en nonprod | Migracion aplicada; tablas nuevas con RLS. |
+| 1. Esquema, RPC y RLS | Candidato canonico local | Cadena granular aprobada localmente; falta reensayo nonprod. |
 | 2. Organizacion activa | Completada local | Cookie HTTP-only y membresia validadas en servidor. |
 | 3. Equipo e invitaciones | Completada local | Operaciones sensibles trasladadas a APIs server-owned. |
 | 4. Leads compartidos | Completada local | Drafts y Campaign V2 continuan personales en V1. |
 | 5. Seguridad de envio | Validada en nonprod | Guard atomico y una sola llamada falsa concurrente verificados. |
-| 6. Verificacion y rollout | Piloto activo | `ANTON.IA QA` activa; reporte posterior limpio. |
+| 6. Verificacion y rollout | Piloto nonprod historico | `ANTON.IA QA` activa en la linea archivada; produccion intacta. |
 
 ## Riesgos Conocidos
 
@@ -422,8 +457,19 @@ npm run collaboration:pilot:enable
 - `src/components/organization/InviteMemberDialog.tsx`
 - `src/components/crm/LeadCard.tsx`
 - `src/components/crm/LeadDetailDrawer.tsx`
-- `supabase/migrations/20260826120000_organization_collaboration_v1.sql`
-- `supabase/migrations/20260826130000_secure_legacy_crm_tables.sql`
+- `supabase/migrations/20260827092000_organization_collaboration_rollout_flag.sql`
+- `supabase/migrations/20260827093000_secure_organization_invitations.sql`
+- `supabase/migrations/20260827094000_organization_collaboration_events.sql`
+- `supabase/migrations/20260827095000_organization_lead_collaboration.sql`
+- `supabase/migrations/20260827100000_organization_contact_threads.sql`
+- `supabase/migrations/20260827101000_backfill_organization_contact_threads.sql`
+- `supabase/migrations/20260827102000_organization_contact_thread_runtime.sql`
+- `supabase/migrations/20260827103000_organization_membership_runtime.sql`
+- `supabase/migrations/20260827104000_organization_collaboration_rollout_runtime.sql`
+- `supabase/migrations/20260827105000_secure_antonia_exceptions.sql`
+- `supabase/migrations/20260827106000_secure_unified_crm_data.sql`
+- `supabase/migrations-archive/20260826120000_organization_collaboration_v1.sql`
+- `supabase/migrations-archive/20260826130000_secure_legacy_crm_tables.sql`
 - `supabase/tests/database/organization_collaboration_v1.test.sql`
 - `__tests__/organization-contact-thread.integration.test.mjs`
 - `scripts/run-collaboration-pilot.mjs`

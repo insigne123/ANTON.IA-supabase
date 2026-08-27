@@ -1,28 +1,21 @@
--- Close legacy PostgREST access while preserving the existing server and
--- organization-member workflows.
-
-alter table public.antonia_exceptions enable row level security;
-
-revoke all on table public.antonia_exceptions from public, anon, authenticated;
-grant all on table public.antonia_exceptions to service_role;
-
-comment on table public.antonia_exceptions is
-  'Server-owned Antonia exception queue. Client roles have no direct access.';
-
+-- Remove every legacy policy before installing the tenant-scoped contract.
+-- PostgreSQL combines permissive policies with OR, so name-based partial
+-- cleanup is not sufficient when hosted policy names have drifted.
 alter table public.unified_crm_data enable row level security;
+
+do $$
+declare
+  p record;
+begin
+  for p in select policyname from pg_policies
+    where schemaname = 'public' and tablename = 'unified_crm_data'
+  loop execute format('drop policy if exists %I on public.unified_crm_data', p.policyname); end loop;
+end;
+$$;
 
 revoke all on table public.unified_crm_data from public, anon, authenticated;
 grant select, insert, update, delete on table public.unified_crm_data to authenticated;
 grant all on table public.unified_crm_data to service_role;
-
-drop policy if exists "Organization members can read unified CRM data"
-  on public.unified_crm_data;
-drop policy if exists "Organization members can insert unified CRM data"
-  on public.unified_crm_data;
-drop policy if exists "Organization members can update unified CRM data"
-  on public.unified_crm_data;
-drop policy if exists "Organization members can delete unified CRM data"
-  on public.unified_crm_data;
 
 create policy "Organization members can read unified CRM data"
   on public.unified_crm_data

@@ -1,4 +1,4 @@
--- Reconcile columns present in the production contract but absent from the
+-- Archived nonprod migration. Reconcile columns present in the production contract but absent from the
 -- historical CLI migration chain. This is safe to apply after a clean replay.
 
 alter table public.enriched_opportunities

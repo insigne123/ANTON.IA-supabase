@@ -103,7 +103,7 @@ No incluye:
 - `npm run db:reset` reconstruye el stack local desde cero y aplica todas las
   migraciones antes de ejecutar `supabase/seed.sql`.
 - `npm run db:lint`, `npm run db:test` (112 aserciones pgTAP),
-  `npm run test:integration` (4 pruebas locales) y `npm test` (582 pruebas)
+  `npm run test:integration` (4 pruebas locales) y `npm test` (585 pruebas)
   pasan con el stack local.
 - `npm run test:env:local` genera `.env.test.local` desde
   `supabase status --output env`, valida que apunta a localhost y mantiene el
@@ -129,7 +129,9 @@ No incluye:
   produccion y cualquier release requiere aprobacion explicita separada.
 - Nonprod tiene RLS activo en todas las tablas publicas expuestas a roles cliente.
   `antonia_exceptions` es server-owned y `unified_crm_data` aplica aislamiento
-  por membresia desde `20260826130000_secure_legacy_crm_tables`.
+  por membresia desde la migracion nonprod archivada
+  `20260826130000_secure_legacy_crm_tables`. La cadena canonica separa ambos
+  contratos en `20260827105000` y `20260827106000`.
 
 ## Arquitectura Objetivo
 

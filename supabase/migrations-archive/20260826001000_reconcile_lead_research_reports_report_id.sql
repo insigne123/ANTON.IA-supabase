@@ -1,4 +1,4 @@
--- The historical privacy function returns report_id while older local schema
+-- Archived nonprod migration. The historical privacy function returns report_id while older local schema
 -- variants used a UUID id. Keep both identifiers available during replay.
 
 alter table public.lead_research_reports
