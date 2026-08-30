@@ -42,6 +42,7 @@ import {
 } from '@/lib/research-workspace';
 import { saveResearchWorkspaceHandoff } from '@/lib/research-workspace-handoff';
 import type { NativeResearchLeadStatus } from '@/lib/native-research-contracts';
+import { isPendingEnrichmentStatus, pendingEnrichmentKind } from '@/lib/enrichment-status';
 import NativeResearchReport, { NativeResearchReportSkeleton } from '@/components/research/NativeResearchReport';
 import ResearchWorkspace from '@/components/research/ResearchWorkspace';
 import {
@@ -66,8 +67,29 @@ type FailedNativeDraft = {
   message: string;
 };
 
-function isPendingEnrichmentStatus(status?: string | null) {
-  return String(status || '').trim().toLowerCase().startsWith('pending');
+function summarizePendingEnrichment(leads: EnrichedLead[]) {
+  const counts = { email: 0, phone: 0, contact: 0, unknown: 0 };
+  for (const lead of leads) {
+    const kind = pendingEnrichmentKind(lead.enrichmentStatus);
+    if (kind) counts[kind] += 1;
+  }
+
+  const total = counts.email + counts.phone + counts.contact + counts.unknown;
+  if (counts.email === total && total > 0) {
+    return {
+      total,
+      label: total === 1 ? 'actualizando correo' : 'actualizando correos',
+      title: 'Actualizando correos',
+    };
+  }
+  if (counts.phone === total && total > 0) {
+    return {
+      total,
+      label: total === 1 ? 'actualizando teléfono' : 'actualizando teléfonos',
+      title: 'Actualizando teléfonos',
+    };
+  }
+  return { total, label: 'actualizando datos', title: 'Actualizando datos de contacto' };
 }
 
 function isNativeResearchReport(status: NativeResearchLeadStatus | null | undefined) {
@@ -288,8 +310,8 @@ export default function EnrichedLeadsClient() {
   // --- PAGINACIÓN ---
   const [pageSize, setPageSize] = useState<number>(50);
   const [page, setPage] = useState<number>(1);
-  const pendingPhoneSyncRef = useRef(false);
-  const [syncingPendingPhones, setSyncingPendingPhones] = useState(false);
+  const pendingEnrichmentSyncRef = useRef(false);
+  const [syncingPendingEnrichment, setSyncingPendingEnrichment] = useState(false);
 
   // --- FILTROS ---
   const [companyFilter, setCompanyFilter] = useState('');
@@ -405,14 +427,14 @@ export default function EnrichedLeadsClient() {
     }
   }, [loadNativeResearchStatuses]);
 
-  const syncPendingPhoneLeads = useCallback(async (ids?: string[]) => {
+  const syncPendingEnrichmentLeads = useCallback(async (ids?: string[]) => {
     const targetIds = (ids || enriched.filter((lead) => isPendingEnrichmentStatus(lead.enrichmentStatus)).map((lead) => lead.id))
       .filter(Boolean)
       .slice(0, 50);
 
-    if (targetIds.length === 0 || pendingPhoneSyncRef.current) return;
-    pendingPhoneSyncRef.current = true;
-    setSyncingPendingPhones(true);
+    if (targetIds.length === 0 || pendingEnrichmentSyncRef.current) return;
+    pendingEnrichmentSyncRef.current = true;
+    setSyncingPendingEnrichment(true);
 
     try {
       const res = await fetch('/api/enriched-leads/phone-sync', {
@@ -433,8 +455,8 @@ export default function EnrichedLeadsClient() {
     } catch (error) {
       console.warn('[phone-sync] unexpected error:', error);
     } finally {
-      pendingPhoneSyncRef.current = false;
-      setSyncingPendingPhones(false);
+      pendingEnrichmentSyncRef.current = false;
+      setSyncingPendingEnrichment(false);
     }
   }, [enriched, loadData]);
 
@@ -453,19 +475,37 @@ export default function EnrichedLeadsClient() {
             const oldData = payload.old as any;
             const newPhones = Array.isArray(newData.phone_numbers) ? newData.phone_numbers : [];
             const phoneFound = Boolean(newData.primary_phone) || newPhones.length > 0;
+            const emailFound = Boolean(newData.email) && newData.email !== 'Not Found';
+            const pendingKind = pendingEnrichmentKind(oldData.enrichment_status);
 
-            // Detect Status Change: Pending -> Completed
-            if (newData.enrichment_status === 'completed' && isPendingEnrichmentStatus(oldData.enrichment_status)) {
-              if (phoneFound) {
+            if (newData.enrichment_status === 'completed' && pendingKind) {
+              if (pendingKind === 'email') {
+                toast({
+                  title: emailFound ? 'Correo encontrado' : 'Búsqueda de correo finalizada',
+                  description: emailFound
+                    ? `Se actualizó el contacto para ${newData.full_name || 'un lead'}.`
+                    : `No se encontró correo para ${newData.full_name || 'este lead'}.`,
+                  duration: 4500,
+                });
+              } else if (pendingKind === 'phone' && phoneFound) {
                 toast({
                   title: '¡Teléfono encontrado!',
                   description: `Se actualizó el contacto para ${newData.full_name || 'un lead'}.`,
                   duration: 5000,
                 });
-              } else {
+              } else if (pendingKind === 'phone') {
                 toast({
                   title: 'Búsqueda de teléfono finalizada',
                   description: `No se encontró teléfono para ${newData.full_name || 'este lead'}.`,
+                  duration: 4500,
+                });
+              } else {
+                const foundContactData = emailFound || phoneFound;
+                toast({
+                  title: foundContactData ? 'Datos de contacto actualizados' : 'Búsqueda de datos finalizada',
+                  description: foundContactData
+                    ? `Se actualizó el contacto para ${newData.full_name || 'un lead'}.`
+                    : `No se encontraron datos nuevos para ${newData.full_name || 'este lead'}.`,
                   duration: 4500,
                 });
               }
@@ -491,17 +531,17 @@ export default function EnrichedLeadsClient() {
 
     if (pendingIds.length === 0) return;
 
-    syncPendingPhoneLeads(pendingIds);
+    syncPendingEnrichmentLeads(pendingIds);
 
     const intervalId = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
-        syncPendingPhoneLeads(pendingIds);
+        syncPendingEnrichmentLeads(pendingIds);
       }
     }, 15000);
 
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
-        syncPendingPhoneLeads(pendingIds);
+        syncPendingEnrichmentLeads(pendingIds);
       }
     };
 
@@ -510,7 +550,7 @@ export default function EnrichedLeadsClient() {
       window.clearInterval(intervalId);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [enriched, syncPendingPhoneLeads]);
+  }, [enriched, syncPendingEnrichmentLeads]);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -596,7 +636,8 @@ export default function EnrichedLeadsClient() {
     const fallbackPhone = lead.phoneNumbers?.length ? lead.phoneNumbers[0].sanitized_number : undefined;
     const shownPhone = lead.primaryPhone || fallbackPhone;
     if (shownPhone && shownPhone !== 'Not Found') return 'ready';
-    if (isPendingEnrichmentStatus(lead.enrichmentStatus)) return 'pending';
+    const pendingKind = pendingEnrichmentKind(lead.enrichmentStatus);
+    if (pendingKind === 'phone' || pendingKind === 'contact' || pendingKind === 'unknown') return 'pending';
     return 'missing';
   }, []);
 
@@ -683,10 +724,7 @@ export default function EnrichedLeadsClient() {
     () => nativeResearchStatusKnown ? filtered.filter(e => !!e.email && !hasReportStrict(e)).length : 0,
     [filtered, hasReportStrict, nativeResearchStatusKnown]
   );
-  const pendingPhoneCount = useMemo(
-    () => enriched.filter((lead) => isPendingEnrichmentStatus(lead.enrichmentStatus)).length,
-    [enriched],
-  );
+  const pendingEnrichment = useMemo(() => summarizePendingEnrichment(enriched), [enriched]);
 
   // === Métricas para los "seleccionar todos" ===
   const researchEligiblePage = useMemo(
@@ -1281,25 +1319,25 @@ export default function EnrichedLeadsClient() {
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-border/60 bg-card/70 px-4 py-3 text-sm shadow-[0_14px_35px_-32px_rgba(15,23,42,0.28)]">
         <span><strong className="font-semibold tabular-nums">{phoneReadyCount}</strong> <span className="text-muted-foreground">con teléfono</span></span>
         <span><strong className="font-semibold tabular-nums">{nativeResearchStatusKnown ? researchEligible : '—'}</strong> <span className="text-muted-foreground">por investigar</span></span>
-        {pendingPhoneCount > 0 ? <span><strong className="font-semibold tabular-nums">{pendingPhoneCount}</strong> <span className="text-muted-foreground">actualizando teléfono</span></span> : null}
+        {pendingEnrichment.total > 0 ? <span><strong className="font-semibold tabular-nums">{pendingEnrichment.total}</strong> <span className="text-muted-foreground">{pendingEnrichment.label}</span></span> : null}
         <span className="ml-auto text-xs text-muted-foreground">{filtered.length} visibles</span>
       </div>
 
-      {pendingPhoneCount > 0 ? (
+      {pendingEnrichment.total > 0 ? (
         <Alert className="border-sky-500/25 bg-sky-500/5 text-foreground dark:border-sky-400/25">
-          <RotateCw className={`h-4 w-4 ${syncingPendingPhones ? 'animate-spin' : 'animate-pulse'}`} />
-          <AlertTitle>Actualizando teléfonos</AlertTitle>
+          <RotateCw className={`h-4 w-4 ${syncingPendingEnrichment ? 'animate-spin' : 'animate-pulse'}`} />
+          <AlertTitle>{pendingEnrichment.title}</AlertTitle>
           <AlertDescription className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <span className="text-muted-foreground">{pendingPhoneCount} {pendingPhoneCount === 1 ? 'contacto sigue' : 'contactos siguen'} en proceso. La lista se actualizará automáticamente.</span>
+            <span className="text-muted-foreground">{pendingEnrichment.total} {pendingEnrichment.total === 1 ? 'contacto sigue' : 'contactos siguen'} en proceso. La lista se actualizará automáticamente.</span>
             <Button
               variant="outline"
               size="sm"
               className="rounded-full bg-background"
-              onClick={() => syncPendingPhoneLeads()}
-              disabled={syncingPendingPhones}
+              onClick={() => syncPendingEnrichmentLeads()}
+              disabled={syncingPendingEnrichment}
             >
-              <RotateCw className={`mr-2 h-4 w-4 ${syncingPendingPhones ? 'animate-spin' : ''}`} />
-              {syncingPendingPhones ? 'Actualizando...' : 'Actualizar ahora'}
+              <RotateCw className={`mr-2 h-4 w-4 ${syncingPendingEnrichment ? 'animate-spin' : ''}`} />
+              {syncingPendingEnrichment ? 'Actualizando...' : 'Actualizar ahora'}
             </Button>
           </AlertDescription>
         </Alert>
@@ -1640,10 +1678,21 @@ export default function EnrichedLeadsClient() {
                           : <span className="text-xs text-muted-foreground">Sin email</span>)
                         : <div className="max-w-[260px] truncate">{e.email}</div>}
                       {(() => {
+                        const pendingKind = pendingEnrichmentKind(e.enrichmentStatus);
+                        return pendingKind === 'email' || pendingKind === 'contact' ? (
+                          <div className="mt-1 inline-flex items-center gap-1.5 text-xs text-sky-700 dark:text-sky-300" title="Actualizando correo">
+                            <RotateCw className="h-3 w-3 animate-spin" />
+                            Buscando correo
+                          </div>
+                        ) : null;
+                      })()}
+                      {(() => {
                         const fallbackPhone = e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined;
                         const shownPhone = e.primaryPhone || fallbackPhone;
+                        const pendingKind = pendingEnrichmentKind(e.enrichmentStatus);
+                        const phonePending = pendingKind === 'phone' || pendingKind === 'contact' || pendingKind === 'unknown';
 
-                        if (e.primaryPhone === 'Not Found' || (!shownPhone && !isPendingEnrichmentStatus(e.enrichmentStatus))) {
+                        if (e.primaryPhone === 'Not Found' || (!shownPhone && !phonePending)) {
                           return <div className="mt-1 text-xs text-muted-foreground">Sin teléfono</div>;
                         }
 
@@ -1669,9 +1718,9 @@ export default function EnrichedLeadsClient() {
                           );
                         }
 
-                        if (isPendingEnrichmentStatus(e.enrichmentStatus)) {
+                        if (phonePending) {
                           return (
-                            <div className="mt-1 inline-flex items-center gap-1.5 text-xs text-sky-700 dark:text-sky-300" title="Actualizando teléfono">
+                            <div className="mt-1 inline-flex items-center gap-1.5 text-xs text-sky-700 dark:text-sky-300" title={pendingKind === 'unknown' ? 'Actualizando datos' : 'Actualizando teléfono'}>
                               <RotateCw className="h-3 w-3 animate-spin" />
                               En proceso
                             </div>

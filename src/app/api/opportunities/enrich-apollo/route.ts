@@ -31,6 +31,7 @@ import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
 import { resolveLeadProvider } from '@/lib/server/provider-routing';
 import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { pendingEnrichmentStatus, type PendingEnrichmentStatus } from '@/lib/enrichment-status';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -328,6 +329,7 @@ async function prepareTargets(input: {
   tableName: FullEnrichTargetTable;
   userId: string;
   organizationId: string;
+  pendingStatus: PendingEnrichmentStatus;
 }) {
   const admin: any = getSupabaseAdminClient();
   const now = new Date().toISOString();
@@ -385,7 +387,7 @@ async function prepareTargets(input: {
         title: text(lead.title, 160) || null,
         organization_name: text(lead.companyName, 200) || null,
         organization_domain: cleanDomain(lead.companyDomain) || null,
-        enrichment_status: 'pending',
+        enrichment_status: input.pendingStatus,
         source_provider: 'fullenrich',
         source_provider_id: sourceProviderId || null,
         updated_at: now,
@@ -429,7 +431,7 @@ async function prepareTargets(input: {
           company_name: text(lead.companyName, 200) || undefined,
           title: text(lead.title, 160) || undefined,
           linkedin_url: linkedinUrl || undefined,
-          enrichment_status: 'pending',
+          enrichment_status: input.pendingStatus,
           updated_at: now,
           source_provider: 'fullenrich',
           ...(sourceProviderId ? { source_provider_id: sourceProviderId } : {}),
@@ -449,7 +451,7 @@ async function prepareTargets(input: {
         company_name: text(lead.companyName, 200) || null,
         title: text(lead.title, 160) || null,
         linkedin_url: linkedinUrl || null,
-        enrichment_status: 'pending',
+        enrichment_status: input.pendingStatus,
         source_provider: 'fullenrich',
         source_provider_id: sourceProviderId || null,
         data: metadata,
@@ -639,9 +641,13 @@ export async function POST(request: NextRequest) {
       quotaResource: resource,
     });
 
-    const targets = await prepareTargets({ leads, tableName, userId, organizationId });
-    preparedTargets = targets;
     const fields = requestedFields(revealEmail.value, revealPhone.value);
+    const pendingStatus = pendingEnrichmentStatus({
+      revealEmail: revealEmail.value,
+      revealPhone: revealPhone.value,
+    });
+    const targets = await prepareTargets({ leads, tableName, userId, organizationId, pendingStatus });
+    preparedTargets = targets;
     const contacts = [];
     try {
       for (const target of targets) {
@@ -704,7 +710,7 @@ export async function POST(request: NextRequest) {
         companyDomain: cleanDomain(target.lead.companyDomain) || undefined,
         sourceProvider: 'fullenrich',
         sourceProviderId: target.sourceProviderId,
-        enrichmentStatus: 'pending',
+        enrichmentStatus: pendingStatus,
         createdAt: new Date().toISOString(),
       })),
     };
