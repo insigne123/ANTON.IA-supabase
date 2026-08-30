@@ -72,6 +72,32 @@ test('DraftContextV2 generation exposes only the server-selected factual evidenc
   }
 });
 
+test('DraftContextV2 generation reserves words for server-side CTA normalization', async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      const request = JSON.parse(String(init?.body || '{}'));
+      prompt = String(request.messages?.[1]?.content || '');
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', body: 'Acme reduce trabajo manual. Northstar ordena tareas repetitivas para que el equipo encuentre información y responda consultas con menos pasos.' }) } }],
+        usage: {},
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    await generateOutreachFromDraftContextV2({ context: draftContextFixture() });
+
+    assert.match(prompt, /Devuelve entre 62 y 112 palabras/);
+    assert.match(prompt, /reserva margen si el servidor debe quitar un CTA no aprobado/);
+  } finally {
+    if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousOpenAiKey;
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test('DraftContextV2 generation consumes the validated report brief and prioritizes its canonical anchor', async () => {
   const previousOpenAiKey = process.env.OPENAI_API_KEY;
   const previousFetch = globalThis.fetch;

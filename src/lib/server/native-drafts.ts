@@ -45,6 +45,7 @@ import {
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { getNativeSnapshot } from '@/lib/server/native-research';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
+import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
 import { ResearchSnapshotV1Schema, type ResearchSnapshotV1 } from '@/lib/research-contracts';
 import type { ResearchReportDocumentV1 } from '@/lib/research-report-contracts';
 import { ensureResearchReportDocument } from '@/lib/server/research-report-documents';
@@ -121,7 +122,7 @@ export type NativeDraftGenerationResult =
     context: DraftContextV2;
     preflight: MessagingPreflightV1;
     issues: DraftPreflightIssueV2[];
-    generation: { provider: 'openai'; model: string; promptVersion: 'native-draft/v3' };
+    generation: { provider: 'openai'; model: string; promptVersion: typeof NATIVE_DRAFT_PROMPT_VERSION };
   }
   | {
     status: 'blocked';
@@ -619,7 +620,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
   const campaignRecipientStepId = text(input.campaignRecipientStepId);
   const identity = campaignRecipientStepId ? null : canonicalSha256({
-    schemaVersion: 'native-draft/v2',
+    schemaVersion: NATIVE_DRAFT_PROMPT_VERSION,
     idempotencyKey: text(input.idempotencyKey) || null,
     instruction: instruction || null,
     sequenceContext: sequenceContext || null,
@@ -652,7 +653,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
           generationMethod: 'model',
           provider: 'openai',
           model: 'persisted-recovery',
-          promptVersion: 'native-draft/v3',
+          promptVersion: NATIVE_DRAFT_PROMPT_VERSION,
           styleProfileId: style.id,
           claimIds: unique(requiredReportAwareDraftPersonalizationV2(context).map((item) => item.claimId)),
         });
@@ -672,7 +673,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
       context,
       preflight: existing.preflight,
       issues: [],
-      generation: { provider: 'openai', model: 'persisted', promptVersion: 'native-draft/v3' },
+      generation: { provider: 'openai', model: 'persisted', promptVersion: NATIVE_DRAFT_PROMPT_VERSION },
     };
   }
 

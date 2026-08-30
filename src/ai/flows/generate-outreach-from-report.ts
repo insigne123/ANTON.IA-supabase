@@ -6,6 +6,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { generateStructured, generateStructuredWithTelemetry } from '@/ai/openai-json';
+import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
 import {
   DraftContextV2Schema,
   requiredReportAwareDraftPersonalizationV2,
@@ -63,7 +64,7 @@ export type GenerateOutreachFromDraftContextV2Input = {
 export type GeneratedOutreachFromDraftContextV2 = GeneratedOutreachV2 & {
   provider: 'openai';
   model: string;
-  promptVersion: 'native-draft/v3';
+  promptVersion: typeof NATIVE_DRAFT_PROMPT_VERSION;
 };
 
 export async function generateOutreachFromReport(
@@ -198,9 +199,18 @@ function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
   };
   const approvedCtaWords = draftWordCount(input.context.constraints.cta.exactText);
   const sequenceMaxWords = input.sequenceContext ? 82 : 112;
+  const maximumModelBodyWords = Math.max(
+    1,
+    Math.min(sequenceMaxWords, input.context.constraints.body.maxWords - approvedCtaWords),
+  );
+  // Normalization can remove a model-supplied CTA before preflight runs.
+  const minimumModelBodyWords = Math.min(
+    maximumModelBodyWords,
+    Math.max(40, input.context.constraints.body.minWords - approvedCtaWords + 12),
+  );
   const modelBodyWords = {
-    min: Math.max(1, input.context.constraints.body.minWords - approvedCtaWords),
-    max: Math.max(1, Math.min(sequenceMaxWords, input.context.constraints.body.maxWords - approvedCtaWords)),
+    min: minimumModelBodyWords,
+    max: maximumModelBodyWords,
   };
   const correction = input.rewrite
     ? `
@@ -244,7 +254,7 @@ REPORT_OUTREACH_BRIEF selecciona el enfoque del reporte validado. Sus IDs solo p
 
 Reglas no negociables:
 - Asunto dentro de los límites definidos por constraints.subject.
-- Devuelve entre ${modelBodyWords.min} y ${modelBodyWords.max} palabras de cuerpo. El servidor agregará después el CTA aprobado para que el correo completo quede dentro de los límites definidos por constraints.body.
+- Devuelve entre ${modelBodyWords.min} y ${modelBodyWords.max} palabras de cuerpo. El mínimo reserva margen si el servidor debe quitar un CTA no aprobado. El servidor agregará después el CTA aprobado para que el correo completo quede dentro de los límites definidos por constraints.body.
 - Sigue context.style.profile para el tono, la extensión y las instrucciones de escritura, salvo que contradiga estas reglas.
 - Estructura el cuerpo en 3 a 5 párrafos breves separados por una línea en blanco. El saludo debe quedar solo y cada párrafo central debe tener como máximo dos frases.
 - No incluyas constraints.cta.exactText en el cuerpo. El servidor lo agregará literalmente una sola vez al final.
@@ -302,6 +312,6 @@ export async function generateOutreachFromDraftContextV2(
     hypothesisIds: [],
     provider: 'openai',
     model: result.telemetry.modelName,
-    promptVersion: 'native-draft/v3',
+    promptVersion: NATIVE_DRAFT_PROMPT_VERSION,
   };
 }

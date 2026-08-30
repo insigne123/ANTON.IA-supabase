@@ -44,7 +44,7 @@ Pensé que podría ser útil compartir un ejemplo práctico de cómo detectar pr
     hypothesisIds: [],
     provider: 'openai',
     model: 'test-model',
-    promptVersion: 'native-draft/v3',
+    promptVersion: 'native-draft/v7',
   };
 }
 
@@ -321,6 +321,39 @@ test('native drafting removes a model CTA before appending the approved CTA', as
   assert.equal(body.split(result.context.constraints.cta.exactText).length - 1, 1);
   assert.ok(body.endsWith(result.context.constraints.cta.exactText));
   assert.equal(result.preflight.status, 'passed');
+});
+
+test('native drafting retries when CTA removal makes the final body too short', async () => {
+  const fixture = dependencies();
+  let generationCalls = 0;
+  let correctiveErrors: string[] = [];
+  fixture.value.generate = async ({ context, rewrite }) => {
+    generationCalls += 1;
+    if (rewrite) correctiveErrors = rewrite.errors;
+    if (generationCalls > 1) return generated(context);
+    return {
+      ...generated(context),
+      body: `Hola Ada,
+
+Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+
+En Northstar ordenamos tareas para que el equipo encuentre información.
+
+¿Te parece si coordinamos una llamada la próxima semana?`,
+    };
+  };
+
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+
+  assert.equal(result.status, 'drafted');
+  assert.equal(generationCalls, 2);
+  assert.ok(correctiveErrors.some((error) => /entre 60 y 180 palabras/i.test(error)));
+  if (result.status !== 'drafted') return;
+  assert.equal(result.preflight.status, 'passed');
+  assert.equal(fixture.persisted.length, 1);
 });
 
 test('native drafting returns structured issues after two failed preflight generations', async () => {
