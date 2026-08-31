@@ -15,6 +15,14 @@ export const FULLENRICH_REQUESTED_FIELDS = [
   'contact.phones',
 ] as const;
 
+export const FULLENRICH_TERMINAL_PROVIDER_STATUSES = [
+  'FINISHED',
+  'CANCELED',
+  'CREDITS_INSUFFICIENT',
+  'RATE_LIMIT',
+  'UNKNOWN',
+] as const;
+
 export type FullEnrichTargetTable = (typeof FULLENRICH_TARGET_TABLES)[number];
 export type FullEnrichRequestedField = (typeof FULLENRICH_REQUESTED_FIELDS)[number];
 
@@ -62,6 +70,19 @@ export type FullEnrichWebhookProcessingResult =
     ignored: number;
   };
 
+export type FullEnrichRetrievedResultProcessingResult =
+  | { kind: 'invalid_payload' }
+  | { kind: 'in_progress' }
+  | {
+    kind: 'processed';
+    providerStatus: string;
+    callbackIds: string[];
+    received: number;
+    processed: number;
+    duplicates: number;
+    ignored: number;
+  };
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA1_RE = /^[0-9a-f]{40}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -69,6 +90,7 @@ const PHONE_RE = /^[+0-9().\-\s]{3,64}$/;
 const TOKEN_RE = /^[A-Za-z0-9_.:-]+$/;
 const ALLOWED_FIELDS = new Set<string>(FULLENRICH_REQUESTED_FIELDS);
 const ALLOWED_TARGET_TABLES = new Set<string>(FULLENRICH_TARGET_TABLES);
+const TERMINAL_PROVIDER_STATUSES = new Set<string>(FULLENRICH_TERMINAL_PROVIDER_STATUSES);
 
 function object(value: unknown): JsonRecord | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -165,6 +187,10 @@ export function verifyFullEnrichWebhookSignature(
 
 export function fullEnrichWebhookPayloadFingerprint(rawBody: Buffer, apiKey: string): string {
   return createHmac('sha256', apiKey).update(rawBody).digest('hex');
+}
+
+export function isFullEnrichTerminalProviderStatus(value: unknown) {
+  return TERMINAL_PROVIDER_STATUSES.has(String(value || '').trim().toUpperCase());
 }
 
 export function parseFullEnrichWebhookPayload(payload: unknown): ParsedFullEnrichWebhook | null {
@@ -356,6 +382,36 @@ async function applyFullEnrichWebhookEntry(
   throw new Error('INVALID_FULLENRICH_CALLBACK_APPLY_RESPONSE');
 }
 
+async function processFullEnrichEntries(
+  input: {
+    providerEnrichmentId: string;
+    providerStatus: string;
+    payloadFingerprint: string;
+    entries: ParsedFullEnrichWebhook['entries'];
+  },
+  client: ServiceClient,
+) {
+  let processed = 0;
+  let duplicates = 0;
+  let ignored = 0;
+
+  for (const entry of input.entries) {
+    const outcome = await applyFullEnrichWebhookEntry({
+      callbackId: entry.callbackId,
+      providerEnrichmentId: input.providerEnrichmentId,
+      providerStatus: input.providerStatus,
+      payloadFingerprint: input.payloadFingerprint,
+      candidate: entry.candidate,
+    }, client);
+
+    if (outcome === 'duplicate') duplicates += 1;
+    else if (outcome === 'unknown_callback' || outcome === 'provider_enrichment_mismatch') ignored += 1;
+    else processed += 1;
+  }
+
+  return { processed, duplicates, ignored };
+}
+
 export async function processFullEnrichWebhookDelivery(
   input: {
     rawBody: Buffer;
@@ -378,30 +434,61 @@ export async function processFullEnrichWebhookDelivery(
   const parsed = parseFullEnrichWebhookPayload(payload);
   if (!parsed) return { kind: 'invalid_payload' };
 
-  const payloadFingerprint = fullEnrichWebhookPayloadFingerprint(input.rawBody, input.apiKey);
-  let processed = 0;
-  let duplicates = 0;
-  let ignored = 0;
-
-  for (const entry of parsed.entries) {
-    const outcome = await applyFullEnrichWebhookEntry({
-      callbackId: entry.callbackId,
-      providerEnrichmentId: parsed.providerEnrichmentId,
-      providerStatus: parsed.providerStatus,
-      payloadFingerprint,
-      candidate: entry.candidate,
-    }, client);
-
-    if (outcome === 'duplicate') duplicates += 1;
-    else if (outcome === 'unknown_callback' || outcome === 'provider_enrichment_mismatch') ignored += 1;
-    else processed += 1;
-  }
+  const outcome = await processFullEnrichEntries({
+    providerEnrichmentId: parsed.providerEnrichmentId,
+    providerStatus: parsed.providerStatus,
+    payloadFingerprint: fullEnrichWebhookPayloadFingerprint(input.rawBody, input.apiKey),
+    entries: parsed.entries,
+  }, client);
 
   return {
     kind: 'processed',
     received: parsed.entries.length,
-    processed,
-    duplicates,
-    ignored,
+    ...outcome,
+  };
+}
+
+/**
+ * This path is intentionally separate from webhook processing. The payload is
+ * fetched with FullEnrich Bearer authentication, while webhook deliveries must
+ * continue to pass raw-body HMAC verification above.
+ */
+export async function processFullEnrichRetrievedResult(
+  input: {
+    rawBody: Buffer;
+    apiKey: string;
+    expectedProviderEnrichmentId?: string;
+  },
+  client: ServiceClient = getSupabaseAdminClient(),
+): Promise<FullEnrichRetrievedResultProcessingResult> {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(input.rawBody.toString('utf8'));
+  } catch {
+    return { kind: 'invalid_payload' };
+  }
+
+  const parsed = parseFullEnrichWebhookPayload(payload);
+  if (!parsed) return { kind: 'invalid_payload' };
+  if (
+    input.expectedProviderEnrichmentId
+    && parsed.providerEnrichmentId !== requiredText(input.expectedProviderEnrichmentId, 'PROVIDER_ENRICHMENT_ID', 200)
+  ) {
+    return { kind: 'invalid_payload' };
+  }
+  if (!isFullEnrichTerminalProviderStatus(parsed.providerStatus)) return { kind: 'in_progress' };
+
+  const outcome = await processFullEnrichEntries({
+    providerEnrichmentId: parsed.providerEnrichmentId,
+    providerStatus: parsed.providerStatus,
+    payloadFingerprint: fullEnrichWebhookPayloadFingerprint(input.rawBody, input.apiKey),
+    entries: parsed.entries,
+  }, client);
+  return {
+    kind: 'processed',
+    providerStatus: parsed.providerStatus,
+    callbackIds: parsed.entries.map((entry) => entry.callbackId),
+    received: parsed.entries.length,
+    ...outcome,
   };
 }

@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(27);
+select plan(40);
 
 select has_table(
   'public',
@@ -80,6 +80,66 @@ select ok(
 select ok(
   to_regclass('public.fullenrich_enrichment_callbacks_active_target_key') is not null,
   'a target cannot have two active FullEnrich callbacks'
+);
+select ok(
+  to_regprocedure('public.claim_fullenrich_enrichment_reconciliation_candidates_v1(integer,timestamp with time zone,timestamp with time zone,timestamp with time zone)') is not null,
+  'the FullEnrich reconciliation claim RPC exists'
+);
+select ok(
+  to_regprocedure('public.release_fullenrich_enrichment_reconciliation_candidates_v1(uuid[],timestamp with time zone,text)') is not null,
+  'the FullEnrich reconciliation release RPC exists'
+);
+select ok(
+  to_regprocedure('public.claim_fullenrich_enrichment_reconciliation_candidates_v2(integer,timestamp with time zone,timestamp with time zone,timestamp with time zone)') is not null,
+  'the bounded FullEnrich reconciliation claim RPC exists'
+);
+select ok(
+  to_regprocedure('public.release_fullenrich_enrichment_reconciliation_candidates_v2(uuid[],timestamp with time zone,text)') is not null,
+  'the terminal-safe FullEnrich reconciliation release RPC exists'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.claim_fullenrich_enrichment_reconciliation_candidates_v1(integer,timestamp with time zone,timestamp with time zone,timestamp with time zone)',
+    'execute'
+  ) and not has_function_privilege(
+    'authenticated',
+    'public.claim_fullenrich_enrichment_reconciliation_candidates_v1(integer,timestamp with time zone,timestamp with time zone,timestamp with time zone)',
+    'execute'
+  ),
+  'the FullEnrich reconciliation claim RPC is service-role-only'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.release_fullenrich_enrichment_reconciliation_candidates_v1(uuid[],timestamp with time zone,text)',
+    'execute'
+  ) and not has_function_privilege(
+    'authenticated',
+    'public.release_fullenrich_enrichment_reconciliation_candidates_v1(uuid[],timestamp with time zone,text)',
+    'execute'
+  ),
+  'the FullEnrich reconciliation release RPC is service-role-only'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.claim_fullenrich_enrichment_reconciliation_candidates_v2(integer,timestamp with time zone,timestamp with time zone,timestamp with time zone)',
+    'execute'
+  ) and not has_function_privilege(
+    'authenticated',
+    'public.claim_fullenrich_enrichment_reconciliation_candidates_v2(integer,timestamp with time zone,timestamp with time zone,timestamp with time zone)',
+    'execute'
+  ) and has_function_privilege(
+    'service_role',
+    'public.release_fullenrich_enrichment_reconciliation_candidates_v2(uuid[],timestamp with time zone,text)',
+    'execute'
+  ) and not has_function_privilege(
+    'authenticated',
+    'public.release_fullenrich_enrichment_reconciliation_candidates_v2(uuid[],timestamp with time zone,text)',
+    'execute'
+  ),
+  'the bounded reconciliation RPCs are service-role-only'
 );
 
 insert into auth.users (id, email)
@@ -197,6 +257,29 @@ select is(
   'a bound callback refuses reassignment to another provider batch'
 );
 
+update public.fullenrich_enrichment_callbacks
+set created_at = now() - interval '20 minutes'
+where callback_id = 'c2000000-0000-4000-8000-000000000003';
+
+select results_eq(
+  $$select callback_id::text, provider_enrichment_id
+    from public.claim_fullenrich_enrichment_reconciliation_candidates_v2(
+      25,
+      now() - interval '10 minutes',
+      now() - interval '5 minutes',
+      now() - interval '15 minutes'
+    )$$,
+  $$values ('c2000000-0000-4000-8000-000000000003'::text, 'fullenrich-batch-1'::text)$$,
+  'a stale bound callback is claimed once for reconciliation'
+);
+select results_eq(
+  $$select reconciliation_attempt_count, reconciliation_claimed_at is not null, last_reconciliation_at is not null
+    from public.fullenrich_enrichment_callbacks
+    where callback_id = 'c2000000-0000-4000-8000-000000000003'$$,
+  $$values (1::integer, true, true)$$,
+  'claiming records a durable attempt and exact claim timestamp'
+);
+
 select is(
   public.apply_fullenrich_enrichment_callback_v1(
     'c2000000-0000-4000-8000-000000000001',
@@ -251,6 +334,38 @@ select results_eq(
   $$values ('enriched@example.test'::text, 2::integer)$$,
   'a duplicate records delivery metadata but preserves the first target update'
 );
+insert into public.fullenrich_enrichment_callbacks (
+  callback_id, provider_enrichment_id, operation_id, user_id, organization_id,
+  target_table, target_id, requested_fields
+) values (
+  'c2000000-0000-4000-8000-000000000006',
+  'fullenrich-batch-credits',
+  'fullenrich-operation-6',
+  'c0000000-0000-4000-8000-000000000001',
+  'c1000000-0000-4000-8000-000000000001',
+  'enriched_leads',
+  'fullenrich-target-lead',
+  array['contact.work_emails']
+);
+select is(
+  public.apply_fullenrich_enrichment_callback_v1(
+    'c2000000-0000-4000-8000-000000000006',
+    'fullenrich-batch-credits',
+    'CREDITS_INSUFFICIENT',
+    repeat('f', 64),
+    '{}'::jsonb
+  ) ->> 'outcome',
+  'processed',
+  'a credit-exhausted provider result settles the callback'
+);
+select results_eq(
+  $$select callback.status, callback.terminal_state, callback.provider_status, lead.enrichment_status
+    from public.fullenrich_enrichment_callbacks callback
+    join public.enriched_leads lead on lead.id = callback.target_id
+    where callback.callback_id = 'c2000000-0000-4000-8000-000000000006'$$,
+  $$values ('terminal'::text, 'failed'::text, 'CREDITS_INSUFFICIENT'::text, 'failed'::text)$$,
+  'credit exhaustion is durable and marks the target failed'
+);
 select is(
   public.apply_fullenrich_enrichment_callback_v1(
     'c2000000-0000-4000-8000-000000000002',
@@ -286,6 +401,22 @@ select results_eq(
     where id = 'c3000000-0000-4000-8000-000000000001'$$,
   $$values ('opportunity@example.test'::text, 'DELIVERABLE'::text, 'completed'::text)$$,
   'the opportunity target is selected from the callback record'
+);
+select is(
+  public.release_fullenrich_enrichment_reconciliation_candidates_v2(
+    array['c2000000-0000-4000-8000-000000000003'::uuid],
+    (select reconciliation_claimed_at from public.fullenrich_enrichment_callbacks where callback_id = 'c2000000-0000-4000-8000-000000000003'),
+    'FULLENRICH_RESULT_NOT_FOUND'
+  ),
+  1,
+  'reconciliation releases an exact claim after its callback becomes terminal'
+);
+select results_eq(
+  $$select reconciliation_claimed_at is null, reconciliation_last_error_code
+    from public.fullenrich_enrichment_callbacks
+    where callback_id = 'c2000000-0000-4000-8000-000000000003'$$,
+  $$values (true, 'FULLENRICH_RESULT_NOT_FOUND'::text)$$,
+  'terminal release preserves the auditable reconciliation failure'
 );
 select is(
   public.apply_fullenrich_enrichment_callback_v1(

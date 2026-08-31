@@ -6046,6 +6046,19 @@ export const outboundReconciliationTick = functions.scheduler.onSchedule({
     });
 });
 
+export const fullEnrichEnrichmentReconciliationTick = functions.scheduler.onSchedule({
+    schedule: 'every 5 minutes',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    secrets: ['FIREBASE_SCHEDULER_SECRET'],
+}, async () => {
+    await invokeFirebaseSchedulerBridge({
+        name: 'fullenrich-enrichment-reconciliation',
+        path: '/api/cron/fullenrich-enrichment-reconciliation',
+        method: 'POST',
+    });
+});
+
 export const replySyncTick = functions.scheduler.onSchedule({
     schedule: 'every 5 minutes',
     timeoutSeconds: 540,

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SOURCE_PROJECT="${SOURCE_PROJECT:-leadflowai-3yjcy}"
-TARGET_PROJECT="${TARGET_PROJECT:-studio-6624658482-61b7b}"
+TARGET_PROJECT="${TARGET_PROJECT:-leadflowai-3yjcy}"
 BACKEND="${BACKEND:-studio}"
 LOCATION="${LOCATION:-us-central1}"
 

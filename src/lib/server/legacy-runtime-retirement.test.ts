@@ -42,6 +42,7 @@ test('production configuration and current guides exclude retired runtimes', () 
   assert.doesNotMatch(productionVerifier, /(?:GLM_API_KEY|N8N_RESEARCH_WEBHOOK_URL)/);
   assert.match(productionVerifier, /aiProvider !== 'openai'/);
   assert.doesNotMatch(secretSync, /VANE_AUTH_HEADER_VALUE/);
+  assert.match(secretSync, /TARGET_PROJECT="\$\{TARGET_PROJECT:-leadflowai-3yjcy\}"/);
   assert.doesNotMatch(readme, /\bn8n\b/i);
   assert.doesNotMatch(deploymentGuide, /\bn8n\b/i);
   assert.match(n8nRoute, /retiredLegacyRuntimeResponse\('n8n-research'\)/);

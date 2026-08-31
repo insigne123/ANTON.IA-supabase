@@ -1,5 +1,6 @@
 const FULLENRICH_BULK_ENRICHMENT_URL = 'https://app.fullenrich.com/api/v2/contact/enrich/bulk';
 const MAX_CONTACTS_PER_BATCH = 100;
+const MAX_RESULT_BYTES = 10_000_000;
 
 export const FULLENRICH_CONTACT_FIELDS = [
   'contact.work_emails',
@@ -27,6 +28,13 @@ export class FullEnrichEnrichmentError extends Error {
     super(code);
   }
 }
+
+export type FullEnrichBulkEnrichmentResult =
+  | { kind: 'ready'; rawBody: Buffer }
+  | { kind: 'in_progress' }
+  | { kind: 'not_found' }
+  | { kind: 'terminal_failure'; providerStatus: 'CREDITS_INSUFFICIENT' }
+  | { kind: 'retryable_error'; errorCode: string };
 
 function text(value: unknown, maxLength: number) {
   if (typeof value !== 'string') return undefined;
@@ -116,6 +124,24 @@ function enrichmentId(value: unknown) {
   return candidate && /^[A-Za-z0-9_.:-]+$/.test(candidate) ? candidate : null;
 }
 
+async function providerErrorCode(response: Response) {
+  try {
+    const payload = await response.json();
+    return text(payload?.code, 100)?.toLowerCase() || '';
+  } catch {
+    return '';
+  }
+}
+
+async function providerStatus(response: Response) {
+  try {
+    const payload = await response.json();
+    return text(payload?.status, 64)?.toUpperCase() || '';
+  } catch {
+    return '';
+  }
+}
+
 export async function submitFullEnrichBulkEnrichment(input: {
   apiKey: string;
   webhookUrl: string;
@@ -179,6 +205,67 @@ export async function submitFullEnrichBulkEnrichment(input: {
       throw new FullEnrichEnrichmentError(504, 'FULLENRICH_ENRICHMENT_TIMEOUT', true);
     }
     throw new FullEnrichEnrichmentError(502, 'FULLENRICH_ENRICHMENT_UPSTREAM_ERROR', true);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Retrieves only a completed FullEnrich batch. Callers must not add
+ * `forceResults`: partial results can incorrectly finalize a pending contact.
+ */
+export async function fetchFullEnrichBulkEnrichmentResult(input: {
+  apiKey: string;
+  enrichmentId: string;
+  environment?: Record<string, string | undefined>;
+}): Promise<FullEnrichBulkEnrichmentResult> {
+  const apiKey = String(input.apiKey || '').trim();
+  const id = enrichmentId(input.enrichmentId);
+  if (!apiKey || !id) return { kind: 'retryable_error', errorCode: 'FULLENRICH_RESULT_REQUEST_INVALID' };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs(input.environment));
+  try {
+    const response = await fetch(`${FULLENRICH_BULK_ENRICHMENT_URL}/${encodeURIComponent(id)}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+        'Cache-Control': 'no-store',
+      },
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+
+    if (response.status === 402) {
+      return await providerStatus(response) === 'CREDITS_INSUFFICIENT'
+        ? { kind: 'terminal_failure', providerStatus: 'CREDITS_INSUFFICIENT' }
+        : { kind: 'retryable_error', errorCode: 'FULLENRICH_RESULT_PAYMENT_REQUIRED' };
+    }
+    if (response.status === 400) {
+      const code = await providerErrorCode(response);
+      return code === 'error.enrichment.in_progress'
+        ? { kind: 'in_progress' }
+        : { kind: 'retryable_error', errorCode: 'FULLENRICH_RESULT_BAD_REQUEST' };
+    }
+    if (response.status === 404) return { kind: 'not_found' };
+    if (response.status === 429) return { kind: 'retryable_error', errorCode: 'FULLENRICH_RESULT_RATE_LIMITED' };
+    if (!response.ok) return { kind: 'retryable_error', errorCode: 'FULLENRICH_RESULT_UPSTREAM_ERROR' };
+
+    const contentLength = Number(response.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_RESULT_BYTES) {
+      return { kind: 'retryable_error', errorCode: 'FULLENRICH_RESULT_TOO_LARGE' };
+    }
+    const rawBody = Buffer.from(await response.arrayBuffer());
+    if (rawBody.length > MAX_RESULT_BYTES) {
+      return { kind: 'retryable_error', errorCode: 'FULLENRICH_RESULT_TOO_LARGE' };
+    }
+    return { kind: 'ready', rawBody };
+  } catch (error) {
+    if (controller.signal.aborted || (error as { name?: string } | null)?.name === 'AbortError') {
+      return { kind: 'retryable_error', errorCode: 'FULLENRICH_RESULT_TIMEOUT' };
+    }
+    return { kind: 'retryable_error', errorCode: 'FULLENRICH_RESULT_UPSTREAM_ERROR' };
   } finally {
     clearTimeout(timeout);
   }

@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import {
   FULLENRICH_CALLBACK_CUSTOM_KEY,
+  processFullEnrichRetrievedResult,
   parseFullEnrichWebhookPayload,
   processFullEnrichWebhookDelivery,
   verifyFullEnrichWebhookSignature,
@@ -121,6 +122,50 @@ test('FullEnrich webhook processing delegates only an opaque callback and normal
   assert.equal('target_table' in calls[0].args, false);
 });
 
+test('FullEnrich retrieval only applies a terminal batch that matches the requested provider ID', async () => {
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const client = {
+    async rpc(name: string, args: Record<string, unknown>) {
+      calls.push({ name, args });
+      return { data: { outcome: 'processed' }, error: null };
+    },
+  };
+  const payload = { ...callbackPayload(), status: 'FINISHED' };
+  const rawBody = Buffer.from(JSON.stringify(payload));
+
+  const processed = await processFullEnrichRetrievedResult({
+    rawBody,
+    apiKey: API_KEY,
+    expectedProviderEnrichmentId: payload.id,
+  }, client);
+  assert.deepEqual(processed, {
+    kind: 'processed',
+    providerStatus: 'FINISHED',
+    callbackIds: [CALLBACK_ID],
+    received: 1,
+    processed: 1,
+    duplicates: 0,
+    ignored: 0,
+  });
+  assert.equal(calls.length, 1);
+
+  const mismatch = await processFullEnrichRetrievedResult({
+    rawBody,
+    apiKey: API_KEY,
+    expectedProviderEnrichmentId: 'different-batch',
+  }, client);
+  assert.deepEqual(mismatch, { kind: 'invalid_payload' });
+  assert.equal(calls.length, 1);
+
+  const pending = await processFullEnrichRetrievedResult({
+    rawBody: Buffer.from(JSON.stringify(callbackPayload())),
+    apiKey: API_KEY,
+    expectedProviderEnrichmentId: payload.id,
+  }, client);
+  assert.deepEqual(pending, { kind: 'in_progress' });
+  assert.equal(calls.length, 1);
+});
+
 test('FullEnrich migration keeps callback data service-role-only and finalizes under a row lock', () => {
   const migration = readFileSync('supabase/migrations/20260827110000_fullenrich_enrichment_callbacks.sql', 'utf8');
 
@@ -143,4 +188,26 @@ test('FullEnrich migration keeps callback data service-role-only and finalizes u
   assert.match(migration, /if v_callback\.terminal_state is not null then[\s\S]*?'outcome', 'duplicate'/);
   assert.match(migration, /target\.user_id = v_callback\.user_id[\s\S]*?target\.organization_id = v_callback\.organization_id/);
   assert.match(migration, /target\.organization_id = v_callback\.organization_id::text/);
+});
+
+test('FullEnrich reconciliation migration claims stale callbacks atomically and releases exact claims', () => {
+  const migration = readFileSync('supabase/migrations/20260830120000_fullenrich_callback_reconciliation.sql', 'utf8');
+  const reliabilityMigration = readFileSync('supabase/migrations/20260830130000_fullenrich_reconciliation_reliability.sql', 'utf8');
+
+  assert.match(migration, /reconciliation_attempt_count integer not null default 0/);
+  assert.match(migration, /last_reconciliation_at timestamptz/);
+  assert.match(migration, /reconciliation_claimed_at timestamptz/);
+  assert.match(migration, /reconciliation_last_error_code text/);
+  assert.match(migration, /create or replace function public\.claim_fullenrich_enrichment_reconciliation_candidates_v1/);
+  assert.match(migration, /for update skip locked/);
+  assert.match(migration, /callback\.status in \('pending', 'processing'\)/);
+  assert.match(migration, /callback\.provider_enrichment_id is not null/);
+  assert.match(migration, /order by callback\.last_reconciliation_at asc nulls first, callback\.created_at asc/);
+  assert.match(migration, /create or replace function public\.release_fullenrich_enrichment_reconciliation_candidates_v1/);
+  assert.match(migration, /callback\.reconciliation_claimed_at = p_claimed_at/);
+  assert.match(migration, /to service_role/);
+  assert.match(reliabilityMigration, /claim_fullenrich_enrichment_reconciliation_candidates_v2/);
+  assert.match(reliabilityMigration, /reconciliation_attempt_count integer/);
+  assert.match(reliabilityMigration, /release_fullenrich_enrichment_reconciliation_candidates_v2/);
+  assert.doesNotMatch(reliabilityMigration, /and callback\.status in \('pending', 'processing'\)/);
 });

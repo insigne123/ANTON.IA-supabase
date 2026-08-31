@@ -13,6 +13,7 @@ const firebaseBridgeRoutes = [
     'process-campaigns',
     'campaigns-v2',
     'outbound-reconciliation',
+    'fullenrich-enrichment-reconciliation',
     'reply-sync',
     'privacy-retention',
     'antonia-rollups',
@@ -65,6 +66,7 @@ test('Firebase owns all production scheduler bridges and Vercel only schedules S
     const schedules = [
         ['campaignProcessingTick', "every 5 minutes", '/api/cron/process-campaigns'],
         ['outboundReconciliationTick', "every 5 minutes", '/api/cron/outbound-reconciliation'],
+        ['fullEnrichEnrichmentReconciliationTick', "every 5 minutes", '/api/cron/fullenrich-enrichment-reconciliation'],
         ['replySyncTick', "every 5 minutes", '/api/cron/reply-sync'],
         ['privacyRetentionTick', '30 3 * * *', '/api/cron/privacy-retention'],
         ['antoniaRollupsTick', '10 0 * * *', '/api/cron/antonia-rollups'],
@@ -112,7 +114,10 @@ test('Firebase owns all production scheduler bridges and Vercel only schedules S
     assert.match(deploymentDocs, /`antoniaTick`/);
     assert.match(deploymentDocs, /`nativeResearchTick`/);
     assert.match(deploymentDocs, /`campaignProcessingTick`/);
+    assert.match(deploymentDocs, /`fullEnrichEnrichmentReconciliationTick`/);
+    assert.match(deploymentDocs, /20260830120000_fullenrich_callback_reconciliation\.sql/);
     assert.match(deploymentDocs, /`FIREBASE_SCHEDULER_SECRET`/);
+    assert.match(deploymentDocs, /ocho ticks/);
     assert.match(deploymentDocs, /roles\/run\.invoker/);
     assert.match(deploymentDocs, /Firebase gestione la binding del job de Cloud Scheduler/);
     assert.match(deploymentDocs, /Retirar en un cambio separado las bindings de App Hosting/);

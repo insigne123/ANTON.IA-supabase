@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   FULLENRICH_CONTACT_FIELDS,
+  fetchFullEnrichBulkEnrichmentResult,
   resolveFullEnrichWebhookUrl,
   submitFullEnrichBulkEnrichment,
   validateFullEnrichBulkContact,
@@ -29,6 +30,63 @@ test('FullEnrich bulk contacts require a precise identity and only request work 
     enrich_fields: ['contact.work_emails'],
     custom: { callback: 'one' },
   });
+});
+
+test('FullEnrich result retrieval uses a completed-batch GET without forceResults', async () => {
+  const originalFetch = globalThis.fetch;
+  let request: { url: string; init?: RequestInit } | null = null;
+  globalThis.fetch = async (input, init) => {
+    request = { url: String(input), init };
+    return Response.json({ id: 'enrichment-123', status: 'FINISHED', data: [] });
+  };
+
+  try {
+    const result = await fetchFullEnrichBulkEnrichmentResult({
+      apiKey: 'test-key',
+      enrichmentId: 'enrichment-123',
+    });
+    assert.equal(result.kind, 'ready');
+    assert.ok(request);
+    const captured = request as { url: string; init?: RequestInit };
+    assert.equal(captured.url, 'https://app.fullenrich.com/api/v2/contact/enrich/bulk/enrichment-123');
+    assert.equal(new URL(captured.url).search, '');
+    assert.equal(captured.init?.method, 'GET');
+    assert.equal(new Headers(captured.init?.headers).get('authorization'), 'Bearer test-key');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('FullEnrich result retrieval leaves a provider batch pending when it is not finished', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ code: 'error.enrichment.in_progress' }, { status: 400 });
+
+  try {
+    assert.deepEqual(await fetchFullEnrichBulkEnrichmentResult({
+      apiKey: 'test-key',
+      enrichmentId: 'enrichment-123',
+    }), { kind: 'in_progress' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('FullEnrich result retrieval recognizes an authoritative credit failure', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({
+    id: 'enrichment-123',
+    status: 'CREDITS_INSUFFICIENT',
+    data: [],
+  }, { status: 402 });
+
+  try {
+    assert.deepEqual(await fetchFullEnrichBulkEnrichmentResult({
+      apiKey: 'test-key',
+      enrichmentId: 'enrichment-123',
+    }), { kind: 'terminal_failure', providerStatus: 'CREDITS_INSUFFICIENT' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('FullEnrich webhook URL must be public HTTPS', () => {
