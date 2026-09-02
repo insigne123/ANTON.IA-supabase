@@ -128,6 +128,8 @@ function getFriendlySearchErrorMessage(message?: string) {
     return raw;
   }
 
+  if (lower.includes('crédito') || lower.includes('credito')) return raw;
+
   if (lower.includes('quota') || lower.includes('limite') || lower.includes('límite') || lower.includes('429')) {
     if (lower.includes('alcanzaste el límite diario') || lower.includes('alcanzaste el limite diario')) return raw;
     return 'Llegaste al limite disponible por hoy. Puedes volver a intentarlo mas tarde o ajustar el volumen de la busqueda.';

@@ -8,6 +8,7 @@ import type {
   Lead,
 } from '@/lib/schemas/leads';
 import { CompanySearchOrganizationSchema } from '@/lib/schemas/leads';
+import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 
 const PATH = '/api/leads/search';
 const PROFILE_STATUS_PATH = '/api/leads/profile-status';
@@ -115,6 +116,7 @@ export async function searchLinkedInProfileLead(
     id: String(enriched.id || `profile-search:${linkedinUrl}`),
     name: enriched.fullName,
     first_name: enriched.firstName,
+    last_name: enriched.lastName,
     email: enriched.email,
     email_status: enriched.emailStatus,
     linkedin_url: enriched.linkedinUrl || linkedinUrl,
@@ -124,6 +126,10 @@ export async function searchLinkedInProfileLead(
     organization_name: enriched.companyName,
     organization_domain: enriched.companyDomain,
     industry: enriched.industry,
+    organization_industry: enriched.industry,
+    city: enriched.city,
+    state: enriched.state,
+    country: enriched.country,
     primary_phone: enriched.primaryPhone,
     phone_numbers: enriched.phoneNumbers,
     seniority: enriched.seniority,
@@ -134,6 +140,15 @@ export async function searchLinkedInProfileLead(
     source_provider_id: enriched.sourceProviderId,
     apollo_id: enriched.sourceProviderId,
   };
+  if (enriched.errorCode === 'APOLLO_CREDITS_EXHAUSTED') {
+    throw new Error('La cuenta de Apollo no tiene créditos disponibles. Recarga créditos o espera al próximo ciclo de facturación.');
+  }
+  if (!hasUsableLinkedInProfileData(lead)) {
+    if (enriched.enrichmentStatus === 'not_found') {
+      return { count: 0, leads_count: 0, leads: [], search_mode: 'linkedin_profile' } as LeadSearchResponse;
+    }
+    throw new Error('No pudimos consultar este perfil en Apollo. Inténtalo nuevamente.');
+  }
   return {
     count: 1,
     leads_count: 1,

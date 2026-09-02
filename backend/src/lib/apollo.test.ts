@@ -304,6 +304,34 @@ test('organization enrichment propagates upstream failures instead of returning 
   }
 });
 
+test('enrichment reports exhausted Apollo credits without exposing billing details', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({
+    error: 'private billing detail',
+    error_details: { code: 'BILLING.LIMIT.CREDITS_EXHAUSTED' },
+  }, { status: 422 });
+  try {
+    const parsed = validateEnrichmentInput({
+      lead: { linkedin_url: 'https://www.linkedin.com/in/example' },
+      reveal_email: true,
+      reveal_phone: false,
+      enrichment_level: 'basic',
+    });
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+
+    await assert.rejects(
+      () => executeApolloEnrichment(parsed.value, 'apollo-test-key', getGatewayConfig()),
+      (error: unknown) => error instanceof ApolloGatewayError
+        && error.status === 429
+        && error.code === 'APOLLO_CREDITS_EXHAUSTED'
+        && !error.message.includes('private billing detail'),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('Apollo configuration and timeout failures do not expose upstream details', async () => {
   assert.equal(getApolloApiKey({ APOLLO_API_KEY: ' apollo-test-key ' }), 'apollo-test-key');
   const config = getGatewayConfig();
