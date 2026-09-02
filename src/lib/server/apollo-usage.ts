@@ -82,7 +82,7 @@ export async function captureApolloCreditUsageSnapshot(input: {
     },
     {
       provider: 'apollo',
-      scope_type: 'api',
+      scope_type: 'user',
       provider_account_id: providerTeamId,
       provider_user_id: providerUserId,
       cycle_start: null,
