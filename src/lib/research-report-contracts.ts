@@ -6,9 +6,9 @@ import {
   type ResearchSnapshotV1,
 } from '@/lib/research-contracts';
 
-const nonEmptyText = z.string().trim().min(1).max(4_000);
+const nonEmptyText = z.string().trim().min(1);
 const identifier = z.string().trim().min(1).max(256);
-const uniqueIdentifiers = z.array(identifier).min(1).max(20).superRefine((values, ctx) => {
+const uniqueIdentifiers = z.array(identifier).min(1).superRefine((values, ctx) => {
   const seen = new Set<string>();
   values.forEach((value, index) => {
     if (seen.has(value)) {
@@ -59,9 +59,37 @@ export const ResearchReportImportedPersonContextV1Schema = z.object({
   provenance: z.literal('imported'),
   fullName: z.string().trim().min(1).max(300).nullable(),
   title: z.string().trim().min(1).max(2_000).nullable(),
+  headline: z.string().trim().min(1).max(2_000).nullable().optional(),
+  seniority: z.string().trim().min(1).max(300).nullable().optional(),
+  departments: z.array(z.string().trim().min(1).max(160)).max(12).nullable().optional(),
   linkedinUrl: z.string().url().nullable(),
   city: z.string().trim().min(1).max(2_000).nullable(),
   country: z.string().trim().min(1).max(2_000).nullable(),
+}).strict();
+
+export const ResearchReportImportedCompanyContextV1Schema = z.object({
+  provenance: z.literal('imported'),
+  name: z.string().trim().min(1).max(300).nullable(),
+  domain: z.string().trim().min(1).max(300).nullable(),
+  websiteUrl: z.string().url().nullable(),
+  linkedinUrl: z.string().url().nullable(),
+  country: z.string().trim().min(1).max(2_000).nullable(),
+  industry: z.string().trim().min(1).max(2_000).nullable().optional(),
+  size: z.number().int().positive().max(10_000_000).nullable().optional(),
+  description: z.string().trim().min(1).max(2_000).nullable().optional(),
+}).strict();
+
+export const ResearchReportSellerContextV1Schema = z.object({
+  provenance: z.literal('seller_profile'),
+  name: z.string().trim().min(1).max(300).nullable(),
+  jobTitle: z.string().trim().min(1).max(2_000).nullable(),
+  companyName: z.string().trim().min(1).max(300),
+  companyDomain: z.string().trim().min(1).max(300).nullable(),
+  sector: z.string().trim().min(1).max(2_000).nullable(),
+  description: z.string().trim().min(1).max(2_000).nullable(),
+  services: z.array(z.string().trim().min(1).max(2_000)).max(50),
+  valueProposition: z.string().trim().min(1).max(2_000).nullable(),
+  proofPoints: z.array(z.string().trim().min(1).max(2_000)).max(50),
 }).strict();
 
 export const ResearchReportGapV1Schema = z.object({
@@ -78,8 +106,8 @@ export const ResearchReportContradictionV1Schema = z.object({
   citations: ResearchReportCitationV1Schema,
 }).strict();
 
-const reportFactList = z.array(ResearchReportFactualBlockV1Schema).max(20);
-const reportHypothesisList = z.array(ResearchReportHypothesisBlockV1Schema).max(20);
+const reportFactList = z.array(ResearchReportFactualBlockV1Schema);
+const reportHypothesisList = z.array(ResearchReportHypothesisBlockV1Schema);
 
 export const ResearchReportNarrativeParagraphV1Schema = z.object({
   text: nonEmptyText,
@@ -88,10 +116,11 @@ export const ResearchReportNarrativeParagraphV1Schema = z.object({
 }).strict();
 
 export const ResearchReportNarrativeV1Schema = z.object({
-  executiveSummary: z.array(ResearchReportNarrativeParagraphV1Schema).max(2),
-  companyProfile: z.array(ResearchReportNarrativeParagraphV1Schema).max(4),
-  leadContext: z.array(ResearchReportNarrativeParagraphV1Schema).max(2),
-  commercialReading: z.array(ResearchReportNarrativeParagraphV1Schema).max(3),
+  executiveSummary: z.array(ResearchReportNarrativeParagraphV1Schema).max(3),
+  companyProfile: z.array(ResearchReportNarrativeParagraphV1Schema).max(20),
+  leadContext: z.array(ResearchReportNarrativeParagraphV1Schema).max(12),
+  commercialReading: z.array(ResearchReportNarrativeParagraphV1Schema).max(20),
+  serviceFit: z.array(ResearchReportNarrativeParagraphV1Schema).max(8).optional(),
 }).strict();
 
 export const ResearchReportSynthesisOutputV1Schema = z.object({
@@ -103,7 +132,7 @@ export const ResearchReportSynthesisOutputV1Schema = z.object({
     market: reportFactList,
     scale: reportFactList,
   }).strict(),
-  signals: z.array(ResearchReportSignalV1Schema).max(20),
+  signals: z.array(ResearchReportSignalV1Schema),
   commercialHypotheses: reportHypothesisList,
   outreachBrief: z.object({
     factualAnchors: reportFactList,
@@ -117,6 +146,11 @@ const completenessSchema = z.object({
   score: z.number().finite().min(0).max(1),
   coveredSections: z.array(ResearchReportSectionV1Schema).max(8),
   missingSections: z.array(ResearchReportSectionV1Schema).max(8),
+  claimCoverage: z.object({
+    available: z.number().int().nonnegative(),
+    represented: z.number().int().nonnegative(),
+    score: z.number().finite().min(0).max(1),
+  }).strict().optional(),
 }).strict().superRefine((value, ctx) => {
   const allSections = ResearchReportSectionV1Schema.options;
   const covered = new Set(value.coveredSections);
@@ -143,6 +177,17 @@ const completenessSchema = z.object({
   if (Math.abs(value.score - expectedScore) > 1e-9) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Completeness score must match covered sections', path: ['score'] });
   }
+  if (value.claimCoverage) {
+    if (value.claimCoverage.represented > value.claimCoverage.available) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Represented claims cannot exceed available claims', path: ['claimCoverage', 'represented'] });
+    }
+    const expectedClaimScore = value.claimCoverage.available === 0
+      ? 1
+      : value.claimCoverage.represented / value.claimCoverage.available;
+    if (Math.abs(value.claimCoverage.score - expectedClaimScore) > 1e-9) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Claim coverage score must match represented claims', path: ['claimCoverage', 'score'] });
+    }
+  }
 });
 
 export const ResearchReportDocumentV1Schema = z.object({
@@ -162,15 +207,17 @@ export const ResearchReportDocumentV1Schema = z.object({
     verifiedFacts: reportFactList,
   }).strict(),
   company: z.object({
+    importedContext: ResearchReportImportedCompanyContextV1Schema.optional(),
     overview: reportFactList,
     offerings: reportFactList,
     market: reportFactList,
     scale: reportFactList,
   }).strict(),
-  signals: z.array(ResearchReportSignalV1Schema).max(20),
+  signals: z.array(ResearchReportSignalV1Schema),
   commercialHypotheses: reportHypothesisList,
   gaps: z.array(ResearchReportGapV1Schema).max(20),
-  contradictions: z.array(ResearchReportContradictionV1Schema).max(20),
+  contradictions: z.array(ResearchReportContradictionV1Schema),
+  sellerContext: ResearchReportSellerContextV1Schema.optional(),
   narrative: ResearchReportNarrativeV1Schema.optional(),
   outreachBrief: z.object({
     factualAnchors: reportFactList,
@@ -184,6 +231,7 @@ export const ResearchReportDocumentV1Schema = z.object({
     provider: z.literal('openai'),
     model: z.string().trim().min(1).max(160).nullable(),
     promptVersion: z.string().trim().min(1).max(160),
+    sellerProfileHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     generatedAt: z.string().datetime({ offset: true }),
   }).strict(),
 }).strict().superRefine((document, ctx) => {
@@ -221,6 +269,8 @@ export type ResearchReportHypothesisBlockV1 = z.infer<typeof ResearchReportHypot
 export type ResearchReportSynthesisOutputV1 = z.infer<typeof ResearchReportSynthesisOutputV1Schema>;
 export type ResearchReportNarrativeParagraphV1 = z.infer<typeof ResearchReportNarrativeParagraphV1Schema>;
 export type ResearchReportNarrativeV1 = z.infer<typeof ResearchReportNarrativeV1Schema>;
+export type ResearchReportImportedCompanyContextV1 = z.infer<typeof ResearchReportImportedCompanyContextV1Schema>;
+export type ResearchReportSellerContextV1 = z.infer<typeof ResearchReportSellerContextV1Schema>;
 export type ResearchReportDocumentV1 = z.infer<typeof ResearchReportDocumentV1Schema>;
 
 export class ResearchReportCitationError extends Error {
@@ -238,9 +288,26 @@ function importedPersonContext(snapshot: ResearchSnapshotV1) {
     provenance: 'imported' as const,
     fullName: snapshot.subject.person.fullName || null,
     title: snapshot.subject.person.title || null,
+    ...(snapshot.subject.person.headline ? { headline: snapshot.subject.person.headline } : {}),
+    ...(snapshot.subject.person.seniority ? { seniority: snapshot.subject.person.seniority } : {}),
+    ...(snapshot.subject.person.departments?.length ? { departments: snapshot.subject.person.departments } : {}),
     linkedinUrl: snapshot.subject.person.linkedinUrl || null,
     city: snapshot.subject.person.city || null,
     country: snapshot.subject.person.country || null,
+  };
+}
+
+function importedCompanyContext(snapshot: ResearchSnapshotV1) {
+  return {
+    provenance: 'imported' as const,
+    name: snapshot.subject.company.name || null,
+    domain: snapshot.subject.company.domain || null,
+    websiteUrl: snapshot.subject.company.websiteUrl || null,
+    linkedinUrl: snapshot.subject.company.linkedinUrl || null,
+    country: snapshot.subject.company.country || null,
+    ...(snapshot.subject.company.industry ? { industry: snapshot.subject.company.industry } : {}),
+    ...(snapshot.subject.company.size ? { size: snapshot.subject.company.size } : {}),
+    ...(snapshot.subject.company.description ? { description: snapshot.subject.company.description } : {}),
   };
 }
 
@@ -264,6 +331,40 @@ function signalTypeForClaimKind(kind: ResearchClaimV1['kind']) {
   return null;
 }
 
+const reportCompanyFactKinds = new Set<ResearchClaimV1['kind']>([
+  'company_overview',
+  'company_identity',
+  'company_industry',
+  'company_service',
+  'company_size',
+  'company_priority',
+]);
+const reportSignalKinds = new Set<ResearchClaimV1['kind']>([
+  'news_signal',
+  'hiring_signal',
+  'technology_signal',
+  'site_signal',
+]);
+
+export function isEligibleResearchReportFactClaimV1(
+  snapshot: ResearchSnapshotV1,
+  claim: ResearchClaimV1,
+  generatedAt: string,
+) {
+  const generatedAtMs = Date.parse(generatedAt);
+  const validUntilMs = Date.parse(claim.freshness.validUntil);
+  const evidenceIds = new Set(snapshot.evidence.map((evidence) => evidence.id));
+  const routable = claim.subjectScope === 'person'
+    || reportCompanyFactKinds.has(claim.kind)
+    || reportSignalKinds.has(claim.kind);
+  return claim.classification === 'fact'
+    && routable
+    && Number.isFinite(generatedAtMs)
+    && Number.isFinite(validUntilMs)
+    && validUntilMs > generatedAtMs
+    && claim.supportingEvidenceIds.some((evidenceId) => evidenceIds.has(evidenceId));
+}
+
 export function validateResearchReportDocumentCitationsV1(
   documentInput: unknown,
   snapshotInput: unknown,
@@ -278,6 +379,9 @@ export function validateResearchReportDocumentCitationsV1(
   if (document.language !== snapshot.request.language) issues.push('document language does not match the snapshot request');
   if (JSON.stringify(document.person.importedContext) !== JSON.stringify(importedPersonContext(snapshot))) {
     issues.push('imported person context must be copied exactly from the snapshot subject');
+  }
+  if (JSON.stringify(document.company.importedContext) !== JSON.stringify(importedCompanyContext(snapshot))) {
+    issues.push('imported company context must be copied exactly from the snapshot subject');
   }
 
   const claimsById = new Map(snapshot.claims.map((claim) => [claim.id, claim]));
@@ -304,6 +408,14 @@ export function validateResearchReportDocumentCitationsV1(
       if (claim.classification !== expectedClassification) {
         issues.push(`${path} cites ${claim.classification} claim ${claimId} as ${expectedClassification}`);
       }
+      const generatedAtMs = Date.parse(document.synthesis.generatedAt);
+      const validUntilMs = Date.parse(claim.freshness.validUntil);
+      if (
+        (expectedClassification === 'fact' && !isEligibleResearchReportFactClaimV1(snapshot, claim, document.synthesis.generatedAt))
+        || (expectedClassification === 'hypothesis' && (!Number.isFinite(validUntilMs) || validUntilMs <= generatedAtMs))
+      ) {
+        issues.push(`${path} cites claim ${claimId} outside its valid report window`);
+      }
       if (claim.subjectScope !== block.subjectScope || (expectedScope && claim.subjectScope !== expectedScope)) {
         issues.push(`${path} cites claim ${claimId} from the wrong subject scope`);
       }
@@ -324,7 +436,7 @@ export function validateResearchReportDocumentCitationsV1(
         issues.push(`${path} claim ${claim.id} has no cited canonical supporting evidence`);
       }
     });
-    if (!citedClaims.some((claim) => normalizedStatement(claim.statement) === normalizedStatement(block.statement))) {
+    if (!citedClaims.every((claim) => normalizedStatement(claim.statement) === normalizedStatement(block.statement))) {
       issues.push(`${path} statement does not match a cited canonical claim statement`);
     }
     return citedClaims;
@@ -372,7 +484,8 @@ export function validateResearchReportDocumentCitationsV1(
       'company_overview', 'company_identity', 'company_industry', 'company_service', 'company_size', 'company_priority',
     ]);
     const commercialNarrativeKinds = new Set<ResearchClaimV1['kind']>([
-      'company_priority', 'news_signal', 'hiring_signal', 'technology_signal', 'site_signal',
+      'company_overview', 'company_identity', 'company_industry', 'company_service', 'company_size', 'company_priority',
+      'news_signal', 'hiring_signal', 'technology_signal', 'site_signal',
       'pain_hypothesis', 'opportunity_hypothesis', 'risk_hypothesis', 'use_case_hypothesis',
     ]);
     Object.entries(document.narrative).forEach(([section, paragraphs]) => {
@@ -387,6 +500,8 @@ export function validateResearchReportDocumentCitationsV1(
             ? claim.classification === 'fact' && claim.subjectScope === 'company' && companyNarrativeKinds.has(claim.kind)
             : section === 'leadContext'
               ? claim.classification === 'fact' && claim.subjectScope === 'person'
+            : section === 'serviceFit'
+              ? claim.subjectScope === 'company' && commercialNarrativeKinds.has(claim.kind)
               : section === 'commercialReading'
                 ? commercialNarrativeKinds.has(claim.kind)
                 : true;
@@ -437,8 +552,31 @@ export function validateResearchReportDocumentCitationsV1(
     seenBlockIds.add(gap.id);
   });
 
+  if (document.completeness.claimCoverage) {
+    const eligibleClaimIds = new Set(snapshot.claims
+      .filter((claim) => isEligibleResearchReportFactClaimV1(snapshot, claim, document.synthesis.generatedAt))
+      .map((claim) => claim.id));
+    const representedClaimIds = new Set([
+      ...document.person.verifiedFacts,
+      ...document.company.overview,
+      ...document.company.offerings,
+      ...document.company.market,
+      ...document.company.scale,
+      ...document.signals,
+    ].flatMap((block) => block.citations.claimIds).filter((claimId) => eligibleClaimIds.has(claimId)));
+    if (document.completeness.claimCoverage.available !== eligibleClaimIds.size) {
+      issues.push('claim coverage available count does not match fresh supported canonical facts');
+    }
+    if (document.completeness.claimCoverage.represented !== representedClaimIds.size) {
+      issues.push('claim coverage represented count does not match canonical detail sections');
+    }
+    if (representedClaimIds.size !== eligibleClaimIds.size) {
+      issues.push('current report detail must represent every fresh supported canonical fact');
+    }
+  }
+
   if (issues.length > 0) throw new ResearchReportCitationError(issues);
   return document;
 }
 
-export const researchReportContractInternals = { importedPersonContext };
+export const researchReportContractInternals = { importedCompanyContext, importedPersonContext };

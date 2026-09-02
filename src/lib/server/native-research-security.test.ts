@@ -10,6 +10,7 @@ const nativeDraftSource = readFileSync('src/lib/server/native-drafts.ts', 'utf8'
 const securityMigration = readFileSync('supabase/migrations/20260822111000_native_research_security_fixes.sql', 'utf8');
 const queueIntegrityMigration = readFileSync('supabase/migrations/20260824170000_native_research_queue_integrity.sql', 'utf8');
 const suppressedSettlementMigration = readFileSync('supabase/migrations/20260824173000_settle_suppressed_native_research_jobs.sql', 'utf8');
+const suppressedQuotaMigration = readFileSync('supabase/migrations/20260901095000_release_suppressed_native_research_quota.sql', 'utf8');
 const legacyCompatibilityMigration = readFileSync('supabase/migrations/20260823120000_reconcile_legacy_schema_drift.sql', 'utf8');
 const privacySubjectData = readFileSync('src/lib/server/privacy-subject-data.ts', 'utf8');
 const nativeLeadStatusSource = nativeResearchSource.slice(
@@ -95,10 +96,27 @@ test('deep official-site collection stays on the company domain and search signa
   }), false);
 });
 
+test('deep official-site candidates cover high-value company sections up to twelve pages', () => {
+  const paths = [
+    'products', 'services', 'cases', 'customers', 'integrations', 'team',
+    'locations', 'security', 'news', 'careers', 'about',
+  ];
+  const candidates = nativeResearchInternals.candidateOfficialPageUrls(
+    paths.map((path) => `<a href="/${path}">${path}</a>`).join(''),
+    new URL('https://acme.com/'),
+    'acme.com',
+    null,
+    12,
+  );
+
+  assert.equal(candidates.length, 11);
+  for (const path of paths) assert.ok(candidates.includes(`https://acme.com/${path}`), path);
+});
+
 test('official-site collection keeps bounded HTML and falls back to useful page text', () => {
-  const first = nativeResearchInternals.boundedOfficialSiteChunk(Buffer.from('abcdefghij'), 120_000 - 4);
+  const first = nativeResearchInternals.boundedOfficialSiteChunk(Buffer.from('abcdefghij'), 180_000 - 4);
   assert.equal(first?.toString('utf8'), 'abcd');
-  assert.equal(nativeResearchInternals.boundedOfficialSiteChunk(Buffer.from('more'), 120_000), null);
+  assert.equal(nativeResearchInternals.boundedOfficialSiteChunk(Buffer.from('more'), 180_000), null);
 
   const page = nativeResearchInternals.officialPageFromHtml(
     new URL('https://acme.com/about'),
@@ -128,6 +146,36 @@ test('official-site collection keeps bounded HTML and falls back to useful page 
   );
   assert.doesNotMatch(truncatedRegionalLanding.text, /boilerplate/);
   assert.equal(nativeResearchInternals.usefulOfficialPageContent(truncatedRegionalLanding), null);
+});
+
+test('official-site pages produce atomic deduplicated sections and support legacy flattened artifacts', () => {
+  const page = nativeResearchInternals.officialPageFromHtml(
+    new URL('https://acme.com/services'),
+    [
+      '<main><h1>Servicios logísticos</h1>',
+      '<p>Acme coordina entregas empresariales con seguimiento operativo para equipos distribuidos en toda la región.</p>',
+      '<p>Acme coordina entregas empresariales con seguimiento operativo para equipos distribuidos en toda la región.</p>',
+      '<h2>Integraciones</h2>',
+      '<p>La plataforma se integra con sistemas de inventario y planificación para mantener actualizados los flujos de trabajo.</p>',
+      '</main>',
+    ].join(''),
+  );
+  const contents = nativeResearchInternals.usefulOfficialPageContents(page);
+  assert.equal(contents.length, 2);
+  assert.match(contents[0].locator, /^Servicios logísticos#/);
+  assert.match(contents[1].locator, /^Integraciones#/);
+
+  const legacyContents = nativeResearchInternals.usefulOfficialPageContents({
+    url: 'https://acme.com/about',
+    title: 'Acme',
+    description: 'Acme desarrolla software operativo para empresas que coordinan inventario, transporte y atención regional.',
+    text: [
+      'Acme desarrolla software operativo para empresas que coordinan inventario, transporte y atención regional.',
+      'Sus equipos trabajan con clientes de distintos sectores para adaptar cada implementación a procesos verificables.',
+    ].join(' '),
+  });
+  assert.equal(legacyContents.length, 2);
+  assert.equal(legacyContents[0].locator, 'meta_description');
 });
 
 test('native generation and deletion use durable privacy-aware claims', () => {
@@ -163,6 +211,17 @@ test('suppressed claims without a token settle the durable job and its run item'
   assert.match(suppressedSettlementMigration, /grant execute on function public\.settle_suppressed_native_lead_research_job_v1/);
   assert.match(nativeResearchSource, /settle_suppressed_native_lead_research_job_v1/);
   assert.match(nativeResearchSource, /if \(!claim\) \{[\s\S]+settleSuppressedNativeResearchJob\(\{ job, access \}\)/);
+});
+
+test('suppression after quota consumption reverses only pre-provider usage atomically', () => {
+  assert.match(suppressedQuotaMigration, /create or replace function public\.cancel_native_lead_research_request_claim_v1/);
+  assert.match(suppressedQuotaMigration, /for update/);
+  assert.match(suppressedQuotaMigration, /pg_advisory_xact_lock/);
+  assert.match(suppressedQuotaMigration, /v_job\.request_claim_state = 'pre_provider' and v_job\.quota_consumed_at is not null/);
+  assert.match(suppressedQuotaMigration, /usage_count = usage_count - 1[\s\S]+usage_count > 0/);
+  assert.match(suppressedQuotaMigration, /leads_investigated = leads_investigated - 1[\s\S]+leads_investigated > 0/);
+  assert.match(suppressedQuotaMigration, /quota bucket is missing for suppressed research release/);
+  assert.match(suppressedQuotaMigration, /quota_consumed_at = case when v_job\.request_claim_state = 'pre_provider' then null/);
 });
 
 test('native lead status lookup stays tenant-scoped and matches only exact lead IDs', () => {

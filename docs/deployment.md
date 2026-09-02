@@ -20,6 +20,7 @@ Para las funciones que consumen Firestore en el backend asegúrate de exportar u
 - `CANONICAL_APP_URL` (URL publica HTTPS del BFF para callbacks opacos de Apollo)
 - `ENRICHMENT_SERVICE_SECRET` (mismo valor en Next y el gateway de leads)
 - `ANTONIA_LEAD_SEARCH_URL`, `ENRICHMENT_SERVICE_URL`, `APOLLO_ORGANIZATION_ENRICHMENT_URL` y `APOLLO_USAGE_SERVICE_URL` (endpoints HTTPS del gateway)
+- `APOLLO_SHARED_ACCOUNT_ID` (opcional pero recomendado: Apollo team/account ID que fija el saldo compartido mostrado en el dashboard; no es un secreto)
 - `APOLLO_ORGANIZATION_CONTEXT_TTL_DAYS` (opcional, 30 por defecto; reutiliza perfiles empresariales tenant-scoped sin repetir cargos)
 - `QUOTA_FALLBACK_SECRET`
 - Native web research: `SERPER_API_KEY` (Secret Manager, runtime-only), `SERPER_TIMEOUT_MS`, `SERPER_MAX_RETRIES`, `SERPER_RETRY_DELAY_MS`

@@ -61,3 +61,26 @@ test('run request keys dedupe equivalent selections without preventing a later r
   assert.equal(first, reordered);
   assert.notEqual(first, later);
 });
+
+test('explicit refresh identities do not reuse a terminal job in the same freshness window', () => {
+  const access = { organizationId: 'org-1', userId: 'user-1' };
+  const leads = [{ id: 'lead-ana', companyName: 'Acme' }];
+  const options = { depth: 'deep' as const, language: 'es', refresh: true };
+
+  const firstRetry = nativeResearchRunInternals.nativeResearchRunRequestKey({
+    access,
+    leads,
+    options,
+    now: 120_000,
+    refreshIdentity: 'retry-one',
+  });
+  const secondRetry = nativeResearchRunInternals.nativeResearchRunRequestKey({
+    access,
+    leads,
+    options,
+    now: 120_000,
+    refreshIdentity: 'retry-two',
+  });
+
+  assert.notEqual(firstRetry, secondRetry);
+});

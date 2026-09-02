@@ -25,6 +25,14 @@ La direccion visual por defecto de esta app es Apple-like: claridad, foco, super
 - Nonprod `htketmmhsfmucevvqmxi` admite escrituras solo con peticion explicita y despues de reset, lint, pgTAP e integracion local.
 - Prefiere `npm run test:reset` para reconstruir identidades y fixtures sinteticos.
 
+## Git y releases
+
+- `main` es la unica rama canonica para integrar, verificar y desplegar cambios.
+- Inicia todo cambio desde `main`; no abras ramas `release/*` ni despliegues desde worktrees detached.
+- Usa un worktree temporal solo para aislar trabajo concurrente. Antes de verificar o desplegar, integra el resultado probado de vuelta en `main`.
+- No borres ramas o worktrees historicos sin una solicitud explicita; nunca deben ser fuente de cambios nuevos ni de un despliegue.
+- Antes de actualizar `main`, revisa `git status`, `git diff`, la historia entrante y las pruebas pertinentes.
+
 ## Limites del estilo Apple-like
 
 - Inspira decisiones en Apple HIG, pero no copies branding, iconografia, tipografias propietarias ni assets de Apple.

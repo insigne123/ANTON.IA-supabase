@@ -190,3 +190,140 @@ test('does not generate a targeted follow-up while an earlier draft is missing',
   assert.equal(generationCalls, 0);
   assert.deepEqual(errors, ['Genera primero los seguimientos anteriores para mantener la continuidad.']);
 });
+
+test('does not reserve a follow-up when the seller profile has no usable offer', async () => {
+  const errors: string[] = [];
+  let reserveCalls = 0;
+  let generationCalls = 0;
+
+  await generateFollowUpDraftBatch({
+    organizationId,
+    userId,
+    snapshotId,
+    config: { styleProfileId: null, sequenceInstruction: 'Continúa con claridad.' },
+    initialDraft,
+    steps: [steps[0]],
+    existingDrafts: new Map(),
+    sellerProfile: {
+      name: null,
+      jobTitle: null,
+      companyName: 'Northstar',
+      companyDomain: null,
+      sector: null,
+      description: null,
+      services: [],
+      valueProposition: null,
+      proofPoints: [],
+    },
+  }, {
+    reserveDraft: async () => { reserveCalls += 1; },
+    createDraft: async () => {
+      generationCalls += 1;
+      throw new Error('generation must not run');
+    },
+    linkDraft: async () => assert.fail('draft must not be linked'),
+    recordError: async ({ error }) => { errors.push(error); },
+  });
+
+  assert.equal(reserveCalls, 0);
+  assert.equal(generationCalls, 0);
+  assert.deepEqual(errors, ['Completa Productos y servicios o Propuesta de valor en tu perfil antes de crear el borrador.']);
+});
+
+test('reuses an unlinked durable reservation after the seller profile changes', async () => {
+  const previousSellerProfile = {
+    name: null,
+    jobTitle: null,
+    companyName: 'Northstar',
+    companyDomain: null,
+    sector: null,
+    description: null,
+    services: ['Automatización de operaciones'],
+    valueProposition: null,
+    proofPoints: [],
+  };
+  const sellerProfile = {
+    ...previousSellerProfile,
+    services: ['Integración de datos operativos'],
+  };
+  const reserved = campaignFollowUpDraftIds({
+    organizationId,
+    userId,
+    stepId: steps[0].id,
+    sellerProfile: previousSellerProfile,
+  });
+  const reservedStep = {
+    ...steps[0],
+    reservedDraftId: reserved.draftId,
+    reservedVersionId: reserved.versionId,
+  };
+  const reservations: Array<{ stepId: string; draftId: string; versionId: string }> = [];
+  const requests: any[] = [];
+
+  await generateFollowUpDraftBatch({
+    organizationId,
+    userId,
+    snapshotId,
+    config: { styleProfileId: null, sequenceInstruction: 'Continúa con claridad.' },
+    initialDraft,
+    steps: [reservedStep],
+    existingDrafts: new Map(),
+    sellerProfile,
+  }, {
+    reserveDraft: async (reservation) => { reservations.push(reservation); },
+    createDraft: async (request) => {
+      requests.push(request);
+      return { status: 'drafted', draft: draft(reserved.draftId, reserved.versionId, 'Borrador reintentado') } as any;
+    },
+    linkDraft: async () => undefined,
+    recordError: async () => assert.fail('generation should not fail'),
+  });
+
+  assert.deepEqual(reservations, [{ stepId: reservedStep.id, ...reserved }]);
+  assert.deepEqual(requests[0].reservedCampaignDraftIds, reserved);
+  assert.deepEqual(requests[0].sellerProfile, sellerProfile);
+  assert.notDeepEqual(
+    reserved,
+    campaignFollowUpDraftIds({ organizationId, userId, stepId: reservedStep.id, sellerProfile }),
+  );
+});
+
+test('preserves an already linked follow-up when the seller profile changes', async () => {
+  const linkedDraft = draft(
+    '90000000-0000-4000-8000-000000000001',
+    '90000000-0000-4000-8000-000000000002',
+    'Borrador editado',
+  );
+  let dependencyCalls = 0;
+
+  await generateFollowUpDraftBatch({
+    organizationId,
+    userId,
+    snapshotId,
+    config: { styleProfileId: null, sequenceInstruction: 'Continúa con claridad.' },
+    initialDraft,
+    steps: [{ ...steps[0], nativeDraftId: linkedDraft.draftId }],
+    existingDrafts: new Map([[steps[0].id, linkedDraft]]),
+    sellerProfile: {
+      name: null,
+      jobTitle: null,
+      companyName: 'Northstar',
+      companyDomain: null,
+      sector: null,
+      description: null,
+      services: ['Una oferta nueva'],
+      valueProposition: null,
+      proofPoints: [],
+    },
+  }, {
+    reserveDraft: async () => { dependencyCalls += 1; },
+    createDraft: async () => {
+      dependencyCalls += 1;
+      throw new Error('generation must not run');
+    },
+    linkDraft: async () => { dependencyCalls += 1; },
+    recordError: async () => { dependencyCalls += 1; },
+  });
+
+  assert.equal(dependencyCalls, 0);
+});

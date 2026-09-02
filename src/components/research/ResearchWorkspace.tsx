@@ -26,12 +26,14 @@ import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ToastAction } from '@/components/ui/toast';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import {
   MAX_RESEARCH_BATCH_SIZE,
   createQueuedResearchWorkspaceRun,
   isResearchInFlight,
+  isSellerProfileIncompleteDraftError,
   parseResearchWorkspaceRun,
   parseResearchReportDetail,
   researchDraftErrorMessage,
@@ -68,9 +70,13 @@ type ResearchableLead = Pick<
   | 'seniority'
   | 'departments'
   | 'linkedinUrl'
-  | 'companyName'
-  | 'companyDomain'
-  | 'organizationDomain'
+   | 'companyName'
+   | 'companyDomain'
+   | 'companyWebsite'
+   | 'companyLinkedinUrl'
+   | 'descriptionSnippet'
+   | 'industry'
+   | 'organizationDomain'
   | 'organizationIndustry'
   | 'organizationSize'
   | 'city'
@@ -100,7 +106,11 @@ function workspaceLead(lead: ResearchableLead): ResearchWorkspaceLead {
     departments: lead.departments || null,
     linkedinUrl: lead.linkedinUrl || null,
     companyName: lead.companyName || null,
-    companyDomain: lead.organizationDomain || lead.companyDomain || (lead.email?.split('@')[1] || null),
+    companyDomain: lead.organizationDomain || lead.companyDomain || lead.companyWebsite || (lead.email?.split('@')[1] || null),
+    companyWebsite: lead.companyWebsite || null,
+    companyLinkedinUrl: lead.companyLinkedinUrl || null,
+    descriptionSnippet: lead.descriptionSnippet || null,
+    industry: lead.industry || null,
     organizationIndustry: lead.organizationIndustry || null,
     organizationSize: lead.organizationSize || null,
     city: lead.city || null,
@@ -139,8 +149,12 @@ function toResearchLead(lead: ResearchWorkspaceLead) {
     departments: Array.isArray(lead.departments) ? lead.departments.filter(Boolean) : null,
     linkedinUrl: normalizeUrl(lead.linkedinUrl),
     companyName: lead.companyName || null,
-    companyDomain: lead.companyDomain || (normalizeEmail(lead.email)?.split('@')[1] || null),
-    organizationIndustry: lead.organizationIndustry || null,
+    companyDomain: lead.companyDomain || lead.companyWebsite || (normalizeEmail(lead.email)?.split('@')[1] || null),
+    companyWebsite: normalizeUrl(lead.companyWebsite),
+    companyLinkedinUrl: normalizeUrl(lead.companyLinkedinUrl),
+    descriptionSnippet: lead.descriptionSnippet || null,
+    industry: lead.industry || null,
+    organizationIndustry: lead.organizationIndustry || lead.industry || null,
     organizationSize: lead.organizationSize || null,
     city: lead.city || null,
     country: lead.country || null,
@@ -268,6 +282,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const [loadingLeads, setLoadingLeads] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [query, setQuery] = useState('');
+  const [queueExpanded, setQueueExpanded] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [activeLeadKey, setActiveLeadKey] = useState<string | null>(null);
   const [activeBatch, setActiveBatch] = useState<StoredResearchBatch | null>(null);
@@ -277,6 +292,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const [startError, setStartError] = useState('');
   const [creatingBatch, setCreatingBatch] = useState(false);
   const [creatingDraftId, setCreatingDraftId] = useState<string | null>(null);
+  const [profileRequiredItemId, setProfileRequiredItemId] = useState<string | null>(null);
   const [reportDetails, setReportDetails] = useState<Record<string, ResearchReportDetail>>({});
   const [reportDetailLoading, setReportDetailLoading] = useState<Record<string, boolean>>({});
   const [reportDetailErrors, setReportDetailErrors] = useState<Record<string, string>>({});
@@ -480,6 +496,12 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const allVisibleSelected = selectableVisibleLeads.length > 0 && selectableVisibleLeads.every((lead) => selectedKeys.includes(lead.key));
   const activeItem = runItems.find((item) => item.lead.key === activeLeadKey) || null;
   const activeLead = activeItem?.lead || workspaceLeads.find((lead) => lead.key === activeLeadKey) || null;
+  const canCollapseQueue = Boolean(activeItem?.result)
+    && handoffReady
+    && handoffResolved
+    && !handoffNotice
+    && selectedLeads.length === 0;
+  const queueCollapsed = canCollapseQueue && !queueExpanded;
   const activeStatus = activeItem?.status || 'idle';
   const activeReportId = activeItem?.reportId || null;
   const activeReportDetail = activeReportId ? reportDetails[activeReportId] || null : null;
@@ -642,6 +664,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   async function createDraft(item: ResearchWorkspaceRunItem) {
     if (!item.canCreateDraft || !item.researchSnapshotId || draftRequestRef.current) return;
     draftRequestRef.current = item.id;
+    setProfileRequiredItemId((current) => current === item.id ? null : current);
     setCreatingDraftId(item.id);
     try {
       const response = await fetch('/api/native-drafts', {
@@ -651,14 +674,24 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.draft?.draftId) {
+        const description = researchDraftErrorMessage(payload, 'Inténtalo nuevamente.');
+        const sellerProfileIncomplete = isSellerProfileIncompleteDraftError(payload)
+          && description === 'Completa tu perfil comercial para crear un borrador alineado con tu propuesta.';
+        if (sellerProfileIncomplete) setProfileRequiredItemId(item.id);
         toast({
           variant: 'destructive',
           title: 'No se pudo preparar el borrador',
-          description: researchDraftErrorMessage(payload, 'Inténtalo nuevamente.'),
+          description,
+          action: sellerProfileIncomplete ? (
+            <ToastAction altText="Completar perfil comercial" onClick={() => router.push('/profile')}>
+              Completar perfil
+            </ToastAction>
+          ) : undefined,
         });
         return;
       }
       const draftId = encodeURIComponent(payload.draft.draftId);
+      setProfileRequiredItemId(null);
       const versionId = payload.draft.versionId ? `&versionId=${encodeURIComponent(payload.draft.versionId)}` : '';
       router.push(`/contact/compose?draftId=${draftId}${versionId}`);
     } catch (error) {
@@ -796,16 +829,32 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
         </Card>
       </section>
 
-      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(320px,0.72fr)_minmax(0,1.28fr)]">
-        <section aria-labelledby="to-research-heading" className="min-w-0">
-          <Card className="min-w-0 overflow-hidden rounded-[28px] border-border/60 shadow-[0_20px_60px_-48px_rgba(15,23,42,0.32)]">
-            <CardHeader className="gap-4 border-b border-border/60 pb-4">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(280px,320px)_minmax(0,1fr)]">
+        <section aria-labelledby="to-research-heading" className="min-w-0 lg:self-start">
+          <Card className="min-w-0 overflow-hidden rounded-[24px] border-border/60 bg-muted/[0.08] shadow-none lg:flex lg:max-h-[calc(100vh-2.5rem)] lg:flex-col">
+            <CardHeader className="shrink-0 gap-4 border-b border-border/60 px-4 pb-4 pt-5">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 id="to-research-heading" className="text-[1.35rem] font-semibold leading-none tracking-[-0.03em]">Por investigar</h2>
-                  <CardDescription className="mt-1 max-w-xl leading-6">Selecciona los leads que quieres preparar con contexto antes de redactar.</CardDescription>
+                  <h2 id="to-research-heading" className="text-lg font-semibold tracking-[-0.025em]">Por investigar</h2>
+                  <CardDescription className={`mt-1 leading-5 ${queueCollapsed ? 'hidden lg:block' : ''}`}>Elige los leads que necesitan contexto antes de redactar.</CardDescription>
                 </div>
-                <div className="relative w-full sm:w-64">
+                {canCollapseQueue ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0 rounded-full px-2.5 lg:hidden"
+                    aria-expanded={queueExpanded}
+                    aria-controls="research-queue-list"
+                    onClick={() => setQueueExpanded((expanded) => !expanded)}
+                  >
+                    {queueExpanded ? 'Ocultar cola' : `Ver cola (${queueLeads.length})`}
+                  </Button>
+                ) : null}
+              </div>
+
+              <div className={queueCollapsed ? 'hidden space-y-4 lg:block' : 'space-y-4'}>
+                <div className="relative w-full">
                   <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
                   <Input
                     id="research-search"
@@ -816,39 +865,39 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                     className="h-10 rounded-full border-border/70 bg-background/85 pl-10"
                   />
                 </div>
-              </div>
 
-              <div className="flex flex-col gap-3 border-t border-border/60 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="select-visible-research-leads"
-                      checked={allVisibleSelected}
-                      onCheckedChange={(checked) => selectVisibleLeads(Boolean(checked))}
-                      disabled={selectableVisibleLeads.length === 0 || selectionLocked}
-                    />
-                    <label htmlFor="select-visible-research-leads" className="cursor-pointer text-sm text-muted-foreground">Seleccionar visibles</label>
+                <div className="flex flex-col gap-3 border-t border-border/60 pt-4">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="select-visible-research-leads"
+                        checked={allVisibleSelected}
+                        onCheckedChange={(checked) => selectVisibleLeads(Boolean(checked))}
+                        disabled={selectableVisibleLeads.length === 0 || selectionLocked}
+                      />
+                      <label htmlFor="select-visible-research-leads" className="cursor-pointer text-sm text-muted-foreground">Seleccionar visibles</label>
+                    </div>
+                    <span className="text-xs text-muted-foreground" aria-live="polite">
+                      {selectedLeads.length ? `${selectedLeads.length} seleccionados` : `Hasta ${MAX_RESEARCH_BATCH_SIZE} por selección`}
+                    </span>
                   </div>
-                  <span className="text-xs text-muted-foreground" aria-live="polite">
-                    {selectedLeads.length ? `${selectedLeads.length} seleccionados` : `Hasta ${MAX_RESEARCH_BATCH_SIZE} por selección`}
-                  </span>
+                  <Button
+                    type="button"
+                    className="w-full rounded-full"
+                    onClick={() => void startResearch()}
+                    disabled={researchUnavailable || selectionLocked || selectedLeads.length === 0}
+                    aria-describedby={handoffPending ? 'research-handoff-help' : activeRunBlocksNewBatch ? 'research-batch-help' : undefined}
+                  >
+                    {creatingBatch ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <BrainCircuit />}
+                    {creatingBatch ? 'Guardando selección…' : handoffPending ? 'Preparando selección…' : selectedLeads.length ? `Investigar ${selectedLeads.length}` : 'Investigar selección'}
+                  </Button>
                 </div>
-                <Button
-                  type="button"
-                  className="w-full rounded-full sm:w-auto"
-                  onClick={() => void startResearch()}
-                  disabled={researchUnavailable || selectionLocked || selectedLeads.length === 0}
-                  aria-describedby={handoffPending ? 'research-handoff-help' : activeRunBlocksNewBatch ? 'research-batch-help' : undefined}
-                >
-                  {creatingBatch ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <BrainCircuit />}
-                  {creatingBatch ? 'Guardando selección…' : handoffPending ? 'Preparando selección…' : selectedLeads.length ? `Investigar ${selectedLeads.length}` : 'Investigar selección'}
-                </Button>
+                {handoffNotice ? <p role="status" className="text-xs leading-5 text-muted-foreground">{handoffNotice}</p> : null}
+                {handoffPending ? <p id="research-handoff-help" className="text-xs leading-5 text-muted-foreground">Estamos preparando la selección que trajiste desde tu lista.</p> : activeRunBlocksNewBatch ? <p id="research-batch-help" className="text-xs leading-5 text-muted-foreground">Espera a que termine la selección actual antes de iniciar otra.</p> : null}
               </div>
-              {handoffNotice ? <p role="status" className="text-xs leading-5 text-muted-foreground">{handoffNotice}</p> : null}
-              {handoffPending ? <p id="research-handoff-help" className="text-xs leading-5 text-muted-foreground">Estamos preparando la selección que trajiste desde tu lista.</p> : activeRunBlocksNewBatch ? <p id="research-batch-help" className="text-xs leading-5 text-muted-foreground">Espera a que termine la selección actual antes de iniciar otra.</p> : null}
             </CardHeader>
 
-            <CardContent className="p-0">
+            <CardContent id="research-queue-list" className={`min-h-0 p-0 lg:block lg:flex-1 lg:overflow-y-auto ${queueCollapsed ? 'hidden' : 'block'}`}>
               {activeItem?.result ? (
                 <a
                   href="#research-report-panel"
@@ -895,7 +944,6 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                     const isActive = lead.key === activeLeadKey;
                     const inFlight = isResearchInFlight(item?.status || 'idle');
                     const selected = selectedKeys.includes(lead.key);
-                    const quality = item?.qualityScore == null ? 'Sin evaluación' : `${item.qualityScore}/100`;
                     const evidence = item ? `${pluralize(item.evidenceCount, 'evidencia')} · ${pluralize(item.sourceCount, 'fuente')}` : 'Sin evidencia todavía';
                     const readiness = item ? researchReadinessLabel(item.readiness) : 'Por investigar';
                     return (
@@ -912,7 +960,11 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                           </div>
                           <button
                             type="button"
-                            onClick={() => setActiveLeadKey(lead.key)}
+                             onClick={() => {
+                               setActiveLeadKey(lead.key);
+                               setQueueExpanded(false);
+                               window.requestAnimationFrame(() => document.getElementById('research-report-panel')?.focus());
+                             }}
                             disabled={draftRequestPending}
                             aria-pressed={isActive}
                             className="min-w-0 rounded-xl text-left outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
@@ -926,8 +978,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                                 <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium ${statusClass(item?.status || 'idle')}`}>{researchStatusLabel(item?.status || 'idle')}</span>
                               </span>
                               <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs leading-5 text-muted-foreground">
-                                <span><span className="font-medium text-foreground">Calidad:</span> {quality}</span>
-                                <span><span className="font-medium text-foreground">Evidencia:</span> {evidence}</span>
+                                <span>{evidence}</span>
                                 <span className={`font-medium ${readinessClass(item?.readiness || 'review')}`}>{readiness}</span>
                               </span>
                               {inFlight ? <Progress value={progressFor(item?.status || 'idle')} className="h-1.5" aria-label={`Progreso de investigación de ${lead.fullName || lead.companyName || 'lead'}: ${researchStatusLabel(item?.status || 'idle')}`} /> : null}
@@ -944,12 +995,12 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
         </section>
 
         <section id="research-report-panel" aria-labelledby="research-detail-heading" className="min-w-0 outline-none" tabIndex={-1}>
-          <Card className="min-w-0 overflow-hidden rounded-[28px] border-border/60 shadow-[0_20px_60px_-48px_rgba(15,23,42,0.32)]">
+          <Card className="min-w-0 rounded-[28px] border-border/60 bg-card/95 shadow-[0_22px_64px_-46px_rgba(15,23,42,0.4)] dark:bg-card/80">
             {!activeItem?.result ? <CardHeader className="gap-2 border-b border-border/60 pb-4">
               <h2 id="research-detail-heading" className="text-[1.35rem] font-semibold leading-none tracking-[-0.03em]">Detalle de investigación</h2>
               <CardDescription className="leading-6">Selecciona un lead para revisar su estado, evidencia y fuentes antes de redactar.</CardDescription>
             </CardHeader> : <h2 id="research-detail-heading" className="sr-only">Informe de investigación</h2>}
-            <CardContent className="space-y-5 p-4 sm:p-5">
+            <CardContent className="space-y-5 p-4 sm:p-6 xl:p-8">
               {runLoading && !activeRun ? (
                 <div aria-busy="true" className="space-y-3">
                   <Skeleton className="h-16 w-full rounded-2xl" />
@@ -1051,11 +1102,13 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                                 readiness={activeReadiness}
                                 researchSnapshotId={activeItem.researchSnapshotId}
                                 canCreateDraft={activeItem.canCreateDraft}
+                                profileCompletionRequired={profileRequiredItemId === activeItem.id}
                                 creatingDraft={creatingDraftId === activeItem.id}
                                 createDraftDisabled={draftRequestPending}
                                 createDraftLabel="Crear borrador y revisar"
                                 creatingDraftLabel="Preparando borrador…"
                                 onCreateDraft={() => void createDraft(activeItem)}
+                                onCompleteProfile={() => router.push('/profile')}
                                 refreshing={creatingBatch}
                                 onRefresh={() => void refreshActiveResearch()}
                               />

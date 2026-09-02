@@ -8,7 +8,7 @@ export const NATIVE_COMPANY_RESEARCH_PROFILE_REVISION = 'native-seller-profile/v
 export const NATIVE_COMPANY_RESEARCH_ICP_HASH = createHash('sha256')
   .update('native-research-default-icp/v1', 'utf8')
   .digest('hex');
-export const NATIVE_COMPANY_RESEARCH_PROMPT_VERSION = 'native-research-prompt/v2';
+export const NATIVE_COMPANY_RESEARCH_PROMPT_VERSION = 'native-research-prompt/v3';
 export const NATIVE_COMPANY_RESEARCH_PROVIDER = 'native-research-v1';
 export const NATIVE_COMPANY_RESEARCH_PROVIDER_VERSION = 'native-research-provider/v2';
 
@@ -60,6 +60,7 @@ type CompanyResearchArtifactIdentityInput = {
   promptVersion?: string | null;
   provider?: string | null;
   providerVersion?: string | null;
+  providerContextFingerprint?: string | null;
 };
 
 const reusableStatuses = new Set<CompanyResearchArtifactStatus>(['completed', 'partial', 'insufficient_data']);
@@ -152,10 +153,19 @@ export function buildCompanyResearchArtifactIdentity(input: CompanyResearchArtif
     provider: normalizeVersion(input.provider, NATIVE_COMPANY_RESEARCH_PROVIDER, 'COMPANY_RESEARCH_PROVIDER'),
     providerVersion: normalizeVersion(input.providerVersion, NATIVE_COMPANY_RESEARCH_PROVIDER_VERSION, 'COMPANY_RESEARCH_PROVIDER_VERSION'),
   };
+  const providerContextFingerprint = normalizeVersion(
+    input.providerContextFingerprint,
+    'none',
+    'COMPANY_RESEARCH_PROVIDER_CONTEXT_FINGERPRINT',
+  );
 
   return {
     ...identity,
-    cacheIdentity: digest(JSON.stringify({ schemaVersion: 'research-company-artifact/v1', ...identity })),
+    cacheIdentity: digest(JSON.stringify({
+      schemaVersion: 'research-company-artifact/v2',
+      ...identity,
+      providerContextFingerprint,
+    })),
   };
 }
 

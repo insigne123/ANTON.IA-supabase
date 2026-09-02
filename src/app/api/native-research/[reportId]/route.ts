@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
+import { ResearchSnapshotV1Schema } from '@/lib/research-contracts';
 import {
   findNativeResearchJob,
   getNativeSnapshot,
   nativeResearchJobToResult,
 } from '@/lib/server/native-research';
 import {
-  loadResearchReportDocument,
+  ensureResearchReportDocument,
   researchReportDocumentMetadata,
 } from '@/lib/server/research-report-documents';
+import { loadSellerProfile } from '@/lib/server/seller-profile';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -26,19 +28,21 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ report
     if (!job) return NextResponse.json({ error: 'NATIVE_RESEARCH_NOT_FOUND' }, { status: 404 });
 
     const access = { organizationId: auth.organizationId, organizationIds: auth.organizationIds, userId: auth.user.id };
-    const [snapshot, reportDocument] = job.researchSnapshotId
-      ? await Promise.all([
-        getNativeSnapshot({
-          snapshotId: job.researchSnapshotId,
-          access,
-        }),
-        loadResearchReportDocument({ researchSnapshotId: job.researchSnapshotId, access }),
-      ])
-      : [null, null];
+    const snapshotRow = job.researchSnapshotId
+      ? await getNativeSnapshot({ snapshotId: job.researchSnapshotId, access })
+      : null;
+    const snapshot = snapshotRow?.payload ? ResearchSnapshotV1Schema.parse(snapshotRow.payload) : null;
+    const reportDocument = snapshot
+      ? await ensureResearchReportDocument({
+        snapshot,
+        access,
+        sellerProfile: await loadSellerProfile(auth.user.id),
+      })
+      : null;
     return NextResponse.json({
       ok: true,
       ...nativeResearchJobToResult(job),
-      snapshot: snapshot?.payload || null,
+      snapshot: snapshot || null,
       reportDocument: reportDocument?.document || null,
       reportSynthesis: reportDocument ? researchReportDocumentMetadata(reportDocument) : null,
     }, { headers: { 'Cache-Control': 'no-store' } });

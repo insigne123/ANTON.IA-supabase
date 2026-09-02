@@ -454,6 +454,9 @@ const ResearchSnapshotV1BaseSchema = z.object({
     person: z.object({
       fullName: nonEmptyString.optional(),
       title: nonEmptyString.optional(),
+      headline: nonEmptyString.optional(),
+      seniority: nonEmptyString.optional(),
+      departments: z.array(nonEmptyString.max(160)).max(12).optional(),
       linkedinUrl: HttpUrlSchema.optional(),
       city: nonEmptyString.optional(),
       country: nonEmptyString.optional(),
@@ -464,6 +467,9 @@ const ResearchSnapshotV1BaseSchema = z.object({
       websiteUrl: HttpUrlSchema.optional(),
       linkedinUrl: HttpUrlSchema.optional(),
       country: nonEmptyString.optional(),
+      industry: nonEmptyString.max(2_000).optional(),
+      size: z.number().int().positive().max(10_000_000).optional(),
+      description: nonEmptyString.max(2_000).optional(),
     }).strict(),
   }).strict(),
   request: z.object({

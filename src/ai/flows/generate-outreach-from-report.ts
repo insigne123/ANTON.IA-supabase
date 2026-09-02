@@ -6,6 +6,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { generateStructured, generateStructuredWithTelemetry } from '@/ai/openai-json';
+import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
 import {
   DraftContextV2Schema,
   requiredReportAwareDraftPersonalizationV2,
@@ -44,10 +45,13 @@ const GenerateOutreachFromDraftContextV2InputSchema = z.object({
   }).optional(),
 });
 
-const GeneratedOutreachModelV2Schema = GeneratedOutreachV2Schema.omit({
-  personalization: true,
-  hypothesisIds: true,
-});
+const GeneratedOutreachModelV2Schema = z.object({
+  subject: z.string().trim().min(1).max(80),
+  contextParagraph: z.string().trim().min(1).max(700)
+    .describe('Un párrafo breve con un solo detalle verificable del destinatario, escrito como situación concreta y sin describir la investigación.'),
+  offerParagraph: z.string().trim().min(1).max(700)
+    .describe('Un párrafo breve que conecta una capacidad concreta del remitente con una consecuencia práctica, sin CTA.'),
+}).strict();
 
 export type GenerateOutreachFromDraftContextV2Input = {
   context: DraftContextV2;
@@ -63,7 +67,7 @@ export type GenerateOutreachFromDraftContextV2Input = {
 export type GeneratedOutreachFromDraftContextV2 = GeneratedOutreachV2 & {
   provider: 'openai';
   model: string;
-  promptVersion: 'native-draft/v3';
+  promptVersion: typeof NATIVE_DRAFT_PROMPT_VERSION;
 };
 
 export async function generateOutreachFromReport(
@@ -119,12 +123,37 @@ Devuelve SOLO JSON valido con esta forma:
 );
 
 function modelForDraftPriority(priority: DraftContextV2['quality']['priority']) {
-  void priority;
+  if (priority === 'A') {
+    return String(
+      process.env.SUPLIA_OPENAI_REASONING_MODEL
+      || process.env.OPENAI_REASONING_MODEL
+      || 'gpt-5.6-terra',
+    ).trim();
+  }
   return String(process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || process.env.OPENAI_MODEL || 'gpt-5.6-luna').trim();
+}
+
+function modelForDraftRequest(input: GenerateOutreachFromDraftContextV2Input) {
+  if (input.rewrite) {
+    return String(
+      process.env.SUPLIA_OPENAI_REASONING_MODEL
+      || process.env.OPENAI_REASONING_MODEL
+      || 'gpt-5.6-terra',
+    ).trim();
+  }
+  return modelForDraftPriority(input.context.quality.priority);
 }
 
 function draftWordCount(value: string) {
   return value.match(/[\p{L}\p{N}]+/gu)?.length || 0;
+}
+
+function draftGreeting(context: DraftContextV2) {
+  const firstName = String(context.recipient.displayName || '')
+    .trim()
+    .split(/\s+/)[0]
+    ?.replace(/[,.:;!?]+$/g, '');
+  return firstName ? `Hola ${firstName},` : 'Hola,';
 }
 
 function escapeRegExp(value: string) {
@@ -133,12 +162,30 @@ function escapeRegExp(value: string) {
 
 function privateWritingInstruction(value: unknown) {
   return String(value || '')
+    .replace(/retoma el contexto del correo inicial sin repetirlo\. reafirma brevemente la relevancia y pregunta si pudo revisarlo\.?/gi, 'Continúa desde el correo anterior sin resumirlo. Aterriza una consecuencia práctica para el equipo.')
+    .replace(/aporta un ángulo o beneficio nuevo y formula una pregunta consultiva fácil de responder\.?/gi, 'Describe una sola acción práctica sin repetir la descripción de la empresa.')
+    .replace(/(?:y\s+)?pregunta si pudo revisarlo\.?/gi, '')
+    .replace(/(?:y\s+)?formula una pregunta consultiva fácil de responder\.?/gi, '')
     .replace(/\bfollow[- ]?ups?\b/gi, 'mensaje')
     .replace(/\bseguimientos?\b/gi, 'mensaje')
-    .replace(/ángulos?/gi, 'ideas')
+    .replace(/\bun ángulo\b/gi, 'una idea')
+    .replace(/\botro ángulo\b/gi, 'otra idea')
+    .replace(/\bángulos\b/gi, 'ideas')
+    .replace(/\bángulo\b/gi, 'idea')
+    .replace(/\bideas?\s+acotadas?\b/gi, 'detalle concreto')
+    .replace(/\buna idea nuevo\b/gi, 'una idea nueva')
     .replace(/\benfoques?\s+acotados?\b/gi, 'ideas concretas')
     .replace(/\bpor tu rol\b/gi, '')
     .replace(/\bpor tu cargo\b/gi, '')
+    .replace(/\bcon (?:ese|este) alcance\b/gi, '')
+    .replace(/\bmi foco (?:sería|seria|es)\b/gi, '')
+    .replace(/\buna idea puntual\b/gi, 'un detalle concreto')
+    .replace(/\b(?:es )?una forma acotada\b/gi, '')
+    .replace(/\bte (?:comparto|dejo) el punto(?: nuevamente)?\b/gi, '')
+    .replace(/\bsin sumar otra capa de trabajo\b/gi, '')
+    .replace(/\bese es el contexto que tenía presente\b/gi, '')
+    .replace(/\bpor si (?:alcanzaste|pudiste) a? ?revisarlo\b/gi, '')
+    .replace(/\bretomo la idea\b/gi, '')
     .replace(/\bsecuencias?\b/gi, 'mensajes')
     .replace(/\betapas?\b/gi, 'mensajes')
     .replace(/\bpasos?\b/gi, 'mensajes')
@@ -159,10 +206,9 @@ function redactPromptTitles(value: unknown, context: DraftContextV2) {
 function sequenceWritingContext(input: OutreachSequenceContextV2, context: DraftContextV2) {
   return {
     sequenceInstruction: privateWritingInstruction(input.sequenceInstruction),
-    priorMessages: input.priorMessages.map((message) => ({
+    previousSubjects: input.priorMessages.map((message) => ({
       index: message.index,
       subject: redactPromptTitles(message.subject, context),
-      body: redactPromptTitles(message.body, context),
     })),
     currentStep: {
       index: input.currentStep.index,
@@ -172,38 +218,117 @@ function sequenceWritingContext(input: OutreachSequenceContextV2, context: Draft
   };
 }
 
+function validationWritingFeedback(errors: string[]) {
+  return errors.map((error) => (
+      /frase prohibida/i.test(error)
+        ? 'Usaste una fórmula vetada. Sustituye esa oración completa por una acción concreta en voz activa.'
+        : /enumera la fuente/i.test(error)
+          ? 'La personalización quedó como un catálogo. Elige un solo detalle de REQUIRED_FACTUAL_PERSONALIZATION y exprésalo en una oración natural, sin lista, sin viñetas y sin unir categorías con comas o con "y".'
+          : /conectar explícitamente/i.test(error)
+            ? 'La oferta quedó plana. En offerParagraph menciona la empresa del remitente, una acción concreta que realiza y una consecuencia práctica conectada con el hecho del destinatario.'
+            : error
+  ));
+}
+
+function selectedCommercialAngle(context: DraftContextV2) {
+  const selectedOrder = new Map(
+    (context.report?.outreachBrief.selectedHypothesisIds || []).map((claimId, index) => [claimId, index]),
+  );
+  return context.hypotheses
+    .filter((hypothesis) => (
+      selectedOrder.has(hypothesis.claimId)
+      && hypothesis.kind !== 'use_case_hypothesis'
+      && !/\b(?:prioridad(?:es)?|explorar si|sin asumir|no confirma|informaci[oó]n p[uú]blica disponible)\b/i.test(hypothesis.statement)
+    ))
+    .sort((left, right) => {
+      const leftOrder = selectedOrder.get(left.claimId) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = selectedOrder.get(right.claimId) ?? Number.MAX_SAFE_INTEGER;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return right.confidence - left.confidence;
+    })
+    .map((hypothesis) => ({
+      claimId: hypothesis.claimId,
+      statement: hypothesis.statement,
+    }))[0] || null;
+}
+
+function boundedWritingStyle(profile: Record<string, unknown>) {
+  const bounded: Record<string, unknown> = {};
+  for (const key of ['tone', 'length', 'language', 'instructions', 'subjectTemplate', 'bodyTemplate']) {
+    const value = typeof profile[key] === 'string' ? profile[key].trim() : '';
+    if (value) bounded[key] = value.slice(0, 1_000);
+  }
+  const cta = profile.cta && typeof profile.cta === 'object' && !Array.isArray(profile.cta)
+    ? profile.cta as Record<string, unknown>
+    : null;
+  if (cta) {
+    bounded.cta = {
+      ...(typeof cta.label === 'string' ? { label: cta.label.trim().slice(0, 240) } : {}),
+      ...(typeof cta.duration === 'string' ? { duration: cta.duration.trim().slice(0, 80) } : {}),
+    };
+  }
+  return bounded;
+}
+
 function draftContextPrompt(input: GenerateOutreachFromDraftContextV2Input) {
   const requiredPersonalization = requiredReportAwareDraftPersonalizationV2(input.context);
-  const requiredEvidenceIds = new Set(requiredPersonalization.map((item) => item.evidenceId));
   const requiredEvidence = requiredPersonalization.map((provenance) => {
     const evidence = input.context.evidence.find((item) => item.evidenceId === provenance.evidenceId);
     return {
-      ...provenance,
       statement: draftEvidencePersonalizationStatementV2(evidence?.statement || ''),
       subjectScope: evidence?.subjectScope || 'company',
     };
   });
-  const factualContext = {
-    ...input.context,
-    person: {
-      ...input.context.person,
-      title: null,
+  const writingContext = {
+    recipient: {
+      displayName: input.context.recipient.displayName,
     },
+    company: input.context.company,
     seller: {
-      ...input.context.seller,
-      jobTitle: null,
+      name: input.context.seller.name,
+      companyName: input.context.seller.companyName,
+      valueProposition: input.context.seller.valueProposition,
+      capabilities: input.context.seller.services.slice(0, 4),
+      proofPoint: input.context.seller.proofPoints[0] || null,
+      description: input.context.seller.description,
     },
-    evidence: input.context.evidence.filter((evidence) => requiredEvidenceIds.has(evidence.evidenceId)),
-    hypotheses: [],
+    style: boundedWritingStyle(input.context.style.profile),
   };
-  const approvedCtaWords = draftWordCount(input.context.constraints.cta.exactText);
-  const sequenceMaxWords = input.sequenceContext ? 82 : 112;
-  const modelBodyWords = {
-    min: Math.max(1, input.context.constraints.body.minWords - approvedCtaWords),
-    max: Math.max(1, Math.min(sequenceMaxWords, input.context.constraints.body.maxWords - approvedCtaWords)),
-  };
-  const correction = input.rewrite
+  const commercialAngle = selectedCommercialAngle(input.context);
+  const commercialAnglePrompt = commercialAngle
     ? `
+REQUIRED_COMMERCIAL_ANGLE (hipótesis, no hecho verificado):
+${JSON.stringify({ statement: commercialAngle.statement })}
+
+Usa este ángulo solo como criterio interno para elegir la capacidad del vendedor. No copies la hipótesis, no verbalices cautela metodológica y no afirmes que la empresa tiene una necesidad. Si no puedes conectarlo con naturalidad, omítelo.
+`
+    : `
+COMMERCIAL_BRIDGE:
+No hay una hipótesis comercial específica seleccionada. Conecta el hecho con una capacidad concreta del vendedor sin afirmar que la empresa tiene un problema, prioridad o intención de compra. No expliques esta cautela dentro del correo.
+`;
+  const reportRestrictions = input.context.report?.outreachBrief.doNotClaim || [];
+  const greeting = draftGreeting(input.context);
+  const approvedCtaWords = draftWordCount(input.context.constraints.cta.exactText);
+  const serverAddedWords = approvedCtaWords + draftWordCount(greeting);
+  const sequenceMaxWords = input.sequenceContext ? 68 : 112;
+  const maximumModelBodyWords = Math.max(
+    1,
+    Math.min(sequenceMaxWords, input.context.constraints.body.maxWords) - serverAddedWords,
+  );
+  // Server normalization can remove an unapproved CTA or shorten a catalogued phrase.
+  const minimumModelBodyWords = Math.min(
+    maximumModelBodyWords,
+    Math.max(40, input.context.constraints.body.minWords - serverAddedWords + 12),
+  );
+  const modelBodyWords = {
+    min: minimumModelBodyWords,
+    max: maximumModelBodyWords,
+  };
+  const minimumContextParagraphWords = Math.min(12, Math.max(1, modelBodyWords.min - 1));
+  const minimumOfferParagraphWords = Math.max(1, modelBodyWords.min - minimumContextParagraphWords);
+  const correction = input.rewrite
+    ? input.rewrite.instruction
+      ? `
 BORRADOR ANTERIOR (solo referencia de redacción; no es evidencia):
 ${JSON.stringify({
   subject: redactPromptTitles(input.rewrite.previous.subject, input.context),
@@ -214,9 +339,17 @@ AJUSTE SOLICITADO POR EL USUARIO:
 ${JSON.stringify(input.rewrite.instruction || null)}
 
 CORRECCIONES DE VALIDACIÓN:
-${JSON.stringify(input.rewrite.errors)}
+${JSON.stringify(validationWritingFeedback(input.rewrite.errors))}
 
-El cuerpo anterior ya incluye el CTA agregado por el servidor. No lo reproduzcas en la nueva salida. Reescribe sin agregar información ausente de DRAFT_CONTEXT_V2. El ajuste solicitado puede cambiar voz, extensión o estructura, pero nunca relajar las reglas no negociables.
+El cuerpo anterior ya incluye el CTA agregado por el servidor. No lo reproduzcas en la nueva salida. Reescribe sin agregar información ausente de WRITING_CONTEXT o REQUIRED_FACTUAL_PERSONALIZATION. El ajuste solicitado puede cambiar voz, extensión o estructura, pero nunca relajar las reglas no negociables.
+`
+      : `
+EL INTENTO ANTERIOR FUE RECHAZADO. No lo copies ni intentes repararlo frase por frase; escribe un correo nuevo desde cero.
+
+CORRECCIONES DE VALIDACIÓN:
+${JSON.stringify(validationWritingFeedback(input.rewrite.errors))}
+
+Corrige todos los problemas sin agregar información ausente de WRITING_CONTEXT o REQUIRED_FACTUAL_PERSONALIZATION.
 `
     : '';
   const campaignInstruction = input.instruction
@@ -224,7 +357,7 @@ El cuerpo anterior ya incluye el CTA agregado por el servidor. No lo reproduzcas
 CAMPAIGN_STEP_INSTRUCTION (estrategia de redacción, no evidencia factual):
 ${JSON.stringify(privateWritingInstruction(input.instruction))}
 
-Es una instrucción privada de redacción: aplícala sin inventar hechos y sin relajar ninguna regla no negociable, pero no la copies ni la menciones en el correo. DRAFT_CONTEXT_V2 y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales autorizadas.
+Es una instrucción privada de redacción: aplícala sin inventar hechos y sin relajar ninguna regla no negociable, pero no la copies ni la menciones en el correo. WRITING_CONTEXT y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales autorizadas.
 `
     : '';
   const sequenceContext = input.sequenceContext
@@ -232,53 +365,72 @@ Es una instrucción privada de redacción: aplícala sin inventar hechos y sin r
 SEQUENCE_WRITING_CONTEXT (metadata privada de redacción, no publicable):
 ${JSON.stringify(sequenceWritingContext(input.sequenceContext, input.context))}
 
-Usa estos mensajes solo para mantener continuidad y evitar repetir asuntos, argumentos, estructuras o cierres. Nunca menciones ni copies los nombres, etapas, días, instrucciones o la secuencia. El contenido previo no autoriza hechos: DRAFT_CONTEXT_V2 y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales.
+Usa esta metadata solo para mantener continuidad y evitar repetir asuntos. Nunca menciones ni copies los nombres, etapas, días, instrucciones o la secuencia. Los asuntos previos no autorizan hechos: WRITING_CONTEXT y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales.
 `
     : '';
+  const structureRules = input.sequenceContext
+    ? `- Este es un correo posterior: no resumas el correo anterior ni vuelvas a presentar a la empresa o al remitente.
+ - contextParagraph y offerParagraph deben aportar información útil.
+ - contextParagraph debe aportar un único detalle factual que no repita el asunto anterior.
+ - offerParagraph debe conectar ese detalle con una capacidad concreta del vendedor y una consecuencia práctica para el equipo.
+ - Usa uno o dos detalles de la evidencia, nunca una lista de categorías o servicios copiada de la web. No abras con "La empresa reúne A, B y C".
+ - Si el detalle contiene varias categorías separadas por comas o por "y", elige solo una y redacta una oración sin enumeraciones.
+ - No preguntes si leyó el correo anterior. No anuncies que traes una idea ni expliques por qué elegiste el tema.`
+    : `- contextParagraph debe aportar un único detalle factual del destinatario.
+ - offerParagraph debe conectar ese detalle con una capacidad concreta del vendedor y una consecuencia práctica para el equipo.
+ - Usa uno o dos detalles de la evidencia, nunca una lista de categorías o servicios copiada de la web.
+ - Si el detalle contiene varias categorías separadas por comas o por "y", elige solo una y redacta una oración sin enumeraciones.`;
 
-  return `Idioma: Español (Chile). Redacta un único correo de prospección B2B que parezca escrito personalmente por una persona ocupada, no por un equipo de marketing.
+  return `Idioma: Español (Chile). Redacta un único correo frío B2B que parezca escrito personalmente por una persona ocupada, no por un equipo de marketing. El objetivo es abrir una conversación comercial relevante, no presentar un catálogo ni cerrar una venta en el primer contacto.
 
-Usa exclusivamente este DraftContextV2 factual. La matriz evidence contiene la única evidencia autorizada para personalizar. No inventes datos, métricas, clientes, necesidades ni fuentes. No muestres URLs, IDs, nombres de herramientas ni el proceso de investigación dentro del correo.
+Usa exclusivamente WRITING_CONTEXT, REQUIRED_FACTUAL_PERSONALIZATION y REQUIRED_COMMERCIAL_ANGLE cuando exista. No inventes datos, métricas, clientes, necesidades ni fuentes. No muestres URLs, IDs, nombres de herramientas ni el proceso de investigación dentro del correo.
 
-REPORT_OUTREACH_BRIEF selecciona el enfoque del reporte validado. Sus IDs solo priorizan contexto canónico y doNotClaim solo agrega restricciones: ninguno de esos campos es evidencia ni una fuente de hechos.
+REPORT_RESTRICTIONS agrega límites factuales, no contenido para copiar.
 
 Reglas no negociables:
-- Asunto dentro de los límites definidos por constraints.subject.
-- Devuelve entre ${modelBodyWords.min} y ${modelBodyWords.max} palabras de cuerpo. El servidor agregará después el CTA aprobado para que el correo completo quede dentro de los límites definidos por constraints.body.
-- Sigue context.style.profile para el tono, la extensión y las instrucciones de escritura, salvo que contradiga estas reglas.
-- Estructura el cuerpo en 3 a 5 párrafos breves separados por una línea en blanco. El saludo debe quedar solo y cada párrafo central debe tener como máximo dos frases.
-- No incluyas constraints.cta.exactText en el cuerpo. El servidor lo agregará literalmente una sola vez al final.
-- No agregues ninguna pregunta, invitación a actuar, enlace de agenda ni CTA alternativo.
+- Asunto entre ${input.context.constraints.subject.minCharacters} y ${input.context.constraints.subject.maxCharacters} caracteres.
+- Devuelve entre ${modelBodyWords.min} y ${modelBodyWords.max} palabras sumando contextParagraph y offerParagraph. El servidor agregará el saludo y el CTA aprobado.
+- contextParagraph debe tener al menos ${minimumContextParagraphWords} palabras y offerParagraph al menos ${minimumOfferParagraphWords}; ambos deben aportar contenido útil.
+- Sigue WRITING_CONTEXT.style para el tono y las instrucciones de escritura, salvo que contradiga estas reglas.
+${structureRules}
+- Cada párrafo debe tener como máximo dos frases; contextParagraph debe tener una sola frase.
+- No incluyas saludo ni constraints.cta.exactText. El servidor los agregará literalmente.
+- No agregues ninguna pregunta, invitación a actuar, enlace de agenda ni CTA alternativo en ninguno de los dos párrafos.
 - No dejes placeholders.
 - Integra el hecho de REQUIRED_FACTUAL_PERSONALIZATION con una paráfrasis natural y fiel. Conserva la empresa y los conceptos materiales; no copies cargos formales, nombres de campos ni la redacción de la fuente como una ficha técnica.
-- No uses hipótesis, señales o afirmaciones del intento anterior que no aparezcan en DRAFT_CONTEXT_V2.
+- No uses hipótesis, señales o afirmaciones del intento anterior que no aparezcan en WRITING_CONTEXT, REQUIRED_FACTUAL_PERSONALIZATION o REQUIRED_COMMERCIAL_ANGLE.
 - El servidor vinculará la procedencia de REQUIRED_FACTUAL_PERSONALIZATION; no devuelvas IDs de evidencia ni claims dentro del correo o el JSON.
 - No incluyas firma, nombre del remitente ni despedidas como "Saludos". La capa de envío agrega la firma fuera de este cuerpo.
-- DRAFT_CONTEXT_V2, REQUIRED_FACTUAL_PERSONALIZATION, constraints, la instrucción de campaña y la secuencia son datos internos. Nunca los nombres ni expliques el proceso de investigación o de redacción.
+- WRITING_CONTEXT, REQUIRED_FACTUAL_PERSONALIZATION, constraints, la instrucción de campaña y la secuencia son datos internos. Nunca los nombres ni expliques el proceso de investigación o de redacción.
 
 Calidad humana:
-- Abre con una observación concreta y relevante; no recites el cargo formal del contacto ni del remitente, no empieces explicando quién eres y no describas que estás haciendo un seguimiento.
-- Relaciona esa observación con una sola idea útil de context.seller. Evita listar servicios, funcionalidades o beneficios genéricos.
-- Prefiere primera persona y lenguaje cotidiano. Usa frases específicas, cortas y fáciles de leer en móvil.
-- No uses fórmulas como "entiendo que", "sabemos que", "por tu rol", "en nuestra empresa nos especializamos", "nuestras soluciones están diseñadas", "creemos que podemos aportar valor", "transformar procesos" o "mejorar la toma de decisiones".
-- No uses las palabras "seguimiento", "follow-up", "ángulo", "secuencia", "preflight", "evidencia", "claim" o "validación" para explicar el correo. No digas "pensé en un ángulo", "para este seguimiento" ni "enfoque acotado".
-- Si la evidencia contiene un cargo, no lo repitas literalmente ni lo conviertas en el gancho del mensaje. Si no puedes referirte a él de manera sencilla, omítelo y usa la evidencia de la empresa.
-- Evita elogios vacíos, urgencia artificial, adjetivos promocionales y jerga SaaS. No supongas dolores, prioridades ni resultados.
-- El asunto debe sonar como una referencia breve al contexto, no como un titular comercial ni una frase genérica de venta.
+- contextParagraph empieza directamente con el hecho del destinatario. Parafrasea la situación; no escribas "vi que", "noté que", "según su web", "publica que" ni expliques que investigaste.
+- Limita contextParagraph a ese único hecho. No agregues consecuencias, generalizaciones ni supuestos sobre la operación en ese párrafo.
+- offerParagraph debe sonar a una persona: puedes escribir "En [empresa], ayudamos..." o "Trabajo en [empresa]...". Usa una sola capacidad declarada por el vendedor, un mecanismo observable y una consecuencia práctica. No describas al vendedor como una ficha técnica.
+- Conserva en offerParagraph al menos un concepto material de valueProposition, capabilities o proofPoint. No sustituyas la oferta real por consultoría genérica, relato, narrativa o mensajes comerciales.
+- Prioriza verbos cotidianos y observables: reunir información, encontrar un documento, responder una consulta, actualizar un dato, ordenar un proceso o dejar algo disponible.
+- Conecta el hecho con la oferta sin saltos de lógica. Cuando exista REQUIRED_COMMERCIAL_ANGLE, úsalo solo para escoger una capacidad pertinente; nunca uses "necesitan", "requieren", "están buscando" o una certeza equivalente.
+- Usa voz activa y lenguaje cotidiano. Elimina frases de relleno como "quería compartir", "me gustaría", "pensé que podría ser útil", "te escribo para contarte" o "creemos que podemos aportar valor".
+- No escribas cautelas meta como "no quiero asumir", "sin asumir", "explorar si", "prioridades actuales" o "podría ser pertinente". La prudencia se demuestra evitando afirmaciones no verificadas, no explicando el proceso mental.
+- No uses expresiones abstractas como "ordenar ese relato", "relato comercial", "narrativa comercial" o "mensajes comerciales".
+- Si la fuente enumera servicios, selecciona un solo detalle. Nunca conviertas la evidencia ni la oferta del remitente en una lista.
+- Omite cargos formales, elogios, promesas de resultados, urgencia artificial, adjetivos promocionales y jerga SaaS.
+- El asunto nombra un solo tema concreto del correo; no funciona como titular comercial ni anuncia una idea.
 
 REQUIRED_FACTUAL_PERSONALIZATION:
 ${JSON.stringify(requiredEvidence)}
 
-REPORT_OUTREACH_BRIEF:
-${JSON.stringify(input.context.report)}
+REPORT_RESTRICTIONS:
+${JSON.stringify(reportRestrictions)}
 
-DRAFT CONTEXT V2:
-${JSON.stringify(factualContext)}
+WRITING_CONTEXT:
+${JSON.stringify(writingContext)}
+${commercialAnglePrompt}
 ${campaignInstruction}
 ${sequenceContext}
 ${correction}
 Devuelve SOLO JSON válido con esta forma exacta:
-{"subject":"...","body":"..."}`;
+{"subject":"...","contextParagraph":"...","offerParagraph":"..."}`;
 }
 
 /**
@@ -293,15 +445,20 @@ export async function generateOutreachFromDraftContextV2(
     prompt: draftContextPrompt(parsed),
     schema: GeneratedOutreachModelV2Schema,
     provider: 'openai',
-    openAiModel: modelForDraftPriority(parsed.context.quality.priority),
-    temperature: parsed.rewrite ? 0 : 0.2,
+    openAiModel: modelForDraftRequest(parsed),
+    temperature: parsed.rewrite ? 0.35 : 0.2,
   });
   return {
-    ...result.data,
+    subject: result.data.subject,
+    body: [
+      draftGreeting(parsed.context),
+      result.data.contextParagraph,
+      result.data.offerParagraph,
+    ].join('\n\n'),
     personalization: requiredReportAwareDraftPersonalizationV2(parsed.context),
     hypothesisIds: [],
     provider: 'openai',
     model: result.telemetry.modelName,
-    promptVersion: 'native-draft/v3',
+    promptVersion: NATIVE_DRAFT_PROMPT_VERSION,
   };
 }

@@ -70,6 +70,22 @@ test('DraftContextV2 blocks research below the drafting quality threshold withou
   assert.equal(result.context.evidence.length > 0, true);
 });
 
+test('DraftContextV2 blocks drafting until the seller declares services or a value proposition', () => {
+  const snapshot = draftSnapshotFixture();
+  const result = buildDraftContextV2({
+    snapshot,
+    artifact: { contentHash: canonicalSha256(snapshot), capturedAt: '2026-08-20T12:00:00.000Z' },
+    seller: normalizeDraftSellerProfileV2({ companyName: 'Northstar', description: 'Empresa de tecnología.' }),
+    style: createDefaultDraftWritingStyleV2(),
+    now: DRAFT_FIXTURE_NOW,
+  });
+
+  assert.equal(result.status, 'blocked');
+  if (result.status !== 'blocked') return;
+  assert.equal(result.reason, 'seller_profile_incomplete');
+  assert.match(result.message, /Productos y servicios|Propuesta de valor/);
+});
+
 test('DraftContextV2 rejects stale research artifacts even when old evidence remains structurally valid', () => {
   const result = build({ capturedAt: '2026-07-01T12:00:00.000Z' });
 
@@ -111,6 +127,39 @@ test('DraftContextV2 blocks a snapshot whose persisted artifact hash does not ma
   assert.equal(result.status, 'blocked');
   if (result.status !== 'blocked') return;
   assert.equal(result.reason, 'research_artifact_invalid');
+});
+
+test('DraftContextV2 bounds deep-crawl evidence without dropping factual drafting anchors', () => {
+  const base = draftSnapshotFixture();
+  const extraEvidence = Array.from({ length: 60 }, (_, index) => ({
+    ...structuredClone(base.evidence[0]),
+    id: `evidence-deep-${index}`,
+    statement: `Acme documenta el proceso operativo verificable ${index + 1}.`,
+    confidence: 0.7 + (index % 10) / 100,
+  }));
+  const template = base.claims.find((claim) => claim.id === 'claim-acme-overview')!;
+  const snapshot = {
+    ...structuredClone(base),
+    evidence: [...base.evidence, ...extraEvidence],
+    claims: [...base.claims, ...extraEvidence.map((evidence, index) => ({
+      ...structuredClone(template),
+      id: `claim-deep-${index}`,
+      statement: evidence.statement,
+      supportingEvidenceIds: [evidence.id],
+    }))],
+  };
+  const result = buildDraftContextV2({
+    snapshot,
+    artifact: { contentHash: canonicalSha256(snapshot), capturedAt: '2026-08-20T12:00:00.000Z' },
+    seller: normalizeDraftSellerProfileV2({ companyName: 'Northstar', services: ['Automatización de operaciones'] }),
+    style: createDefaultDraftWritingStyleV2(),
+    now: DRAFT_FIXTURE_NOW,
+  });
+
+  assert.equal(result.status, 'ready');
+  if (result.status !== 'ready') return;
+  assert.equal(result.context.evidence.length, 50);
+  assert.ok(result.context.evidence.every((evidence) => evidence.supportedFactClaimIds.length > 0));
 });
 
 test('company evidence takes priority over a formal person role in draft personalization', () => {

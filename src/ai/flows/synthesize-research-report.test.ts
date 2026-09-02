@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   buildDeterministicResearchReportDocumentV1,
+  sellerProfileHash,
   synthesizeResearchReportDocumentV1,
 } from './synthesize-research-report';
 import { validateResearchReportDocumentCitationsV1 } from '@/lib/research-report-contracts';
@@ -52,6 +53,129 @@ test('OpenAI failure returns the deterministic cited fallback without invented p
   assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(result.document, snapshot));
 });
 
+test('seller profile is preserved as private context and produces a cautious cited service fit', () => {
+  const snapshot = draftSnapshotFixture();
+  const sellerProfile = {
+    companyName: 'Northstar',
+    services: ['Automatizacion de operaciones'],
+    valueProposition: 'Reducimos trabajo manual con automatizacion responsable.',
+  };
+  const document = buildDeterministicResearchReportDocumentV1({ snapshot, sellerProfile, generatedAt: '2026-08-24T18:15:00.000Z' });
+  const serviceFit = document.narrative?.serviceFit || [];
+
+  assert.equal(document.sellerContext?.companyName, 'Northstar');
+  assert.deepEqual(document.sellerContext?.services, ['Automatizacion de operaciones']);
+  assert.equal(document.synthesis.sellerProfileHash, sellerProfileHash(sellerProfile));
+  assert.equal(serviceFit.length, 1);
+  assert.match(serviceFit[0].text, /podría aplicarse/);
+  assert.deepEqual(serviceFit[0].claimIds, ['claim-acme-overview']);
+  assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(document, snapshot));
+});
+
+test('model synthesis cannot drop canonical claims from a partially populated section', async () => {
+  const base = draftSnapshotFixture();
+  const extraEvidence = {
+    ...structuredClone(base.evidence[0]),
+    id: 'evidence-acme-second',
+    statement: 'Acme también documenta un servicio de conciliación de inventario.',
+  };
+  const snapshot = {
+    ...structuredClone(base),
+    evidence: [...base.evidence, extraEvidence],
+    claims: [...base.claims, {
+      ...structuredClone(base.claims.find((claim) => claim.id === 'claim-acme-overview')!),
+      id: 'claim-acme-second',
+      kind: 'company_overview' as const,
+      statement: extraEvidence.statement,
+      supportingEvidenceIds: [extraEvidence.id],
+    }],
+  };
+  const projection = buildDeterministicResearchReportDocumentV1({ snapshot });
+  const generated = {
+    executiveSummary: structuredClone(projection.executiveSummary),
+    person: { verifiedFacts: structuredClone(projection.person.verifiedFacts) },
+    company: {
+      overview: [structuredClone(projection.company.overview[0])],
+      offerings: structuredClone(projection.company.offerings),
+      market: structuredClone(projection.company.market),
+      scale: structuredClone(projection.company.scale),
+    },
+    signals: structuredClone(projection.signals),
+    commercialHypotheses: structuredClone(projection.commercialHypotheses),
+    outreachBrief: structuredClone(projection.outreachBrief),
+  };
+
+  const result = await synthesizeResearchReportDocumentV1({ snapshot }, {
+    generate: async () => ({ data: generated, telemetry: { modelName: 'test-model' } }),
+  });
+
+  assert.deepEqual(
+    new Set(result.document.company.overview.flatMap((block) => block.citations.claimIds)),
+    new Set(['claim-acme-overview', 'claim-acme-second']),
+  );
+  assert.deepEqual(result.document.completeness.claimCoverage, {
+    available: 3,
+    represented: 3,
+    score: 1,
+  });
+});
+
+test('canonical detail preserves deep-crawl factual claims while model input and output stay bounded', async () => {
+  const base = draftSnapshotFixture();
+  const extraEvidence = Array.from({ length: 70 }, (_, index) => ({
+    ...structuredClone(base.evidence[0]),
+    id: `evidence-acme-extra-${index}`,
+    statement: `Acme documenta la capacidad operativa verificable número ${index + 1}.`,
+  }));
+  const template = base.claims.find((claim) => claim.id === 'claim-acme-overview')!;
+  const extraClaims = extraEvidence.map((evidence, index) => ({
+    ...structuredClone(template),
+    id: `claim-acme-extra-${index}`,
+    statement: evidence.statement,
+    supportingEvidenceIds: [evidence.id],
+  }));
+  const snapshot = {
+    ...structuredClone(base),
+    evidence: [...base.evidence, ...extraEvidence],
+    claims: [...base.claims, ...extraClaims],
+  };
+  const generatedAt = '2026-08-24T18:16:00.000Z';
+  const projection = buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt });
+  const generated = {
+    executiveSummary: structuredClone(projection.executiveSummary),
+    person: { verifiedFacts: structuredClone(projection.person.verifiedFacts) },
+    company: {
+      overview: structuredClone(projection.company.overview.slice(0, 20)),
+      offerings: [],
+      market: [],
+      scale: [],
+    },
+    signals: [],
+    commercialHypotheses: structuredClone(projection.commercialHypotheses.slice(0, 20)),
+    outreachBrief: structuredClone(projection.outreachBrief),
+  };
+
+  let prompt = '';
+  const result = await synthesizeResearchReportDocumentV1({ snapshot, generatedAt }, {
+    generate: async (input) => {
+      prompt = input.prompt;
+      return { data: generated, telemetry: { modelName: 'test-model' } };
+    },
+  });
+
+  assert.equal(result.metadata.generationMethod, 'model');
+  assert.equal(result.document.company.overview.length, 71);
+  assert.deepEqual(result.document.completeness.claimCoverage, {
+    available: 72,
+    represented: 72,
+    score: 1,
+  });
+  const canonicalInput = JSON.parse(prompt.split('Canonical input:\n')[1].trim());
+  assert.ok(canonicalInput.claims.length <= 60);
+  assert.ok(canonicalInput.evidence.length <= 120);
+  assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(result.document, snapshot));
+});
+
 test('model output with unknown citations is rejected and replaced by the cited fallback', async () => {
   const snapshot = draftSnapshotFixture();
   const generatedAt = '2026-08-24T18:20:00.000Z';
@@ -88,7 +212,12 @@ test('model synthesis drops an invalid extra block while preserving canonically 
   const modelBody = {
     executiveSummary: structuredClone(projection.executiveSummary),
     person: { verifiedFacts: structuredClone(projection.person.verifiedFacts) },
-    company: structuredClone(projection.company),
+    company: {
+      overview: structuredClone(projection.company.overview),
+      offerings: structuredClone(projection.company.offerings),
+      market: structuredClone(projection.company.market),
+      scale: structuredClone(projection.company.scale),
+    },
     signals: structuredClone(projection.signals),
     commercialHypotheses: structuredClone(projection.commercialHypotheses),
     narrative: {
@@ -114,7 +243,7 @@ test('model synthesis drops an invalid extra block while preserving canonically 
   assert.equal(result.metadata.generationMethod, 'model');
   assert.equal(result.metadata.retryable, false);
   assert.equal(result.document.executiveSummary.facts.some((block) => block.id === 'model-invalid-extra'), false);
-  assert.equal(result.document.narrative?.executiveSummary[0].text, 'Acme ayuda a equipos de operaciones a reducir trabajo manual.');
+  assert.equal(result.document.narrative?.executiveSummary[0].text, 'Acme comunica una propuesta para reducir trabajo manual en operaciones.');
   assert.deepEqual(result.document.narrative?.executiveSummary[0].evidenceIds, ['evidence-acme']);
   assert.ok(result.document.company.overview.length > 0);
   assert.ok(result.document.outreachBrief.factualAnchors.length > 0);

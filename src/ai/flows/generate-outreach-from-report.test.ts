@@ -29,15 +29,19 @@ test('DraftContextV2 generation fails closed when OpenAI is unavailable, even if
 
 test('DraftContextV2 generation exposes only the server-selected factual evidence to OpenAI', async () => {
   const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  const previousReasoningModel = process.env.OPENAI_REASONING_MODEL;
   const previousFetch = globalThis.fetch;
   let prompt = '';
+  let requestedModel = '';
   try {
     process.env.OPENAI_API_KEY = 'test-openai-key';
+    process.env.OPENAI_REASONING_MODEL = 'test-reasoning-model';
     globalThis.fetch = async (_input, init) => {
       const request = JSON.parse(String(init?.body || '{}'));
+      requestedModel = String(request.model || '');
       prompt = String(request.messages?.[1]?.content || '');
       return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({ subject: 'Una idea para Acme', body: 'Contenido factual.' }) } }],
+        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', contextParagraph: 'Acme reduce trabajo manual.', offerParagraph: 'Northstar ordena tareas repetitivas.' }) } }],
         usage: {},
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
@@ -56,23 +60,33 @@ test('DraftContextV2 generation exposes only the server-selected factual evidenc
 
     assert.equal(result.personalization[0].claimId, 'claim-acme-overview');
     assert.deepEqual(result.hypothesisIds, []);
-    assert.match(prompt, /"hypotheses":\[\]/);
-    assert.match(prompt, /El servidor lo agregará literalmente una sola vez al final/);
+    assert.equal(requestedModel, 'test-reasoning-model');
+    assert.match(prompt, /WRITING_CONTEXT/);
+    assert.match(prompt, /REPORT_RESTRICTIONS:\n\[\]/);
+    assert.match(prompt, /El servidor los agregará literalmente/);
     assert.match(prompt, /No agregues ninguna pregunta, invitación a actuar/);
     assert.match(prompt, /paráfrasis natural y fiel/);
     assert.match(prompt, /no por un equipo de marketing/);
+    assert.match(prompt, /nunca una lista de categorías o servicios copiada de la web/);
+    assert.match(prompt, /elige solo una y redacta una oración sin enumeraciones/);
+    assert.match(prompt, /capabilities/);
+    assert.match(prompt, /consecuencia práctica/);
+    assert.match(prompt, /parezca escrito personalmente/);
     assert.match(prompt, /No incluyas firma/);
+    assert.doesNotMatch(prompt, /PHRASES_TO_AVOID|he visto que|con ese alcance/);
     assert.doesNotMatch(prompt, /gpt-4o-mini/);
     assert.doesNotMatch(prompt, /Acme necesita contratar urgentemente/);
     assert.doesNotMatch(prompt, /claim-acme-opportunity/);
   } finally {
     if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousOpenAiKey;
+    if (previousReasoningModel === undefined) delete process.env.OPENAI_REASONING_MODEL;
+    else process.env.OPENAI_REASONING_MODEL = previousReasoningModel;
     globalThis.fetch = previousFetch;
   }
 });
 
-test('DraftContextV2 generation consumes the validated report brief and prioritizes its canonical anchor', async () => {
+test('DraftContextV2 generation reserves enough model words for server normalization', async () => {
   const previousOpenAiKey = process.env.OPENAI_API_KEY;
   const previousFetch = globalThis.fetch;
   let prompt = '';
@@ -82,7 +96,37 @@ test('DraftContextV2 generation consumes the validated report brief and prioriti
       const request = JSON.parse(String(init?.body || '{}'));
       prompt = String(request.messages?.[1]?.content || '');
       return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({ subject: 'Una idea para Ada', body: 'Contenido factual.' }) } }],
+        choices: [{ message: { content: JSON.stringify({
+          subject: 'Procesos en Acme',
+          contextParagraph: 'Acme reduce trabajo manual para equipos de operaciones en su trabajo diario.',
+          offerParagraph: 'Northstar ordena tareas repetitivas para que el equipo encuentre información y responda consultas con menos pasos.',
+        }) } }],
+        usage: {},
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    await generateOutreachFromDraftContextV2({ context: draftContextFixture() });
+
+    assert.match(prompt, /Devuelve entre 40 y \d+ palabras/);
+    assert.match(prompt, /contextParagraph debe tener al menos 12 palabras y offerParagraph al menos 28/);
+  } finally {
+    if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousOpenAiKey;
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('DraftContextV2 generation ignores a generic priority hypothesis from the report', async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      const request = JSON.parse(String(init?.body || '{}'));
+      prompt = String(request.messages?.[1]?.content || '');
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', contextParagraph: 'Acme reduce trabajo manual.', offerParagraph: 'Northstar ordena tareas repetitivas.' }) } }],
         usage: {},
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
@@ -102,10 +146,15 @@ test('DraftContextV2 generation consumes the validated report brief and prioriti
     const result = await generateOutreachFromDraftContextV2({ context });
 
     assert.equal(result.personalization[0].claimId, 'claim-acme-overview');
-    assert.match(prompt, /REPORT_OUTREACH_BRIEF/);
-    assert.match(prompt, /claim-ada-role/);
+    assert.deepEqual(result.hypothesisIds, []);
+    assert.match(prompt, /REPORT_RESTRICTIONS/);
     assert.match(prompt, /No presentar hipótesis como necesidades confirmadas/);
     assert.match(prompt, /Acme publica que ayuda a equipos de operaciones a reducir trabajo manual/);
+    assert.match(prompt, /COMMERCIAL_BRIDGE/);
+    assert.doesNotMatch(prompt, /Podría ser útil explorar si Acme tiene una prioridad activa/);
+    assert.match(prompt, /No escribas cautelas meta/);
+    assert.match(prompt, /ordenar ese relato/);
+    assert.doesNotMatch(prompt, /claim-ada-role/);
     assert.doesNotMatch(prompt, /Directora de Operaciones/);
   } finally {
     if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
@@ -124,7 +173,7 @@ test('DraftContextV2 generation labels a campaign step instruction as non-factua
       const request = JSON.parse(String(init?.body || '{}'));
       prompt = String(request.messages?.[1]?.content || '');
       return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({ subject: 'Seguimiento breve', body: 'Contenido factual.' }) } }],
+        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', contextParagraph: 'Acme reduce trabajo manual.', offerParagraph: 'Northstar ordena tareas repetitivas.' }) } }],
         usage: {},
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
@@ -155,7 +204,7 @@ test('DraftContextV2 generation strips sequence metadata and formal titles from 
       const request = JSON.parse(String(init?.body || '{}'));
       prompt = String(request.messages?.[1]?.content || '');
       return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({ subject: 'Una idea para Acme', body: 'Contenido factual.' }) } }],
+        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', contextParagraph: 'Acme reduce trabajo manual.', offerParagraph: 'Northstar ordena tareas repetitivas.' }) } }],
         usage: {},
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
@@ -183,9 +232,13 @@ test('DraftContextV2 generation strips sequence metadata and formal titles from 
 
     assert.match(prompt, /SEQUENCE_WRITING_CONTEXT \(metadata privada de redacción, no publicable\)/);
     assert.match(prompt, /Nunca menciones ni copies los nombres, etapas, días, instrucciones o la secuencia/);
+    assert.match(prompt, /contextParagraph y offerParagraph deben aportar información útil/);
+    assert.match(prompt, /previousSubjects/);
+    assert.match(prompt, /no resumas el correo anterior ni vuelvas a presentar a la empresa/);
     assert.doesNotMatch(prompt, /Seguimiento inicial|Segundo seguimiento|Directora de Operaciones|offsetDays/);
+    assert.doesNotMatch(prompt, /formula una pregunta consultiva|Aporta un idea|pensé en un ángulo acotado/);
     const sequenceStart = prompt.indexOf('SEQUENCE_WRITING_CONTEXT');
-    const sequenceEnd = prompt.indexOf('\n\nUsa estos mensajes', sequenceStart);
+    const sequenceEnd = prompt.indexOf('\n\nUsa esta metadata', sequenceStart);
     assert.ok(sequenceStart >= 0 && sequenceEnd > sequenceStart);
     assert.doesNotMatch(prompt.slice(sequenceStart, sequenceEnd), /ángulo acotado/);
   } finally {

@@ -6,6 +6,7 @@ import {
   getCurrentNativeDraft,
 } from '@/lib/server/native-drafts';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { loadSellerProfile } from '@/lib/server/seller-profile';
 import type { MessagingDraftV1 } from '@/lib/messaging-contracts';
 import { assertCampaignV2CreatorAccess, isCampaignsV2Enabled } from './feature-access';
 import { generateFollowUpDraftBatch } from './follow-up-draft-batch';
@@ -30,6 +31,8 @@ type FollowUpDraftStep = {
   offsetDays: number;
   instruction: string;
   nativeDraftId: string | null;
+  reservedDraftId: string | null;
+  reservedVersionId: string | null;
 };
 
 function text(value: unknown) {
@@ -88,7 +91,7 @@ export async function pregenerateFirstContactPlanDrafts(input: {
 
   const recipientStepsResult = await client
     .from('campaign_recipient_steps')
-    .select('id,sequence_step_id,step_index,native_draft_id')
+    .select('id,sequence_step_id,step_index,native_draft_id,reserved_native_draft_id,reserved_native_version_id')
     .eq('organization_id', input.organizationId)
     .eq('enrollment_id', enrollment.id)
     .gt('step_index', 0)
@@ -118,6 +121,8 @@ export async function pregenerateFirstContactPlanDrafts(input: {
       offsetDays: Number(sequence.offset_days),
       instruction: sequence.instruction,
       nativeDraftId: step.native_draft_id ?? null,
+      reservedDraftId: step.reserved_native_draft_id ?? null,
+      reservedVersionId: step.reserved_native_version_id ?? null,
     };
   });
 
@@ -138,6 +143,7 @@ export async function pregenerateFirstContactPlanDrafts(input: {
     if (!draft) throw new Error('CAMPAIGN_V2_NATIVE_DRAFT_MISSING');
     existingDrafts.set(step.id, draft);
   }
+  const sellerProfile = await loadSellerProfile(input.userId);
 
   await generateFollowUpDraftBatch({
     organizationId: input.organizationId,
@@ -147,6 +153,7 @@ export async function pregenerateFirstContactPlanDrafts(input: {
     initialDraft,
     steps,
     existingDrafts,
+    sellerProfile,
     targetStepId: input.targetStepId,
   }, {
     createDraft: (request) => createNativeDraft(request),

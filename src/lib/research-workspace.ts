@@ -30,6 +30,10 @@ export type ResearchWorkspaceLead = {
   linkedinUrl?: string | null;
   companyName?: string | null;
   companyDomain?: string | null;
+  companyWebsite?: string | null;
+  companyLinkedinUrl?: string | null;
+  descriptionSnippet?: string | null;
+  industry?: string | null;
   organizationIndustry?: string | null;
   organizationSize?: number | null;
   city?: string | null;
@@ -155,6 +159,11 @@ export type ResearchReportView = {
     score: number;
     coveredSections: ResearchReportSectionV1[];
     missingSections: ResearchReportSectionV1[];
+    claimCoverage?: {
+      available: number;
+      represented: number;
+      score: number;
+    };
   } | null;
   coverage: {
     claims: number;
@@ -380,6 +389,7 @@ export function researchWarningLabel(warning: string): string {
     company_profile_unavailable: 'No pudimos consultar fuentes adicionales sobre la actividad de la empresa.',
     company_news_unavailable: 'Las noticias recientes de la empresa no estuvieron disponibles.',
     hiring_signals_unavailable: 'Las señales recientes de contratación no estuvieron disponibles.',
+    similarweb_unavailable: 'La señal de presencia digital no estuvo disponible; se usaron otras fuentes.',
   };
   if (labels[normalized]) return labels[normalized];
   if (/^[a-z0-9_:-]+$/.test(normalized)) return 'Hay una señal que conviene validar antes de contactar.';
@@ -387,6 +397,32 @@ export function researchWarningLabel(warning: string): string {
 }
 
 /** Turns structured draft preflight failures into concise, actionable product copy. */
+export function isSellerProfileIncompleteDraftError(payload: unknown): boolean {
+  const root = record(payload);
+  const result = record(root.result);
+  const values = [
+    root.error,
+    root.code,
+    result.error,
+    result.code,
+    root.message,
+    result.message,
+  ].map((value) => text(value).toLowerCase()).filter(Boolean);
+
+  return values.some((value) => {
+    if (value.includes('seller_profile_incomplete')) return true;
+    const referencesSellerProfile = /\bseller[\s_-]+profile\b/.test(value);
+    const asksForSellerProfile = /\b(?:incomplete|missing|required)\b/.test(value)
+      || /\bcomplete (?:your|the) seller[\s_-]+profile\b/.test(value);
+    const referencesCommercialProfile = /\bperfil (?:comercial|del vendedor|de vendedor)\b/.test(value);
+    const asksForCommercialProfile = /\bincomplet\w*\b/.test(value)
+      || /\bfaltan?\b/.test(value)
+      || /\bcomplet(?:a|ar|e)\b/.test(value);
+    return (referencesSellerProfile && asksForSellerProfile)
+      || (referencesCommercialProfile && asksForCommercialProfile);
+  });
+}
+
 export function researchDraftErrorMessage(payload: unknown, fallback: string): string {
   const root = record(payload);
   const result = record(root.result);
@@ -394,6 +430,7 @@ export function researchDraftErrorMessage(payload: unknown, fallback: string): s
   if (code.includes('auth')) return 'Tu sesión ya no está disponible. Vuelve a iniciar sesión e inténtalo nuevamente.';
   if (code.includes('privacy') || code.includes('suppressed')) return 'No podemos continuar con este contacto por sus preferencias de privacidad.';
   if (code.includes('in_progress')) return 'Ya estamos preparando este borrador. Espera un momento antes de volver a intentarlo.';
+  if (isSellerProfileIncompleteDraftError(payload)) return 'Completa tu perfil comercial para crear un borrador alineado con tu propuesta.';
 
   const rawIssues = list(root.issues).length > 0 ? list(root.issues) : list(result.issues);
   const issues = rawIssues.map((issue) => {
@@ -454,6 +491,9 @@ function profileFieldsFor(
   const person = importedContext || {
     fullName: lead.fullName,
     title: lead.title,
+    headline: lead.headline,
+    seniority: lead.seniority,
+    departments: lead.departments,
     linkedinUrl: lead.linkedinUrl,
     city: lead.city,
     country: lead.country,
@@ -461,10 +501,14 @@ function profileFieldsFor(
   const fields: Array<ResearchReportProfileField | null> = [
     text(person.fullName) ? { label: 'Nombre', value: text(person.fullName) } : null,
     text(person.title) ? { label: 'Cargo', value: text(person.title) } : null,
-    !importedContext && text(lead.headline) ? { label: 'Titular profesional', value: text(lead.headline) } : null,
-    !importedContext && text(lead.seniority) ? { label: 'Seniority', value: text(lead.seniority) } : null,
-    !importedContext && Array.isArray(lead.departments) && lead.departments.some(Boolean)
-      ? { label: 'Área', value: lead.departments.filter(Boolean).join(', ') }
+    text(person.headline || lead.headline)
+      ? { label: 'Titular profesional', value: text(person.headline || lead.headline) }
+      : null,
+    text(person.seniority || lead.seniority)
+      ? { label: 'Seniority', value: text(person.seniority || lead.seniority) }
+      : null,
+    (Array.isArray(person.departments) ? person.departments : lead.departments)?.some(Boolean)
+      ? { label: 'Área', value: (Array.isArray(person.departments) ? person.departments : lead.departments || []).filter(Boolean).join(', ') }
       : null,
     [person.city, person.country].filter(Boolean).length > 0
       ? { label: 'Ubicación', value: [person.city, person.country].filter(Boolean).join(', ') }
@@ -476,15 +520,37 @@ function profileFieldsFor(
   return fields.filter((field): field is ResearchReportProfileField => Boolean(field));
 }
 
-function companyContextFieldsFor(lead: ResearchWorkspaceResult['lead']): ResearchReportProfileField[] {
-  const fields: Array<[string, unknown]> = [
-    ['Industria', lead.organizationIndustry],
-    ['Tamaño de empresa', lead.organizationSize ? `${lead.organizationSize.toLocaleString('es-CL')} personas` : null],
+function companyContextFieldsFor(
+  lead: ResearchWorkspaceResult['lead'],
+  importedContext?: ResearchReportDocumentV1['company']['importedContext'],
+): ResearchReportProfileField[] {
+  const company = importedContext || {
+    name: lead.companyName,
+    domain: lead.companyDomain,
+    websiteUrl: lead.companyWebsite,
+    linkedinUrl: lead.companyLinkedinUrl,
+    country: lead.country,
+    description: lead.descriptionSnippet,
+    industry: lead.organizationIndustry || lead.industry,
+    size: lead.organizationSize,
+  };
+  const domain = text(company.domain);
+  const fields: Array<ResearchReportProfileField | null> = [
+    domain ? { label: 'Dominio importado', value: domain } : null,
+    text(company.description) ? { label: 'Descripción importada', value: text(company.description) } : null,
+    text(company.industry)
+      ? { label: 'Industria', value: text(company.industry) }
+      : null,
+    company.size ? { label: 'Tamaño de empresa', value: `${company.size.toLocaleString('es-CL')} personas` } : null,
+    safeResearchSourceUrl(company.websiteUrl)
+      ? { label: 'Sitio importado', value: 'Sitio web', href: safeResearchSourceUrl(company.websiteUrl)! }
+      : null,
+    safeResearchSourceUrl(company.linkedinUrl)
+      ? { label: 'Perfil de empresa', value: 'LinkedIn', href: safeResearchSourceUrl(company.linkedinUrl)! }
+      : null,
+    text(company.country) ? { label: 'País', value: text(company.country) } : null,
   ];
-  return fields.flatMap(([label, value]) => {
-    const normalized = text(value);
-    return normalized ? [{ label, value: normalized }] : [];
-  });
+  return fields.filter((field): field is ResearchReportProfileField => Boolean(field));
 }
 
 function reportEvidenceFromSnapshot(
@@ -646,7 +712,7 @@ export function buildResearchReport(
   reportDocument?: ResearchReportDocumentV1 | null,
 ): ResearchReportView {
   const snapshot = result.snapshot;
-  const companyContext = companyContextFieldsFor(result.lead);
+  const companyContext = companyContextFieldsFor(result.lead, reportDocument?.company.importedContext);
 
   if (snapshot && reportDocument) {
     const executive = reportDocument.executiveSummary.facts.flatMap((block) => {
@@ -1024,8 +1090,12 @@ function normalizeResult(value: unknown): ResearchWorkspaceResult | null {
       departments: list(lead.departments).map(text).filter(Boolean),
       linkedinUrl: nullableText(lead.linkedinUrl ?? lead.linkedin_url),
       companyName: nullableText(lead.companyName ?? lead.company_name),
-      companyDomain: nullableText(lead.companyDomain ?? lead.company_domain),
-      organizationIndustry: nullableText(lead.organizationIndustry ?? lead.organization_industry),
+      companyDomain: nullableText(lead.companyDomain ?? lead.company_domain ?? lead.companyWebsite ?? lead.company_website),
+      companyWebsite: nullableText(lead.companyWebsite ?? lead.company_website),
+      companyLinkedinUrl: nullableText(lead.companyLinkedinUrl ?? lead.company_linkedin_url),
+      descriptionSnippet: nullableText(lead.descriptionSnippet ?? lead.description_snippet),
+      industry: nullableText(lead.industry),
+      organizationIndustry: nullableText(lead.organizationIndustry ?? lead.organization_industry ?? lead.industry),
       organizationSize: numberOrNull(lead.organizationSize ?? lead.organization_size),
       city: nullableText(lead.city),
       country: nullableText(lead.country),

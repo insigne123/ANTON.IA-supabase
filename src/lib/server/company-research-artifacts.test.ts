@@ -55,6 +55,7 @@ test('company artifact identity normalizes company input and isolates every cach
   assert.notEqual(first.cacheIdentity, identity({ icpHash: 'icp-v2' }).cacheIdentity);
   assert.notEqual(first.cacheIdentity, identity({ promptVersion: 'prompt/v2' }).cacheIdentity);
   assert.notEqual(first.cacheIdentity, identity({ providerVersion: 'provider/v2' }).cacheIdentity);
+  assert.notEqual(first.cacheIdentity, identity({ providerContextFingerprint: `sha256:${'a'.repeat(64)}` }).cacheIdentity);
 });
 
 test('only fresh artifacts with the exact tenant identity are reusable', () => {

@@ -3,11 +3,13 @@ import test from 'node:test';
 
 import { buildDeterministicResearchReportDocumentV1 } from '@/ai/flows/synthesize-research-report';
 import { ResearchReportDocumentV1Schema } from '@/lib/research-report-contracts';
+import { ResearchSnapshotV1Schema } from '@/lib/research-contracts';
 import {
   buildResearchReport,
   buildResearchNarrative,
   canShowResearchDraftAction,
   createQueuedResearchWorkspaceRun,
+  isSellerProfileIncompleteDraftError,
   parseResearchReportDetail,
   parseResearchWorkspaceRun,
   researchDraftErrorMessage,
@@ -141,7 +143,26 @@ test('uses the canonical snapshot for verified company context and drafting read
 });
 
 test('maps a validated report document first and keeps claim, evidence, and source counts independent', () => {
-  const snapshot = draftSnapshotFixture();
+  const fixture = draftSnapshotFixture();
+  const snapshot = ResearchSnapshotV1Schema.parse({
+    ...fixture,
+    subject: {
+      ...fixture.subject,
+      person: {
+        ...fixture.subject.person,
+        headline: 'Lidera operaciones regionales',
+        seniority: 'Director',
+        departments: ['Operaciones'],
+      },
+      company: {
+        ...fixture.subject.company,
+        linkedinUrl: 'https://www.linkedin.com/company/acme',
+        industry: 'Software',
+        size: 240,
+        description: 'Acme coordina operaciones para equipos empresariales.',
+      },
+    },
+  });
   const deterministic = buildDeterministicResearchReportDocumentV1({
     snapshot,
     generatedAt: '2026-08-24T12:00:00.000Z',
@@ -164,6 +185,13 @@ test('maps a validated report document first and keeps claim, evidence, and sour
         email: 'ada@acme.example',
         title: 'Directora de Operaciones',
         companyName: 'Acme',
+        headline: 'Lidera operaciones regionales',
+        seniority: 'Director',
+        departments: ['Operaciones'],
+        companyWebsite: 'https://acme.example/about',
+        companyLinkedinUrl: 'https://www.linkedin.com/company/acme',
+        descriptionSnippet: 'Acme coordina operaciones para equipos empresariales.',
+        industry: 'Software',
         organizationIndustry: 'Software',
         organizationSize: 240,
       },
@@ -187,7 +215,14 @@ test('maps a validated report document first and keeps claim, evidence, and sour
   assert.equal(report.evidenceRecords.length, 2);
   assert.equal(report.sources.length, 2);
   assert.ok(report.person.fields.every((field) => !['Industria', 'Tamaño de empresa'].includes(field.label)));
-  assert.deepEqual(report.companyContext.map((field) => field.label), ['Industria', 'Tamaño de empresa']);
+  assert.deepEqual(report.companyContext.map((field) => field.label), [
+    'Dominio importado',
+    'Descripción importada',
+    'Industria',
+    'Tamaño de empresa',
+    'Sitio importado',
+    'Perfil de empresa',
+  ]);
   assert.equal(report.companySections.overview[0].evidence[0].sourceUrl, 'https://acme.example/about');
 });
 
@@ -422,6 +457,19 @@ test('surfaces the first structured draft issue and the remaining issue count', 
   assert.equal(
     researchDraftErrorMessage({ result: { issues: [{ message: 'Confirma la fuente usada para personalizar.' }] } }, 'Inténtalo nuevamente.'),
     'Confirma la fuente usada para personalizar.',
+  );
+});
+
+test('maps an incomplete seller profile error to actionable copy only for explicit profile signals', () => {
+  const codedError = { error: 'seller_profile_incomplete' };
+  const messageError = { result: { message: 'Complete your seller profile before creating a draft.' } };
+
+  assert.equal(isSellerProfileIncompleteDraftError(codedError), true);
+  assert.equal(isSellerProfileIncompleteDraftError(messageError), true);
+  assert.equal(isSellerProfileIncompleteDraftError({ message: 'The lead profile is incomplete.' }), false);
+  assert.equal(
+    researchDraftErrorMessage(codedError, 'Inténtalo nuevamente.'),
+    'Completa tu perfil comercial para crear un borrador alineado con tu propuesta.',
   );
 });
 

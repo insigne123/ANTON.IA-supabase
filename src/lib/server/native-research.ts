@@ -5,6 +5,7 @@ import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 
 import {
+  ResearchClaimV1Schema,
   ResearchSnapshotV1Schema,
   type ContractErrorV1,
   type ResearchClaimV1,
@@ -51,16 +52,25 @@ import {
   releaseCompanyResearchArtifactClaim,
 } from '@/lib/server/company-research-artifacts';
 import { getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
+import {
+  apolloCompanyResearchContext,
+  loadApolloResearchContext,
+  mergeApolloResearchContextIntoLead,
+  parseApolloResearchContext,
+  type ApolloResearchContext,
+} from '@/lib/server/apollo-research-context';
 import { collectPublicPersonEvidence, type PublicPersonEvidenceResult } from '@/lib/server/native-person-research';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
 import {
   ensureResearchReportDocument,
   researchReportDocumentMetadata,
 } from '@/lib/server/research-report-documents';
+import { loadSellerProfile } from '@/lib/server/seller-profile';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import {
   researchBrand,
   researchBrandMentions,
+  researchSimilarweb,
   researchSerpCompanyNews,
   researchSerpCompanyProfile,
   researchSerpJobsSignals,
@@ -69,9 +79,10 @@ import {
 
 const NATIVE_PROVIDER = 'native-research-v1';
 const ACTIVE_STATUSES = ['queued', 'running', 'in_progress', 'pending', 'processing'];
-const OFFICIAL_SITE_MAX_RESPONSE_BYTES = 120_000;
-const MAX_OFFICIAL_SITE_PAGES = 3;
-const MAX_DEEP_OFFICIAL_SITE_PAGES = 5;
+const OFFICIAL_SITE_MAX_RESPONSE_BYTES = 180_000;
+const MAX_OFFICIAL_SITE_PAGES = 5;
+const MAX_DEEP_OFFICIAL_SITE_PAGES = 12;
+const MAX_OFFICIAL_PAGE_SEGMENTS = 6;
 const PERSONAL_EMAIL_DOMAINS = new Set([
   'gmail.com', 'googlemail.com', 'hotmail.com', 'outlook.com', 'live.com', 'msn.com',
   'yahoo.com', 'yahoo.es', 'icloud.com', 'me.com', 'proton.me', 'protonmail.com',
@@ -129,6 +140,12 @@ type OfficialSitePage = {
   title: string | null;
   description: string | null;
   text: string;
+  segments?: OfficialSiteSegment[];
+};
+
+type OfficialSiteSegment = {
+  text: string;
+  locator: string;
 };
 
 type OfficialSiteResult = OfficialSitePage & {
@@ -417,6 +434,99 @@ function requestOfficialSite(url: URL, address: ResolvedPublicAddress, signal: A
   });
 }
 
+function decodeHtmlText(value: unknown) {
+  const namedEntities: Record<string, string> = {
+    amp: '&', apos: "'", gt: '>', lt: '<', nbsp: ' ', quot: '"',
+  };
+  const codePoint = (raw: string, radix: number) => {
+    const parsed = Number.parseInt(raw, radix);
+    return Number.isFinite(parsed) && parsed >= 0 && parsed <= 0x10ffff && !(parsed >= 0xd800 && parsed <= 0xdfff)
+      ? String.fromCodePoint(parsed)
+      : '';
+  };
+  return String(value || '')
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => codePoint(code, 16))
+    .replace(/&#(\d+);/g, (_match, code) => codePoint(code, 10))
+    .replace(/&([a-z]+);/gi, (match, name) => namedEntities[String(name).toLowerCase()] ?? match);
+}
+
+function officialStatementKey(value: unknown) {
+  return text(value)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+function substantiveOfficialStatements(value: unknown, maxSegments = MAX_OFFICIAL_PAGE_SEGMENTS) {
+  const normalized = text(decodeHtmlText(value));
+  if (!normalized) return [];
+  const sentences = normalized.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g) || [normalized];
+  const statements: string[] = [];
+  let pending = '';
+  for (const sentence of sentences) {
+    const unit = text(sentence);
+    if (!unit) continue;
+    const combined = text(`${pending} ${unit}`);
+    if (pending && combined.length > 560) {
+      statements.push(conciseSourceStatement(pending, 560));
+      pending = unit;
+    } else {
+      pending = combined;
+    }
+    if (pending.length >= 60 && /[.!?]$/.test(unit)) {
+      statements.push(conciseSourceStatement(pending, 560));
+      pending = '';
+    }
+    if (statements.length >= maxSegments) break;
+  }
+  if (statements.length < maxSegments && pending.length >= 60) {
+    statements.push(conciseSourceStatement(pending, 560));
+  }
+
+  const seen = new Set<string>();
+  return statements.filter((statement) => {
+    const key = officialStatementKey(statement);
+    if (!key || seen.has(key) || isGenericResearchText(statement)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, maxSegments);
+}
+
+function officialSegmentsFromHtml(html: string): OfficialSiteSegment[] {
+  const cleaned = html
+    .replace(/<script\b[\s\S]*?(?:<\/script>|$)/gi, ' ')
+    .replace(/<style\b[\s\S]*?(?:<\/style>|$)/gi, ' ')
+    .replace(/<noscript\b[\s\S]*?(?:<\/noscript>|$)/gi, ' ')
+    .replace(/<(?:nav|footer|form|svg)\b[\s\S]*?(?:<\/(?:nav|footer|form|svg)>|$)/gi, ' ');
+  const segments: OfficialSiteSegment[] = [];
+  const seen = new Set<string>();
+  const blockPattern = /<(h[1-6]|p|li|dt|dd)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+  let heading = '';
+  let blockIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = blockPattern.exec(cleaned)) && segments.length < MAX_OFFICIAL_PAGE_SEGMENTS) {
+    const tag = match[1].toLowerCase();
+    const blockText = text(decodeHtmlText(match[2].replace(/<[^>]+>/g, ' ')));
+    if (tag.startsWith('h')) {
+      heading = blockText.slice(0, 140);
+      continue;
+    }
+    blockIndex += 1;
+    for (const statement of substantiveOfficialStatements(blockText, MAX_OFFICIAL_PAGE_SEGMENTS - segments.length)) {
+      const key = officialStatementKey(statement);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      segments.push({
+        text: statement,
+        locator: `${heading || tag}#${blockIndex}`,
+      });
+    }
+  }
+  return segments;
+}
+
 function officialPageFromHtml(url: URL, html: string): OfficialSitePage {
   const title = text(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g, '')) || null;
   const description = text(
@@ -430,26 +540,43 @@ function officialPageFromHtml(url: URL, html: string): OfficialSitePage {
       .replace(/<noscript\b[\s\S]*?(?:<\/noscript>|$)/gi, ' ')
       .replace(/<[^>]+>/g, ' '),
   ).slice(0, 4_000);
+  const segments = officialSegmentsFromHtml(html);
 
-  return { url: url.toString(), title, description, text: readable };
+  return { url: url.toString(), title, description, text: readable, ...(segments.length > 0 ? { segments } : {}) };
+}
+
+function usefulOfficialPageContents(page: OfficialSitePage) {
+  const contents: Array<{ statement: string; locator: string }> = [];
+  const seen = new Set<string>();
+  const add = (statement: unknown, locator: string) => {
+    const normalized = conciseSourceStatement(statement, 560);
+    const key = officialStatementKey(normalized);
+    if (normalized.length < 60 || !key || seen.has(key) || isGenericResearchText(normalized)) return;
+    seen.add(key);
+    contents.push({ statement: normalized, locator });
+  };
+
+  const storedSegments = array(page.segments);
+  for (const segment of storedSegments) {
+    if (contents.length >= MAX_OFFICIAL_PAGE_SEGMENTS) break;
+    add(object(segment).text, text(object(segment).locator) || `page_section#${contents.length + 1}`);
+  }
+  if (contents.length < MAX_OFFICIAL_PAGE_SEGMENTS) add(page.description, 'meta_description');
+  if (storedSegments.length === 0) {
+    for (const statement of substantiveOfficialStatements(page.text)) {
+      if (contents.length >= MAX_OFFICIAL_PAGE_SEGMENTS) break;
+      add(statement, contents.length === 0 ? 'page_text' : `page_text#${contents.length + 1}`);
+    }
+  }
+  return contents.slice(0, MAX_OFFICIAL_PAGE_SEGMENTS);
 }
 
 function usefulOfficialPageContent(page: OfficialSitePage) {
-  const candidates = [
-    { value: page.description, locator: 'meta_description' as const },
-    { value: page.text, locator: 'page_text' as const },
-  ];
-  for (const candidate of candidates) {
-    const statement = conciseSourceStatement(candidate.value);
-    if (statement.length >= 60 && !isGenericResearchText(statement)) {
-      return { statement, locator: candidate.locator };
-    }
-  }
-  return null;
+  return usefulOfficialPageContents(page)[0] || null;
 }
 
 function isUsefulOfficialPage(page: OfficialSitePage) {
-  return Boolean(usefulOfficialPageContent(page));
+  return usefulOfficialPageContents(page).length > 0;
 }
 
 function candidateOfficialPageUrls(html: string, baseUrl: URL, domain: string, country?: string | null, maxPages = MAX_OFFICIAL_SITE_PAGES) {
@@ -482,7 +609,7 @@ function candidateOfficialPageUrls(html: string, baseUrl: URL, domain: string, c
       const path = url.pathname.toLowerCase();
       const target = `${path} ${label}`;
       let score = 0;
-      if (/(?:nosotros|quienes|empresa|about|company|servicios|services|solutions|portfolio|reclutamiento|seleccion|talento)/.test(target)) score += 6;
+      if (/(?:nosotros|quienes|empresa|about|company|productos?|products?|plataforma|platform|servicios|services|solutions|portfolio|casos|cases?|case-stud(?:y|ies)|success-stories|clientes|customers|integraciones|integrations|partners|socios|equipo|team|leadership|liderazgo|ubicaciones|locations|oficinas|offices|seguridad|security|trust|compliance|noticias|news|press|blog|careers|jobs|empleos|vacantes|reclutamiento|seleccion|talento)/.test(target)) score += 6;
       if (countryKey && target.includes(countryKey)) score += 5;
       if (/(?:^|\/)(?:cl|chile)(?:\/|$)/.test(path)) score += 4;
       if (path.split('/').filter(Boolean).length <= 3) score += 1;
@@ -616,8 +743,10 @@ async function collectCompanySignals(input: {
   organizationId: string;
   lead: NativeResearchLead;
   options: NativeResearchOptions;
+  apolloContext: ApolloResearchContext | null;
 }): Promise<CompanySignalsCollection> {
   const domain = companyResearchDomain(input.lead);
+  const companyApolloContext = apolloCompanyResearchContext(input.apolloContext);
   const warnings: string[] = [];
   if (!domain && !text(input.lead.companyName)) {
     warnings.push('company_identity_missing');
@@ -640,6 +769,7 @@ async function collectCompanySignals(input: {
     researchDepth: input.options.depth,
     researchLanguage: input.options.language,
     provider: NATIVE_PROVIDER,
+    providerContextFingerprint: companyApolloContext?.fingerprint,
   });
   let claim = await claimCompanyResearchArtifact({
     identity,
@@ -729,12 +859,21 @@ async function collectCompanySignals(input: {
       claimToken: claim.claimToken,
       status,
       payload: {
-        schemaVersion: 'native-company-signals/v1',
+        schemaVersion: 'native-company-signals/v2',
         companySignals: signals,
+        ...(companyApolloContext ? { apolloCompanyContext: companyApolloContext } : {}),
       },
-      expiresAt: new Date(Date.now() + (status === 'completed'
-        ? COMPANY_RESEARCH_ARTIFACT_TTL_MS
-        : COMPANY_RESEARCH_INSUFFICIENT_TTL_MS)).toISOString(),
+      expiresAt: new Date(Math.max(
+        Date.now() + 60_000,
+        Math.min(
+          Date.now() + (status === 'completed'
+            ? COMPANY_RESEARCH_ARTIFACT_TTL_MS
+            : COMPANY_RESEARCH_INSUFFICIENT_TTL_MS),
+          companyApolloContext?.observedAt
+            ? Date.parse(companyApolloContext.observedAt) + COMPANY_RESEARCH_ARTIFACT_TTL_MS
+            : Number.POSITIVE_INFINITY,
+        ),
+      )).toISOString(),
       errorMetadata: { warnings },
     });
     return {
@@ -787,7 +926,7 @@ async function collectSearchSignals(input: {
     cache: !input.options.refresh,
   };
   const warnings: string[] = [];
-  const [profile, news, jobs, mentions] = await Promise.all([
+  const [profile, news, jobs, mentions, similarweb] = await Promise.all([
     domain || input.lead.companyName
       ? researchSerpCompanyProfile(providerInput, context).catch(() => {
         warnings.push('company_profile_unavailable');
@@ -812,8 +951,14 @@ async function collectSearchSignals(input: {
         return null;
       })
       : Promise.resolve(null),
+    domain
+      ? researchSimilarweb(providerInput, context).catch(() => {
+        warnings.push('similarweb_unavailable');
+        return null;
+      })
+      : Promise.resolve(null),
   ]);
-  return { profile: object(profile), news: object(news), jobs: object(jobs), mentions: object(mentions), warnings };
+  return { profile: object(profile), news: object(news), jobs: object(jobs), mentions: object(mentions), similarweb: object(similarweb), warnings };
 }
 
 function createError(input: {
@@ -856,6 +1001,30 @@ function officialClaimKind(page: OfficialSitePage): ResearchClaimV1['kind'] {
     : 'company_overview';
 }
 
+function visibleSignalLimit(depth: NativeResearchOptions['depth']) {
+  return depth === 'deep' ? 12 : depth === 'basic' ? 6 : 9;
+}
+
+function selectBalancedSearchSignals<T extends { kind: 'news' | 'jobs' | 'mentions' }>(signals: T[], limit: number) {
+  const buckets = {
+    news: signals.filter((signal) => signal.kind === 'news'),
+    jobs: signals.filter((signal) => signal.kind === 'jobs'),
+    mentions: signals.filter((signal) => signal.kind === 'mentions'),
+  };
+  const selected: T[] = [];
+  for (let index = 0; selected.length < limit; index += 1) {
+    let added = false;
+    for (const kind of ['news', 'jobs', 'mentions'] as const) {
+      const signal = buckets[kind][index];
+      if (!signal || selected.length >= limit) continue;
+      selected.push(signal);
+      added = true;
+    }
+    if (!added) break;
+  }
+  return selected;
+}
+
 function isRelevantSearchResult(input: {
   title: string;
   snippet: string;
@@ -881,6 +1050,7 @@ function buildSnapshot(input: {
   news: Record<string, any>;
   jobs: Record<string, any>;
   mentions: Record<string, any>;
+  similarweb: Record<string, any>;
   person: PublicPersonEvidenceResult;
   warnings: string[];
 }): NativeResearchPipelineOutput {
@@ -930,13 +1100,17 @@ function buildSnapshot(input: {
     observedAt?: string | null;
     extractionMethod?: ResearchEvidenceV1['extraction']['method'];
   }) => {
-    if (!value.source || !text(value.statement)) return null;
+    const statement = text(value.statement);
+    if (!value.source || !statement) return null;
+    const evidenceId = id('evidence', `${value.source.id}:${statement}`);
+    const existing = evidence.find((item) => item.id === evidenceId);
+    if (existing) return existing;
     const created: ResearchEvidenceV1 = {
-      id: id('evidence', `${value.source.id}:${value.statement}`),
+      id: evidenceId,
       subjectScope: value.subjectScope || 'company',
       kind: value.kind || 'observation',
       path: 'native_research',
-      statement: text(value.statement),
+      statement,
       sourceId: value.source.id,
       ...(value.locator ? { locator: value.locator } : {}),
       ...(isoDateOrNull(value.observedAt) ? { observedAt: isoDateOrNull(value.observedAt)! } : {}),
@@ -957,15 +1131,16 @@ function buildSnapshot(input: {
     asOf?: string | null;
     derivation?: ResearchClaimV1['derivation'];
   }) => {
+    const statement = text(value.statement);
     const supporting = value.supportingEvidenceIds.filter((evidenceId) => evidence.some((item) => item.id === evidenceId));
-    if (!text(value.statement) || supporting.length === 0) return null;
+    if (!statement || supporting.length === 0) return null;
     const asOf = isoDateOrNull(value.asOf) || now;
     const created: ResearchClaimV1 = {
-      id: id('claim', `${value.kind}:${value.statement}`),
+      id: id('claim', `${value.kind}:${statement}`),
       kind: value.kind,
       subjectScope: value.kind.startsWith('lead_') ? 'person' : 'company',
       classification: value.classification || 'fact',
-      statement: text(value.statement),
+      statement,
       supportingEvidenceIds: supporting,
       contradictingEvidenceIds: [],
       confidence: Math.max(0, Math.min(1, value.confidence ?? 0.7)),
@@ -976,6 +1151,16 @@ function buildSnapshot(input: {
       },
       derivation: value.derivation || { method: 'rule', promptVersion: 'native-research/v2' },
     };
+    const existingIndex = claims.findIndex((item) => item.id === created.id);
+    if (existingIndex >= 0) {
+      const existing = claims[existingIndex];
+      const merged = ResearchClaimV1Schema.parse({
+        ...existing,
+        supportingEvidenceIds: [...new Set([...existing.supportingEvidenceIds, ...created.supportingEvidenceIds])],
+      });
+      claims[existingIndex] = merged;
+      return merged;
+    }
     claims.push(created);
     return created;
   };
@@ -985,14 +1170,14 @@ function buildSnapshot(input: {
   const officialPages = input.company.official?.pages?.length
     ? input.company.official.pages
     : input.company.official ? [input.company.official] : [];
-  const companyUrl = safeSourceUrl(officialPages[0]?.url, domain);
+  const companyUrl = safeSourceUrl(officialPages[0]?.url || input.lead.companyWebsite, domain);
   const companyFactEvidence: ResearchEvidenceV1[] = [];
   const personFactEvidence: ResearchEvidenceV1[] = [];
+  const officialStatementKeys = new Set<string>();
 
   for (const page of officialPages) {
-    const content = usefulOfficialPageContent(page);
-    if (!content) continue;
-    const { statement, locator } = content;
+    const contents = usefulOfficialPageContents(page);
+    if (contents.length === 0) continue;
     const source = addSource({
       url: page.url,
       type: 'official_site',
@@ -1001,30 +1186,35 @@ function buildSnapshot(input: {
       reliability: 0.9,
       retrievedAt: companyFetchedAt,
     });
-    const itemEvidence = addEvidence({
-      statement,
-      source,
-      kind: 'fact',
-      confidence: 0.86,
-      locator: { kind: 'page_section', value: locator },
-      extractedAt: companyFetchedAt,
-      extractionMethod: 'rule',
-    });
-    if (!itemEvidence || !source || !isQualifiedResearchFactEvidence({
-      evidence: itemEvidence,
-      source,
-      companyName,
-      companyDomain: domain,
-    })) continue;
+    for (const { statement, locator } of contents) {
+      const statementKey = officialStatementKey(statement);
+      if (!statementKey || officialStatementKeys.has(statementKey)) continue;
+      const itemEvidence = addEvidence({
+        statement,
+        source,
+        kind: 'fact',
+        confidence: 0.86,
+        locator: { kind: 'page_section', value: locator },
+        extractedAt: companyFetchedAt,
+        extractionMethod: 'rule',
+      });
+      if (!itemEvidence || !source || !isQualifiedResearchFactEvidence({
+        evidence: itemEvidence,
+        source,
+        companyName,
+        companyDomain: domain,
+      })) continue;
 
-    companyFactEvidence.push(itemEvidence);
-    addClaim({
-      kind: officialClaimKind(page),
-      statement,
-      supportingEvidenceIds: [itemEvidence.id],
-      confidence: itemEvidence.confidence,
-      asOf: companyFetchedAt,
-    });
+      officialStatementKeys.add(statementKey);
+      companyFactEvidence.push(itemEvidence);
+      addClaim({
+        kind: officialClaimKind(page),
+        statement,
+        supportingEvidenceIds: [itemEvidence.id],
+        confidence: itemEvidence.confidence,
+        asOf: companyFetchedAt,
+      });
+    }
   }
 
   const brandDescription = conciseSourceStatement(input.company.brand?.description);
@@ -1142,7 +1332,8 @@ function buildSnapshot(input: {
   for (const kind of ['profile', 'news', 'jobs', 'mentions'] as const) {
     const payload = kind === 'profile' ? input.profile : kind === 'news' ? input.news : kind === 'jobs' ? input.jobs : input.mentions;
     const fetchedAt = isoDateOrNull(payload.fetchedAt) || now;
-    const items = array(payload.items || payload.results || payload.organic_results).slice(0, 5);
+    const maxItems = input.options.depth === 'deep' ? 8 : input.options.depth === 'basic' ? 3 : 6;
+    const items = array(payload.items || payload.results || payload.organic_results).slice(0, maxItems);
     for (const item of items) {
       const link = validHttpUrl(item?.link || item?.url);
       const title = text(item?.title || item?.name);
@@ -1179,7 +1370,7 @@ function buildSnapshot(input: {
             asOf: fetchedAt,
           });
         }
-      } else if (isRelevantResearchSignal({
+      } else if ((kind !== 'news' || Boolean(source.publishedAt)) && isRelevantResearchSignal({
         evidence: itemEvidence,
         source,
         companyName,
@@ -1190,7 +1381,41 @@ function buildSnapshot(input: {
     }
   }
 
-  const visibleSignals = searchEvidence.slice(0, 3);
+  if (text(input.similarweb.status) === 'completed') {
+    const visits = Number(input.similarweb.visitsMonthly);
+    const globalRank = Number(input.similarweb.globalRank);
+    const category = text(input.similarweb.category);
+    const details = [
+      Number.isFinite(visits) && visits > 0 ? `${visits.toLocaleString('es-CL')} visitas mensuales estimadas` : '',
+      Number.isFinite(globalRank) && globalRank > 0 ? `ranking global estimado ${globalRank.toLocaleString('es-CL')}` : '',
+      category ? `categoría ${category}` : '',
+    ].filter(Boolean);
+    if (details.length > 0) {
+      const fetchedAt = isoDateOrNull(input.similarweb.fetchedAt) || now;
+      const source = addSource({
+        url: `https://data.similarweb.com/api/v1/data?domain=${encodeURIComponent(domain)}`,
+        type: 'other',
+        title: `${companyName} en Similarweb`,
+        publisher: 'Similarweb',
+        provider: 'similarweb',
+        reliability: 0.55,
+        retrievedAt: fetchedAt,
+      });
+      const itemEvidence = addEvidence({
+        statement: `Similarweb estima para ${companyName}: ${details.join('; ')}. Es una señal direccional de presencia digital, no una medición financiera ni de tamaño de la empresa.`,
+        source,
+        kind: 'event',
+        confidence: 0.55,
+        locator: { kind: 'provider_annotation', value: 'similarweb_public_metrics' },
+        extractedAt: fetchedAt,
+        observedAt: fetchedAt,
+        extractionMethod: 'provider',
+      });
+      if (itemEvidence && source) searchEvidence.push({ evidence: itemEvidence, source, kind: 'mentions' });
+    }
+  }
+
+  const visibleSignals = selectBalancedSearchSignals(searchEvidence, visibleSignalLimit(input.options.depth));
   for (const signal of visibleSignals) {
     const asOf = signal.source.publishedAt || signal.source.retrievedAt;
     const signalSummary = conciseSourceStatement(signal.evidence.statement, 280);
@@ -1219,6 +1444,17 @@ function buildSnapshot(input: {
         asOf,
       });
     }
+  }
+  if (companyFactEvidence.length > 0 && !claims.some((claim) => claim.classification === 'hypothesis')) {
+    addClaim({
+      kind: 'use_case_hypothesis',
+      statement: `La información pública disponible sobre ${companyName} podría justificar explorar sus prioridades actuales antes de proponer una solución; no confirma una necesidad concreta.`,
+      supportingEvidenceIds: [companyFactEvidence[0].id],
+      classification: 'hypothesis',
+      confidence: 0.52,
+      validityDays: 14,
+      asOf: companyFetchedAt,
+    });
   }
 
   const qualifiedSignals = searchEvidence.filter(({ evidence: itemEvidence, source }) => isRelevantResearchSignal({
@@ -1279,6 +1515,9 @@ function buildSnapshot(input: {
       person: {
         ...(input.lead.fullName ? { fullName: input.lead.fullName } : {}),
         ...(input.lead.title ? { title: input.lead.title } : {}),
+        ...(input.lead.headline ? { headline: input.lead.headline } : {}),
+        ...(input.lead.seniority ? { seniority: input.lead.seniority } : {}),
+        ...(input.lead.departments?.length ? { departments: input.lead.departments } : {}),
         ...(input.lead.linkedinUrl ? { linkedinUrl: input.lead.linkedinUrl } : {}),
         ...(input.lead.city ? { city: input.lead.city } : {}),
         ...(input.lead.country ? { country: input.lead.country } : {}),
@@ -1289,6 +1528,9 @@ function buildSnapshot(input: {
         ...(companyUrl ? { websiteUrl: companyUrl } : {}),
         ...(input.lead.companyLinkedinUrl ? { linkedinUrl: input.lead.companyLinkedinUrl } : {}),
         ...(input.lead.country ? { country: input.lead.country } : {}),
+        ...((input.lead.organizationIndustry || input.lead.industry) ? { industry: input.lead.organizationIndustry || input.lead.industry } : {}),
+        ...(input.lead.organizationSize ? { size: input.lead.organizationSize } : {}),
+        ...(input.lead.descriptionSnippet ? { description: input.lead.descriptionSnippet } : {}),
       },
     },
     request: {
@@ -1475,6 +1717,30 @@ async function patchNativeIdentity(input: { jobId: string; reportId: string; req
   if (!data) throw new Error('NATIVE_RESEARCH_PRIVACY_SUPPRESSED');
 }
 
+async function persistNativeResearchProviderContext(input: {
+  job: NativeResearchJob;
+  claimToken: string;
+  requestPayload: Record<string, any>;
+  lead: NativeResearchLead;
+}) {
+  const { data, error } = await getSupabaseAdminClient()
+    .from('lead_research_jobs')
+    .update({
+      request_payload: input.requestPayload,
+      company_name: input.lead.companyName || null,
+      company_domain: companyResearchDomain(input.lead) || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', input.job.id)
+    .eq('organization_id', input.job.organizationId)
+    .eq('user_id', input.job.userId)
+    .eq('request_claim_token', input.claimToken)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('NATIVE_RESEARCH_PROVIDER_CONTEXT_CLAIM_LOST');
+}
+
 type NativeResearchEnqueueInput = {
   access: NativeResearchAccess;
   lead: NativeResearchLead;
@@ -1493,12 +1759,20 @@ type HeldNativeResearchJob = {
 
 async function enqueueNativeResearchInternal(input: NativeResearchEnqueueInput, holdClaim: boolean): Promise<HeldNativeResearchJob> {
   assertNativeResearchEnabled();
-  const lead = NativeResearchLeadSchema.parse(input.lead);
+  const requestedLead = NativeResearchLeadSchema.parse(input.lead);
+  const apolloContext = await loadApolloResearchContext({
+    organizationId: input.access.organizationId,
+    userId: input.access.userId,
+    leadId: requestedLead.id,
+    companyDomain: requestedLead.companyDomain,
+  });
+  const lead = mergeApolloResearchContextIntoLead(requestedLead, apolloContext);
   const options = NativeResearchOptionsSchema.parse(input.options || {});
   const leadRef = deriveNativeResearchLeadRef(lead);
   const requestPayload = {
     lead,
     options,
+    ...(apolloContext ? { apolloContext } : {}),
     ...(input.runId ? { run_id: input.runId } : {}),
   };
   const claim = await claimNativeResearchRequest({
@@ -1754,7 +2028,8 @@ async function persistNativeSnapshot(input: {
 
 async function ensureNativeResearchReport(job: NativeResearchJob, snapshot: ResearchSnapshotV1) {
   const access = { organizationId: job.organizationId, userId: job.userId };
-  return ensureResearchReportDocument({ snapshot, access });
+  const sellerProfile = await loadSellerProfile(job.userId);
+  return ensureResearchReportDocument({ snapshot, access, sellerProfile });
 }
 
 function attachReportSynthesis(result: NativeResearchResult, report: Awaited<ReturnType<typeof ensureNativeResearchReport>>) {
@@ -1919,12 +2194,7 @@ async function processJob(job: NativeResearchJob) {
       await settleSuppressedNativeResearchJob({ job, access, claimToken: claim.claimToken });
       return false;
     }
-    await markLeadResearchRequestProviderSubmitting(owned);
-    if (await isNativeResearchSuppressed(job)) {
-      await settleSuppressedNativeResearchJob({ job, access, claimToken: claim.claimToken });
-      return false;
-    }
-    const lead = NativeResearchLeadSchema.parse({
+    const requestedLead = NativeResearchLeadSchema.parse({
       id: job.leadId,
       fullName: object(job.requestPayload.lead).fullName,
       email: job.email,
@@ -1937,13 +2207,37 @@ async function processJob(job: NativeResearchJob) {
       companyDomain: job.companyDomain,
       companyWebsite: object(job.requestPayload.lead).companyWebsite,
       companyLinkedinUrl: object(job.requestPayload.lead).companyLinkedinUrl,
+      descriptionSnippet: object(job.requestPayload.lead).descriptionSnippet,
+      industry: object(job.requestPayload.lead).industry,
       organizationIndustry: object(job.requestPayload.lead).organizationIndustry,
       organizationSize: object(job.requestPayload.lead).organizationSize,
       city: object(job.requestPayload.lead).city,
       country: object(job.requestPayload.lead).country,
     });
+    const apolloContext = await loadApolloResearchContext({
+      organizationId: job.organizationId,
+      userId: job.userId,
+      leadId: job.leadId,
+      companyDomain: job.companyDomain,
+    }) || parseApolloResearchContext(job.requestPayload.apolloContext);
+    const lead = mergeApolloResearchContextIntoLead(requestedLead, apolloContext);
     const options = NativeResearchOptionsSchema.parse(object(job.requestPayload.options));
-    const company = await collectCompanySignals({ organizationId: job.organizationId, lead, options });
+    const requestPayload = {
+      ...job.requestPayload,
+      lead,
+      options,
+      ...(apolloContext ? { apolloContext } : {}),
+    };
+    await persistNativeResearchProviderContext({ job, claimToken: claim.claimToken, requestPayload, lead });
+    job.requestPayload = requestPayload;
+    job.companyName = lead.companyName || null;
+    job.companyDomain = companyResearchDomain(lead) || null;
+    await markLeadResearchRequestProviderSubmitting(owned);
+    if (await isNativeResearchSuppressed(job)) {
+      await settleSuppressedNativeResearchJob({ job, access, claimToken: claim.claimToken });
+      return false;
+    }
+    const company = await collectCompanySignals({ organizationId: job.organizationId, lead, options, apolloContext });
     if (company.busy) {
       await releaseLeadResearchRequestClaim({
         ...owned,
@@ -1978,10 +2272,11 @@ async function processJob(job: NativeResearchJob) {
       news: search.news,
       jobs: search.jobs,
       mentions: search.mentions,
+      similarweb: search.similarweb,
       person,
       warnings: [...company.warnings, ...search.warnings, ...person.warnings],
     });
-    output.snapshot = await enrichCompanyResearchSnapshotV1(output.snapshot);
+    output.snapshot = await enrichCompanyResearchSnapshotV1(output.snapshot, apolloContext);
     output.result.promptPack.claims = output.snapshot.claims.map((item) => item.statement).slice(0, 8);
     output.result.companyResearchCache = {
       hit: company.cacheHit,
@@ -2151,6 +2446,7 @@ export function nativeResearchJobToResult(job: NativeResearchJob) {
 }
 
 export const nativeResearchInternals = {
+  buildSnapshot,
   boundedOfficialSiteChunk,
   candidateOfficialPageUrls,
   fetchOfficialSite,
@@ -2159,7 +2455,10 @@ export const nativeResearchInternals = {
   isSafeOfficialSiteUrl,
   officialPageFromHtml,
   pinnedOfficialSiteLookup,
+  selectBalancedSearchSignals,
   usefulOfficialPageContent,
+  usefulOfficialPageContents,
+  visibleSignalLimit,
 };
 
 export type { NativeResearchAccess, NativeResearchJob, NativeResearchPipelineOutput };

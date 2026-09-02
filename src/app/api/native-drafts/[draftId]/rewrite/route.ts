@@ -25,7 +25,10 @@ export async function POST(req: NextRequest, context: { params: Promise<{ draftI
     const draft = await getCurrentNativeDraft({ organizationId, userId: auth.user.id, draftId });
     if (!draft) return NextResponse.json({ error: 'NATIVE_DRAFT_NOT_FOUND' }, { status: 404 });
 
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_INVALID_JSON' }, { status: 400 });
+    }
     const instruction = typeof body?.instruction === 'string' ? body.instruction.trim() : '';
     const styleProfileId = typeof body?.styleProfileId === 'string' ? body.styleProfileId.trim() : null;
     if (!instruction || instruction.length > 1_000) {
@@ -48,6 +51,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ draftI
     });
   } catch (error: any) {
     if (error?.name === 'AuthError') return handleAuthError(error);
+    if (error?.name === 'SyntaxError') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_INVALID_JSON' }, { status: 400 });
+    }
     if (error instanceof NativeDraftPreflightError) {
       return NextResponse.json({
         error: 'NATIVE_DRAFT_PREFLIGHT_FAILED',
@@ -60,6 +66,12 @@ export async function POST(req: NextRequest, context: { params: Promise<{ draftI
     }
     if (error?.message === 'NATIVE_DRAFT_PRIVACY_SUPPRESSED') {
       return NextResponse.json({ error: 'NATIVE_DRAFT_PRIVACY_SUPPRESSED' }, { status: 409 });
+    }
+    if (error?.message === 'NATIVE_DRAFT_GENERATION_IN_PROGRESS') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_GENERATION_IN_PROGRESS' }, { status: 409 });
+    }
+    if (error?.message === 'NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_SNAPSHOT_NOT_FOUND' }, { status: 404 });
     }
     if (error?.message === 'NATIVE_DRAFT_OPENAI_REWRITE_FAILED') {
       return NextResponse.json({ error: 'NATIVE_DRAFT_OPENAI_REWRITE_FAILED' }, { status: 503 });

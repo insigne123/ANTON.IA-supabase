@@ -18,7 +18,10 @@ function isNativeDraftSetupError(error: any) {
 export async function POST(req: NextRequest) {
   try {
     const auth = await requireAuth();
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_INVALID_JSON' }, { status: 400 });
+    }
     const snapshotId = String(body?.researchSnapshotId || body?.snapshotId || '').trim();
     if (!snapshotId) return NextResponse.json({ error: 'NATIVE_DRAFT_SNAPSHOT_REQUIRED' }, { status: 400 });
     const snapshot = await getNativeSnapshot({
@@ -50,11 +53,20 @@ export async function POST(req: NextRequest) {
     });
   } catch (error: any) {
     if (error?.name === 'AuthError') return handleAuthError(error);
+    if (error?.name === 'SyntaxError') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_INVALID_JSON' }, { status: 400 });
+    }
     if (error?.message === 'NATIVE_DRAFT_PRIVACY_SUPPRESSED') {
       return NextResponse.json({ error: 'NATIVE_DRAFT_PRIVACY_SUPPRESSED' }, { status: 409 });
     }
     if (error?.message === 'NATIVE_DRAFT_GENERATION_IN_PROGRESS') {
       return NextResponse.json({ error: 'NATIVE_DRAFT_GENERATION_IN_PROGRESS' }, { status: 409 });
+    }
+    if (error?.message === 'NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_SNAPSHOT_NOT_FOUND' }, { status: 404 });
+    }
+    if (error?.message === 'NATIVE_RESEARCH_SNAPSHOT_CONFLICT') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_VERSION_CONFLICT' }, { status: 409 });
     }
     console.error('[native-drafts] create failed:', error);
     if (isNativeDraftSetupError(error)) {
@@ -63,6 +75,6 @@ export async function POST(req: NextRequest) {
         message: 'Estamos terminando la configuración para crear borradores. Inténtalo nuevamente en unos minutos.',
       }, { status: 503 });
     }
-    return NextResponse.json({ error: 'NATIVE_DRAFT_CREATE_FAILED', message: error?.message || 'No se pudo crear el borrador.' }, { status: 500 });
+    return NextResponse.json({ error: 'NATIVE_DRAFT_CREATE_FAILED', message: 'No se pudo crear el borrador.' }, { status: 500 });
   }
 }

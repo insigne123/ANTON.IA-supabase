@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   createNativeDraft,
   normalizeNativeDraftBody,
+  reviseNativeDraft,
   rewriteNativeDraft,
   type NativeDraftGenerationDependencies,
 } from './native-drafts';
@@ -30,12 +31,12 @@ const access = {
 function generated(context: DraftContextV2): GeneratedOutreachFromDraftContextV2 {
   const evidence = context.evidence.find((item) => item.supportedFactClaimIds.includes('claim-acme-overview'))!;
   return {
-    subject: 'Una idea para Acme',
+    subject: 'Procesos en Acme',
     body: `Hola Ada,
 
-Acme publica que ayuda a equipos de operaciones a reducir trabajo manual. En Northstar ayudamos a equipos que quieren ordenar tareas repetitivas sin imponer cambios bruscos a su forma de trabajo.
+Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
 
-Pensé que podría ser útil compartir un ejemplo práctico de cómo detectar procesos que consumen tiempo y priorizar los primeros ajustes. La idea es entender el contexto de Acme antes de proponer cualquier alternativa concreta.`,
+En Northstar automatizamos tareas repetitivas para reducir trabajo manual y dejar la información disponible para el equipo.`,
     personalization: [{
       evidenceId: evidence.evidenceId,
       claimId: 'claim-acme-overview',
@@ -44,7 +45,7 @@ Pensé que podría ser útil compartir un ejemplo práctico de cómo detectar pr
     hypothesisIds: [],
     provider: 'openai',
     model: 'test-model',
-    promptVersion: 'native-draft/v3',
+    promptVersion: 'native-draft/v8',
   };
 }
 
@@ -126,6 +127,29 @@ test('native drafting returns a failure result when OpenAI is unavailable and ne
   assert.equal(fixture.releaseCount(), 1);
 });
 
+test('native drafting acquires the privacy claim before synthesizing the report document', async () => {
+  const fixture = dependencies();
+  const events: string[] = [];
+  fixture.value.generate = async ({ context }) => generated(context);
+  const ensureReportDocument = fixture.value.ensureReportDocument!;
+  fixture.value.claimGeneration = async () => {
+    events.push('claim');
+    return { state: 'claimed', claimToken: 'claim-token' };
+  };
+  fixture.value.ensureReportDocument = async (input) => {
+    events.push('report');
+    return ensureReportDocument(input);
+  };
+
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+
+  assert.equal(result.status, 'drafted');
+  assert.deepEqual(events.slice(0, 2), ['claim', 'report']);
+});
+
 test('native drafting repairs missing generation metadata before replaying a persisted draft', async () => {
   const fixture = dependencies();
   const campaignRecipientStepId = '60000000-0000-4000-8000-000000000001';
@@ -155,7 +179,7 @@ test('native drafting repairs missing generation metadata before replaying a per
   }, fixture.value);
 
   assert.equal(replay.status, 'drafted');
-  assert.equal(fixture.claimCount(), 1);
+  assert.equal(fixture.claimCount(), 2);
   assert.equal(repairedMetadata?.draftId, persisted.draftId);
   assert.equal(repairedMetadata?.versionId, persisted.versionId);
   assert.equal(repairedMetadata?.model, 'persisted-recovery');
@@ -201,6 +225,28 @@ test('snapshots without an email return blocked without synthesizing a report do
   assert.equal(fixture.claimCount(), 0);
 });
 
+test('native drafting asks the user to complete the commercial profile before generation', async () => {
+  const fixture = dependencies();
+  let ensureReportCalls = 0;
+  fixture.value.loadSellerProfile = async () => normalizeDraftSellerProfileV2({
+    companyName: 'Northstar',
+    description: 'Empresa de tecnología.',
+  });
+  fixture.value.ensureReportDocument = async () => {
+    ensureReportCalls += 1;
+    throw new Error('Report synthesis should not run');
+  };
+
+  const result = await createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, fixture.value);
+
+  assert.equal(result.status, 'blocked');
+  if (result.status !== 'blocked') return;
+  assert.equal(result.code, 'seller_profile_incomplete');
+  assert.match(result.message, /Productos y servicios|Propuesta de valor/);
+  assert.equal(ensureReportCalls, 0);
+  assert.equal(fixture.claimCount(), 0);
+});
+
 test('native drafting permits one corrective generation pass, then persists a traceable immutable version', async () => {
   const fixture = dependencies();
   let generationCalls = 0;
@@ -222,10 +268,85 @@ test('native drafting permits one corrective generation pass, then persists a tr
   assert.equal(result.draft.lifecycle, 'draft');
   assert.equal(result.draft.preflight.status, 'passed');
   assert.equal(result.draft.approval.status, 'pending');
-  assert.match(result.draft.content.text || '', /Hola Ada,\n\nAcme publica que ayuda/);
+  assert.match(result.draft.content.text || '', /Hola Ada,\n\nAcme comunica que ayuda/);
   assert.ok(result.draft.content.text?.endsWith(result.context.constraints.cta.exactText));
   assert.equal(fixture.persisted.length, 1);
   assert.deepEqual(fixture.metadata[0].claimIds, ['claim-acme-overview']);
+});
+
+test('native drafting deterministically narrows a catalogued personalization before preflight', async () => {
+  const baseSnapshot = draftSnapshotFixture();
+  const snapshot = {
+    ...baseSnapshot,
+    evidence: baseSnapshot.evidence.map((evidence) => evidence.id === 'evidence-acme'
+      ? {
+        ...evidence,
+        statement: 'Outsourcing de Recursos Humanos, reclutamiento y servicios transitorios para optimizar la gestión de personas.',
+      }
+      : evidence),
+  };
+  const fixture = dependencies(snapshot);
+  fixture.value.loadSellerProfile = async () => normalizeDraftSellerProfileV2({
+    name: 'Grace Hopper',
+    companyName: 'Northstar',
+    services: ['Automatización de recursos humanos'],
+  });
+  let generationCalls = 0;
+  fixture.value.generate = async ({ context }) => {
+    generationCalls += 1;
+    const output = generated(context);
+    return {
+      ...output,
+      body: output.body
+        .replace(
+          'Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.',
+          'Acme reúne outsourcing de Recursos Humanos, reclutamiento y servicios transitorios.',
+        )
+        .replace(
+          'En Northstar automatizamos tareas repetitivas para reducir trabajo manual y dejar la información disponible para el equipo.',
+          'En Northstar automatizamos tareas de recursos humanos para reducir trabajo manual y dejar la información disponible para el equipo.',
+        ),
+    };
+  };
+
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+
+  assert.equal(result.status, 'drafted');
+  assert.equal(generationCalls, 1);
+  if (result.status !== 'drafted') return;
+  assert.equal(result.preflight.status, 'passed');
+  assert.match(result.draft.content.text || '', /Acme reúne outsourcing de Recursos Humanos\./);
+  assert.doesNotMatch(result.draft.content.text || '', /reclutamiento|servicios transitorios/);
+  assert.equal(fixture.persisted.length, 1);
+});
+
+test('native drafting rejects meta language around a generic commercial hypothesis', async () => {
+  const fixture = dependencies();
+  fixture.value.generate = async ({ context }) => {
+    const output = generated(context);
+    return {
+      ...output,
+      body: output.body.replace(
+        'En Northstar automatizamos tareas repetitivas para reducir trabajo manual y dejar la información disponible para el equipo.',
+        'Podría ser pertinente explorar si esa prioridad está presente hoy. En Northstar automatizamos tareas repetitivas para reducir trabajo manual.',
+      ),
+      hypothesisIds: ['claim-acme-opportunity'],
+    };
+  };
+
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+
+  assert.equal(result.status, 'blocked');
+  if (result.status !== 'blocked') return;
+  assert.equal(result.code, 'draft_preflight_failed');
+  assert.ok(result.issues.some((issue) => issue.code === 'prohibited_phrase' || issue.code === 'abstract_language'));
+  assert.equal(fixture.metadata.length, 0);
 });
 
 test('native drafting passes a bounded campaign instruction and includes it in deterministic identity', async () => {
@@ -266,6 +387,88 @@ test('native drafting passes a bounded campaign instruction and includes it in d
   );
 });
 
+test('native drafting includes the seller profile in deterministic identity', async () => {
+  const firstFixture = dependencies();
+  const secondFixture = dependencies();
+  firstFixture.value.generate = async ({ context }) => generated(context);
+  secondFixture.value.generate = async ({ context }) => generated(context);
+  secondFixture.value.loadSellerProfile = async () => normalizeDraftSellerProfileV2({
+    name: 'Grace Hopper',
+    companyName: 'Northstar',
+    services: ['Automatización de operaciones'],
+    proofPoints: ['Caso verificable en logística'],
+  });
+
+  const first = await createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, firstFixture.value);
+  const second = await createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, secondFixture.value);
+
+  assert.equal(first.status, 'drafted');
+  assert.equal(second.status, 'drafted');
+  if (first.status !== 'drafted' || second.status !== 'drafted') return;
+  assert.notEqual(first.draft.draftId, second.draft.draftId);
+  assert.notEqual(first.draft.versionId, second.draft.versionId);
+});
+
+test('campaign follow-up identity changes with the seller profile', async () => {
+  const firstFixture = dependencies();
+  const secondFixture = dependencies();
+  firstFixture.value.generate = async ({ context }) => generated(context);
+  secondFixture.value.generate = async ({ context }) => {
+    const output = generated(context);
+    return {
+      ...output,
+      body: output.body.replace(
+        'En Northstar automatizamos tareas repetitivas para reducir trabajo manual y dejar la información disponible para el equipo.',
+        'En Northstar integramos datos operativos para reducir trabajo manual y dejar la información disponible para el equipo.',
+      ),
+    };
+  };
+  secondFixture.value.loadSellerProfile = async () => normalizeDraftSellerProfileV2({
+    name: 'Grace Hopper',
+    companyName: 'Northstar',
+    services: ['Integración de datos operativos'],
+  });
+  const campaignRecipientStepId = '80000000-0000-4000-8000-000000000008';
+
+  const first = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+    campaignRecipientStepId,
+  }, firstFixture.value);
+  const second = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+    campaignRecipientStepId,
+  }, secondFixture.value);
+
+  assert.equal(first.status, 'drafted');
+  assert.equal(second.status, 'drafted');
+  if (first.status !== 'drafted' || second.status !== 'drafted') return;
+  assert.notEqual(first.draft.draftId, second.draft.draftId);
+  assert.notEqual(first.draft.versionId, second.draft.versionId);
+});
+
+test('campaign follow-up generation honors an existing durable reservation', async () => {
+  const fixture = dependencies();
+  fixture.value.generate = async ({ context }) => generated(context);
+  const reservedCampaignDraftIds = {
+    draftId: '90000000-0000-4000-8000-000000000003',
+    versionId: '90000000-0000-4000-8000-000000000004',
+  };
+
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+    campaignRecipientStepId: '80000000-0000-4000-8000-000000000008',
+    reservedCampaignDraftIds,
+  }, fixture.value);
+
+  assert.equal(result.status, 'drafted');
+  if (result.status !== 'drafted') return;
+  assert.equal(result.draft.draftId, reservedCampaignDraftIds.draftId);
+  assert.equal(result.draft.versionId, reservedCampaignDraftIds.versionId);
+});
+
 test('native drafting appends an arbitrary approved CTA exactly once on the server', async () => {
   const fixture = dependencies();
   const exactCta = 'Gracias por considerar esta propuesta concreta.';
@@ -292,7 +495,7 @@ test('native drafting appends an arbitrary approved CTA exactly once on the serv
   const body = result.draft.content.text || '';
   assert.equal(body.split(exactCta).length - 1, 1);
   assert.ok(body.endsWith(exactCta));
-  assert.ok((body.match(/[\p{L}\p{N}]+/gu)?.length || 0) >= 60);
+  assert.ok((body.match(/[\p{L}\p{N}]+/gu)?.length || 0) >= 35);
   assert.ok((body.match(/[\p{L}\p{N}]+/gu)?.length || 0) <= 180);
 });
 
@@ -323,6 +526,36 @@ test('native drafting removes a model CTA before appending the approved CTA', as
   assert.equal(result.preflight.status, 'passed');
 });
 
+test('native drafting retries a candidate shortened by an unapproved CTA before persisting', async () => {
+  const fixture = dependencies();
+  let generationCalls = 0;
+  fixture.value.generate = async ({ context }) => {
+    generationCalls += 1;
+    if (generationCalls > 1) return generated(context);
+    return {
+      ...generated(context),
+      body: `Hola Ada,
+
+Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+
+En Northstar ordenamos tareas para que el equipo encuentre información.
+
+¿Te parece si coordinamos una llamada la próxima semana?`,
+    };
+  };
+
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+
+  assert.equal(result.status, 'drafted');
+  assert.equal(generationCalls, 2);
+  if (result.status !== 'drafted') return;
+  assert.equal(result.preflight.status, 'passed');
+  assert.equal(fixture.persisted.length, 1);
+});
+
 test('native drafting returns structured issues after two failed preflight generations', async () => {
   const fixture = dependencies();
   let generationCalls = 0;
@@ -340,7 +573,7 @@ test('native drafting returns structured issues after two failed preflight gener
   if (result.status !== 'blocked') return;
   assert.equal(result.code, 'draft_preflight_failed');
   assert.equal(generationCalls, 2);
-  assert.deepEqual(result.issues.map((issue) => issue.code), ['body_length', 'personalization_invalid']);
+  assert.deepEqual(result.issues.map((issue) => issue.code), ['body_length', 'body_structure', 'commercial_relevance', 'personalization_invalid']);
   assert.deepEqual(result.preflight.errors, result.issues.map((issue) => issue.message));
   assert.equal(fixture.persisted.length, 0);
   assert.equal(fixture.releaseCount(), 1);
@@ -370,6 +603,7 @@ test('requested AI rewrites create a canonical revision and replace its generati
     loadMetadata: async () => ({
       versionId: initial.draft.versionId,
       draftId: initial.draft.draftId,
+      researchSnapshotId: DRAFT_FIXTURE_IDS.snapshot,
       styleProfileId: null,
       claimIds: ['claim-acme-overview'],
     }),
@@ -377,14 +611,12 @@ test('requested AI rewrites create a canonical revision and replace its generati
       receivedInstruction = rewrite?.instruction || '';
       return {
         ...generated(context),
-        subject: 'Acme, una alternativa más directa',
+        subject: 'Menos tareas manuales en Acme',
         body: `Hola Ada,
 
-Acme publica que ayuda a equipos de operaciones a reducir trabajo manual.
+Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
 
-En Northstar ayudamos a ordenar tareas repetitivas con un enfoque gradual, sin imponer cambios bruscos al equipo.
-
-Pensé que podía ser útil compartir una forma práctica de detectar procesos que consumen tiempo y priorizar los primeros ajustes según el contexto actual de Acme.`,
+En Northstar automatizamos operaciones repetitivas para reducir tareas manuales y mantener la información disponible para el equipo.`,
       };
     },
     appendRevision: async (parent, changes) => createChildMessagingDraftV1(parent, {
@@ -405,9 +637,100 @@ Pensé que podía ser útil compartir una forma práctica de detectar procesos q
   assert.equal(result.draft.revision, 2);
   assert.equal(result.draft.parentVersionId, initial.draft.versionId);
   assert.equal(result.preflight.status, 'passed');
-  assert.match(result.draft.content.text || '', /Hola Ada,\n\nAcme publica que ayuda/);
+  assert.match(result.draft.content.text || '', /Hola Ada,\n\nAcme comunica que ayuda/);
   assert.deepEqual(replacedMetadata[0].claimIds, ['claim-acme-overview']);
   assert.equal(replacedMetadata[0].generationMethod, 'model');
+});
+
+test('requested AI rewrites fail closed when provenance points to another research snapshot', async () => {
+  const fixture = dependencies();
+  fixture.value.generate = async ({ context }) => generated(context);
+  const initial = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+  assert.equal(initial.status, 'drafted');
+  if (initial.status !== 'drafted') return;
+
+  let claimCalls = 0;
+  const rewriteDependencies: NativeDraftGenerationDependencies = {
+    ...fixture.value,
+    loadMetadata: async () => ({
+      versionId: initial.draft.versionId,
+      draftId: initial.draft.draftId,
+      researchSnapshotId: '70000000-0000-4000-8000-000000000007',
+      styleProfileId: null,
+      claimIds: ['claim-acme-overview'],
+    }),
+    claimGeneration: async () => {
+      claimCalls += 1;
+      return { state: 'claimed', claimToken: 'claim-token' };
+    },
+  };
+
+  await assert.rejects(
+    () => rewriteNativeDraft({
+      ...access,
+      draft: initial.draft,
+      instruction: 'Hazlo más directo.',
+    }, rewriteDependencies),
+    /NATIVE_RESEARCH_SNAPSHOT_CONFLICT/,
+  );
+  assert.equal(claimCalls, 0);
+});
+
+test('manual revisions claim the draft and preserve canonical snapshot metadata', async () => {
+  const fixture = dependencies();
+  fixture.value.generate = async ({ context }) => generated(context);
+  const initial = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+  assert.equal(initial.status, 'drafted');
+  if (initial.status !== 'drafted') return;
+
+  const childVersionId = 'e4c25535-06ec-4dcb-b071-6033f4605cb5';
+  let claimCalls = 0;
+  let releaseCalls = 0;
+  let appendCalls = 0;
+  const revisionDependencies: NativeDraftGenerationDependencies = {
+    ...fixture.value,
+    loadMetadata: async ({ versionId }) => ({
+      versionId,
+      draftId: initial.draft.draftId,
+      researchSnapshotId: DRAFT_FIXTURE_IDS.snapshot,
+      styleProfileId: null,
+      claimIds: ['claim-acme-overview'],
+    }),
+    claimGeneration: async () => {
+      claimCalls += 1;
+      return { state: 'claimed', claimToken: 'claim-token' };
+    },
+    releaseGeneration: async () => {
+      releaseCalls += 1;
+      return true;
+    },
+    appendRevision: async (parent, changes) => {
+      appendCalls += 1;
+      return createChildMessagingDraftV1(parent, {
+        ...changes,
+        versionId: childVersionId,
+        createdAt: DRAFT_FIXTURE_NOW.toISOString(),
+      });
+    },
+  };
+
+  const revised = await reviseNativeDraft({
+    ...access,
+    draft: initial.draft,
+    subject: 'Procesos más claros en Acme',
+    text: `${initial.draft.content.text}\n\nPodemos revisar el primer proceso prioritario.`,
+  }, revisionDependencies);
+
+  assert.equal(revised.versionId, childVersionId);
+  assert.equal(appendCalls, 1);
+  assert.equal(claimCalls, 1);
+  assert.equal(releaseCalls, 1);
 });
 
 test('native drafting replaces model-supplied provenance IDs with the canonical factual evidence', async () => {

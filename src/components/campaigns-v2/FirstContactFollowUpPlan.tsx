@@ -77,12 +77,12 @@ const USE_INITIAL_STYLE = '__initial_email_style__';
 const FOLLOW_UP_OFFSETS = [3, 4, 5, 7] as const;
 const FOLLOW_UP_NAMES = ['Primer seguimiento', 'Segundo seguimiento', 'Tercer seguimiento', 'Último seguimiento'] as const;
 const FOLLOW_UP_INSTRUCTIONS = [
-  'Retoma el contexto del correo inicial sin repetirlo. Reafirma brevemente la relevancia y pregunta si pudo revisarlo.',
-  'Aporta un ángulo o beneficio nuevo y formula una pregunta consultiva fácil de responder.',
-  'Reduce la fricción con una alternativa concreta o una propuesta breve, sin presionar.',
-  'Cierra el ciclo con una salida amable, resume el valor en una línea y deja la puerta abierta.',
+  'Continúa desde el correo inicial sin resumirlo. Usa un solo detalle factual y ve directo a una acción concreta.',
+  'Describe una acción concreta del remitente sin repetir la descripción de ninguna empresa.',
+  'Explica con un ejemplo breve qué podría encontrar, responder o actualizar el equipo.',
+  'Mantén el cierre corto y directo. Reconoce que puede no ser prioridad y deja la puerta abierta.',
 ] as const;
-const GLOBAL_COHERENCE_NOTE = 'Mantén coherencia entre todos los seguimientos, aporta un avance nuevo en cada mensaje y evita repetir ideas, argumentos o frases.';
+const GLOBAL_COHERENCE_NOTE = 'Mantén coherencia entre todos los seguimientos, usa un tema concreto distinto en cada mensaje y no repitas frases.';
 
 function buildFollowUpSteps(count: number) {
   return Array.from({ length: count }, (_, index) => ({

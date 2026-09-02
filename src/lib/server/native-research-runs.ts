@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { buildResearchRequestIdempotencyKeyV1 } from '@/lib/research-contracts';
 import {
@@ -52,6 +52,7 @@ function nativeResearchRunRequestKey(input: {
   leads: NativeResearchLead[];
   options: NativeResearchOptions;
   now?: number;
+  refreshIdentity?: string | null;
 }) {
   const windowMs = input.options.refresh ? 2 * 60_000 : 24 * 60 * 60_000;
   const freshnessBucket = Math.floor((input.now ?? Date.now()) / windowMs);
@@ -60,6 +61,9 @@ function nativeResearchRunRequestKey(input: {
     userId: input.access.userId,
     options: input.options,
     freshnessBucket,
+    ...(input.options.refresh
+      ? { refreshIdentity: text(input.refreshIdentity) || `bucket:${freshnessBucket}` }
+      : {}),
     leads: input.leads.map((lead) => deriveNativeResearchLeadRef(lead).toLowerCase()).sort(),
   })}`;
 }
@@ -145,7 +149,13 @@ export async function enqueueNativeResearchRun(input: {
 }) {
   const parsed = NativeResearchBatchRequestSchema.parse({ leads: input.leads, options: input.options || {} });
   const leads = uniqueLeads(parsed.leads);
-  const requestKey = nativeResearchRunRequestKey({ access: input.access, leads, options: parsed.options });
+  const requestKey = nativeResearchRunRequestKey({
+    access: input.access,
+    leads,
+    options: parsed.options,
+    // A manual refresh must be able to create a new job after a terminal failure.
+    refreshIdentity: parsed.options.refresh ? randomUUID() : null,
+  });
   const admin = getSupabaseAdminClient();
   const runId = crypto.randomUUID();
   const now = new Date().toISOString();

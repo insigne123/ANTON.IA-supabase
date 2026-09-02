@@ -30,6 +30,8 @@ export const NativeResearchLeadSchema = z.object({
   companyDomain: z.string().trim().max(300).nullable().optional(),
   companyWebsite: z.string().trim().url().max(2_048).nullable().optional(),
   companyLinkedinUrl: z.string().trim().url().max(2_048).nullable().optional(),
+  descriptionSnippet: optionalText,
+  industry: optionalText,
   organizationIndustry: optionalText,
   organizationSize: z.number().int().positive().max(10_000_000).nullable().optional(),
   city: optionalText,

@@ -13,8 +13,12 @@ import {
   isQualifiedResearchFactEvidence,
   researchTextKey,
 } from '@/lib/research-fact-eligibility';
+import {
+  apolloResearchContextForPrompt,
+  type ApolloResearchContext,
+} from '@/lib/server/apollo-research-context';
 
-export const COMPANY_RESEARCH_ENRICHMENT_PROMPT_VERSION = 'company-research-enrichment/v1';
+export const COMPANY_RESEARCH_ENRICHMENT_PROMPT_VERSION = 'company-research-enrichment/v2';
 
 const CompanyProfileClaimSchema = z.object({
   kind: z.enum(['company_overview', 'company_industry', 'company_service', 'company_size']),
@@ -111,7 +115,7 @@ export function mergeCompanyResearchClaimsV1(input: {
   });
 }
 
-function buildPrompt(snapshot: ResearchSnapshotV1) {
+function buildPrompt(snapshot: ResearchSnapshotV1, apolloContext: ApolloResearchContext | null = null) {
   const sourceById = new Map(snapshot.sources.map((source) => [source.id, source]));
   const evidence = snapshot.evidence
     .filter((item) => {
@@ -148,16 +152,22 @@ function buildPrompt(snapshot: ResearchSnapshotV1) {
     '- Incluye los evidenceIds exactos que respaldan cada afirmación.',
     '- Si una dimensión no está respaldada, no crees un claim para ella.',
     '- No conviertas anuncios, opiniones o planes en hechos actuales.',
+    '- El contexto Apollo es una observación auxiliar del proveedor: úsalo solo para identidad y desambiguación.',
+    '- El contexto Apollo no es evidencia pública y nunca puede respaldar un claim ni sustituir un evidenceId web.',
     '- Evita duplicar las afirmaciones existentes.',
     '',
     `Empresa: ${snapshot.subject.company.name || 'No identificada'}`,
     `Dominio: ${snapshot.subject.company.domain || 'No disponible'}`,
+    `Contexto Apollo no probatorio: ${JSON.stringify(apolloResearchContextForPrompt(apolloContext))}`,
     `Claims existentes: ${JSON.stringify(snapshot.claims.filter((claim) => claim.subjectScope === 'company').map((claim) => ({ kind: claim.kind, statement: claim.statement })))}`,
     `Evidencia: ${JSON.stringify(evidence)}`,
   ].join('\n');
 }
 
-export async function enrichCompanyResearchSnapshotV1(snapshot: ResearchSnapshotV1) {
+export async function enrichCompanyResearchSnapshotV1(
+  snapshot: ResearchSnapshotV1,
+  apolloContext: ApolloResearchContext | null = null,
+) {
   const eligibleEvidenceCount = snapshot.evidence.filter((item) => item.subjectScope === 'company' && ['fact', 'quote'].includes(item.kind)).length;
   if (eligibleEvidenceCount === 0 || !String(process.env.OPENAI_API_KEY || '').trim()) return snapshot;
 
@@ -171,7 +181,7 @@ export async function enrichCompanyResearchSnapshotV1(snapshot: ResearchSnapshot
         || 'gpt-5.6-terra',
       temperature: 0.1,
       schema: CompanyProfileOutputSchema,
-      prompt: buildPrompt(snapshot),
+      prompt: buildPrompt(snapshot, apolloContext),
     });
     return mergeCompanyResearchClaimsV1({
       snapshot,

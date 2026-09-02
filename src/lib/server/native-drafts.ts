@@ -19,7 +19,6 @@ import {
 import {
   buildDraftContextV2,
   createDefaultDraftWritingStyleV2,
-  normalizeDraftSellerProfileV2,
   normalizeDraftWritingStyleV2,
   requiredReportAwareDraftPersonalizationV2,
   type DraftContextBuildResult,
@@ -30,6 +29,7 @@ import {
 import {
   createFailedDraftPreflightV2,
   draftContentFingerprintV2,
+  repairCataloguedDraftPersonalizationV2,
   stripUnapprovedDraftCtasV2,
   validateDraftPreflightV2,
   type DraftPreflightIssueV2,
@@ -45,6 +45,8 @@ import {
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { getNativeSnapshot } from '@/lib/server/native-research';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
+import { loadSellerProfile } from '@/lib/server/seller-profile';
+import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
 import { ResearchSnapshotV1Schema, type ResearchSnapshotV1 } from '@/lib/research-contracts';
 import type { ResearchReportDocumentV1 } from '@/lib/research-report-contracts';
 import { ensureResearchReportDocument } from '@/lib/server/research-report-documents';
@@ -87,12 +89,12 @@ type NativeDraftGenerationClaim = {
 type NativeDraftGenerationMetadata = {
   versionId: string;
   draftId: string;
+  researchSnapshotId: string;
   styleProfileId: string | null;
   claimIds: string[];
 };
 
 type NativeDraftGenerationMetadataInput = NativeDraftGenerationMetadata & NativeDraftAccess & {
-  researchSnapshotId: string;
   generationMethod: 'model' | 'human';
   provider: string | null;
   model: string | null;
@@ -101,6 +103,7 @@ type NativeDraftGenerationMetadataInput = NativeDraftGenerationMetadata & Native
 
 export type NativeDraftBlockedCode =
   | 'recipient_missing'
+  | 'seller_profile_incomplete'
   | 'research_artifact_missing'
   | 'research_artifact_invalid'
   | 'research_not_ready'
@@ -121,7 +124,7 @@ export type NativeDraftGenerationResult =
     context: DraftContextV2;
     preflight: MessagingPreflightV1;
     issues: DraftPreflightIssueV2[];
-    generation: { provider: 'openai'; model: string; promptVersion: 'native-draft/v3' };
+    generation: { provider: 'openai'; model: string; promptVersion: typeof NATIVE_DRAFT_PROMPT_VERSION };
   }
   | {
     status: 'blocked';
@@ -151,6 +154,7 @@ export type NativeDraftGenerationDependencies = {
   ensureReportDocument?: (input: {
     snapshot: ResearchSnapshotV1;
     access: NativeDraftAccess;
+    sellerProfile?: DraftSellerProfileV2 | null;
     generatedAt?: string;
   }) => Promise<ResearchReportDocumentV1>;
   claimGeneration?: (input: NativeDraftAccess & { draftId: string; snapshotId: string; email: string }) => Promise<NativeDraftGenerationClaim>;
@@ -181,10 +185,14 @@ function text(value: unknown) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-export function campaignFollowUpDraftIds(input: NativeDraftAccess & { stepId: string }) {
+export function campaignFollowUpDraftIds(input: NativeDraftAccess & {
+  stepId: string;
+  sellerProfile?: DraftSellerProfileV2;
+}) {
   const identity = canonicalSha256({
-    schemaVersion: 'campaign-follow-up-draft/v1',
+    schemaVersion: 'campaign-follow-up-draft/v2',
     stepId: text(input.stepId),
+    sellerProfileHash: input.sellerProfile ? canonicalSha256(input.sellerProfile) : null,
   });
   return {
     draftId: deterministicMessagingUuid(`native-draft:${input.organizationId}:${input.userId}:${identity}`),
@@ -218,25 +226,39 @@ function unique(values: string[]) {
   return [...new Set(values.map(text).filter(Boolean))];
 }
 
-async function loadSellerProfile(userId: string): Promise<DraftSellerProfileV2> {
-  const { data } = await getSupabaseAdminClient()
-    .from('profiles')
-    .select('full_name,job_title,company_name,company_domain,signatures')
-    .eq('id', userId)
-    .maybeSingle();
-  const profile: any = data || {};
-  const extended = object(profile.signatures?.profile_extended);
-  return normalizeDraftSellerProfileV2({
-    name: profile.full_name || null,
-    jobTitle: profile.job_title || null,
-    companyName: profile.company_name || profile.full_name || 'Mi empresa',
-    companyDomain: profile.company_domain || null,
-    sector: extended.sector || extended.industry || null,
-    description: extended.description || null,
-    services: extended.services || [],
-    valueProposition: extended.valueProposition || extended.value_proposition || null,
-    proofPoints: extended.proofPoints || extended.proof_points || [],
-  });
+function parseNativeSnapshotRow(row: NativeSnapshotRow, expectedSnapshotId: string) {
+  if (!row?.payload) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
+  const snapshot = ResearchSnapshotV1Schema.parse(row.payload);
+  if (
+    snapshot.id !== expectedSnapshotId
+    || (text(row.id) && text(row.id) !== expectedSnapshotId)
+  ) {
+    throw new Error('NATIVE_RESEARCH_SNAPSHOT_CONFLICT');
+  }
+  return snapshot;
+}
+
+function assertNativeDraftMetadata(input: {
+  metadata: NativeDraftGenerationMetadata | null;
+  draft: MessagingDraftV1;
+}): NativeDraftGenerationMetadata {
+  const metadata = input.metadata;
+  if (!metadata || metadata.versionId !== input.draft.versionId || metadata.draftId !== input.draft.draftId) {
+    throw new Error('NATIVE_DRAFT_PROVENANCE_REQUIRED');
+  }
+  if (metadata.researchSnapshotId !== input.draft.researchSnapshotId) {
+    throw new Error('NATIVE_RESEARCH_SNAPSHOT_CONFLICT');
+  }
+  return metadata;
+}
+
+function assertNativeDraftRecipient(snapshot: ResearchSnapshotV1, draft: MessagingDraftV1) {
+  const snapshotEmail = text(snapshot.subject.email).toLowerCase();
+  const draftEmail = text(draft.recipient.email).toLowerCase();
+  if (!snapshotEmail || snapshotEmail !== draftEmail) {
+    throw new Error('NATIVE_RESEARCH_SNAPSHOT_CONFLICT');
+  }
+  return snapshotEmail;
 }
 
 async function loadServerWritingStyle(input: NativeDraftAccess & {
@@ -270,6 +292,20 @@ async function loadServerWritingStyle(input: NativeDraftAccess & {
     contentHash: result.data.content_hash,
     revision: result.data.revision,
   });
+}
+
+async function loadDraftWritingStyle(input: {
+  access: NativeDraftAccess;
+  styleProfileId?: string | null;
+  styleName?: string | null;
+  dependencies?: NativeDraftGenerationDependencies;
+}) {
+  const request = {
+    ...input.access,
+    styleProfileId: input.styleProfileId,
+    styleName: input.styleName,
+  };
+  return input.dependencies?.loadWritingStyle?.(request) || loadServerWritingStyle(request);
 }
 
 async function claimNativeDraftGeneration(input: NativeDraftAccess & {
@@ -307,6 +343,36 @@ async function releaseNativeDraftGeneration(input: NativeDraftAccess & { draftId
   });
   if (error) throw error;
   return data === true;
+}
+
+async function acquireNativeDraftGenerationClaim(
+  input: NativeDraftAccess & { draftId: string; snapshotId: string; email: string },
+  dependencies?: NativeDraftGenerationDependencies,
+) {
+  const claimGeneration = dependencies?.claimGeneration || claimNativeDraftGeneration;
+  const claim = await claimGeneration(input);
+  if (claim.state === 'suppressed') throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
+  if (claim.state !== 'claimed' || !claim.claimToken) {
+    throw new Error('NATIVE_DRAFT_GENERATION_IN_PROGRESS');
+  }
+
+  const releaseGeneration = dependencies?.releaseGeneration || releaseNativeDraftGeneration;
+  return {
+    claimToken: claim.claimToken,
+    async release() {
+      try {
+        const released = await releaseGeneration({
+          organizationId: input.organizationId,
+          userId: input.userId,
+          draftId: input.draftId,
+          claimToken: claim.claimToken!,
+        });
+        if (!released) console.error('[native-drafts] generation claim was not released:', { draftId: input.draftId });
+      } catch (error) {
+        console.error('[native-drafts] generation claim release failed:', error);
+      }
+    },
+  };
 }
 
 async function findExistingNativeDraftContentFingerprints(input: NativeDraftAccess & {
@@ -398,7 +464,7 @@ async function loadNativeDraftMetadata(input: NativeDraftAccess & {
 }): Promise<NativeDraftGenerationMetadata | null> {
   const { data, error } = await getSupabaseAdminClient()
     .from('messaging_draft_generation_metadata')
-    .select('version_id,draft_id,style_profile_id,claim_ids')
+    .select('version_id,draft_id,research_snapshot_id,style_profile_id,claim_ids')
     .eq('organization_id', input.organizationId)
     .eq('user_id', input.userId)
     .eq('version_id', input.versionId)
@@ -408,6 +474,7 @@ async function loadNativeDraftMetadata(input: NativeDraftAccess & {
   return {
     versionId: text(data.version_id),
     draftId: text(data.draft_id),
+    researchSnapshotId: text(data.research_snapshot_id),
     styleProfileId: text(data.style_profile_id) || null,
     claimIds: unique(strings(data.claim_ids)),
   };
@@ -509,43 +576,47 @@ function outputForPreflight(
 ): GeneratedOutreachV2 {
   const approvedCta = context.constraints.cta.exactText;
   const modelBody = stripUnapprovedDraftCtasV2(normalizeNativeDraftBody(generated.body), approvedCta);
-  return {
+  return repairCataloguedDraftPersonalizationV2(context, {
     subject: generated.subject,
     body: normalizeNativeDraftBody(`${modelBody}\n\n${approvedCta}`),
     personalization: requiredReportAwareDraftPersonalizationV2(context),
     hypothesisIds: generated.hypothesisIds,
-  };
+  });
 }
 
 async function createDraftContext(input: {
   access: NativeDraftAccess;
   snapshotRow: NativeSnapshotRow;
+  snapshotId: string;
   styleProfileId?: string | null;
   styleName?: string | null;
+  style?: DraftWritingStyleV2;
+  seller?: DraftSellerProfileV2;
+  ensureReportDocument?: boolean;
   dependencies?: NativeDraftGenerationDependencies;
   now: Date;
 }) {
-  const snapshot = ResearchSnapshotV1Schema.parse(input.snapshotRow.payload);
+  const snapshot = parseNativeSnapshotRow(input.snapshotRow, input.snapshotId);
   const ensureReportDocument = input.dependencies?.ensureReportDocument || (async (request: {
     snapshot: ResearchSnapshotV1;
     access: NativeDraftAccess;
+    sellerProfile?: DraftSellerProfileV2 | null;
     generatedAt?: string;
   }) => (await ensureResearchReportDocument(request)).document);
-  const [seller, style, reportDocument] = await Promise.all([
-    input.dependencies?.loadSellerProfile?.(input.access.userId) || loadSellerProfile(input.access.userId),
-    input.dependencies?.loadWritingStyle?.({
-      ...input.access,
+  const seller = input.seller
+    || await (input.dependencies?.loadSellerProfile?.(input.access.userId) || loadSellerProfile(input.access.userId));
+  const [style, reportDocument] = await Promise.all([
+    input.style || loadDraftWritingStyle({
+      access: input.access,
       styleProfileId: input.styleProfileId,
       styleName: input.styleName,
-    }) || loadServerWritingStyle({
-      ...input.access,
-      styleProfileId: input.styleProfileId,
-      styleName: input.styleName,
+      dependencies: input.dependencies,
     }),
-    snapshot.subject.email
+    input.ensureReportDocument !== false && snapshot.subject.email
       ? ensureReportDocument({
         snapshot,
         access: input.access,
+        sellerProfile: seller,
         generatedAt: input.now.toISOString(),
       })
       : Promise.resolve(null),
@@ -584,6 +655,8 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   instruction?: string | null;
   sequenceContext?: OutreachSequenceContextV2;
   campaignRecipientStepId?: string | null;
+  reservedCampaignDraftIds?: { draftId: string; versionId: string };
+  sellerProfile?: DraftSellerProfileV2;
 }, dependencies?: NativeDraftGenerationDependencies): Promise<NativeDraftGenerationResult> {
   const now = dependencies?.now?.() || new Date();
   const instruction = text(input.instruction);
@@ -593,102 +666,145 @@ export async function createNativeDraft(input: NativeDraftAccess & {
     : undefined;
   const snapshotRow = await (dependencies?.getSnapshot?.({ snapshotId: input.snapshotId, access: input })
     || getNativeSnapshot({ snapshotId: input.snapshotId, access: input }));
-  if (!snapshotRow?.payload) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
-  const parsedSnapshot = ResearchSnapshotV1Schema.parse(snapshotRow.payload);
+  if (!snapshotRow) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
+  const parsedSnapshot = parseNativeSnapshotRow(snapshotRow, input.snapshotId);
   const snapshotEmail = text(parsedSnapshot.subject.email).toLowerCase();
   const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
   if (snapshotEmail && await isSuppressed(snapshotEmail, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
-  const { snapshot, style, result: contextResult } = await createDraftContext({
+  const style = await loadDraftWritingStyle({
     access: input,
-    snapshotRow,
     styleProfileId: input.styleProfileId,
     styleName: input.styleName,
     dependencies,
-    now,
   });
-  if (contextResult.status === 'blocked') return contextBlockResult(contextResult, now);
-  const context = contextResult.context;
-  const email = text(context.recipient.email).toLowerCase();
-  if (!email) return blockedResult({
-    context,
-    code: 'recipient_missing',
-    message: 'La investigación no tiene un email válido para crear un borrador.',
-    now,
-  });
+  if (!snapshotEmail) {
+    const { result: contextResult } = await createDraftContext({
+      access: input,
+      snapshotRow,
+      snapshotId: input.snapshotId,
+      style,
+      ensureReportDocument: false,
+      dependencies,
+      now,
+    });
+    if (contextResult.status === 'blocked') return contextBlockResult(contextResult, now);
+    return blockedResult({
+      context: contextResult.context,
+      code: 'recipient_missing',
+      message: 'La investigación no tiene un email válido para crear un borrador.',
+      now,
+    });
+  }
 
-  if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
+  const email = snapshotEmail;
+  const preliminary = await createDraftContext({
+    access: input,
+    snapshotRow,
+    snapshotId: input.snapshotId,
+    style,
+    seller: input.sellerProfile,
+    ensureReportDocument: false,
+    dependencies,
+    now,
+  });
+  if (preliminary.result.status === 'blocked') return contextBlockResult(preliminary.result, now);
+  const artifactHash = text(snapshotRow.content_hash);
+  const snapshotHash = /^[a-f0-9]{64}$/.test(artifactHash) && artifactHash === canonicalSha256(parsedSnapshot)
+    ? artifactHash
+    : null;
   const campaignRecipientStepId = text(input.campaignRecipientStepId);
+  const reservedCampaignDraftIds = input.reservedCampaignDraftIds;
+  if (reservedCampaignDraftIds && (
+    !campaignRecipientStepId
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reservedCampaignDraftIds.draftId)
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reservedCampaignDraftIds.versionId)
+  )) {
+    throw new Error('NATIVE_DRAFT_CAMPAIGN_RESERVATION_INVALID');
+  }
   const identity = campaignRecipientStepId ? null : canonicalSha256({
-    schemaVersion: 'native-draft/v2',
+    schemaVersion: NATIVE_DRAFT_PROMPT_VERSION,
     idempotencyKey: text(input.idempotencyKey) || null,
     instruction: instruction || null,
     sequenceContext: sequenceContext || null,
-    snapshotId: snapshot.id,
-    snapshotHash: context.research.contentHash,
+    snapshotId: parsedSnapshot.id,
+    snapshotHash,
     recipientEmail: email,
+    sellerProfileHash: canonicalSha256(preliminary.result.context.seller),
     styleHash: style.contentHash,
   });
   const campaignIds = campaignRecipientStepId
-    ? campaignFollowUpDraftIds({ ...input, stepId: campaignRecipientStepId })
+    ? reservedCampaignDraftIds || campaignFollowUpDraftIds({
+      ...input,
+      stepId: campaignRecipientStepId,
+      sellerProfile: preliminary.result.context.seller,
+    })
     : null;
   const draftId = campaignIds?.draftId
     || deterministicMessagingUuid(`native-draft:${input.organizationId}:${input.userId}:${identity}`);
   const versionId = campaignIds?.versionId
     || deterministicMessagingUuid(`native-version:${input.organizationId}:${input.userId}:${identity}`);
-  const findPersistedDraft = dependencies?.findPersistedDraft || ((request) => getMessagingDraftVersionV1(request));
-  const existing = await findPersistedDraft({ ...input, draftId, versionId });
-  if (existing) {
-    const loadMetadata = dependencies?.loadMetadata || loadNativeDraftMetadata;
-    const persistMetadata = dependencies?.persistMetadata || persistNativeDraftMetadata;
-    try {
-      const metadata = await loadMetadata({ ...input, versionId: existing.versionId });
-      if (!metadata) {
-        await persistMetadata({
-          versionId: existing.versionId,
-          draftId: existing.draftId,
-          organizationId: input.organizationId,
-          userId: input.userId,
-          researchSnapshotId: input.snapshotId,
-          generationMethod: 'model',
-          provider: 'openai',
-          model: 'persisted-recovery',
-          promptVersion: 'native-draft/v3',
-          styleProfileId: style.id,
-          claimIds: unique(requiredReportAwareDraftPersonalizationV2(context).map((item) => item.claimId)),
-        });
-      }
-    } catch (error) {
-      console.error('[native-drafts] metadata recovery failed:', error);
-      return failureResult({
-        context,
-        code: 'generation_metadata_persist_failed',
-        message: 'No se pudo reparar la trazabilidad del borrador; no puede aprobarse ni enviarse.',
-        now,
-      });
-    }
-    return {
-      status: 'drafted',
-      draft: existing,
-      context,
-      preflight: existing.preflight,
-      issues: [],
-      generation: { provider: 'openai', model: 'persisted', promptVersion: 'native-draft/v3' },
-    };
-  }
-
-  const claimGeneration = dependencies?.claimGeneration || claimNativeDraftGeneration;
-  const releaseGeneration = dependencies?.releaseGeneration || releaseNativeDraftGeneration;
-  const claim = await claimGeneration({
+  const claim = await acquireNativeDraftGenerationClaim({
     organizationId: input.organizationId,
     userId: input.userId,
     draftId,
     snapshotId: input.snapshotId,
     email,
-  });
-  if (claim.state === 'suppressed') throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
-  if (claim.state === 'busy' || !claim.claimToken) throw new Error('NATIVE_DRAFT_GENERATION_IN_PROGRESS');
+  }, dependencies);
 
   try {
+    const { result: contextResult } = await createDraftContext({
+      access: input,
+      snapshotRow,
+      snapshotId: input.snapshotId,
+      style,
+      seller: preliminary.result.context.seller,
+      dependencies,
+      now,
+    });
+    if (contextResult.status === 'blocked') return contextBlockResult(contextResult, now);
+    const context = contextResult.context;
+    const findPersistedDraft = dependencies?.findPersistedDraft || ((request) => getMessagingDraftVersionV1(request));
+    const existing = await findPersistedDraft({ ...input, draftId, versionId });
+    if (existing) {
+      const loadMetadata = dependencies?.loadMetadata || loadNativeDraftMetadata;
+      const persistMetadata = dependencies?.persistMetadata || persistNativeDraftMetadata;
+      try {
+        const metadata = await loadMetadata({ ...input, versionId: existing.versionId });
+        if (!metadata) {
+          await persistMetadata({
+            versionId: existing.versionId,
+            draftId: existing.draftId,
+            organizationId: input.organizationId,
+            userId: input.userId,
+            researchSnapshotId: input.snapshotId,
+            generationMethod: 'model',
+            provider: 'openai',
+            model: 'persisted-recovery',
+            promptVersion: NATIVE_DRAFT_PROMPT_VERSION,
+            styleProfileId: style.id,
+            claimIds: unique(requiredReportAwareDraftPersonalizationV2(context).map((item) => item.claimId)),
+          });
+        }
+      } catch (error) {
+        console.error('[native-drafts] metadata recovery failed:', error);
+        return failureResult({
+          context,
+          code: 'generation_metadata_persist_failed',
+          message: 'No se pudo reparar la trazabilidad del borrador; no puede aprobarse ni enviarse.',
+          now,
+        });
+      }
+      if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
+      return {
+        status: 'drafted',
+        draft: existing,
+        context,
+        preflight: existing.preflight,
+        issues: [],
+        generation: { provider: 'openai', model: 'persisted', promptVersion: NATIVE_DRAFT_PROMPT_VERSION },
+      };
+    }
+
     if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
     const findExistingContentFingerprints = dependencies?.findExistingContentFingerprints || findExistingNativeDraftContentFingerprints;
     const existingContentFingerprints = await findExistingContentFingerprints({ ...input, email });
@@ -815,17 +931,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
       },
     };
   } finally {
-    try {
-      const released = await releaseGeneration({
-        organizationId: input.organizationId,
-        userId: input.userId,
-        draftId,
-        claimToken: claim.claimToken,
-      });
-      if (!released) console.error('[native-drafts] generation claim was not released:', { draftId });
-    } catch (error) {
-      console.error('[native-drafts] generation claim release failed:', error);
-    }
+    await claim.release();
   }
 }
 
@@ -833,13 +939,26 @@ export async function reviseNativeDraft(input: NativeDraftAccess & {
   draft: MessagingDraftV1;
   subject?: string;
   text?: string;
-}) {
-  const metadata = await loadNativeDraftMetadata({
-    organizationId: input.organizationId,
-    userId: input.userId,
-    versionId: input.draft.versionId,
+}, dependencies?: NativeDraftGenerationDependencies) {
+  const loadMetadata = dependencies?.loadMetadata || loadNativeDraftMetadata;
+  const metadata = assertNativeDraftMetadata({
+    metadata: await loadMetadata({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      versionId: input.draft.versionId,
+    }),
+    draft: input.draft,
   });
-  if (!metadata) throw new Error('NATIVE_DRAFT_PROVENANCE_REQUIRED');
+  if (!input.draft.researchSnapshotId) throw new Error('NATIVE_DRAFT_RESEARCH_SNAPSHOT_REQUIRED');
+  const snapshotRow = await (dependencies?.getSnapshot?.({
+    snapshotId: input.draft.researchSnapshotId,
+    access: input,
+  }) || getNativeSnapshot({ snapshotId: input.draft.researchSnapshotId, access: input }));
+  if (!snapshotRow) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
+  const snapshot = parseNativeSnapshotRow(snapshotRow, input.draft.researchSnapshotId);
+  const email = assertNativeDraftRecipient(snapshot, input.draft);
+  const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
+  if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
   const content: MessagingContentV1 = {
     subject: text(input.subject) || input.draft.content.subject,
     text: normalizeNativeDraftBody(input.text) || input.draft.content.text,
@@ -849,21 +968,36 @@ export async function reviseNativeDraft(input: NativeDraftAccess & {
   if (hashMessagingDraftContent({ ...input.draft, content }) === hashMessagingDraftContent(input.draft)) {
     return input.draft;
   }
-  const persisted = await appendMessagingDraftRevisionV1(input.draft, { content });
-  const copiedMetadata = await loadNativeDraftMetadata({
+  const claim = await acquireNativeDraftGenerationClaim({
     organizationId: input.organizationId,
     userId: input.userId,
-    versionId: persisted.versionId,
-  });
-  if (
-    !copiedMetadata
-    || copiedMetadata.draftId !== persisted.draftId
-    || copiedMetadata.styleProfileId !== metadata.styleProfileId
-    || JSON.stringify(copiedMetadata.claimIds.slice().sort()) !== JSON.stringify(metadata.claimIds.slice().sort())
-  ) {
-    throw new Error('NATIVE_DRAFT_METADATA_PERSIST_FAILED');
+    draftId: input.draft.draftId,
+    snapshotId: input.draft.researchSnapshotId,
+    email,
+  }, dependencies);
+  try {
+    if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
+    const appendRevision = dependencies?.appendRevision || ((draft, changes) => appendMessagingDraftRevisionV1(draft, changes));
+    const persisted = await appendRevision(input.draft, { content });
+    const copiedMetadata = await loadMetadata({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      versionId: persisted.versionId,
+    });
+    if (
+      !copiedMetadata
+      || copiedMetadata.versionId !== persisted.versionId
+      || copiedMetadata.draftId !== persisted.draftId
+      || copiedMetadata.researchSnapshotId !== input.draft.researchSnapshotId
+      || copiedMetadata.styleProfileId !== metadata.styleProfileId
+      || JSON.stringify(copiedMetadata.claimIds.slice().sort()) !== JSON.stringify(metadata.claimIds.slice().sort())
+    ) {
+      throw new Error('NATIVE_DRAFT_METADATA_PERSIST_FAILED');
+    }
+    return persisted;
+  } finally {
+    await claim.release();
   }
-  return persisted;
 }
 
 export async function rewriteNativeDraft(input: NativeDraftAccess & {
@@ -877,101 +1011,133 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
 
   const now = dependencies?.now?.() || new Date();
   const loadMetadata = dependencies?.loadMetadata || loadNativeDraftMetadata;
-  const metadata = await loadMetadata({ ...input, versionId: input.draft.versionId });
-  if (!metadata || metadata.draftId !== input.draft.draftId) {
-    throw new Error('NATIVE_DRAFT_PROVENANCE_REQUIRED');
-  }
+  const metadata = assertNativeDraftMetadata({
+    metadata: await loadMetadata({ ...input, versionId: input.draft.versionId }),
+    draft: input.draft,
+  });
   const snapshotRow = await (dependencies?.getSnapshot?.({
     snapshotId: input.draft.researchSnapshotId,
     access: input,
   }) || getNativeSnapshot({ snapshotId: input.draft.researchSnapshotId, access: input }));
-  if (!snapshotRow?.payload) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
-
-  const { style, result: contextResult } = await createDraftContext({
+  if (!snapshotRow) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
+  const snapshot = parseNativeSnapshotRow(snapshotRow, input.draft.researchSnapshotId);
+  const email = assertNativeDraftRecipient(snapshot, input.draft);
+  const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
+  if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
+  const style = await loadDraftWritingStyle({
+    access: input,
+    styleProfileId: input.styleProfileId || metadata.styleProfileId,
+    dependencies,
+  });
+  const preliminary = await createDraftContext({
     access: input,
     snapshotRow,
-    styleProfileId: input.styleProfileId || metadata.styleProfileId,
+    snapshotId: input.draft.researchSnapshotId,
+    style,
+    ensureReportDocument: false,
     dependencies,
     now,
   });
-  if (contextResult.status === 'blocked') {
-    throw new NativeDraftPreflightError(contextBlockResult(contextResult, now).preflight);
+  if (preliminary.result.status === 'blocked') {
+    throw new NativeDraftPreflightError(contextBlockResult(preliminary.result, now).preflight);
   }
-  const context = contextResult.context;
-  const email = text(input.draft.recipient.email).toLowerCase();
-  const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
-  if (!email || await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
-
-  const previous = outputForPersistedDraft({ draft: input.draft, context, metadata });
-  const findExistingContentFingerprints = dependencies?.findExistingContentFingerprints || findExistingNativeDraftContentFingerprints;
-  const existingContentFingerprints = await findExistingContentFingerprints({
-    ...input,
-    email,
-    excludeVersionId: input.draft.versionId,
-  });
-  existingContentFingerprints.push(draftContentFingerprintV2(previous.subject, previous.body));
-  const generate = dependencies?.generate || generateOutreachFromDraftContextV2;
-
-  let generated: GeneratedOutreachFromDraftContextV2;
-  try {
-    generated = await generate({ context, rewrite: { previous, errors: [], instruction } });
-  } catch (error) {
-    console.warn('[native-drafts] OpenAI requested rewrite failed:', error);
-    throw new Error('NATIVE_DRAFT_OPENAI_REWRITE_FAILED');
-  }
-  let generatedOutput = outputForPreflight(context, generated);
-  let validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now });
-  if (!validation.valid) {
-    try {
-      generated = await generate({
-        context,
-        rewrite: {
-          previous: generatedOutput,
-          errors: validation.issues.map((issue) => issue.message),
-          instruction,
-        },
-      });
-    } catch (error) {
-      console.warn('[native-drafts] OpenAI corrective rewrite failed:', error);
-      throw new Error('NATIVE_DRAFT_OPENAI_REWRITE_FAILED');
-    }
-    generatedOutput = outputForPreflight(context, generated);
-    validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now });
-  }
-  if (!validation.valid) throw new NativeDraftPreflightError(validation.preflight, validation.issues);
-  if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
-
-  const content: MessagingContentV1 = {
-    subject: text(generatedOutput.subject),
-    text: generatedOutput.body,
-    html: null,
-    ...(input.draft.content.deliveryOptions ? { deliveryOptions: input.draft.content.deliveryOptions } : {}),
-  };
-  const appendRevision = dependencies?.appendRevision || ((draft, changes) => appendMessagingDraftRevisionV1(draft, changes));
-  const persisted = await appendRevision(input.draft, { content });
-  const replaceMetadata = dependencies?.replaceMetadata || replaceNativeDraftMetadata;
-  await replaceMetadata({
-    versionId: persisted.versionId,
-    draftId: persisted.draftId,
+  const claim = await acquireNativeDraftGenerationClaim({
     organizationId: input.organizationId,
     userId: input.userId,
-    researchSnapshotId: input.draft.researchSnapshotId,
-    generationMethod: 'model',
-    provider: generated.provider,
-    model: generated.model,
-    promptVersion: generated.promptVersion,
-    styleProfileId: style.id,
-    claimIds: unique(generatedOutput.personalization.map((item) => item.claimId)),
-  });
-  return {
-    draft: persisted,
-    preflight: validation.preflight,
-    generation: {
+    draftId: input.draft.draftId,
+    snapshotId: input.draft.researchSnapshotId,
+    email,
+  }, dependencies);
+
+  try {
+    const { result: contextResult } = await createDraftContext({
+      access: input,
+      snapshotRow,
+      snapshotId: input.draft.researchSnapshotId,
+      style,
+      dependencies,
+      now,
+    });
+    if (contextResult.status === 'blocked') {
+      throw new NativeDraftPreflightError(contextBlockResult(contextResult, now).preflight);
+    }
+    const context = contextResult.context;
+    const previous = outputForPersistedDraft({ draft: input.draft, context, metadata });
+    const findExistingContentFingerprints = dependencies?.findExistingContentFingerprints || findExistingNativeDraftContentFingerprints;
+    const existingContentFingerprints = await findExistingContentFingerprints({
+      ...input,
+      email,
+      excludeVersionId: input.draft.versionId,
+    });
+    existingContentFingerprints.push(draftContentFingerprintV2(previous.subject, previous.body));
+    const generate = dependencies?.generate || generateOutreachFromDraftContextV2;
+
+    let generated: GeneratedOutreachFromDraftContextV2;
+    try {
+      generated = await generate({ context, rewrite: { previous, errors: [], instruction } });
+    } catch (error) {
+      console.warn('[native-drafts] OpenAI requested rewrite failed:', error);
+      throw new Error('NATIVE_DRAFT_OPENAI_REWRITE_FAILED');
+    }
+    let generatedOutput = outputForPreflight(context, generated);
+    let validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now });
+    if (!validation.valid) {
+      try {
+        generated = await generate({
+          context,
+          rewrite: {
+            previous: generatedOutput,
+            errors: validation.issues.map((issue) => issue.message),
+            instruction,
+          },
+        });
+      } catch (error) {
+        console.warn('[native-drafts] OpenAI corrective rewrite failed:', error);
+        throw new Error('NATIVE_DRAFT_OPENAI_REWRITE_FAILED');
+      }
+      generatedOutput = outputForPreflight(context, generated);
+      validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now });
+    }
+    if (!validation.valid) throw new NativeDraftPreflightError(validation.preflight, validation.issues);
+    if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
+
+    const content: MessagingContentV1 = {
+      subject: text(generatedOutput.subject),
+      text: generatedOutput.body,
+      html: null,
+      ...(input.draft.content.deliveryOptions ? { deliveryOptions: input.draft.content.deliveryOptions } : {}),
+    };
+    const appendRevision = dependencies?.appendRevision || ((draft, changes) => appendMessagingDraftRevisionV1(draft, changes));
+    const persisted = await appendRevision(input.draft, { content });
+    const replaceMetadata = dependencies?.replaceMetadata || replaceNativeDraftMetadata;
+    await replaceMetadata({
+      versionId: persisted.versionId,
+      draftId: persisted.draftId,
+      organizationId: input.organizationId,
+      userId: input.userId,
+      researchSnapshotId: input.draft.researchSnapshotId,
+      generationMethod: 'model',
       provider: generated.provider,
       model: generated.model,
       promptVersion: generated.promptVersion,
-    },
-  };
+      styleProfileId: style.id,
+      claimIds: unique([
+        ...generatedOutput.personalization.map((item) => item.claimId),
+        ...generatedOutput.hypothesisIds,
+      ]),
+    });
+    return {
+      draft: persisted,
+      preflight: validation.preflight,
+      generation: {
+        provider: generated.provider,
+        model: generated.model,
+        promptVersion: generated.promptVersion,
+      },
+    };
+  } finally {
+    await claim.release();
+  }
 }
 
 export async function approveNativeDraft(input: NativeDraftAccess & {
@@ -985,50 +1151,82 @@ export async function approveNativeDraft(input: NativeDraftAccess & {
   const now = dependencies?.now?.() || new Date();
   const snapshotRow = await (dependencies?.getSnapshot?.({ snapshotId: current.researchSnapshotId, access: input })
     || getNativeSnapshot({ snapshotId: current.researchSnapshotId, access: input }));
-  if (!snapshotRow?.payload) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
+  if (!snapshotRow) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
+  const snapshot = parseNativeSnapshotRow(snapshotRow, current.researchSnapshotId);
   const loadMetadata = dependencies?.loadMetadata || loadNativeDraftMetadata;
-  const metadata = await loadMetadata({ ...input, versionId: current.versionId });
-  if (!metadata || metadata.draftId !== current.draftId) {
-    throw new Error('NATIVE_DRAFT_PROVENANCE_REQUIRED');
-  }
-  const { result: contextResult } = await createDraftContext({
+  const metadata = assertNativeDraftMetadata({
+    metadata: await loadMetadata({ ...input, versionId: current.versionId }),
+    draft: current,
+  });
+  const email = assertNativeDraftRecipient(snapshot, current);
+  const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
+  if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
+  const style = await loadDraftWritingStyle({
+    access: input,
+    styleProfileId: metadata.styleProfileId,
+    dependencies,
+  });
+  const preliminary = await createDraftContext({
     access: input,
     snapshotRow,
-    styleProfileId: metadata.styleProfileId,
+    snapshotId: current.researchSnapshotId,
+    style,
+    ensureReportDocument: false,
     dependencies,
     now,
   });
-  if (contextResult.status === 'blocked') {
-    throw new NativeDraftPreflightError(contextBlockResult(contextResult, now).preflight);
+  if (preliminary.result.status === 'blocked') {
+    throw new NativeDraftPreflightError(contextBlockResult(preliminary.result, now).preflight);
   }
-  const context = contextResult.context;
-  const email = text(current.recipient.email).toLowerCase();
-  const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
-  if (!email || await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
-  const findExistingContentFingerprints = dependencies?.findExistingContentFingerprints || findExistingNativeDraftContentFingerprints;
-  const existingContentFingerprints = await findExistingContentFingerprints({
-    ...input,
+  const claim = await acquireNativeDraftGenerationClaim({
+    organizationId: input.organizationId,
+    userId: input.userId,
+    draftId: current.draftId,
+    snapshotId: current.researchSnapshotId,
     email,
-    excludeVersionId: current.versionId,
-  });
-  const validation = validateDraftPreflightV2(
-    context,
-    outputForPersistedDraft({ draft: current, context, metadata }),
-    { existingContentFingerprints, now },
-  );
-  if (!validation.valid) throw new NativeDraftPreflightError(validation.preflight, validation.issues);
+  }, dependencies);
 
-  const warnings = unique([...(validation.preflight.warnings || []), ...(input.warnings || [])]).slice(0, 100);
-  const { data, error } = await getSupabaseAdminClient().rpc('approve_messaging_draft_v1', {
-    p_draft_id: input.draftId,
-    p_version_id: input.versionId,
-    p_organization_id: input.organizationId,
-    p_user_id: input.userId,
-    p_warnings: warnings,
-  });
-  if (error) throw error;
-  const payload = data && typeof data === 'object' && 'payload' in data ? (data as any).payload : data;
-  return MessagingDraftV1Schema.parse(payload);
+  try {
+    const { result: contextResult } = await createDraftContext({
+      access: input,
+      snapshotRow,
+      snapshotId: current.researchSnapshotId,
+      style,
+      dependencies,
+      now,
+    });
+    if (contextResult.status === 'blocked') {
+      throw new NativeDraftPreflightError(contextBlockResult(contextResult, now).preflight);
+    }
+    const context = contextResult.context;
+    const findExistingContentFingerprints = dependencies?.findExistingContentFingerprints || findExistingNativeDraftContentFingerprints;
+    const existingContentFingerprints = await findExistingContentFingerprints({
+      ...input,
+      email,
+      excludeVersionId: current.versionId,
+    });
+    const validation = validateDraftPreflightV2(
+      context,
+      outputForPersistedDraft({ draft: current, context, metadata }),
+      { existingContentFingerprints, now },
+    );
+    if (!validation.valid) throw new NativeDraftPreflightError(validation.preflight, validation.issues);
+    if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
+
+    const warnings = unique([...(validation.preflight.warnings || []), ...(input.warnings || [])]).slice(0, 100);
+    const { data, error } = await getSupabaseAdminClient().rpc('approve_messaging_draft_v1', {
+      p_draft_id: input.draftId,
+      p_version_id: input.versionId,
+      p_organization_id: input.organizationId,
+      p_user_id: input.userId,
+      p_warnings: warnings,
+    });
+    if (error) throw error;
+    const payload = data && typeof data === 'object' && 'payload' in data ? (data as any).payload : data;
+    return MessagingDraftV1Schema.parse(payload);
+  } finally {
+    await claim.release();
+  }
 }
 
 export function isNativeDraftVersionConflict(error: unknown) {
@@ -1037,7 +1235,11 @@ export function isNativeDraftVersionConflict(error: unknown) {
   const message = text(details.message).toLowerCase();
   return code === '40001'
     || code === '40400'
+    || code === 'NATIVE_RESEARCH_SNAPSHOT_CONFLICT'
+    || code === 'NATIVE_DRAFT_METADATA_CONFLICT'
     || message.includes('expected parent version')
     || message.includes('stale messaging draft parent')
-    || message.includes('is not current');
+    || message.includes('is not current')
+    || message.includes('native_research_snapshot_conflict')
+    || message.includes('native_draft_metadata_conflict');
 }

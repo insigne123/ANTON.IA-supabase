@@ -40,7 +40,16 @@ export async function POST(req: NextRequest, context: { params: Promise<{ draftI
     if (isNativeDraftVersionConflict(error)) {
       return NextResponse.json({ error: 'NATIVE_DRAFT_VERSION_CONFLICT' }, { status: 409 });
     }
+    if (error?.message === 'NATIVE_DRAFT_PRIVACY_SUPPRESSED') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_PRIVACY_SUPPRESSED' }, { status: 409 });
+    }
+    if (error?.message === 'NATIVE_DRAFT_GENERATION_IN_PROGRESS') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_GENERATION_IN_PROGRESS' }, { status: 409 });
+    }
+    if (error?.message === 'NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_SNAPSHOT_NOT_FOUND' }, { status: 404 });
+    }
     console.error('[native-drafts] approve failed:', error);
-    return NextResponse.json({ error: 'NATIVE_DRAFT_APPROVE_FAILED', message: error?.message || 'No se pudo aprobar el borrador.' }, { status: 500 });
+    return NextResponse.json({ error: 'NATIVE_DRAFT_APPROVE_FAILED', message: 'No se pudo aprobar el borrador.' }, { status: 500 });
   }
 }

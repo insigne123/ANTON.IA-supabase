@@ -28,6 +28,9 @@ export type DraftPreflightIssueV2 = {
   code:
     | 'subject_length'
     | 'body_length'
+    | 'body_structure'
+    | 'commercial_relevance'
+    | 'abstract_language'
     | 'unresolved_placeholder'
     | 'prohibited_phrase'
     | 'cta_count'
@@ -94,6 +97,21 @@ const personalizationBoilerplate = /\b(?:ir al contenido|profile picture|email &
 
 export function draftEvidencePersonalizationStatementV2(value: unknown) {
   const statement = text(value);
+  const conditionalClause = /,\s*(?:si\b|siempre que\b|aunque\b|cuando\b|porque\b|mientras\b|salvo\b|excepto\b|a menos que\b)/i.test(statement);
+  const focusedListItem = statement.includes(',') && hasEnumerationCue(statement) && !conditionalClause
+    ? statement
+      .split(',')
+      .map(text)
+      .find((candidate) => {
+        const words = wordCount(candidate);
+        return candidate.length >= 24
+          && candidate.length <= 120
+          && words >= 4
+          && words <= 16
+          && !personalizationBoilerplate.test(candidate);
+      })
+    : undefined;
+  if (focusedListItem) return focusedListItem;
   if (statement.length <= 180 && !personalizationBoilerplate.test(statement)) return statement;
   const excerpt = statement
     .split(/(?:[.!?;]\s+|\|)/)
@@ -146,6 +164,14 @@ function wordCount(value: string) {
   return value.match(/[\p{L}\p{N}]+/gu)?.length || 0;
 }
 
+function bodyParagraphs(value: string) {
+  return String(value || '')
+    .replace(/\r\n?/g, '\n')
+    .split(/\n\s*\n/)
+    .map(text)
+    .filter(Boolean);
+}
+
 function sentenceParts(value: string) {
   return value
     .split(/(?<=[.!?])\s+|\n{2,}/)
@@ -153,7 +179,10 @@ function sentenceParts(value: string) {
     .filter(Boolean);
 }
 
-const draftCtaCue = /\b(?:agenda(?:mos|r)?|agend(?:amos|ar)?|coordina(?:mos|r)?|conversemos|conversar|hablemos|hablar|reunion|reunión|llamada|call|calendly|calendar|te parece|te sirve|podemos (?:hablar|conversar)|responde|disponibilidad)\b/i;
+const draftCtaCue = /\b(?:agenda(?:mos|r)?|agend(?:amos|ar)?|coordina(?:mos|r)?\s+(?:una\s+)?(?:reunion|reunión|llamada|call|cita)|conversemos|conversar|hablemos|hablar|reunion|reunión|llamada|call|calendly|calendar|te parece|te sirve|podemos (?:hablar|conversar|coordinar)|responde|disponibilidad)\b/i;
+const commercialActionCue = /\b(?:ayud\w*|automat\w*|orden\w*|reun\w*|encontr\w*|respond\w*|actualiz\w*|dej\w*|part\w*|trabaj\w*)\b/i;
+const commercialOutcomeCue = /\b(?:para\s+\p{L}|podr[ií]a|quiz[aá]s|si\b|cuando\b|as[ií]|sin\s+\p{L})/iu;
+const abstractCommercialLanguage = /\b(?:no\s+(?:quiero|quisiera|busco)\s+asumir|sin\s+asumir|explorar\s+si|prioridades?\s+(?:actuales|comerciales)|(?:ese|este|un)\s+relato|relato\s+comercial|narrativa\s+comercial|mensajes?\s+comerciales?)\b/i;
 
 function isUnapprovedDraftCtaSentence(sentence: string) {
   return draftCtaCue.test(sentence) || /[¿?]/.test(sentence);
@@ -188,6 +217,12 @@ function materialPersonalizationTerms(value: string) {
     .filter((term) => term.length >= 4 && !personalizationStopWords.has(term));
 }
 
+function hasEnumerationCue(value: string) {
+  const separatorCount = (value.match(/[,;]/g) || []).length;
+  return separatorCount >= 2
+    || /[,;]\s+[^.!?]+\b(?:y|e|o)\b/i.test(value);
+}
+
 function hasGroundedPersonalization(
   context: DraftContextV2,
   personalization: DraftPersonalizationProvenanceV2[],
@@ -206,6 +241,126 @@ function hasGroundedPersonalization(
     const minimumMatches = Math.min(2, materialTerms.length);
     return Boolean(statement && minimumMatches > 0 && matchedTerms.length >= minimumMatches);
   });
+}
+
+function hasCataloguedPersonalization(
+  context: DraftContextV2,
+  personalization: DraftPersonalizationProvenanceV2[],
+  body: string,
+) {
+  return Boolean(cataloguedPersonalizationSentence(context, personalization, body));
+}
+
+function cataloguedPersonalizationSentence(
+  context: DraftContextV2,
+  personalization: DraftPersonalizationProvenanceV2[],
+  body: string,
+) {
+  const evidenceById = new Map(context.evidence.map((evidence) => [evidence.evidenceId, evidence]));
+  const sentences = sentenceParts(body);
+  for (const item of personalization) {
+    const statement = text(evidenceById.get(item.evidenceId)?.statement || '');
+    const materialTerms = [...new Set(materialPersonalizationTerms(statement))];
+    if (materialTerms.length < 7) continue;
+    const sentence = sentences.find((candidate) => hasEnumerationCue(candidate) && (
+      materialTerms.filter((term) => normalizeForMatch(candidate).includes(term)).length >= 5
+    ));
+    if (sentence) return { sentence, materialTerms };
+  }
+  return null;
+}
+
+export function repairCataloguedDraftPersonalizationV2(
+  context: DraftContextV2,
+  outputInput: GeneratedOutreachV2,
+) {
+  const output = GeneratedOutreachV2Schema.parse(outputInput);
+  let body = output.body;
+
+  for (let attempt = 0; attempt < output.personalization.length; attempt += 1) {
+    const catalogued = cataloguedPersonalizationSentence(context, output.personalization, body);
+    if (!catalogued) break;
+    const separatorIndexes = [...new Set([
+      ...[...catalogued.sentence.matchAll(/[,;]/g)].map((match) => match.index),
+      ...[...catalogued.sentence.matchAll(/\s+(?:y|e|o)\s+/gi)].map((match) => match.index),
+    ])].sort((left, right) => Number(left) - Number(right));
+    const replacements = separatorIndexes.flatMap((index) => {
+      if (index === undefined) return [];
+      const candidate = text(catalogued.sentence.slice(0, index)).replace(/[,:;.!?]+$/g, '');
+      const normalizedCandidate = normalizeForMatch(candidate);
+      const matchedTerms = catalogued.materialTerms.filter((term) => normalizedCandidate.includes(term));
+      const endsWithConnector = /\b(?:a|con|de|del|e|el|en|la|las|los|o|para|por|un|una|y)$/i.test(candidate);
+      return wordCount(candidate) >= 5
+        && matchedTerms.length >= 2
+        && !endsWithConnector
+        && !hasEnumerationCue(candidate)
+        ? [`${candidate}.`]
+        : [];
+    });
+    const replacement = replacements.find((candidate) => (
+      wordCount(body.replace(catalogued.sentence, candidate)) >= context.constraints.body.minWords
+    )) || replacements[0];
+    if (!replacement || replacement === catalogued.sentence) break;
+    body = body.replace(catalogued.sentence, replacement);
+  }
+
+  return GeneratedOutreachV2Schema.parse({ ...output, body });
+}
+
+function commercialOfferParagraph(body: string, approvedCta: string) {
+  const paragraphs = bodyParagraphs(approvedCta ? body.split(approvedCta).join(' ') : body);
+  return paragraphs[paragraphs.length - 1] || '';
+}
+
+const sellerOfferStopWords = new Set([
+  'ayuda', 'ayudamos', 'clientes', 'empresa', 'empresas', 'equipo', 'equipos', 'informacion',
+  'negocio', 'para', 'producto', 'productos',
+  'resultado', 'resultados', 'servicio', 'servicios', 'solucion', 'soluciones', 'tarea', 'tareas',
+  'trabajo', 'valor',
+]);
+
+function sellerOfferTerms(context: DraftContextV2) {
+  const values = [
+    context.seller.valueProposition,
+    ...context.seller.services,
+    ...context.seller.proofPoints,
+  ];
+  return [...new Set(values.flatMap((value) => normalizeForMatch(value).split(' ')))]
+    .filter((term) => term.length >= 5 && !sellerOfferStopWords.has(term));
+}
+
+function relatedCommercialTerm(left: string, right: string) {
+  if (left === right) return true;
+  const prefixLength = Math.min(left.length, right.length, 8);
+  return prefixLength >= 7 && left.slice(0, prefixLength) === right.slice(0, prefixLength);
+}
+
+function isGroundedInSellerOffer(context: DraftContextV2, offerParagraph: string) {
+  const declaredTerms = sellerOfferTerms(context);
+  if (declaredTerms.length === 0) return false;
+  const outputTerms = normalizeForMatch(offerParagraph).split(' ').filter((term) => term.length >= 5);
+  return declaredTerms.some((declared) => outputTerms.some((output) => relatedCommercialTerm(declared, output)));
+}
+
+function isGroundedInTargetEvidence(context: DraftContextV2, offerParagraph: string) {
+  const outputTerms = new Set(materialPersonalizationTerms(offerParagraph));
+  return context.evidence.some((evidence) => materialPersonalizationTerms(
+    draftEvidencePersonalizationStatementV2(evidence.statement),
+  ).some((term) => outputTerms.has(term)));
+}
+
+function hasCommercialRelevance(context: DraftContextV2, body: string, approvedCta: string) {
+  const sellerName = normalizeForMatch(context.seller.companyName);
+  const offerParagraph = commercialOfferParagraph(body, approvedCta);
+  const normalizedOffer = normalizeForMatch(offerParagraph);
+  const sellerMentioned = !sellerName
+    || sellerName === normalizeForMatch('Mi empresa')
+    || normalizedOffer.includes(sellerName);
+  return sellerMentioned
+    && commercialActionCue.test(offerParagraph)
+    && commercialOutcomeCue.test(offerParagraph)
+    && isGroundedInSellerOffer(context, offerParagraph)
+    && isGroundedInTargetEvidence(context, offerParagraph);
 }
 
 function containsHypothesisHedge(body: string) {
@@ -266,6 +421,7 @@ export function validateDraftPreflightV2(
 ): DraftPreflightV2Result {
   const output = GeneratedOutreachV2Schema.parse(outputInput);
   const subject = text(output.subject);
+  const rawBody = String(output.body || '').trim();
   const body = text(output.body);
   const issues: DraftPreflightIssueV2[] = [];
   const add = (code: DraftPreflightIssueV2['code'], message: string, location: DraftPreflightIssueV2['location']) => {
@@ -279,6 +435,9 @@ export function validateDraftPreflightV2(
   const words = wordCount(body);
   if (words < context.constraints.body.minWords || words > context.constraints.body.maxWords) {
     add('body_length', `El cuerpo debe tener entre ${context.constraints.body.minWords} y ${context.constraints.body.maxWords} palabras.`, 'body');
+  }
+  if (bodyParagraphs(rawBody).length < 4) {
+    add('body_structure', 'El correo debe separar el saludo, dos párrafos útiles y el CTA con líneas en blanco.', 'body');
   }
   if (hasPlaceholder(subject) || hasPlaceholder(body)) {
     add('unresolved_placeholder', 'El correo contiene placeholders sin resolver.', 'body');
@@ -309,6 +468,13 @@ export function validateDraftPreflightV2(
     || hasExtraQuestion
   ) {
     add('cta_count', 'El correo debe incluir exactamente un CTA y usar el CTA aprobado para este estilo.', 'body');
+  }
+
+  if (!hasCommercialRelevance(context, rawBody, requiredCta)) {
+    add('commercial_relevance', 'El último párrafo útil debe conectar una capacidad declarada en el perfil con una acción concreta y una consecuencia práctica.', 'body');
+  }
+  if (abstractCommercialLanguage.test(bodyOutsideRequiredCta)) {
+    add('abstract_language', 'El correo usa lenguaje meta o abstracto en lugar de explicar una acción comercial concreta.', 'body');
   }
 
   const existingFingerprints = new Set(options.existingContentFingerprints || []);
@@ -342,6 +508,9 @@ export function validateDraftPreflightV2(
   }
   if (output.personalization.length > 0 && !hasGroundedPersonalization(context, output.personalization, `${subject} ${body}`)) {
     add('personalization_invalid', 'La personalización debe conservar los conceptos materiales de la evidencia seleccionada.', 'body');
+  }
+  if (output.personalization.length > 0 && hasCataloguedPersonalization(context, output.personalization, body)) {
+    add('personalization_invalid', 'La personalización enumera la fuente como una ficha; debe usar solo uno o dos detalles en lenguaje natural.', 'body');
   }
 
   const hypothesesById = new Map(context.hypotheses.map((hypothesis) => [hypothesis.claimId, hypothesis]));

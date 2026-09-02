@@ -26,7 +26,7 @@ export const DRAFT_CONTEXT_V2_SCHEMA_VERSION = 'draft-context/v2';
 export const DRAFT_CONTEXT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 export const MIN_DRAFT_QUALITY_SCORE = 48;
 
-export const DEFAULT_DRAFT_CTA = '¿Te parece una conversación breve de 15 minutos esta semana?';
+export const DEFAULT_DRAFT_CTA = '¿Te parece si lo conversamos 15 minutos esta semana?';
 export const DRAFT_PROHIBITED_PHRASES = [
   'soy una ia',
   'como ia',
@@ -43,6 +43,44 @@ export const DRAFT_PROHIBITED_PHRASES = [
   'por tu rol',
   'por tu cargo',
   'en tu cargo',
+  'con ese alcance',
+  'con este alcance',
+  'mi foco sería',
+  'mi foco es',
+  'una idea puntual',
+  'una idea para',
+  'una idea sobre',
+  'un punto sobre',
+  'forma acotada',
+  'te comparto el punto',
+  'te dejo el punto',
+  'de manera breve',
+  'sin sumar otra capa de trabajo',
+  'ese es el contexto que tenía presente',
+  'por si alcanzaste a revisarlo',
+  'por si pudiste revisarlo',
+  'retomo la idea',
+  'pensé que podría ser útil',
+  'quería compartirte una idea',
+  'he visto que',
+  'he notado que',
+  'se enfoca en',
+  'lo que permite',
+  'esto puede hacer',
+  'puede ayudar',
+  'facilitando',
+  'ahorrando tiempo',
+  'acceso rápido',
+  'tareas más importantes',
+  'tareas estratégicas',
+  'flujo constante',
+  'tiempo valioso',
+  'actividades más productivas',
+  'eficiencia operativa',
+  'implica trabajar con',
+  'hacer más eficiente',
+  'sin agregar carga adicional',
+  'optimización en',
   'seguimiento',
   'follow-up',
   'follow up',
@@ -57,6 +95,18 @@ export const DRAFT_PROHIBITED_PHRASES = [
   'claim id',
   'evidence id',
   'preflight',
+  'no quiero asumir',
+  'sin asumir',
+  'asumir prioridades',
+  'prioridades actuales',
+  'explorar si',
+  'podría ser pertinente',
+  'conviene explorar',
+  'ordenar ese relato',
+  'ese relato',
+  'relato comercial',
+  'narrativa comercial',
+  'mensajes comerciales',
 ] as const;
 
 const NullableTextSchema = z.string().trim().min(1).max(2_000).nullable();
@@ -166,7 +216,7 @@ export const DraftContextV2Schema = z.object({
   hypotheses: z.array(DraftHypothesisV2Schema).max(20),
   constraints: z.object({
     subject: z.object({ minCharacters: z.literal(3), maxCharacters: z.literal(80) }).strict(),
-    body: z.object({ minWords: z.literal(60), maxWords: z.literal(180) }).strict(),
+    body: z.object({ minWords: z.literal(35), maxWords: z.literal(180) }).strict(),
     cta: z.object({ exactText: z.string().trim().min(8).max(240), maximumCount: z.literal(1) }).strict(),
     prohibitedPhrases: z.array(z.string().trim().min(1)).min(1),
     minimumEvidenceProvenance: z.literal(1),
@@ -177,6 +227,7 @@ export type DraftContextV2 = z.infer<typeof DraftContextV2Schema>;
 
 export type DraftContextBlockReason =
   | 'recipient_missing'
+  | 'seller_profile_incomplete'
   | 'research_artifact_missing'
   | 'research_artifact_invalid'
   | 'research_not_ready'
@@ -332,6 +383,11 @@ export function normalizeDraftSellerProfileV2(value: unknown): DraftSellerProfil
   });
 }
 
+export function hasUsableDraftSellerOfferV2(seller: DraftSellerProfileV2) {
+  return seller.services.some((service) => text(service).length >= 3)
+    || text(seller.valueProposition).length >= 12;
+}
+
 export function normalizeDraftWritingStyleV2(value: unknown): DraftWritingStyleV2 {
   const style = object(value);
   const profile = object(style.profile);
@@ -405,7 +461,14 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
       },
       supportedFactClaimIds: factClaimsByEvidenceId.get(item.id) || [],
     })];
-  });
+  }).sort((left, right) => {
+    const leftFactual = left.supportedFactClaimIds.length > 0;
+    const rightFactual = right.supportedFactClaimIds.length > 0;
+    if (leftFactual !== rightFactual) return leftFactual ? -1 : 1;
+    if (left.subjectScope !== right.subjectScope) return left.subjectScope === 'company' ? -1 : 1;
+    if (left.confidence !== right.confidence) return right.confidence - left.confidence;
+    return left.evidenceId.localeCompare(right.evidenceId);
+  }).slice(0, 50);
   const hypotheses = snapshot.claims
     .filter((claim) => claim.classification === 'hypothesis' && isFreshResearchClaim(claim, nowMs))
     .flatMap((claim) => {
@@ -435,7 +498,9 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
           supportingEvidenceIds,
         })]
         : [];
-    });
+    })
+    .sort((left, right) => right.confidence - left.confidence || left.claimId.localeCompare(right.claimId))
+    .slice(0, 20);
   const reportDocument = input.reportDocument
     ? validateResearchReportDocumentCitationsV1(input.reportDocument, snapshot)
     : null;
@@ -511,7 +576,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
     hypotheses,
     constraints: {
       subject: { minCharacters: 3, maxCharacters: 80 },
-      body: { minWords: 60, maxWords: 180 },
+      body: { minWords: 35, maxWords: 180 },
       cta: { exactText: styleCta(input.style), maximumCount: 1 },
       prohibitedPhrases: [...DRAFT_PROHIBITED_PHRASES],
       minimumEvidenceProvenance: 1,
@@ -542,6 +607,14 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
   }
   if (!quality.draftEligibility.eligible || quality.score < MIN_DRAFT_QUALITY_SCORE) {
     return { status: 'blocked', context, reason: 'quality_below_threshold', message: `La calidad de investigación (${quality.score}) no alcanza el mínimo para redactar (${MIN_DRAFT_QUALITY_SCORE}).` };
+  }
+  if (!hasUsableDraftSellerOfferV2(context.seller)) {
+    return {
+      status: 'blocked',
+      context,
+      reason: 'seller_profile_incomplete',
+      message: 'Completa Productos y servicios o Propuesta de valor en tu perfil antes de crear el borrador.',
+    };
   }
   return { status: 'ready', context };
 }

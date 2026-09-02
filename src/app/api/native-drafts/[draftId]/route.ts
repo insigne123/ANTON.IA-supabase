@@ -17,7 +17,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ draftI
     return NextResponse.json({ ok: true, draft }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: any) {
     if (error?.name === 'AuthError') return handleAuthError(error);
-    return NextResponse.json({ error: 'NATIVE_DRAFT_READ_FAILED', message: error?.message || 'No se pudo leer el borrador.' }, { status: 500 });
+    return NextResponse.json({ error: 'NATIVE_DRAFT_READ_FAILED', message: 'No se pudo leer el borrador.' }, { status: 500 });
   }
 }
 
@@ -29,7 +29,10 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ draft
     if (!organizationId) return NextResponse.json({ error: 'NATIVE_DRAFT_NOT_FOUND' }, { status: 404 });
     const current = await getCurrentNativeDraft({ organizationId, userId: auth.user.id, draftId });
     if (!current) return NextResponse.json({ error: 'NATIVE_DRAFT_NOT_FOUND' }, { status: 404 });
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_INVALID_JSON' }, { status: 400 });
+    }
     const draft = await reviseNativeDraft({
       organizationId,
       userId: auth.user.id,
@@ -40,9 +43,18 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ draft
     return NextResponse.json({ ok: true, draft }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
   } catch (error: any) {
     if (error?.name === 'AuthError') return handleAuthError(error);
+    if (error?.name === 'SyntaxError') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_INVALID_JSON' }, { status: 400 });
+    }
     if (isNativeDraftVersionConflict(error)) {
       return NextResponse.json({ error: 'NATIVE_DRAFT_VERSION_CONFLICT' }, { status: 409 });
     }
-    return NextResponse.json({ error: 'NATIVE_DRAFT_UPDATE_FAILED', message: error?.message || 'No se pudo guardar la revisión.' }, { status: 500 });
+    if (error?.message === 'NATIVE_DRAFT_PRIVACY_SUPPRESSED') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_PRIVACY_SUPPRESSED' }, { status: 409 });
+    }
+    if (error?.message === 'NATIVE_DRAFT_GENERATION_IN_PROGRESS') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_GENERATION_IN_PROGRESS' }, { status: 409 });
+    }
+    return NextResponse.json({ error: 'NATIVE_DRAFT_UPDATE_FAILED', message: 'No se pudo guardar la revisión.' }, { status: 500 });
   }
 }

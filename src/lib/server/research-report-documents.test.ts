@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   buildDeterministicResearchReportDocumentV1,
   RESEARCH_REPORT_PROMPT_VERSION,
+  sellerProfileHash,
   type ResearchReportSynthesisResult,
 } from '@/ai/flows/synthesize-research-report';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
@@ -42,8 +43,9 @@ test('native processing checkpoints the snapshot before synthesis and detail GET
   const settlement = normalFlow.indexOf('updateRunItem');
   assert.ok(terminal >= 0 && snapshotRow > terminal && synthesis > snapshotRow && settlement > synthesis);
   assert.match(pipeline, /terminalCheckpointStored = true/);
-  assert.match(pipeline, /ensureResearchReportDocument\(\{ snapshot, access \}\)/);
-  assert.match(detailRoute, /loadResearchReportDocument/);
+  assert.match(pipeline, /ensureResearchReportDocument\(\{ snapshot, access, sellerProfile \}\)/);
+  assert.match(detailRoute, /ensureResearchReportDocument/);
+  assert.match(detailRoute, /loadSellerProfile/);
   assert.match(detailRoute, /reportDocument: reportDocument\?\.document \|\| null/);
   assert.match(detailRoute, /reportSynthesis:/);
 });
@@ -62,6 +64,7 @@ test('a historical snapshot without a report is lazily synthesized and persisted
       provider: 'openai',
       model: null,
       promptVersion: RESEARCH_REPORT_PROMPT_VERSION,
+      sellerProfileHash: document.synthesis.sellerProfileHash!,
       retryable: true,
       errorCode: 'report_synthesis_failed',
       errorMessage: 'Deterministic test fallback.',
@@ -148,6 +151,15 @@ test('report persistence permits fallback-to-model and prompt-version upgrades',
   assert.equal(researchReportDocumentInternals.shouldPersistResearchReportTransition(model, 'model'), false);
   assert.equal(researchReportDocumentInternals.shouldPersistResearchReportTransition(model, 'fallback'), false);
   assert.equal(researchReportDocumentInternals.shouldPersistResearchReportTransition({ ...model, promptVersion: 'legacy/v1' }, 'model'), true);
+  assert.equal(researchReportDocumentInternals.shouldPersistResearchReportTransition({ ...model, promptVersion: 'legacy/v1' }, 'fallback'), true);
+
+  const sellerProfile = { companyName: 'Northstar', services: ['Automatizacion de operaciones'] };
+  const profileHash = sellerProfileHash(sellerProfile);
+  assert.equal(researchReportDocumentInternals.shouldPersistResearchReportTransition(fallback, 'fallback', RESEARCH_REPORT_PROMPT_VERSION, profileHash), true);
+  assert.equal(researchReportDocumentInternals.shouldPersistResearchReportTransition({
+    ...fallback,
+    document: { ...fallback.document, synthesis: { ...fallback.document.synthesis, sellerProfileHash: profileHash } },
+  }, 'fallback', RESEARCH_REPORT_PROMPT_VERSION, profileHash), false);
 });
 
 test('retryable fallback reports retry synthesis while model reports remain immutable', async () => {
@@ -166,8 +178,9 @@ test('retryable fallback reports retry synthesis while model reports remain immu
     document,
     metadata: {
       status: 'partial', generationMethod: 'fallback', provider: 'openai', model: null,
-      promptVersion: RESEARCH_REPORT_PROMPT_VERSION, retryable: true,
-      errorCode: 'report_synthesis_failed', errorMessage: 'Retryable fallback.',
+       promptVersion: RESEARCH_REPORT_PROMPT_VERSION, retryable: true,
+       sellerProfileHash: document.synthesis.sellerProfileHash!,
+       errorCode: 'report_synthesis_failed', errorMessage: 'Retryable fallback.',
     },
   };
   const dependencies = {
@@ -186,4 +199,55 @@ test('retryable fallback reports retry synthesis while model reports remain immu
     load: async () => ({ ...fallback, generationMethod: 'model', retryable: false }),
   });
   assert.equal(synthesizeCalls, 0);
+});
+
+test('legacy report coverage is regenerated before current strict validation', async () => {
+  const snapshot = draftSnapshotFixture();
+  const generatedAt = DRAFT_FIXTURE_NOW.toISOString();
+  const currentDocument = buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt });
+  const legacyDocument = {
+    ...currentDocument,
+    completeness: {
+      ...currentDocument.completeness,
+      claimCoverage: { available: 3, represented: 3, score: 1 },
+    },
+    synthesis: { ...currentDocument.synthesis, promptVersion: 'legacy/v4' },
+  };
+  const legacy: StoredResearchReportDocument = {
+    id: 'stored-report-id', researchSnapshotId: snapshot.id, organizationId: DRAFT_FIXTURE_IDS.organization,
+    userId: DRAFT_FIXTURE_IDS.user, status: 'completed', generationMethod: 'model', provider: 'openai', model: 'legacy-model',
+    promptVersion: 'legacy/v4', contentHash: canonicalSha256(legacyDocument), retryable: false,
+    errorCode: null, errorMessage: null, document: legacyDocument, generatedAt,
+    createdAt: generatedAt, updatedAt: generatedAt,
+  };
+  const synthesis: ResearchReportSynthesisResult = {
+    document: currentDocument,
+    metadata: {
+      status: currentDocument.synthesis.status,
+      generationMethod: currentDocument.synthesis.method,
+      provider: 'openai', model: null, promptVersion: RESEARCH_REPORT_PROMPT_VERSION,
+      sellerProfileHash: currentDocument.synthesis.sellerProfileHash!, retryable: true,
+      errorCode: 'report_synthesis_failed', errorMessage: 'Fallback exhaustivo.',
+    },
+  };
+  let synthesizeCalls = 0;
+
+  const result = await ensureResearchReportDocument({
+    snapshot,
+    access: { organizationId: DRAFT_FIXTURE_IDS.organization, userId: DRAFT_FIXTURE_IDS.user },
+  }, {
+    load: async () => legacy,
+    synthesize: async () => { synthesizeCalls += 1; return synthesis; },
+    upsert: async () => ({
+      ...legacy,
+      status: synthesis.metadata.status,
+      generationMethod: synthesis.metadata.generationMethod,
+      promptVersion: synthesis.metadata.promptVersion,
+      document: synthesis.document,
+    }),
+  });
+
+  assert.equal(synthesizeCalls, 1);
+  assert.equal(result.promptVersion, RESEARCH_REPORT_PROMPT_VERSION);
+  assert.deepEqual(result.document.completeness.claimCoverage, { available: 2, represented: 2, score: 1 });
 });

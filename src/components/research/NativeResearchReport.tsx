@@ -43,11 +43,13 @@ export type NativeResearchReportProps = {
   readiness?: ResearchReadiness;
   researchSnapshotId?: string | null;
   canCreateDraft?: boolean;
+  profileCompletionRequired?: boolean;
   creatingDraft?: boolean;
   createDraftDisabled?: boolean;
   createDraftLabel?: string;
   creatingDraftLabel?: string;
   onCreateDraft?: () => void;
+  onCompleteProfile?: () => void;
   refreshing?: boolean;
   refreshLabel?: string;
   refreshingLabel?: string;
@@ -139,7 +141,7 @@ function ClaimList({
           <li key={claim.id} className="py-4 first:pt-3.5 last:pb-3.5">
             <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
               <p className={cn(
-                'min-w-0 text-sm leading-6 text-foreground/90',
+                'min-w-0 break-words text-sm leading-6 text-foreground/90',
                 tone === 'executive' && 'text-[15px] font-medium leading-7',
               )}>
                 {claim.statement}
@@ -176,7 +178,7 @@ function NarrativeText({
   paragraphs: Array<{
     text: string;
     evidenceIds?: string[];
-    classification?: 'fact' | 'hypothesis' | 'signal';
+    classification?: 'fact' | 'hypothesis' | 'signal' | 'fit';
     observedAt?: string | null;
   }>;
   empty: string;
@@ -194,18 +196,24 @@ function NarrativeText({
           ? 'Hipótesis'
           : paragraph.classification === 'signal'
             ? 'Señal pública'
-            : 'Verificado';
+            : paragraph.classification === 'fit'
+              ? 'Posible encaje'
+              : 'Verificado';
         return (
           <div key={`${paragraph.text}-${index}`}>
             {showClassification && paragraph.classification ? (
               <p className={cn(
                 'mb-1 text-[10px] font-semibold uppercase tracking-[0.13em]',
-                paragraph.classification === 'hypothesis' ? 'text-primary' : 'text-emerald-700 dark:text-emerald-300',
+                paragraph.classification === 'fit'
+                  ? 'text-amber-700 dark:text-amber-300'
+                  : paragraph.classification === 'hypothesis'
+                    ? 'text-primary'
+                    : 'text-emerald-700 dark:text-emerald-300',
               )}>
                 {label}{observedAt ? ` · ${observedAt}` : ''}
               </p>
             ) : null}
-            <p>{paragraph.text}</p>
+            <p className="break-words">{paragraph.text}</p>
             {onShowEvidence && paragraph.evidenceIds?.length ? (
               <button
                 type="button"
@@ -218,16 +226,6 @@ function NarrativeText({
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function ClaimStatements({ claims }: { claims: ResearchReportClaim[] }) {
-  return (
-    <div className="space-y-2.5">
-      {claims.map((claim) => (
-        <p key={claim.id} className="text-sm leading-6 text-foreground/85">{claim.statement}</p>
-      ))}
     </div>
   );
 }
@@ -276,16 +274,18 @@ function ImportedFields({ fields }: { fields: ResearchReportProfileField[] }) {
   );
 }
 
-function CompanySections({ sections }: { sections: ResearchReportCompanySections }) {
+function CompanySections({ sections, showEmpty = true }: { sections: ResearchReportCompanySections; showEmpty?: boolean }) {
+  const visibleSections = companySectionCopy.filter((section) => showEmpty || sections[section.key].length > 0);
+  if (visibleSections.length === 0) return null;
   return (
     <div className="mt-4 divide-y divide-border/60 rounded-2xl border border-border/70 bg-background/45 px-4 sm:px-5">
-      {companySectionCopy.map((section) => {
+      {visibleSections.map((section) => {
         const claims = sections[section.key];
         return (
           <section key={section.key} className="grid gap-2 py-4 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-5">
             <h4 className="text-sm font-semibold text-foreground/90">{section.title}</h4>
             {claims.length > 0
-              ? <ClaimStatements claims={claims} />
+              ? <ClaimList claims={claims} />
               : <p className="text-sm leading-6 text-muted-foreground">{section.empty}</p>}
           </section>
         );
@@ -317,6 +317,7 @@ export function NativeResearchReport({
   readiness: readinessProp,
   researchSnapshotId = result.researchSnapshotId,
   canCreateDraft,
+  profileCompletionRequired = false,
   creatingDraft = false,
   createDraftDisabled = false,
   createDraftLabel = 'Crear borrador y revisar',
@@ -325,6 +326,7 @@ export function NativeResearchReport({
   refreshLabel = 'Actualizar investigación',
   refreshingLabel = 'Actualizando…',
   onCreateDraft,
+  onCompleteProfile,
   onRefresh,
   className,
 }: NativeResearchReportProps) {
@@ -343,7 +345,7 @@ export function NativeResearchReport({
   });
   const qualityScore = result.quality.score ?? result.score;
   const eligible = result.draftEligibility.eligible === true;
-  const actionAvailable = canShowResearchDraftAction({
+  const actionAvailable = !profileCompletionRequired && canShowResearchDraftAction({
     readiness,
     snapshotId: researchSnapshotId,
     eligible,
@@ -363,7 +365,7 @@ export function NativeResearchReport({
   const canonicalClaimById = new Map((result.snapshot?.claims || []).map((claim) => [claim.id, claim]));
   const canonicalEvidenceById = new Map((result.snapshot?.evidence || []).map((evidence) => [evidence.id, evidence]));
   const canonicalSourceById = new Map((result.snapshot?.sources || []).map((source) => [source.id, source]));
-  const decorateNarrative = (paragraphs: NonNullable<typeof narrative>[keyof NonNullable<typeof narrative>]) => paragraphs.map((paragraph) => {
+  const decorateNarrative = (paragraphs: Array<{ text: string; claimIds: string[]; evidenceIds: string[] }>) => paragraphs.map((paragraph) => {
     const claims = paragraph.claimIds.map((claimId) => canonicalClaimById.get(claimId)).filter(Boolean);
     const classification: 'fact' | 'hypothesis' | 'signal' = claims.some((claim) => claim?.classification === 'hypothesis')
       ? 'hypothesis'
@@ -394,6 +396,15 @@ export function NativeResearchReport({
   const commercialNarrative = narrative
     ? decorateNarrative(narrative.commercialReading)
     : claimParagraphs([...report.signals, ...report.opportunities]);
+  const serviceFitNarrative = narrative?.serviceFit
+    ? decorateNarrative(narrative.serviceFit).map((paragraph) => ({ ...paragraph, classification: 'fit' as const }))
+    : [];
+  const sellerContext = reportDocument?.sellerContext;
+  const sellerOffer = sellerContext?.valueProposition
+    || sellerContext?.services?.join(', ')
+    || sellerContext?.description
+    || '';
+  const showServiceFit = serviceFitNarrative.length > 0 || Boolean(sellerOffer);
   const evidenceClaims = [...new Map([
     ...report.executive,
     ...report.person.facts,
@@ -414,7 +425,7 @@ export function NativeResearchReport({
         <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">Informe de investigación</p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.035em] text-foreground sm:text-3xl">{companyName}</h2>
+            <h2 className="mt-2 break-words text-2xl font-semibold tracking-[-0.035em] text-foreground sm:text-3xl">{companyName}</h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">Contexto empresarial y comercial para {leadName}.</p>
           </div>
           {updatedAt ? <p className="shrink-0 text-xs text-muted-foreground">Actualizado el {updatedAt}</p> : null}
@@ -472,9 +483,9 @@ export function NativeResearchReport({
             ? <ImportedFields fields={report.person.fields} />
             : <p className="text-sm leading-6 text-muted-foreground">No hay contexto personal importado para este contacto.</p>}
         </div>
-        {!narrative && report.person.facts.length > 0 ? <div className="mt-5">
+        {report.person.facts.length > 0 ? <div className="mt-5">
           <h4 className="text-sm font-semibold">Hechos públicos verificados</h4>
-          <div className="mt-2"><ClaimStatements claims={report.person.facts} /></div>
+          <div className="mt-2"><ClaimList claims={report.person.facts} /></div>
         </div> : null}
       </section>
 
@@ -496,7 +507,7 @@ export function NativeResearchReport({
             <ImportedFields fields={report.companyContext} />
           </div>
         ) : null}
-        {companyNarrative.length === 0 ? <CompanySections sections={report.companySections} /> : null}
+        <CompanySections sections={report.companySections} showEmpty={companyNarrative.length === 0} />
       </section>
 
       <section aria-labelledby={`${id}-commercial`}>
@@ -514,7 +525,43 @@ export function NativeResearchReport({
             showClassification
           />
         </div>
+        {report.signals.length > 0 ? (
+          <div className="mt-5">
+            <h4 className="text-sm font-semibold">Señales públicas verificadas</h4>
+            <div className="mt-2"><ClaimList claims={report.signals} tone="signal" /></div>
+          </div>
+        ) : null}
       </section>
+
+      {showServiceFit ? (
+        <section aria-labelledby={`${id}-service-fit`}>
+          <SectionHeading
+            id={`${id}-service-fit`}
+            eyebrow="Tu propuesta"
+            title="Cómo podrías ayudar"
+            description="Relacionamos lo que ofreces con la evidencia disponible, sin asumir una necesidad que aún no se ha confirmado."
+          />
+          {sellerContext && sellerOffer ? (
+            <div className="mt-4 rounded-2xl border border-border/70 bg-muted/[0.16] px-4 py-4 sm:px-5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">Perfil utilizado</p>
+              <p className="mt-1 text-sm font-medium text-foreground">{sellerContext.companyName}</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">{sellerOffer}</p>
+            </div>
+          ) : null}
+          {serviceFitNarrative.length > 0 ? (
+            <div className="mt-4 border-l-2 border-primary/30 pl-4 sm:pl-5">
+              <NarrativeText
+                paragraphs={serviceFitNarrative}
+                empty="La evidencia disponible todavía no permite relacionar tu propuesta con una situación concreta de esta empresa."
+                onShowEvidence={showEvidence}
+                showClassification
+              />
+            </div>
+          ) : (
+            <p className="mt-4 text-sm leading-7 text-muted-foreground">La evidencia disponible todavía no permite relacionar tu propuesta con una situación concreta de esta empresa.</p>
+          )}
+        </section>
+      ) : null}
 
       {hasReviewPoints ? (
         <section aria-labelledby={`${id}-review`}>
@@ -576,8 +623,12 @@ export function NativeResearchReport({
               <div>
                 <p className="font-medium">Cobertura</p>
                 <p className="mt-1 leading-6 text-muted-foreground">
-                  {report.completeness
-                    ? `${report.completeness.status === 'complete' ? 'Cobertura completa' : 'Cobertura parcial'} (${Math.round(report.completeness.score * 100)}%).`
+                  {report.completeness?.claimCoverage
+                    ? report.completeness.claimCoverage.available === 0
+                      ? 'Aún no hay hechos públicos vigentes con respaldo para medir cobertura.'
+                      : `${report.completeness.claimCoverage.represented} de ${report.completeness.claimCoverage.available} hechos públicos vigentes incluidos (${Math.round(report.completeness.claimCoverage.score * 100)}%).`
+                    : report.completeness
+                      ? `${report.completeness.status === 'complete' ? 'Secciones completas' : 'Secciones parciales'} (${Math.round(report.completeness.score * 100)}%).`
                     : `${report.coverage.claims} afirmaciones visibles con respaldo canónico.`}
                 </p>
               </div>
@@ -587,12 +638,6 @@ export function NativeResearchReport({
                 <p className="font-medium">Base de afirmaciones</p>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">Hechos e hipótesis canónicas usados para construir la lectura del informe.</p>
                 <div className="mt-3"><ClaimList claims={evidenceClaims} /></div>
-              </div>
-            ) : null}
-            {companyNarrative.length > 0 ? (
-              <div className="border-t border-border/60 py-4">
-                <p className="font-medium">Perfil estructurado</p>
-                <CompanySections sections={report.companySections} />
               </div>
             ) : null}
             {result.warnings.length > 0 ? (
@@ -641,10 +686,12 @@ export function NativeResearchReport({
       <footer className="sticky bottom-0 z-10 -mx-2 flex flex-col gap-3 border-t border-border/70 bg-background/95 px-2 py-4 shadow-[0_-16px_30px_-30px_rgba(15,23,42,0.45)] backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-medium">
-            {actionAvailable ? 'Borrador disponible para revisión' : showCompanyContextGuidance ? 'Hace falta contexto de empresa' : 'Borrador no disponible'}
+            {profileCompletionRequired ? 'Completa tu perfil comercial' : actionAvailable ? 'Borrador disponible para revisión' : showCompanyContextGuidance ? 'Hace falta contexto de empresa' : 'Borrador no disponible'}
           </p>
           <p id={`${id}-action-help`} className="mt-1 text-xs leading-5 text-muted-foreground">
-            {actionAvailable
+            {profileCompletionRequired
+              ? 'Agrega Productos y servicios o Propuesta de valor para crear un correo alineado con tu oferta.'
+              : actionAvailable
               ? 'Se abrirá como borrador para que puedas revisarlo. No se enviará automáticamente.'
                : showCompanyContextGuidance
                 ? 'Actualiza la investigación para buscar una fuente corporativa verificable.'
@@ -653,7 +700,17 @@ export function NativeResearchReport({
                   : blockReason}
           </p>
         </div>
-        {onCreateDraft && actionAvailable ? (
+        {profileCompletionRequired && onCompleteProfile ? (
+          <Button
+            type="button"
+            className="w-full shrink-0 rounded-full sm:w-auto"
+            onClick={onCompleteProfile}
+            aria-describedby={`${id}-action-help`}
+          >
+            <FileText aria-hidden="true" />
+            Completar perfil
+          </Button>
+        ) : onCreateDraft && actionAvailable ? (
           <Button
             type="button"
             className="w-full shrink-0 rounded-full sm:w-auto"

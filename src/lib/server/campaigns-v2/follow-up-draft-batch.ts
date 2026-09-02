@@ -4,6 +4,10 @@ import {
 } from '@/lib/campaigns-v2/outreach-sequence-context';
 import type { MessagingDraftV1 } from '@/lib/messaging-contracts';
 import {
+  hasUsableDraftSellerOfferV2,
+  type DraftSellerProfileV2,
+} from '@/lib/server/draft-context-v2';
+import {
   campaignFollowUpDraftIds,
   type createNativeDraft,
   type NativeDraftGenerationResult,
@@ -16,6 +20,8 @@ type FollowUpDraftStep = {
   offsetDays: number;
   instruction: string;
   nativeDraftId: string | null;
+  reservedDraftId?: string | null;
+  reservedVersionId?: string | null;
 };
 
 type FollowUpDraftBatchDependencies = {
@@ -52,6 +58,7 @@ export async function generateFollowUpDraftBatch(input: {
   initialDraft: MessagingDraftV1;
   steps: FollowUpDraftStep[];
   existingDrafts: Map<string, MessagingDraftV1>;
+  sellerProfile?: DraftSellerProfileV2;
   targetStepId?: string;
 }, dependencies: FollowUpDraftBatchDependencies) {
   const steps = [...input.steps].sort((left, right) => left.index - right.index);
@@ -60,6 +67,13 @@ export async function generateFollowUpDraftBatch(input: {
   for (const step of steps) {
     if (input.targetStepId && step.id !== input.targetStepId) continue;
     if (step.nativeDraftId || input.existingDrafts.has(step.id)) continue;
+    if (input.sellerProfile && !hasUsableDraftSellerOfferV2(input.sellerProfile)) {
+      await dependencies.recordError({
+        stepId: step.id,
+        error: 'Completa Productos y servicios o Propuesta de valor en tu perfil antes de crear el borrador.',
+      });
+      break;
+    }
 
     const priorMessages = [draftMessage(input.initialDraft, {
       kind: 'initial' as const,
@@ -100,11 +114,14 @@ export async function generateFollowUpDraftBatch(input: {
     });
 
     try {
-      const reserved = campaignFollowUpDraftIds({
-        organizationId: input.organizationId,
-        userId: input.userId,
-        stepId: step.id,
-      });
+      const reserved = step.reservedDraftId && step.reservedVersionId
+        ? { draftId: step.reservedDraftId, versionId: step.reservedVersionId }
+        : campaignFollowUpDraftIds({
+          organizationId: input.organizationId,
+          userId: input.userId,
+          stepId: step.id,
+          sellerProfile: input.sellerProfile,
+        });
       await dependencies.reserveDraft({ stepId: step.id, ...reserved });
       const result = await dependencies.createDraft({
         organizationId: input.organizationId,
@@ -115,6 +132,8 @@ export async function generateFollowUpDraftBatch(input: {
         sequenceContext,
         idempotencyKey: `campaign-recipient-step:${step.id}`,
         campaignRecipientStepId: step.id,
+        reservedCampaignDraftIds: reserved,
+        sellerProfile: input.sellerProfile,
       });
       if (result.status !== 'drafted') {
         await dependencies.recordError({ stepId: step.id, error: result.message.slice(0, 2_000) });

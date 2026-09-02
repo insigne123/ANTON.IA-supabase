@@ -3,10 +3,12 @@ import {
   ResearchReportDocumentV1Schema,
   validateResearchReportDocumentCitationsV1,
   type ResearchReportDocumentV1,
+  type ResearchReportSellerContextV1,
 } from '@/lib/research-report-contracts';
 import { ResearchSnapshotV1Schema, type ResearchSnapshotV1 } from '@/lib/research-contracts';
 import {
   RESEARCH_REPORT_PROMPT_VERSION,
+  sellerProfileHash,
   synthesizeResearchReportDocumentV1,
   type ResearchReportSynthesisResult,
 } from '@/ai/flows/synthesize-research-report';
@@ -48,10 +50,13 @@ function shouldPersistResearchReportTransition(
   existing: StoredResearchReportDocument | null,
   incomingMethod: ResearchReportSynthesisResult['metadata']['generationMethod'],
   incomingPromptVersion = RESEARCH_REPORT_PROMPT_VERSION,
+  incomingSellerProfileHash?: string,
 ) {
   return !existing
     || (existing.generationMethod === 'fallback' && incomingMethod === 'model')
-    || (incomingMethod === 'model' && existing.promptVersion !== incomingPromptVersion);
+    || existing.promptVersion !== incomingPromptVersion
+    || (incomingSellerProfileHash !== undefined
+      && existing.document.synthesis.sellerProfileHash !== incomingSellerProfileHash);
 }
 
 function text(value: unknown) {
@@ -131,7 +136,12 @@ export async function upsertResearchReportDocument(input: {
       userId: snapshot.scope.ownerUserId,
     },
   }, admin);
-  if (!shouldPersistResearchReportTransition(existing, input.synthesis.metadata.generationMethod, input.synthesis.metadata.promptVersion)) return existing!;
+  if (!shouldPersistResearchReportTransition(
+    existing,
+    input.synthesis.metadata.generationMethod,
+    input.synthesis.metadata.promptVersion,
+    input.synthesis.metadata.sellerProfileHash,
+  )) return existing!;
 
   const document = validateResearchReportDocumentCitationsV1(input.synthesis.document, snapshot);
   const contentHash = canonicalSha256(document);
@@ -172,7 +182,12 @@ export async function upsertResearchReportDocument(input: {
       access: { organizationId: snapshot.scope.organizationId, userId: snapshot.scope.ownerUserId },
     }, admin);
     if (!existing) throw error;
-    if (!shouldPersistResearchReportTransition(existing, input.synthesis.metadata.generationMethod, input.synthesis.metadata.promptVersion)) return existing;
+    if (!shouldPersistResearchReportTransition(
+      existing,
+      input.synthesis.metadata.generationMethod,
+      input.synthesis.metadata.promptVersion,
+      input.synthesis.metadata.sellerProfileHash,
+    )) return existing;
   }
 
   const { data, error } = await admin
@@ -201,6 +216,7 @@ export async function upsertResearchReportDocument(input: {
 export async function ensureResearchReportDocument(input: {
   snapshot: ResearchSnapshotV1;
   access: ResearchReportDocumentAccess;
+  sellerProfile?: Partial<ResearchReportSellerContextV1> | null;
   generatedAt?: string;
 }, dependencies: EnsureResearchReportDocumentDependencies = {}) {
   const snapshot = ResearchSnapshotV1Schema.parse(input.snapshot);
@@ -215,15 +231,23 @@ export async function ensureResearchReportDocument(input: {
 
   const load = dependencies.load || loadResearchReportDocument;
   const existing = await load({ researchSnapshotId: snapshot.id, access: input.access });
+  const expectedSellerProfileHash = sellerProfileHash(input.sellerProfile);
   if (existing) {
-    validateResearchReportDocumentCitationsV1(existing.document, snapshot);
     const needsRetry = existing.generationMethod === 'fallback' && existing.retryable;
     const needsPromptUpgrade = existing.promptVersion !== RESEARCH_REPORT_PROMPT_VERSION;
-    if (!needsRetry && !needsPromptUpgrade) return existing;
+    const needsSellerProfileUpgrade = existing.document.synthesis.sellerProfileHash !== expectedSellerProfileHash;
+    if (!needsRetry && !needsPromptUpgrade && !needsSellerProfileUpgrade) {
+      validateResearchReportDocumentCitationsV1(existing.document, snapshot);
+      return existing;
+    }
   }
 
   const synthesize = dependencies.synthesize || synthesizeResearchReportDocumentV1;
-  const synthesis = await synthesize({ snapshot, generatedAt: input.generatedAt });
+  const synthesis = await synthesize({
+    snapshot,
+    sellerProfile: input.sellerProfile,
+    generatedAt: input.generatedAt,
+  });
   validateResearchReportDocumentCitationsV1(synthesis.document, snapshot);
   const upsert = dependencies.upsert || upsertResearchReportDocument;
   const persisted = await upsert({ snapshot, synthesis });
