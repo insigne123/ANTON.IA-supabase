@@ -7,6 +7,7 @@ import { assessLeadMissionFit, decideAutopilotContactAction, scoreLeadForMission
 import { getLeadResearchAutoContactBlockReason, getLeadResearchStatus, isLeadResearchReadyForAutoContact } from '@/lib/lead-research';
 import { syncLeadAutopilotToCrm } from '@/lib/server/crm-autopilot';
 import { getDailyQuotaStatus } from '@/lib/server/daily-quota-store';
+import { hasUserEnrichmentSearchCreditAccess } from '@/lib/server/enrichment-search-access';
 import { createAntoniaException } from '@/lib/server/antonia-exceptions';
 import { ensureLeadResearchReport } from '@/lib/server/lead-research-reports';
 import { buildThreadKey } from '@/lib/email-observability';
@@ -758,6 +759,7 @@ async function executeCampaignGeneration(task: any, supabase: any, config: any) 
 }
 
 async function executeSearch(task: any, supabase: any, config: any) {
+    const userId = String(task.payload?.userId || '').trim();
     await assertMissionIsActive(supabase, task.mission_id, 'search_start');
     const usage = await getDailyUsage(supabase, task.organization_id);
     // User requested "busquedas diarias" to mean "executions", limiting to e.g. 3 per day.
@@ -801,6 +803,7 @@ async function executeSearch(task: any, supabase: any, config: any) {
             headers: ensureInternalHeaders({
                 'Content-Type': 'application/json',
                 'x-user-id': String(task.payload.userId || ''),
+                'x-organization-id': String(task.organization_id || ''),
             }, 'search'),
             body: JSON.stringify(internalBody),
         }, SEARCH_FETCH_TIMEOUT_MS, 'internal_search');
@@ -811,6 +814,11 @@ async function executeSearch(task: any, supabase: any, config: any) {
         }
         data = await response.json();
     } catch (internalErr: any) {
+        const errorText = String(internalErr?.message || internalErr || '');
+        if (errorText.includes('internal_search_failed:429:')
+            || errorText.includes('DAILY_SEARCH_QUOTA_EXCEEDED')) {
+            throw internalErr;
+        }
         console.warn('[Search] Internal /api/leads/search failed. Falling back to external URL.', internalErr?.message || internalErr);
 
         const searchPayload = {
@@ -1095,6 +1103,9 @@ async function executeSearch(task: any, supabase: any, config: any) {
 async function executeEnrichment(task: any, supabase: any, config: any) {
     await assertMissionIsActive(supabase, task.mission_id, 'enrichment_start');
     const { leads, enrichmentLevel, userId } = task.payload;
+    if (!(await hasUserEnrichmentSearchCreditAccess(userId))) {
+        return { skipped: true, reason: 'credit_access_denied', resource: 'enrich' };
+    }
     const isDeep = enrichmentLevel === 'deep';
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';

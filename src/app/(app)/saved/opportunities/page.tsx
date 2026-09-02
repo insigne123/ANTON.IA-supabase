@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
-import type { JobOpportunity, LeadFromApollo, EnrichedOppLead } from '@/lib/types';
+import type { JobOpportunity, LeadSearchResult, EnrichedOppLead } from '@/lib/types';
 import { savedOpportunitiesStorage } from '@/lib/services/opportunities-service';
 import { enrichedOpportunitiesStorage } from '@/lib/services/enriched-opportunities-service';
 import { useToast } from '@/hooks/use-toast';
@@ -32,7 +32,7 @@ export default function SavedOpportunitiesPage() {
     const [leadTitles, setLeadTitles] = useState('Head of Talent, HR Manager, Recruiting Lead');
     const [personLocations, setPersonLocations] = useState('');
     const [loadingLeads, setLoadingLeads] = useState(false);
-    const [foundLeads, setFoundLeads] = useState<LeadFromApollo[]>([]);
+    const [foundLeads, setFoundLeads] = useState<LeadSearchResult[]>([]);
 
     const [orgPickerOpen, setOrgPickerOpen] = useState(false);
     const [orgLoading, setOrgLoading] = useState(false);
@@ -211,7 +211,7 @@ export default function SavedOpportunitiesPage() {
                     linkedinUrl: l.linkedinUrl,
                     email: l.email, // [IMPROVED MATCHING] Send email if we have it
                     id: l.id,
-                    apolloId: l.id, // Pass ID as apolloId too just in case
+                    sourceProviderId: l.sourceProvider === 'apollo' ? (l.sourceProviderId || l.id) : undefined,
                 })),
                 revealEmail: opts.revealEmail,
                 revealPhone: opts.revealPhone
@@ -230,7 +230,11 @@ export default function SavedOpportunitiesPage() {
 
             if (!r.ok) {
                 if (r.status === 401) throw new Error(j?.error || 'No autorizado');
-                if (r.status === 429) throw new Error(j?.error || 'Límite alcanzado');
+                if (r.status === 429) {
+                    throw new Error(j?.message || (j?.error === 'ENRICHMENT_SEARCH_CREDITS_UNAVAILABLE'
+                        ? 'Esta cuenta no tiene créditos disponibles para búsquedas ni enriquecimiento.'
+                        : 'Límite alcanzado'));
+                }
                 throw new Error(j?.error || `Error ${r.status}`);
             }
 
@@ -238,15 +242,19 @@ export default function SavedOpportunitiesPage() {
                 ...e,
                 descriptionSnippet: currentOpp?.descriptionSnippet,
                 email: e.email || undefined,
-                emailStatus: e.email ? (e.emailStatus || 'verified') : 'not_found',
+                emailStatus: e.email
+                    ? (e.emailStatus || 'verified')
+                    : String(e.enrichmentStatus || '').startsWith('pending') ? 'unknown' : 'not_found',
                 phoneNumbers: e.phoneNumbers,
                 primaryPhone: e.primaryPhone || (e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined),
                 enrichmentStatus: e.enrichmentStatus,
             }));
             await enrichedOpportunitiesStorage.addDedup(enrichedNow);
 
-            const foundCount = enrichedNow.filter(l => !!l.email).length;
-            toast({ title: 'Enriquecimiento completado', description: `Procesados: ${enrichedNow.length}. Con email: ${foundCount}.` });
+            toast({
+                title: 'Enriquecimiento en curso',
+                description: `${enrichedNow.length} contacto(s) enviados. Los datos aparecerán en Enriquecidos al finalizar.`,
+            });
             setOrgPickerOpen(false);
             setOpenEnrichOptions(false);
         } catch (e: any) {

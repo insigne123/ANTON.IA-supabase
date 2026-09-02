@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { captureApolloCreditUsageSnapshot } from '@/lib/server/apollo-usage';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
+import { captureApolloCreditUsageSnapshot } from '@/lib/server/apollo-usage';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -14,14 +14,13 @@ export async function POST(req: NextRequest) {
   try {
     const result = await captureApolloCreditUsageSnapshot({
       requestId: req.headers.get('x-request-id') || undefined,
-      sourceRoute: 'POST /api/cron/apollo-usage',
+      sourceRoute: '/api/cron/apollo-usage',
     });
     return NextResponse.json(result, { headers: firebaseSchedulerResponseHeaders() });
-  } catch (error) {
-    console.error('[cron/apollo-usage] capture failed', error);
+  } catch {
     return NextResponse.json(
-      { error: 'APOLLO_USAGE_CAPTURE_FAILED', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 502 },
+      { error: 'APOLLO_USAGE_CAPTURE_FAILED' },
+      { status: 500, headers: firebaseSchedulerResponseHeaders() },
     );
   }
 }

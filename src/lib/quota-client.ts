@@ -111,7 +111,7 @@ export function setClientQuotaSnapshot(kind: QuotaKind, params: { count: number;
   persistQuota(state);
 
   const limits = getClientQuotaLimits();
-  if (typeof params.limit === 'number' && Number.isFinite(params.limit) && params.limit > 0) {
+  if (typeof params.limit === 'number' && Number.isFinite(params.limit) && params.limit >= 0) {
     limits[kind] = Math.trunc(params.limit);
     persistQuotaLimits(limits);
   }

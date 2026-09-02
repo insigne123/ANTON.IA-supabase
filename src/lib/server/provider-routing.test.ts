@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { resolveLeadProvider } from './provider-routing';
 
-test('Apollo-only routing normalizes a legacy PDL request', () => {
+test('Apollo-only routing normalizes a legacy provider request', () => {
   const decision = resolveLeadProvider({
     requestedProvider: 'pdl',
     organizationId: 'legacy-pdl-organization',
@@ -15,7 +15,7 @@ test('Apollo-only routing normalizes a legacy PDL request', () => {
     provider: 'apollo',
     requestedProvider: 'pdl',
     defaultProvider: 'apollo',
-    forcedApolloReason: 'apollo_only',
+    forcedProviderReason: 'apollo_only',
   });
 });
 

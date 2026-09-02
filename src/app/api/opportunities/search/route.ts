@@ -1,6 +1,11 @@
 // src/app/api/opportunities/search/route.ts
 import { getApifyClient, hasApifyAuth } from '@/lib/apify-client';
 import { requireAuth, handleAuthError } from '@/lib/server/auth-utils';
+import { consumeLeadSearchQuota, type DailyQuotaResult } from '@/lib/server/daily-quota-store';
+import {
+  enrichmentSearchCreditsUnavailablePayload,
+  hasEnrichmentSearchCreditAccess,
+} from '@/lib/server/enrichment-search-access';
 
 type Body = {
   jobTitle?: string;
@@ -16,6 +21,9 @@ export async function POST(req: Request) {
   try {
     // 1. Auth Check
     const { user, organizationId } = await requireAuth(); // Throws if invalid
+    if (!hasEnrichmentSearchCreditAccess(user?.email)) {
+      return j(enrichmentSearchCreditsUnavailablePayload(), 429);
+    }
 
     // We could use user/orgId here for logging/quota if needed in the future
 
@@ -32,6 +40,9 @@ export async function POST(req: Request) {
         401,
       );
     }
+
+    const quota = await consumeLeadSearchQuota({ userId: user.id, organizationId });
+    if (!quota.allowed) return quotaError(quota);
 
     const actorId = process.env.APIFY_ACTOR_ID?.trim() || 'bebity/linkedin-jobs-scraper';
     const client = getApifyClient();
@@ -90,4 +101,13 @@ function j(data: unknown, status = 200) {
     status,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+function quotaError(quota: DailyQuotaResult) {
+  return j({
+    error: 'DAILY_SEARCH_QUOTA_EXCEEDED',
+    count: quota.count,
+    limit: quota.limit,
+    retryAt: quota.resetAtISO,
+  }, 429);
 }

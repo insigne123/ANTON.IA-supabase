@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = extensions, public, pg_catalog;
 
-select plan(7);
+select plan(9);
 
 select has_table(
   'public',
@@ -50,6 +50,22 @@ select policies_are(
     'Users can view their own or org enriched opportunities'
   ],
   'enriched opportunities retains its expected RLS policy set'
+);
+select ok(
+  (
+    select with_check is not null
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'enriched_opportunities'
+      and policyname = 'Users can update their own or org enriched opportunities'
+  ),
+  'enriched opportunities update policy validates the resulting tenant scope'
+);
+select ok(
+  has_function_privilege('service_role', 'public.increment_contacted_count(text)', 'execute')
+    and not has_function_privilege('authenticated', 'public.increment_contacted_count(text)', 'execute')
+    and not has_function_privilege('anon', 'public.increment_contacted_count(text)', 'execute'),
+  'increment_contacted_count is restricted to service role'
 );
 
 select * from finish();

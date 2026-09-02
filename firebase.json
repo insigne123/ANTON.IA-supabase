@@ -11,6 +11,8 @@
       ".next-build",
       ".playwright-mcp",
       ".opencode",
+      ".release-*",
+      ".release-*/**",
       "opencode.json",
       "AGENTS.md",
       "supabase/.temp",

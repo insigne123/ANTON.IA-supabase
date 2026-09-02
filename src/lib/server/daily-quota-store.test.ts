@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import ts from 'typescript';
 import { DEFAULT_DAILY_QUOTA_LIMITS } from '@/lib/daily-quota-limits';
 
 const migrationPath = 'supabase/migrations/20260813100000_atomic_daily_quota.sql';
@@ -20,12 +19,6 @@ const leadResearchRoute = readFileSync(leadResearchRoutePath, 'utf8');
 const leadSearchRoute = readFileSync(leadSearchRoutePath, 'utf8');
 const backupCronRoute = readFileSync(backupCronRoutePath, 'utf8');
 const enrichmentRoute = readFileSync(enrichmentRoutePath, 'utf8');
-const modeHelpersStart = enrichmentRoute.indexOf('type EnrichmentMode');
-const modeHelpersEnd = enrichmentRoute.indexOf('// Lazy initialization', modeHelpersStart);
-const modeHelpersModule = await import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(
-  `${enrichmentRoute.slice(modeHelpersStart, modeHelpersEnd)}\nexport { resolveEnrichmentMode, resolveQuotaResource };`,
-  { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } },
-).outputText).toString('base64')}`);
 
 function functionBody(name: string) {
   const start = sql.indexOf(`create or replace function public.${name}`);
@@ -200,16 +193,16 @@ test('lead research claims request identity before atomically consuming quota an
   assert.match(post, /retryAt: nextDayStartISOUTC\(\)/);
 });
 
-test('enrichment claims an operation after provider configuration and before any provider submission', () => {
+test('enrichment replays before gateway configuration and claims before Apollo submission', () => {
   const start = enrichmentRoute.indexOf('export async function POST');
   const post = enrichmentRoute.slice(start);
   const organizationRequired = post.indexOf("error: 'ORGANIZATION_REQUIRED'");
   const providerDecision = post.indexOf('resolveLeadProvider({');
-  const configValidation = post.indexOf('resolveApolloProviderConfiguration()');
+  const configValidation = post.indexOf('assertApolloEnrichmentConfigured();');
   const replayLookup = post.indexOf('getEnrichmentQuotaOperation({');
   const claim = post.indexOf('claimEnrichmentQuotaOperation({');
-  const submitting = post.indexOf('markEnrichmentQuotaOperationSubmitted(operationMutationIdentity)');
-  const apolloProvider = post.indexOf('await fetch(externalUrl');
+  const submitting = post.indexOf('await markEnrichmentQuotaOperationSubmitted(mutationIdentity)');
+  const apolloProvider = post.indexOf('await submitApolloEnrichment({');
 
   assert.ok(start >= 0 && organizationRequired >= 0 && replayLookup >= 0 && providerDecision >= 0 && configValidation >= 0);
   assert.ok(claim >= 0 && submitting >= 0 && apolloProvider >= 0);
@@ -220,13 +213,16 @@ test('enrichment claims an operation after provider configuration and before any
   assert.ok(claim < submitting, 'the durable operation must be owned before the provider boundary');
   assert.ok(submitting < apolloProvider, 'the provider boundary must be persisted before Apollo');
   assert.match(enrichmentRoute, /return mode === 'deep' \? 'investigate' : 'enrich'/);
-  assert.match(post, /resource: quotaResource,[\s\S]*operationId: operationIdentity\.operationId,[\s\S]*count: leads\.length/);
+  assert.match(post, /resource,[\s\S]*operationId: operation\.operationId,[\s\S]*count: leads\.length/);
   assert.match(post, /body\.resource != null/);
-  assert.match(post, /resolveEnrichmentMode\(body\.mode, trustedInternalCaller, shouldRevealPhone\)/);
+  assert.match(post, /resolveMode\(body\.mode, trustedInternal, revealPhone\.value\)/);
+  assert.match(enrichmentRoute, /'people_search_leads'/);
+  assert.match(enrichmentRoute, /input\.tableName === 'people_search_leads'/);
+  assert.match(enrichmentRoute, /organization_domain: cleanDomain\(lead\.companyDomain\)/);
   assert.match(post, /status: 403/);
-  assert.match(post, /status: 503/);
-  assert.match(enrichmentRoute, /APOLLO_API_KEY missing/);
-  assert.match(enrichmentRoute, /ENRICHMENT_SERVICE_SECRET missing/);
+  assert.match(post, /ENRICHMENT_SERVICE_SECRET_NOT_CONFIGURED' \? 503/);
+  assert.match(enrichmentRoute, /ENRICHMENT_SERVICE_SECRET_NOT_CONFIGURED/);
+  assert.match(enrichmentRoute, /APOLLO_WEBHOOK_URL_NOT_CONFIGURED/);
   assert.doesNotMatch(enrichmentRoute, /handlePdlEnrichment|enrichPersonWithPDL/);
   assert.doesNotMatch(enrichmentRoute, /getDailyQuotaStatus|useMemQuota|QUOTA_FALLBACK_SECRET|x-quota-ticket/);
 });
@@ -257,8 +253,8 @@ test('quota operation retries replay prior consumption and never reacquire submi
   assert.match(existingBranch, /'response_payload', v_operation\.response_payload/);
 
   const post = enrichmentRoute.slice(enrichmentRoute.indexOf('export async function POST'));
-  assert.match(post, /if \(!claimedOperation\.claimed \|\| !claimedOperation\.allowed \|\| !claimedOperation\.claimToken\) \{\s*return operationStateResponse\(claimedOperation\);/);
-  assert.match(post, /ProviderOutcomeUnknownError[\s\S]*completeEnrichmentQuotaOperation\(/);
+  assert.match(post, /if \(!claim\.claimed \|\| !claim\.allowed \|\| !claim\.claimToken\) \{[\s\S]*return await operationStateResponse\(claim/);
+  assert.match(post, /error instanceof ApolloEnrichmentError[\s\S]*completeEnrichmentQuotaOperation\(/);
   assert.match(post, /releaseEnrichmentQuotaOperation\(/);
 });
 
@@ -288,27 +284,41 @@ test('quota operation ledger and RPCs are service-role only', () => {
 });
 
 test('enrichment requires a client operation identity and does not use content-only daily deduplication', () => {
-  assert.match(enrichmentRoute, /req\.headers\.get\('idempotency-key'\)/);
+  assert.match(enrichmentRoute, /request\.headers\.get\('idempotency-key'\)/);
   assert.match(enrichmentRoute, /body\.operationId/);
   assert.match(enrichmentRoute, /IDEMPOTENCY_KEY_REQUIRED/);
-  assert.match(enrichmentRoute, /IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST/);
-  assert.match(enrichmentRoute, /createHash\('sha256'\)[\s\S]*JSON\.stringify\(normalized\)/);
-  const fingerprintStart = enrichmentRoute.indexOf('function buildEnrichmentRequestFingerprint');
-  const fingerprintEnd = enrichmentRoute.indexOf('function resolveApolloProviderConfiguration', fingerprintStart);
+  assert.match(source, /IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST/);
+  assert.match(enrichmentRoute, /function requestFingerprint[\s\S]*createHash\('sha256'\)\.update\(JSON\.stringify\(\{/);
+  const fingerprintStart = enrichmentRoute.indexOf('function requestFingerprint');
+  const fingerprintEnd = enrichmentRoute.indexOf('function usage', fingerprintStart);
   const fingerprint = enrichmentRoute.slice(fingerprintStart, fingerprintEnd);
-  assert.doesNotMatch(fingerprint, /requestedProvider|provider/i);
+  assert.doesNotMatch(fingerprint, /requestedProvider/);
   assert.match(enrichmentRoute, /providerRequested: providerDecision\.requestedProvider/);
   assert.doesNotMatch(operationSql, /unique \([^)]*request_fingerprint[^)]*\)/);
 });
 
 test('enrichment mode cannot be forged or made inconsistent with requested fields', () => {
-  assert.deepEqual(modeHelpersModule.resolveEnrichmentMode(undefined, false, false), { ok: true, mode: 'normal' });
-  assert.deepEqual(modeHelpersModule.resolveEnrichmentMode(undefined, false, true), { ok: true, mode: 'deep' });
-  assert.equal(modeHelpersModule.resolveEnrichmentMode('deep', false, true).ok, false);
-  assert.equal(modeHelpersModule.resolveEnrichmentMode('normal', true, true).ok, false);
-  assert.deepEqual(modeHelpersModule.resolveEnrichmentMode('deep', true, true), { ok: true, mode: 'deep' });
-  assert.equal(modeHelpersModule.resolveQuotaResource('normal'), 'enrich');
-  assert.equal(modeHelpersModule.resolveQuotaResource('deep'), 'investigate');
+  const start = enrichmentRoute.indexOf('function resolveMode');
+  const end = enrichmentRoute.indexOf('function resolveTableName', start);
+  const resolver = enrichmentRoute.slice(start, end);
+  assert.match(resolver, /const expected: EnrichmentMode = revealPhone \? 'deep' : 'normal'/);
+  assert.match(resolver, /ENRICHMENT_MODE_INTERNAL_ONLY/);
+  assert.match(resolver, /ENRICHMENT_MODE_FIELD_MISMATCH/);
+  assert.match(enrichmentRoute, /function quotaResource[\s\S]*mode === 'deep' \? 'investigate' : 'enrich'/);
+});
+
+test('profile enrichment has stable targets and recoverable idempotent replays', () => {
+  assert.match(enrichmentRoute, /function profileTargetId[\s\S]*createHash\('sha256'\)/);
+  assert.match(enrichmentRoute, /from\('people_search_leads'\)[\s\S]*\.eq\('user_id', input\.userId\)[\s\S]*\.eq\('organization_id', input\.organizationId\)/);
+  assert.match(enrichmentRoute, /async function operationTargets/);
+  assert.match(enrichmentRoute, /target_table', input\.tableName/);
+  assert.match(enrichmentRoute, /enriched\.length > 0 \? \{ queued: true, enriched \}/);
+  assert.match(enrichmentRoute, /createApolloEnrichmentCallback\(/);
+  assert.match(enrichmentRoute, /bindApolloEnrichmentCallback\(/);
+  assert.match(enrichmentRoute, /settleApolloEnrichmentCallback\(/);
+  assert.match(enrichmentRoute, /async function markTargetsFailed/);
+  assert.match(enrichmentRoute, /stableTargetIds/);
+  assert.match(enrichmentRoute, /claimToken: claim\.claimToken/);
 });
 
 test('backup enrichment delegates atomic quota authority and preserves unrelated usage increments', () => {

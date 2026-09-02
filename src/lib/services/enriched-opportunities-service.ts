@@ -12,6 +12,8 @@ const TABLE = 'enriched_opportunities';
 function mapRowToEnrichedLead(row: any): EnrichedLead {
     return {
         id: row.id,
+        sourceProvider: row.source_provider || row.data?.sourceProvider,
+        sourceProviderId: row.source_provider_id || row.data?.sourceProviderId,
         apolloId: row.data?.apolloId,
         organizationId: row.organization_id,
         sourceOpportunityId: row.data?.sourceOpportunityId,
@@ -22,6 +24,8 @@ function mapRowToEnrichedLead(row: any): EnrichedLead {
         linkedinUrl: row.linkedin_url,
         emailStatus: row.email_status || row.data?.emailStatus,
         companyDomain: row.data?.companyDomain,
+        companyWebsite: row.data?.companyWebsite,
+        companyLinkedinUrl: row.data?.companyLinkedinUrl,
         descriptionSnippet: row.data?.descriptionSnippet,
         createdAt: row.created_at,
 
@@ -104,6 +108,8 @@ function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string, organizationId
         phone_numbers: lead.phoneNumbers,
         primary_phone: lead.primaryPhone,
         enrichment_status: lead.enrichmentStatus ?? 'completed',
+        source_provider: lead.sourceProvider,
+        source_provider_id: lead.sourceProviderId,
 
         // Metadata
         updated_at: lead.updatedAt || new Date().toISOString(),
@@ -113,10 +119,14 @@ function mapEnrichedLeadToRow(lead: EnrichedLead, userId: string, organizationId
             sourceOpportunityId: lead.sourceOpportunityId,
             emailStatus: lead.emailStatus,
             companyDomain: lead.companyDomain,
+            companyWebsite: lead.companyWebsite,
+            companyLinkedinUrl: lead.companyLinkedinUrl,
             descriptionSnippet: lead.descriptionSnippet,
             industry: lead.industry,
             report: lead.report,
             apolloId: lead.apolloId,
+            sourceProvider: lead.sourceProvider,
+            sourceProviderId: lead.sourceProviderId,
         },
     };
 }

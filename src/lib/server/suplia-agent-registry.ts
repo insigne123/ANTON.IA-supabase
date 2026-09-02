@@ -243,7 +243,7 @@ function fallbackPlan(goal: string): z.infer<typeof PlannerSchema> {
       { key: 'prospector_approval', title: 'Aprobacion de busqueda', description: 'Preparar una busqueda externa para aprobacion humana.', agentName: 'prospector' },
     ],
     assumptions: ['El usuario quiere preparar prospeccion o campana sin ejecutar acciones sensibles automaticamente.'],
-    risks: ['Las busquedas en Apollo pueden consumir creditos y requieren aprobacion.'],
+    risks: ['Las busquedas externas pueden consumir creditos y requieren aprobacion.'],
   };
 }
 

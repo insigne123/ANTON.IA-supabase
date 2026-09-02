@@ -7,13 +7,25 @@ import type {
   LinkedInProfileSearchRequest,
   Lead,
 } from '@/lib/schemas/leads';
+import { CompanySearchOrganizationSchema } from '@/lib/schemas/leads';
 
 const PATH = '/api/leads/search';
 const PROFILE_STATUS_PATH = '/api/leads/profile-status';
+const PROFILE_ENRICHMENT_PATH = '/api/opportunities/enrich-apollo';
+const ORGANIZATION_ENRICHMENT_PATH = '/api/organizations/enrich-apollo';
+
+export class ApolloOrganizationEnrichmentClientError extends Error {
+  constructor(message: string, readonly preserveOperation: boolean) {
+    super(message);
+  }
+}
 
 type SearchPayload = LeadsSearchParams | LinkedInProfileSearchRequest | CompanyNameSearchRequest;
 
 function extractSearchErrorMessage(json: any, status: number): string {
+  if (status === 429 && json?.error === 'ENRICHMENT_SEARCH_CREDITS_UNAVAILABLE') {
+    return String(json?.message || 'Esta cuenta no tiene créditos disponibles para búsquedas ni enriquecimiento.');
+  }
   if (status === 429 && json?.error === 'DAILY_SEARCH_QUOTA_EXCEEDED') {
     const count = Number(json?.count);
     const limit = Number(json?.limit);
@@ -81,7 +93,113 @@ export async function searchLinkedInProfileLead(
   body: LinkedInProfileSearchRequest,
   signal?: AbortSignal,
 ): Promise<LeadSearchResponse> {
-  return postSearch(body, signal);
+  const linkedinUrl = String(body.linkedin_url || body.linkedin_profile_url || body.linkedinUrl || '').trim();
+  const revealEmail = body.reveal_email ?? body.revealEmail ?? false;
+  const revealPhone = body.reveal_phone ?? body.revealPhone ?? false;
+  const operationId = `profile-match:${crypto.randomUUID()}`;
+  const result = await enrichLinkedInProfileLead({
+    lead: {
+      id: `profile-search:${linkedinUrl}`,
+      linkedin_url: linkedinUrl,
+    },
+    revealEmail,
+    revealPhone,
+    operationId,
+    linkedinUrl,
+  }, signal);
+  const enriched = result.enriched?.[0] as any;
+  if (!enriched) {
+    return { count: 0, leads_count: 0, leads: [], search_mode: 'linkedin_profile' } as LeadSearchResponse;
+  }
+  const lead: Lead = {
+    id: String(enriched.id || `profile-search:${linkedinUrl}`),
+    name: enriched.fullName,
+    first_name: enriched.firstName,
+    email: enriched.email,
+    email_status: enriched.emailStatus,
+    linkedin_url: enriched.linkedinUrl || linkedinUrl,
+    title: enriched.title,
+    headline: enriched.headline,
+    org_name: enriched.companyName,
+    organization_name: enriched.companyName,
+    organization_domain: enriched.companyDomain,
+    industry: enriched.industry,
+    primary_phone: enriched.primaryPhone,
+    phone_numbers: enriched.phoneNumbers,
+    seniority: enriched.seniority,
+    departments: enriched.departments,
+    photo_url: enriched.photoUrl,
+    enrichment_status: enriched.enrichmentStatus,
+    source_provider: 'apollo',
+    source_provider_id: enriched.sourceProviderId,
+    apollo_id: enriched.sourceProviderId,
+  };
+  return {
+    count: 1,
+    leads_count: 1,
+    leads: [lead],
+    search_mode: 'linkedin_profile',
+    enrichment_requested: revealEmail || revealPhone,
+    profile_tracking_ids: [lead.id],
+  } as LeadSearchResponse;
+}
+
+export async function enrichLinkedInProfileLead(input: {
+  lead: Lead;
+  revealEmail: boolean;
+  revealPhone: boolean;
+  operationId: string;
+  linkedinUrl: string;
+}, signal?: AbortSignal): Promise<{
+  queued: boolean;
+  operationId: string;
+  operationStatus?: string;
+  enriched?: Array<{ id: string }>;
+}> {
+  const res = await fetch(PROFILE_ENRICHMENT_PATH, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': input.operationId,
+    },
+    body: JSON.stringify({
+      operationId: input.operationId,
+      provider: 'apollo',
+      tableName: 'people_search_leads',
+      revealEmail: input.revealEmail,
+      revealPhone: input.revealPhone,
+      leads: [{
+        fullName: input.lead.name,
+        linkedinUrl: input.linkedinUrl,
+        companyName: input.lead.org_name || input.lead.organization_name,
+        companyDomain: input.lead.organization?.website_url
+          || input.lead.organization_website
+          || input.lead.organization_domain,
+        title: input.lead.title,
+        clientRef: input.lead.id,
+        sourceProviderId: input.lead.source_provider_id,
+      }],
+    }),
+    cache: 'no-store',
+    signal,
+  });
+
+  const json = await res.json().catch(() => null);
+  const providerOutcomeUnknown = json?.error === 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN'
+    && Array.isArray(json?.enriched)
+    && Boolean(json.enriched[0]?.id);
+  if (!res.ok && !providerOutcomeUnknown) {
+    if (res.status === 429) {
+      throw new Error('Alcanzaste el límite diario de enriquecimientos. El perfil seguirá disponible sin datos de contacto.');
+    }
+    throw new Error('No pudimos iniciar la búsqueda de datos de contacto. Inténtalo nuevamente.');
+  }
+  if ((!json?.queued && json?.operationStatus !== 'completed' && !providerOutcomeUnknown)
+    || !Array.isArray(json?.enriched) || !json.enriched[0]?.id) {
+    throw new Error('No pudimos confirmar la búsqueda de datos de contacto. Inténtalo nuevamente.');
+  }
+
+  return { ...json, queued: Boolean(json.queued || json.operationStatus === 'completed') };
 }
 
 export async function searchCompanyNameLeads(
@@ -89,6 +207,36 @@ export async function searchCompanyNameLeads(
   signal?: AbortSignal,
 ): Promise<LeadSearchResponse> {
   return postSearch(body, signal);
+}
+
+export async function enrichApolloOrganization(input: {
+  domain: string;
+  operationId: string;
+}, signal?: AbortSignal): Promise<CompanySearchOrganization | null> {
+  const response = await fetch(ORGANIZATION_ENRICHMENT_PATH, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': input.operationId,
+    },
+    body: JSON.stringify({ domain: input.domain, operationId: input.operationId }),
+    cache: 'no-store',
+    signal,
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const unknown = payload?.error === 'APOLLO_ORGANIZATION_OUTCOME_UNKNOWN';
+    throw new ApolloOrganizationEnrichmentClientError(
+      unknown
+        ? 'No pudimos confirmar el resultado. Puedes consultar la misma operación nuevamente sin repetir el cargo.'
+        : response.status === 429
+          ? 'Alcanzaste el límite diario de enriquecimientos.'
+          : 'No pudimos enriquecer esta empresa.',
+      unknown,
+    );
+  }
+  if (payload?.status === 'no_data') return null;
+  return CompanySearchOrganizationSchema.parse(payload?.organization);
 }
 
 export async function getLinkedInProfileStatuses(

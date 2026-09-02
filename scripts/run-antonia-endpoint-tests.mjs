@@ -63,7 +63,7 @@ const REQUEST_OVERRIDES = {
     expected: [200],
   },
   'GET /api/leads/apify/status': {
-    expected: [400],
+    expected: [410],
   },
   'GET /api/opportunities/status': {
     expected: [400],
@@ -109,7 +109,7 @@ const REQUEST_OVERRIDES = {
   },
   'POST /api/webhooks/apollo': {
     body: {},
-    expected: [400],
+    expected: [410],
   },
   'POST /api/contact/bulk-send': {
     body: {},

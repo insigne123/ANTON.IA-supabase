@@ -7,6 +7,8 @@ export type PrivacySubjectLookupData = {
     profiles: number;
     leads: number;
     enrichedLeads: number;
+    enrichedOpportunities: number;
+    peopleSearchLeads: number;
     contactedLeads: number;
     unsubscribedEntries: number;
     researchReports: number;
@@ -26,6 +28,8 @@ export type PrivacySubjectLookupData = {
     profiles: Array<{ id: string; email: string; full_name: string | null; updated_at: string | null }>;
     leads: Array<{ id: string; user_id?: string | null; organization_id?: string | null; name: string | null; title: string | null; company: string | null; email: string; status: string | null; created_at: string | null }>;
     enrichedLeads: Array<{ id: string; user_id?: string | null; organization_id?: string | null; full_name: string | null; title: string | null; company_name: string | null; email: string; created_at: string | null; updated_at: string | null }>;
+    enrichedOpportunities: Array<{ id: string; user_id?: string | null; organization_id?: string | null; full_name: string | null; title: string | null; company_name: string | null; email: string; created_at: string | null; updated_at: string | null }>;
+    peopleSearchLeads: Array<{ id: string; user_id?: string | null; organization_id?: string | null; name: string | null; title: string | null; organization_name: string | null; email: string; created_at: string | null; updated_at: string | null }>;
     contactedLeads: Array<{ id: string; user_id?: string | null; organization_id?: string | null; lead_id?: string | null; name: string | null; role: string | null; company: string | null; email: string; status: string | null; sent_at: string | null; replied_at: string | null; evaluation_status?: string | null; campaign_followup_allowed?: boolean | null; campaign_followup_reason?: string | null }>;
     unsubscribedEntries: Array<{ id: string; email: string; user_id?: string | null; organization_id?: string | null; reason: string | null; created_at: string | null }>;
     researchReports: Array<{ id: string; email: string | null; user_id?: string | null; organization_id?: string | null; lead_ref?: string | null; company_name: string | null; company_domain: string | null; generated_at: string | null; updated_at: string | null }>;
@@ -86,6 +90,8 @@ export async function lookupPrivacySubjectData(rawEmail: string): Promise<Privac
   const profiles = rows(result.profiles);
   const leads = rows(result.leads);
   const enrichedLeads = rows(result.enrichedLeads);
+  const enrichedOpportunities = rows(result.enrichedOpportunities);
+  const peopleSearchLeads = rows(result.peopleSearchLeads);
   const contactedLeads = rows(result.contactedLeads);
   const unsubscribedEntries = rows(result.unsubscribedEntries);
   const researchReports = rows(result.researchReports);
@@ -129,6 +135,8 @@ export async function lookupPrivacySubjectData(rawEmail: string): Promise<Privac
       profiles: profiles.length,
       leads: leads.length,
       enrichedLeads: enrichedLeads.length,
+      enrichedOpportunities: enrichedOpportunities.length,
+      peopleSearchLeads: peopleSearchLeads.length,
       contactedLeads: contactedLeads.length,
       unsubscribedEntries: unsubscribedEntries.length,
       researchReports: researchReports.length,
@@ -148,6 +156,8 @@ export async function lookupPrivacySubjectData(rawEmail: string): Promise<Privac
       profiles,
       leads,
       enrichedLeads,
+      enrichedOpportunities,
+      peopleSearchLeads,
       contactedLeads,
       unsubscribedEntries,
       researchReports,
@@ -233,6 +243,8 @@ export async function applyPrivacyBlock(rawEmail: string, input: { reason?: stri
     blocked: true,
     updatedContactedCount: Number(result.updatedContactedCount || 0),
     updatedLeadsCount: Number(result.updatedLeadsCount || 0),
+    updatedEnrichedOpportunitiesCount: Number(result.updatedEnrichedOpportunitiesCount || 0),
+    updatedPeopleSearchLeadsCount: Number(result.updatedPeopleSearchLeadsCount || 0),
     campaignSafetyStop: result.campaignSafetyStop || null,
   };
 
@@ -310,6 +322,8 @@ export async function deletePrivacySubjectData(rawEmail: string, input: { reason
     deletedMessagingDraftVersionsCount: Number(deletedResearchMessaging?.messagingDraftVersions || 0),
     deletedOutboundDispatchesCount: Number(deletedResearchMessaging?.outboundDispatches || 0),
     deletedEnrichedLeadsCount: Number(deletedResearchMessaging?.enrichedLeads || 0),
+    deletedEnrichedOpportunitiesCount: Number(deletedResearchMessaging?.enrichedOpportunities || 0),
+    deletedPeopleSearchLeadsCount: Number(deletedResearchMessaging?.peopleSearchLeads || 0),
     deletedContactedLeadsCount: Number(deletedResearchMessaging?.contactedLeads || 0),
     deletedLeadsCount: Number(deletedResearchMessaging?.leads || 0),
     deletedLeadResponsesCount: Number(deletedResearchMessaging?.leadResponses || 0),

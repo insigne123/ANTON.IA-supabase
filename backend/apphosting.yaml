@@ -11,6 +11,11 @@ env:
     secret: APOLLO_API_KEY
     availability: [RUNTIME]
 
+  # Only Apollo requests are accepted by this gateway.
+  - variable: LEADS_PROVIDER_DEFAULT
+    value: "apollo"
+    availability: [RUNTIME]
+
   # Must have the same value as the root BFF's ENRICHMENT_SERVICE_SECRET.
   # It is runtime-only so it cannot be emitted into a browser bundle.
   - variable: ENRICHMENT_SERVICE_SECRET

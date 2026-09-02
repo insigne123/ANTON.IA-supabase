@@ -47,6 +47,12 @@ test('endpoint rate limiting is bounded and returns retry information', () => {
   assert.ok(third.retryAfterSeconds >= 1);
 });
 
+test('lead provider configuration uses a bounded default', () => {
+  assert.equal(getGatewayConfig({}).defaultProvider, 'apollo');
+  assert.equal(getGatewayConfig({ LEADS_PROVIDER_DEFAULT: 'apollo' }).defaultProvider, 'apollo');
+  assert.equal(getGatewayConfig({ LEADS_PROVIDER_DEFAULT: 'unknown' }).defaultProvider, 'apollo');
+});
+
 test('bounded JSON parsing rejects oversized request bodies before validation', async () => {
   const request = new Request('https://backend.example/api/enrich', {
     method: 'POST',
@@ -66,4 +72,6 @@ test('App Hosting binds the shared secret at runtime only', () => {
   const config = readFileSync(new URL('../../apphosting.yaml', import.meta.url), 'utf8');
   assert.match(config, /variable: ENRICHMENT_SERVICE_SECRET\s+secret: ENRICHMENT_SERVICE_SECRET\s+availability: \[RUNTIME\]/);
   assert.doesNotMatch(config, /variable: ENRICHMENT_SERVICE_SECRET[\s\S]{0,160}availability: \[BUILD/);
+  assert.match(config, /variable: APOLLO_API_KEY\s+secret: APOLLO_API_KEY\s+availability: \[RUNTIME\]/);
+  assert.doesNotMatch(config, /variable: APOLLO_API_KEY[\s\S]{0,160}availability: \[BUILD/);
 });

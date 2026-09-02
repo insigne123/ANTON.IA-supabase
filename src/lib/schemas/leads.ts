@@ -42,6 +42,8 @@ export const LeadSchema = z.object({
   title: z.string().nullable().optional(),
   organization: LeadOrganizationSchema.optional(),
   photo_url: z.string().nullable().optional(),
+  source_provider: z.string().nullable().optional(),
+  source_provider_id: z.string().nullable().optional(),
   apollo_id: z.string().nullable().optional(),
   city: z.string().nullable().optional(),
   state: z.string().nullable().optional(),
@@ -92,6 +94,11 @@ export const CompanySearchOrganizationSchema = z.object({
   state: z.string().nullable().optional(),
   country: z.string().nullable().optional(),
   match_score: z.number().nullable().optional(),
+  short_description: z.string().nullable().optional(),
+  keywords: z.array(z.string()).optional(),
+  founded_year: z.number().nullable().optional(),
+  annual_revenue: z.number().nullable().optional(),
+  total_funding: z.number().nullable().optional(),
 });
 
 export const LeadSearchResponseSchema = LeadsResponseSchema.extend({
@@ -114,6 +121,7 @@ export const LeadSearchResponseSchema = LeadsResponseSchema.extend({
   search_strategy: z.enum(['people', 'organizations_then_people']).optional(),
   matched_organizations: z.number().int().nonnegative().optional(),
   enrichment_requested: z.boolean().optional(),
+  organization_search_credits: z.number().int().nonnegative().optional(),
 }).passthrough();
 
 /** Legacy array envelope used by the browser-facing lead-search route. */

@@ -2,6 +2,11 @@
 import type { NextRequest } from 'next/server';
 import { getApifyClient, hasApifyAuth } from '@/lib/apify-client';
 import { normalizeLinkedinJob } from '@/lib/opportunities';
+import { requireAuth, handleAuthError } from '@/lib/server/auth-utils';
+import {
+  enrichmentSearchCreditsUnavailablePayload,
+  hasEnrichmentSearchCreditAccess,
+} from '@/lib/server/enrichment-search-access';
 
 // ✅ SOLO UNA declaración. Si ya existía otra, elimínala.
 export const dynamic = 'force-dynamic';
@@ -12,14 +17,18 @@ export async function GET(req: NextRequest) {
   const runId = url.searchParams.get('runId') || '';
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 100), 1), 200);
 
-  if (!runId) {
-    return j({ error: { type: 'invalid-input', message: 'Falta "runId".' } }, 400);
-  }
-  if (!hasApifyAuth()) {
-    return j({ error: { type: 'missing-apify-token', message: 'Falta APIFY_TOKEN.' } }, 401);
-  }
-
   try {
+    const { user } = await requireAuth();
+    if (!hasEnrichmentSearchCreditAccess(user?.email)) {
+      return j(enrichmentSearchCreditsUnavailablePayload(), 429);
+    }
+    if (!runId) {
+      return j({ error: { type: 'invalid-input', message: 'Falta "runId".' } }, 400);
+    }
+    if (!hasApifyAuth()) {
+      return j({ error: { type: 'missing-apify-token', message: 'Falta APIFY_TOKEN.' } }, 401);
+    }
+
     const client = getApifyClient();
 
     // Estado del run
@@ -40,6 +49,8 @@ export async function GET(req: NextRequest) {
     return j({ ok: true, status: 'SUCCEEDED', total: mapped.length, items: mapped }, 200);
   } catch (err: any) {
     const raw = String(err?.message || err);
+    const authRes = handleAuthError(err);
+    if (authRes.status !== 500 || err?.name === 'AuthError') return authRes;
     if (raw.includes('user-or-token-not-found')) {
       return j(
         { error: { type: 'user-or-token-not-found', message: 'APIFY_TOKEN inválido o expirado.' } },

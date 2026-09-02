@@ -80,6 +80,8 @@ export function normalizeFromN8N(json: unknown) {
       title: l.title ?? "",
       organization: normalizeOrganization(l),
       photo_url: l.photo_url ?? "",
+      source_provider: (l as any).source_provider ?? (l as any).sourceProvider ?? undefined,
+      source_provider_id: (l as any).source_provider_id ?? (l as any).sourceProviderId ?? undefined,
       apollo_id: (l as any).apollo_id ?? (l as any).apolloId ?? undefined,
       city: (l as any).city ?? null,
       state: (l as any).state ?? null,

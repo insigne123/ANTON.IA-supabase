@@ -1,7 +1,6 @@
 // src/app/api/leads/search/route.ts
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from "next/server";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { normalizeDomainList } from "@/lib/domain";
 import {
   CompanyNameSearchRequestSchema,
@@ -10,23 +9,20 @@ import {
   LeadsResponseSchema
 } from "@/lib/schemas/leads";
 import { normalizeFromN8N } from "@/lib/normalizers/n8n";
-import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
 import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
-import { resolveLeadProvider, resolveOrganizationIdForUser } from '@/lib/server/provider-routing';
+import { resolveLeadProvider } from '@/lib/server/provider-routing';
+import {
+  requestAuthErrorResponse,
+  requireSessionOrTrustedInternalRequest,
+} from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
-import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
-import { partitionLinkedInProfileLeads } from '@/lib/linkedin-profile-result';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 export const runtime = 'nodejs';
 
-const APOLLO_BASE = 'https://api.apollo.io/api/v1';
-const LINKEDIN_PROFILE_TABLE_NAME = 'people_search_leads';
-const DEFAULT_APOLLO_WEBHOOK_BASE_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
-const USE_APIFY = String(process.env.USE_APIFY || "false") === "true";
 const DEFAULT_LEAD_SEARCH_URL = "https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search";
 const LEAD_SEARCH_URL = process.env.ANTONIA_LEAD_SEARCH_URL || process.env.LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
 const TIMEOUT_MS = Number(process.env.LEADS_N8N_TIMEOUT_MS ?? 60000);
@@ -46,13 +42,7 @@ function mapFlexibleLead(raw: any, index: number) {
     ? raw.organization
     : undefined;
 
-  const email =
-    raw?.email ||
-    raw?.work_email ||
-    raw?.recommended_personal_email ||
-    raw?.personal_email ||
-    raw?.primary_email ||
-    undefined;
+  const email = raw?.email || raw?.work_email || raw?.primary_email || undefined;
 
   return {
     id:
@@ -89,7 +79,9 @@ function mapFlexibleLead(raw: any, index: number) {
     photo_url:
       String(raw?.photo_url || raw?.photoUrl || raw?.profile_photo_url || raw?.image_url || '').trim() || undefined,
     email_status: String(raw?.email_status || (email ? 'verified' : 'unknown')).trim() || undefined,
-    apollo_id: String(raw?.apollo_id || raw?.apolloId || raw?.id || raw?.person_id || '').trim() || undefined,
+    source_provider: String(raw?.source_provider || raw?.sourceProvider || '').trim() || undefined,
+    source_provider_id: String(raw?.source_provider_id || raw?.sourceProviderId || '').trim() || undefined,
+    apollo_id: String(raw?.apollo_id || raw?.apolloId || '').trim() || undefined,
     city: String(raw?.city || '').trim() || undefined,
     state: String(raw?.state || '').trim() || undefined,
     country: String(raw?.country || '').trim() || undefined,
@@ -177,272 +169,15 @@ function pickLeadSearchMeta(json: unknown) {
     search_strategy: source.search_strategy,
     matched_organizations: source.matched_organizations,
     enrichment_requested: source.enrichment_requested,
+    organization_search_credits: Number.isFinite(Number(source.organization_search_credits))
+      ? Number(source.organization_search_credits)
+      : undefined,
     debug_logs: Array.isArray(source.debug_logs) ? source.debug_logs : undefined,
   };
 }
 
-function isApolloPhoneRevealWebhookError(message?: string | null) {
-  const text = String(message || '').toLowerCase();
-  return text.includes('webhook_url') && text.includes('reveal_phone_number');
-}
-
-function hasApolloProfileMatch(person: any) {
-  if (!person || typeof person !== 'object') return false;
-  return Boolean(
-    String(person.id || '').trim() ||
-    String(person.linkedin_url || '').trim() ||
-    String(person.name || '').trim() ||
-    String(person.first_name || '').trim() ||
-    String(person.last_name || '').trim()
-  );
-}
-
-function normalizeClientEnrichmentStatus(status?: string | null) {
-  const normalized = String(status || '').trim().toLowerCase();
-  if (!normalized) return undefined;
-  if (normalized.startsWith('pending')) return 'pending';
-  return normalized;
-}
-
-function pickApolloProfileEmail(person: any, revealEmail: boolean) {
-  if (!revealEmail) return undefined;
-  const primary = String(person?.email || '').trim();
-  if (primary) return primary;
-  if (Array.isArray(person?.personal_emails)) {
-    const personal = person.personal_emails
-      .map((value: unknown) => String(value || '').trim())
-      .find(Boolean);
-    if (personal) return personal;
-  }
-  return undefined;
-}
-
-function pickApolloProfilePhones(person: any, revealPhone: boolean) {
-  if (!revealPhone) {
-    return { primaryPhone: undefined as string | undefined, phoneNumbers: undefined as any[] | undefined };
-  }
-
-  const items: any[] = [];
-  const push = (value: unknown, type: string) => {
-    const normalized = String(value || '').trim();
-    if (!normalized) return;
-    items.push({
-      raw_number: normalized,
-      sanitized_number: normalized,
-      type,
-      position: 'current',
-      status: 'unknown',
-    });
-  };
-
-  push(person?.phone_number, 'phone');
-  push(person?.mobile_phone, 'mobile');
-  push(person?.work_phone, 'work');
-
-  const unique = new Map<string, any>();
-  for (const item of items) {
-    const key = String(item.sanitized_number || '').trim();
-    if (!key || unique.has(key)) continue;
-    unique.set(key, item);
-  }
-
-  const phoneNumbers = Array.from(unique.values());
-  return {
-    primaryPhone: phoneNumbers[0]?.sanitized_number || undefined,
-    phoneNumbers: phoneNumbers.length > 0 ? phoneNumbers : undefined,
-  };
-}
-
-function mapApolloProfileLead(person: any, index: number, options?: { revealEmail?: boolean; revealPhone?: boolean }) {
-  const revealEmail = Boolean(options?.revealEmail);
-  const revealPhone = Boolean(options?.revealPhone);
-  const email = pickApolloProfileEmail(person, revealEmail);
-  const phones = pickApolloProfilePhones(person, revealPhone);
-
-  return {
-    id:
-      String(person?.id || '').trim() ||
-      String(person?.linkedin_url || '').trim() ||
-      String(email || '').trim() ||
-      `lead-${index + 1}`,
-    first_name: String(person?.first_name || '').trim() || undefined,
-    last_name: String(person?.last_name || '').trim() || undefined,
-    email: email || undefined,
-    title: String(person?.title || person?.headline || '').trim() || undefined,
-    organization: {
-      id: String(person?.organization?.id || person?.organization_id || '').trim() || undefined,
-      name: String(person?.organization?.name || '').trim() || undefined,
-      domain: cleanDomain(person?.organization?.primary_domain || person?.organization?.website_url),
-      industry: String(person?.organization?.industry || '').trim() || undefined,
-      website_url: String(person?.organization?.website_url || '').trim() || undefined,
-      linkedin_url: String(person?.organization?.linkedin_url || '').trim() || undefined,
-    },
-    linkedin_url: String(person?.linkedin_url || '').trim() || undefined,
-    photo_url: String(person?.photo_url || '').trim() || undefined,
-    email_status: String(person?.email_status || (email ? 'verified' : 'unknown')).trim() || undefined,
-    apollo_id: String(person?.id || '').trim() || undefined,
-    primary_phone: phones.primaryPhone,
-    phone_numbers: phones.phoneNumbers,
-    enrichment_status: String(person?.enrichment_status || '').trim() || undefined,
-  };
-}
-
-type PhoneEnrichmentQueueResult = {
-  queued: boolean;
-  status: 'queued' | 'skipped' | 'failed';
-  message: string;
-  webhookUrl: string | null;
-  providerStatus: number | null;
-  providerDetails: string | null;
-};
-
-function getApolloOrganizationName(person: any) {
-  const direct = String(person?.organization?.name || '').trim();
-  if (direct) return direct;
-
-  if (Array.isArray(person?.employment_history)) {
-    const current = person.employment_history.find((item: any) => item?.current);
-    const currentName = String(current?.organization_name || '').trim();
-    if (currentName) return currentName;
-    const firstName = String(person.employment_history[0]?.organization_name || '').trim();
-    if (firstName) return firstName;
-  }
-
-  return '';
-}
-
-function getApolloOrganizationWebsite(person: any) {
-  const direct = String(person?.organization?.website_url || person?.organization?.primary_domain || '').trim();
-  if (direct) {
-    return direct.startsWith('http') ? direct : `https://${direct}`;
-  }
-
-  const employmentWebsite = String(person?.employment_history?.[0]?.organization_website || '').trim();
-  if (employmentWebsite) {
-    return employmentWebsite.startsWith('http') ? employmentWebsite : `https://${employmentWebsite}`;
-  }
-
-  return null;
-}
-
-function isValidPublicHttpsUrl(url: URL) {
-  if (url.protocol !== 'https:') return false;
-  const hostname = url.hostname.toLowerCase();
-  if (!hostname) return false;
-  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') return false;
-  if (hostname.endsWith('.local')) return false;
-  return true;
-}
-
-function resolveRequestOrigin(req: NextRequest) {
-  const candidates = [
-    (() => {
-      try {
-        return new URL(req.url).origin;
-      } catch {
-        return '';
-      }
-    })(),
-    req.headers.get('origin') || '',
-    (() => {
-      const referer = req.headers.get('referer') || '';
-      if (!referer) return '';
-      try {
-        return new URL(referer).origin;
-      } catch {
-        return '';
-      }
-    })(),
-    (() => {
-      const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || '';
-      const proto = req.headers.get('x-forwarded-proto') || 'https';
-      return host ? `${proto}://${host}` : '';
-    })(),
-  ];
-
-  for (const candidate of candidates) {
-    const trimmed = String(candidate || '').trim();
-    if (!trimmed) continue;
-    try {
-      const parsed = new URL(trimmed);
-      if (isValidPublicHttpsUrl(parsed)) return parsed.origin;
-    } catch {
-      continue;
-    }
-  }
-
-  return null;
-}
-
-function resolveLinkedInProfileWebhookUrl(
-  recordId: string,
-  revealEmail: boolean,
-  revealPhone: boolean,
-  requestOrigin?: string | null,
-) {
-  const candidates = [
-    process.env.APOLLO_LINKEDIN_PROFILE_WEBHOOK_URL,
-    process.env.LINKEDIN_PROFILE_WEBHOOK_URL,
-    process.env.APOLLO_PROFILE_WEBHOOK_URL,
-    process.env.APOLLO_WEBHOOK_URL,
-    process.env.APOLLO_WEBHOOK_BASE_URL,
-    process.env.LEAD_SEARCH_WEBHOOK_BASE_URL,
-    process.env.APP_URL,
-    process.env.CANONICAL_APP_URL,
-    process.env.NEXT_PUBLIC_APP_URL,
-    process.env.NEXT_PUBLIC_BASE_URL,
-    requestOrigin,
-    DEFAULT_APOLLO_WEBHOOK_BASE_URL,
-  ];
-
-  for (const candidate of candidates) {
-    if (typeof candidate !== 'string') continue;
-    const trimmed = candidate.trim();
-    if (!trimmed) continue;
-
-    try {
-      let parsed = new URL(trimmed);
-      if (!parsed.pathname.toLowerCase().endsWith('/api/apollo-webhook')) {
-        parsed = new URL('/api/apollo-webhook', parsed);
-      }
-      if (!isValidPublicHttpsUrl(parsed)) continue;
-      parsed.searchParams.set('record_id', recordId);
-      parsed.searchParams.set('table_name', LINKEDIN_PROFILE_TABLE_NAME);
-      parsed.searchParams.set('reveal_email', String(revealEmail));
-      parsed.searchParams.set('reveal_phone', String(revealPhone));
-      const webhookSecret = String(process.env.APOLLO_WEBHOOK_SECRET || '').trim();
-      if (webhookSecret) {
-        parsed.searchParams.set('webhook_secret', webhookSecret);
-      }
-      return parsed.toString();
-    } catch {
-      continue;
-    }
-  }
-
-  return null;
-}
-
-async function resolveSearchUserId(req: NextRequest) {
-  const userIdFromHeader = req.headers.get('x-user-id')?.trim() || '';
-  if (userIdFromHeader) {
-    if (!isTrustedInternalRequest(req)) {
-      return { error: NextResponse.json({ error: 'UNAUTHORIZED_INTERNAL_REQUEST', message: 'Invalid internal API secret' }, { status: 401 }) };
-    }
-    return { userId: userIdFromHeader };
-  }
-
-  const supabase = createRouteHandlerClient({ cookies: (() => req.cookies) as any });
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.id) {
-    return { error: NextResponse.json({ error: 'UNAUTHORIZED', message: 'User must be logged in' }, { status: 401 }) };
-  }
-
-  return { userId: user.id };
-}
-
 async function reserveLeadSearchQuota(userId: string, organizationId?: string | null) {
-  const resolvedOrganizationId = organizationId || await resolveOrganizationIdForUser(userId);
+  const resolvedOrganizationId = organizationId || null;
   if (!resolvedOrganizationId) {
     return {
       error: NextResponse.json({ error: 'ORGANIZATION_REQUIRED' }, { status: 403 }),
@@ -519,441 +254,6 @@ async function auditSearchResponse(response: NextResponse, context: SearchAuditC
   return response;
 }
 
-function buildPeopleSearchLeadRow(person: any, options: {
-  linkedinUrl: string;
-  organizationId?: string | null;
-  batchRunId?: string | null;
-  enrichmentStatus?: string | null;
-  revealEmail?: boolean;
-}) {
-  const lead = mapApolloProfileLead(person, 0, {
-    revealEmail: Boolean(options.revealEmail),
-    revealPhone: true,
-  });
-  const organizationName = getApolloOrganizationName(person) || lead.organization?.name || null;
-  const organizationWebsite = getApolloOrganizationWebsite(person);
-  const normalizedLinkedin = normalizeLinkedinProfileUrl(lead.linkedin_url || options.linkedinUrl) || null;
-  const now = new Date().toISOString();
-  const batchRunId = String(options.batchRunId || '').trim() || now;
-
-  return {
-    id: String(person?.id || '').trim(),
-    linkedin_url: normalizedLinkedin,
-    email: lead.email || null,
-    name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || String(person?.name || '').trim() || null,
-    org_name: organizationName,
-    title: lead.title || null,
-    organization_website: organizationWebsite,
-    page: 1,
-    batch_run_id: batchRunId,
-    created_at: now,
-    organization_id: options.organizationId || null,
-    industry: lead.organization?.industry || null,
-    photo_url: lead.photo_url || null,
-    email_status: lead.email_status || null,
-    first_name: lead.first_name || null,
-    last_name: lead.last_name || null,
-    organization_name: organizationName,
-    updated_at: now,
-    city: String(person?.city || '').trim() || null,
-    state: String(person?.state || '').trim() || null,
-    country: String(person?.country || '').trim() || null,
-    headline: String(person?.headline || '').trim() || null,
-    seniority: String(person?.seniority || '').trim() || null,
-    departments: Array.isArray(person?.departments) ? person.departments : null,
-    phone_numbers: Array.isArray(lead.phone_numbers) ? lead.phone_numbers : [],
-    primary_phone: lead.primary_phone || null,
-    enrichment_status: options.enrichmentStatus || 'completed',
-    organization_domain: lead.organization?.domain || cleanDomain(organizationWebsite) || null,
-    organization_industry: lead.organization?.industry || null,
-    organization_size: typeof person?.organization?.estimated_num_employees === 'number'
-      ? person.organization.estimated_num_employees
-      : null,
-  };
-}
-
-function mapStoredLinkedInProfileLead(row: any) {
-  const personLike = {
-    id: row?.id,
-    first_name: row?.first_name,
-    last_name: row?.last_name,
-    email: row?.email,
-    title: row?.title,
-    linkedin_url: row?.linkedin_url,
-    photo_url: row?.photo_url,
-    email_status: row?.email_status,
-    phone_numbers: Array.isArray(row?.phone_numbers) ? row.phone_numbers : [],
-    primary_phone: row?.primary_phone,
-    enrichment_status: row?.enrichment_status,
-    organization: {
-      name: row?.organization_name || row?.org_name,
-      primary_domain: row?.organization_domain,
-      industry: row?.organization_industry || row?.industry,
-      website_url: row?.organization_website,
-    },
-  };
-
-  const lead = mapApolloProfileLead(personLike, 0, {
-    revealEmail: true,
-    revealPhone: true,
-  });
-  lead.enrichment_status = normalizeClientEnrichmentStatus(row?.enrichment_status) || lead.enrichment_status;
-  return lead;
-}
-
-async function saveLinkedInProfileLead(person: any, options: {
-  linkedinUrl: string;
-  organizationId?: string | null;
-  batchRunId?: string | null;
-  enrichmentStatus?: string | null;
-  revealEmail?: boolean;
-}) {
-  const recordId = String(person?.id || '').trim();
-  if (!recordId) {
-    throw new Error('Profile match missing provider id');
-  }
-
-  const admin = getSupabaseAdminClient();
-  const { data: existing } = await admin
-    .from(LINKEDIN_PROFILE_TABLE_NAME)
-    .select('*')
-    .eq('id', recordId)
-    .maybeSingle();
-
-  const row = buildPeopleSearchLeadRow(person, options);
-  const merged = {
-    ...existing,
-    ...row,
-    email: row.email || existing?.email || null,
-    email_status: row.email_status || existing?.email_status || null,
-    phone_numbers: Array.isArray(row.phone_numbers) && row.phone_numbers.length > 0
-      ? row.phone_numbers
-      : (Array.isArray(existing?.phone_numbers) ? existing.phone_numbers : []),
-    primary_phone: row.primary_phone || existing?.primary_phone || null,
-    organization_website: row.organization_website || existing?.organization_website || null,
-    organization_domain: row.organization_domain || existing?.organization_domain || null,
-    organization_industry: row.organization_industry || existing?.organization_industry || row.industry || existing?.industry || null,
-    title: row.title || existing?.title || null,
-    name: row.name || existing?.name || null,
-    first_name: row.first_name || existing?.first_name || null,
-    last_name: row.last_name || existing?.last_name || null,
-    photo_url: row.photo_url || existing?.photo_url || null,
-    enrichment_status: row.primary_phone || row.email || existing?.primary_phone || existing?.email
-      ? (options.enrichmentStatus || existing?.enrichment_status || 'completed')
-      : (existing?.enrichment_status || options.enrichmentStatus || 'pending_profile'),
-  };
-  const { error } = await admin
-    .from(LINKEDIN_PROFILE_TABLE_NAME)
-    .upsert(merged, { onConflict: 'id' });
-
-  if (error) throw error;
-
-  const { data: persisted } = await admin
-    .from(LINKEDIN_PROFILE_TABLE_NAME)
-    .select('*')
-    .eq('id', recordId)
-    .maybeSingle();
-
-  return persisted || merged;
-}
-
-async function markLeadAsPendingProfileEnrichment(recordId: string) {
-  const admin = getSupabaseAdminClient();
-  const { error } = await admin
-    .from(LINKEDIN_PROFILE_TABLE_NAME)
-    .update({
-      enrichment_status: 'pending_profile',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', recordId);
-
-  if (error) throw error;
-}
-
-async function queueLinkedInProfileReveal(
-  apiKey: string,
-  apolloPersonId: string,
-  revealEmail: boolean,
-  revealPhone: boolean,
-  requestOrigin?: string | null,
-): Promise<PhoneEnrichmentQueueResult> {
-  const webhookUrl = resolveLinkedInProfileWebhookUrl(apolloPersonId, revealEmail, revealPhone, requestOrigin);
-  if (!webhookUrl) {
-    return {
-      queued: false,
-      status: 'skipped',
-        message: 'No se pudo construir un webhook publico HTTPS para pedir el telefono al proveedor.',
-      webhookUrl: null,
-      providerStatus: null,
-      providerDetails: 'missing_public_webhook_url',
-    };
-  }
-
-  const params = new URLSearchParams();
-  params.set('id', apolloPersonId);
-  params.set('reveal_personal_emails', String(revealEmail));
-  params.set('reveal_phone_number', String(revealPhone));
-  params.set('webhook_url', webhookUrl);
-
-  try {
-    const response = await fetchWithTimeout(
-      `${APOLLO_BASE}/people/match?${params.toString()}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache',
-          'Accept': 'application/json',
-          'X-Api-Key': apiKey,
-        },
-        body: '{}',
-      },
-      TIMEOUT_MS,
-    );
-
-    const raw = await response.text();
-    let json: any = null;
-    if (raw?.trim()) {
-      try {
-        json = JSON.parse(raw);
-      } catch {
-        json = null;
-      }
-    }
-
-    if (!response.ok) {
-      const message = String(json?.error || json?.message || raw || `APOLLO_PHONE_QUEUE_HTTP_${response.status}`).trim();
-      return {
-        queued: false,
-        status: 'failed',
-        message: message || 'El proveedor no pudo encolar los datos del perfil.',
-        webhookUrl,
-        providerStatus: response.status,
-        providerDetails: message || null,
-      };
-    }
-
-    return {
-      queued: true,
-      status: 'queued',
-      message: 'El perfil se esta completando y se actualizara en breve por webhook.',
-      webhookUrl,
-      providerStatus: response.status,
-      providerDetails: null,
-    };
-  } catch (error: any) {
-    return {
-      queued: false,
-      status: 'failed',
-      message: error?.message || 'El proveedor no pudo encolar los datos del perfil.',
-      webhookUrl,
-      providerStatus: null,
-      providerDetails: error?.message || null,
-    };
-  }
-}
-
-async function callApolloProfileSearch(
-  params: {
-    linkedinUrl: string;
-    revealEmail: boolean;
-    revealPhone: boolean;
-    organizationId?: string | null;
-    requestOrigin?: string | null;
-  },
-  meta?: Record<string, unknown>
-) {
-  const apiKey = String(process.env.APOLLO_API_KEY || '').trim();
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        error: 'APOLLO_API_KEY_MISSING',
-        message: 'APOLLO_API_KEY missing',
-        ...(meta || {}),
-      },
-      { status: 502 },
-    );
-  }
-
-  const requestedReveal = buildRevealFlags(params.revealEmail, params.revealPhone);
-
-  try {
-    const response = await fetchWithTimeout(
-      `${APOLLO_BASE}/people/match`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'X-Api-Key': apiKey,
-          'Cache-Control': 'no-cache',
-        },
-        body: JSON.stringify({
-          linkedin_url: params.linkedinUrl,
-          reveal_personal_emails: params.revealEmail,
-          reveal_phone_number: false,
-        }),
-      },
-      TIMEOUT_MS,
-    );
-
-    const raw = await response.text();
-    let json: any = null;
-    if (raw?.trim()) {
-      try {
-        json = JSON.parse(raw);
-      } catch {
-        json = null;
-      }
-    }
-
-    if (!response.ok) {
-      const message = String(json?.error || json?.message || raw || `APOLLO_PROFILE_HTTP_${response.status}`).trim();
-      return NextResponse.json(
-        {
-          error: 'APOLLO_PROFILE_SEARCH_ERROR',
-          message,
-          requested_reveal: requestedReveal,
-          ...(meta || {}),
-        },
-        { status: 502 },
-      );
-    }
-
-    const person = json?.person;
-    if (!hasApolloProfileMatch(person)) {
-      return NextResponse.json(
-        {
-          count: 0,
-          leads: [],
-          requested_reveal: requestedReveal,
-          applied_reveal: requestedReveal,
-          effective_reveal: buildRevealFlags(false, false),
-          ...(meta || {}),
-        },
-        { status: 200 },
-      );
-    }
-
-    const providerWarnings: string[] = [];
-    let queueResult: PhoneEnrichmentQueueResult | null = null;
-
-    let persistedProfile: any = null;
-
-    try {
-      persistedProfile = await saveLinkedInProfileLead(person, {
-        linkedinUrl: params.linkedinUrl,
-        organizationId: params.organizationId,
-        enrichmentStatus: 'completed',
-        revealEmail: params.revealEmail,
-      });
-    } catch (saveError: any) {
-      providerWarnings.push(`No se pudo preparar el registro de seguimiento para telefono: ${saveError?.message || 'error desconocido'}`);
-    }
-
-    const lead = persistedProfile
-      ? mapStoredLinkedInProfileLead(persistedProfile)
-      : mapApolloProfileLead(person, 0, {
-        revealEmail: params.revealEmail,
-        revealPhone: false,
-      });
-    const emailFound = Boolean(lead.email);
-    const phoneFound = Boolean(lead.primary_phone);
-    const shouldQueueReveal = params.revealPhone && !phoneFound;
-
-    if (shouldQueueReveal) {
-      const apolloPersonId = String(person?.id || '').trim();
-      if (!apolloPersonId) {
-        queueResult = {
-          queued: false,
-          status: 'failed',
-          message: 'El proveedor encontro el perfil, pero no devolvio un identificador valido para completar los datos solicitados.',
-          webhookUrl: null,
-          providerStatus: null,
-          providerDetails: 'missing_apollo_person_id',
-        };
-      } else if (providerWarnings.length > 0) {
-        queueResult = {
-          queued: false,
-          status: 'failed',
-          message: 'No se pudo preparar el registro interno para completar los datos del perfil.',
-          webhookUrl: null,
-          providerStatus: null,
-          providerDetails: 'failed_to_prepare_tracking_row',
-        };
-      } else {
-        queueResult = await queueLinkedInProfileReveal(
-          apiKey,
-          apolloPersonId,
-          params.revealEmail,
-          params.revealPhone,
-          params.requestOrigin,
-        );
-
-        if (queueResult?.queued) {
-          try {
-            await markLeadAsPendingProfileEnrichment(apolloPersonId);
-          } catch (markError: any) {
-            queueResult = {
-              queued: false,
-              status: 'failed',
-              message: 'El proveedor acepto la cola de enriquecimiento, pero no se pudo marcar el registro como pendiente.',
-              webhookUrl: queueResult.webhookUrl,
-              providerStatus: queueResult.providerStatus,
-              providerDetails: markError?.message || 'failed_to_mark_pending_profile',
-            };
-          }
-        }
-      }
-    }
-
-    if (queueResult?.queued) {
-      lead.enrichment_status = 'pending';
-    } else {
-      const emailSatisfied = !params.revealEmail || emailFound;
-      const phoneSatisfied = !params.revealPhone || phoneFound;
-      lead.enrichment_status = emailSatisfied && phoneSatisfied ? 'completed' : 'failed';
-    }
-
-    const responseBody: Record<string, unknown> = {
-      count: 1,
-      leads: [lead],
-      requested_reveal: requestedReveal,
-      applied_reveal: requestedReveal,
-      effective_reveal: buildRevealFlags(params.revealEmail ? emailFound : false, params.revealPhone ? phoneFound : false),
-      ...(meta || {}),
-    };
-
-    if (queueResult) {
-      responseBody.phone_enrichment = {
-        requested: true,
-        queued: queueResult.queued,
-        status: queueResult.status,
-        message: queueResult.message,
-        webhook_url: queueResult.webhookUrl,
-        provider_status: queueResult.providerStatus,
-        provider_details: queueResult.providerDetails,
-      };
-    }
-
-    if (providerWarnings.length > 0) {
-      responseBody.provider_warnings = providerWarnings;
-    }
-
-    return NextResponse.json(responseBody, { status: 200 });
-  } catch (error: any) {
-    return NextResponse.json(
-      {
-        error: 'APOLLO_PROFILE_SEARCH_ERROR',
-        message: error?.message || 'Unknown profile search error',
-        requested_reveal: requestedReveal,
-        ...(meta || {}),
-      },
-      { status: 502 },
-    );
-  }
-}
-
 function looksLikeSingleLeadPayload(payload: any) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
   return Boolean(
@@ -1020,33 +320,6 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
       const normalized = normalizeLeadSearchResponse(json);
       const responseMeta = pickLeadSearchMeta(json);
 
-      if (payload?.search_mode === 'linkedin_profile' && normalized.count > 1) {
-        return NextResponse.json(
-          {
-            error: 'PROFILE_SEARCH_BACKEND_MISMATCH',
-            message: 'El backend devolvio multiples resultados para una busqueda de perfil unico.',
-            search_mode: 'linkedin_profile',
-            leads_count: normalized.count,
-            ...responseMeta,
-            ...(meta || {}),
-          },
-          { status: 502 },
-        );
-      }
-
-      if (payload?.search_mode === 'linkedin_profile') {
-        const { profileLeads, trackingIds } = partitionLinkedInProfileLeads(normalized.leads);
-        return NextResponse.json({
-          ...normalized,
-          ...responseMeta,
-          ...(meta || {}),
-          count: profileLeads.length,
-          leads_count: profileLeads.length,
-          leads: profileLeads,
-          ...(trackingIds.length > 0 ? { profile_tracking_ids: trackingIds } : {}),
-        }, { status: 200 });
-      }
-
       return NextResponse.json({ ...normalized, ...responseMeta, ...(meta || {}) }, { status: 200 });
     } catch (e) {
       lastErr = e;
@@ -1066,10 +339,6 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
   );
 }
 
-function buildRevealFlags(email: boolean, phone: boolean) {
-  return { email, phone };
-}
-
 export async function GET(req: NextRequest) {
   try {
     const recordId = String(req.nextUrl.searchParams.get('record_id') || '').trim();
@@ -1077,8 +346,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'MISSING_RECORD_ID' }, { status: 400 });
     }
 
-    const ctx = await resolveSearchUserId(req);
-    if ('error' in ctx) return ctx.error;
+    let ctx: Awaited<ReturnType<typeof requireSessionOrTrustedInternalRequest>>;
+    try {
+      ctx = await requireSessionOrTrustedInternalRequest(req);
+    } catch (error) {
+      const response = requestAuthErrorResponse(error);
+      if (response) return response;
+      throw error;
+    }
     const url = buildLeadSearchGetUrl(recordId);
     if (!url) {
       return NextResponse.json({ error: 'PROFILE_RECORD_FETCH_ERROR', message: 'Lead search backend URL missing' }, { status: 500 });
@@ -1125,9 +400,16 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const ctx = await resolveSearchUserId(req);
-    if ('error' in ctx) return ctx.error;
-    const userId = ctx.userId;
+    let ctx: Awaited<ReturnType<typeof requireSessionOrTrustedInternalRequest>>;
+    try {
+      ctx = await requireSessionOrTrustedInternalRequest(req);
+    } catch (error) {
+      const response = requestAuthErrorResponse(error);
+      if (response) return response;
+      throw error;
+    }
+    const userId = ctx.user.id;
+    const organizationId = ctx.organizationId;
 
     let body: unknown = null;
     try {
@@ -1137,7 +419,7 @@ export async function POST(req: NextRequest) {
     }
 
     const requestId = req.headers.get('x-request-id')?.trim() || randomUUID();
-    const actorType = req.headers.get('x-user-id')?.trim() ? 'agent' as const : 'user' as const;
+    const actorType = ctx.source === 'internal' ? 'agent' as const : 'user' as const;
     let requestRecorded = false;
     const recordSearchRequest = async (params: {
       searchMode: string;
@@ -1174,51 +456,21 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(body)) {
       const profileParsed = LinkedInProfileSearchRequestSchema.safeParse(body);
       if (profileParsed.success) {
-        const profileReq = profileParsed.data;
-        const linkedinUrl = String(
-          profileReq.linkedin_url || profileReq.linkedin_profile_url || profileReq.linkedinUrl || ''
-        ).trim();
-        const organizationId = await resolveOrganizationIdForUser(userId);
-        const requestedProvider = String((body as any)?.provider || '').trim().toLowerCase();
-        const providerDecision = resolveLeadProvider({ requestedProvider, organizationId });
+        const providerDecision = resolveLeadProvider({ organizationId });
         await recordSearchRequest({
           searchMode: 'linkedin_profile',
           organizationId,
           providerRequested: providerDecision.requestedProvider,
           providerUsed: providerDecision.provider,
         });
-        const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
-        if ('error' in quotaReservation && quotaReservation.error) {
-          return await auditSearchResponse(quotaReservation.error, {
-            requestId,
-            userId,
-            organizationId,
-            actorType,
-            searchMode: 'linkedin_profile',
-            providerRequested: providerDecision.requestedProvider,
-            providerUsed: providerDecision.provider,
-          });
-        }
-        const profilePayload = {
-          user_id: userId,
+        const response = NextResponse.json({
+          error: 'LINKEDIN_PROFILE_REQUIRES_ENRICHMENT',
+          message: 'La busqueda exacta por LinkedIn usa el flujo idempotente de enriquecimiento.',
           search_mode: 'linkedin_profile',
-          linkedin_url: linkedinUrl,
-          reveal_email: profileReq.reveal_email ?? profileReq.revealEmail ?? true,
-          reveal_phone: profileReq.reveal_phone ?? profileReq.revealPhone ?? true,
-        };
-
-        const response = await callLeadSearchService(profilePayload, {
-          search_mode: 'linkedin_profile',
-          providerRequested: providerDecision.requestedProvider,
           providerUsed: providerDecision.provider,
-          providerDefault: providerDecision.defaultProvider,
-          providerForcedReason: providerDecision.forcedApolloReason,
-          fallbackApplied: false,
-        });
+        }, { status: 409 });
         response.headers.set('x-search-mode', 'linkedin_profile');
         response.headers.set('x-provider-used', providerDecision.provider);
-        response.headers.set('x-quota-count', String(quotaReservation.quota.count));
-        response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
         return await auditSearchResponse(response, {
           requestId,
           userId,
@@ -1227,17 +479,13 @@ export async function POST(req: NextRequest) {
           searchMode: 'linkedin_profile',
           providerRequested: providerDecision.requestedProvider,
           providerUsed: providerDecision.provider,
-          quotaCount: quotaReservation.quota.count,
-          quotaLimit: quotaReservation.quota.limit,
         });
       }
 
       const companyParsed = CompanyNameSearchRequestSchema.safeParse(body);
       if (companyParsed.success) {
         const companyReq = companyParsed.data;
-        const organizationId = await resolveOrganizationIdForUser(userId);
-        const requestedProvider = String((body as any)?.provider || '').trim().toLowerCase();
-        const providerDecision = resolveLeadProvider({ requestedProvider, organizationId });
+        const providerDecision = resolveLeadProvider({ organizationId });
         await recordSearchRequest({
           searchMode: 'company_name',
           organizationId,
@@ -1267,6 +515,7 @@ export async function POST(req: NextRequest) {
           companyReq.companyDomain,
         ]);
         const companyPayload = {
+          provider: providerDecision.provider,
           user_id: userId,
           search_mode: 'company_name',
           company_name: String(companyReq.company_name || '').trim() || undefined,
@@ -1283,7 +532,7 @@ export async function POST(req: NextRequest) {
           providerRequested: providerDecision.requestedProvider,
           providerUsed: providerDecision.provider,
           providerDefault: providerDecision.defaultProvider,
-          providerForcedReason: providerDecision.forcedApolloReason,
+          providerForcedReason: providerDecision.forcedProviderReason,
           fallbackApplied: false,
         });
         response.headers.set('x-search-mode', 'company_name');
@@ -1324,12 +573,7 @@ export async function POST(req: NextRequest) {
     }
 
     const currentParams = parsed.data[0];
-    const requestedProvider = Array.isArray(body)
-      ? String((body?.[0] as any)?.provider || '').trim().toLowerCase()
-      : '';
-    const organizationId = await resolveOrganizationIdForUser(userId);
     const providerDecision = resolveLeadProvider({
-      requestedProvider,
       organizationId,
     });
 
@@ -1341,29 +585,6 @@ export async function POST(req: NextRequest) {
     });
 
     const fallbackApplied = false;
-
-    if (USE_APIFY) {
-      await safeAppendAntoniaEvent({
-        eventKey: `search:${requestId}:bypassed:apify`,
-        eventType: 'search.bypassed',
-        organizationId,
-        actorId: userId,
-        actorType,
-        entityType: 'search',
-        entityId: requestId,
-        sourceRoute: '/api/leads/search',
-        requestId,
-        correlationId: requestId,
-        operationId: requestId,
-        status: 'bypassed',
-        outcome: 'apify_redirect',
-        severity: 'warning',
-        payload: { searchMode: 'batch', provider: 'apify' },
-      });
-      const url = new URL(req.url);
-      url.pathname = "/api/leads/apify";
-      return NextResponse.redirect(url, 307);
-    }
 
     const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
     if ('error' in quotaReservation && quotaReservation.error) {
@@ -1380,6 +601,7 @@ export async function POST(req: NextRequest) {
     }
 
     const newPayload = {
+      provider: providerDecision.provider,
       user_id: userId || undefined,
       search_mode: 'batch',
       industry_keywords: currentParams.industry_keywords,
@@ -1400,12 +622,12 @@ export async function POST(req: NextRequest) {
 
     const response = await callLeadSearchService(newPayload, {
       providerRequested: providerDecision.requestedProvider,
-      providerUsed: 'apollo',
+      providerUsed: providerDecision.provider,
       providerDefault: providerDecision.defaultProvider,
-      providerForcedReason: providerDecision.forcedApolloReason,
+      providerForcedReason: providerDecision.forcedProviderReason,
       fallbackApplied,
     });
-    response.headers.set('x-provider-used', 'apollo');
+    response.headers.set('x-provider-used', providerDecision.provider);
     response.headers.set('x-quota-count', String(quotaReservation.quota.count));
     response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
     return await auditSearchResponse(response, {
@@ -1415,7 +637,7 @@ export async function POST(req: NextRequest) {
       actorType,
       searchMode: 'batch',
       providerRequested: providerDecision.requestedProvider,
-      providerUsed: 'apollo',
+      providerUsed: providerDecision.provider,
       quotaCount: quotaReservation.quota.count,
       quotaLimit: quotaReservation.quota.limit,
       fallbackApplied,

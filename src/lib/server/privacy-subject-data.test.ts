@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const source = readFileSync('src/lib/server/privacy-subject-data.ts', 'utf8');
 const migration = readFileSync('supabase/migrations/20260825120000_campaign_outreach_v2.sql', 'utf8');
+const apolloPrivacyMigration = readFileSync('supabase/migrations/20260901093000_apollo_contact_privacy_lifecycle.sql', 'utf8');
 
 test('privacy exports include matching Campaign V2 plans, sequence copy, enrollments, and recipient steps', () => {
   assert.match(source, /admin\.rpc\('lookup_research_messaging_subject_v1', \{ p_email: email \}\)/);
@@ -35,4 +36,19 @@ test('privacy blocking delegates all durable writes to the atomic service-role s
   assert.match(applyBlock, /admin\.rpc\('apply_privacy_suppression_v2', \{[\s\S]+p_email: email,[\s\S]+p_reason: reason/);
   assert.doesNotMatch(applyBlock, /\.from\('contacted_leads'\)|\.from\('leads'\)|\.from\('unsubscribed_emails'\)/);
   assert.match(applyBlock, /campaignSafetyStop: result\.campaignSafetyStop \|\| null/);
+});
+
+test('Apollo contact stores share the privacy lock, export, suppression, and deletion lifecycle', () => {
+  assert.match(apolloPrivacyMigration, /create or replace function public\.enforce_enrichment_contact_suppression_v1/);
+  assert.match(apolloPrivacyMigration, /pg_advisory_xact_lock\(hashtextextended\(concat\('privacy-delete:', v_email\), 0\)\)/);
+  assert.match(apolloPrivacyMigration, /enforce_enriched_opportunities_contact_suppression/);
+  assert.match(apolloPrivacyMigration, /enforce_people_search_leads_contact_suppression/);
+  assert.match(apolloPrivacyMigration, /'enrichedOpportunities'/);
+  assert.match(apolloPrivacyMigration, /'peopleSearchLeads'/);
+  assert.match(apolloPrivacyMigration, /delete from public\.enriched_opportunities/);
+  assert.match(apolloPrivacyMigration, /delete from public\.people_search_leads/);
+  assert.match(source, /enrichedOpportunities: enrichedOpportunities\.length/);
+  assert.match(source, /peopleSearchLeads: peopleSearchLeads\.length/);
+  assert.match(source, /deletedEnrichedOpportunitiesCount/);
+  assert.match(source, /deletedPeopleSearchLeadsCount/);
 });

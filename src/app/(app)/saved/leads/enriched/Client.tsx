@@ -221,7 +221,8 @@ export default function EnrichedLeadsClient() {
             toUpdate.push({
               ...existing, // Keep original creation date, etc
               fullName: incoming.fullName || existing.fullName,
-              apolloId: incoming.apolloId || existing.apolloId,
+              sourceProvider: incoming.sourceProvider || existing.sourceProvider,
+              sourceProviderId: incoming.sourceProviderId || existing.sourceProviderId,
               email: incoming.email || existing.email,
               emailStatus: incoming.emailStatus || existing.emailStatus,
               phoneNumbers: incoming.phoneNumbers,
@@ -252,7 +253,10 @@ export default function EnrichedLeadsClient() {
         // Reload list
         const fresh = await enrichedLeadsStorageGet();
         setEnriched(fresh);
-        toast({ title: 'Enriquecimiento completado', description: `Se actualizaron ${toUpdate.length} y agregaron ${toAdd.length} leads.` });
+        toast({
+          title: 'Enriquecimiento en curso',
+          description: `Enviados: ${toUpdate.length + toAdd.length}. Los datos se actualizarán al finalizar.`,
+        });
       }
 
     } catch (e: any) {

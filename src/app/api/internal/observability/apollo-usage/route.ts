@@ -1,7 +1,6 @@
-import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { captureApolloCreditUsageSnapshot } from '@/lib/server/apollo-usage';
 import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
+import { captureApolloCreditUsageSnapshot } from '@/lib/server/apollo-usage';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -14,15 +13,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await captureApolloCreditUsageSnapshot({
-      requestId: req.headers.get('x-request-id') || randomUUID(),
-      sourceRoute: 'POST /api/internal/observability/apollo-usage',
+      requestId: req.headers.get('x-request-id') || undefined,
+      sourceRoute: '/api/internal/observability/apollo-usage',
     });
     return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
-  } catch (error) {
-    console.error('[internal/observability/apollo-usage] capture failed', error);
+  } catch {
     return NextResponse.json(
-      { error: 'APOLLO_USAGE_CAPTURE_FAILED', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 502 },
+      { error: 'APOLLO_USAGE_CAPTURE_FAILED' },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } },
     );
   }
 }

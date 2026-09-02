@@ -362,6 +362,19 @@ export default function ProfilePage() {
                       <Label htmlFor="valueProposition">Propuesta de valor</Label>
                       <Textarea id="valueProposition" value={profile.valueProposition} onChange={handleInputChange} placeholder="Que resultado ayudas a conseguir y por que elegirte" className="min-h-24 resize-y rounded-xl bg-background/70" />
                     </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="proofPoints">Pruebas y resultados <span className="font-normal text-muted-foreground">(opcional)</span></Label>
+                      <Textarea
+                        id="proofPoints"
+                        rows={4}
+                        value={profile.proofPoints}
+                        onChange={handleInputChange}
+                        placeholder={'Ej. Reducimos un 25% el tiempo de gestión\nEj. Más de 40 equipos implementados'}
+                        aria-describedby="proofPoints-help"
+                        className="min-h-28 resize-y rounded-xl bg-background/70 leading-6"
+                      />
+                      <p id="proofPoints-help" className="text-xs leading-5 text-muted-foreground">Agrega un caso, resultado o dato verificable por línea. La IA podrá usarlos como respaldo al redactar.</p>
+                    </div>
                   </div>
                 </section>
               </div>

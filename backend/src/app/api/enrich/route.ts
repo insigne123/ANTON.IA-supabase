@@ -7,7 +7,7 @@ import {
   getRequestId,
   readBoundedJsonBody,
 } from '../../../lib/gateway';
-import { ApolloGatewayError, executeEnrichment, getApolloApiKey } from '../../../lib/apollo';
+import { ApolloGatewayError, executeApolloEnrichment, getApolloApiKey } from '../../../lib/apollo';
 import { validateEnrichmentInput } from '../../../lib/validation';
 
 export const dynamic = 'force-dynamic';
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await executeEnrichment(input.value, apiKey, config);
+    const result = await executeApolloEnrichment(input.value, apiKey, config);
     finish(200, result.success ? 'COMPLETED' : 'NOT_FOUND', {
       revealEmail: input.value.revealEmail,
       revealPhone: input.value.revealPhone,

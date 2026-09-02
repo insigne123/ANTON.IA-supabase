@@ -62,7 +62,7 @@ export type SupliaToolDefinition = {
   handler: SupliaToolHandler;
 };
 
-const DEFAULT_ENRICHMENT_SERVICE_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/enrich';
+const APOLLO_ENRICHMENT_ROUTE = '/api/opportunities/enrich-apollo';
 
 function asText(value: unknown) {
   return String(value || '').trim();
@@ -478,7 +478,7 @@ async function buildSearchPlan(input: Record<string, unknown>) {
       peopleSearchPages: Math.max(1, Math.ceil((maxCompanies * maxPeoplePerCompany) / 25)),
     },
     approvalRequiredBeforeExternalSearch: true,
-    note: 'Search plan creado sin llamar Apollo.',
+    note: 'Search plan creado sin llamar al proveedor externo.',
   };
 }
 
@@ -717,7 +717,7 @@ async function scorePeople(input: Record<string, unknown>, context: SupliaToolCo
 }
 
 async function enrichLead(input: Record<string, unknown>, context: SupliaToolContext) {
-  const result = await enrichLeadBatch({ leads: [input], provider: input.provider }, context);
+  const result = await enrichLeadBatch({ leads: [input] }, context);
   return { lead: (result.items as any[])?.[0] || null, summary: result.summary };
 }
 
@@ -725,95 +725,57 @@ async function enrichLeadBatch(input: Record<string, unknown>, context: SupliaTo
   const leads = asObjectArray(input.leads || input.items).slice(0, asLimit(input.limit, 10, 25));
   if (leads.length === 0) throw new Error('Faltan leads para enriquecer.');
 
-  const providerDecision = resolveLeadProvider({
-    requestedProvider: input.provider,
-    organizationId: context.auth.organizationId,
-  });
-  const { externalUrl, backendSecret } = resolveApolloEnrichmentService();
-
-  const limits = await getEffectiveDailyQuotaLimits({ userId: context.auth.user.id, organizationId: context.auth.organizationId });
-  const quota = await checkAndConsumeDailyQuota({
-    userId: context.auth.user.id,
-    organizationId: context.auth.organizationId,
-    resource: 'enrich',
-    limit: limits.enrich,
-    count: leads.length,
-  });
-  if (!quota.allowed) throw new Error(`Cuota diaria de enrichment agotada (${quota.count}/${quota.limit}).`);
-
-  const items: any[] = [];
+  const providerDecision = resolveLeadProvider({ organizationId: context.auth.organizationId });
   await context.reportProgress?.({ current: 0, total: leads.length, label: 'Enrichment iniciado' });
-  for (const lead of leads) {
-    await context.assertRunnable?.();
-    try {
-      const fullName = getLeadName(lead);
-      const [firstName = '', ...lastNameParts] = fullName.split(/\s+/).filter(Boolean);
-      const apolloId = asText(lead.apolloId || lead.apollo_id || lead.id);
-      const response = await fetch(externalUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-secret-key': backendSecret,
-        },
-        body: JSON.stringify({
-          lead: {
-            first_name: firstName,
-            last_name: lastNameParts.join(' '),
-            organization_name: asText(lead.companyName || lead.company),
-            organization_domain: cleanDomain(lead.companyDomain || lead.company_domain || ''),
-            ...(apolloId ? { id: apolloId, apollo_id: apolloId } : {}),
-          },
-          reveal_email: true,
-          reveal_phone: false,
-          revealEmail: true,
-          revealPhone: false,
-          enrichment_level: 'basic',
-          requested_data: { email: true, phone: false },
-          requested_fields: ['email'],
-        }),
-      });
-      const raw = await response.text();
-      if (!response.ok) throw new Error(`apollo_enrichment_failed:${response.status}:${raw.slice(0, 300)}`);
-
-      let enriched: any;
-      try {
-        enriched = raw ? JSON.parse(raw) : {};
-      } catch {
-        throw new Error('apollo_enrichment_invalid_response');
-      }
-      const person = enriched?.extracted_data || {};
-      const matched = Boolean(enriched?.success && enriched?.extracted_data);
-      items.push({
-        ...lead,
-        enrichmentStatus: matched ? 'completed' : 'not_found',
-        providerUsed: providerDecision.provider,
-        email: person.email || getLeadEmail(lead) || undefined,
-        fullName: person.full_name || fullName,
-        title: person.title || person.job_title || lead.title,
-        linkedinUrl: person.linkedin_url || lead.linkedinUrl || lead.linkedin_url,
-        companyName: person.organization_name || person.job_company_name || lead.companyName || lead.company,
-        companyDomain: cleanDomain(person.organization_domain || person.job_company_website || lead.companyDomain || lead.company_domain || '') || undefined,
-        location: person.location_name || lead.location,
-        raw: enriched,
-      });
-    } catch (error: any) {
-      items.push({ ...lead, enrichmentStatus: 'failed', error: error?.message || 'enrichment_failed' });
-    }
-    await context.reportProgress?.({ current: items.length, total: leads.length, label: `Enrichment ${items.length}/${leads.length}` });
-    await context.heartbeat?.();
-  }
+  await context.assertRunnable?.();
+  const { url, internalSecret } = resolveApolloEnrichmentRoute();
+  const operationId = `suplia:${context.jobId || context.conversationId}:${context.stepId || 'enrich'}`.slice(0, 200);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': operationId,
+      'x-user-id': context.auth.user.id,
+      'x-organization-id': context.auth.organizationId,
+      'x-internal-api-secret': internalSecret,
+    },
+    body: JSON.stringify({
+      provider: 'apollo',
+      tableName: 'enriched_leads',
+      revealEmail: true,
+      revealPhone: false,
+      leads: leads.map((lead) => ({
+        fullName: getLeadName(lead),
+        linkedinUrl: asText(lead.linkedinUrl || lead.linkedin_url) || undefined,
+        companyName: asText(lead.companyName || lead.company) || undefined,
+        companyDomain: cleanDomain(lead.companyDomain || lead.company_domain || '') || undefined,
+        title: asText(lead.title),
+        sourceProviderId: asText(lead.sourceProvider || lead.source_provider).toLowerCase() === 'apollo'
+          ? asText(lead.sourceProviderId || lead.source_provider_id) || undefined
+          : undefined,
+        clientRef: asText(lead.id) || undefined,
+      })),
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(String(payload?.error || `APOLLO_ENRICHMENT_${response.status}`));
+  const items = Array.isArray(payload?.enriched) ? payload.enriched : [];
+  await context.reportProgress?.({ current: leads.length, total: leads.length, label: 'Enrichment en cola' });
+  await context.heartbeat?.();
 
   return {
     items,
     summary: {
       requested: leads.length,
-      completed: items.filter((item) => item.enrichmentStatus === 'completed').length,
-      failed: items.filter((item) => item.enrichmentStatus === 'failed').length,
-      notFound: items.filter((item) => item.enrichmentStatus === 'not_found').length,
-      quota,
+      queued: items.length,
+      completed: 0,
+      failed: 0,
+      notFound: 0,
+      operationId: payload?.operationId,
+      operationStatus: payload?.operationStatus,
       providerRequested: providerDecision.requestedProvider,
       providerUsed: providerDecision.provider,
-      providerForcedReason: providerDecision.forcedApolloReason,
+      providerForcedReason: providerDecision.forcedProviderReason,
     },
   };
 }
@@ -890,25 +852,16 @@ ${winningSubjects.length ? `\nAsuntos que ya generaron respuesta. Replica el est
   };
 }
 
-function resolveApolloEnrichmentService() {
-  if (!asText(process.env.APOLLO_API_KEY)) throw new Error('APOLLO_API_KEY missing');
-
-  const externalUrl = asText(process.env.ENRICHMENT_SERVICE_URL) || DEFAULT_ENRICHMENT_SERVICE_URL;
-  const backendSecret = asText(
-    process.env.BACKEND_ENRICH_SECRET ||
-    process.env.ENRICHMENT_SERVICE_SECRET ||
-    process.env.API_SECRET_KEY,
-  );
-  if (!backendSecret) throw new Error('ENRICHMENT_SERVICE_SECRET missing');
-
+function resolveApolloEnrichmentRoute() {
+  const baseUrl = asText(process.env.CANONICAL_APP_URL || process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL);
+  const internalSecret = asText(process.env.INTERNAL_API_SECRET);
+  if (!baseUrl) throw new Error('CANONICAL_APP_URL missing');
+  if (!internalSecret) throw new Error('INTERNAL_API_SECRET missing');
   try {
-    const parsed = new URL(externalUrl);
-    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('unsupported protocol');
+    return { url: new URL(APOLLO_ENRICHMENT_ROUTE, baseUrl).toString(), internalSecret };
   } catch {
-    throw new Error('ENRICHMENT_SERVICE_URL invalid');
+    throw new Error('CANONICAL_APP_URL invalid');
   }
-
-  return { externalUrl, backendSecret };
 }
 
 async function bulkVariantPreview(input: Record<string, unknown>, context: SupliaToolContext) {
@@ -1005,11 +958,11 @@ async function searchCompanies(input: Record<string, unknown>, context: SupliaTo
   const perPage = asLimit(input.perPage || input.limit, 8, 25);
   const page = asLimit(input.page, 1, 10);
   const result = await searchProspectingCompanies({
+    userId: context.auth.user.id,
     organizationId: context.auth.organizationId,
     companyName,
     perPage,
     page,
-    provider: input.provider,
   });
 
   return {
@@ -1036,6 +989,7 @@ async function searchPeople(input: Record<string, unknown>, context: SupliaToolC
   const perPage = asLimit(input.perPage || input.limit, 25, 50);
   const maxPages = asLimit(input.maxPages, 1, 5);
   const result = await searchProspectingPeople({
+    userId: context.auth.user.id,
     organizationId: context.auth.organizationId,
     personTitles,
     domains,
@@ -1047,7 +1001,6 @@ async function searchPeople(input: Record<string, unknown>, context: SupliaToolC
     similarTitles: input.similarTitles !== false,
     dedupe: ['smart', 'id', 'email', 'none'].includes(asText(input.dedupe)) ? asText(input.dedupe) as any : 'smart',
     includeLockedEmails: input.includeLockedEmails !== false,
-    provider: input.provider,
   });
 
   return {
@@ -2218,13 +2171,13 @@ const SUPLIA_TOOLS: Record<string, SupliaToolDefinition> = {
   },
   'prospecting.search_companies': {
     name: 'prospecting.search_companies',
-    description: 'Busca empresas en Apollo. Consume creditos externos y requiere aprobacion humana.',
+    description: 'Busca empresas con Apollo. Consume creditos externos y requiere aprobacion humana.',
     inputSchema: '{ "companyName": string, "perPage"?: number, "page"?: number }',
     handler: searchCompanies,
   },
   'prospecting.search_people': {
     name: 'prospecting.search_people',
-    description: 'Busca personas decisoras en Apollo por empresa, dominio, titulo y ubicacion. Consume creditos externos y requiere aprobacion humana.',
+    description: 'Busca personas decisoras con Apollo por empresa, dominio, titulo y ubicacion. Consume creditos externos y requiere aprobacion humana.',
     inputSchema: '{ "personTitles"?: string[], "domains"?: string[], "companyNames"?: string[], "personLocations"?: string[], "perPage"?: number, "maxPages"?: number }',
     handler: searchPeople,
   },

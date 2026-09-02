@@ -6,29 +6,11 @@ To get started, take a look at src/app/page.tsx.
 
 ## Búsqueda de Leads
 
-La búsqueda y el enriquecimiento de leads usan Apollo. Configura `APOLLO_API_KEY`, `ENRICHMENT_SERVICE_URL` y `ENRICHMENT_SERVICE_SECRET` para los flujos que corresponda.
-
-### Configuración (Apify - Legacy)
-
-Para usar el flujo antiguo basado en Apify (no recomendado):
-
-1.  Establece la variable de entorno `USE_APIFY="true"`.
-2.  Ve a tu [Consola de Apify](https://console.apify.com/).
-3.  Navega a `Settings` > `Integrations`.
-  4.  Copia tu `Personal API token`.
-5.  Añade la siguiente línea a tu archivo `.env`:
-
-```
-APIFY_TOKEN=tu_token_de_apify
-```
-
-**Importante**: El endpoint unificado `/api/leads/search` ahora redirige (307) a `/api/leads/apify` si `USE_APIFY` está activo. El flujo de Apify sigue siendo asíncrono y depende de polling.
+La busqueda y el enriquecimiento de leads usan Apollo a traves de un gateway autenticado. Configura `APOLLO_API_KEY` solo en `backend-antonia` y comparte `ENRICHMENT_SERVICE_SECRET` entre el BFF Next y el gateway.
 
 ## Proveedor de Leads
 
-La búsqueda y el enriquecimiento de leads usan Apollo. Configura `APOLLO_API_KEY`, `ENRICHMENT_SERVICE_URL` y `ENRICHMENT_SERVICE_SECRET` para los flujos que corresponda.
-
-Las rutas conservan `providerRequested` y `providerUsed` para auditoría. Los valores heredados de proveedor se normalizan de forma segura a Apollo y la respuesta siempre informa `providerUsed: "apollo"`.
+Las rutas activas fuerzan Apollo y responden `providerUsed: "apollo"`. Los identificadores de proveedores retirados se conservan unicamente en registros historicos.
 # Leadflowai-21-11
 
 ## UI/UX Workflow

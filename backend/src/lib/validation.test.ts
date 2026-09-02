@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { getGatewayConfig } from './gateway';
-import { normalizeApolloEmployeeRange, validateEnrichmentInput, validateLeadSearchInput } from './validation';
+import {
+  normalizeEmployeeRange,
+  validateEnrichmentInput,
+  validateLeadSearchInput,
+  validateOrganizationEnrichmentInput,
+} from './validation';
 
 test('lead search validation requires filters and caps requested provider results', () => {
   const config = getGatewayConfig({ APOLLO_BACKEND_MAX_SEARCH_RESULTS: '100' });
@@ -23,6 +28,30 @@ test('lead search validation requires filters and caps requested provider result
     max_results: 5_001,
   }, config);
   assert.equal(valid.ok, false);
+});
+
+test('lead search validation only accepts Apollo', () => {
+  const apolloConfig = getGatewayConfig({ LEADS_PROVIDER_DEFAULT: 'apollo' });
+  const defaulted = validateLeadSearchInput({
+    search_mode: 'batch',
+    titles: ['Founder'],
+  }, apolloConfig);
+  assert.equal(defaulted.ok, true);
+  if (defaulted.ok) assert.equal(defaulted.value.provider, 'apollo');
+
+  const rejectedFullEnrich = validateLeadSearchInput({
+    provider: 'fullenrich',
+    search_mode: 'batch',
+    titles: ['Founder'],
+  }, apolloConfig);
+  assert.equal(rejectedFullEnrich.ok, false);
+
+  const unsupported = validateLeadSearchInput({
+    provider: 'unknown',
+    search_mode: 'batch',
+    titles: ['Founder'],
+  }, apolloConfig);
+  assert.equal(unsupported.ok, false);
 });
 
 test('company searches accept selected-organization metadata but use its id as the provider filter', () => {
@@ -65,11 +94,11 @@ test('lead search normalizes employee ranges and keeps firmographic filters sepa
     assert.deepEqual(result.value.personLocations, ['Santiago']);
     assert.equal(result.value.includeSimilarTitles, false);
   }
-  assert.equal(normalizeApolloEmployeeRange('1,10'), '1,10');
-  assert.equal(normalizeApolloEmployeeRange('10-200 empleados'), '10,200');
-  assert.equal(normalizeApolloEmployeeRange('10000001+'), null);
-  assert.equal(normalizeApolloEmployeeRange('1-10000001'), null);
-  assert.equal(normalizeApolloEmployeeRange('invalid'), null);
+  assert.equal(normalizeEmployeeRange('1,10'), '1,10');
+  assert.equal(normalizeEmployeeRange('10-200 empleados'), '10,200');
+  assert.equal(normalizeEmployeeRange('10000001+'), null);
+  assert.equal(normalizeEmployeeRange('1-10000001'), null);
+  assert.equal(normalizeEmployeeRange('invalid'), null);
 });
 
 test('enrichment validation rejects conflicting aliases and broad provider matches', () => {
@@ -87,7 +116,7 @@ test('enrichment validation rejects conflicting aliases and broad provider match
   assert.equal(broadMatch.ok, false);
 
   const valid = validateEnrichmentInput({
-    lead: { id: 'apollo-person-id' },
+    lead: { source_provider_id: 'apollo-person-id' },
     reveal_email: true,
     reveal_phone: false,
     enrichment_level: 'basic',
@@ -95,4 +124,29 @@ test('enrichment validation rejects conflicting aliases and broad provider match
     requested_fields: ['email'],
   });
   assert.equal(valid.ok, true);
+
+  const phoneWithoutWebhook = validateEnrichmentInput({
+    lead: { source_provider_id: 'apollo-person-id' },
+    reveal_email: false,
+    reveal_phone: true,
+    enrichment_level: 'deep',
+  });
+  assert.equal(phoneWithoutWebhook.ok, false);
+
+  const phoneWithWebhook = validateEnrichmentInput({
+    lead: { source_provider_id: 'apollo-person-id' },
+    reveal_email: false,
+    reveal_phone: true,
+    enrichment_level: 'deep',
+    webhook_url: 'https://studio.example.com/api/apollo-webhook/token',
+  });
+  assert.equal(phoneWithWebhook.ok, true);
+});
+
+test('organization enrichment accepts one normalized domain and no extra selectors', () => {
+  const valid = validateOrganizationEnrichmentInput({ domain: 'https://www.people.co/about' });
+  assert.equal(valid.ok, true);
+  if (valid.ok) assert.equal(valid.value.domain, 'people.co');
+  assert.equal(validateOrganizationEnrichmentInput({ domain: 'People Co' }).ok, false);
+  assert.equal(validateOrganizationEnrichmentInput({ domain: 'people.co', organization_id: 'org-1' }).ok, false);
 });

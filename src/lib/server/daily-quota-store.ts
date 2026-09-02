@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { DEFAULT_DAILY_QUOTA_LIMITS } from '@/lib/daily-quota-limits';
 import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
+import { hasUserEnrichmentSearchCreditAccess } from '@/lib/server/enrichment-search-access';
 
 // Use a service role client for reliable quota updates (bypassing RLS if needed for atomic increments)
 // or standard client if we trust RLS. For atomic increments via RPC + security definer, service role is safest or
@@ -115,7 +116,7 @@ export async function getEnrichmentQuotaOperation(params: {
   const operation = data as Record<string, any> | null;
   if (!operation) return null;
   if (String(operation.request_fingerprint || '') !== params.requestFingerprint) {
-    throw new Error('operation id was already used for a different enrichment request');
+    throw new Error('IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST');
   }
   // Quota denials may become claimable after reset or a limit change; the atomic RPC decides that case.
   if (!operation.quota_allowed && Number(operation.response_status) === 429) return null;
@@ -410,8 +411,21 @@ function isMissingOutboundQuotaBucketsTable(error: any) {
     && message.includes("could not find the table 'public.outbound_contact_quota_buckets'");
 }
 
-async function resolveUserScopedQuotaContext(params: { userId: string; fallbackLimit: number; resource: UserScopedQuotaResource }) {
+async function resolveUserScopedQuotaContext(params: {
+  userId: string;
+  fallbackLimit: number;
+  resource: UserScopedQuotaResource;
+  enrichmentSearchAccess?: boolean;
+}) {
   const { userId, fallbackLimit, resource } = params;
+  if (resource === 'enrich') {
+    const hasCreditAccess = params.enrichmentSearchAccess
+      ?? await hasUserEnrichmentSearchCreditAccess(userId);
+    if (!hasCreditAccess) {
+      return { limit: 0, scope: 'user' } satisfies UserScopedQuotaContext;
+    }
+  }
+
   let overrideRow: any = null;
   const overrideColumn = resource === 'research' ? 'daily_investigate_limit' : `daily_${resource}_limit`;
   const { data, error } = await getSupabaseAdmin()
@@ -446,10 +460,12 @@ export async function getEffectiveDailyQuotaLimits(params: { userId: string; org
   // A mission controls its own automated work, not the account allowance shown
   // across the workspace. Resolve membership here so invalid callers still fail closed.
   await resolveOrganizationIdForQuota(params.userId, params.organizationId);
+  const enrichmentSearchAccess = await hasUserEnrichmentSearchCreditAccess(params.userId);
   const enrichQuota = await resolveUserScopedQuotaContext({
     userId: params.userId,
     fallbackLimit: DEFAULT_DAILY_QUOTA_LIMITS.enrich,
     resource: 'enrich',
+    enrichmentSearchAccess,
   });
   const researchQuota = await resolveUserScopedQuotaContext({
     userId: params.userId,
@@ -462,11 +478,22 @@ export async function getEffectiveDailyQuotaLimits(params: { userId: string; org
   });
 
   return {
+    // Apollo people search is credit-free. Product search quota is independent
+    // from paid enrichment access and provider account credits.
     leadSearch: DEFAULT_DAILY_QUOTA_LIMITS.leadSearch,
     enrich: enrichQuota.limit,
     research: researchQuota.limit,
     contact: contactQuota.limit,
   };
+}
+
+export async function consumeLeadSearchQuota(params: { userId: string; organizationId?: string }) {
+  const limits = await getEffectiveDailyQuotaLimits(params);
+  return checkAndConsumeDailyQuota({
+    ...params,
+    resource: 'search',
+    limit: limits.leadSearch,
+  });
 }
 
 async function countContactsToday(params: { userId: string; organizationId: string; dayKey: string; scope: ContactQuotaContext['scope'] }) {
@@ -618,6 +645,15 @@ export async function checkAndConsumeDailyQuota(
   const orgId = await resolveOrganizationIdForQuota(userId, params.organizationId);
   const date = todayKeyUTC();
 
+  if (resource === 'search' || resource === 'leadSearch') {
+    const hasCreditAccess = await hasUserEnrichmentSearchCreditAccess(userId);
+    if (!hasCreditAccess) {
+      const result = { allowed: false, count: 0, limit: 0, dayKey: date, resetAtISO: nextDayStartISOUTC() };
+      await recordQuotaDecision({ userId, organizationId: orgId, resource, requestedCount: count, scope: 'user', result });
+      return result;
+    }
+  }
+
   if (resource === 'contact') {
     const contactQuota = await getContactQuotaUsage({ userId, organizationId: orgId, limit });
     const used = contactQuota.count;
@@ -688,6 +724,17 @@ export async function getDailyQuotaStatus(
   }
 
   const date = todayKeyUTC();
+
+  if (resource === 'search' || resource === 'leadSearch') {
+    try {
+      const hasCreditAccess = await hasUserEnrichmentSearchCreditAccess(userId);
+      if (!hasCreditAccess) {
+        return { allowed: false, count: 0, limit: 0, dayKey: date, resetAtISO: nextDayStartISOUTC() };
+      }
+    } catch {
+      return { allowed: false, count: 0, limit: 0, dayKey: date, resetAtISO: nextDayStartISOUTC() };
+    }
+  }
 
   if (resource === 'contact') {
     try {

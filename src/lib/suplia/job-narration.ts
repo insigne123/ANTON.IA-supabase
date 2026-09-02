@@ -37,8 +37,8 @@ function list(value: unknown, fallback: string) {
 
 function providerLabel(value: unknown) {
   const provider = clean(value).toLowerCase();
-  if (provider === 'apollo' || provider === 'pdl' || provider === 'auto') return 'Apollo';
-  return 'Apollo';
+  if (provider === 'apollo' || provider === 'auto') return 'Apollo';
+  return 'Proveedor de leads';
 }
 
 export function buildSupliaJobIntroMessage(job: JobLike) {

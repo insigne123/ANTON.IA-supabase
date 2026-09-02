@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const migration = readFileSync('supabase/migrations/20260822121500_phase1_security_rls.sql', 'utf8');
 const appHosting = readFileSync('apphosting.yaml', 'utf8');
+const backendAppHosting = readFileSync('backend/apphosting.yaml', 'utf8');
 const tokenService = readFileSync('src/lib/services/token-service.ts', 'utf8');
 const tokenStatusRoute = readFileSync('src/app/api/integrations/store-token/route.ts', 'utf8');
 const gmailPage = readFileSync('src/app/(app)/gmail/page.tsx', 'utf8');
@@ -41,9 +42,11 @@ test('provider connection checks use the authenticated server boundary', () => {
   }
 });
 
-test('App Hosting uses the buildpack and production OpenAI and Apollo settings', () => {
+test('App Hosting keeps Apollo credentials behind the authenticated gateway', () => {
   assert.doesNotMatch(appHosting, /^build:/m);
-  assert.match(appHosting, /- variable: APOLLO_API_KEY\s+secret: APOLLO_API_KEY\s+availability: \[RUNTIME\]/);
+  assert.doesNotMatch(appHosting, /- variable: APOLLO_API_KEY/);
+  assert.match(appHosting, /- variable: ENRICHMENT_SERVICE_SECRET\s+secret: ENRICHMENT_SERVICE_SECRET\s+availability: \[RUNTIME\]/);
+  assert.match(backendAppHosting, /- variable: APOLLO_API_KEY\s+secret: APOLLO_API_KEY\s+availability: \[RUNTIME\]/);
   assert.match(appHosting, /- variable: OPENAI_API_KEY\s+secret: OPENAI_API_KEY\s+availability: \[RUNTIME\]/);
   assert.match(appHosting, /- variable: AI_PROVIDER\s+value: openai\s+availability: \[RUNTIME\]/);
   assert.doesNotMatch(appHosting, /- variable: GLM_API_KEY/);

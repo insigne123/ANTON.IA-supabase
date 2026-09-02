@@ -9,10 +9,6 @@ runConfig:
 
 env:
   # === Primary production providers ===
-  - variable: APOLLO_API_KEY
-    secret: APOLLO_API_KEY
-    availability: [RUNTIME]
-
   - variable: OPENAI_API_KEY
     secret: OPENAI_API_KEY
     availability: [RUNTIME]
@@ -73,7 +69,7 @@ env:
     value: "false"
     availability: [BUILD, RUNTIME]
 
-  # === Lead providers (Apollo/PDL trial) ===
+  # === Lead provider ===
   - variable: LEADS_PROVIDER_DEFAULT
     value: apollo
     availability: [RUNTIME]
@@ -82,44 +78,8 @@ env:
     value: apollo
     availability: [RUNTIME]
 
-  - variable: PDL_TRIAL_ENABLED
-    value: "false"
-    availability: [RUNTIME]
-
-  - variable: PDL_BASE_URL
-    value: https://api.peopledatalabs.com/v5
-    availability: [RUNTIME]
-
-  - variable: PDL_TIMEOUT_MS
-    value: "30000"
-    availability: [RUNTIME]
-
-  - variable: PDL_SEARCH_PAGE_SIZE
-    value: "100"
-    availability: [RUNTIME]
-
-  - variable: PDL_SEARCH_MAX_PAGES
-    value: "10"
-    availability: [RUNTIME]
-
-  - variable: PDL_MAX_RESULTS
-    value: "200"
-    availability: [RUNTIME]
-
-  - variable: PDL_ENRICH_MIN_LIKELIHOOD
-    value: "2"
-    availability: [RUNTIME]
-
-  - variable: PDL_FALLBACK_TO_APOLLO
-    value: "true"
-    availability: [RUNTIME]
-
   - variable: LEADS_DISABLE_EXTERNAL_FALLBACK
-    value: "false"
-    availability: [RUNTIME]
-
-  - variable: APIFY_APOLLO_ACTOR_ID
-    value: code_crafter/apollo-io-scraper
+    value: "true"
     availability: [RUNTIME]
 
   - variable: NEXT_PUBLIC_GOOGLE_CLIENT_ID
@@ -146,16 +106,44 @@ env:
     value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/enrich
     availability: [RUNTIME]
 
+  - variable: APOLLO_SEARCH_TIMEOUT_MS
+    value: "20000"
+    availability: [RUNTIME]
+
+  - variable: APOLLO_ENRICHMENT_TIMEOUT_MS
+    value: "25000"
+    availability: [RUNTIME]
+
+  - variable: APOLLO_ORGANIZATION_ENRICHMENT_URL
+    value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/organization-enrich
+    availability: [RUNTIME]
+
+  - variable: APOLLO_ORGANIZATION_ENRICHMENT_TIMEOUT_MS
+    value: "25000"
+    availability: [RUNTIME]
+
+  - variable: APOLLO_ORGANIZATION_CONTEXT_TTL_DAYS
+    value: "30"
+    availability: [RUNTIME]
+
+  - variable: APOLLO_USAGE_SERVICE_URL
+    value: https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/usage
+    availability: [RUNTIME]
+
+  - variable: APOLLO_USAGE_TIMEOUT_MS
+    value: "25000"
+    availability: [RUNTIME]
+
+  - variable: SUPLIA_APOLLO_CONCURRENCY_PER_ORG
+    value: "1"
+    availability: [RUNTIME]
+
   - variable: ENRICHMENT_SERVICE_SECRET
     secret: ENRICHMENT_SERVICE_SECRET
     availability: [RUNTIME]
 
   - variable: INTERNAL_API_SECRET
     secret: INTERNAL_API_SECRET
-    availability: [RUNTIME]
-
-  - variable: APOLLO_WEBHOOK_SECRET
-    secret: APOLLO_WEBHOOK_SECRET
     availability: [RUNTIME]
 
   - variable: DEBUG_API_ENABLED

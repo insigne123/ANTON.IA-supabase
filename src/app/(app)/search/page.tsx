@@ -24,7 +24,9 @@ import { contactedLeadsStorage } from '@/lib/services/contacted-leads-service';
 import * as Quota from '@/lib/quota-client';
 import { PAGE_SIZE_DEFAULT, PAGE_SIZE_OPTIONS } from '@/lib/search-config';
 import {
-  getLinkedInProfileLead,
+  getLinkedInProfileStatuses,
+  enrichApolloOrganization,
+  ApolloOrganizationEnrichmentClientError,
   searchCompanyNameLeads,
   searchLeads,
   searchLinkedInProfileLead,
@@ -45,10 +47,8 @@ import { Switch } from '@/components/ui/switch';
 import { splitDomainInput } from '@/lib/domain';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import { Badge } from '@/components/ui/badge';
-import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
-import { APOLLO_EMAIL_ENRICHMENT_CREDITS, APOLLO_PHONE_ENRICHMENT_CREDITS, apolloEnrichmentCreditCost } from '@/lib/apollo-credit-costs';
 import {
   DEFAULT_LEAD_SEARCH_FILTERS,
   normalizeSavedSearchCriteria,
@@ -188,7 +188,8 @@ function normalizeLeadForUI(raw: Lead, options?: {
     companyWebsite,
     companyLinkedin,
     linkedinUrl,
-    apolloId: raw.apollo_id || undefined,
+    sourceProvider: raw.source_provider || (raw.apollo_id ? 'apollo' : undefined),
+    sourceProviderId: raw.source_provider_id || raw.apollo_id || undefined,
     phoneNumbers: revealPhone ? (phoneNumbers || null) : null,
     primaryPhone: revealPhone ? primaryPhone : null,
     enrichmentStatus: revealPhone || revealEmail ? enrichmentStatus : undefined,
@@ -250,11 +251,21 @@ function buildLinkedInProfileNotice(params: {
   let title = 'Perfil encontrado';
   let description = 'Ya puedes revisar el resultado y decidir si quieres guardarlo.';
 
-  if (phoneState === 'queued') {
-    title = emailState === 'ready' ? 'Correo listo, telefono en camino' : 'Telefono en camino';
-    description = emailState === 'ready'
-      ? 'El correo ya esta disponible. El telefono aparecera en el resultado cuando este listo.'
-      : 'Encontramos el perfil y seguimos buscando el telefono. Puedes continuar trabajando mientras se actualiza.';
+  if (emailState === 'queued' || phoneState === 'queued') {
+    if (emailState === 'queued' && phoneState === 'queued') {
+      title = 'Datos de contacto en camino';
+      description = 'Encontramos el perfil y seguimos buscando el correo y el teléfono. El resultado se actualizará automáticamente.';
+    } else if (emailState === 'queued') {
+      title = 'Correo en camino';
+      description = phoneState === 'ready'
+        ? 'El teléfono ya está disponible. El correo aparecerá cuando esté listo.'
+        : 'Encontramos el perfil y seguimos buscando el correo. El resultado se actualizará automáticamente.';
+    } else {
+      title = emailState === 'ready' ? 'Correo listo, teléfono en camino' : 'Teléfono en camino';
+      description = emailState === 'ready'
+        ? 'El correo ya está disponible. El teléfono aparecerá cuando esté listo.'
+        : 'Encontramos el perfil y seguimos buscando el teléfono. El resultado se actualizará automáticamente.';
+    }
   } else if (emailRequested && emailState === 'missing' && phoneRequested && phoneState === 'missing') {
     tone = 'warning';
     title = 'Perfil sin datos de contacto visibles';
@@ -327,7 +338,8 @@ function hasLeadPhone(lead: UILaed) {
 function mapLeadToEnriched(l: UILaed) {
   return {
     id: l.id,
-    apolloId: l.apolloId,
+    sourceProvider: l.sourceProvider,
+    sourceProviderId: l.sourceProviderId || l.apolloId,
     sourceOpportunityId: undefined,
     fullName: l.name,
     title: l.title,
@@ -513,6 +525,8 @@ export default function SearchPage() {
   const [companyCandidates, setCompanyCandidates] = useState<CompanySearchOrganization[]>([]);
   const [selectedOrganization, setSelectedOrganization] = useState<CompanySearchOrganization | null>(null);
   const [companySelectionPending, setCompanySelectionPending] = useState(false);
+  const [isEnrichingOrganization, setIsEnrichingOrganization] = useState(false);
+  const organizationEnrichmentOperationsRef = useRef(new Map<string, string>());
 
   const handleSaveSelectedLeads = async () => {
     const selected = leads.filter(lead => selectedLeads.has(lead.id));
@@ -621,7 +635,9 @@ export default function SearchPage() {
         ? 'not_requested'
         : result.leads.some((lead) => hasVisibleLeadEmail(lead))
           ? 'ready'
-          : 'missing';
+          : phoneStatus === 'queued'
+            ? 'queued'
+            : 'missing';
       const phoneState: ProfileContactState = !filters.revealPhone
         ? 'not_requested'
         : phoneStatus === 'queued'
@@ -635,7 +651,7 @@ export default function SearchPage() {
         setProfileSearchNotice({
           tone: 'warning',
           title: 'Perfil no disponible',
-          description: 'No encontramos información suficiente para crear un lead con esta URL.',
+          description: result.phone_enrichment?.message || 'No encontramos información suficiente para crear un lead con esta URL.',
           emailState,
           phoneState,
         });
@@ -676,6 +692,15 @@ export default function SearchPage() {
               emailState,
               phoneState,
             }));
+      } else if (phoneStatus === 'failed' && result.phone_enrichment?.message) {
+        setProfilePhonePollingStartedAt(null);
+        setProfileSearchNotice({
+          tone: 'warning',
+          title: 'Perfil encontrado, contacto pendiente',
+          description: result.phone_enrichment.message,
+          emailState,
+          phoneState,
+        });
       } else if (phoneStatus === 'skipped' || phoneStatus === 'failed') {
         setProfilePhonePollingStartedAt(null);
         setProfileSearchNotice(buildLinkedInProfileNotice({
@@ -857,6 +882,38 @@ export default function SearchPage() {
     toast({ title: 'Búsqueda cancelada' });
   };
 
+  const handleEnrichOrganization = async () => {
+    const domain = selectedOrganization?.primary_domain;
+    if (!selectedOrganization || !domain || isEnrichingOrganization) return;
+    const operationId = organizationEnrichmentOperationsRef.current.get(domain)
+      || `organization-enrich:${crypto.randomUUID()}`;
+    organizationEnrichmentOperationsRef.current.set(domain, operationId);
+    setIsEnrichingOrganization(true);
+    try {
+      const enriched = await enrichApolloOrganization({ domain, operationId });
+      if (!enriched) {
+        toast({ title: 'Sin datos adicionales', description: 'Apollo no encontró más información pública para esta empresa.' });
+        return;
+      }
+      organizationEnrichmentOperationsRef.current.delete(domain);
+      setSelectedOrganization((current) => current?.id === selectedOrganization.id
+        ? { ...current, ...enriched }
+        : current);
+      toast({ title: 'Empresa actualizada', description: 'Añadimos el perfil público disponible de la organización.' });
+    } catch (error) {
+      if (!(error instanceof ApolloOrganizationEnrichmentClientError) || !error.preserveOperation) {
+        organizationEnrichmentOperationsRef.current.delete(domain);
+      }
+      toast({
+        variant: 'destructive',
+        title: 'No pudimos actualizar la empresa',
+        description: error instanceof Error ? error.message : 'Inténtalo nuevamente.',
+      });
+    } finally {
+      setIsEnrichingOrganization(false);
+    }
+  };
+
   const handleClear = () => {
     searchRunIdRef.current += 1;
     abortRef.current?.abort();
@@ -893,21 +950,32 @@ export default function SearchPage() {
     const maxAttempts = 18;
     const startedAt = Date.now();
     const maxDurationMs = maxAttempts * 5000;
-    const emailStateBeforePolling = profileSearchNotice?.emailState
-      || (filters.revealEmail ? 'missing' : 'not_requested');
-
-    const finishWithoutPhone = (description: string) => {
+    const finishWithoutContact = (description: string, items: Awaited<ReturnType<typeof getLinkedInProfileStatuses>> = []) => {
       if (cancelled) return;
+      const emailState: ProfileContactState = !filters.revealEmail
+        ? 'not_requested'
+        : items.some((item) => hasVisibleLeadEmail(item))
+          ? 'ready'
+          : 'missing';
+      const phoneState: ProfileContactState = !filters.revealPhone
+        ? 'not_requested'
+        : items.some((item) => hasVisibleLeadPhone(item))
+          ? 'ready'
+          : 'missing';
       setProfilePhonePollingIds([]);
       setProfilePhonePollingStartedAt(null);
       setLastProfilePhoneStatus('failed');
       profilePhoneToastStateRef.current = 'missing';
       setProfileSearchNotice({
         tone: 'warning',
-        title: 'Telefono no disponible por ahora',
+        title: filters.revealEmail && filters.revealPhone
+          ? 'Datos de contacto no disponibles'
+          : filters.revealEmail
+            ? 'Correo no disponible por ahora'
+            : 'Teléfono no disponible por ahora',
         description,
-        emailState: emailStateBeforePolling,
-        phoneState: filters.revealPhone ? 'missing' : 'not_requested',
+        emailState,
+        phoneState,
       });
     };
 
@@ -919,16 +987,7 @@ export default function SearchPage() {
       profileStatusAbortRef.current = controller;
 
       try {
-        const items = (await Promise.all(
-          profilePhonePollingIds.map(async (id) => {
-            try {
-              return await getLinkedInProfileLead(id, controller.signal);
-            } catch (error: any) {
-              if (error?.name !== 'AbortError') failedAttempts += 1;
-              return null;
-            }
-          })
-        )).filter(Boolean) as Lead[];
+        const items = await getLinkedInProfileStatuses(profilePhonePollingIds, controller.signal);
         if (cancelled) return;
 
         if (items.length > 0) {
@@ -936,15 +995,15 @@ export default function SearchPage() {
           const resolvedWithRequestedData = items.filter((item) => {
             const phoneNumbers = normalizeUiPhoneNumbers(item.phone_numbers);
             const hasPhone = Boolean(item.primary_phone || getPhoneFallback(phoneNumbers));
+            const hasEmail = hasVisibleLeadEmail(item);
+            const emailSatisfied = !filters.revealEmail || hasEmail;
             const phoneSatisfied = !filters.revealPhone || hasPhone;
-            return phoneSatisfied;
+            const status = String(item.enrichment_status || '').trim();
+            return emailSatisfied && phoneSatisfied && !isPendingEnrichmentStatus(status);
           });
           const stillPending = items.some((item) => {
-            const phoneNumbers = normalizeUiPhoneNumbers(item.phone_numbers);
-            const hasPhone = Boolean(item.primary_phone || getPhoneFallback(phoneNumbers));
-            const phoneMissing = filters.revealPhone && !hasPhone;
             const status = String(item.enrichment_status || '').trim();
-            return phoneMissing && isPendingEnrichmentStatus(status);
+            return isPendingEnrichmentStatus(status);
           });
 
           setLeads((prev) => {
@@ -953,7 +1012,9 @@ export default function SearchPage() {
               if (!item) return lead;
               const nextPhoneNumbersRaw = normalizeUiPhoneNumbers(item.phone_numbers) || lead.phoneNumbers;
               const nextPrimaryPhoneRaw = item.primary_phone || getPhoneFallback(nextPhoneNumbersRaw) || lead.primaryPhone || null;
-              const nextEmailRaw = String(item.email || '').trim() || lead.email || null;
+              const nextEmailRaw = hasVisibleLeadEmail(item)
+                ? String(item.email || '').trim()
+                : lead.email || null;
               const nextPhoneNumbers = filters.revealPhone ? (nextPhoneNumbersRaw || null) : null;
               const nextPrimaryPhone = filters.revealPhone ? nextPrimaryPhoneRaw : null;
               const nextEmail = filters.revealEmail ? nextEmailRaw : null;
@@ -969,25 +1030,24 @@ export default function SearchPage() {
               };
               return nextLead;
             });
-            const knownIds = new Set(updated.map((lead) => String(lead.id || '').trim()));
-            const newlyAvailable = items
-              .filter((item) => hasUsableLinkedInProfileData(item) && !knownIds.has(String(item.id || '').trim()))
-              .map((item) => normalizeLeadForUI(item, {
-                revealEmail: filters.revealEmail,
-                revealPhone: filters.revealPhone,
-              }));
-            return [...updated, ...newlyAvailable];
+            return updated;
           });
 
           if (resolvedWithRequestedData.length > 0) {
+            const emailReady = items.some((item) => hasVisibleLeadEmail(item));
+            const phoneReady = items.some((item) => hasVisibleLeadPhone(item));
             setProfilePhonePollingIds([]);
             setProfilePhonePollingStartedAt(null);
             setProfileSearchNotice({
               tone: 'info',
               title: 'Perfil actualizado',
-              description: 'El telefono ya esta visible en el resultado y puedes guardarlo sin salir de esta pantalla.',
-              emailState: items.some((item) => hasVisibleLeadEmail(item as any)) ? 'ready' : (filters.revealEmail ? 'missing' : 'not_requested'),
-              phoneState: 'ready',
+              description: filters.revealEmail && filters.revealPhone
+                ? 'El correo y el teléfono ya están visibles en el resultado.'
+                : filters.revealEmail
+                  ? 'El correo ya está visible en el resultado.'
+                  : 'El teléfono ya está visible en el resultado.',
+              emailState: filters.revealEmail ? (emailReady ? 'ready' : 'missing') : 'not_requested',
+              phoneState: filters.revealPhone ? (phoneReady ? 'ready' : 'missing') : 'not_requested',
             });
             setLastProfilePhoneStatus(null);
             if (profilePhoneToastStateRef.current !== 'found') {
@@ -1001,24 +1061,25 @@ export default function SearchPage() {
           }
 
           if (!stillPending) {
-            finishWithoutPhone('Encontramos el perfil, pero el proveedor no devolvio un telefono disponible.');
+            finishWithoutContact('Encontramos el perfil, pero el proveedor no devolvió todos los datos de contacto solicitados.', items);
             return;
           }
         }
 
         if (attempts >= maxAttempts || Date.now() - startedAt >= maxDurationMs) {
-          finishWithoutPhone(failedAttempts > 0
-            ? 'No pudimos confirmar el estado del telefono despues de varios intentos. Puedes volver a buscarlo.'
-            : 'El proveedor esta tardando mas de lo esperado. Puedes volver a intentarlo en unos minutos.');
+          finishWithoutContact(failedAttempts > 0
+            ? 'No pudimos confirmar los datos de contacto después de varios intentos. Puedes volver a buscarlos.'
+            : 'El proveedor está tardando más de lo esperado. Puedes volver a intentarlo en unos minutos.', items);
           return;
         }
 
         timeoutId = window.setTimeout(poll, 5000);
       } catch (error: any) {
         if (cancelled || error?.name === 'AbortError') return;
-        console.warn('[search] profile phone polling failed:', error?.message || error);
+        failedAttempts += 1;
+        console.warn('[search] profile contact polling failed:', error?.message || error);
         if (attempts >= maxAttempts || Date.now() - startedAt >= maxDurationMs) {
-          finishWithoutPhone('No pudimos confirmar el estado del telefono. Puedes volver a intentarlo.');
+          finishWithoutContact('No pudimos confirmar los datos de contacto. Puedes volver a intentarlo.');
           return;
         }
         timeoutId = window.setTimeout(poll, 5000);
@@ -1033,7 +1094,6 @@ export default function SearchPage() {
       profileStatusAbortRef.current?.abort();
       profileStatusAbortRef.current = null;
     };
-    // The notice is captured when polling starts; adding it as a dependency would restart the timer on every status update.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.searchMode, filters.revealEmail, filters.revealPhone, profilePhonePollingIds, toast]);
 
@@ -1282,7 +1342,7 @@ export default function SearchPage() {
                     onChange={(event) => handleFilterChange('linkedinUrl', event.target.value)}
                     required
                   />
-                  <p className="text-xs text-muted-foreground">El correo se consulta por defecto. Activa el teléfono antes de buscar si también lo necesitas.</p>
+                  <p className="text-xs text-muted-foreground">Define qué datos laborales solicitarás al enriquecer los perfiles encontrados.</p>
                 </div>
                 <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
                   <CollapsibleTrigger asChild>
@@ -1296,15 +1356,15 @@ export default function SearchPage() {
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
                         <div>
-                          <Label htmlFor="revealEmail">Buscar correo</Label>
-                          <p className="text-xs text-muted-foreground">Incluye el correo cuando esté disponible · {APOLLO_EMAIL_ENRICHMENT_CREDITS} crédito Apollo.</p>
+                          <Label htmlFor="revealEmail">Correo laboral</Label>
+                          <p className="text-xs text-muted-foreground">Solicita únicamente direcciones de trabajo.</p>
                         </div>
                         <Switch id="revealEmail" checked={filters.revealEmail} onCheckedChange={(value) => handleFilterChange('revealEmail', value)} />
                       </div>
                       <div className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-muted/20 p-3">
                         <div>
-                          <Label htmlFor="revealPhone">Buscar teléfono</Label>
-                          <p className="text-xs text-muted-foreground">Puede tardar un poco más · {APOLLO_PHONE_ENRICHMENT_CREDITS} créditos Apollo.</p>
+                          <Label htmlFor="revealPhone">Teléfono</Label>
+                          <p className="text-xs text-muted-foreground">Se completa de forma asíncrona cuando está disponible.</p>
                         </div>
                         <Switch id="revealPhone" checked={filters.revealPhone} onCheckedChange={(value) => handleFilterChange('revealPhone', value)} />
                       </div>
@@ -1312,7 +1372,7 @@ export default function SearchPage() {
                   </CollapsibleContent>
                 </Collapsible>
                 <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
-                  Costo estimado por perfil: <strong className="font-medium text-foreground">{apolloEnrichmentCreditCost({ revealEmail: filters.revealEmail, revealPhone: filters.revealPhone })} créditos Apollo</strong>.
+                  El resultado inicial muestra datos profesionales. Los datos de contacto se actualizan en segundo plano.
                 </p>
               </div>
             ) : filters.searchMode === 'company_name' ? (
@@ -1358,12 +1418,21 @@ export default function SearchPage() {
                 </Collapsible>
 
                 {selectedOrganization ? (
-                  <div className="flex max-w-3xl items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-sm dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                  <div className="flex max-w-3xl flex-col gap-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-sm dark:border-emerald-500/30 dark:bg-emerald-500/10 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex min-w-0 items-start gap-2">
                     <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600 dark:text-emerald-300" />
-                    <div>
+                    <div className="min-w-0">
                       <span className="font-medium text-emerald-900 dark:text-emerald-100">Empresa seleccionada: </span>
                       <span className="text-emerald-800 dark:text-emerald-200">{selectedOrganization.name}{selectedOrganization.primary_domain ? ` · ${selectedOrganization.primary_domain}` : ''}</span>
+                      {selectedOrganization.short_description ? <p className="mt-1 line-clamp-2 text-xs text-emerald-800/80 dark:text-emerald-100/70">{selectedOrganization.short_description}</p> : null}
                     </div>
+                    </div>
+                    {selectedOrganization.primary_domain ? (
+                      <Button type="button" variant="outline" size="sm" className="shrink-0 bg-background/70 shadow-none" onClick={handleEnrichOrganization} disabled={isLoading || isEnrichingOrganization}>
+                        {isEnrichingOrganization ? <Loader2 className="h-4 w-4 animate-spin" /> : <Building2 className="h-4 w-4" />}
+                        {isEnrichingOrganization ? 'Actualizando…' : 'Completar empresa'}
+                      </Button>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -1470,7 +1539,7 @@ export default function SearchPage() {
                       <Mail className="h-4 w-4 text-muted-foreground" />
                       <span>Correo</span>
                       <Badge variant="outline" className={statusChipClasses(profileSearchNotice.emailState)}>
-                        {profileSearchNotice.emailState === 'ready' ? 'Disponible' : profileSearchNotice.emailState === 'missing' ? 'No disponible' : 'No solicitado'}
+                        {profileSearchNotice.emailState === 'ready' ? 'Disponible' : profileSearchNotice.emailState === 'queued' ? 'Buscando…' : profileSearchNotice.emailState === 'missing' ? 'No disponible' : 'No solicitado'}
                       </Badge>
                     </div>
                     <div className="inline-flex items-center gap-2 text-sm">

@@ -13,9 +13,10 @@ const firebaseBridgeRoutes = [
     'process-campaigns',
     'campaigns-v2',
     'outbound-reconciliation',
+    'apollo-reconciliation',
+    'apollo-usage',
     'reply-sync',
     'privacy-retention',
-    'apollo-usage',
     'antonia-rollups',
 ].map((route) => ({
     route,
@@ -66,9 +67,10 @@ test('Firebase owns all production scheduler bridges and Vercel only schedules S
     const schedules = [
         ['campaignProcessingTick', "every 5 minutes", '/api/cron/process-campaigns'],
         ['outboundReconciliationTick', "every 5 minutes", '/api/cron/outbound-reconciliation'],
+        ['apolloReconciliationTick', "every 5 minutes", '/api/cron/apollo-reconciliation'],
+        ['apolloUsageTick', "every 1 hours", '/api/cron/apollo-usage'],
         ['replySyncTick', "every 5 minutes", '/api/cron/reply-sync'],
         ['privacyRetentionTick', '30 3 * * *', '/api/cron/privacy-retention'],
-        ['apolloUsageTick', '0 * * * *', '/api/cron/apollo-usage'],
         ['antoniaRollupsTick', '10 0 * * *', '/api/cron/antonia-rollups'],
     ];
     for (const [name, cadence, path] of schedules) {

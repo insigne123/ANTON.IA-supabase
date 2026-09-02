@@ -7,7 +7,7 @@ import {
   getRequestId,
   readBoundedJsonBody,
 } from '../../../lib/gateway';
-import { ApolloGatewayError, executeLeadSearch, getApolloApiKey } from '../../../lib/apollo';
+import { executeProviderLeadSearch, isLeadProviderGatewayError } from '../../../lib/lead-provider';
 import { validateLeadSearchInput } from '../../../lib/validation';
 
 export const dynamic = 'force-dynamic';
@@ -63,15 +63,10 @@ export async function POST(request: NextRequest) {
     return response({ error: 'INVALID_REQUEST', details: input.issues }, 400, requestId);
   }
 
-  const apiKey = getApolloApiKey();
-  if (!apiKey) {
-    finish(503, 'APOLLO_PROVIDER_NOT_CONFIGURED');
-    return response({ error: 'APOLLO_PROVIDER_NOT_CONFIGURED' }, 503, requestId);
-  }
-
   try {
-    const result = await executeLeadSearch(input.value, apiKey, config);
+    const result = await executeProviderLeadSearch(input.value, config);
     finish(200, 'COMPLETED', {
+      provider: input.value.provider,
       searchMode: input.value.searchMode,
       requestedResults: input.value.maxResults,
       returnedResults: Number(result.count) || 0,
@@ -79,13 +74,19 @@ export async function POST(request: NextRequest) {
     });
     return response(result, 200, requestId);
   } catch (error) {
-    if (error instanceof ApolloGatewayError) {
-      finish(error.status, error.code, { searchMode: input.value.searchMode });
+    if (isLeadProviderGatewayError(error)) {
+      finish(error.status, error.code, {
+        provider: input.value.provider,
+        searchMode: input.value.searchMode,
+      });
       return response({ error: error.code }, error.status, requestId);
     }
 
     console.error('[apollo-backend] lead-search failed', { requestId, code: 'BACKEND_ERROR' });
-    finish(500, 'BACKEND_ERROR', { searchMode: input.value.searchMode });
+    finish(500, 'BACKEND_ERROR', {
+      provider: input.value.provider,
+      searchMode: input.value.searchMode,
+    });
     return response({ error: 'BACKEND_ERROR' }, 500, requestId);
   }
 }

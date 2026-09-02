@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { GatewayConfig } from './gateway';
+import type { GatewayConfig, LeadProvider } from './gateway';
 
 const MAX_FILTER_ITEMS = 20;
 
@@ -8,9 +8,9 @@ export type ValidationResult<T> =
   | { ok: false; issues: Array<{ path: string; message: string }> };
 
 export type LeadSearchInput = {
-  searchMode: 'batch' | 'company_name' | 'linkedin_profile';
+  provider: LeadProvider;
+  searchMode: 'batch' | 'company_name';
   userId?: string;
-  linkedinUrl?: string;
   revealEmail: boolean;
   revealPhone: boolean;
   companyName?: string;
@@ -31,10 +31,10 @@ export type LeadSearchInput = {
 
 export type EnrichmentInput = {
   recordId?: string;
-  tableName?: 'enriched_opportunities' | 'enriched_leads';
+  tableName?: 'enriched_opportunities' | 'enriched_leads' | 'people_search_leads';
   lead: {
     id?: string;
-    apolloId?: string;
+    sourceProviderId?: string;
     firstName?: string;
     lastName?: string;
     fullName?: string;
@@ -45,6 +45,12 @@ export type EnrichmentInput = {
   revealEmail: boolean;
   revealPhone: boolean;
   enrichmentLevel: 'basic' | 'deep';
+  webhookUrl?: string;
+  matchOnly: boolean;
+};
+
+export type OrganizationEnrichmentInput = {
+  domain: string;
 };
 
 function boundedText(maxLength = 160) {
@@ -55,7 +61,7 @@ function boundedTextList(maxLength = 160) {
   return z.array(boundedText(maxLength)).max(MAX_FILTER_ITEMS, `must contain at most ${MAX_FILTER_ITEMS} values`).optional().default([]);
 }
 
-export function normalizeApolloEmployeeRange(value: string) {
+export function normalizeEmployeeRange(value: string) {
   const normalized = value.trim().toLowerCase().replace(/\s+empleados?$/, '').trim();
   const bounded = normalized.match(/^(\d+)\s*(?:-|,|a)\s*(\d+)$/);
   if (bounded) {
@@ -75,8 +81,8 @@ export function normalizeApolloEmployeeRange(value: string) {
 
 function employeeRangeList() {
   const employeeRange = boundedText(80)
-    .refine((value) => normalizeApolloEmployeeRange(value) !== null, 'must use min,max, min-max, or min+')
-    .transform((value) => normalizeApolloEmployeeRange(value)!);
+    .refine((value) => normalizeEmployeeRange(value) !== null, 'must use min,max, min-max, or min+')
+    .transform((value) => normalizeEmployeeRange(value)!);
   return z.array(employeeRange).max(MAX_FILTER_ITEMS, `must contain at most ${MAX_FILTER_ITEMS} values`).optional().default([]);
 }
 
@@ -114,12 +120,25 @@ function validLinkedinUrl(value: string) {
   }
 }
 
+function validWebhookUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:'
+      && !url.username
+      && !url.password
+      && url.hostname !== 'localhost'
+      && url.hostname !== '127.0.0.1'
+      && url.hostname !== '::1';
+  } catch {
+    return false;
+  }
+}
+
 export function validateLeadSearchInput(value: unknown, config: GatewayConfig): ValidationResult<LeadSearchInput> {
   const schema = z.object({
+    provider: z.literal('apollo').optional(),
     user_id: optionalIdentifier(),
-    search_mode: z.enum(['batch', 'company_name', 'linkedin_profile']),
-    linkedin_url: z.string().trim().max(500).optional()
-      .refine((item) => item === undefined || validLinkedinUrl(item), 'must be a valid https LinkedIn URL'),
+    search_mode: z.enum(['batch', 'company_name']),
     reveal_email: z.boolean().optional(),
     reveal_phone: z.boolean().optional(),
     company_name: boundedText(200).optional(),
@@ -143,10 +162,6 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
     // then clamp provider work to the backend's stricter runtime cap below.
     max_results: z.number().int().min(1).max(5_000).optional(),
   }).strict().superRefine((input, context) => {
-    if (input.search_mode === 'linkedin_profile' && !input.linkedin_url) {
-      context.addIssue({ code: z.ZodIssueCode.custom, path: ['linkedin_url'], message: 'is required for linkedin_profile searches' });
-    }
-
     if (input.search_mode === 'company_name'
       && !input.company_name
       && input.organization_domains.length === 0
@@ -162,7 +177,9 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
       && input.company_location.length === 0
       && input.person_locations.length === 0
       && input.employee_range.length === 0
-      && input.employee_ranges.length === 0) {
+      && input.employee_ranges.length === 0
+      && input.organization_domains.length === 0
+      && !input.selected_organization_id) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['search_mode'], message: 'at least one bounded search filter is required' });
     }
   });
@@ -174,9 +191,9 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
   return {
     ok: true,
     value: {
+      provider: input.provider ?? config.defaultProvider,
       searchMode: input.search_mode,
       userId: input.user_id,
-      linkedinUrl: input.linkedin_url,
       revealEmail: input.reveal_email ?? true,
       revealPhone: input.reveal_phone ?? false,
       companyName: input.company_name,
@@ -205,7 +222,7 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
 export function validateEnrichmentInput(value: unknown): ValidationResult<EnrichmentInput> {
   const leadSchema = z.object({
     id: optionalIdentifier(),
-    apollo_id: optionalIdentifier(),
+    source_provider_id: optionalIdentifier(),
     first_name: boundedText(100).optional(),
     last_name: boundedText(100).optional(),
     full_name: boundedText(200).optional(),
@@ -217,7 +234,7 @@ export function validateEnrichmentInput(value: unknown): ValidationResult<Enrich
 
   const schema = z.object({
     record_id: optionalIdentifier(),
-    table_name: z.enum(['enriched_opportunities', 'enriched_leads']).optional(),
+    table_name: z.enum(['enriched_opportunities', 'enriched_leads', 'people_search_leads']).optional(),
     lead: leadSchema,
     reveal_email: z.boolean().optional(),
     reveal_phone: z.boolean().optional(),
@@ -226,6 +243,9 @@ export function validateEnrichmentInput(value: unknown): ValidationResult<Enrich
     enrichment_level: z.enum(['basic', 'deep']).optional(),
     requested_data: z.object({ email: z.boolean().optional(), phone: z.boolean().optional() }).strict().optional(),
     requested_fields: z.array(z.enum(['email', 'phone'])).max(2).optional(),
+    match_only: z.boolean().optional().default(false),
+    webhook_url: z.string().trim().max(2_000).optional()
+      .refine((item) => item === undefined || validWebhookUrl(item), 'must be a public https URL'),
   }).strict();
 
   const parsed = schema.safeParse(value);
@@ -242,8 +262,14 @@ export function validateEnrichmentInput(value: unknown): ValidationResult<Enrich
   if (input.reveal_phone !== undefined && input.revealPhone !== undefined && input.reveal_phone !== input.revealPhone) {
     issues.push({ path: 'reveal_phone', message: 'conflicts with revealPhone' });
   }
-  if (!revealEmail && !revealPhone) {
+  if (!revealEmail && !revealPhone && !input.match_only) {
     issues.push({ path: 'reveal_email', message: 'at least one enrichment field is required' });
+  }
+  if (input.match_only && !input.lead.linkedin_url) {
+    issues.push({ path: 'match_only', message: 'requires a LinkedIn URL' });
+  }
+  if (revealPhone && !input.webhook_url) {
+    issues.push({ path: 'webhook_url', message: 'is required when phone enrichment is requested' });
   }
   if (input.requested_data?.email !== undefined && input.requested_data.email !== revealEmail) {
     issues.push({ path: 'requested_data.email', message: 'must match reveal_email' });
@@ -266,8 +292,8 @@ export function validateEnrichmentInput(value: unknown): ValidationResult<Enrich
   }
 
   const lead = input.lead;
-  if (!lead.id && !lead.apollo_id && !lead.linkedin_url && !(lead.first_name && lead.organization_name)) {
-    issues.push({ path: 'lead', message: 'an Apollo id, LinkedIn URL, or first name plus organization is required' });
+  if (!lead.id && !lead.source_provider_id && !lead.linkedin_url && !(lead.first_name && lead.organization_name)) {
+    issues.push({ path: 'lead', message: 'a provider id, LinkedIn URL, or first name plus organization is required' });
   }
 
   if (issues.length > 0) return { ok: false, issues: issues.slice(0, 10) };
@@ -279,7 +305,7 @@ export function validateEnrichmentInput(value: unknown): ValidationResult<Enrich
       tableName: input.table_name,
       lead: {
         id: input.lead.id,
-        apolloId: input.lead.apollo_id,
+        sourceProviderId: input.lead.source_provider_id,
         firstName: input.lead.first_name,
         lastName: input.lead.last_name,
         fullName: input.lead.full_name,
@@ -290,6 +316,14 @@ export function validateEnrichmentInput(value: unknown): ValidationResult<Enrich
       revealEmail,
       revealPhone,
       enrichmentLevel,
+      webhookUrl: input.webhook_url,
+      matchOnly: input.match_only,
     },
   };
+}
+
+export function validateOrganizationEnrichmentInput(value: unknown): ValidationResult<OrganizationEnrichmentInput> {
+  const parsed = z.object({ domain: boundedDomain() }).strict().safeParse(value);
+  if (!parsed.success) return { ok: false, issues: issuesFrom(parsed.error) };
+  return { ok: true, value: parsed.data };
 }

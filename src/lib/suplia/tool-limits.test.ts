@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { getSupliaStepTimeoutMs, getSupliaToolLeasePolicy } from './tool-limits';
 
-test('external lead tools use Apollo leases, including legacy provider inputs', () => {
+test('external lead tools share the bounded Apollo lease', () => {
   const env = { SUPLIA_APOLLO_CONCURRENCY_PER_ORG: '1', SUPLIA_TOOL_LEASE_TTL_SECONDS: '90' };
 
   assert.deepEqual(getSupliaToolLeasePolicy('prospecting.search_companies', { provider: 'apollo' }, env), {

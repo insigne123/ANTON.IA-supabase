@@ -16,7 +16,7 @@ function clean(value: unknown) {
 
 function providerFromInput(input: Record<string, unknown>, fallback = 'auto') {
   const provider = clean(input.provider || input.providerUsed);
-  if (provider === 'apollo' || provider === 'gmail' || provider === 'outlook') return provider;
+  if (provider === 'gmail' || provider === 'outlook') return provider;
   return fallback;
 }
 

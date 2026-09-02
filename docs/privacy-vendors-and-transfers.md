@@ -47,19 +47,22 @@ Como leer este documento:
 - Accion: documentar origen de datos, terminos del proveedor y base de uso B2B.
 
 ### 6. People Data Labs (PDL)
+- Estado: retirado del runtime de produccion; se conserva codigo legacy no importado para trazabilidad.
 - Tipo de datos: enrichment y datos profesionales de personas.
-- Efecto: proveedor alternativo o complementario para leads.
-- Accion: documentar origen de datos, terminos y restricciones de uso.
+- Efecto historico: proveedor alternativo o complementario para leads.
+- Accion: no configurar credenciales ni reactivar sin una revision de privacidad y seguridad.
 
 ### 7. Apify
+- Estado: activo solo para buscar vacantes en `/api/opportunities/*`; retirado como proveedor de busqueda de personas.
 - Tipo de datos: resultados de scraping o automatizacion externa para busqueda o LinkedIn.
-- Efecto: flujo legacy de prospeccion e integracion externa.
-- Accion: revisar si sigue activo, donde corre y que datos registra.
+- Efecto: obtiene vacantes de LinkedIn mediante un actor dedicado; no participa en busqueda ni enriquecimiento de personas.
+- Accion: mantener esta excepcion separada del gateway Apollo y revisar periodicamente datos, retencion y terminos del actor.
 
 ### 8. Anymail Finder
+- Estado: retirado del runtime de produccion; su endpoint responde `410 PROVIDER_RETIRED`.
 - Tipo de datos: datos de contacto y enriquecimiento de email.
-- Efecto: revelar o validar correos de leads.
-- Accion: documentar retencion y controles de uso.
+- Efecto historico: revelaba o validaba correos de leads.
+- Accion: no configurar credenciales y conservar solo identidades historicas persistidas.
 
 ## Riesgos simples a tener presentes
 

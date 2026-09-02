@@ -10,6 +10,7 @@ functions/.webpack/
 .next/
 .next-build/
 .playwright-mcp/
+/.release-*/
 
 # TypeScript incremental build cache
 *.tsbuildinfo

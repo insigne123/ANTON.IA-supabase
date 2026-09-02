@@ -1,35 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 
-import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
+import {
+  requestAuthErrorResponse,
+  requireSessionOrTrustedInternalRequest,
+} from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
 
-async function resolveUserId(req: NextRequest) {
-  const userIdFromHeader = req.headers.get('x-user-id')?.trim() || '';
-  if (userIdFromHeader) {
-    if (!isTrustedInternalRequest(req)) {
-      return { error: NextResponse.json({ error: 'UNAUTHORIZED_INTERNAL_REQUEST' }, { status: 401 }) };
-    }
-    return { userId: userIdFromHeader };
-  }
-
-  const supabase = createRouteHandlerClient({ cookies: (() => req.cookies) as any });
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.id) {
-    return { error: NextResponse.json({ error: 'UNAUTHORIZED', message: 'User must be logged in' }, { status: 401 }) };
-  }
-
-  return { userId: user.id };
-}
-
 export async function POST(req: NextRequest) {
   try {
-    const ctx = await resolveUserId(req);
-    if ('error' in ctx) return ctx.error;
+    let ctx: Awaited<ReturnType<typeof requireSessionOrTrustedInternalRequest>>;
+    try {
+      ctx = await requireSessionOrTrustedInternalRequest(req);
+    } catch (error) {
+      const response = requestAuthErrorResponse(error);
+      if (response) return response;
+      throw error;
+    }
 
     let body: any;
     try {
@@ -47,31 +37,12 @@ export async function POST(req: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const { data: memberships, error: membershipError } = await admin
-      .from('organization_members')
-      .select('organization_id')
-      .eq('user_id', ctx.userId);
-
-    if (membershipError) {
-      console.error('[profile-status] membership query error:', membershipError);
-      return NextResponse.json({ error: 'PROFILE_STATUS_MEMBERSHIP_ERROR', message: membershipError.message }, { status: 500 });
-    }
-
-    const organizationIds = Array.isArray(memberships)
-      ? memberships
-        .map((item: any) => String(item?.organization_id || '').trim())
-        .filter(Boolean)
-      : [];
-
-    if (organizationIds.length === 0) {
-      return NextResponse.json({ error: 'FORBIDDEN', message: 'User does not belong to any organization' }, { status: 403 });
-    }
-
     const { data, error } = await admin
       .from('people_search_leads')
       .select('id, linkedin_url, email, email_status, primary_phone, phone_numbers, enrichment_status, updated_at')
       .in('id', ids)
-      .in('organization_id', organizationIds);
+      .eq('organization_id', ctx.organizationId)
+      .eq('user_id', ctx.user.id);
 
     if (error) {
       console.error('[profile-status] query error:', error);
