@@ -7,6 +7,7 @@ export type ProfileFormValues = {
   description: string;
   services: string;
   valueProposition: string;
+  proofPoints: string;
 };
 
 export const PROFILE_SUGGESTION_FIELDS = [
@@ -48,6 +49,7 @@ const EMPTY_PROFILE: ProfileFormValues = {
   description: '',
   services: '',
   valueProposition: '',
+  proofPoints: '',
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -61,6 +63,15 @@ function asText(value: unknown): string {
     return value.map((item) => String(item ?? '').trim()).filter(Boolean).join(', ');
   }
   return String(value ?? '').trim();
+}
+
+function asMultilineText(value: unknown): string {
+  if (!Array.isArray(value)) return asText(value);
+  return value.map((item) => asText(item)).filter(Boolean).join('\n');
+}
+
+function multilineItems(value: string): string[] {
+  return value.split(/\r?\n/g).map((item) => item.trim()).filter(Boolean);
 }
 
 export function createEmptyProfileForm(): ProfileFormValues {
@@ -129,6 +140,7 @@ export function mapProfileToForm(profile?: ProfileLike | null): ProfileFormValue
     description: asText(extended.description),
     services: asText(extended.services),
     valueProposition: asText(extended.valueProposition || extended.value_proposition),
+    proofPoints: asMultilineText(extended.proofPoints || extended.proof_points),
   };
 }
 
@@ -151,6 +163,7 @@ export function buildProfileUpdate(form: ProfileFormValues, currentProfile?: Pro
         description: form.description.trim(),
         services: form.services.trim(),
         valueProposition: form.valueProposition.trim(),
+        proofPoints: multilineItems(form.proofPoints),
       },
     },
   };

@@ -37,6 +37,7 @@ test('maps legacy and list profile values into editable strings', () => {
         industry: 'Software',
         services: ['Automatizacion', 'Analitica'],
         value_proposition: 'Decisiones mas rapidas',
+        proof_points: ['25% menos tiempo de gestion', '40 equipos implementados'],
       },
     },
   });
@@ -45,6 +46,7 @@ test('maps legacy and list profile values into editable strings', () => {
   assert.equal(form.sector, 'Software');
   assert.equal(form.services, 'Automatizacion, Analitica');
   assert.equal(form.valueProposition, 'Decisiones mas rapidas');
+  assert.equal(form.proofPoints, '25% menos tiempo de gestion\n40 equipos implementados');
   assert.equal(form.website, 'https://acme.com');
 });
 
@@ -57,6 +59,7 @@ test('buildProfileUpdate preserves every outer and nested signature key', () => 
     website: 'https://www.acme.com/about',
     sector: 'Tecnologia',
     services: 'Software',
+    proofPoints: '25% menos tiempo de gestion\n\n  40 equipos implementados  ',
   };
   const update = buildProfileUpdate(form, {
     signatures: {
@@ -72,6 +75,10 @@ test('buildProfileUpdate preserves every outer and nested signature key', () => 
   assert.deepEqual(update.signatures.gmail, { enabled: true, html: '<p>Firma</p>' });
   assert.deepEqual((update.signatures.profile_extended as Record<string, unknown>).customField, { nested: true });
   assert.equal((update.signatures.profile_extended as Record<string, unknown>).value_proposition, 'Valor anterior');
+  assert.deepEqual((update.signatures.profile_extended as Record<string, unknown>).proofPoints, [
+    '25% menos tiempo de gestion',
+    '40 equipos implementados',
+  ]);
 });
 
 test('AI suggestions select empty fields only and never apply empty values', () => {
