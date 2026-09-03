@@ -51,13 +51,22 @@ function timestamp(...values: unknown[]) {
 function snapshotCreditFields(snapshot: UsageSnapshot) {
   const usage = record(snapshot.usage);
   const creditUsage = record(usage.creditUsage);
-  const leadCredit = record(creditUsage.lead_credit ?? creditUsage.leadCredit);
+  const creditUsageStats = record(creditUsage.credit_usage_stats ?? creditUsage.creditUsageStats);
+  const leadCredit = record(
+    creditUsageStats.lead_credit
+      ?? creditUsageStats.leadCredit
+      ?? creditUsage.lead_credit
+      ?? creditUsage.leadCredit,
+  );
   const profileUsage = record(usage.profileCreditUsage);
   const creditFields = record(usage.creditFields ?? profileUsage.credit_fields ?? profileUsage.creditFields);
+  const currentCreditCycle = record(creditUsage.current_credit_cycle ?? creditUsage.currentCreditCycle);
 
   const remaining = finiteNumber(
     leadCredit.left_over,
     leadCredit.remaining,
+    creditUsageStats.credits_remaining,
+    creditUsageStats.remaining,
     creditUsage.credits_remaining,
     creditUsage.credit_remaining,
     creditUsage.remaining,
@@ -69,6 +78,8 @@ function snapshotCreditFields(snapshot: UsageSnapshot) {
   const used = finiteNumber(
     leadCredit.consumed,
     leadCredit.used,
+    creditUsageStats.credits_used,
+    creditUsageStats.used,
     creditUsage.credits_used,
     creditUsage.credit_used,
     creditUsage.used,
@@ -77,6 +88,8 @@ function snapshotCreditFields(snapshot: UsageSnapshot) {
   );
   const providerLimit = finiteNumber(
     leadCredit.limit,
+    creditUsageStats.credits_limit,
+    creditUsageStats.limit,
     creditUsage.credits_limit,
     creditUsage.credit_limit,
     creditUsage.limit,
@@ -87,6 +100,8 @@ function snapshotCreditFields(snapshot: UsageSnapshot) {
   );
   const cycleEnd = timestamp(
     snapshot.cycle_end,
+    currentCreditCycle.end_date,
+    currentCreditCycle.endDate,
     leadCredit.cycle_end,
     creditUsage.cycle_end,
     creditFields.cycle_end,
