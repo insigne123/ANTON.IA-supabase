@@ -616,6 +616,15 @@ async function persistImmediateResult(input: {
     ? input.extracted.phone_numbers.slice(0, 20)
     : [];
   const primaryPhone = input.revealPhone ? text(input.extracted.primary_phone, 64) || null : null;
+  const email = input.revealEmail ? text(input.extracted.email, 320) || undefined : undefined;
+  const emailStatus = input.revealEmail ? text(input.extracted.email_status, 64) || undefined : undefined;
+  const contactValues = {
+    email,
+    email_status: emailStatus,
+    // Do not overwrite an existing value while Apollo is still processing.
+    phone_numbers: input.revealPhone && phoneNumbers.length > 0 ? phoneNumbers : undefined,
+    primary_phone: input.revealPhone ? primaryPhone || undefined : undefined,
+  };
   const providerId = text(input.extracted.source_provider_id || input.extracted.apollo_id, 255) || input.target.sourceProviderId;
   const dataContext = {
     sourceProvider: 'apollo',
@@ -651,6 +660,7 @@ async function persistImmediateResult(input: {
 
   const values = input.tableName === 'people_search_leads' ? {
     ...common,
+    ...contactValues,
     apollo_person_id: providerId || undefined,
     name: text(input.extracted.full_name, 200) || undefined,
     first_name: text(input.extracted.first_name, 100) || undefined,
@@ -668,6 +678,7 @@ async function persistImmediateResult(input: {
     departments: Array.isArray(input.extracted.departments) ? input.extracted.departments.slice(0, 20) : undefined,
   } : input.tableName === 'enriched_leads' ? {
     ...common,
+    ...contactValues,
     full_name: text(input.extracted.full_name, 200) || undefined,
     company_name: text(input.extracted.organization_name, 200) || undefined,
     organization_domain: text(input.extracted.organization_domain, 253) || undefined,
@@ -683,6 +694,7 @@ async function persistImmediateResult(input: {
     data: { ...existingData, ...dataContext },
   } : {
     ...common,
+    ...contactValues,
     full_name: text(input.extracted.full_name, 200) || undefined,
     company_name: text(input.extracted.organization_name, 200) || undefined,
     data: { ...existingData, ...dataContext },

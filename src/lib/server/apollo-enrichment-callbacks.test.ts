@@ -121,11 +121,9 @@ test('Apollo webhook parser preserves signed request IDs and bounds contact fiel
 
 test('Apollo webhook processing hashes the raw payload before the atomic RPC', async () => {
   const token = 'a'.repeat(43);
-  const rawBody = Buffer.from(JSON.stringify({
-    request_id: '1234567890123456789',
-    status: 'success',
-    person: { id: 'apollo-person-1', phone_number: '+15550100001' },
-  }));
+  const rawBody = Buffer.from(
+    '{"request_id":7729515760484695000,"status":"success","person":{"id":"apollo-person-1","phone_number":"+15550100001"}}',
+  );
   const calls: Array<{ name: string; params: Record<string, unknown> }> = [];
   const client = {
     rpc: async (name: string, params: Record<string, unknown>) => {
@@ -138,8 +136,59 @@ test('Apollo webhook processing hashes the raw payload before the atomic RPC', a
   assert.deepEqual(result, { kind: 'processed', outcome: 'processed' });
   assert.equal(calls[0]?.name, 'apply_apollo_enrichment_callback_v1');
   assert.equal(calls[0]?.params.p_token_hash, hashApolloCallbackToken(token));
+  assert.equal(calls[0]?.params.p_provider_request_id, '7729515760484695000');
   assert.match(String(calls[0]?.params.p_payload_hash), /^[0-9a-f]{64}$/);
   assert.equal(JSON.stringify(calls[0]?.params).includes(token), false);
+});
+
+test('native Apollo phone webhooks resolve the request ID from the callback row', async () => {
+  const token = 'c'.repeat(43);
+  const providerRequestId = '7729515760484695000';
+  const rawBody = Buffer.from(JSON.stringify({
+    status: 'success',
+    total_requested_enrichments: 1,
+    people: [{
+      id: 'apollo-person-1',
+      status: 'success',
+      phone_numbers: [{
+        raw_number: '+1 555 010 0001',
+        sanitized_number: '+15550100001',
+        type_cd: 'mobile',
+        status_cd: 'valid_number',
+        position: 0,
+      }],
+    }],
+  }));
+  const calls: Array<{ name: string; params: Record<string, unknown> }> = [];
+  const client = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: { provider_request_id: providerRequestId }, error: null }),
+        }),
+      }),
+    }),
+    rpc: async (name: string, params: Record<string, unknown>) => {
+      calls.push({ name, params });
+      return { data: { outcome: 'processed' }, error: null };
+    },
+  };
+
+  const result = await processApolloWebhookDelivery({ token, rawBody }, client);
+  assert.deepEqual(result, { kind: 'processed', outcome: 'processed' });
+  assert.equal(calls[0]?.params.p_provider_request_id, providerRequestId);
+  assert.equal(calls[0]?.params.p_provider_status, 'SUCCESS');
+  assert.deepEqual(calls[0]?.params.p_candidate, {
+    apollo_person_id: 'apollo-person-1',
+    phone_numbers: [{
+      raw_number: '+1 555 010 0001',
+      sanitized_number: '+15550100001',
+      type: 'mobile',
+      position: '0',
+      status: 'valid_number',
+    }],
+    primary_phone: '+15550100001',
+  });
 });
 
 test('Apollo webhook URLs fail closed for local or insecure origins', () => {

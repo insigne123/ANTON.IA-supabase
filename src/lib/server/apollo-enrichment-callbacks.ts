@@ -34,7 +34,7 @@ export type ApolloWebhookCandidate = {
 };
 
 export type ParsedApolloWebhook = {
-  providerRequestId: string;
+  providerRequestId: string | null;
   providerStatus: string;
   candidate: ApolloWebhookCandidate;
 };
@@ -56,6 +56,14 @@ function text(value: unknown, maxLength: number): string | null {
   if (typeof value !== 'string' && typeof value !== 'number') return null;
   const normalized = String(value).trim();
   return normalized && normalized.length <= maxLength ? normalized : null;
+}
+
+function parseApolloJson(raw: string) {
+  const preserved = raw.replace(
+    /("(?:request_id|requestId)"\s*:\s*)(-?\d+)(?=\s*[,}])/g,
+    '$1"$2"',
+  );
+  return JSON.parse(preserved) as unknown;
 }
 
 function requiredUuid(value: string, name: string) {
@@ -286,21 +294,22 @@ export async function settleApolloEnrichmentCallback(
 function normalizePhone(value: unknown) {
   const input = object(value);
   const raw = text(
-    input?.sanitized_number
-    || input?.raw_number
+    input?.raw_number
     || input?.number
-    || input?.phone_number,
+    || input?.phone_number
+    || input?.sanitized_number,
     64,
   );
-  if (!raw) return null;
-  const sanitized = raw.replace(/[^+\d]/g, '');
+  const sanitizedInput = text(input?.sanitized_number || raw, 64);
+  if (!sanitizedInput) return null;
+  const sanitized = sanitizedInput.replace(/[^+\d]/g, '');
   if (!/^\+?\d{3,20}$/.test(sanitized)) return null;
   return {
-    raw_number: raw,
+    raw_number: raw || sanitized,
     sanitized_number: sanitized,
     type: text(input?.type || input?.type_cd, 32) || 'phone',
     position: text(input?.position, 32) || 'current',
-    status: text(input?.status, 32) || 'unknown',
+    status: text(input?.status || input?.status_cd, 32) || 'unknown',
   };
 }
 
@@ -314,7 +323,15 @@ export function parseApolloWebhookPayload(payload: unknown, requestIdHeader?: st
     root.request_id || root.requestId || data?.request_id || requestIdHeader,
     255,
   );
-  if (!providerRequestId) return null;
+  const hasResultShape = Boolean(
+    root.status
+    || root.webhook_status
+    || root.error_code
+    || root.person
+    || root.data
+    || Array.isArray(root.people),
+  );
+  if (!providerRequestId && !hasResultShape) return null;
 
   const apolloPersonId = text(person.id || person.person_id || person.apollo_id, 255);
   const email = text(person.email || person.work_email, 320);
@@ -354,16 +371,30 @@ export async function processApolloWebhookDelivery(
 
   let payload: unknown;
   try {
-    payload = JSON.parse(input.rawBody.toString('utf8'));
+    payload = parseApolloJson(input.rawBody.toString('utf8'));
   } catch {
     return { kind: 'invalid_payload' as const };
   }
   const parsed = parseApolloWebhookPayload(payload, input.requestIdHeader);
   if (!parsed) return { kind: 'invalid_payload' as const };
 
+  // Apollo's native phone webhook identifies the callback by its opaque URL
+  // token and normally omits the original request_id from the JSON body.
+  let providerRequestId = parsed.providerRequestId;
+  if (!providerRequestId) {
+    const { data, error } = await client
+      .from('apollo_enrichment_callbacks')
+      .select('provider_request_id')
+      .eq('token_hash', tokenHash)
+      .maybeSingle();
+    if (error) throw error;
+    providerRequestId = text(data?.provider_request_id, 255);
+  }
+  if (!providerRequestId) return { kind: 'provider_request_pending' as const };
+
   const outcome = await applyApolloEnrichmentCandidate({
     tokenHash,
-    providerRequestId: parsed.providerRequestId,
+    providerRequestId,
     providerStatus: parsed.providerStatus,
     payloadHash: createHash('sha256').update(input.rawBody).digest('hex'),
     candidate: parsed.candidate,

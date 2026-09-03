@@ -42,6 +42,9 @@ export async function POST(
     if (result.kind === 'invalid_payload') {
       return NextResponse.json({ error: 'INVALID_PAYLOAD' }, { status: 400 });
     }
+    if (result.kind === 'provider_request_pending') {
+      return NextResponse.json({ error: 'PROVIDER_REQUEST_PENDING' }, { status: 503 });
+    }
     return NextResponse.json({ ok: true, outcome: result.outcome });
   } catch {
     // Provider payloads can contain contact data and must never reach logs.

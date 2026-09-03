@@ -169,6 +169,29 @@ test('standard enrichment uses query params, disables waterfall, and keeps phone
   }
 });
 
+test('standard enrichment preserves Apollo request IDs larger than JavaScript safe integers', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    '{"request_id":7729515760484695000,"credits_consumed":1,"person":{"id":"person-1","email":"ana@example.test"}}',
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  );
+
+  try {
+    const parsed = validateEnrichmentInput({
+      lead: { source_provider_id: 'person-1' },
+      reveal_email: true,
+      reveal_phone: false,
+    });
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+
+    const result = await executeApolloEnrichment(parsed.value, 'apollo-test-key', getGatewayConfig());
+    assert.equal(result.provider_request_id, '7729515760484695000');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('webhook result polling preserves signed request ids and exposes normalized candidates', async () => {
   const requests: Array<{ url: URL; init?: RequestInit }> = [];
   const originalFetch = globalThis.fetch;
@@ -176,10 +199,19 @@ test('webhook result polling preserves signed request ids and exposes normalized
     requests.push({ url: new URL(String(input)), init });
     return Response.json({
       request_id: '-9223372036854775807',
-      status: 'completed',
-      person: {
-        id: 'person-1',
-        phone_numbers: [{ sanitized_number: '+15550100001', type: 'mobile' }],
+      webhook_status: 'success',
+      webhook_result: {
+        status: 'success',
+        people: [{
+          id: 'person-1',
+          phone_numbers: [{
+            raw_number: '+1 555 010 0001',
+            sanitized_number: '+15550100001',
+            type_cd: 'mobile',
+            status_cd: 'valid_number',
+            position: 0,
+          }],
+        }],
       },
     });
   };
@@ -187,11 +219,27 @@ test('webhook result polling preserves signed request ids and exposes normalized
   try {
     const result = await getApolloWebhookResult('-9223372036854775807', 'apollo-test-key', getGatewayConfig());
     assert.equal(result.provider_request_id, '-9223372036854775807');
-    assert.equal(result.status, 'completed');
+    assert.equal(result.status, 'success');
     assert.equal(result.candidate?.apollo_person_id, 'person-1');
     assert.equal(result.candidate?.primary_phone, '+15550100001');
     assert.equal(requests[0]?.url.pathname, '/api/v1/webhook_result/-9223372036854775807');
     assert.equal(requests[0]?.init?.method, 'GET');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('webhook polling keeps Apollo pending responses retryable', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(
+    { error_code: 'result_pending', retry_after_seconds: 10 },
+    { status: 404 },
+  );
+  try {
+    const result = await getApolloWebhookResult('7729515760484695000', 'apollo-test-key', getGatewayConfig());
+    assert.equal(result.status, 'result_pending');
+    assert.equal(result.retry_after_seconds, 10);
+    assert.equal(result.provider_request_id, '7729515760484695000');
   } finally {
     globalThis.fetch = originalFetch;
   }
