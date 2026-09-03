@@ -7,18 +7,10 @@ import {
   getApolloApiKey,
   getApolloUsageSnapshot,
   getApolloWebhookResult,
-  resolveApolloIndustryFilters,
 } from './apollo';
 import { getGatewayConfig } from './gateway';
 import { executeProviderLeadSearch } from './lead-provider';
 import { validateEnrichmentInput, validateLeadSearchInput } from './validation';
-
-test('industry filters resolve canonical tags and preserve unknown keywords', () => {
-  assert.deepEqual(resolveApolloIndustryFilters(['Recursos Humanos', 'Computer Software', 'SaaS']), {
-    tagIds: ['5567e0e37369640e5ac10c00', '5567cd4e7369643b70010000'],
-    keywordFallbacks: ['SaaS'],
-  });
-});
 
 test('people search uses Apollo query filters and strips accidental contact data', async () => {
   const requests: Array<{ url: URL; init?: RequestInit }> = [];
@@ -47,9 +39,11 @@ test('people search uses Apollo query filters and strips accidental contact data
       search_mode: 'batch',
       industry_keywords: ['Human Resources'],
       company_keywords: ['payroll'],
+      company_location: ['Chile'],
       person_locations: ['Santiago'],
       employee_ranges: ['51-200'],
       titles: ['HR Director'],
+      seniorities: ['director'],
       include_similar_titles: false,
       max_results: 25,
     }, config);
@@ -67,12 +61,68 @@ test('people search uses Apollo query filters and strips accidental contact data
 
     assert.equal(requests.length, 1);
     assert.equal(requests[0]?.url.pathname, '/api/v1/mixed_people/api_search');
-    assert.deepEqual(requests[0]?.url.searchParams.getAll('organization_industry_tag_ids[]'), ['5567e0e37369640e5ac10c00']);
-    assert.deepEqual(requests[0]?.url.searchParams.getAll('q_organization_keyword_tags[]'), ['payroll']);
+    assert.equal(requests[0]?.url.searchParams.get('q_keywords'), 'Human Resources, payroll');
+    assert.deepEqual(requests[0]?.url.searchParams.getAll('organization_industry_tag_ids[]'), []);
+    assert.deepEqual(requests[0]?.url.searchParams.getAll('q_organization_keyword_tags[]'), []);
+    assert.deepEqual(requests[0]?.url.searchParams.getAll('organization_locations[]'), ['Chile']);
+    assert.deepEqual(requests[0]?.url.searchParams.getAll('person_locations[]'), ['Santiago']);
+    assert.deepEqual(requests[0]?.url.searchParams.getAll('person_titles[]'), ['HR Director']);
+    assert.deepEqual(requests[0]?.url.searchParams.getAll('person_seniorities[]'), ['director']);
     assert.deepEqual(requests[0]?.url.searchParams.getAll('organization_num_employees_ranges[]'), ['51,200']);
+    assert.equal(requests[0]?.url.searchParams.get('include_similar_titles'), 'false');
     const headers = new Headers(requests[0]?.init?.headers);
     assert.equal(headers.get('x-api-key'), 'apollo-test-key');
     assert.equal(headers.get('authorization'), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('batch search reproduces the screenshot filters without adding hidden constraints', async () => {
+  const requests: Array<{ url: URL; init?: RequestInit }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    requests.push({ url: new URL(String(input)), init });
+    return Response.json({ people: [] });
+  };
+
+  try {
+    const config = getGatewayConfig({ APOLLO_BACKEND_MAX_SEARCH_RESULTS: '100' });
+    const parsed = validateLeadSearchInput({
+      provider: 'apollo',
+      search_mode: 'batch',
+      industry_keywords: ['Technology'],
+      company_location: ['chile'],
+      employee_ranges: ['5001+'],
+      titles: [],
+      seniorities: [],
+      include_similar_titles: true,
+      max_results: 25,
+    }, config);
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+
+    const result = await executeProviderLeadSearch(parsed.value, config, { APOLLO_API_KEY: 'apollo-test-key' });
+    assert.equal(result.search_mode, 'batch');
+    assert.equal(result.count, 0);
+    assert.deepEqual(result.leads, []);
+
+    assert.equal(requests.length, 1);
+    const searchParams = requests[0]?.url.searchParams;
+    assert.equal(requests[0]?.url.pathname, '/api/v1/mixed_people/api_search');
+    assert.equal(requests[0]?.init?.method, 'POST');
+    assert.equal(requests[0]?.init?.body, '{}');
+    assert.equal(searchParams?.get('q_keywords'), 'Technology');
+    assert.deepEqual(searchParams?.getAll('organization_industry_tag_ids[]'), []);
+    assert.deepEqual(searchParams?.getAll('q_organization_keyword_tags[]'), []);
+    assert.deepEqual(searchParams?.getAll('organization_locations[]'), ['chile']);
+    assert.deepEqual(searchParams?.getAll('person_locations[]'), []);
+    assert.deepEqual(searchParams?.getAll('person_titles[]'), []);
+    assert.deepEqual(searchParams?.getAll('person_seniorities[]'), []);
+    assert.deepEqual(searchParams?.getAll('organization_num_employees_ranges[]'), ['5001,10000000']);
+    assert.equal(searchParams?.get('include_similar_titles'), null);
+    assert.equal(searchParams?.get('per_page'), '25');
+    assert.equal(searchParams?.get('page'), '1');
   } finally {
     globalThis.fetch = originalFetch;
   }

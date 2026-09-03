@@ -1455,7 +1455,7 @@ export default function SearchPage() {
                         {industries.map((industry) => <SelectItem key={industry} value={industry} disabled={isLoading}>{INDUSTRY_LABELS_ES[industry] || industry}</SelectItem>)}
                       </SelectContent>
                     </Select>
-                    <p className="text-xs text-muted-foreground">Usa una categoría para obtener resultados más precisos.</p>
+                    <p className="text-xs text-muted-foreground">Apollo usa este valor como palabra clave para encontrar empresas relacionadas.</p>
                   </div>
                    <div className="space-y-2">
                      <Label htmlFor="companyKeywords">Palabras clave de empresa</Label>

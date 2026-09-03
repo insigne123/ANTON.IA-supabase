@@ -92,63 +92,6 @@ function normalizeComparable(value: unknown) {
     .trim();
 }
 
-const INDUSTRY_ALIASES: Record<string, string> = {
-  'recursos humanos': 'human resources',
-  tecnologia: 'technology',
-  salud: 'healthcare',
-  finanzas: 'finance',
-  fabricacion: 'manufacturing',
-  educacion: 'education',
-  construccion: 'construction',
-};
-
-const INDUSTRY_TAG_IDS = Object.fromEntries(Object.entries({
-  'Human Resources': '5567e0e37369640e5ac10c00',
-  Technology: '5494458a746564006c840200',
-  Healthcare: '5494458a746564006c840100',
-  Finance: '5494458a746564006c840000',
-  Manufacturing: '5494458a746564006c840300',
-  Retail: '5567ced173696450cb580000',
-  Education: '5494458a746564006c840500',
-  Accounting: '5567ce1f7369643b78570000',
-  'Architecture & Planning': '5567cdb77369645401080000',
-  'Apparel & Fashion': '5567cd82736964540d0b0000',
-  Automotive: '5567cdf27369644cfd800000',
-  'Building Materials': '5567e1a17369641ea9d30100',
-  Biotechnology: '5567d08e7369645dbc4b0000',
-  'Environment Services': '5567ce5b736964540d280000',
-  'Electrical/Electronic Manufacturing': '5567cd4c73696439c9030000',
-  'Computer Software': '5567cd4e7369643b70010000',
-  Entertainment: '5567cdd37369643b80510000',
-  'Education Management': '5567ce9e736964540d540000',
-  Construction: '5567cd4773696439dd350000',
-  'Financial Services': '5567cdd67369643e64020000',
-  'Government Administration': '5567cd527369643981050000',
-  Hospitality: '5567ce9d7369643bc19c0000',
-  'Health, Wellness & Fitness': '5567cddb7369644d250c0000',
-  'Higher Education': '5567cd4c73696453e1300000',
-  'Information Services': '5567e0c97369640d2b3b1600',
-}).map(([name, id]) => [normalizeComparable(name), id])) as Record<string, string>;
-
-function canonicalIndustry(value: unknown) {
-  const normalized = normalizeComparable(value);
-  return INDUSTRY_ALIASES[normalized] || normalized;
-}
-
-export function resolveApolloIndustryFilters(requestedIndustries: string[]) {
-  const tagIds = new Set<string>();
-  const keywordFallbacks = new Set<string>();
-
-  for (const requestedIndustry of requestedIndustries) {
-    const canonical = canonicalIndustry(requestedIndustry);
-    const tagId = INDUSTRY_TAG_IDS[canonical];
-    if (tagId) tagIds.add(tagId);
-    else if (requestedIndustry.trim()) keywordFallbacks.add(requestedIndustry.trim());
-  }
-
-  return { tagIds: [...tagIds], keywordFallbacks: [...keywordFallbacks] };
-}
-
 function mapOrganization(value: unknown) {
   const organization = asRecord(value);
   if (!organization) return null;
@@ -368,8 +311,6 @@ async function searchPeople(params: {
     ))
     : [[]];
   const people = new Map<string, NonNullable<ReturnType<typeof mapPerson>>>();
-  const industryFilters = resolveApolloIndustryFilters(params.input.industryKeywords);
-
   for (const organizationIds of organizationIdChunks) {
     const remaining = params.input.maxResults - people.size;
     if (remaining <= 0) break;
@@ -385,11 +326,11 @@ async function searchPeople(params: {
     appendAll(query, 'organization_num_employees_ranges[]', params.input.employeeRanges);
     appendAll(query, 'q_organization_domains_list[]', params.domains || []);
     appendAll(query, 'organization_ids[]', organizationIds);
-    appendAll(query, 'organization_industry_tag_ids[]', industryFilters.tagIds);
-    appendAll(query, 'q_organization_keyword_tags[]', [
+    const keywordTerms = [
+      ...params.input.industryKeywords,
       ...params.input.companyKeywords,
-      ...industryFilters.keywordFallbacks,
-    ]);
+    ].map(asText).filter(Boolean);
+    if (keywordTerms.length > 0) query.set('q_keywords', keywordTerms.join(', '));
 
     const payload = await requestApollo('/mixed_people/api_search', params.apiKey, params.config, { query });
     if (!Array.isArray(payload.people)) {

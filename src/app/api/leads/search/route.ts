@@ -17,6 +17,7 @@ import {
 } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
+import { buildBatchLeadSearchPayload } from '@/lib/server/lead-search-payload';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -600,25 +601,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const newPayload = {
+    const newPayload = buildBatchLeadSearchPayload(currentParams, {
       provider: providerDecision.provider,
-      user_id: userId || undefined,
-      search_mode: 'batch',
-      industry_keywords: currentParams.industry_keywords,
-      company_keywords: currentParams.company_keywords,
-      company_location: currentParams.company_location,
-      person_locations: currentParams.person_locations,
-      titles: Array.isArray(currentParams.titles)
-        ? currentParams.titles
-        : (typeof currentParams.titles === 'string' && currentParams.titles.length > 0 ? [currentParams.titles] : []),
-      seniorities: Array.isArray(currentParams.seniorities) ? currentParams.seniorities : [],
-      include_similar_titles: currentParams.include_similar_titles,
-      employee_range: currentParams.employee_ranges,
-      employee_ranges: currentParams.employee_ranges,
-      max_results: currentParams.max_results,
-    };
-
-    if (!newPayload.titles) newPayload.titles = [];
+      userId,
+    });
 
     const response = await callLeadSearchService(newPayload, {
       providerRequested: providerDecision.requestedProvider,

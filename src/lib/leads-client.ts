@@ -110,7 +110,13 @@ export async function searchLinkedInProfileLead(
   }, signal);
   const enriched = result.enriched?.[0] as any;
   if (!enriched) {
-    return { count: 0, leads_count: 0, leads: [], search_mode: 'linkedin_profile' } as LeadSearchResponse;
+    return {
+      count: 0,
+      leads_count: 0,
+      leads: [],
+      search_mode: 'linkedin_profile',
+      phone_enrichment: result.phone_enrichment,
+    } as LeadSearchResponse;
   }
   const lead: Lead = {
     id: String(enriched.id || `profile-search:${linkedinUrl}`),
@@ -145,7 +151,13 @@ export async function searchLinkedInProfileLead(
   }
   if (!hasUsableLinkedInProfileData(lead)) {
     if (enriched.enrichmentStatus === 'not_found') {
-      return { count: 0, leads_count: 0, leads: [], search_mode: 'linkedin_profile' } as LeadSearchResponse;
+      return {
+        count: 0,
+        leads_count: 0,
+        leads: [],
+        search_mode: 'linkedin_profile',
+        phone_enrichment: result.phone_enrichment,
+      } as LeadSearchResponse;
     }
     throw new Error('No pudimos consultar este perfil en Apollo. Inténtalo nuevamente.');
   }
@@ -156,6 +168,7 @@ export async function searchLinkedInProfileLead(
     search_mode: 'linkedin_profile',
     enrichment_requested: revealEmail || revealPhone,
     profile_tracking_ids: [lead.id],
+    phone_enrichment: result.phone_enrichment,
   } as LeadSearchResponse;
 }
 
@@ -170,6 +183,7 @@ export async function enrichLinkedInProfileLead(input: {
   operationId: string;
   operationStatus?: string;
   enriched?: Array<{ id: string }>;
+  phone_enrichment?: LeadSearchResponse['phone_enrichment'];
 }> {
   const res = await fetch(PROFILE_ENRICHMENT_PATH, {
     method: 'POST',

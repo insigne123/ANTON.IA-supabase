@@ -74,7 +74,7 @@ de autenticacion, ownership, cuotas, persistencia y callbacks.
 - costo Apollo actual: cero creditos
 - no devuelve emails ni telefonos
 - maximo de 100 resultados por pagina
-- filtros deben enviarse como query params documentados
+- filtros deben enviarse como query params documentados; industria y palabras clave usan `q_keywords`, no IDs internos de la interfaz de Apollo
 - busquedas sin filtros acotados deben fallar cerradas
 - resultados deben exponer disponibilidad de contacto, no datos inventados
 - `source_provider` debe persistirse como `apollo`

@@ -599,6 +599,53 @@ function canonicalTargetResponse(input: {
   };
 }
 
+function phoneEnrichmentResponse(input: {
+  requested: boolean;
+  enriched: Array<Record<string, unknown>>;
+}) {
+  if (!input.requested) {
+    return {
+      requested: false,
+      queued: false,
+      status: 'not_requested' as const,
+      message: null,
+      webhook_url: null,
+      provider_status: null,
+      provider_details: null,
+    };
+  }
+
+  const hasPendingPhone = input.enriched.some((item) => (
+    String(item.enrichmentStatus || '').trim().toLowerCase().startsWith('pending')
+  ));
+  const hasPhone = input.enriched.some((item) => (
+    Boolean(text(item.primaryPhone, 64))
+    || (Array.isArray(item.phoneNumbers) && item.phoneNumbers.length > 0)
+  ));
+  const hasFailure = input.enriched.some((item) => (
+    ['failed', 'not_found', 'no_phone'].includes(String(item.enrichmentStatus || '').trim().toLowerCase())
+  ));
+  const status = hasPendingPhone
+    ? 'queued' as const
+    : hasFailure && !hasPhone
+      ? 'failed' as const
+      : 'skipped' as const;
+
+  return {
+    requested: true,
+    queued: status === 'queued',
+    status,
+    message: status === 'queued'
+      ? 'El telefono se esta preparando y se actualizara automaticamente.'
+      : status === 'failed'
+        ? 'El proveedor no pudo completar la busqueda del telefono.'
+        : null,
+    webhook_url: null,
+    provider_status: null,
+    provider_details: null,
+  };
+}
+
 async function persistImmediateResult(input: {
   target: PreparedTarget;
   tableName: ApolloTargetTable;
@@ -1106,6 +1153,10 @@ export async function POST(request: NextRequest) {
       requestedData: { email: revealEmail.value, phone: revealPhone.value },
       usage: usage(claim),
       enriched,
+      phone_enrichment: phoneEnrichmentResponse({
+        requested: revealPhone.value,
+        enriched,
+      }),
     };
 
     if (!revealPhone.value && callbacks.length === 0) {

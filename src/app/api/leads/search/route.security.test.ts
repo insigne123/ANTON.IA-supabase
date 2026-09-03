@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8');
+const batchPayloadSource = readFileSync(new URL('../../../../lib/server/lead-search-payload.ts', import.meta.url), 'utf8');
 const clientSource = readFileSync(new URL('../../../../lib/leads-client.ts', import.meta.url), 'utf8');
 const searchPageSource = readFileSync(new URL('../../../(app)/search/page.tsx', import.meta.url), 'utf8');
 const profileStatusSource = readFileSync(new URL('../profile-status/route.ts', import.meta.url), 'utf8');
@@ -18,11 +19,13 @@ test('lead-search BFF supplies the backend secret only from server runtime confi
 });
 
 test('lead-search BFF keeps firmographic filters distinct and disables batch enrichment', () => {
-  assert.match(source, /industry_keywords: currentParams\.industry_keywords/);
-  assert.match(source, /company_keywords: currentParams\.company_keywords/);
-  assert.match(source, /company_location: currentParams\.company_location/);
-  assert.match(source, /person_locations: currentParams\.person_locations/);
-  assert.match(source, /employee_ranges: currentParams\.employee_ranges/);
+  assert.match(source, /buildBatchLeadSearchPayload\(currentParams/);
+  assert.match(batchPayloadSource, /industry_keywords: currentParams\.industry_keywords/);
+  assert.match(batchPayloadSource, /company_keywords: currentParams\.company_keywords/);
+  assert.match(batchPayloadSource, /company_location: currentParams\.company_location/);
+  assert.match(batchPayloadSource, /person_locations: currentParams\.person_locations/);
+  assert.match(batchPayloadSource, /employee_ranges: currentParams\.employee_ranges/);
+  assert.doesNotMatch(batchPayloadSource, /employee_range:/);
   assert.doesNotMatch(source, /enrich:\s*true/);
   assert.doesNotMatch(source, /\(body as any\)\?\.provider|body\?\.\[0\].*provider/);
   assert.doesNotMatch(source, /enrichmentSearchCreditsUnavailablePayload/);
@@ -50,6 +53,8 @@ test('profile search uses one idempotent enrichment request and polls the persis
   assert.match(searchPageSource, /await getLinkedInProfileStatuses\(profilePhonePollingIds/);
   assert.match(searchPageSource, /emailSatisfied && phoneSatisfied && !isPendingEnrichmentStatus\(status\)/);
   assert.doesNotMatch(searchPageSource, /getLinkedInProfileLead\(/);
+  assert.match(enrichmentSource, /phone_enrichment: phoneEnrichmentResponse\(/);
+  assert.match(clientSource, /phone_enrichment: result\.phone_enrichment/);
 });
 
 test('Apollo search, enrichment, and polling stay inside the active tenant and actor', () => {
