@@ -3,91 +3,98 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { DEFAULT_DAILY_QUOTA_LIMITS } from '@/lib/daily-quota-limits';
 
-const migrationPath = 'supabase/migrations/20260813100000_atomic_daily_quota.sql';
 const operationMigrationPath = 'supabase/migrations/20260813120000_idempotent_enrichment_quota_operations.sql';
+const sharedCreditsMigrationPath = 'supabase/migrations/20260904220304_shared_daily_account_credits.sql';
 const sourcePath = 'src/lib/server/daily-quota-store.ts';
 const functionsPath = 'functions/index.ts';
 const leadResearchRoutePath = 'src/app/api/lead-research/route.ts';
 const leadSearchRoutePath = 'src/app/api/leads/search/route.ts';
 const backupCronRoutePath = 'src/app/api/cron/antonia/route.ts';
 const enrichmentRoutePath = 'src/app/api/opportunities/enrich-apollo/route.ts';
-const sql = readFileSync(migrationPath, 'utf8');
+const supliaRunnerPath = 'src/lib/server/suplia-tool-runner.ts';
+const supliaResearchPath = 'src/lib/server/suplia-research-tools.ts';
 const operationSql = readFileSync(operationMigrationPath, 'utf8');
+const sharedCreditsSql = readFileSync(sharedCreditsMigrationPath, 'utf8');
 const source = readFileSync(sourcePath, 'utf8');
 const functionsSource = readFileSync(functionsPath, 'utf8');
 const leadResearchRoute = readFileSync(leadResearchRoutePath, 'utf8');
 const leadSearchRoute = readFileSync(leadSearchRoutePath, 'utf8');
 const backupCronRoute = readFileSync(backupCronRoutePath, 'utf8');
 const enrichmentRoute = readFileSync(enrichmentRoutePath, 'utf8');
+const supliaRunner = readFileSync(supliaRunnerPath, 'utf8');
+const supliaResearch = readFileSync(supliaResearchPath, 'utf8');
 
-function functionBody(name: string) {
-  const start = sql.indexOf(`create or replace function public.${name}`);
+function operationFunctionBody(name: string) {
+  const marker = `create or replace function public.${name}`;
+  const sql = sharedCreditsSql.includes(marker) ? sharedCreditsSql : operationSql;
+  const start = sql.indexOf(marker);
   assert.notEqual(start, -1, `${name} must exist`);
   const end = sql.indexOf('\n$$;', start);
   assert.notEqual(end, -1, `${name} must have a complete body`);
   return sql.slice(start, end);
 }
 
-function operationFunctionBody(name: string) {
-  const start = operationSql.indexOf(`create or replace function public.${name}`);
-  assert.notEqual(start, -1, `${name} must exist`);
-  const end = operationSql.indexOf('\n$$;', start);
+function sharedCreditsFunctionBody(name: string) {
+  const start = sharedCreditsSql.indexOf(`create or replace function public.${name}`);
+  assert.notEqual(start, -1, `${name} must exist in the shared credit migration`);
+  const end = sharedCreditsSql.indexOf('\n$$;', start);
   assert.notEqual(end, -1, `${name} must have a complete body`);
-  return operationSql.slice(start, end);
+  return sharedCreditsSql.slice(start, end);
 }
 
 test('atomic quota RPC validates its internal caller, ownership, scope, resource, and counts', () => {
-  const body = functionBody('consume_antonia_daily_quota_v1');
+  const body = sharedCreditsFunctionBody('consume_antonia_daily_quota_v1');
   assert.match(body, /auth\.role\(\).*<> 'service_role'/);
   assert.match(body, /p_scope not in \('organization', 'user'\)/);
   assert.match(body, /p_resource not in \('leadSearch', 'search', 'enrich', 'investigate', 'research'\)/);
   assert.match(body, /p_requested_count <= 0/);
   assert.match(body, /p_limit < 0/);
-  assert.match(body, /from public\.organization_members om/);
-  assert.match(body, /om\.organization_id = p_organization_id/);
-  assert.match(body, /om\.user_id = p_user_id/);
+  assert.match(body, /from public\.organization_members member/);
+  assert.match(body, /member\.organization_id = p_organization_id/);
+  assert.match(body, /member\.user_id = p_user_id/);
 });
 
 test('atomic quota RPC locks an upserted row and never increments a denied request', () => {
-  const body = functionBody('consume_antonia_daily_quota_v1');
-  assert.match(body, /on conflict \(organization_id, user_id, date, resource\) do nothing/);
-  assert.match(body, /on conflict \(organization_id, date\) do nothing/);
-  assert.match(body, /case when p_resource = 'research' then 'investigate'/);
-  assert.equal((body.match(/for update;/g) || []).length, 2);
-  assert.equal((body.match(/if v_current > p_limit - p_requested_count then/g) || []).length, 2);
-  assert.equal((body.match(/return jsonb_build_object\('allowed', false, 'count', v_current, 'limit', p_limit\);/g) || []).length, 2);
-  assert.ok(body.lastIndexOf("return jsonb_build_object('allowed', false") < body.indexOf('v_current := v_current + p_requested_count'));
+  const body = sharedCreditsFunctionBody('consume_antonia_user_daily_credits_v1');
+  assert.match(body, /on conflict \(user_id, date\) do nothing/);
+  assert.match(body, /for update;/);
+  assert.match(body, /if v_usage\.usage_count > v_limit - p_requested_count then/);
+  assert.match(body, /usage_count = credits\.usage_count \+ p_requested_count/);
+  assert.match(body, /search_count = credits\.search_count \+ case when v_resource = 'search'/);
+  assert.ok(body.indexOf("'allowed', false") < body.indexOf('update public.antonia_user_daily_credits'));
 });
 
 test('atomic quota RPC is private to service role', () => {
-  assert.match(sql, /security definer/);
-  assert.match(sql, /set search_path = pg_catalog/);
-  assert.match(sql, /revoke all on function public\.consume_antonia_daily_quota_v1\([^)]+\) from public, anon, authenticated;/);
-  assert.match(sql, /grant execute on function public\.consume_antonia_daily_quota_v1\([^)]+\) to service_role;/);
+  assert.match(sharedCreditsSql, /security definer/);
+  assert.match(sharedCreditsSql, /set search_path = pg_catalog/);
+  assert.match(sharedCreditsSql, /revoke all on function public\.consume_antonia_daily_quota_v1\([^)]+\)[\s\S]*from public, anon, authenticated;/);
+  assert.match(sharedCreditsSql, /grant execute on function public\.consume_antonia_daily_quota_v1\([^)]+\)[\s\S]*to service_role;/);
 });
 
 test('only service-controlled typed override columns can change effective quota', () => {
-  const resolverStart = source.indexOf('function readQuotaLimitOverride');
-  const resolverEnd = source.indexOf('async function resolveContactQuotaContext', resolverStart);
+  const resolverStart = source.indexOf('async function resolveDailyCreditQuotaContext');
+  const resolverEnd = source.indexOf('export async function getEffectiveDailyQuotaLimits', resolverStart);
   const resolver = source.slice(resolverStart, resolverEnd);
   assert.match(resolver, /\.from\('user_quota_overrides'\)/);
-  assert.match(resolver, /\.select\(overrideColumn\)/);
-  assert.match(resolver, /value\?\.\[overrideKey\] \?\? 0/);
+  assert.match(resolver, /\.select\('daily_credit_limit'\)/);
+  assert.match(resolver, /Math\.min\(DEFAULT_DAILY_CREDIT_LIMIT/);
   assert.doesNotMatch(resolver, /profiles|signatures|quota_overrides\?\.|antonia\?\./);
 
   const workerResolverStart = functionsSource.indexOf('async function getEffectiveDailyContactQuota');
   const workerResolverEnd = functionsSource.indexOf('function sleep', workerResolverStart);
   const workerResolver = functionsSource.slice(workerResolverStart, workerResolverEnd);
   assert.match(workerResolver, /\.from\('user_quota_overrides'\)/);
-  assert.match(workerResolver, /\.select\('daily_enrich_limit, daily_investigate_limit'\)/);
+  assert.match(workerResolver, /\.select\('daily_credit_limit'\)/);
   assert.match(workerResolver, /daily_contact_limit \?\? 0/);
-  assert.match(workerResolver, /value\?\.\[overrideKey\] \?\? 0/);
+  assert.match(workerResolver, /Math\.min\(DEFAULT_DAILY_CREDIT_LIMIT/);
   assert.doesNotMatch(workerResolver, /\.from\('profiles'\)|signatures|quota_overrides\?\.|antonia\?\./);
 
-  assert.match(sql, /add column if not exists daily_enrich_limit integer/);
-  assert.match(sql, /add column if not exists daily_investigate_limit integer/);
-  assert.match(sql, /revoke insert, update, delete, truncate on table public\.user_quota_overrides from public, anon, authenticated;/);
-  assert.match(sql, /grant select, insert, update, delete on table public\.user_quota_overrides to service_role;/);
+  assert.match(sharedCreditsSql, /add column if not exists daily_credit_limit integer/);
+  assert.match(sharedCreditsSql, /daily_credit_limit between 1 and 50/);
+  assert.match(sharedCreditsSql, /set daily_credit_limit = case[\s\S]*least\(50, quota_override\.daily_enrich_limit, quota_override\.daily_investigate_limit\)/);
+  assert.match(sharedCreditsSql, /where quota_override\.daily_credit_limit is null/);
+  assert.match(sharedCreditsSql, /revoke all on table public\.antonia_user_daily_credits from public, anon, authenticated;/);
+  assert.match(sharedCreditsSql, /grant select on table public\.antonia_user_daily_credits to service_role;/);
 });
 
 test('quota store delegates non-contact consumption once to the atomic RPC', () => {
@@ -95,7 +102,7 @@ test('quota store delegates non-contact consumption once to the atomic RPC', () 
   const end = source.indexOf('export async function getDailyQuotaStatus', start);
   const consume = source.slice(start, end);
   assert.match(consume, /resource === 'contact'/);
-  assert.match(consume, /resolveUserScopedQuotaContext/);
+  assert.match(consume, /resolveDailyCreditQuotaContext/);
   assert.match(consume, /p_scope: quota\.scope/);
   assert.equal((consume.match(/'consume_antonia_daily_quota_v1'/g) || []).length, 1);
   assert.equal((consume.match(/\.rpc\('consume_antonia_daily_quota_v1'/g) || []).length, 1);
@@ -111,15 +118,65 @@ test('quota store delegates non-contact consumption once to the atomic RPC', () 
 
 });
 
-test('account quotas use the shared 100-operation policy instead of mission budgets', () => {
+test('account credits share one 50-operation policy instead of mission budgets', () => {
   assert.deepEqual(DEFAULT_DAILY_QUOTA_LIMITS, {
-    leadSearch: 100,
-    enrich: 100,
-    research: 100,
+    leadSearch: 50,
+    enrich: 50,
+    research: 50,
     contact: 100,
   });
   assert.match(source, /DEFAULT_DAILY_QUOTA_LIMITS/);
   assert.doesNotMatch(source, /resolveMissionQuotaDefaults/);
+  assert.match(source, /\.from\('antonia_user_daily_credits'\)/);
+  assert.match(sharedCreditsSql, /primary key \(user_id, date\)/);
+});
+
+test('cutover backfill deduplicates legacy counters while adding distinct research work', () => {
+  assert.match(sharedCreditsSql, /'legacy_investigate'[\s\S]*'operation_investigate'[\s\S]*'research_job'/);
+  assert.match(sharedCreditsSql, /total\.source_kind = 'operation_investigate'[\s\S]*\+[\s\S]*total\.source_kind = 'research_job'/);
+  assert.match(sharedCreditsSql, /greatest\([\s\S]*total\.source_kind = 'legacy_investigate'/);
+  assert.match(sharedCreditsSql, /\+[\s\S]*total\.source_kind = 'suplia_investigate'/);
+});
+
+test('all metered resources use the same user-scoped atomic credit boundary', () => {
+  const consume = sharedCreditsFunctionBody('consume_antonia_daily_quota_v1');
+  assert.match(consume, /consume_antonia_user_daily_credits_v1\([\s\S]*p_user_id, p_resource, p_requested_count/);
+  assert.doesNotMatch(consume, /update public\.antonia_daily_usage/);
+
+  const research = sharedCreditsFunctionBody('consume_lead_research_request_quota_v1');
+  const researchRelease = sharedCreditsFunctionBody('release_lead_research_request_claim_v1');
+  assert.match(research, /consume_antonia_user_daily_credits_v1\(p_user_id, 'investigate', 1\)/);
+  assert.match(research, /quota_scope = 'user'/);
+  assert.match(researchRelease, /request_claim_state = 'pre_provider'[\s\S]*release_antonia_user_daily_credits_v1/);
+  assert.match(researchRelease, /quota_consumed_at = case when v_job\.request_claim_state = 'pre_provider' then null/);
+
+  const release = sharedCreditsFunctionBody('release_antonia_quota_operation_v1');
+  const settlement = sharedCreditsFunctionBody('settle_apollo_enrichment_quota_if_ready_v1');
+  const suppression = sharedCreditsFunctionBody('cancel_native_lead_research_request_claim_v1');
+  assert.match(release, /release_antonia_user_daily_credits_v1/);
+  assert.match(settlement, /release_antonia_user_daily_credits_v1/);
+  assert.match(suppression, /release_antonia_user_daily_credits_v1/);
+
+  const suplia = sharedCreditsFunctionBody('consume_suplia_research_tool_credit_v1');
+  assert.match(suplia, /from public\.suplia_tool_runs run[\s\S]*for update;/);
+  assert.match(suplia, /consume_antonia_user_daily_credits_v1\(p_user_id, 'investigate', 1\)/);
+  assert.match(suplia, /insert into public\.antonia_suplia_research_credit_operations/);
+  assert.match(sharedCreditsSql, /revoke all on table public\.antonia_suplia_research_credit_operations from public, anon, authenticated;/);
+  assert.match(sharedCreditsSql, /revoke all on function public\.consume_suplia_research_tool_credit_v1\(uuid, uuid, uuid\)[\s\S]*from public, anon, authenticated;/);
+  assert.match(sharedCreditsSql, /grant execute on function public\.consume_suplia_research_tool_credit_v1\(uuid, uuid, uuid\)[\s\S]*to service_role;/);
+  assert.match(supliaRunner, /consumeSupliaResearchToolCredit\([\s\S]*toolRunId: toolRun\.id/);
+  assert.match(supliaResearch, /if \(!context\.consumeResearchCredit\) throw new Error\('RESEARCH_CREDIT_RESERVATION_REQUIRED'\)/);
+  assert.match(supliaResearch, /needEnv\('SERPER_API_KEY'\);[\s\S]*await consumePremiumResearchCredit\(context\);[\s\S]*await searchSerper\(search\)/);
+  assert.match(supliaResearch, /needEnv\('BRANDDEV_API_KEY'\);[\s\S]*await consumePremiumResearchCredit\(context\);[\s\S]*fetchJsonWithTimeout/);
+});
+
+test('Firebase search cannot bypass the central account credit reservation', () => {
+  const start = functionsSource.indexOf('async function executeSearch');
+  const end = functionsSource.indexOf('async function executeEnrichment', start);
+  const search = functionsSource.slice(start, end);
+  assert.match(search, /fetch\(internalUrl/);
+  assert.match(search, /DAILY_SEARCH_QUOTA_EXCEEDED/);
+  assert.doesNotMatch(search, /getLeadSearchUrl|fallbackUrl|x-api-secret-key/);
 });
 
 test('quota resolution follows the same oldest organization membership as the client', () => {
@@ -233,12 +290,13 @@ test('quota operation claim serializes concurrent callers and only the creator i
   const lock = body.indexOf('for update;');
   const replayBranch = body.indexOf('if not v_created then');
   const replayReturn = body.indexOf("'response_payload', v_operation.response_payload", replayBranch);
-  const consume = body.indexOf('public.consume_antonia_daily_quota_v1(');
+  const consume = body.indexOf('public.consume_antonia_user_daily_credits_v1(');
 
   assert.ok(insert >= 0 && lock > insert && replayBranch > lock && replayReturn > replayBranch && consume > replayReturn);
   assert.match(body, /on conflict \(organization_id, user_id, resource, operation_id\) do nothing/);
   assert.match(body, /v_operation\.request_fingerprint <> lower\(trim\(p_request_fingerprint\)\)/);
-  assert.equal((body.match(/public\.consume_antonia_daily_quota_v1\(/g) || []).length, 1);
+  assert.equal((body.match(/public\.consume_antonia_user_daily_credits_v1\(/g) || []).length, 1);
+  assert.doesNotMatch(body, /public\.consume_antonia_daily_quota_v1\(/);
   assert.match(operationSql, /unique \(organization_id, user_id, resource, operation_id\)/);
 });
 
@@ -261,10 +319,8 @@ test('quota operation retries replay prior consumption and never reacquire submi
 test('an unconsumed quota denial can retry with the same operation after reset or a limit change', () => {
   const claim = operationFunctionBody('claim_antonia_quota_operation_v1');
   assert.match(claim, /v_operation\.status = 'failed'[\s\S]*not v_operation\.quota_allowed[\s\S]*v_operation\.response_status = 429/);
-  assert.match(claim, /v_operation\.quota_day < v_day/);
-  assert.match(claim, /v_operation\.quota_scope <> p_scope/);
-  assert.match(claim, /v_operation\.quota_limit <> p_limit/);
-  assert.match(claim, /set quota_scope = p_scope, quota_day = v_day[\s\S]*status = 'claimed'/);
+  assert.match(claim, /set quota_scope = 'user', quota_day = v_day[\s\S]*status = 'claimed'/);
+  assert.doesNotMatch(claim, /v_operation\.quota_scope <> p_scope|v_operation\.quota_limit <> p_limit/);
 });
 
 test('quota operation ledger and RPCs are service-role only', () => {
@@ -277,9 +333,11 @@ test('quota operation ledger and RPCs are service-role only', () => {
     'release_antonia_quota_operation_v1',
   ]) {
     const body = operationFunctionBody(name);
+    const marker = `create or replace function public.${name}`;
+    const sql = sharedCreditsSql.includes(marker) ? sharedCreditsSql : operationSql;
     assert.match(body, /auth\.role\(\).*<> 'service_role'/);
-    assert.match(operationSql, new RegExp(`revoke all on function public\\.${name}\\([^)]+\\) from public, anon, authenticated;`));
-    assert.match(operationSql, new RegExp(`grant execute on function public\\.${name}\\([^)]+\\) to service_role;`));
+    assert.match(sql, new RegExp(`revoke all on function public\\.${name}\\([^)]+\\)\\s+from public, anon, authenticated;`));
+    assert.match(sql, new RegExp(`grant execute on function public\\.${name}\\([^)]+\\)\\s+to service_role;`));
   }
 });
 
@@ -312,7 +370,7 @@ test('profile enrichment has stable targets and recoverable idempotent replays',
   assert.match(enrichmentRoute, /from\('people_search_leads'\)[\s\S]*\.eq\('user_id', input\.userId\)[\s\S]*\.eq\('organization_id', input\.organizationId\)/);
   assert.match(enrichmentRoute, /async function operationTargets/);
   assert.match(enrichmentRoute, /target_table', input\.tableName/);
-  assert.match(enrichmentRoute, /enriched\.length > 0 \? \{ queued: true, enriched \}/);
+  assert.match(enrichmentRoute, /enriched\.length > 0 \? \{[\s\S]*(?:enriched: pendingEnriched|queued: true, enriched)/);
   assert.match(enrichmentRoute, /createApolloEnrichmentCallback\(/);
   assert.match(enrichmentRoute, /bindApolloEnrichmentCallback\(/);
   assert.match(enrichmentRoute, /settleApolloEnrichmentCallback\(/);

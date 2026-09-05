@@ -5,10 +5,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { QUOTA_KINDS, type QuotaKind, getClientQuota, getClientLimit, onQuotaChange, setClientQuotaSnapshot } from '@/lib/quota-client';
+import { QUOTA_KINDS, type QuotaKind, getClientQuota, getClientLimit, isCreditQuotaKind, onQuotaChange, setClientQuotaSnapshot } from '@/lib/quota-client';
 import { DEFAULT_DAILY_QUOTA_LIMITS } from '@/lib/daily-quota-limits';
 import { cn } from '@/lib/utils';
-import { AlertCircle, FlaskConical, Loader2, Search, Users, Sparkles } from 'lucide-react';
+import { AlertCircle, Loader2, Users, Sparkles } from 'lucide-react';
 
 type Props = {
   className?: string;
@@ -43,27 +43,19 @@ function nextResetLocalString(): string {
 
 function toRows(kinds: QuotaKind[], useClientSnapshot: boolean): Row[] {
   const quota = useClientSnapshot ? getClientQuota() : null;
-  return kinds.map((k) => {
+  const visibleKinds = kinds.filter((kind, index) => !isCreditQuotaKind(kind)
+    || kinds.findIndex((candidate) => isCreditQuotaKind(candidate)) === index);
+  return visibleKinds.map((k) => {
     const count = quota?.[k] || 0;
     const limit = useClientSnapshot ? getClientLimit(k) : DEFAULT_DAILY_QUOTA_LIMITS[k];
     const pct = Math.max(0, Math.min(100, Math.round((count / Math.max(1, limit)) * 100)));
-    const label =
-      k === 'leadSearch' ? 'Búsqueda de Leads' :
-      k === 'enrich'     ? 'Enriquecimiento' :
-      k === 'research'   ? 'Investigación' :
-      k === 'contact'    ? 'Contactos' : k;
+    const label = isCreditQuotaKind(k) ? 'Créditos' : 'Contactos';
 
-    const shortLabel =
-      k === 'leadSearch' ? 'Búsquedas' :
-      k === 'enrich'     ? 'Enriquecer' :
-      k === 'research'   ? 'Investigar' :
-      k === 'contact'    ? 'Contactos' : k;
+    const shortLabel = isCreditQuotaKind(k) ? 'Créditos' : 'Contactos';
 
-    const icon =
-      k === 'leadSearch' ? <Search className="h-4 w-4" aria-hidden="true" /> :
-      k === 'enrich'     ? <Sparkles className="h-4 w-4" aria-hidden="true" /> :
-      k === 'research'   ? <FlaskConical className="h-4 w-4" aria-hidden="true" /> :
-      <Users className="h-4 w-4" aria-hidden="true" />;
+    const icon = isCreditQuotaKind(k)
+      ? <Sparkles className="h-4 w-4" aria-hidden="true" />
+      : <Users className="h-4 w-4" aria-hidden="true" />;
 
     return { kind: k, label, shortLabel, icon, count, limit, pct };
   });
@@ -151,7 +143,7 @@ export default function DailyQuotaProgress({ className, kinds, compact, summary,
             </div>
           </div>
 
-          <div className="grid min-w-0 flex-1 grid-cols-2 gap-x-5 gap-y-3 lg:grid-cols-4">
+          <div className="grid min-w-0 flex-1 grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2">
             {rows.map((row) => (
               <div key={row.kind} className="min-w-0">
                 <div className="flex items-center justify-between gap-2 text-xs">

@@ -3,10 +3,10 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
-  ENRICHMENT_SEARCH_ALLOWED_EMAIL,
   ENRICHMENT_SEARCH_CREDITS_UNAVAILABLE,
   enrichmentSearchCreditsUnavailablePayload,
   hasEnrichmentSearchCreditAccess,
+  hasUserEnrichmentSearchCreditAccess,
   normalizeEnrichmentSearchEmail,
 } from './enrichment-search-access';
 
@@ -25,11 +25,17 @@ const freeSearchRouteSources = [
   readFileSync(new URL('../../app/api/opportunities/orgs-apollo/route.ts', import.meta.url), 'utf8'),
 ];
 
-test('paid enrichment access is allowlisted by normalized auth email', () => {
-  assert.equal(normalizeEnrichmentSearchEmail(` ${ENRICHMENT_SEARCH_ALLOWED_EMAIL.toUpperCase()} `), ENRICHMENT_SEARCH_ALLOWED_EMAIL);
-  assert.equal(hasEnrichmentSearchCreditAccess(` ${ENRICHMENT_SEARCH_ALLOWED_EMAIL.toUpperCase()} `), true);
-  assert.equal(hasEnrichmentSearchCreditAccess('otro@grupoexpro.com'), false);
+test('paid enrichment access is available to every authenticated email', () => {
+  assert.equal(normalizeEnrichmentSearchEmail(' USER@EXAMPLE.COM '), 'user@example.com');
+  assert.equal(hasEnrichmentSearchCreditAccess('user@example.com'), true);
+  assert.equal(hasEnrichmentSearchCreditAccess('otro@grupoexpro.com'), true);
   assert.equal(hasEnrichmentSearchCreditAccess(null), false);
+});
+
+test('internal enrichment accepts every authenticated user id', async () => {
+  assert.equal(await hasUserEnrichmentSearchCreditAccess('user-one'), true);
+  assert.equal(await hasUserEnrichmentSearchCreditAccess('user-two'), true);
+  assert.equal(await hasUserEnrichmentSearchCreditAccess('  '), false);
 });
 
 test('denied credit responses are explicitly zero and carry a stable error code', () => {
@@ -41,8 +47,8 @@ test('denied credit responses are explicitly zero and carry a stable error code'
   });
 });
 
-test('search quota is independent while paid enrichment boundaries retain the allowlist', () => {
-  assert.match(quotaStoreSource, /leadSearch: DEFAULT_DAILY_QUOTA_LIMITS\.leadSearch/);
+test('search and enrichment keep authentication gates and shared quota controls without an account allowlist', () => {
+  assert.match(quotaStoreSource, /leadSearch: credits\.limit/);
   assert.match(quotaStoreSource, /resource === 'search' \|\| resource === 'leadSearch'/);
   assert.match(quotaClientSource, /params\.limit >= 0/);
   assert.match(workerSource, /hasUserEnrichmentSearchCreditAccess\(supabase, userId\)/);
@@ -64,8 +70,8 @@ test('search quota is independent while paid enrichment boundaries retain the al
         return index < 0 ? Number.POSITIVE_INFINITY : index;
       }),
     );
-    assert.ok(handlerStart >= 0 && gate > handlerStart, 'provider route must check the allowlist');
-    if (Number.isFinite(provider)) assert.ok(gate < provider, 'allowlist must precede the provider call');
+    assert.ok(handlerStart >= 0 && gate > handlerStart, 'provider route must check authenticated account access');
+    if (Number.isFinite(provider)) assert.ok(gate < provider, 'account access must precede the provider call');
   }
 
   for (const source of freeSearchRouteSources) {

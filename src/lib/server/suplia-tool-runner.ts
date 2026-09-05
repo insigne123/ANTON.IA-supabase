@@ -1,5 +1,6 @@
 import type { OpenAiModelTier } from '@/ai/model-router';
 import type { AuthContext } from '@/lib/server/auth-utils';
+import { consumeSupliaResearchToolCredit } from '@/lib/server/daily-quota-store';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { getSupliaPolicy } from '@/lib/server/suplia-policy';
 import { claimSupliaToolLease, releaseSupliaToolLease, type SupliaToolLease } from '@/lib/server/suplia-tool-leases';
@@ -256,6 +257,14 @@ export async function runSupliaTool(input: ToolRunInput): Promise<{ toolRun: Sup
       reportProgress: (progress) => reportSupliaToolProgress(input, progress),
       assertRunnable: () => assertSupliaToolRunnable(input),
       heartbeat: () => heartbeatSupliaTool(input),
+      consumeResearchCredit: async () => {
+        const quota = await consumeSupliaResearchToolCredit({
+          toolRunId: toolRun.id,
+          userId: input.auth.user.id,
+          organizationId: input.auth.organizationId,
+        });
+        if (!quota.allowed) throw new Error('DAILY_RESEARCH_QUOTA_EXCEEDED');
+      },
     });
     await assertSupliaToolRunnable(input);
     const finishedAt = new Date().toISOString();

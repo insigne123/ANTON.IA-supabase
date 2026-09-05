@@ -1,6 +1,8 @@
 export const DEFAULT_DAILY_QUOTA_LIMITS = {
-  leadSearch: 100,
-  enrich: 100,
-  research: 100,
+  leadSearch: 50,
+  enrich: 50,
+  research: 50,
   contact: 100,
 } as const;
+
+export const DEFAULT_DAILY_CREDIT_LIMIT = 50;

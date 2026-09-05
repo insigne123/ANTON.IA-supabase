@@ -31,15 +31,15 @@ export async function GET(req: NextRequest) {
 
   try {
     const limits = await getEffectiveDailyQuotaLimits({ userId });
-    const statuses = await Promise.all(
-      RESOURCES.map(async (resource) => {
-        const serverResource = resource === 'leadSearch' ? 'search' : resource;
-        const limit = limits[resource];
-        const s = await getDailyQuotaStatus({ userId, resource: serverResource, limit });
-        return { resource, ...s };
-      })
-    );
-    return NextResponse.json({ statuses }, {
+    const [credits, contact] = await Promise.all([
+      getDailyQuotaStatus({ userId, resource: 'search', limit: limits.leadSearch }),
+      getDailyQuotaStatus({ userId, resource: 'contact', limit: limits.contact }),
+    ]);
+    const statuses = RESOURCES.map((resource) => ({
+      resource,
+      ...(resource === 'contact' ? contact : credits),
+    }));
+    return NextResponse.json({ statuses, credits, contact }, {
       headers: {
         'Cache-Control': 'private, no-store, max-age=0',
         Vary: 'Cookie',

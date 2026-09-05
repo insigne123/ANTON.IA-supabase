@@ -6,9 +6,7 @@ import { Progress } from '@/components/ui/progress';
 import { RefreshCw } from 'lucide-react';
 
 interface QuotaData {
-  searches: { used: number; limit: number; runs: number };
-  enrichments: { used: number; limit: number };
-  investigations: { used: number; limit: number };
+  credits: { used: number; limit: number; remaining: number };
   contacts: { used: number; limit: number };
   date: string;
 }
@@ -120,7 +118,7 @@ export function QuotaUsageCard() {
           <div>
             <CardTitle>Uso de Cuotas Diarias</CardTitle>
             <CardDescription>
-              Se reinicia a medianoche • {formatQuotaDate(quota.date)}
+              Se reinicia a medianoche UTC · {formatQuotaDate(quota.date)}
             </CardDescription>
           </div>
           <button
@@ -135,19 +133,9 @@ export function QuotaUsageCard() {
       </CardHeader>
       <CardContent className="space-y-4">
         <QuotaItem
-          label="Búsquedas"
-          used={quota.searches.runs}
-          limit={quota.searches.limit}
-        />
-        <QuotaItem
-          label="Enriquecimientos"
-          used={quota.enrichments.used}
-          limit={quota.enrichments.limit}
-        />
-        <QuotaItem
-          label="Investigaciones"
-          used={quota.investigations.used}
-          limit={quota.investigations.limit}
+          label="Créditos"
+          used={quota.credits.used}
+          limit={quota.credits.limit}
         />
         <QuotaItem
           label="Contactos"

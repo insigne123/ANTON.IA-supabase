@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   clearSupliaResearchCache,
+  researchBrand,
   researchSimilarweb,
   researchWhois,
   supliaResearchTestInternals,
@@ -106,4 +107,48 @@ test('builds safe search research queries', () => {
     supliaResearchTestInternals.buildSerpQuery('serp_company_profile', { company: 'Acme', domain: 'acme.com' }),
     '"Acme" acme.com productos servicios industria empleados oficinas clientes',
   );
+});
+
+test('premium brand research reserves one credit before calling the provider', async () => {
+  const originalApiKey = process.env.BRANDDEV_API_KEY;
+  const events: string[] = [];
+  process.env.BRANDDEV_API_KEY = 'test-brand-key';
+  (globalThis as any).fetch = async () => {
+    events.push('provider');
+    return new Response(JSON.stringify({ brand: { name: 'Example' } }), { status: 200 });
+  };
+
+  try {
+    const result: any = await researchBrand({ domain: 'example.com', cache: false }, {
+      consumeResearchCredit: async () => { events.push('credit'); },
+    } as any);
+    assert.equal(result.name, 'Example');
+    assert.deepEqual(events, ['credit', 'provider']);
+  } finally {
+    if (originalApiKey == null) delete process.env.BRANDDEV_API_KEY;
+    else process.env.BRANDDEV_API_KEY = originalApiKey;
+    (globalThis as any).fetch = originalFetch;
+  }
+});
+
+test('premium brand research fails closed when no credit boundary is available', async () => {
+  const originalApiKey = process.env.BRANDDEV_API_KEY;
+  let providerCalled = false;
+  process.env.BRANDDEV_API_KEY = 'test-brand-key';
+  (globalThis as any).fetch = async () => {
+    providerCalled = true;
+    return new Response('{}', { status: 200 });
+  };
+
+  try {
+    await assert.rejects(
+      researchBrand({ domain: 'example.com', cache: false }, {} as any),
+      /RESEARCH_CREDIT_RESERVATION_REQUIRED/,
+    );
+    assert.equal(providerCalled, false);
+  } finally {
+    if (originalApiKey == null) delete process.env.BRANDDEV_API_KEY;
+    else process.env.BRANDDEV_API_KEY = originalApiKey;
+    (globalThis as any).fetch = originalFetch;
+  }
 });

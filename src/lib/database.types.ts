@@ -1199,6 +1199,75 @@ export type Database = {
           },
         ]
       }
+      antonia_user_daily_credits: {
+        Row: {
+          date: string
+          enrich_count: number
+          investigate_count: number
+          search_count: number
+          updated_at: string
+          usage_count: number
+          user_id: string
+        }
+        Insert: {
+          date: string
+          enrich_count?: number
+          investigate_count?: number
+          search_count?: number
+          updated_at?: string
+          usage_count?: number
+          user_id: string
+        }
+        Update: {
+          date?: string
+          enrich_count?: number
+          investigate_count?: number
+          search_count?: number
+          updated_at?: string
+          usage_count?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      antonia_suplia_research_credit_operations: {
+        Row: {
+          consumed_at: string
+          organization_id: string
+          quota_day: string
+          tool_run_id: string
+          user_id: string
+        }
+        Insert: {
+          consumed_at?: string
+          organization_id: string
+          quota_day: string
+          tool_run_id: string
+          user_id: string
+        }
+        Update: {
+          consumed_at?: string
+          organization_id?: string
+          quota_day?: string
+          tool_run_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "antonia_suplia_research_credit_operations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "antonia_suplia_research_credit_operations_tool_run_id_fkey"
+            columns: ["tool_run_id"]
+            isOneToOne: true
+            referencedRelation: "suplia_tool_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       antonia_workflow_email_drafts: {
         Row: {
           alternative_subject: string | null
@@ -6806,6 +6875,7 @@ export type Database = {
         Row: {
           created_at: string
           daily_contact_limit: number | null
+          daily_credit_limit: number | null
           daily_enrich_limit: number | null
           daily_investigate_limit: number | null
           updated_at: string
@@ -6814,6 +6884,7 @@ export type Database = {
         Insert: {
           created_at?: string
           daily_contact_limit?: number | null
+          daily_credit_limit?: number | null
           daily_enrich_limit?: number | null
           daily_investigate_limit?: number | null
           updated_at?: string
@@ -6822,6 +6893,7 @@ export type Database = {
         Update: {
           created_at?: string
           daily_contact_limit?: number | null
+          daily_credit_limit?: number | null
           daily_enrich_limit?: number | null
           daily_investigate_limit?: number | null
           updated_at?: string
@@ -7124,6 +7196,22 @@ export type Database = {
           p_requested_count: number
           p_resource: string
           p_scope: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      consume_antonia_user_daily_credits_v1: {
+        Args: {
+          p_requested_count: number
+          p_resource: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      consume_suplia_research_tool_credit_v1: {
+        Args: {
+          p_organization_id: string
+          p_tool_run_id: string
           p_user_id: string
         }
         Returns: Json
@@ -7532,6 +7620,15 @@ export type Database = {
           p_claim_token: string
           p_operation_id: string
           p_organization_id: string
+          p_resource: string
+          p_user_id: string
+        }
+        Returns: boolean
+      }
+      release_antonia_user_daily_credits_v1: {
+        Args: {
+          p_day: string
+          p_released_count: number
           p_resource: string
           p_user_id: string
         }

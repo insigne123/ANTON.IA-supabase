@@ -285,6 +285,11 @@ function needEnv(name: string) {
   return value;
 }
 
+async function consumePremiumResearchCredit(context: SupliaToolContext) {
+  if (!context.consumeResearchCredit) throw new Error('RESEARCH_CREDIT_RESERVATION_REQUIRED');
+  await context.consumeResearchCredit();
+}
+
 function asText(value: unknown) {
   return String(value || '').trim();
 }
@@ -322,6 +327,8 @@ async function researchSerp(input: Record<string, unknown>, context: SupliaToolC
   const cached = await getPersistentResearchCache(context, 'serper', cacheKey, input.cache !== false);
   if (cached) return cached;
 
+  needEnv('SERPER_API_KEY');
+  await consumePremiumResearchCredit(context);
   const result = await searchSerper(search);
   const output = {
     status: 'completed',
@@ -396,6 +403,7 @@ export async function researchBrand(input: Record<string, unknown>, context: Sup
   if (cached) return cached;
 
   const apiKey = needEnv('BRANDDEV_API_KEY');
+  await consumePremiumResearchCredit(context);
   const result = await fetchJsonWithTimeout(`https://api.brand.dev/v1/brand/retrieve?domain=${encodeURIComponent(domain)}`, 'branddev', {
     headers: { authorization: `Bearer ${apiKey}` },
   });

@@ -31,9 +31,8 @@ export { antoniaWorker } from './src/antonia-worker';
 
 // NOTE: Keep defaults for backwards compatibility, but prefer env vars in production.
 const DEFAULT_APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
-const DEFAULT_LEAD_SEARCH_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search';
 const DEFAULT_LEAD_RESEARCH_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-research';
-const DISABLE_EXTERNAL_SEARCH_FALLBACK = String(process.env.LEADS_DISABLE_EXTERNAL_FALLBACK || 'false').toLowerCase() === 'true';
+const DEFAULT_DAILY_CREDIT_LIMIT = 50;
 
 function isLikelyN8nWebhookUrl(value?: string | null) {
     const raw = String(value || '').trim().toLowerCase();
@@ -48,10 +47,6 @@ function getAppUrl(): string {
         process.env.NEXT_PUBLIC_APP_URL ||
         DEFAULT_APP_URL
     );
-}
-
-function getLeadSearchUrl(): string {
-    return process.env.ANTONIA_LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
 }
 
 function getLeadResearchUrl(): string {
@@ -850,17 +845,15 @@ async function getEffectiveLeadProcessingQuota(
     params: {
         userId: string;
         organizationId: string;
-        fallbackLimit: number;
         resource: 'enrich' | 'investigate';
-        organizationCount: number;
     }
 ): Promise<{ limit: number; used: number; scope: 'organization' | 'user' }> {
     const today = new Date().toISOString().split('T')[0];
-    const { userId, organizationId, fallbackLimit, resource, organizationCount } = params;
+    const { userId } = params;
 
     const { data: overrideRow, error: overrideError } = await supabase
         .from('user_quota_overrides')
-        .select('daily_enrich_limit, daily_investigate_limit')
+        .select('daily_credit_limit')
         .eq('user_id', userId)
         .maybeSingle();
 
@@ -870,44 +863,19 @@ async function getEffectiveLeadProcessingQuota(
         throw overrideError;
     }
 
-    const readOverride = (value: any) => {
-        const overrideKey = resource === 'investigate' ? 'daily_investigate_limit' : 'daily_enrich_limit';
-        const limit = Number(value?.[overrideKey] ?? 0);
-        return Number.isFinite(limit) && limit > 0 ? limit : 0;
-    };
-
-    const overrideLimit = missingOverrideTable ? 0 : readOverride(overrideRow);
-
-    const useUserQuota = Number.isFinite(overrideLimit) && overrideLimit > 0;
-    const effectiveLimit = useUserQuota ? overrideLimit : Math.max(0, Number(fallbackLimit) || 0);
-
-    if (!useUserQuota) {
-        return { limit: effectiveLimit, used: Math.max(0, Number(organizationCount || 0)), scope: 'organization' };
-    }
+    const overrideLimit = missingOverrideTable ? 0 : Number(overrideRow?.daily_credit_limit || 0);
+    const effectiveLimit = Number.isFinite(overrideLimit) && overrideLimit > 0
+        ? Math.min(DEFAULT_DAILY_CREDIT_LIMIT, Math.trunc(overrideLimit))
+        : DEFAULT_DAILY_CREDIT_LIMIT;
 
     const { data: usageBucket, error: usageError } = await supabase
-        .from('antonia_user_daily_usage')
+        .from('antonia_user_daily_credits')
         .select('usage_count')
-        .eq('organization_id', organizationId)
         .eq('user_id', userId)
         .eq('date', today)
-        .eq('resource', resource)
         .maybeSingle();
     if (usageError) throw usageError;
-    if (usageBucket) {
-        return { limit: effectiveLimit, used: Math.max(0, Number(usageBucket.usage_count || 0)), scope: 'user' };
-    }
-
-    const timestampColumn = resource === 'enrich' ? 'last_enriched_at' : 'last_investigated_at';
-    const { count, error: countError } = await supabase
-        .from('leads')
-        .select('*', { count: 'exact', head: true })
-        .eq('organization_id', organizationId)
-        .eq('user_id', userId)
-        .gte(timestampColumn, `${today}T00:00:00Z`);
-    if (countError) throw countError;
-
-    return { limit: effectiveLimit, used: count || 0, scope: 'user' };
+    return { limit: effectiveLimit, used: Math.max(0, Number(usageBucket?.usage_count || 0)), scope: 'user' };
 }
 
 async function consumeLeadProcessingQuota(
@@ -1608,38 +1576,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
             || errorText.includes('DAILY_SEARCH_QUOTA_EXCEEDED')) {
             throw e;
         }
-        if (DISABLE_EXTERNAL_SEARCH_FALLBACK) {
-            throw e;
-        }
-        // Backward compatible fallback: hit the external service directly
-        const fallbackUrl = getLeadSearchUrl();
-        console.warn('[SEARCH] Internal search failed. Falling back to external URL:', String(e));
-
-        const searchPayload = {
-            user_id: userId,
-            titles: jobTitle ? [jobTitle] : [],
-            company_location: location ? [location] : [],
-            industry_keywords: industry ? [industry] : [],
-            seniorities: Array.isArray(task.payload?.seniorities) ? task.payload.seniorities : [],
-            employee_range: companySize ? [companySize] : [],
-            employee_ranges: companySize ? [companySize] : [],
-            max_results: 100
-        };
-        const backendSecret = String(process.env.ENRICHMENT_SERVICE_SECRET || process.env.API_SECRET_KEY || '').trim();
-        if (!backendSecret) throw new Error('ENRICHMENT_SERVICE_SECRET missing');
-        const response = await fetch(fallbackUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-secret-key': backendSecret,
-            },
-            body: JSON.stringify(searchPayload)
-        });
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => '');
-            throw new Error(`Search API failed: ${response.statusText} - ${errorText}`);
-        }
-        data = await response.json();
+        throw e;
     }
 
     const rawLeads: any[] = Array.isArray(data?.leads) ? data.leads : (Array.isArray(data?.results) ? data.results : (Array.isArray(data?.data?.leads) ? data.data.leads : []));
@@ -1961,15 +1898,7 @@ async function executeSearch(task: any, supabase: SupabaseClient, taskConfig: an
     };
 }
 
-async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig: any) {
-    // Get mission limits
-    const { data: mission } = await supabase
-        .from('antonia_missions')
-        .select('daily_enrich_limit')
-        .eq('id', task.mission_id)
-        .single();
-
-    const usage = await getDailyUsage(supabase, task.organization_id);
+async function executeEnrichment(task: any, supabase: SupabaseClient, _taskConfig: any) {
     const userId = await getTaskUserId(task, supabase);
     if (!(await hasUserEnrichmentSearchCreditAccess(supabase, userId))) {
         return { skipped: true, reason: 'credit_access_denied', resource: 'enrich' };
@@ -1977,9 +1906,7 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
     const quota = await getEffectiveLeadProcessingQuota(supabase, {
         userId,
         organizationId: task.organization_id,
-        fallbackLimit: mission?.daily_enrich_limit || 10,
         resource: 'enrich',
-        organizationCount: usage.leads_enriched || 0,
     });
     const limit = quota.limit;
 
@@ -2340,21 +2267,11 @@ async function executeEnrichment(task: any, supabase: SupabaseClient, taskConfig
 }
 
 async function executeInvestigate(task: any, supabase: SupabaseClient) {
-    // Get mission limits
-    const { data: mission } = await supabase
-        .from('antonia_missions')
-        .select('daily_investigate_limit')
-        .eq('id', task.mission_id)
-        .single();
-
-    const usage = await getDailyUsage(supabase, task.organization_id);
     const userId = await getTaskUserId(task, supabase);
     const quota = await getEffectiveLeadProcessingQuota(supabase, {
         userId,
         organizationId: task.organization_id,
-        fallbackLimit: mission?.daily_investigate_limit || 5,
         resource: 'investigate',
-        organizationCount: usage.leads_investigated || 0,
     });
     const limit = quota.limit;
 

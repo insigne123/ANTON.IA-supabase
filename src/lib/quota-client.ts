@@ -6,6 +6,12 @@ import { DEFAULT_DAILY_QUOTA_LIMITS } from './daily-quota-limits';
 export type QuotaKind = 'leadSearch' | 'enrich' | 'research' | 'contact';
 export type QuotaLimits = Record<QuotaKind, number>;
 
+const CREDIT_KINDS: QuotaKind[] = ['leadSearch', 'enrich', 'research'];
+
+export function isCreditQuotaKind(kind: QuotaKind) {
+  return kind !== 'contact';
+}
+
 const DEFAULT_LIMITS: QuotaLimits = { ...DEFAULT_DAILY_QUOTA_LIMITS };
 
 // === IMPORTANTE ===
@@ -50,7 +56,10 @@ export function getClientQuota(): QuotaState {
   if (!storage) return { ...EMPTY };
   try {
     const raw = storage.getItem(storageKey());
-    return raw ? { ...EMPTY, ...JSON.parse(raw) } : { ...EMPTY };
+    const state = raw ? { ...EMPTY, ...JSON.parse(raw) } : { ...EMPTY };
+    const credits = Math.max(...CREDIT_KINDS.map((kind) => Math.max(0, Number(state[kind] || 0))));
+    for (const kind of CREDIT_KINDS) state[kind] = credits;
+    return state;
   } catch {
     return { ...EMPTY };
   }
@@ -61,7 +70,10 @@ export function getClientQuotaLimits(): QuotaLimits {
   if (!storage) return { ...DEFAULT_LIMITS };
   try {
     const raw = storage.getItem(limitsStorageKey());
-    return raw ? { ...DEFAULT_LIMITS, ...JSON.parse(raw) } : { ...DEFAULT_LIMITS };
+    const limits = raw ? { ...DEFAULT_LIMITS, ...JSON.parse(raw) } : { ...DEFAULT_LIMITS };
+    const credits = Math.min(...CREDIT_KINDS.map((kind) => Math.max(0, Number(limits[kind] ?? DEFAULT_LIMITS[kind]))));
+    for (const kind of CREDIT_KINDS) limits[kind] = credits;
+    return limits;
   } catch {
     return { ...DEFAULT_LIMITS };
   }
@@ -86,33 +98,57 @@ export function incClientQuota(kind: QuotaKind, amount = 1) {
   const state = getClientQuota();
   const used = Number(state[kind] || 0);
   const next = used + amount;
-  state[kind] = next;
+  if (isCreditQuotaKind(kind)) {
+    for (const creditKind of CREDIT_KINDS) state[creditKind] = next;
+  } else {
+    state[kind] = next;
+  }
   persistQuota(state);
   emitQuotaChange(kind, state);
 }
 
 export function setClientQuota(kind: QuotaKind, amount: number) {
   const state = getClientQuota();
-  state[kind] = Math.max(0, Math.trunc(Number.isFinite(amount) ? amount : 0));
+  const next = Math.max(0, Math.trunc(Number.isFinite(amount) ? amount : 0));
+  if (isCreditQuotaKind(kind)) {
+    for (const creditKind of CREDIT_KINDS) state[creditKind] = next;
+  } else {
+    state[kind] = next;
+  }
   persistQuota(state);
   emitQuotaChange(kind, state);
 }
 
 export function setClientLimit(kind: QuotaKind, amount: number) {
   const limits = getClientQuotaLimits();
-  limits[kind] = Math.max(1, Math.trunc(Number.isFinite(amount) ? amount : DEFAULT_LIMITS[kind]));
+  const next = Math.max(1, Math.trunc(Number.isFinite(amount) ? amount : DEFAULT_LIMITS[kind]));
+  if (isCreditQuotaKind(kind)) {
+    for (const creditKind of CREDIT_KINDS) limits[creditKind] = next;
+  } else {
+    limits[kind] = next;
+  }
   persistQuotaLimits(limits);
   emitQuotaChange(kind, getClientQuota(), limits);
 }
 
 export function setClientQuotaSnapshot(kind: QuotaKind, params: { count: number; limit?: number }) {
   const state = getClientQuota();
-  state[kind] = Math.max(0, Math.trunc(Number.isFinite(params.count) ? params.count : 0));
+  const next = Math.max(0, Math.trunc(Number.isFinite(params.count) ? params.count : 0));
+  if (isCreditQuotaKind(kind)) {
+    for (const creditKind of CREDIT_KINDS) state[creditKind] = next;
+  } else {
+    state[kind] = next;
+  }
   persistQuota(state);
 
   const limits = getClientQuotaLimits();
   if (typeof params.limit === 'number' && Number.isFinite(params.limit) && params.limit >= 0) {
-    limits[kind] = Math.trunc(params.limit);
+    const nextLimit = Math.trunc(params.limit);
+    if (isCreditQuotaKind(kind)) {
+      for (const creditKind of CREDIT_KINDS) limits[creditKind] = nextLimit;
+    } else {
+      limits[kind] = nextLimit;
+    }
     persistQuotaLimits(limits);
   }
 

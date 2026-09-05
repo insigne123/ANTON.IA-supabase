@@ -37,32 +37,22 @@ export async function GET(req: NextRequest) {
 
         const organizationId = membership.organization_id;
         const limits = await getEffectiveDailyQuotaLimits({ userId: user.id, organizationId });
-        const [searchQuota, enrichQuota, investigateQuota, contactQuota] = await Promise.all([
+        const [creditQuota, contactQuota] = await Promise.all([
             getDailyQuotaStatus({ userId: user.id, organizationId, resource: 'search', limit: limits.leadSearch }),
-            getDailyQuotaStatus({ userId: user.id, organizationId, resource: 'enrich', limit: limits.enrich }),
-            getDailyQuotaStatus({ userId: user.id, organizationId, resource: 'research', limit: limits.research }),
             getDailyQuotaStatus({ userId: user.id, organizationId, resource: 'contact', limit: limits.contact }),
         ]);
 
         const quotaData = {
-            searches: {
-                used: searchQuota.count,
-                limit: searchQuota.limit,
-                runs: searchQuota.count,
-            },
-            enrichments: {
-                used: enrichQuota.count,
-                limit: enrichQuota.limit
-            },
-            investigations: {
-                used: investigateQuota.count,
-                limit: investigateQuota.limit
+            credits: {
+                used: creditQuota.count,
+                limit: creditQuota.limit,
+                remaining: Math.max(0, creditQuota.limit - creditQuota.count),
             },
             contacts: {
                 used: contactQuota.count,
                 limit: contactQuota.limit
             },
-            date: searchQuota.dayKey
+            date: creditQuota.dayKey
         };
 
         return NextResponse.json(quotaData, {

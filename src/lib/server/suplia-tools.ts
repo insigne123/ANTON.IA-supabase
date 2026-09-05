@@ -8,7 +8,6 @@ import { cleanDomain, getContactabilityCopy, normalizeEmail, type Contactability
 import { classifyReply, extractReplyPreview } from '@/lib/reply-classifier';
 import { deterministicMessagingUuid } from '@/lib/messaging-contracts';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
-import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
 import { buildSupliaContext } from '@/lib/server/suplia-context';
 import { sendSupliaEmail } from '@/lib/server/suplia-email';
@@ -51,6 +50,7 @@ export type SupliaToolContext = {
   reportProgress?: (progress: { current: number; total?: number; label?: string | null; metadata?: Record<string, unknown> }) => Promise<void>;
   assertRunnable?: () => Promise<void>;
   heartbeat?: () => Promise<void>;
+  consumeResearchCredit?: () => Promise<void>;
 };
 
 export type SupliaToolHandler = (input: Record<string, unknown>, context: SupliaToolContext) => Promise<Record<string, unknown>>;

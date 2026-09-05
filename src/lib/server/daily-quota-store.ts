@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { DEFAULT_DAILY_QUOTA_LIMITS } from '@/lib/daily-quota-limits';
+import { DEFAULT_DAILY_CREDIT_LIMIT, DEFAULT_DAILY_QUOTA_LIMITS } from '@/lib/daily-quota-limits';
 import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
 import { hasUserEnrichmentSearchCreditAccess } from '@/lib/server/enrichment-search-access';
 
@@ -167,11 +167,7 @@ export async function claimEnrichmentQuotaOperation(params: {
   }
 
   const organizationId = await resolveOrganizationIdForQuota(userId, params.organizationId);
-  const quota = await resolveUserScopedQuotaContext({
-    userId,
-    fallbackLimit: Math.max(0, Number(params.limit) || 0),
-    resource: params.resource,
-  });
+  const quota = await resolveDailyCreditQuotaContext(userId);
   const { data, error } = await (getSupabaseAdmin() as any).rpc('claim_antonia_quota_operation_v1', {
     p_organization_id: organizationId,
     p_user_id: userId,
@@ -351,11 +347,6 @@ function todayKeyUTC(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function positiveInt(value: any, fallback: number) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback;
-}
-
 function nextDayStartISOUTC(): string {
   const now = new Date();
   const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
@@ -385,7 +376,7 @@ type ContactQuotaContext = {
   scope: 'organization' | 'user';
 };
 
-type UserScopedQuotaResource = 'contact' | 'enrich' | 'investigate' | 'research';
+type UserScopedQuotaResource = 'contact';
 
 type UserScopedQuotaContext = {
   limit: number;
@@ -393,7 +384,7 @@ type UserScopedQuotaContext = {
 };
 
 function readQuotaLimitOverride(value: any, resource: UserScopedQuotaResource) {
-  const overrideKey = resource === 'research' ? 'daily_investigate_limit' : `daily_${resource}_limit`;
+  const overrideKey = `daily_${resource}_limit`;
   const limit = Number(value?.[overrideKey] ?? 0);
   return Number.isFinite(limit) && limit > 0 ? limit : 0;
 }
@@ -415,19 +406,10 @@ async function resolveUserScopedQuotaContext(params: {
   userId: string;
   fallbackLimit: number;
   resource: UserScopedQuotaResource;
-  enrichmentSearchAccess?: boolean;
 }) {
   const { userId, fallbackLimit, resource } = params;
-  if (resource === 'enrich') {
-    const hasCreditAccess = params.enrichmentSearchAccess
-      ?? await hasUserEnrichmentSearchCreditAccess(userId);
-    if (!hasCreditAccess) {
-      return { limit: 0, scope: 'user' } satisfies UserScopedQuotaContext;
-    }
-  }
-
   let overrideRow: any = null;
-  const overrideColumn = resource === 'research' ? 'daily_investigate_limit' : `daily_${resource}_limit`;
+  const overrideColumn = `daily_${resource}_limit`;
   const { data, error } = await getSupabaseAdmin()
     .from('user_quota_overrides')
     .select(overrideColumn)
@@ -456,33 +438,39 @@ async function resolveContactQuotaContext(params: { userId: string; fallbackLimi
   return resolveUserScopedQuotaContext({ ...params, resource: 'contact' });
 }
 
+async function resolveDailyCreditQuotaContext(userId: string): Promise<UserScopedQuotaContext> {
+  if (!(await hasUserEnrichmentSearchCreditAccess(userId))) {
+    return { limit: 0, scope: 'user' };
+  }
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('user_quota_overrides')
+    .select('daily_credit_limit')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error && !isMissingUserQuotaOverridesTable(error)) throw error;
+  const override = Number((data as { daily_credit_limit?: number | null } | null)?.daily_credit_limit || 0);
+  const limit = Number.isFinite(override) && override > 0
+    ? Math.min(DEFAULT_DAILY_CREDIT_LIMIT, Math.trunc(override))
+    : DEFAULT_DAILY_CREDIT_LIMIT;
+  return { limit, scope: 'user' };
+}
+
 export async function getEffectiveDailyQuotaLimits(params: { userId: string; organizationId?: string }): Promise<EffectiveDailyQuotaLimits> {
   // A mission controls its own automated work, not the account allowance shown
   // across the workspace. Resolve membership here so invalid callers still fail closed.
   await resolveOrganizationIdForQuota(params.userId, params.organizationId);
-  const enrichmentSearchAccess = await hasUserEnrichmentSearchCreditAccess(params.userId);
-  const enrichQuota = await resolveUserScopedQuotaContext({
-    userId: params.userId,
-    fallbackLimit: DEFAULT_DAILY_QUOTA_LIMITS.enrich,
-    resource: 'enrich',
-    enrichmentSearchAccess,
-  });
-  const researchQuota = await resolveUserScopedQuotaContext({
-    userId: params.userId,
-    fallbackLimit: DEFAULT_DAILY_QUOTA_LIMITS.research,
-    resource: 'investigate',
-  });
+  const credits = await resolveDailyCreditQuotaContext(params.userId);
   const contactQuota = await resolveContactQuotaContext({
     userId: params.userId,
     fallbackLimit: DEFAULT_DAILY_QUOTA_LIMITS.contact,
   });
 
   return {
-    // Apollo people search is credit-free. Product search quota is independent
-    // from paid enrichment access and provider account credits.
-    leadSearch: DEFAULT_DAILY_QUOTA_LIMITS.leadSearch,
-    enrich: enrichQuota.limit,
-    research: researchQuota.limit,
+    leadSearch: credits.limit,
+    enrich: credits.limit,
+    research: credits.limit,
     contact: contactQuota.limit,
   };
 }
@@ -494,6 +482,36 @@ export async function consumeLeadSearchQuota(params: { userId: string; organizat
     resource: 'search',
     limit: limits.leadSearch,
   });
+}
+
+export async function consumeSupliaResearchToolCredit(params: {
+  toolRunId: string;
+  userId: string;
+  organizationId: string;
+}) {
+  const toolRunId = String(params.toolRunId || '').trim();
+  const userId = String(params.userId || '').trim();
+  const organizationId = String(params.organizationId || '').trim();
+  if (!toolRunId || !userId || !organizationId) {
+    throw new Error('SUPLIA research credit identity is required');
+  }
+
+  const { data, error } = await (getSupabaseAdmin() as any).rpc('consume_suplia_research_tool_credit_v1', {
+    p_tool_run_id: toolRunId,
+    p_organization_id: organizationId,
+    p_user_id: userId,
+  });
+  if (error) throw error;
+  const result = data as { allowed?: boolean; count?: number; limit?: number; reused?: boolean } | null;
+  if (!result || typeof result.allowed !== 'boolean' || !Number.isFinite(Number(result.count))) {
+    throw new Error('Invalid SUPLIA research credit response');
+  }
+  return {
+    allowed: result.allowed,
+    count: Number(result.count),
+    limit: Number(result.limit ?? DEFAULT_DAILY_CREDIT_LIMIT),
+    reused: Boolean(result.reused),
+  };
 }
 
 async function countContactsToday(params: { userId: string; organizationId: string; dayKey: string; scope: ContactQuotaContext['scope'] }) {
@@ -511,50 +529,26 @@ async function countContactsToday(params: { userId: string; organizationId: stri
   return count || 0;
 }
 
-async function countUserLeadQuotaEventsToday(params: {
-  userId: string;
-  organizationId: string;
-  dayKey: string;
-  resource: Exclude<UserScopedQuotaResource, 'contact'>;
-  scope: UserScopedQuotaContext['scope'];
-}) {
-  if (params.scope !== 'user') return 0;
-
-  const timestampColumn = params.resource === 'enrich' ? 'last_enriched_at' : 'last_investigated_at';
-  const { count, error } = await getSupabaseAdmin()
-    .from('leads')
-    .select('*', { count: 'exact', head: true })
-    .eq('organization_id', params.organizationId)
-    .eq('user_id', params.userId)
-    .gte(timestampColumn, `${params.dayKey}T00:00:00Z`);
-
-  if (error) throw error;
-  return count || 0;
-}
-
-async function getUserLeadQuotaUsageToday(params: {
-  userId: string;
-  organizationId: string;
-  dayKey: string;
-  resource: Exclude<UserScopedQuotaResource, 'contact' | 'research'>;
-}) {
+async function getDailyCreditQuotaStatus(params: { userId: string; limit?: number }): Promise<DailyQuotaResult> {
+  const dayKey = todayKeyUTC();
+  const quota = typeof params.limit === 'number'
+    ? { limit: Math.min(DEFAULT_DAILY_CREDIT_LIMIT, Math.max(0, Math.trunc(params.limit))) }
+    : await resolveDailyCreditQuotaContext(params.userId);
   const { data, error } = await getSupabaseAdmin()
-    .from('antonia_user_daily_usage')
+    .from('antonia_user_daily_credits')
     .select('usage_count')
-    .eq('organization_id', params.organizationId)
     .eq('user_id', params.userId)
-    .eq('date', params.dayKey)
-    .eq('resource', params.resource)
+    .eq('date', dayKey)
     .maybeSingle();
-
   if (error) throw error;
-  const bucket = data as { usage_count?: number } | null;
-  if (bucket) return Math.max(0, Number(bucket.usage_count || 0));
-
-  return countUserLeadQuotaEventsToday({
-    ...params,
-    scope: 'user',
-  });
+  const count = Math.max(0, Number((data as { usage_count?: number } | null)?.usage_count || 0));
+  return {
+    allowed: count < quota.limit,
+    count,
+    limit: quota.limit,
+    dayKey,
+    resetAtISO: nextDayStartISOUTC(),
+  };
 }
 
 export async function getUserScopedAntoniaQuotaStatus(params: {
@@ -565,35 +559,19 @@ export async function getUserScopedAntoniaQuotaStatus(params: {
   organizationCount?: number;
 }): Promise<DailyQuotaResult> {
   const orgId = await resolveOrganizationIdForQuota(params.userId, params.organizationId);
-  const dayKey = todayKeyUTC();
-  const quota = await resolveUserScopedQuotaContext({
-    userId: params.userId,
-    fallbackLimit: params.limit,
-    resource: params.resource,
-  });
-
-  if (params.resource === 'contact') {
-    const { count: used } = await getContactQuotaUsage({
-      userId: params.userId,
-      organizationId: orgId,
-      limit: params.limit,
-    });
-    return { allowed: used < quota.limit, count: used, limit: quota.limit, dayKey, resetAtISO: nextDayStartISOUTC() };
+  if (params.resource !== 'contact') {
+    return getDailyCreditQuotaStatus({ userId: params.userId });
   }
-
-  const used = quota.scope === 'user'
-    ? await getUserLeadQuotaUsageToday({
-      userId: params.userId,
-      organizationId: orgId,
-      dayKey,
-      resource: params.resource,
-    })
-    : Math.max(0, Number(params.organizationCount || 0));
-
+  const { count: used, limit } = await getContactQuotaUsage({
+    userId: params.userId,
+    organizationId: orgId,
+    limit: params.limit,
+  });
+  const dayKey = todayKeyUTC();
   return {
-    allowed: used < quota.limit,
+    allowed: used < limit,
     count: used,
-    limit: quota.limit,
+    limit,
     dayKey,
     resetAtISO: nextDayStartISOUTC(),
   };
@@ -674,16 +652,7 @@ export async function checkAndConsumeDailyQuota(
   }
 
   const atomicResource = resource as AtomicDailyQuotaResource;
-  let effectiveLimit = Math.max(0, Number(limit) || 0);
-
-  const quota = atomicResource === 'enrich' || atomicResource === 'investigate' || atomicResource === 'research'
-    ? await resolveUserScopedQuotaContext({
-      userId,
-      fallbackLimit: effectiveLimit,
-      resource: atomicResource,
-    })
-    : { limit: effectiveLimit, scope: 'organization' as const };
-  effectiveLimit = quota.limit;
+  const quota = await resolveDailyCreditQuotaContext(userId);
 
   const { data, error } = await (getSupabaseAdmin() as any).rpc('consume_antonia_daily_quota_v1', {
     p_organization_id: orgId,
@@ -746,29 +715,9 @@ export async function getDailyQuotaStatus(
     }
   }
 
-  const userScopedResource = resource === 'research' ? 'investigate' : resource;
-  if (userScopedResource === 'enrich' || userScopedResource === 'investigate') {
+  if (ATOMIC_DAILY_QUOTA_RESOURCES.has(resource as AtomicDailyQuotaResource)) {
     try {
-      const quota = await resolveUserScopedQuotaContext({
-        userId,
-        fallbackLimit: limit,
-        resource: userScopedResource,
-      });
-      if (quota.scope === 'user') {
-        const count = await getUserLeadQuotaUsageToday({
-          userId,
-          organizationId: orgId,
-          dayKey: date,
-          resource: userScopedResource,
-        });
-        return {
-          allowed: count < quota.limit,
-          count,
-          limit: quota.limit,
-          dayKey: date,
-          resetAtISO: nextDayStartISOUTC(),
-        };
-      }
+      return await getDailyCreditQuotaStatus({ userId });
     } catch {
       return { allowed: false, count: 0, limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
     }

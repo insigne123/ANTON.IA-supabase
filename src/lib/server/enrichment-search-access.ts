@@ -1,6 +1,3 @@
-import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
-
-export const ENRICHMENT_SEARCH_ALLOWED_EMAIL = 'laramirez@grupoexpro.com';
 export const ENRICHMENT_SEARCH_CREDITS_UNAVAILABLE = 'ENRICHMENT_SEARCH_CREDITS_UNAVAILABLE';
 
 export function normalizeEnrichmentSearchEmail(value: unknown) {
@@ -8,19 +5,11 @@ export function normalizeEnrichmentSearchEmail(value: unknown) {
 }
 
 export function hasEnrichmentSearchCreditAccess(email: unknown) {
-  return normalizeEnrichmentSearchEmail(email) === ENRICHMENT_SEARCH_ALLOWED_EMAIL;
+  return Boolean(normalizeEnrichmentSearchEmail(email));
 }
 
 export async function hasUserEnrichmentSearchCreditAccess(userId: unknown) {
-  const normalizedUserId = String(userId || '').trim();
-  if (!normalizedUserId) return false;
-
-  try {
-    const { data, error } = await getSupabaseAdminClient().auth.admin.getUserById(normalizedUserId);
-    return !error && hasEnrichmentSearchCreditAccess(data?.user?.email);
-  } catch {
-    return false;
-  }
+  return Boolean(String(userId || '').trim());
 }
 
 export function enrichmentSearchCreditsUnavailablePayload() {
