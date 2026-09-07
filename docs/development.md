@@ -1,6 +1,6 @@
 # Development
 
-## Local-first rule
+## Development targets
 
 Daily development starts with the local Supabase stack. Local data is
 disposable, migrations are replayed from the repository, and outbound effects
@@ -11,18 +11,19 @@ locally.
 | --- | --- | --- |
 | Supabase local | None | Development, resets, database tests, integration tests, and manual QA. |
 | Nonproduction | `htketmmhsfmucevvqmxi` | Synthetic QA identities and an explicitly requested smoke test. |
-| Production | `yfdelflsheurzaicwayi` | Read-only diagnosis through the configured read-only MCP. Never use it for development or tests. |
+| Production | `yfdelflsheurzaicwayi` | Explicit forward-only migrations and diagnosis through the project-scoped MCP. Never use it for development or tests. |
 
-Production is a forbidden write target. Never link the development CLI to it,
-run tests against it, create QA data in it, or use an ad hoc `supabase db push`
-against it. The test target guard rejects its project ref.
+Never link the development CLI to production, run tests against it, or create
+QA data in it. An explicitly requested production migration uses only the
+project-scoped `supabase-production` MCP. The test target guard continues to
+reject its project ref.
 
 ## Prerequisites
 
 - Node.js 22. Both `.nvmrc` and `package.json` require this major version.
 - npm with dependencies installed using `npm ci`.
-- Docker Desktop running before a local Supabase command. On Windows, use the
-  Docker Linux container backend.
+- Docker Desktop is needed only when local Supabase commands are requested. On
+  Windows, use the Docker Linux container backend.
 - The repository-local Supabase CLI. It is installed by `npm ci`; use the npm
   scripts rather than a separately installed global CLI.
 - Supabase CLI authentication and access to `htketmmhsfmucevvqmxi` only when a
@@ -130,9 +131,9 @@ Project commands are stored in `.opencode/commands/`:
 - `/smoke-nonprod` runs the guarded smoke suite against
   `htketmmhsfmucevvqmxi` without pushing migrations.
 
-Restart OpenCode after adding or changing project command files; command
-definitions are loaded at startup. The production MCP remains read-only, and
-none of these commands permit production writes.
+Restart OpenCode after changing project configuration or command files. The
+production MCP is project-scoped and requires OAuth; local and nonproduction
+commands never authorize a production write.
 
 ## Troubleshooting
 
@@ -144,8 +145,8 @@ none of these commands permit production writes.
 | `.env.test.local` is missing or stale | Start Supabase, then run `npm run test:env:local`. This refreshes local URLs and keys. |
 | QA sign-in fails after a reset | Run `npm run test:identity:ensure`; use the current `QA_TEST_PASSWORD` from `.env.test.local`. |
 | The CLI is linked to the wrong hosted project | Do not run a push. Use `npm run db:link:nonprod` only when nonproduction work was explicitly requested. |
-| A command reports the production ref | Stop immediately. Do not override the guard or edit an environment file to bypass it. |
+| A test command reports the production ref | Stop immediately. Tests, resets, and seeds never target production. |
 
-Production deployment remains a separate release process. Consult
-[Deployment](./deployment.md) for deployment checks; this development workflow
-does not authorize a production database change.
+Production deployment remains an explicit release action. Consult
+[Deployment](./deployment.md) for application checks and
+[Database](./database.md) for the direct migration workflow.

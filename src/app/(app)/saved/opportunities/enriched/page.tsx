@@ -29,6 +29,11 @@ import { buildEffectiveCompanyProfile, buildSenderInfo, applySignaturePlaceholde
 import { buildPersonEmailContext, renderTemplate } from '@/lib/template';
 import { ensureSubjectPrefix, generateCompanyOutreachV2 } from '@/lib/outreach-templates';
 import { restyleDraftWithProfile } from '@/lib/email-style-restyle';
+import {
+  OUTSOURCING_EMAIL_STYLE_PRESETS,
+  outsourcingEmailStylePresetSelection,
+  styleProfileFromOutsourcingEmailStylePreset,
+} from '@/lib/outsourcing-email-style-presets';
 import { profileService, type Profile } from '@/lib/services/profile-service';
 import { adaptLeadResearchResponseToReport, isLeadResearchReadyForAutoContact } from '@/lib/lead-research';
 import { MAX_RESEARCH_BATCH_SIZE } from '@/lib/research-workspace';
@@ -107,8 +112,15 @@ export default function EnrichedOpportunitiesPage() {
   const loadData = async () => {
     const data = await enrichedOpportunitiesStorage.get();
     setEnriched(data);
-    const styles = styleProfilesStorage.list(); // FIXED: use storage.list()
-    setStyleProfiles(styles);
+    const savedStyles = styleProfilesStorage.list();
+    const savedNames = new Set(savedStyles.map((style) => style.name));
+    const presetStyles = OUTSOURCING_EMAIL_STYLE_PRESETS
+      .filter((preset) => !savedNames.has(preset.label))
+      .map((preset) => ({
+        ...styleProfileFromOutsourcingEmailStylePreset(preset, 'opportunities'),
+        id: outsourcingEmailStylePresetSelection(preset.id),
+      }));
+    setStyleProfiles([...savedStyles, ...presetStyles]);
   };
 
   useEffect(() => {
@@ -715,7 +727,11 @@ export default function EnrichedOpportunitiesPage() {
       </Card>
 
       <Sheet open={researchOpen} onOpenChange={setResearchOpen}>
-        <SheetContent side="right" showCloseButton={false} className="h-dvh w-full overflow-y-auto overscroll-contain px-4 py-5 sm:max-w-5xl sm:px-6 sm:py-6 lg:px-8">
+        <SheetContent
+          side="right"
+          showCloseButton={false}
+          className="h-dvh w-full max-w-none overflow-hidden border-l border-border/70 p-0 sm:w-[94vw] sm:max-w-[1280px]"
+        >
           <SheetHeader className="sr-only">
             <SheetTitle>Investigación de oportunidades</SheetTitle>
             <SheetDescription>Investiga las oportunidades enriquecidas y prepara un email con evidencia.</SheetDescription>

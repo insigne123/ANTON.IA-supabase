@@ -1040,7 +1040,7 @@ export default function EnrichedLeadsClient() {
     }
   }
 
-  async function generateEmailFromReportFor(lead: EnrichedLead) {
+  async function generateEmailFromReportFor(lead: EnrichedLead, styleProfileId: string | null = null) {
     if (nativeDraftRequestRef.current) return;
     if (!nativeResearchStatusKnown) return;
     if (!canContact(lead)) {
@@ -1077,7 +1077,7 @@ export default function EnrichedLeadsClient() {
       const response = await fetch('/api/native-drafts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `native-draft:${researchSnapshotId}` },
-        body: JSON.stringify({ researchSnapshotId }),
+        body: JSON.stringify({ researchSnapshotId, styleProfileId }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.draft?.draftId) {
@@ -1784,7 +1784,11 @@ export default function EnrichedLeadsClient() {
         setResearchOpen(open);
         if (!open) void loadNativeResearchStatuses(enriched);
       }}>
-        <SheetContent side="right" className="h-dvh w-full overflow-y-auto overscroll-contain px-4 py-5 sm:max-w-5xl sm:px-6 sm:py-6 lg:px-8">
+        <SheetContent
+          side="right"
+          showCloseButton={false}
+          className="h-dvh w-full max-w-none overflow-hidden border-l border-border/70 p-0 sm:w-[94vw] sm:max-w-[1280px]"
+        >
           <SheetHeader className="sr-only">
             <SheetTitle>Investigación de leads</SheetTitle>
             <SheetDescription>Investiga los leads enriquecidos y prepara un email con evidencia.</SheetDescription>
@@ -1858,7 +1862,7 @@ export default function EnrichedLeadsClient() {
                     canCreateDraft={canContact(reportLead)}
                     creatingDraft={creatingDraftId === reportLead.id}
                     createDraftDisabled={draftRequestPending}
-                    onCreateDraft={() => void generateEmailFromReportFor(reportLead)}
+                    onCreateDraft={(styleProfileId) => void generateEmailFromReportFor(reportLead, styleProfileId)}
                     onRefresh={() => {
                       setOpenReport(false);
                       openResearchWorkspace([reportLead.id], { refresh: true });

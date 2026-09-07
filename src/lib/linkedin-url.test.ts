@@ -29,7 +29,20 @@ test('decodes and normalizes percent-encoded profile slugs', () => {
   const encoded = 'https://www.linkedin.com/in/sally-tatiana-bard%C3%A1lez-chota-0693a875/';
   assert.equal(
     normalizeLinkedinProfileUrl(encoded),
-    'https://www.linkedin.com/in/sally-tatiana-bardalez-chota-0693a875',
+    'https://www.linkedin.com/in/sally-tatiana-bard%C3%A1lez-chota-0693a875',
   );
   assert.equal(getLinkedinProfileDisplayName(encoded), 'Sally Tatiana Bardález Chota');
+});
+
+test('preserves the exact UTF-8 identity of accented LinkedIn slugs', () => {
+  const encoded = 'https://www.linkedin.com/in/laura-sof%C3%ADa-sotelo-torres-47423735/';
+  assert.equal(
+    normalizeLinkedinProfileUrl(encoded),
+    'https://www.linkedin.com/in/laura-sof%C3%ADa-sotelo-torres-47423735',
+  );
+  assert.equal(
+    normalizeLinkedinProfileUrl('https://cl.linkedin.com/in/laura-sofi\u0301a-sotelo-torres-47423735?trk=public_profile'),
+    'https://www.linkedin.com/in/laura-sof%C3%ADa-sotelo-torres-47423735',
+  );
+  assert.equal(getLinkedinProfileDisplayName(encoded), 'Laura Sofía Sotelo Torres');
 });

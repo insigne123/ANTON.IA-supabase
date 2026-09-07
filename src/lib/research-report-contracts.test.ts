@@ -77,6 +77,7 @@ test('report narrative may paraphrase cited claims but cannot detach them from c
   assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(readable, snapshot));
 
   const unsupported = structuredClone(readable) as any;
+  unsupported.narrative.executiveSummary[0].claimIds = ['claim-acme-overview'];
   unsupported.narrative.executiveSummary[0].evidenceIds = ['evidence-ada'];
   assert.throws(
     () => validateResearchReportDocumentCitationsV1(unsupported, snapshot),
@@ -161,6 +162,46 @@ test('report contract derives signal metadata from the cited canonical chain and
     () => validateResearchReportDocumentCitationsV1(wrongDate, snapshot),
     (error: any) => error instanceof ResearchReportCitationError && /observedAt/.test(error.message),
   );
+});
+
+test('report projection excludes unqualified supporting evidence from citations', () => {
+  const raw = structuredClone(draftSnapshotFixture()) as any;
+  raw.sources.push(
+    {
+      id: 'source-other-news', type: 'news', url: 'https://news.example/other-company', canonicalUrl: 'https://news.example/other-company',
+      title: 'Other Company expansion', provider: 'fixture', retrievedAt: generatedAt, reliability: 0.8,
+    },
+    {
+      id: 'source-acme-news', type: 'news', url: 'https://news.example/acme-expansion', canonicalUrl: 'https://news.example/acme-expansion',
+      title: 'Acme expansion', provider: 'fixture', retrievedAt: generatedAt, reliability: 0.8,
+    },
+  );
+  raw.evidence.push(
+    {
+      id: 'evidence-other-news', subjectScope: 'company', kind: 'event', path: 'fixture.news',
+      statement: 'Other Company opened a regional operation.', sourceId: 'source-other-news', observedAt: '2026-08-20T09:00:00.000Z',
+      extractedAt: generatedAt, confidence: 0.8, extraction: { method: 'rule', provider: 'fixture', version: 'fixture/v1' },
+    },
+    {
+      id: 'evidence-acme-news', subjectScope: 'company', kind: 'event', path: 'fixture.news',
+      statement: 'Acme anunció una nueva operación regional.', sourceId: 'source-acme-news', observedAt: '2026-08-21T09:00:00.000Z',
+      extractedAt: generatedAt, confidence: 0.8, extraction: { method: 'rule', provider: 'fixture', version: 'fixture/v1' },
+    },
+  );
+  raw.claims.push({
+    id: 'claim-mixed-news', kind: 'news_signal', subjectScope: 'company', classification: 'fact',
+    statement: 'Acme anunció una nueva operación regional.',
+    supportingEvidenceIds: ['evidence-other-news', 'evidence-acme-news'], contradictingEvidenceIds: [], confidence: 0.8,
+    freshness: { asOf: generatedAt, validUntil: '2026-09-21T09:00:00.000Z', policyVersion: 'research-freshness/v1' },
+    derivation: { method: 'rule', promptVersion: 'fixture/v1' },
+  });
+  const snapshot = ResearchSnapshotV1Schema.parse(raw);
+  const document = buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt });
+  const signal = document.signals.find((item) => item.citations.claimIds.includes('claim-mixed-news'))!;
+
+  assert.deepEqual(signal.citations.evidenceIds, ['evidence-acme-news']);
+  assert.equal(signal.observedAt, '2026-08-21T09:00:00.000Z');
+  assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(document, snapshot));
 });
 
 test('report contradiction summary and status must remain canonical', () => {

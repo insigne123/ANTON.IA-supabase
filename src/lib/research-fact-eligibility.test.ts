@@ -1,7 +1,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { mentionsResearchCompany } from './research-fact-eligibility';
+import {
+  isGenericResearchText,
+  isHardRejectedResearchUrl,
+  isHardRejectedResearchText,
+  mentionsResearchCompany,
+} from './research-fact-eligibility';
+
+test('hard-rejected challenge text cannot be diluted with substantive-looking padding', () => {
+  const poisoned = [
+    'Acme Logistics ofrece soluciones empresariales para operaciones regionales. '.repeat(12),
+    'One moment, please... Loader Please wait while your request is being verified.',
+  ].join(' ');
+
+  assert.ok(poisoned.length > 320);
+  assert.equal(isHardRejectedResearchText(poisoned), true);
+  assert.equal(isGenericResearchText(poisoned), true);
+  assert.equal(isHardRejectedResearchText('Verify you are human with hCaptcha before continuing.'), true);
+  assert.equal(isHardRejectedResearchText('Just a moment...'), true);
+  assert.equal(isHardRejectedResearchUrl('https://acme.example/cdn-cgi/challenge-platform/h/g/orchestrate'), true);
+  assert.equal(isHardRejectedResearchText('Acme explica cómo reCAPTCHA ayuda a proteger formularios públicos.'), false);
+});
+
+test('ordinary navigation remains a conservative length-bounded generic filter', () => {
+  assert.equal(isGenericResearchText('Skip to main content'), true);
+  assert.equal(isGenericResearchText(`${'Acme publishes useful operational context. '.repeat(12)} Skip to main content`), false);
+});
 
 test('mentionsResearchCompany accepts the company name in its actual order', () => {
   assert.equal(mentionsResearchCompany(

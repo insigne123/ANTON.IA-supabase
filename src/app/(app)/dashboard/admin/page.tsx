@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   Activity,
@@ -7,6 +8,7 @@ import {
   Building2,
   Check,
   CircleAlert,
+  Coins,
   Globe2,
   LogOut,
   Mail,
@@ -234,8 +236,8 @@ export default function AdminDashboardPage() {
   const users = overview?.users || [];
 
   return (
-    <main className="min-h-screen">
-      <div className="mx-auto w-full max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
+    <div className="min-h-full">
+      <div className="mx-auto w-full max-w-[1480px] px-4 py-1 sm:px-2 lg:px-4 lg:py-3">
         <header className="flex flex-col gap-5 border-b border-border/60 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
             <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-primary">
@@ -248,6 +250,12 @@ export default function AdminDashboardPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline">
+              <Link href="/dashboard/admin/credits">
+                <Coins className="h-4 w-4" aria-hidden="true" />
+                Créditos
+              </Link>
+            </Button>
             <Button type="button" variant="outline" onClick={() => void loadOverview({ silent: true })} disabled={loading || refreshing}>
               <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} aria-hidden="true" />
               Actualizar
@@ -268,11 +276,11 @@ export default function AdminDashboardPage() {
             <div className="grid w-full gap-3 sm:grid-cols-2 lg:w-auto lg:grid-cols-4">
               <div className="space-y-1.5">
                 <Label htmlFor="admin-from">Desde</Label>
-                <Input id="admin-from" type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+                <Input id="admin-from" type="date" value={from} max={to} onChange={(event) => setFrom(event.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="admin-to">Hasta</Label>
-                <Input id="admin-to" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+                <Input id="admin-to" type="date" value={to} min={from} onChange={(event) => setTo(event.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="admin-group">Grupo</Label>
@@ -287,6 +295,11 @@ export default function AdminDashboardPage() {
                   <option value="">Todo el equipo</option>
                   {users.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
                 </select>
+                {userId ? (
+                  <Link href={`/dashboard/admin/users/${userId}`} className="inline-flex min-h-8 items-center text-xs font-medium text-primary underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    Ver historial del usuario
+                  </Link>
+                ) : null}
               </div>
             </div>
           </div>
@@ -315,9 +328,9 @@ export default function AdminDashboardPage() {
 
             <section aria-label="Indicadores principales" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
               <MetricCard label="Leads capturados" value={number(summary?.leadsCaptured || 0)} note="Leads únicos nuevos" icon={Search} />
-              <MetricCard label="Leads contactados" value={number(summary?.leadsContacted || 0)} note="Contactos únicos" icon={Send} accent="text-sky-600 dark:text-sky-300" />
-              <MetricCard label="Investigaciones" value={number(summary?.investigations || 0)} note="Solicitadas o completadas" icon={BriefcaseBusiness} accent="text-violet-600 dark:text-violet-300" />
-              <MetricCard label="Teléfonos buscados" value={number(summary?.phonesSearched || 0)} note="Resultados con teléfono" icon={Phone} accent="text-emerald-600 dark:text-emerald-300" />
+              <MetricCard label="Leads contactados" value={number(summary?.leadsContacted || 0)} note="Contactos con envío confirmado" icon={Send} accent="text-sky-600 dark:text-sky-300" />
+              <MetricCard label="Investigaciones" value={number(summary?.investigations || 0)} note="Solicitudes únicas" icon={BriefcaseBusiness} accent="text-violet-600 dark:text-violet-300" />
+              <MetricCard label="Búsquedas con teléfono" value={number(summary?.phonesSearched || 0)} note="Resultados con número disponible" icon={Phone} accent="text-emerald-600 dark:text-emerald-300" />
               <MetricCard label="Tasa de respuesta" value={percent(summary?.responseRate || 0)} note={`${number(summary?.replies || 0)} respuestas`} icon={Mail} accent="text-amber-600 dark:text-amber-300" />
             </section>
 
@@ -366,7 +379,7 @@ export default function AdminDashboardPage() {
 
               <Card className="rounded-2xl border-border/60 bg-card/90">
                 <CardHeader className="px-5 pb-2 pt-5"><CardTitle className="text-base">Personas y empresas</CardTitle><CardDescription>Concentración del outreach en el período.</CardDescription></CardHeader>
-                <CardContent className="grid gap-3 px-5 pb-5 sm:grid-cols-2 xl:grid-cols-1"><div className="flex items-center justify-between rounded-xl bg-muted/30 p-3"><span className="flex items-center gap-2 text-sm text-muted-foreground"><Building2 className="h-4 w-4" aria-hidden="true" />Empresas capturadas</span><span className="font-semibold tabular-nums">{number(overview.companies.reduce((sum, item) => sum + item.value, 0))}</span></div><div className="flex items-center justify-between rounded-xl bg-muted/30 p-3"><span className="flex items-center gap-2 text-sm text-muted-foreground"><UserRound className="h-4 w-4" aria-hidden="true" />Seniorities detectados</span><span className="font-semibold tabular-nums">{number(overview.seniorities.reduce((sum, item) => sum + item.value, 0))}</span></div></CardContent>
+                <CardContent className="grid gap-3 px-5 pb-5 sm:grid-cols-2 xl:grid-cols-1"><div className="flex items-center justify-between rounded-xl bg-muted/30 p-3"><span className="flex items-center gap-2 text-sm text-muted-foreground"><Building2 className="h-4 w-4" aria-hidden="true" />Empresas únicas</span><span className="font-semibold tabular-nums">{number(summary?.companiesCaptured || 0)}</span></div><div className="flex items-center justify-between rounded-xl bg-muted/30 p-3"><span className="flex items-center gap-2 text-sm text-muted-foreground"><UserRound className="h-4 w-4" aria-hidden="true" />Perfiles con seniority</span><span className="font-semibold tabular-nums">{number(summary?.profilesWithSeniority || 0)}</span></div></CardContent>
               </Card>
             </section>
 
@@ -390,6 +403,6 @@ export default function AdminDashboardPage() {
           </div>
         ) : null}
       </div>
-    </main>
+    </div>
   );
 }

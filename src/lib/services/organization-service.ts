@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 
-type OrganizationRole = 'owner' | 'admin' | 'member';
+export type OrganizationRole = 'owner' | 'admin' | 'member';
 
 export type OrganizationListResponse = {
     activeOrganizationId: string | null;

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { MessagingApprovalV1Schema, MessagingDraftV1Schema } from '@/lib/messaging-contracts';
+import { EmailStyleSelectionSchema } from '@/lib/outsourcing-email-style-presets';
 
 import { CampaignV2StepStateSchema } from './inbox-contracts';
 
@@ -83,7 +84,7 @@ export type GetFirstContactPlanResponse = z.infer<typeof GetFirstContactPlanResp
 export const CreateFirstContactPlanBodySchema = z.object({
   draftId: UuidSchema,
   versionId: UuidSchema,
-  styleProfileId: UuidSchema.nullable().optional(),
+  styleProfileId: EmailStyleSelectionSchema.nullable().optional(),
   sequenceInstruction: z.string().trim().min(1).max(1_000),
   steps: z.array(z.object({
     name: z.string().trim().min(1).max(120),

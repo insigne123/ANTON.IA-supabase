@@ -39,18 +39,21 @@ test('generated drafts remain editable, retryable, and stable while generation r
   assert.match(composerSource, /Reintentar generación/);
 });
 
-test('AI notes save local edits first and global notes preserve sequential partial progress', () => {
+test('AI notes save local edits first and adjust only editable unsent follow-ups', () => {
   const rewriteFunction = composerSource.slice(
     composerSource.indexOf('async function rewriteDraft'),
     composerSource.indexOf('async function generatePlan'),
   );
   assert.ok(rewriteFunction.indexOf('await patchDraft(stepId)') < rewriteFunction.indexOf('/rewrite`'));
   assert.match(rewriteFunction, /method: 'POST'/);
+  assert.match(rewriteFunction, /expectedVersionId: step\.draft\.versionId/);
+  assert.match(rewriteFunction, /campaignStepId: step\.id/);
   assert.match(composerSource, /for \(const \[index, step\] of generatedSteps\.entries\(\)\) \{[\s\S]+await rewriteDraft\(step\.id, coherentInstruction/);
+  assert.match(composerSource, /AI_EDITABLE_STEP_STATES\.has\(step\.state\)/);
   assert.match(composerSource, /Mantén coherencia entre todos los seguimientos/);
   assert.match(composerSource, /Los demás seguimientos conservaron sus cambios/);
   assert.match(composerSource, /await loadPlan\(undefined, false\)/);
-  assert.match(composerSource, /todos los seguimientos\. El correo inicial no cambiará/);
+  assert.match(composerSource, /solo a los seguimientos que todavía no se enviaron\. El correo inicial no cambiará/);
   assert.match(composerSource, /event\.metaKey \|\| event\.ctrlKey/);
   assert.match(composerSource, /side="bottom"/);
   assert.match(composerSource, /sm:right-0[\s\S]+sm:h-full[\s\S]+sm:max-w-lg/);

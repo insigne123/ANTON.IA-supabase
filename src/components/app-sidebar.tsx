@@ -20,7 +20,7 @@ import {
   SidebarTrigger
 } from '@/components/ui/sidebar';
 import {
-  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, Building2, LogOut, Shield, LayoutGrid, Bot, Link2
+  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, Building2, LogOut, Shield, ShieldCheck, LayoutGrid, Bot, Link2
 } from 'lucide-react';
 import Logo from './logo';
 import { useAuth } from '@/context/AuthContext';
@@ -34,7 +34,7 @@ type NavItem = {
   icon: LucideIcon;
   label: string;
   aliases?: string[];
-  feature?: 'opportunities';
+  feature?: 'opportunities' | 'admin-dashboard';
 };
 
 const navSections: Array<{ label: string; items: NavItem[] }> = [
@@ -44,6 +44,12 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
       { href: '/antonia', icon: Bot, label: 'Agente ANTON.IA' },
       { href: '/profile', icon: User, label: 'Mi Perfil de Empresa' },
+    ],
+  },
+  {
+    label: 'Administración',
+    items: [
+      { href: '/dashboard/admin', icon: ShieldCheck, label: 'Admin', feature: 'admin-dashboard' },
     ],
   },
   {
@@ -82,11 +88,26 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const { signOut } = useAuth();
+  const { signOut, user, organizationId, organizationRole } = useAuth();
   const canAccessOpportunities = isOpportunitiesEnabled();
+  const adminAllowedEmails = String(process.env.NEXT_PUBLIC_ADMIN_DASHBOARD_ALLOWED_EMAILS || '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+  const canAccessAdminDashboard = organizationId === process.env.NEXT_PUBLIC_ADMIN_DASHBOARD_ORGANIZATION_ID
+    && (organizationRole === 'owner' || organizationRole === 'admin')
+    && adminAllowedEmails.includes(String(user?.email || '').trim().toLowerCase());
 
   const isActiveRoute = (item: NavItem) => [item.href, ...(item.aliases || [])]
-    .some((href) => pathname === href || pathname.startsWith(`${href}/`));
+    .some((href) => pathname === href || (href !== '/dashboard' && pathname.startsWith(`${href}/`)));
+  const visibleSections = navSections
+    .map((section) => ({
+      ...section,
+      items: section.items
+        .filter((item) => item.feature !== 'opportunities' || canAccessOpportunities)
+        .filter((item) => item.feature !== 'admin-dashboard' || canAccessAdminDashboard),
+    }))
+    .filter((section) => section.items.length > 0);
 
   return (
     <Sidebar className="border-r border-sidebar-border/70 bg-[linear-gradient(180deg,hsl(var(--sidebar-background))_0%,hsl(var(--sidebar-background))_68%,hsl(var(--background))_100%)]">
@@ -101,7 +122,7 @@ export function AppSidebar() {
 
       <SidebarContent className="px-2 pb-3 pt-2">
         <nav aria-label="Navegacion principal" className="contents">
-          {navSections.map((section, index) => (
+          {visibleSections.map((section, index) => (
           <React.Fragment key={section.label}>
             <SidebarGroup className="p-0">
               <SidebarGroupLabel className="px-3 pb-2 pt-1 text-[11px] font-medium uppercase tracking-[0.18em] text-sidebar-foreground/55">
@@ -109,9 +130,7 @@ export function AppSidebar() {
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu className="gap-1.5">
-                  {section.items
-                    .filter((item) => item.feature !== 'opportunities' || canAccessOpportunities)
-                    .map((item) => {
+                  {section.items.map((item) => {
                     const isActive = isActiveRoute(item);
 
                     return (
@@ -137,7 +156,7 @@ export function AppSidebar() {
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
-            {index < navSections.length - 1 && <SidebarSeparator className="mx-3 my-2 bg-sidebar-border/65" />}
+            {index < visibleSections.length - 1 && <SidebarSeparator className="mx-3 my-2 bg-sidebar-border/65" />}
           </React.Fragment>
           ))}
         </nav>

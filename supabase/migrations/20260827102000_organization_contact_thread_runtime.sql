@@ -107,7 +107,8 @@ begin
       ) returning * into v_thread;
     else
       if v_thread.reserved_dispatch_id is not null
-        and v_thread.reserved_dispatch_id <> v_dispatch.id then
+        and v_thread.reserved_dispatch_id <> v_dispatch.id
+        and coalesce(v_thread.reservation_expires_at, 'infinity'::timestamptz) > p_started_at then
         v_conflict := 'Another member is already preparing contact for this recipient.';
       elsif v_thread.status = 'suppressed' then
         v_conflict := 'This recipient is suppressed for the organization.';
@@ -146,7 +147,10 @@ begin
     if v_conflict is not null then
       update public.outbound_dispatches
       set status = 'failed',
-          started_at = null,
+          started_at = case
+            when v_dispatch.status = 'pending' then null
+            else coalesce(v_dispatch.started_at, p_started_at)
+          end,
           completed_at = p_started_at,
           provider_message_id = null,
           provider_response = jsonb_build_object(
@@ -296,6 +300,9 @@ begin
   end if;
   if length(trim(coalesce(p_reason, ''))) not between 3 and 1000 then
     raise exception 'Reopen reason is required' using errcode = '22023';
+  end if;
+  if v_thread.status = 'suppressed' then
+    raise exception 'Suppressed contact threads cannot be reopened' using errcode = '55000';
   end if;
   if v_thread.last_contacted_at is null or v_thread.last_contacted_at > now() - interval '90 days' then
     raise exception 'Contact thread cannot be reopened before 90 days' using errcode = '55000';

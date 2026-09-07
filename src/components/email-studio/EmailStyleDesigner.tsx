@@ -19,6 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { generateMailFromStyle } from '@/lib/ai/style-mail';
 import { findReportForLead } from '@/lib/lead-research-storage';
+import { OUTSOURCING_EMAIL_STYLE_PRESETS } from '@/lib/outsourcing-email-style-presets';
 import {
   buildCompanyProfileInfo,
   buildSenderInfo,
@@ -43,78 +44,12 @@ type ResearchLeadOption = {
   report: CrossReport;
 };
 
-type PresetId = 'direct' | 'consultative' | 'commercial';
+type PresetId = (typeof OUTSOURCING_EMAIL_STYLE_PRESETS)[number]['id'];
 
 const DEFAULT_INSTRUCTIONS =
   'Profesional y humano. Usa frases claras, personalización relevante y una invitación breve, sin exageraciones.';
 
-const STYLE_PRESETS: Array<{
-  id: PresetId;
-  label: string;
-  profile: Partial<StyleProfile>;
-}> = [
-  {
-    id: 'direct',
-    label: 'Directo',
-    profile: {
-      tone: 'direct',
-      length: 'short',
-      instructions:
-        'Claro y breve. Abre con el motivo del contacto, conecta una necesidad concreta con el valor y cierra con un siguiente paso simple.',
-      subjectTemplate: '[[lead.firstName]], una idea para [[company.name]]',
-      bodyTemplate: `Hola {{lead.firstName}},
-
-Revisé {{company.name}} y vi una oportunidad relacionada con {{report.pains}}.
-
-En {{sender.company}} ayudamos a resolverlo con {{report.valueProps}}.
-
-¿Te parece una llamada de {{cta.duration}} min esta semana?
-
-{{sender.name}}`,
-    },
-  },
-  {
-    id: 'consultative',
-    label: 'Consultivo',
-    profile: {
-      tone: 'consultative',
-      length: 'medium',
-      instructions:
-        'Cercano y consultivo. Demuestra que entiendes el contexto, plantea una observación útil y abre una conversación sin presionar.',
-      subjectTemplate: '[[lead.firstName]], una observación sobre [[company.name]]',
-      bodyTemplate: `Hola {{lead.firstName}},
-
-Al revisar {{company.name}}, me llamó la atención {{report.pains}}.
-
-Suele ser un buen momento para evaluar cómo {{report.valueProps}} puede apoyar las prioridades del equipo sin sumar complejidad.
-
-¿Te serviría contrastar enfoques en una llamada de {{cta.duration}} min?
-
-{{sender.name}}
-{{sender.company}}`,
-    },
-  },
-  {
-    id: 'commercial',
-    label: 'Comercial',
-    profile: {
-      tone: 'commercial',
-      length: 'medium',
-      instructions:
-        'Persuasivo y concreto. Prioriza el resultado de negocio, aporta relevancia con la investigación y termina con una propuesta fácil de aceptar.',
-      subjectTemplate: 'Una oportunidad para [[company.name]]',
-      bodyTemplate: `Hola {{lead.firstName}},
-
-Viendo las prioridades de {{company.name}}, detecté una oportunidad en {{report.pains}}.
-
-Desde {{sender.company}} ayudamos a equipos similares a avanzar con {{report.valueProps}} y un seguimiento comercial más consistente.
-
-¿Revisamos si encaja en una llamada de {{cta.duration}} min?
-
-{{sender.name}}`,
-    },
-  },
-];
+const STYLE_PRESETS = OUTSOURCING_EMAIL_STYLE_PRESETS;
 
 function createStyleDraft(): StyleProfile {
   return {
@@ -614,7 +549,7 @@ export default function EmailStyleDesigner() {
 
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium text-foreground">Punto de partida</legend>
-              <div className="grid min-w-0 grid-cols-1 gap-2 min-[360px]:grid-cols-3">
+              <div className="grid min-w-0 grid-cols-1 gap-2 min-[360px]:grid-cols-2">
                 {STYLE_PRESETS.map((preset) => (
                   <Button
                     key={preset.id}
@@ -632,6 +567,11 @@ export default function EmailStyleDesigner() {
                   </Button>
                 ))}
               </div>
+              {activePreset ? (
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {STYLE_PRESETS.find((preset) => preset.id === activePreset)?.description}
+                </p>
+              ) : null}
             </fieldset>
 
             <div className="space-y-2">

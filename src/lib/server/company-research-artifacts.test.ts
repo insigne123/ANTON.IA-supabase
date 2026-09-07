@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
+  NATIVE_COMPANY_RESEARCH_PROVIDER_VERSION,
   buildCompanyResearchArtifactIdentity,
   claimCompanyResearchArtifact,
   isFreshReusableCompanyResearchArtifact,
@@ -11,6 +12,10 @@ import {
 
 const migration = readFileSync('supabase/migrations/20260822133000_research_company_artifacts.sql', 'utf8');
 const nativeResearchSource = readFileSync('src/lib/server/native-research.ts', 'utf8');
+
+test('native provider version invalidates company artifacts created before ingestion hardening', () => {
+  assert.equal(NATIVE_COMPANY_RESEARCH_PROVIDER_VERSION, 'native-research-provider/v3');
+});
 
 function identity(overrides: Record<string, unknown> = {}) {
   return buildCompanyResearchArtifactIdentity({

@@ -5,20 +5,26 @@ import { DEFAULT_DAILY_QUOTA_LIMITS } from '@/lib/daily-quota-limits';
 
 const operationMigrationPath = 'supabase/migrations/20260813120000_idempotent_enrichment_quota_operations.sql';
 const sharedCreditsMigrationPath = 'supabase/migrations/20260904220304_shared_daily_account_credits.sql';
+const organizationCreditsMigrationPath = 'supabase/migrations/20260907121351_organization_credit_policies.sql';
 const sourcePath = 'src/lib/server/daily-quota-store.ts';
 const functionsPath = 'functions/index.ts';
 const leadResearchRoutePath = 'src/app/api/lead-research/route.ts';
 const leadSearchRoutePath = 'src/app/api/leads/search/route.ts';
+const quotaStatusRoutePath = 'src/app/api/quota/status/route.ts';
+const antoniaQuotaRoutePath = 'src/app/api/antonia/quota/route.ts';
 const backupCronRoutePath = 'src/app/api/cron/antonia/route.ts';
 const enrichmentRoutePath = 'src/app/api/opportunities/enrich-apollo/route.ts';
 const supliaRunnerPath = 'src/lib/server/suplia-tool-runner.ts';
 const supliaResearchPath = 'src/lib/server/suplia-research-tools.ts';
 const operationSql = readFileSync(operationMigrationPath, 'utf8');
 const sharedCreditsSql = readFileSync(sharedCreditsMigrationPath, 'utf8');
+const organizationCreditsSql = readFileSync(organizationCreditsMigrationPath, 'utf8');
 const source = readFileSync(sourcePath, 'utf8');
 const functionsSource = readFileSync(functionsPath, 'utf8');
 const leadResearchRoute = readFileSync(leadResearchRoutePath, 'utf8');
 const leadSearchRoute = readFileSync(leadSearchRoutePath, 'utf8');
+const quotaStatusRoute = readFileSync(quotaStatusRoutePath, 'utf8');
+const antoniaQuotaRoute = readFileSync(antoniaQuotaRoutePath, 'utf8');
 const backupCronRoute = readFileSync(backupCronRoutePath, 'utf8');
 const enrichmentRoute = readFileSync(enrichmentRoutePath, 'utf8');
 const supliaRunner = readFileSync(supliaRunnerPath, 'utf8');
@@ -71,22 +77,20 @@ test('atomic quota RPC is private to service role', () => {
   assert.match(sharedCreditsSql, /grant execute on function public\.consume_antonia_daily_quota_v1\([^)]+\)[\s\S]*to service_role;/);
 });
 
-test('only service-controlled typed override columns can change effective quota', () => {
+test('effective credit limits come from the organization policy boundary', () => {
   const resolverStart = source.indexOf('async function resolveDailyCreditQuotaContext');
   const resolverEnd = source.indexOf('export async function getEffectiveDailyQuotaLimits', resolverStart);
   const resolver = source.slice(resolverStart, resolverEnd);
-  assert.match(resolver, /\.from\('user_quota_overrides'\)/);
-  assert.match(resolver, /\.select\('daily_credit_limit'\)/);
-  assert.match(resolver, /Math\.min\(DEFAULT_DAILY_CREDIT_LIMIT/);
+  assert.match(resolver, /getDailyCreditQuotaStatus\(\{ userId, organizationId \}\)/);
+  assert.match(resolver, /status\.binding === 'team'/);
   assert.doesNotMatch(resolver, /profiles|signatures|quota_overrides\?\.|antonia\?\./);
 
   const workerResolverStart = functionsSource.indexOf('async function getEffectiveDailyContactQuota');
   const workerResolverEnd = functionsSource.indexOf('function sleep', workerResolverStart);
   const workerResolver = functionsSource.slice(workerResolverStart, workerResolverEnd);
-  assert.match(workerResolver, /\.from\('user_quota_overrides'\)/);
-  assert.match(workerResolver, /\.select\('daily_credit_limit'\)/);
-  assert.match(workerResolver, /daily_contact_limit \?\? 0/);
-  assert.match(workerResolver, /Math\.min\(DEFAULT_DAILY_CREDIT_LIMIT/);
+  assert.match(workerResolver, /rpc\('get_antonia_credit_status_v2'/);
+  assert.match(workerResolver, /p_organization_id: params\.organizationId/);
+  assert.match(workerResolver, /status\.binding === 'team'/);
   assert.doesNotMatch(workerResolver, /\.from\('profiles'\)|signatures|quota_overrides\?\.|antonia\?\./);
 
   assert.match(sharedCreditsSql, /add column if not exists daily_credit_limit integer/);
@@ -95,6 +99,9 @@ test('only service-controlled typed override columns can change effective quota'
   assert.match(sharedCreditsSql, /where quota_override\.daily_credit_limit is null/);
   assert.match(sharedCreditsSql, /revoke all on table public\.antonia_user_daily_credits from public, anon, authenticated;/);
   assert.match(sharedCreditsSql, /grant select on table public\.antonia_user_daily_credits to service_role;/);
+  assert.match(organizationCreditsSql, /create table public\.antonia_credit_policies/);
+  assert.match(organizationCreditsSql, /create table public\.antonia_daily_credit_buckets/);
+  assert.match(organizationCreditsSql, /create or replace function public\.get_antonia_credit_status_v2/);
 });
 
 test('quota store delegates non-contact consumption once to the atomic RPC', () => {
@@ -118,7 +125,7 @@ test('quota store delegates non-contact consumption once to the atomic RPC', () 
 
 });
 
-test('account credits share one 50-operation policy instead of mission budgets', () => {
+test('account credits use organization policy buckets instead of mission budgets', () => {
   assert.deepEqual(DEFAULT_DAILY_QUOTA_LIMITS, {
     leadSearch: 50,
     enrich: 50,
@@ -127,7 +134,9 @@ test('account credits share one 50-operation policy instead of mission budgets',
   });
   assert.match(source, /DEFAULT_DAILY_QUOTA_LIMITS/);
   assert.doesNotMatch(source, /resolveMissionQuotaDefaults/);
-  assert.match(source, /\.from\('antonia_user_daily_credits'\)/);
+  assert.match(source, /'get_antonia_credit_status_v2'/);
+  assert.match(organizationCreditsSql, /bucket_type text not null check \(bucket_type in \('user', 'team'\)\)/);
+  assert.match(organizationCreditsSql, /mode in \('user', 'team', 'hybrid'\)/);
   assert.match(sharedCreditsSql, /primary key \(user_id, date\)/);
 });
 
@@ -179,11 +188,21 @@ test('Firebase search cannot bypass the central account credit reservation', () 
   assert.doesNotMatch(search, /getLeadSearchUrl|fallbackUrl|x-api-secret-key/);
 });
 
-test('quota resolution follows the same oldest organization membership as the client', () => {
+test('quota resolution fails closed when callers omit an ambiguous organization', () => {
   const resolverStart = source.indexOf('async function resolveOrganizationIdForQuota');
   const resolverEnd = source.indexOf('async function resolveUserScopedQuotaContext', resolverStart);
   const resolver = source.slice(resolverStart, resolverEnd);
-  assert.match(resolver, /\.order\('created_at', \{ ascending: true \}\)/);
+  assert.match(resolver, /\.limit\(2\)/);
+  assert.match(resolver, /memberships\.length > 1/);
+  assert.match(resolver, /organizationId is required for multi-organization user/);
+});
+
+test('quota status routes use the active organization instead of the oldest membership', () => {
+  assert.match(quotaStatusRoute, /requireSessionOrTrustedInternalRequest\(req\)/);
+  assert.match(quotaStatusRoute, /getEffectiveDailyQuotaLimits\(\{ userId, organizationId \}\)/);
+  assert.match(quotaStatusRoute, /getDailyQuotaStatus\(\{ userId, organizationId, resource: 'search'/);
+  assert.match(antoniaQuotaRoute, /requireAuth\(\)/);
+  assert.doesNotMatch(antoniaQuotaRoute, /\.order\('created_at'/);
 });
 
 test('lead searches reserve the account quota before reaching an external provider', () => {

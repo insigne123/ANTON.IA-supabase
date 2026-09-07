@@ -13,6 +13,7 @@ import {
   normalizeDraftSellerProfileV2,
   type DraftContextV2,
 } from './draft-context-v2';
+import type { OutreachSequenceContextV2 } from '@/lib/campaigns-v2/outreach-sequence-context';
 import {
   DRAFT_FIXTURE_IDS,
   DRAFT_FIXTURE_NOW,
@@ -597,6 +598,7 @@ test('requested AI rewrites create a canonical revision and replace its generati
   if (initial.status !== 'drafted') return;
 
   let receivedInstruction = '';
+  const receivedSequenceContext: { value: OutreachSequenceContextV2 | null } = { value: null };
   const replacedMetadata: any[] = [];
   const rewriteDependencies: NativeDraftGenerationDependencies = {
     ...fixture.value,
@@ -607,8 +609,9 @@ test('requested AI rewrites create a canonical revision and replace its generati
       styleProfileId: null,
       claimIds: ['claim-acme-overview'],
     }),
-    generate: async ({ context, rewrite }) => {
+    generate: async ({ context, rewrite, sequenceContext }) => {
       receivedInstruction = rewrite?.instruction || '';
+      receivedSequenceContext.value = sequenceContext || null;
       return {
         ...generated(context),
         subject: 'Menos tareas manuales en Acme',
@@ -631,9 +634,30 @@ En Northstar automatizamos operaciones repetitivas para reducir tareas manuales 
     ...access,
     draft: initial.draft,
     instruction: 'Hazlo más directo y conserva párrafos breves.',
+    sequenceContext: {
+      sequenceInstruction: 'Aporta valor nuevo sin repetir mensajes anteriores.',
+      priorMessages: [{
+        kind: 'initial',
+        index: 0,
+        name: 'Contacto inicial',
+        subject: initial.draft.content.subject || 'Procesos en Acme',
+        body: initial.draft.content.text || '',
+      }],
+      currentStep: {
+        index: 1,
+        total: 2,
+        name: 'Primer seguimiento',
+        offsetDays: 3,
+        instruction: 'Usa un hecho nuevo y una pregunta breve.',
+      },
+    },
   }, rewriteDependencies);
 
   assert.equal(receivedInstruction, 'Hazlo más directo y conserva párrafos breves.');
+  const sequenceContext = receivedSequenceContext.value;
+  assert.ok(sequenceContext);
+  assert.equal(sequenceContext.currentStep.index, 1);
+  assert.equal(sequenceContext.priorMessages[0].kind, 'initial');
   assert.equal(result.draft.revision, 2);
   assert.equal(result.draft.parentVersionId, initial.draft.versionId);
   assert.equal(result.preflight.status, 'passed');

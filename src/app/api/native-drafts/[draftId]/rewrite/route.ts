@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
+import { normalizeEmailStyleSelection } from '@/lib/outsourcing-email-style-presets';
+import { resolveCampaignStepRewriteContext } from '@/lib/server/campaigns-v2/rewrite-context';
 import {
   NativeDraftPreflightError,
   getCurrentNativeDraft,
@@ -30,13 +32,33 @@ export async function POST(req: NextRequest, context: { params: Promise<{ draftI
       return NextResponse.json({ error: 'NATIVE_DRAFT_INVALID_JSON' }, { status: 400 });
     }
     const instruction = typeof body?.instruction === 'string' ? body.instruction.trim() : '';
-    const styleProfileId = typeof body?.styleProfileId === 'string' ? body.styleProfileId.trim() : null;
+    const rawStyleProfileId = typeof body?.styleProfileId === 'string' ? body.styleProfileId : null;
+    const styleProfileId = rawStyleProfileId ? normalizeEmailStyleSelection(rawStyleProfileId) : null;
+    const expectedVersionId = typeof body?.expectedVersionId === 'string' ? body.expectedVersionId.trim() : '';
+    const campaignStepId = typeof body?.campaignStepId === 'string' ? body.campaignStepId.trim() : '';
     if (!instruction || instruction.length > 1_000) {
       return NextResponse.json({ error: 'NATIVE_DRAFT_REWRITE_INSTRUCTION_INVALID' }, { status: 400 });
     }
-    if (styleProfileId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(styleProfileId)) {
+    if (rawStyleProfileId?.trim() && !styleProfileId) {
       return NextResponse.json({ error: 'NATIVE_DRAFT_STYLE_INVALID' }, { status: 400 });
     }
+    if (!expectedVersionId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expectedVersionId)) {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_EXPECTED_VERSION_REQUIRED' }, { status: 400 });
+    }
+    if (draft.versionId !== expectedVersionId) {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_VERSION_CONFLICT' }, { status: 409 });
+    }
+    if (campaignStepId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(campaignStepId)) {
+      return NextResponse.json({ error: 'CAMPAIGN_V2_STEP_INVALID' }, { status: 400 });
+    }
+    const sequenceContext = campaignStepId
+      ? await resolveCampaignStepRewriteContext({
+          organizationId,
+          userId: auth.user.id,
+          campaignStepId,
+          draft,
+        })
+      : undefined;
 
     const result = await rewriteNativeDraft({
       organizationId,
@@ -44,6 +66,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ draftI
       draft,
       instruction,
       styleProfileId,
+      ...(sequenceContext ? { sequenceContext } : {}),
     });
     return NextResponse.json({ ok: true, ...result }, {
       status: 201,

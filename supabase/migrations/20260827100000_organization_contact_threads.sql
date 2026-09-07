@@ -37,7 +37,7 @@ create table if not exists public.organization_contact_threads (
   ),
   constraint organization_contact_threads_reopen_check check (
     (reopened_at is null and reopened_by_user_id is null and reopen_reason is null)
-    or (reopened_at is not null and reopened_by_user_id is not null and length(trim(reopen_reason)) between 3 and 1000)
+    or (reopened_at is not null and length(trim(reopen_reason)) between 3 and 1000)
   ),
   unique (organization_id, channel, recipient_key)
 );
@@ -50,6 +50,30 @@ create index if not exists organization_contact_threads_reserved_idx
 
 alter table public.outbound_dispatches
   add column if not exists contact_thread_id uuid;
+
+-- Privacy deletion is the only supported dispatch deletion path. Clear both
+-- reservation fields before its foreign key nullifies reserved_dispatch_id.
+create or replace function public.clear_deleted_dispatch_thread_reservation_v1()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.organization_contact_threads
+  set reserved_dispatch_id = null,
+      reservation_expires_at = null,
+      status = case when root_dispatch_id is null then 'available' else status end,
+      updated_at = now()
+  where reserved_dispatch_id = old.id;
+  return old;
+end;
+$$;
+
+drop trigger if exists outbound_dispatches_clear_thread_reservation on public.outbound_dispatches;
+create trigger outbound_dispatches_clear_thread_reservation
+  before delete on public.outbound_dispatches
+  for each row execute function public.clear_deleted_dispatch_thread_reservation_v1();
 
 do $$
 begin

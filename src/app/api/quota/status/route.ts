@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
 import { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
-import { isTrustedInternalRequest } from '@/lib/server/internal-api-auth';
+import {
+  requestAuthErrorResponse,
+  requireSessionOrTrustedInternalRequest,
+} from '@/lib/server/request-auth';
 
 type R = 'leadSearch' | 'enrich' | 'research' | 'contact';
 
@@ -12,28 +13,18 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
-  const userIdFromHeader = req.headers.get('x-user-id')?.trim() || '';
-
-  let userId = userIdFromHeader;
-
-  if (userIdFromHeader) {
-    if (!isTrustedInternalRequest(req)) {
-      return NextResponse.json({ error: 'unauthorized internal request' }, { status: 401 });
-    }
-  } else {
-    const supabase = createRouteHandlerClient({ cookies });
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-    }
-    userId = user.id;
-  }
-
   try {
-    const limits = await getEffectiveDailyQuotaLimits({ userId });
+    const auth = await requireSessionOrTrustedInternalRequest(req);
+    const userId = auth.user.id;
+    const organizationId = auth.organizationId;
+    if (!organizationId) {
+      return NextResponse.json({ error: 'No organization found' }, { status: 404 });
+    }
+
+    const limits = await getEffectiveDailyQuotaLimits({ userId, organizationId });
     const [credits, contact] = await Promise.all([
-      getDailyQuotaStatus({ userId, resource: 'search', limit: limits.leadSearch }),
-      getDailyQuotaStatus({ userId, resource: 'contact', limit: limits.contact }),
+      getDailyQuotaStatus({ userId, organizationId, resource: 'search', limit: limits.leadSearch }),
+      getDailyQuotaStatus({ userId, organizationId, resource: 'contact', limit: limits.contact }),
     ]);
     const statuses = RESOURCES.map((resource) => ({
       resource,
@@ -46,6 +37,8 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (e: any) {
+    const authResponse = requestAuthErrorResponse(e);
+    if (authResponse) return authResponse;
     return NextResponse.json({ error: e?.message || 'status error' }, { status: 500 });
   }
 }

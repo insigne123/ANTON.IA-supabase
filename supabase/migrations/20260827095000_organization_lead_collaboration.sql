@@ -15,12 +15,10 @@ create table if not exists public.organization_lead_collaboration (
     contact_state in ('uncontacted', 'reserved', 'contacted', 'replied', 'suppressed')
   ),
   constraint organization_lead_collaboration_assignment_check check (
-    (assigned_to_user_id is null and assigned_at is null)
-    or (assigned_to_user_id is not null and assigned_at is not null)
+    assigned_to_user_id is null or assigned_at is not null
   ),
   constraint organization_lead_collaboration_claim_check check (
-    (claimed_by_user_id is null and claim_expires_at is null)
-    or (claimed_by_user_id is not null and claim_expires_at is not null)
+    claimed_by_user_id is null or claim_expires_at is not null
   )
 );
 
@@ -39,6 +37,9 @@ as $$
 declare
   v_discovered_by uuid;
 begin
+  if tg_op = 'UPDATE' and new.organization_id is distinct from old.organization_id then
+    delete from public.organization_lead_collaboration where lead_id = new.id;
+  end if;
   if new.organization_id is null then return new; end if;
 
   select new.user_id into v_discovered_by
@@ -198,7 +199,7 @@ declare
   v_row public.organization_lead_collaboration%rowtype;
   v_actor_role text;
 begin
-  if auth.uid() is null or p_lead_id is null or p_minutes not between 1 and 60 then
+  if auth.uid() is null or p_lead_id is null or p_minutes is null or p_minutes not between 1 and 60 then
     raise exception 'invalid lead claim' using errcode = '22023';
   end if;
 

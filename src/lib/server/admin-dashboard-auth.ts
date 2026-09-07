@@ -21,60 +21,64 @@ export class AdminDashboardAuthError extends Error {
   }
 }
 
-function configuredOrganizationMatches(organization: { id: string; name: string }) {
+function getConfiguredOrganizationId() {
   const configuredId = String(process.env.ADMIN_DASHBOARD_ORGANIZATION_ID || '').trim();
-  const configuredName = String(process.env.ADMIN_DASHBOARD_ORGANIZATION_NAME || 'GrupoExpro').trim();
+  if (!configuredId) {
+    throw new AdminDashboardAuthError('El panel administrativo no está configurado.', 503);
+  }
+  return configuredId;
+}
 
-  if (configuredId) return configuredId === organization.id;
-  if (!configuredName) return true;
-  return organization.name.trim().toLowerCase() === configuredName.toLowerCase();
+function getConfiguredAdminEmails() {
+  const emails = String(process.env.ADMIN_DASHBOARD_ALLOWED_EMAILS || '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+  if (emails.length === 0) {
+    throw new AdminDashboardAuthError('El acceso del panel administrativo no está configurado.', 503);
+  }
+  return new Set(emails);
 }
 
 export async function requireAdminDashboardAccess(): Promise<AdminDashboardAuthContext> {
   const sessionClient = createRouteHandlerClient({ cookies });
   const { data: { user }, error: userError } = await sessionClient.auth.getUser();
   if (userError || !user) {
-    throw new AdminDashboardAuthError('Unauthorized', 401);
+    throw new AdminDashboardAuthError('Inicia sesión para abrir el panel administrativo.', 401);
   }
 
+  const configuredOrganizationId = getConfiguredOrganizationId();
+  const allowedEmails = getConfiguredAdminEmails();
+  const userEmail = String(user.email || '').trim().toLowerCase();
+  if (!allowedEmails.has(userEmail)) {
+    throw new AdminDashboardAuthError('Tu cuenta no está autorizada para abrir este panel.', 403);
+  }
   const supabase = getSupabaseAdminClient();
-  const { data: memberships, error: membershipsError } = await supabase
+  const { data: membership, error: membershipError } = await supabase
     .from('organization_members')
-    .select('organization_id, role, created_at')
+    .select('organization_id, role')
     .eq('user_id', user.id)
+    .eq('organization_id', configuredOrganizationId)
     .in('role', ['owner', 'admin'])
-    .order('created_at', { ascending: true });
+    .maybeSingle();
 
-  if (membershipsError) {
-    console.error('[admin-dashboard-auth] Membership lookup failed:', membershipsError);
-    throw new AdminDashboardAuthError('Unable to verify admin access', 503);
+  if (membershipError) {
+    console.error('[admin-dashboard-auth] Membership lookup failed:', membershipError);
+    throw new AdminDashboardAuthError('No pudimos verificar el acceso administrativo.', 503);
+  }
+  if (!membership) {
+    throw new AdminDashboardAuthError('Necesitas un rol de owner o admin para abrir este panel.', 403);
   }
 
-  const organizationIds = (memberships || [])
-    .map((membership: any) => String(membership.organization_id || '').trim())
-    .filter(Boolean);
-
-  if (organizationIds.length === 0) {
-    throw new AdminDashboardAuthError('Admin access required', 403);
-  }
-
-  const { data: organizations, error: organizationsError } = await supabase
+  const { data: organization, error: organizationError } = await supabase
     .from('organizations')
     .select('id, name')
-    .in('id', organizationIds);
+    .eq('id', configuredOrganizationId)
+    .maybeSingle();
 
-  if (organizationsError) {
-    console.error('[admin-dashboard-auth] Organization lookup failed:', organizationsError);
-    throw new AdminDashboardAuthError('Unable to verify organization access', 503);
-  }
-
-  const organization = (organizations || []).find((candidate: any) => configuredOrganizationMatches({
-    id: String(candidate.id),
-    name: String(candidate.name || ''),
-  }));
-
-  if (!organization) {
-    throw new AdminDashboardAuthError('This admin portal is not enabled for your organization', 403);
+  if (organizationError || !organization) {
+    console.error('[admin-dashboard-auth] Organization lookup failed:', organizationError);
+    throw new AdminDashboardAuthError('No pudimos verificar la organización del panel.', 503);
   }
 
   return {
@@ -91,5 +95,5 @@ export function adminDashboardAuthErrorResponse(error: unknown) {
   }
 
   console.error('[admin-dashboard-auth] Unexpected error:', error);
-  return NextResponse.json({ error: 'Unable to authorize admin dashboard' }, { status: 500 });
+  return NextResponse.json({ error: 'No pudimos autorizar el panel administrativo.' }, { status: 500 });
 }

@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { canonicalSha256 } from '@/lib/messaging-contracts';
+import {
+  OUTSOURCING_EMAIL_STYLE_PRESETS,
+  outsourcingEmailStylePresetSelection,
+  styleProfileFromOutsourcingEmailStylePreset,
+} from '@/lib/outsourcing-email-style-presets';
 import { handleAuthError, requireAuth, type AuthContext } from '@/lib/server/auth-utils';
+import { materializedOutsourcingEmailStylePresetId } from '@/lib/server/email-style-profiles';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
 
-const STYLE_FIELDS = 'id,name,profile,revision,is_default,updated_at';
+const STYLE_FIELDS = 'id,name,profile,content_hash,revision,is_default,updated_at';
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' };
 const mutationQueues = new Map<string, Promise<void>>();
 
@@ -22,6 +28,7 @@ type EmailStyleRow = {
   id: string;
   name: string;
   profile: Record<string, unknown>;
+  content_hash: string;
   revision: number;
   is_default: boolean;
   updated_at: string;
@@ -89,7 +96,9 @@ function parseEmailStyleBody(value: unknown): EmailStyleInput {
   }
   if (new TextEncoder().encode(serializedProfile).byteLength > 256 * 1024) invalid();
 
-  return { ...(id ? { id } : {}), name, profile: body.profile, isDefault };
+  const profile = { ...body.profile };
+  delete profile.presetId;
+  return { ...(id ? { id } : {}), name, profile, isDefault };
 }
 
 function serializeEmailStyle(row: EmailStyleRow) {
@@ -100,6 +109,19 @@ function serializeEmailStyle(row: EmailStyleRow) {
     revision: row.revision,
     isDefault: row.is_default,
     updatedAt: row.updated_at,
+  };
+}
+
+function serializePresetStyle(preset: (typeof OUTSOURCING_EMAIL_STYLE_PRESETS)[number]) {
+  const id = outsourcingEmailStylePresetSelection(preset.id);
+  const profile = styleProfileFromOutsourcingEmailStylePreset(preset);
+  return {
+    id,
+    name: profile.name,
+    profile: { ...profile, id },
+    revision: 1,
+    isDefault: false,
+    updatedAt: '1970-01-01T00:00:00.000Z',
   };
 }
 
@@ -210,7 +232,7 @@ async function persistEmailStyle(auth: AuthContext, input: EmailStyleInput) {
   return { created, style: serializeEmailStyle(row) };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const auth = await requireAuth();
     const { data, error } = await auth.supabase
@@ -222,8 +244,22 @@ export async function GET() {
       .order('updated_at', { ascending: false });
     if (error) throw error;
 
+    const styles = (data || []).map((row: EmailStyleRow) => serializeEmailStyle(row));
+    const includePresets = req.nextUrl.searchParams.get('includePresets') === 'true';
+    const persistedPresetIds = new Set(
+      (data || []).flatMap((row: EmailStyleRow) => {
+        const presetId = materializedOutsourcingEmailStylePresetId(row);
+        return presetId ? [presetId] : [];
+      }),
+    );
+    const presetStyles = includePresets
+      ? OUTSOURCING_EMAIL_STYLE_PRESETS
+        .filter((preset) => !persistedPresetIds.has(preset.id))
+        .map(serializePresetStyle)
+      : [];
+
     return NextResponse.json({
-      styles: (data || []).map((row: EmailStyleRow) => serializeEmailStyle(row)),
+      styles: [...styles, ...presetStyles],
     }, { headers: NO_STORE_HEADERS });
   } catch (error: any) {
     if (error?.name === 'AuthError') return handleAuthError(error);

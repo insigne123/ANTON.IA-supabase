@@ -56,6 +56,8 @@ export type AdminDashboardOverview = {
     linkedinConnections: number;
     responseRate: number;
     monthlyProjection: number;
+    companiesCaptured: number;
+    profilesWithSeniority: number;
   };
   trend: Array<{
     date: string;
@@ -77,4 +79,49 @@ export type AdminDashboardOverview = {
   companies: AdminDimension[];
   seniorities: AdminDimension[];
   titles: AdminDimension[];
+};
+
+export type AdminCreditMode = 'user' | 'team' | 'hybrid';
+
+export type AdminCreditPolicy = {
+  id: string;
+  mode: AdminCreditMode | null;
+  userDailyLimit: number | null;
+  teamDailyLimit: number | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  pending: boolean;
+};
+
+export type AdminCreditOverview = {
+  organization: { id: string; name: string };
+  quotaDay: string;
+  nextResetAt: string;
+  defaultPolicy: {
+    current: AdminCreditPolicy;
+    pending: AdminCreditPolicy | null;
+  };
+  teams: Array<{
+    id: string;
+    name: string;
+    memberCount: number;
+    currentLimit: number;
+    pendingPolicy: AdminCreditPolicy | null;
+    usage: number;
+  }>;
+  users: Array<{
+    id: string;
+    name: string;
+    email: string;
+    role: 'owner' | 'admin' | 'member';
+    primaryTeam: { id: string; name: string } | null;
+    pendingTeam: { id: string; name: string } | null;
+    mode: AdminCreditMode;
+    userLimit: number;
+    teamLimit: number | null;
+    userUsage: number | null;
+    teamUsage: number | null;
+    binding: 'user' | 'team';
+    pendingPolicy: AdminCreditPolicy | null;
+  }>;
 };

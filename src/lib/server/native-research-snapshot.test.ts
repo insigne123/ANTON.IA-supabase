@@ -25,7 +25,7 @@ test('native snapshot preserves imported lead context and turns Similarweb into 
   const duplicateProfileResult = {
     title: 'Acme',
     snippet: 'Acme coordina operaciones para equipos empresariales y ofrece soporte especializado para organizaciones regionales.',
-    link: 'https://acme.example/profile',
+    link: 'https://acme.example/profile/?utm_source=serper#result',
   };
   const output = nativeResearchInternals.buildSnapshot({
     jobId: 'job-1',
@@ -48,14 +48,24 @@ test('native snapshot preserves imported lead context and turns Similarweb into 
           text: 'Acme coordina operaciones para equipos empresariales y ofrece soporte especializado para organizaciones regionales.',
         }],
       },
-      whois: null,
+      whois: {
+        created: 'One moment, please... Loader Please wait while your request is being verified.',
+      },
       brand: null,
       fetchedAt: '2026-08-24T18:00:00.000Z',
     },
     profile: {
       provider: 'serper',
       fetchedAt: '2026-08-24T18:00:00.000Z',
-      items: [duplicateProfileResult, duplicateProfileResult],
+      items: [
+        duplicateProfileResult,
+        { ...duplicateProfileResult, link: 'https://acme.example/profile' },
+        {
+          title: 'Perfil corporativo de Acme',
+          snippet: 'Acme publica información institucional sobre su operación regional.',
+          link: 'https://news.example/acme-alliance?utm_source=profile',
+        },
+      ],
     },
     news: {
       provider: 'serper',
@@ -105,6 +115,28 @@ test('native snapshot preserves imported lead context and turns Similarweb into 
   assert.ok(output.snapshot.claims.some((claim) => claim.classification === 'hypothesis'));
   assert.equal(new Set(output.snapshot.evidence.map((item) => item.id)).size, output.snapshot.evidence.length);
   assert.equal(new Set(output.snapshot.claims.map((claim) => claim.id)).size, output.snapshot.claims.length);
+  assert.equal(output.snapshot.evidence.some((item) => /request is being verified/i.test(item.statement)), false);
+  const profileSources = output.snapshot.sources.filter((source) => source.canonicalUrl === 'https://acme.example/profile');
+  assert.equal(profileSources.length, 1);
+  assert.equal(profileSources[0].url, duplicateProfileResult.link);
+  const mergedNewsSource = output.snapshot.sources.find((source) => source.canonicalUrl === 'https://news.example/acme-alliance');
+  assert.equal(mergedNewsSource?.type, 'news');
+  assert.equal(mergedNewsSource?.publishedAt, '2026-08-23T12:00:00.000Z');
+});
+
+test('canonical source dedupe preserves semantic parameters and merges dated news metadata', () => {
+  assert.equal(
+    nativeResearchInternals.canonicalResearchSourceUrl('https://acme.example/article?source=partner&utm_source=serper#top'),
+    'https://acme.example/article?source=partner',
+  );
+  assert.notEqual(
+    nativeResearchInternals.canonicalResearchSourceUrl('https://www.acme.example/article'),
+    nativeResearchInternals.canonicalResearchSourceUrl('https://acme.example/article'),
+  );
+  assert.notEqual(
+    nativeResearchInternals.canonicalResearchSourceUrl('https://acme.example/a//b'),
+    nativeResearchInternals.canonicalResearchSourceUrl('https://acme.example/a/b'),
+  );
 });
 
 test('visible company signals are balanced by kind with bounded depth caps', () => {

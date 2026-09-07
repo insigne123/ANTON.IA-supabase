@@ -16,14 +16,14 @@ La direccion visual por defecto de esta app es Apple-like: claridad, foco, super
 
 ## Supabase y pruebas
 
-- Usa Node 22 y ejecuta `npm run doctor` antes de diagnosticar el stack local.
+- Usa Node 22. Ejecuta `npm run doctor` solo cuando el problema dependa del stack local.
 - Las pruebas usan `.env.test.local`; nunca cargues `.env.local` en una suite.
-- Produccion `yfdelflsheurzaicwayi` admite migraciones solo con solicitud explicita del usuario y un release preparado.
-- Antes de escribir en produccion: completar reset, lint, pgTAP e integracion local; validar nonprod; revisar el dry-run; y confirmar backup o ventana de cambio.
-- En produccion usa solo migraciones pequenas, forward-only y una familia de tablas por vez. Verifica esquema, RLS y logs antes de activar un feature flag o ampliar el rollout.
+- Produccion `yfdelflsheurzaicwayi` es el destino principal. Usa el MCP `supabase-production`, limitado a ese project ref.
+- Escribe en produccion solo con solicitud explicita del usuario. No uses nonprod ni Docker como gates obligatorios salvo que el usuario los pida.
+- Antes de escribir, revisa el SQL y ejecuta las validaciones proporcionales disponibles. No repitas suites ya aprobadas si el cambio posterior no afecta su superficie.
+- Aplica una sola migracion pequena y forward-only por vez. Verifica inmediatamente esquema, RLS y logs antes de continuar con app, Functions o feature flags.
 - Nunca ejecutes `reset`, seeds ni suites de prueba contra produccion.
-- Nonprod `htketmmhsfmucevvqmxi` admite escrituras solo con peticion explicita y despues de reset, lint, pgTAP e integracion local.
-- Prefiere `npm run test:reset` para reconstruir identidades y fixtures sinteticos.
+- Si falta autenticacion del MCP, usa `opencode mcp auth supabase-production`; nunca guardes tokens en el repositorio.
 
 ## Git y releases
 

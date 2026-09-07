@@ -45,8 +45,14 @@ test('profile search uses one idempotent enrichment request and polls the persis
   assert.match(clientSource, /'Idempotency-Key': input\.operationId/);
   assert.match(clientSource, /linkedinUrl: input\.linkedinUrl/);
   assert.match(clientSource, /json\?\.error === 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN'/);
+  assert.match(clientSource, /APOLLO_ENRICHMENT_TARGET_BUSY/);
+  assert.match(enrichmentSource, /const targetBusy = code === 'APOLLO_ENRICHMENT_TARGET_BUSY'/);
+  assert.match(enrichmentSource, /enrichmentStatus: requestedRevealPhone \? 'pending_phone' : 'pending'/);
+  assert.match(enrichmentSource, /phone_enrichment: phoneEnrichmentResponse\(/);
   assert.match(clientSource, /const result = await enrichLinkedInProfileLead\(/);
   assert.match(clientSource, /profile-match:\$\{crypto\.randomUUID\(\)\}/);
+  assert.match(searchPageSource, /organization: canonicalOrganization/);
+  assert.match(searchPageSource, /country: raw\.country \|\| null/);
   assert.match(searchPageSource, /reveal_email: filters\.revealEmail,[\s\S]*reveal_phone: filters\.revealPhone/);
   assert.doesNotMatch(searchPageSource, /await enrichLinkedInProfileLead\(/);
   assert.match(source, /LINKEDIN_PROFILE_REQUIRES_ENRICHMENT/);

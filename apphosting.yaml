@@ -69,6 +69,22 @@ env:
     value: "false"
     availability: [BUILD, RUNTIME]
 
+  - variable: ADMIN_DASHBOARD_ORGANIZATION_ID
+    value: e73dd11f-c8db-4ffc-9711-47dc74295064
+    availability: [RUNTIME]
+
+  - variable: NEXT_PUBLIC_ADMIN_DASHBOARD_ORGANIZATION_ID
+    value: e73dd11f-c8db-4ffc-9711-47dc74295064
+    availability: [BUILD, RUNTIME]
+
+  - variable: ADMIN_DASHBOARD_ALLOWED_EMAILS
+    value: gmeneses@grupoexpro.com,nicolas.yarur.g@yago.cl
+    availability: [RUNTIME]
+
+  - variable: NEXT_PUBLIC_ADMIN_DASHBOARD_ALLOWED_EMAILS
+    value: gmeneses@grupoexpro.com,nicolas.yarur.g@yago.cl
+    availability: [BUILD, RUNTIME]
+
   # === Lead provider ===
   - variable: LEADS_PROVIDER_DEFAULT
     value: apollo

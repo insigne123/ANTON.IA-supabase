@@ -7,6 +7,7 @@ type StructuredOptions<T extends z.ZodTypeAny> = {
   openAiModel?: string;
   openAiModels?: string[];
   provider?: StructuredProvider;
+  signal?: AbortSignal;
 };
 
 export type StructuredProvider = 'openai' | 'glm';
@@ -177,6 +178,7 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
     },
     body: JSON.stringify(requestBody),
     cache: 'no-store',
+    signal: opts.signal,
   });
 
   if (!res.ok) {

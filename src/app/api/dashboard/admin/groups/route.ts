@@ -72,40 +72,17 @@ export async function POST(req: NextRequest) {
       if (groupError || memberError) throw groupError || memberError;
       if (!group || !member) return NextResponse.json({ error: 'Grupo o usuario no pertenece a esta organización.' }, { status: 404 });
 
-      if (action === 'remove') {
-        const { error } = await auth.supabase
-          .from('organization_reporting_group_members')
-          .update({ is_primary: false, unassigned_at: new Date().toISOString() })
-          .eq('organization_id', auth.organizationId)
-          .eq('group_id', groupId)
-          .eq('user_id', userId)
-          .is('unassigned_at', null);
-        if (error) throw error;
-        return NextResponse.json({ ok: true });
-      }
-
       const isPrimary = Boolean(body?.isPrimary);
-      if (isPrimary) {
-        const { error } = await auth.supabase
-          .from('organization_reporting_group_members')
-          .update({ is_primary: false })
-          .eq('organization_id', auth.organizationId)
-          .eq('user_id', userId)
-          .is('unassigned_at', null);
-        if (error) throw error;
-      }
-
-      const { error } = await auth.supabase
-        .from('organization_reporting_group_members')
-        .upsert({
-          organization_id: auth.organizationId,
-          group_id: groupId,
-          user_id: userId,
-          is_primary: isPrimary,
-          unassigned_at: null,
-        }, { onConflict: 'group_id,user_id' });
+      const { error } = await auth.supabase.rpc('manage_organization_reporting_group_member_v2', {
+        p_organization_id: auth.organizationId,
+        p_actor_user_id: auth.user.id,
+        p_group_id: groupId,
+        p_user_id: userId,
+        p_action: action,
+        p_is_primary: action === 'assign' && isPrimary,
+      });
       if (error) throw error;
-      return NextResponse.json({ ok: true }, { status: 201 });
+      return NextResponse.json({ ok: true }, { status: action === 'assign' ? 201 : 200 });
     }
 
     const name = String(body?.name || '').trim();

@@ -66,6 +66,30 @@ language plpgsql
 set search_path = public
 as $$
 begin
+  -- Foreign-key cleanup may anonymize deleted actors or detach deleted
+  -- entities, but the event payload and organization remain immutable.
+  if new.id is not distinct from old.id
+    and new.organization_id is not distinct from old.organization_id
+    and new.event_type is not distinct from old.event_type
+    and new.entity_type is not distinct from old.entity_type
+    and new.entity_id is not distinct from old.entity_id
+    and new.metadata is not distinct from old.metadata
+    and new.created_at is not distinct from old.created_at
+    and (
+      new.actor_user_id is not distinct from old.actor_user_id
+      or (new.actor_user_id is null and old.actor_user_id is not null)
+    )
+    and (
+      new.lead_id is not distinct from old.lead_id
+      or (new.lead_id is null and old.lead_id is not null)
+    )
+    and (
+      new.contact_thread_id is not distinct from old.contact_thread_id
+      or (new.contact_thread_id is null and old.contact_thread_id is not null)
+    ) then
+    return new;
+  end if;
+
   raise exception 'organization collaboration events are append-only' using errcode = '55000';
 end;
 $$;

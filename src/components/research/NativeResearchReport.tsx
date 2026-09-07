@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import {
   CheckCircle2,
   ChevronDown,
@@ -13,6 +13,8 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { ResearchReportDocumentV1 } from '@/lib/research-report-contracts';
 import { cn } from '@/lib/utils';
@@ -28,7 +30,6 @@ import {
   safeResearchSourceUrl,
   type ResearchReadiness,
   type ResearchReportClaim,
-  type ResearchReportCompanySections,
   type ResearchReportEvidence,
   type ResearchReportProfileField,
   type ResearchWorkspaceResult,
@@ -48,7 +49,7 @@ export type NativeResearchReportProps = {
   createDraftDisabled?: boolean;
   createDraftLabel?: string;
   creatingDraftLabel?: string;
-  onCreateDraft?: () => void;
+  onCreateDraft?: (styleProfileId: string | null) => void;
   onCompleteProfile?: () => void;
   refreshing?: boolean;
   refreshLabel?: string;
@@ -57,16 +58,13 @@ export type NativeResearchReportProps = {
   className?: string;
 };
 
-const companySectionCopy: Array<{
-  key: keyof ResearchReportCompanySections;
-  title: string;
-  empty: string;
-}> = [
-  { key: 'overview', title: 'Visión general', empty: 'No hay una descripción corporativa verificable.' },
-  { key: 'offerings', title: 'Oferta', empty: 'No se verificaron productos o servicios concretos.' },
-  { key: 'market', title: 'Mercado e industria', empty: 'No se verificó información suficiente sobre su mercado.' },
-  { key: 'scale', title: 'Escala', empty: 'No se encontraron indicadores públicos de escala.' },
-];
+type DraftStyleOption = {
+  id: string;
+  name: string;
+  isDefault: boolean;
+};
+
+const DEFAULT_DRAFT_STYLE = '__default_draft_style__';
 
 function statusTone(status: ResearchWorkspaceStatus) {
   if (status === 'completed') return 'text-emerald-700 dark:text-emerald-300';
@@ -122,40 +120,22 @@ function EvidenceLink({ evidence }: { evidence: ResearchReportEvidence }) {
   );
 }
 
-function ClaimList({
-  claims,
-  tone = 'default',
-}: {
-  claims: ResearchReportClaim[];
-  tone?: 'default' | 'signal' | 'hypothesis' | 'executive';
-}) {
+function ClaimList({ claims }: { claims: ResearchReportClaim[] }) {
   return (
-    <ul className={cn(
-      'divide-y divide-border/60',
-      tone === 'hypothesis' && 'rounded-2xl border border-primary/20 bg-primary/[0.035] px-4 dark:bg-primary/[0.08]',
-      tone === 'executive' && 'rounded-2xl border border-border/70 bg-muted/[0.18] px-4 sm:px-5',
-    )}>
+    <ul className="divide-y divide-border/60">
       {claims.map((claim) => {
-        const observed = tone === 'signal' ? dateLabel(claim.observedAt) : null;
+        const observed = dateLabel(claim.observedAt);
         return (
           <li key={claim.id} className="py-4 first:pt-3.5 last:pb-3.5">
             <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-              <p className={cn(
-                'min-w-0 break-words text-sm leading-6 text-foreground/90',
-                tone === 'executive' && 'text-[15px] font-medium leading-7',
-              )}>
+              <p className="min-w-0 break-words text-sm leading-6 text-foreground/90">
                 {claim.statement}
               </p>
-              <span className={cn(
-                'shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em]',
-                claim.classification === 'hypothesis'
-                  ? 'text-primary'
-                  : 'text-emerald-700 dark:text-emerald-300',
-              )}>
-                {claim.classification === 'hypothesis' ? 'Hipótesis' : 'Verificado'}
-              </span>
+              {claim.classification === 'hypothesis' ? (
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">Hipótesis</span>
+              ) : null}
             </div>
-            {observed ? <p className="mt-1 text-xs font-medium text-sky-700 dark:text-sky-300">Observado el {observed}</p> : null}
+            {observed ? <p className="mt-1 text-xs text-muted-foreground">Observado el {observed}</p> : null}
             {claim.evidence.length > 0 ? (
               <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
                 <span className="sr-only">Evidencia:</span>
@@ -172,7 +152,6 @@ function ClaimList({
 function NarrativeText({
   paragraphs,
   empty,
-  onShowEvidence,
   showClassification = false,
 }: {
   paragraphs: Array<{
@@ -182,7 +161,6 @@ function NarrativeText({
     observedAt?: string | null;
   }>;
   empty: string;
-  onShowEvidence?: () => void;
   showClassification?: boolean;
 }) {
   if (paragraphs.length === 0) {
@@ -196,12 +174,11 @@ function NarrativeText({
           ? 'Hipótesis'
           : paragraph.classification === 'signal'
             ? 'Señal pública'
-            : paragraph.classification === 'fit'
-              ? 'Posible encaje'
-              : 'Verificado';
+            : 'Posible encaje';
+        const showLabel = showClassification && paragraph.classification && paragraph.classification !== 'fact';
         return (
           <div key={`${paragraph.text}-${index}`}>
-            {showClassification && paragraph.classification ? (
+            {showLabel ? (
               <p className={cn(
                 'mb-1 text-[10px] font-semibold uppercase tracking-[0.13em]',
                 paragraph.classification === 'fit'
@@ -214,20 +191,36 @@ function NarrativeText({
               </p>
             ) : null}
             <p className="break-words">{paragraph.text}</p>
-            {onShowEvidence && paragraph.evidenceIds?.length ? (
-              <button
-                type="button"
-                onClick={onShowEvidence}
-                className="mt-1.5 rounded-sm text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              >
-                Ver respaldo
-              </button>
-            ) : null}
           </div>
         );
       })}
     </div>
   );
+}
+
+function NarrativeOrClaims({
+  paragraphs,
+  claims,
+  empty,
+  showClassification = false,
+}: {
+  paragraphs: Parameters<typeof NarrativeText>[0]['paragraphs'];
+  claims: ResearchReportClaim[];
+  empty: string;
+  showClassification?: boolean;
+}) {
+  if (paragraphs.length > 0) {
+    return <NarrativeText paragraphs={paragraphs} empty={empty} showClassification={showClassification} />;
+  }
+  if (claims.length > 0) {
+    return (
+      <div>
+        <p className="mb-2 text-sm leading-6 text-muted-foreground">La lectura interpretada no está disponible todavía. Mostramos los datos verificables para que puedas revisarlos.</p>
+        <ClaimList claims={claims} />
+      </div>
+    );
+  }
+  return <NarrativeText paragraphs={[]} empty={empty} showClassification={showClassification} />;
 }
 
 function SectionHeading({
@@ -274,23 +267,48 @@ function ImportedFields({ fields }: { fields: ResearchReportProfileField[] }) {
   );
 }
 
-function CompanySections({ sections, showEmpty = true }: { sections: ResearchReportCompanySections; showEmpty?: boolean }) {
-  const visibleSections = companySectionCopy.filter((section) => showEmpty || sections[section.key].length > 0);
-  if (visibleSections.length === 0) return null;
+function ReportCollapsibleSection({
+  id,
+  eyebrow,
+  title,
+  description,
+  open,
+  onOpenChange,
+  children,
+}: {
+  id: string;
+  eyebrow: string;
+  title: string;
+  description: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+}) {
   return (
-    <div className="mt-4 divide-y divide-border/60 rounded-2xl border border-border/70 bg-background/45 px-4 sm:px-5">
-      {visibleSections.map((section) => {
-        const claims = sections[section.key];
-        return (
-          <section key={section.key} className="grid gap-2 py-4 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-5">
-            <h4 className="text-sm font-semibold text-foreground/90">{section.title}</h4>
-            {claims.length > 0
-              ? <ClaimList claims={claims} />
-              : <p className="text-sm leading-6 text-muted-foreground">{section.empty}</p>}
-          </section>
-        );
-      })}
-    </div>
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      <section aria-labelledby={`${id}-heading`}>
+        <h3 id={`${id}-heading`}>
+          <CollapsibleTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              className="group h-auto w-full justify-between gap-5 whitespace-normal rounded-none px-0 py-5 text-left hover:bg-transparent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              aria-describedby={`${id}-description`}
+            >
+              <span className="min-w-0">
+                <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{eyebrow}</span>
+                <span className="mt-1 block text-lg font-semibold tracking-[-0.02em] text-foreground">{title}</span>
+              </span>
+              <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
+            </Button>
+          </CollapsibleTrigger>
+        </h3>
+        <p id={`${id}-description`} className="-mt-2 max-w-2xl pb-4 text-sm leading-6 text-muted-foreground">{description}</p>
+        <CollapsibleContent>
+          <div className="border-t border-border/60 py-5">{children}</div>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
   );
 }
 
@@ -331,7 +349,6 @@ export function NativeResearchReport({
   className,
 }: NativeResearchReportProps) {
   const id = useId();
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const report = buildResearchReport(result, reportDocument);
   const evidenceCount = report.coverage.evidenceRecords;
   const sourceCount = report.coverage.sources;
@@ -380,57 +397,89 @@ export function NativeResearchReport({
       observedAt: evidence?.observedAt || source?.publishedAt || source?.retrievedAt || null,
     };
   });
-  const claimParagraphs = (claims: ResearchReportClaim[]) => claims.map((claim) => ({
-    text: claim.statement,
-    evidenceIds: claim.evidence.map((item) => item.id),
-    classification: (claim.classification === 'hypothesis'
-      ? 'hypothesis'
-      : ['news_signal', 'hiring_signal', 'technology_signal', 'site_signal'].includes(claim.kind)
-        ? 'signal'
-        : 'fact') as 'fact' | 'hypothesis' | 'signal',
-    observedAt: claim.observedAt,
-  }));
-  const executiveNarrative = narrative ? decorateNarrative(narrative.executiveSummary) : claimParagraphs(report.executive);
+  const executiveNarrative = narrative ? decorateNarrative(narrative.executiveSummary) : [];
   const companyNarrative = narrative ? decorateNarrative(narrative.companyProfile) : [];
   const leadNarrative = narrative ? decorateNarrative(narrative.leadContext) : [];
-  const commercialNarrative = narrative
-    ? decorateNarrative(narrative.commercialReading)
-    : claimParagraphs([...report.signals, ...report.opportunities]);
+  const commercialNarrative = narrative ? decorateNarrative(narrative.commercialReading) : [];
   const serviceFitNarrative = narrative?.serviceFit
     ? decorateNarrative(narrative.serviceFit).map((paragraph) => ({ ...paragraph, classification: 'fit' as const }))
     : [];
-  const sellerContext = reportDocument?.sellerContext;
-  const sellerOffer = sellerContext?.valueProposition
-    || sellerContext?.services?.join(', ')
-    || sellerContext?.description
-    || '';
-  const showServiceFit = serviceFitNarrative.length > 0 || Boolean(sellerOffer);
+  const companyClaims = Object.values(report.companySections).flat();
+  const commercialClaims = [...report.signals, ...report.opportunities];
+  const showServiceFit = serviceFitNarrative.length > 0;
+  const hasCommercialReading = commercialNarrative.length > 0 || commercialClaims.length > 0 || showServiceFit;
+  const hasUnresolvedContradiction = report.contradictions.some((item) => item.status === 'unresolved');
+  const hasBlockingGap = report.gaps.length > 0 && !actionAvailable;
+  const reviewNeedsAttention = hasUnresolvedContradiction || hasBlockingGap;
   const evidenceClaims = [...new Map([
     ...report.executive,
     ...report.person.facts,
-    ...companySectionCopy.flatMap((section) => report.companySections[section.key]),
+    ...Object.values(report.companySections).flat(),
     ...report.signals,
     ...report.opportunities,
   ].map((claim) => [claim.id, claim])).values()];
+  const contradictionEvidence = [...new Map(
+    report.contradictions
+      .flatMap((item) => item.evidence)
+      .map((evidence) => [evidence.id, evidence]),
+  ).values()];
   const companyName = result.lead.companyName || result.lead.companyDomain || 'la empresa';
   const leadName = result.lead.fullName || result.lead.email || 'el contacto';
-  const showEvidence = () => {
-    setDetailsOpen(true);
-    window.requestAnimationFrame(() => document.getElementById(`${id}-details`)?.focus());
-  };
+  const reportIdentity = researchSnapshotId || result.lead.id || result.lead.email || `${leadName}:${companyName}`;
+  const [contactOpen, setContactOpen] = useState(false);
+  const [companyOpen, setCompanyOpen] = useState(false);
+  const [commercialOpen, setCommercialOpen] = useState(hasCommercialReading);
+  const [reviewOpen, setReviewOpen] = useState(reviewNeedsAttention);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [draftStyles, setDraftStyles] = useState<DraftStyleOption[]>([]);
+  const [draftStyleId, setDraftStyleId] = useState(DEFAULT_DRAFT_STYLE);
+  const showActionFooter = (profileCompletionRequired && Boolean(onCompleteProfile))
+    || (actionAvailable && Boolean(onCreateDraft))
+    || refreshAvailable
+    || (!inFlight && Boolean(blockReason));
+
+  useEffect(() => {
+    setContactOpen(false);
+    setCompanyOpen(false);
+    setCommercialOpen(hasCommercialReading);
+    setReviewOpen(reviewNeedsAttention);
+    setDetailsOpen(false);
+  }, [hasCommercialReading, reportIdentity, reviewNeedsAttention]);
+
+  useEffect(() => {
+    if (!actionAvailable) return;
+    const controller = new AbortController();
+    void fetch('/api/email-styles?includePresets=true', { cache: 'no-store', signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !Array.isArray(payload?.styles)) return;
+        const styles: DraftStyleOption[] = payload.styles.flatMap((style: any): DraftStyleOption[] => {
+          const id = String(style?.id || '').trim();
+          const name = String(style?.name || '').trim();
+          return id && name ? [{ id, name, isDefault: Boolean(style?.isDefault) }] : [];
+        });
+        setDraftStyles(styles);
+        const defaultStyle = styles.find((style) => style.isDefault);
+        if (defaultStyle) setDraftStyleId(defaultStyle.id);
+      })
+      .catch((error) => {
+        if (error?.name !== 'AbortError') setDraftStyles([]);
+      });
+    return () => controller.abort();
+  }, [actionAvailable]);
 
   return (
-    <article className={cn('min-w-0 space-y-9', className)} aria-label="Reporte de investigación">
-      <header className="space-y-6 border-b border-border/60 pb-7">
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+    <article className={cn('min-w-0 space-y-7', className)} aria-label="Reporte de investigación">
+      <header className="space-y-4 border-b border-border/60 pb-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">Informe de investigación</p>
-            <h2 className="mt-2 break-words text-2xl font-semibold tracking-[-0.035em] text-foreground sm:text-3xl">{companyName}</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">Contexto empresarial y comercial para {leadName}.</p>
+            <h2 className="mt-1 break-words text-2xl font-semibold tracking-[-0.035em] text-foreground">{companyName}</h2>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">Contexto empresarial y comercial para {leadName}.</p>
           </div>
           {updatedAt ? <p className="shrink-0 text-xs text-muted-foreground">Actualizado el {updatedAt}</p> : null}
         </div>
-        <div className="flex flex-col gap-2 border-t border-border/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 border-t border-border/50 pt-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-2.5" role="status" aria-live="polite">
             {inFlight ? (
               <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-sky-600 motion-reduce:animate-none dark:text-sky-300" aria-hidden="true" />
@@ -452,156 +501,134 @@ export function NativeResearchReport({
       <section aria-labelledby={`${id}-executive`}>
         <SectionHeading
           id={`${id}-executive`}
-          eyebrow="Resumen ejecutivo"
-          title="Lo que conviene saber"
-          description="Síntesis de la empresa, el contacto y las señales con mejor respaldo."
+          eyebrow="Antes de contactar"
+          title={`Lo esencial sobre ${leadName}`}
+          description="Una lectura breve para llegar a la conversación con contexto, sin convertir señales en certezas."
         />
-        <div className="mt-4 rounded-3xl border border-border/70 bg-muted/[0.16] px-5 py-5 sm:px-6 sm:py-6">
-          <NarrativeText
+        <div className="mt-4 rounded-3xl border border-primary/15 bg-primary/[0.04] px-5 py-5 sm:px-6">
+          <NarrativeOrClaims
             paragraphs={executiveNarrative}
+            claims={report.executive}
             empty="La evidencia disponible aún no permite preparar un resumen ejecutivo verificable."
-            onShowEvidence={showEvidence}
           />
         </div>
       </section>
 
-      <section aria-labelledby={`${id}-person`}>
-        <SectionHeading
+      <div className="divide-y divide-border/60 rounded-3xl border border-border/70 bg-card/35 px-5 sm:px-6">
+        <ReportCollapsibleSection
+          id={`${id}-commercial`}
+          eyebrow="Lectura comercial"
+          title="Qué explorar y cómo ayudar"
+          description="Hipótesis para orientar preguntas y conectar tu oferta sin asumir un dolor confirmado."
+          open={commercialOpen}
+          onOpenChange={setCommercialOpen}
+        >
+          <div className="space-y-6">
+            <section aria-labelledby={`${id}-possible-challenges`}>
+              <h4 id={`${id}-possible-challenges`} className="text-sm font-semibold">Posibles retos a validar</h4>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Son hipótesis basadas en señales públicas. Confírmalas en la conversación.</p>
+              <div className="mt-3 border-l-2 border-amber-400/50 pl-4 sm:pl-5">
+                <NarrativeOrClaims
+                  paragraphs={commercialNarrative}
+                  claims={commercialClaims}
+                  empty="No hay señales suficientes para proponer un reto concreto."
+                  showClassification
+                />
+              </div>
+            </section>
+            <section aria-labelledby={`${id}-seller-fit`} className="border-t border-border/60 pt-5">
+              <h4 id={`${id}-seller-fit`} className="text-sm font-semibold">Lo que puedes ofrecer</h4>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Una conexión posible entre tu propuesta y el contexto investigado.</p>
+              <div className="mt-3 border-l-2 border-primary/30 pl-4 sm:pl-5">
+                <NarrativeText
+                  paragraphs={serviceFitNarrative}
+                  empty="Aún no hay un encaje suficientemente respaldado para recomendar una oferta concreta."
+                  showClassification
+                />
+              </div>
+            </section>
+          </div>
+        </ReportCollapsibleSection>
+
+        <ReportCollapsibleSection
           id={`${id}-person`}
           eyebrow="Contacto"
           title="Quién es y qué sabemos"
-          description="El contexto importado se distingue de la información encontrada en fuentes públicas."
-        />
-        {leadNarrative.length > 0 ? (
-          <div className="mt-4">
-            <NarrativeText paragraphs={leadNarrative} empty="" onShowEvidence={showEvidence} />
+          description="Contexto del contacto para interpretar su rol antes de escribirle."
+          open={contactOpen}
+          onOpenChange={setContactOpen}
+        >
+          <NarrativeOrClaims
+            paragraphs={leadNarrative}
+            claims={report.person.facts}
+            empty="No encontramos contexto público adicional sobre este contacto."
+          />
+          <div className="mt-5 rounded-2xl border border-border/70 bg-muted/[0.16] px-4 py-4 sm:px-5">
+            <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">Contexto importado</p>
+            {report.person.fields.length > 0
+              ? <ImportedFields fields={report.person.fields} />
+              : <p className="text-sm leading-6 text-muted-foreground">No hay contexto personal importado para este contacto.</p>}
           </div>
-        ) : null}
-        <div className="mt-4 rounded-2xl border border-border/70 bg-muted/[0.16] px-4 py-4 sm:px-5">
-          <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">Contexto importado</p>
-          {report.person.fields.length > 0
-            ? <ImportedFields fields={report.person.fields} />
-            : <p className="text-sm leading-6 text-muted-foreground">No hay contexto personal importado para este contacto.</p>}
-        </div>
-        {report.person.facts.length > 0 ? <div className="mt-5">
-          <h4 className="text-sm font-semibold">Hechos públicos verificados</h4>
-          <div className="mt-2"><ClaimList claims={report.person.facts} /></div>
-        </div> : null}
-      </section>
+        </ReportCollapsibleSection>
 
-      <section aria-labelledby={`${id}-company`}>
-        <SectionHeading
+        <ReportCollapsibleSection
           id={`${id}-company`}
           eyebrow="Empresa"
           title="Qué hace y cómo opera"
-          description="Una lectura de su actividad, oferta, mercado y escala observable."
-        />
-        {companyNarrative.length > 0 ? (
-          <div className="mt-4">
-            <NarrativeText paragraphs={companyNarrative} empty="" onShowEvidence={showEvidence} />
-          </div>
-        ) : null}
-        {report.companyContext.length > 0 ? (
-          <div className="mt-5 border-l-2 border-border/70 pl-4">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">Contexto de empresa importado</p>
-            <ImportedFields fields={report.companyContext} />
-          </div>
-        ) : null}
-        <CompanySections sections={report.companySections} showEmpty={companyNarrative.length === 0} />
-      </section>
-
-      <section aria-labelledby={`${id}-commercial`}>
-        <SectionHeading
-          id={`${id}-commercial`}
-          eyebrow="Lectura comercial"
-          title="Señales y temas para explorar"
-          description="Interpretación prudente de la actividad pública. Las hipótesis no representan necesidades confirmadas."
-        />
-        <div className="mt-4 border-l-2 border-primary/30 pl-4 sm:pl-5">
-          <NarrativeText
-            paragraphs={commercialNarrative}
-            empty="La evidencia no permite formular todavía una lectura comercial citada."
-            onShowEvidence={showEvidence}
-            showClassification
+          description="Actividad, oferta, mercado y escala observables."
+          open={companyOpen}
+          onOpenChange={setCompanyOpen}
+        >
+          <NarrativeOrClaims
+            paragraphs={companyNarrative}
+            claims={companyClaims}
+            empty="Todavía no hay una lectura corporativa suficientemente clara. Revisa las fuentes y los vacíos antes de usar este contexto."
           />
-        </div>
-        {report.signals.length > 0 ? (
-          <div className="mt-5">
-            <h4 className="text-sm font-semibold">Señales públicas verificadas</h4>
-            <div className="mt-2"><ClaimList claims={report.signals} tone="signal" /></div>
-          </div>
-        ) : null}
-      </section>
-
-      {showServiceFit ? (
-        <section aria-labelledby={`${id}-service-fit`}>
-          <SectionHeading
-            id={`${id}-service-fit`}
-            eyebrow="Tu propuesta"
-            title="Cómo podrías ayudar"
-            description="Relacionamos lo que ofreces con la evidencia disponible, sin asumir una necesidad que aún no se ha confirmado."
-          />
-          {sellerContext && sellerOffer ? (
-            <div className="mt-4 rounded-2xl border border-border/70 bg-muted/[0.16] px-4 py-4 sm:px-5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">Perfil utilizado</p>
-              <p className="mt-1 text-sm font-medium text-foreground">{sellerContext.companyName}</p>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">{sellerOffer}</p>
+          {report.companyContext.length > 0 ? (
+            <div className="mt-5 border-l-2 border-border/70 pl-4">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">Contexto importado</p>
+              <ImportedFields fields={report.companyContext} />
             </div>
           ) : null}
-          {serviceFitNarrative.length > 0 ? (
-            <div className="mt-4 border-l-2 border-primary/30 pl-4 sm:pl-5">
-              <NarrativeText
-                paragraphs={serviceFitNarrative}
-                empty="La evidencia disponible todavía no permite relacionar tu propuesta con una situación concreta de esta empresa."
-                onShowEvidence={showEvidence}
-                showClassification
-              />
-            </div>
-          ) : (
-            <p className="mt-4 text-sm leading-7 text-muted-foreground">La evidencia disponible todavía no permite relacionar tu propuesta con una situación concreta de esta empresa.</p>
-          )}
-        </section>
-      ) : null}
+        </ReportCollapsibleSection>
+
+      </div>
 
       {hasReviewPoints ? (
-        <section aria-labelledby={`${id}-review`}>
-          <SectionHeading
+        <div className="rounded-3xl border border-border/70 bg-card/35 px-5 sm:px-6">
+          <ReportCollapsibleSection
             id={`${id}-review`}
             eyebrow="Límites del reporte"
             title="Vacíos y contradicciones"
             description="Puntos que conviene considerar antes de personalizar el contacto."
-          />
-          <div className="mt-4 divide-y divide-border/60 rounded-2xl border border-border/70 px-4 sm:px-5">
-            {report.contradictions.map((item) => (
-              <div key={item.id} className="py-4">
-                <div className="flex flex-wrap items-start justify-between gap-2">
+            open={reviewOpen}
+            onOpenChange={setReviewOpen}
+          >
+            <div className="divide-y divide-border/60 rounded-2xl border border-border/70 px-4 sm:px-5">
+              {report.contradictions.map((item) => (
+                <div key={item.id} className="flex flex-wrap items-start justify-between gap-2 py-4">
                   <p className="text-sm font-medium leading-6">{item.summary}</p>
                   <span className={cn('text-[10px] font-semibold uppercase tracking-[0.12em]', item.status === 'resolved' ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300')}>
                     {item.status === 'resolved' ? 'Resuelta' : 'Sin resolver'}
                   </span>
                 </div>
-                {item.evidence.length > 0 ? (
-                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5 text-xs">
-                    {item.evidence.map((evidence) => <EvidenceLink key={evidence.id} evidence={evidence} />)}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-            {report.gaps.map((gap) => (
-              <p key={gap.id} className="py-4 text-sm leading-6 text-muted-foreground">{gap.description}</p>
-            ))}
-          </div>
-        </section>
+              ))}
+              {report.gaps.map((gap) => (
+                <p key={gap.id} className="py-4 text-sm leading-6 text-muted-foreground">{gap.description}</p>
+              ))}
+            </div>
+          </ReportCollapsibleSection>
+        </div>
       ) : null}
 
       <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <section id={`${id}-details`} aria-labelledby={`${id}-details-heading`} className="border-y border-border/60 outline-none" tabIndex={-1}>
+        <section id={`${id}-details`} aria-labelledby={`${id}-details-heading`} className="border-y border-border/60">
           <h3 id={`${id}-details-heading`} className="sr-only">Fuentes y calidad del reporte</h3>
           <CollapsibleTrigger asChild>
             <Button
               type="button"
               variant="ghost"
-              className="h-auto w-full justify-between rounded-none px-0 py-4 text-left hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              className="h-auto w-full justify-between whitespace-normal rounded-none px-0 py-4 text-left hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             >
               <span className="min-w-0">
                 <span className="block text-sm font-semibold">Fuentes y calidad</span>
@@ -638,6 +665,14 @@ export function NativeResearchReport({
                 <p className="font-medium">Base de afirmaciones</p>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">Hechos e hipótesis canónicas usados para construir la lectura del informe.</p>
                 <div className="mt-3"><ClaimList claims={evidenceClaims} /></div>
+              </div>
+            ) : null}
+            {contradictionEvidence.length > 0 ? (
+              <div className="border-t border-border/60 py-4">
+                <p className="font-medium">Respaldo de contradicciones</p>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-2 text-xs text-muted-foreground">
+                  {contradictionEvidence.map((evidence) => <EvidenceLink key={evidence.id} evidence={evidence} />)}
+                </div>
               </div>
             ) : null}
             {result.warnings.length > 0 ? (
@@ -683,7 +718,7 @@ export function NativeResearchReport({
         </section>
       </Collapsible>
 
-      <footer className="sticky bottom-0 z-10 -mx-2 flex flex-col gap-3 border-t border-border/70 bg-background/95 px-2 py-4 shadow-[0_-16px_30px_-30px_rgba(15,23,42,0.45)] backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:flex-row sm:items-center sm:justify-between">
+      {showActionFooter ? <footer className="flex flex-col gap-3 border-t border-border/70 pt-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-medium">
             {profileCompletionRequired ? 'Completa tu perfil comercial' : actionAvailable ? 'Borrador disponible para revisión' : showCompanyContextGuidance ? 'Hace falta contexto de empresa' : 'Borrador no disponible'}
@@ -711,16 +746,34 @@ export function NativeResearchReport({
             Completar perfil
           </Button>
         ) : onCreateDraft && actionAvailable ? (
-          <Button
-            type="button"
-            className="w-full shrink-0 rounded-full sm:w-auto"
-            onClick={onCreateDraft}
-            disabled={creatingDraft || createDraftDisabled}
-            aria-describedby={`${id}-action-help`}
-          >
-            {creatingDraft ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <FileText aria-hidden="true" />}
-            {creatingDraft ? creatingDraftLabel : createDraftLabel}
-          </Button>
+          <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:min-w-64">
+            <Label htmlFor={`${id}-draft-style`} className="text-xs text-muted-foreground">Estilo del correo</Label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Select value={draftStyleId} onValueChange={setDraftStyleId} disabled={creatingDraft || createDraftDisabled}>
+                <SelectTrigger id={`${id}-draft-style`} className="h-11 w-full sm:w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEFAULT_DRAFT_STYLE}>Estilo predeterminado</SelectItem>
+                  {draftStyles.map((style) => (
+                    <SelectItem key={style.id} value={style.id}>
+                      {style.name}{style.isDefault ? ' · Predeterminado' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                className="min-h-11 w-full shrink-0 rounded-full sm:w-auto"
+                onClick={() => onCreateDraft(draftStyleId === DEFAULT_DRAFT_STYLE ? null : draftStyleId)}
+                disabled={creatingDraft || createDraftDisabled}
+                aria-describedby={`${id}-action-help`}
+              >
+                {creatingDraft ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <FileText aria-hidden="true" />}
+                {creatingDraft ? creatingDraftLabel : createDraftLabel}
+              </Button>
+            </div>
+          </div>
         ) : refreshAvailable ? (
           <Button
             type="button"
@@ -734,7 +787,7 @@ export function NativeResearchReport({
             {refreshing ? refreshingLabel : refreshLabel}
           </Button>
         ) : null}
-      </footer>
+      </footer> : null}
     </article>
   );
 }

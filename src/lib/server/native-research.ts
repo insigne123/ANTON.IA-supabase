@@ -15,6 +15,8 @@ import {
 } from '@/lib/research-contracts';
 import {
   isGenericResearchText,
+  isHardRejectedResearchUrl,
+  isHardRejectedResearchText,
   isQualifiedResearchFactEvidence,
   isRelevantResearchSignal,
   isSameResearchCompanyDomain,
@@ -346,6 +348,21 @@ function validHttpUrl(value: unknown) {
   }
 }
 
+const TRACKING_QUERY_PARAMETER = /^(?:utm_.+|gclid|dclid|fbclid|msclkid|mc_cid|mc_eid)$/i;
+
+function canonicalResearchSourceUrl(value: unknown) {
+  const displayUrl = validHttpUrl(value);
+  if (!displayUrl) return '';
+  const url = new URL(displayUrl);
+  url.hash = '';
+  for (const key of [...url.searchParams.keys()]) {
+    if (TRACKING_QUERY_PARAMETER.test(key)) url.searchParams.delete(key);
+  }
+  url.searchParams.sort();
+  if (url.pathname !== '/') url.pathname = url.pathname.replace(/\/+$/, '');
+  return url.toString();
+}
+
 function safeSourceUrl(value: unknown, fallbackDomain: string) {
   const direct = validHttpUrl(value);
   if (direct) return direct;
@@ -533,19 +550,39 @@ function officialPageFromHtml(url: URL, html: string): OfficialSitePage {
     html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i)?.[1]
     || html.match(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i)?.[1],
   ) || null;
-  const readable = text(
-    html
+  const contentHtml = html
       .replace(/<script\b[\s\S]*?(?:<\/script>|$)/gi, ' ')
       .replace(/<style\b[\s\S]*?(?:<\/style>|$)/gi, ' ')
       .replace(/<noscript\b[\s\S]*?(?:<\/noscript>|$)/gi, ' ')
-      .replace(/<[^>]+>/g, ' '),
-  ).slice(0, 4_000);
+      .replace(/<(?:nav|footer|form|svg)\b[\s\S]*?(?:<\/(?:nav|footer|form|svg)>|$)/gi, ' ');
+  const readable = text(decodeHtmlText(contentHtml.replace(/<[^>]+>/g, ' '))).slice(0, 4_000);
+  if (
+    isHardRejectedResearchUrl(url.toString())
+    || isHardRejectedResearchText(title)
+    || isHardRejectedResearchText(description)
+    || isHardRejectedResearchText(readable)
+  ) {
+    return { url: url.toString(), title: null, description: null, text: '' };
+  }
   const segments = officialSegmentsFromHtml(html);
 
   return { url: url.toString(), title, description, text: readable, ...(segments.length > 0 ? { segments } : {}) };
 }
 
+function isHardRejectedOfficialPage(value: unknown) {
+  const page = object(value);
+  const segmentText = array(page.segments).map((segment) => text(object(segment).text));
+  return isHardRejectedResearchText([
+    isHardRejectedResearchUrl(page.url) ? 'challenge platform' : '',
+    page.title,
+    page.description,
+    page.text,
+    ...segmentText,
+  ].filter(Boolean).join(' '));
+}
+
 function usefulOfficialPageContents(page: OfficialSitePage) {
+  if (isHardRejectedOfficialPage(page)) return [];
   const contents: Array<{ statement: string; locator: string }> = [];
   const seen = new Set<string>();
   const add = (statement: unknown, locator: string) => {
@@ -719,6 +756,45 @@ function emptyCompanySignals(domain: string): CompanySignals {
   };
 }
 
+function officialPageFromArtifactPayload(value: unknown, expectedDomain: string): OfficialSitePage | null {
+  const stored = object(value);
+  const url = validHttpUrl(stored.url);
+  if (
+    !url
+    || (expectedDomain && !isSameResearchCompanyDomain(url, expectedDomain))
+    || isHardRejectedOfficialPage(stored)
+  ) return null;
+  const segments = array(stored.segments).flatMap((segment) => {
+    const candidate = object(segment);
+    const segmentText = text(candidate.text);
+    if (!segmentText || isHardRejectedResearchText(segmentText)) return [];
+    return [{ text: segmentText, locator: text(candidate.locator) || 'page_section' }];
+  });
+  const page: OfficialSitePage = {
+    url,
+    title: text(stored.title) || null,
+    description: text(stored.description) || null,
+    text: text(stored.text),
+    ...(segments.length > 0 ? { segments } : {}),
+  };
+  return isHardRejectedOfficialPage(page) ? null : page;
+}
+
+function officialSiteFromArtifactPayload(value: unknown, expectedDomain: string): OfficialSiteResult | null {
+  const stored = object(value);
+  if (Object.keys(stored).length === 0) return null;
+  const pages: OfficialSitePage[] = [];
+  const seen = new Set<string>();
+  for (const candidate of [stored, ...array(stored.pages)]) {
+    const page = officialPageFromArtifactPayload(candidate, expectedDomain);
+    const canonicalUrl = page ? canonicalResearchSourceUrl(page.url) : '';
+    if (!page || !canonicalUrl || seen.has(canonicalUrl)) continue;
+    seen.add(canonicalUrl);
+    pages.push(page);
+  }
+  return pages.length > 0 ? { ...pages[0], pages } : null;
+}
+
 function companySignalsFromArtifactPayload(payload: unknown, expectedDomain: string): CompanySignals | null {
   const value = object(object(payload).companySignals);
   const fetchedAt = text(value.fetchedAt);
@@ -726,7 +802,7 @@ function companySignalsFromArtifactPayload(payload: unknown, expectedDomain: str
   if (!fetchedAt || (expectedDomain && domain !== expectedDomain)) return null;
   return {
     domain: domain || expectedDomain,
-    official: nullableObject(value.official) as OfficialSiteResult | null,
+    official: officialSiteFromArtifactPayload(value.official, domain || expectedDomain),
     whois: nullableObject(value.whois),
     brand: nullableObject(value.brand),
     fetchedAt,
@@ -1033,7 +1109,7 @@ function isRelevantSearchResult(input: {
   companyDomain?: string | null;
 }) {
   const statement = `${input.title} ${input.snippet}`.trim();
-  if (!statement || isGenericResearchText(statement)) return false;
+  if (!statement || isHardRejectedResearchUrl(input.link) || isHardRejectedResearchText(statement) || isGenericResearchText(statement)) return false;
   return isSameResearchCompanyDomain(input.link, input.companyDomain)
     || mentionsResearchCompany(statement, input);
 }
@@ -1071,14 +1147,25 @@ function buildSnapshot(input: {
     publishedAt?: string | null;
   }) => {
     const url = validHttpUrl(source.url);
-    if (!url) return null;
-    const existing = sources.find((item) => item.url === url);
-    if (existing) return existing;
+    const canonicalUrl = canonicalResearchSourceUrl(url);
+    if (!url || !canonicalUrl || isHardRejectedResearchUrl(url)) return null;
+    const existing = sources.find((item) => item.canonicalUrl === canonicalUrl);
+    if (existing) {
+      const publishedAt = isoDateOrNull(source.publishedAt);
+      const retrievedAt = isoDateOrNull(source.retrievedAt);
+      if (publishedAt && (!existing.publishedAt || publishedAt > existing.publishedAt)) existing.publishedAt = publishedAt;
+      if (retrievedAt && retrievedAt > existing.retrievedAt) existing.retrievedAt = retrievedAt;
+      if (!existing.title && text(source.title)) existing.title = text(source.title);
+      if (!existing.publisher && text(source.publisher)) existing.publisher = text(source.publisher);
+      existing.reliability = Math.max(existing.reliability, Math.max(0, Math.min(1, source.reliability ?? 0.7)));
+      if (existing.type !== 'official_site' && source.type === 'news') existing.type = 'news';
+      return existing;
+    }
     const created: ResearchSourceV1 = {
-      id: id('source', url),
+      id: id('source', canonicalUrl),
       type: source.type,
       url,
-      canonicalUrl: url,
+      canonicalUrl,
       ...(text(source.title) ? { title: text(source.title) } : {}),
       ...(text(source.publisher) ? { publisher: text(source.publisher) } : {}),
       provider: source.provider,
@@ -1101,7 +1188,7 @@ function buildSnapshot(input: {
     extractionMethod?: ResearchEvidenceV1['extraction']['method'];
   }) => {
     const statement = text(value.statement);
-    if (!value.source || !statement) return null;
+    if (!value.source || !statement || isHardRejectedResearchText(statement)) return null;
     const evidenceId = id('evidence', `${value.source.id}:${statement}`);
     const existing = evidence.find((item) => item.id === evidenceId);
     if (existing) return existing;
@@ -2448,7 +2535,9 @@ export function nativeResearchJobToResult(job: NativeResearchJob) {
 export const nativeResearchInternals = {
   buildSnapshot,
   boundedOfficialSiteChunk,
+  canonicalResearchSourceUrl,
   candidateOfficialPageUrls,
+  companySignalsFromArtifactPayload,
   fetchOfficialSite,
   isPrivateIpAddress,
   isRelevantSearchResult,

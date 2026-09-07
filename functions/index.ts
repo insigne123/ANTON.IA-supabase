@@ -32,7 +32,6 @@ export { antoniaWorker } from './src/antonia-worker';
 // NOTE: Keep defaults for backwards compatibility, but prefer env vars in production.
 const DEFAULT_APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
 const DEFAULT_LEAD_RESEARCH_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-research';
-const DEFAULT_DAILY_CREDIT_LIMIT = 50;
 
 function isLikelyN8nWebhookUrl(value?: string | null) {
     const raw = String(value || '').trim().toLowerCase();
@@ -849,33 +848,21 @@ async function getEffectiveLeadProcessingQuota(
     }
 ): Promise<{ limit: number; used: number; scope: 'organization' | 'user' }> {
     const today = new Date().toISOString().split('T')[0];
-    const { userId } = params;
-
-    const { data: overrideRow, error: overrideError } = await supabase
-        .from('user_quota_overrides')
-        .select('daily_credit_limit')
-        .eq('user_id', userId)
-        .maybeSingle();
-
-    const missingOverrideTable = String((overrideError as any)?.code || '') === 'PGRST205'
-        || String((overrideError as any)?.message || '').toLowerCase().includes("could not find the table 'public.user_quota_overrides'");
-    if (overrideError && !missingOverrideTable) {
-        throw overrideError;
+    const { data, error } = await supabase.rpc('get_antonia_credit_status_v2', {
+        p_organization_id: params.organizationId,
+        p_user_id: params.userId,
+        p_day: today,
+    } as any);
+    if (error) throw error;
+    const status = data as { count?: number; limit?: number; binding?: string } | null;
+    if (!status || !Number.isFinite(Number(status.count)) || !Number.isFinite(Number(status.limit))) {
+        throw new Error('Invalid daily credit status response');
     }
-
-    const overrideLimit = missingOverrideTable ? 0 : Number(overrideRow?.daily_credit_limit || 0);
-    const effectiveLimit = Number.isFinite(overrideLimit) && overrideLimit > 0
-        ? Math.min(DEFAULT_DAILY_CREDIT_LIMIT, Math.trunc(overrideLimit))
-        : DEFAULT_DAILY_CREDIT_LIMIT;
-
-    const { data: usageBucket, error: usageError } = await supabase
-        .from('antonia_user_daily_credits')
-        .select('usage_count')
-        .eq('user_id', userId)
-        .eq('date', today)
-        .maybeSingle();
-    if (usageError) throw usageError;
-    return { limit: effectiveLimit, used: Math.max(0, Number(usageBucket?.usage_count || 0)), scope: 'user' };
+    return {
+        limit: Number(status.limit),
+        used: Number(status.count),
+        scope: status.binding === 'team' ? 'organization' : 'user',
+    };
 }
 
 async function consumeLeadProcessingQuota(

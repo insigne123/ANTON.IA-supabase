@@ -19,6 +19,7 @@ import {
 const migration = readFileSync('supabase/migrations/20260824180000_research_report_documents.sql', 'utf8');
 const pipeline = readFileSync('src/lib/server/native-research.ts', 'utf8');
 const detailRoute = readFileSync('src/app/api/native-research/[reportId]/route.ts', 'utf8');
+const reportStore = readFileSync('src/lib/server/research-report-documents.ts', 'utf8');
 
 test('report document migration is tenant-readable and service-write-only', () => {
   assert.match(migration, /research_snapshot_id uuid not null unique/);
@@ -30,6 +31,7 @@ test('report document migration is tenant-readable and service-write-only', () =
   assert.match(migration, /grant select on table public\.research_report_documents to authenticated/);
   assert.match(migration, /grant all on table public\.research_report_documents to service_role/);
   assert.doesNotMatch(migration, /for (?:insert|update|delete) to authenticated/i);
+  assert.match(reportStore, /\.eq\('content_hash', existing\.contentHash\)[\s\S]+\.eq\('updated_at', existing\.updatedAt\)/);
 });
 
 test('native processing checkpoints the snapshot before synthesis and detail GET exposes the document', () => {

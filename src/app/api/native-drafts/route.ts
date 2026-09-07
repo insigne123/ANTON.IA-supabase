@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
+import { normalizeEmailStyleSelection } from '@/lib/outsourcing-email-style-presets';
 import { createNativeDraft } from '@/lib/server/native-drafts';
 import { getNativeSnapshot } from '@/lib/server/native-research';
 
@@ -24,6 +25,11 @@ export async function POST(req: NextRequest) {
     }
     const snapshotId = String(body?.researchSnapshotId || body?.snapshotId || '').trim();
     if (!snapshotId) return NextResponse.json({ error: 'NATIVE_DRAFT_SNAPSHOT_REQUIRED' }, { status: 400 });
+    const rawStyleProfileId = typeof body?.styleProfileId === 'string' ? body.styleProfileId : null;
+    const styleProfileId = rawStyleProfileId ? normalizeEmailStyleSelection(rawStyleProfileId) : null;
+    if (rawStyleProfileId?.trim() && !styleProfileId) {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_STYLE_INVALID' }, { status: 400 });
+    }
     const snapshot = await getNativeSnapshot({
       snapshotId,
       access: { organizationId: auth.organizationId, organizationIds: auth.organizationIds, userId: auth.user.id },
@@ -33,7 +39,7 @@ export async function POST(req: NextRequest) {
       organizationId: snapshot.organization_id,
       userId: auth.user.id,
       snapshotId,
-      styleProfileId: typeof body?.styleProfileId === 'string' ? body.styleProfileId : null,
+      styleProfileId,
       styleName: typeof body?.styleName === 'string' ? body.styleName : null,
       idempotencyKey: typeof body?.idempotencyKey === 'string' ? body.idempotencyKey : req.headers.get('idempotency-key'),
     });

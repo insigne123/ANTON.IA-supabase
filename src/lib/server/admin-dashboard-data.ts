@@ -205,11 +205,22 @@ export async function loadAdminDashboardOverview(
       errors,
     ),
     readRows(
-      supabase.from('contacted_leads')
-        .select('id, user_id, lead_id, sent_at, created_at, replied_at, provider, status, company, role, country, data, reply_intent, last_reply_text')
+      supabase.from('people_search_leads')
+        .select('id, user_id, created_at, primary_phone, phone_numbers, organization_name, org_name, title, seniority')
         .eq('organization_id', organizationId)
         .gte('created_at', from.toISOString())
         .lt('created_at', to.toISOString()),
+      'people_search_leads',
+      errors,
+    ),
+    readRows(
+      supabase.from('contacted_leads')
+        .select('id, user_id, lead_id, sent_at, created_at, replied_at, provider, status, company, role, country, data, reply_intent, last_reply_text')
+        .eq('organization_id', organizationId)
+        .or([
+          `and(sent_at.gte.${from.toISOString()},sent_at.lt.${to.toISOString()})`,
+          `and(replied_at.gte.${from.toISOString()},replied_at.lt.${to.toISOString()})`,
+        ].join(',')),
       'contacted_leads',
       errors,
     ),
@@ -233,20 +244,19 @@ export async function loadAdminDashboardOverview(
       errors,
     ),
     readRows(
-      supabase.from('lead_research_reports')
-        .select('id, user_id, lead_id, created_at, updated_at, provider, company_name')
+      supabase.from('lead_research_jobs')
+        .select('id, user_id, lead_id, created_at, completed_at, status, provider, company_name')
         .eq('organization_id', organizationId)
         .gte('created_at', from.toISOString())
         .lt('created_at', to.toISOString()),
-      'lead_research_reports',
+      'lead_research_jobs',
       errors,
     ),
   ];
 
-  const [leads, enrichedLeads, contactedLeads, emailEvents, ledgerEvents, researchReports] = await Promise.all(rangeQueries);
+  const [leads, enrichedLeads, peopleSearchLeads, contactedLeads, emailEvents, ledgerEvents, researchJobs] = await Promise.all(rangeQueries);
   const groupFilter = normalize(query.groupId);
   const userFilter = normalize(query.userId);
-  const userIds = new Set(organizationMembers.map((member) => normalize(member.user_id)).filter(Boolean));
 
   const userMatches = (userId: string) => {
     if (userFilter && userId !== userFilter) return false;
@@ -262,8 +272,9 @@ export async function loadAdminDashboardOverview(
 
   const filteredLeads = filtered(leads, rowUserId);
   const filteredEnriched = filtered(enrichedLeads, rowUserId);
+  const filteredPeopleSearch = filtered(peopleSearchLeads, rowUserId);
   const filteredContacted = filtered(contactedLeads, rowUserId);
-  const filteredResearch = filtered(researchReports, rowUserId);
+  const filteredResearch = filtered(researchJobs, rowUserId);
   const contactedById = new Map(filteredContacted.map((row) => [normalize(row.id), row]));
   const filteredEmailEvents = emailEvents.filter((event) => {
     const contacted = contactedById.get(normalize(event.contacted_id));
@@ -272,27 +283,38 @@ export async function loadAdminDashboardOverview(
   });
   const filteredLedger = filtered(ledgerEvents, rowUserId);
 
-  const repliedContacted = filteredContacted.filter(hasReply);
-  const sentContacted = filteredContacted.filter((row) => Boolean(row.sent_at || row.created_at));
+  const repliedContacted = filteredContacted.filter((row) => hasReply(row) && isWithinRange(row, ['replied_at'], from, to));
+  const sentContacted = filteredContacted.filter((row) => isWithinRange(row, ['sent_at'], from, to));
   const replyEvents = filteredEmailEvents.filter((event) => eventMatches(event.event_type, ['reply', 'replied', 'received']));
+  const sentEmailEvents = filteredEmailEvents.filter((event) => eventMatches(event.event_type, ['sent']));
+  const sentLedgerEvents = filteredLedger.filter((event) => eventMatches(event.event_type, ['email.sent', 'outbound.sent', 'dispatch.sent']));
+  const replyLedgerEvents = filteredLedger.filter((event) => eventMatches(event.event_type, ['reply.received', 'contact.replied']));
   const replies = Math.max(
     countUnique(repliedContacted, (row) => row.lead_id || row.id),
     countUnique(replyEvents, (row) => row.lead_id || row.contacted_id || row.id),
-    filteredLedger.filter((event) => eventMatches(event.event_type, ['reply.received', 'reply.received', 'contact.replied'])).length,
+    countUnique(replyLedgerEvents, (row) => row.lead_id || row.contacted_id || row.entity_id || row.id),
   );
-  const emailsSent = sentContacted.filter((row) => {
+  const sentEmailContacts = sentContacted.filter((row) => {
     const channel = channelOf(row);
     return !channel || channel.includes('mail') || channel.includes('gmail') || channel.includes('outlook') || channel.includes('email');
-  }).length;
+  });
+  const emailsSent = Math.max(sentEmailContacts.length, sentEmailEvents.length, sentLedgerEvents.length);
   const linkedinConnections = sentContacted.filter((row) => channelOf(row).includes('linkedin')).length
     + filteredLedger.filter((event) => eventMatches(event.event_type, ['linkedin.connection', 'linkedin.connected'])).length;
-  const investigations = filteredResearch.length
-    + filteredLedger.filter((event) => eventMatches(event.event_type, ['research.completed', 'research.requested', 'lead.researched'])).length;
-  const phonesSearched = filteredLedger.filter((event) => eventMatches(event.event_type, ['phone.search', 'phone.enrichment', 'enrichment.phone'])).length
-    || filteredEnriched.filter(hasPhone).length;
-  const leadsContacted = countUnique(filteredContacted, (row) => row.lead_id || row.id);
+  const researchLedgerEvents = filteredLedger.filter((event) => eventMatches(event.event_type, ['research.completed', 'research.requested', 'lead.researched', 'backfill.research']));
+  const investigations = countUnique(filteredResearch, (row) => row.id)
+    || countUnique(researchLedgerEvents, (row) => row.research_job_id || row.entity_id || row.lead_id || row.id);
+  const phonesSearched = countUnique(filteredPeopleSearch.filter(hasPhone), (row) => row.id)
+    || countUnique(
+      filteredLedger.filter((event) => eventMatches(event.event_type, ['phone.search', 'phone.enrichment', 'enrichment.phone'])),
+      (row) => row.lead_id || row.entity_id || row.id,
+    );
+  const leadsContacted = Math.max(
+    countUnique(sentContacted, (row) => row.lead_id || row.id),
+    countUnique(sentEmailEvents, (row) => row.lead_id || row.contacted_id || row.id),
+  );
   const leadsCaptured = countUnique(filteredLeads, (row) => row.id) || filteredLeads.length;
-  const responseRate = emailsSent > 0 ? Math.round((replies / emailsSent) * 1000) / 10 : 0;
+  const responseRate = emailsSent > 0 ? Math.min(100, Math.round((replies / emailsSent) * 1000) / 10) : 0;
   const elapsedDays = Math.max(1, Math.ceil((to.getTime() - from.getTime()) / 86_400_000));
   const daysInMonth = new Date(to.getUTCFullYear(), to.getUTCMonth() + 1, 0).getUTCDate();
   const totalUsage = leadsCaptured + investigations + emailsSent;
@@ -305,23 +327,36 @@ export async function loadAdminDashboardOverview(
     const dayFrom = new Date(`${key}T00:00:00.000Z`);
     const dayTo = new Date(addDays(key, 1));
     const dayLeads = filteredLeads.filter((row) => isWithinRange(row, ['created_at'], dayFrom, dayTo)).length;
-    const dayContacted = filteredContacted.filter((row) => isWithinRange(row, ['sent_at', 'created_at'], dayFrom, dayTo)).length;
-    const dayResearch = filteredResearch.filter((row) => isWithinRange(row, ['created_at', 'updated_at'], dayFrom, dayTo)).length
-      + filteredLedger.filter((event) => eventMatches(event.event_type, ['research.completed', 'research.requested']) && isWithinRange(event, ['occurred_at'], dayFrom, dayTo)).length;
-    const dayReplies = filteredContacted.filter((row) => isWithinRange(row, ['replied_at'], dayFrom, dayTo) && hasReply(row)).length
-      + replyEvents.filter((event) => isWithinRange(event, ['event_at', 'created_at'], dayFrom, dayTo)).length;
+    const dayContacted = Math.max(
+      countUnique(sentContacted.filter((row) => isWithinRange(row, ['sent_at'], dayFrom, dayTo)), (row) => row.lead_id || row.id),
+      countUnique(sentEmailEvents.filter((event) => isWithinRange(event, ['event_at'], dayFrom, dayTo)), (row) => row.lead_id || row.contacted_id || row.id),
+    );
+    const dayResearch = filteredResearch.length > 0
+      ? filteredResearch.filter((row) => isWithinRange(row, ['created_at'], dayFrom, dayTo)).length
+      : countUnique(
+        researchLedgerEvents.filter((event) => isWithinRange(event, ['occurred_at'], dayFrom, dayTo)),
+        (row) => row.research_job_id || row.entity_id || row.lead_id || row.id,
+      );
+    const dayReplies = Math.max(
+      countUnique(repliedContacted.filter((row) => isWithinRange(row, ['replied_at'], dayFrom, dayTo)), (row) => row.lead_id || row.id),
+      countUnique(replyEvents.filter((event) => isWithinRange(event, ['event_at'], dayFrom, dayTo)), (row) => row.lead_id || row.contacted_id || row.id),
+      countUnique(replyLedgerEvents.filter((event) => isWithinRange(event, ['occurred_at'], dayFrom, dayTo)), (row) => row.lead_id || row.contacted_id || row.entity_id || row.id),
+    );
     return { date: key, leads: dayLeads, contacted: dayContacted, researched: dayResearch, replies: dayReplies };
   });
 
   const metricsForUser = (userId: string) => {
     const userLeads = filteredLeads.filter((row) => rowUserId(row) === userId);
-    const userContacted = filteredContacted.filter((row) => rowUserId(row) === userId);
+    const userContacted = sentContacted.filter((row) => rowUserId(row) === userId);
     const userResearch = filteredResearch.filter((row) => rowUserId(row) === userId);
-    const userReplies = userContacted.filter(hasReply);
+    const userReplies = repliedContacted.filter((row) => rowUserId(row) === userId);
     return {
       leads: userLeads.length,
       contacted: countUnique(userContacted, (row) => row.lead_id || row.id),
-      researched: userResearch.length + filteredLedger.filter((event) => rowUserId(event) === userId && eventMatches(event.event_type, ['research.completed'])).length,
+      researched: userResearch.length || countUnique(
+        researchLedgerEvents.filter((event) => rowUserId(event) === userId),
+        (row) => row.research_job_id || row.entity_id || row.lead_id || row.id,
+      ),
       replies: countUnique(userReplies, (row) => row.lead_id || row.id),
     };
   };
@@ -350,9 +385,9 @@ export async function loadAdminDashboardOverview(
     .filter((group) => !groupFilter || String(group.id) === groupFilter)
     .map((group) => {
       const groupLeads = filteredLeads.filter((row) => attributedToGroup(rowUserId(row), String(group.id)));
-      const groupContacted = filteredContacted.filter((row) => attributedToGroup(rowUserId(row), String(group.id)));
+      const groupContacted = sentContacted.filter((row) => attributedToGroup(rowUserId(row), String(group.id)));
       const groupResearch = filteredResearch.filter((row) => attributedToGroup(rowUserId(row), String(group.id)));
-      const groupReplies = groupContacted.filter(hasReply);
+      const groupReplies = repliedContacted.filter((row) => attributedToGroup(rowUserId(row), String(group.id)));
       const groupEmails = groupContacted.filter((row) => {
         const channel = channelOf(row);
         return !channel || channel.includes('mail') || channel.includes('email');
@@ -378,7 +413,7 @@ export async function loadAdminDashboardOverview(
   const companies = new Map<string, number>();
   const titles = new Map<string, number>();
   const seniorities = new Map<string, number>();
-  for (const row of filteredContacted) {
+  for (const row of sentContacted) {
     const data = asData(row);
     increment(companies, row.company || row.company_name || data.company || data.company_name);
     increment(titles, row.role || row.title || data.role || data.title);
@@ -389,8 +424,13 @@ export async function loadAdminDashboardOverview(
     increment(titles, row.title || data.title);
     increment(seniorities, row.seniority || data.seniority);
   }
+  for (const row of filteredPeopleSearch) {
+    increment(companies, row.organization_name || row.org_name);
+    increment(titles, row.title);
+    increment(seniorities, row.seniority);
+  }
 
-  const sampled = [leads, enrichedLeads, contactedLeads, emailEvents, ledgerEvents, researchReports].some((rows) => rows.length >= MAX_ROWS);
+  const sampled = [leads, enrichedLeads, peopleSearchLeads, contactedLeads, emailEvents, ledgerEvents, researchJobs].some((rows) => rows.length >= MAX_ROWS);
   const coverageNote = errors.length > 0
     ? `No se pudieron consultar: ${errors.join(', ')}.`
     : sampled
@@ -415,6 +455,9 @@ export async function loadAdminDashboardOverview(
       linkedinConnections,
       responseRate,
       monthlyProjection,
+      companiesCaptured: companies.size,
+      profilesWithSeniority: filteredPeopleSearch.filter((row) => normalize(row.seniority)).length
+        || filteredEnriched.filter((row) => normalize(row.seniority || asData(row).seniority)).length,
     },
     trend,
     groups: groupMetrics,

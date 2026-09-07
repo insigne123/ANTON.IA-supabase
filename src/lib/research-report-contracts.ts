@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
 import {
+  isQualifiedResearchFactEvidence,
+  isQualifiedResearchPersonFactEvidence,
+  isRelevantResearchSignal,
+} from '@/lib/research-fact-eligibility';
+import {
   ResearchSnapshotV1Schema,
   type ResearchClaimV1,
   type ResearchSnapshotV1,
@@ -353,16 +358,50 @@ export function isEligibleResearchReportFactClaimV1(
 ) {
   const generatedAtMs = Date.parse(generatedAt);
   const validUntilMs = Date.parse(claim.freshness.validUntil);
-  const evidenceIds = new Set(snapshot.evidence.map((evidence) => evidence.id));
-  const routable = claim.subjectScope === 'person'
-    || reportCompanyFactKinds.has(claim.kind)
-    || reportSignalKinds.has(claim.kind);
   return claim.classification === 'fact'
-    && routable
     && Number.isFinite(generatedAtMs)
     && Number.isFinite(validUntilMs)
     && validUntilMs > generatedAtMs
-    && claim.supportingEvidenceIds.some((evidenceId) => evidenceIds.has(evidenceId));
+    && eligibleResearchReportFactEvidenceIdsV1(snapshot, claim).length > 0;
+}
+
+export function eligibleResearchReportFactEvidenceIdsV1(
+  snapshot: ResearchSnapshotV1,
+  claim: ResearchClaimV1,
+) {
+  const evidenceById = new Map(snapshot.evidence.map((evidence) => [evidence.id, evidence]));
+  const sourceById = new Map(snapshot.sources.map((source) => [source.id, source]));
+  const routable = claim.subjectScope === 'person'
+    || reportCompanyFactKinds.has(claim.kind)
+    || reportSignalKinds.has(claim.kind);
+  if (claim.classification !== 'fact' || !routable) return [];
+  return claim.supportingEvidenceIds.filter((evidenceId, index, values) => {
+    if (values.indexOf(evidenceId) !== index) return false;
+      const evidence = evidenceById.get(evidenceId);
+      const source = evidence ? sourceById.get(evidence.sourceId) : undefined;
+      if (!evidence || !source) return false;
+      if (reportSignalKinds.has(claim.kind)) {
+        return isRelevantResearchSignal({
+          evidence,
+          source,
+          companyName: snapshot.subject.company.name,
+          companyDomain: snapshot.subject.company.domain,
+        });
+      }
+      if (claim.subjectScope === 'person') {
+        return isQualifiedResearchPersonFactEvidence({
+          evidence,
+          source,
+          personName: snapshot.subject.person.fullName,
+        });
+      }
+      return isQualifiedResearchFactEvidence({
+        evidence,
+        source,
+        companyName: snapshot.subject.company.name,
+        companyDomain: snapshot.subject.company.domain,
+      });
+    });
 }
 
 export function validateResearchReportDocumentCitationsV1(
@@ -422,17 +461,23 @@ export function validateResearchReportDocumentCitationsV1(
       if (allowedKinds && !allowedKinds.has(claim.kind)) issues.push(`${path} cites claim ${claimId} with a kind not allowed in this section`);
       return [claim];
     });
+    const eligibleEvidenceByClaim = new Map(citedClaims.map((claim) => [
+      claim.id,
+      new Set(claim.classification === 'fact'
+        ? eligibleResearchReportFactEvidenceIdsV1(snapshot, claim)
+        : claim.supportingEvidenceIds),
+    ]));
     block.citations.evidenceIds.forEach((evidenceId) => {
       if (!evidenceById.has(evidenceId)) {
         issues.push(`${path} references unknown evidence ${evidenceId}`);
         return;
       }
-      if (!citedClaims.some((claim) => claim.supportingEvidenceIds.includes(evidenceId))) {
+      if (!citedClaims.some((claim) => eligibleEvidenceByClaim.get(claim.id)?.has(evidenceId))) {
         issues.push(`${path} evidence ${evidenceId} is not supporting evidence for a cited claim`);
       }
     });
     citedClaims.forEach((claim) => {
-      if (!block.citations.evidenceIds.some((evidenceId) => claim.supportingEvidenceIds.includes(evidenceId))) {
+      if (!block.citations.evidenceIds.some((evidenceId) => eligibleEvidenceByClaim.get(claim.id)?.has(evidenceId))) {
         issues.push(`${path} claim ${claim.id} has no cited canonical supporting evidence`);
       }
     });
@@ -506,17 +551,26 @@ export function validateResearchReportDocumentCitationsV1(
                 ? commercialNarrativeKinds.has(claim.kind)
                 : true;
           if (!allowed) issues.push(`narrative.${section}.${index} cites claim ${claimId} from the wrong narrative section`);
+          if (claim.classification === 'fact' && !isEligibleResearchReportFactClaimV1(snapshot, claim, document.synthesis.generatedAt)) {
+            issues.push(`narrative.${section}.${index} cites claim ${claimId} outside its valid report window`);
+          }
           return [claim];
         });
+        const eligibleEvidenceByClaim = new Map(citedClaims.map((claim) => [
+          claim.id,
+          new Set(claim.classification === 'fact'
+            ? eligibleResearchReportFactEvidenceIdsV1(snapshot, claim)
+            : claim.supportingEvidenceIds),
+        ]));
         paragraph.evidenceIds.forEach((evidenceId) => {
           if (!evidenceById.has(evidenceId)) {
             issues.push(`narrative.${section}.${index} references unknown evidence ${evidenceId}`);
-          } else if (!citedClaims.some((claim) => claim.supportingEvidenceIds.includes(evidenceId))) {
+          } else if (!citedClaims.some((claim) => eligibleEvidenceByClaim.get(claim.id)?.has(evidenceId))) {
             issues.push(`narrative.${section}.${index} evidence ${evidenceId} does not support a cited claim`);
           }
         });
         citedClaims.forEach((claim) => {
-          if (!paragraph.evidenceIds.some((evidenceId) => claim.supportingEvidenceIds.includes(evidenceId))) {
+          if (!paragraph.evidenceIds.some((evidenceId) => eligibleEvidenceByClaim.get(claim.id)?.has(evidenceId))) {
             issues.push(`narrative.${section}.${index} claim ${claim.id} has no cited canonical supporting evidence`);
           }
         });

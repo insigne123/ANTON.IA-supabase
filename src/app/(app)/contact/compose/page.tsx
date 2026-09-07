@@ -116,7 +116,8 @@ function ComposeInner() {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [draftSource, setDraftSource] = useState<'investigation' | 'style'>('investigation');
   const [styleProfiles, setStyleProfiles] = useState<StyleProfile[]>([]);
-  const [selectedStyleName, setSelectedStyleName] = useState<string>('');
+  const [selectedStyleId, setSelectedStyleId] = useState<string>('');
+  const [rewriteStyleProfileId, setRewriteStyleProfileId] = useState<string>('');
   const [styleProfilesError, setStyleProfilesError] = useState(false);
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
   const [sendOperation, setSendOperation] = useState<ManualEmailOperation | null>(null);
@@ -143,6 +144,9 @@ function ComposeInner() {
     setFollowUpPlan(null);
     setFollowUpDirty(false);
     setFollowUpBusy(false);
+    setRewriteInstruction('');
+    setRewriteStyleProfileId('');
+    setRewriteError(null);
   }, [nativeDraftId]);
 
   useEffect(() => {
@@ -351,7 +355,7 @@ function ComposeInner() {
 
     async function loadStyleProfiles() {
       try {
-        const response = await fetch('/api/email-styles', { cache: 'no-store' });
+        const response = await fetch('/api/email-styles?includePresets=true', { cache: 'no-store' });
         const payload = await response.json().catch(() => null);
         if (!response.ok || !Array.isArray(payload?.styles)) throw new Error('No se pudieron cargar los estilos.');
         if (!active) return;
@@ -362,7 +366,7 @@ function ComposeInner() {
           isDefault: Boolean(style?.isDefault),
         })) as StyleProfile[];
         setStyleProfiles(list);
-        setSelectedStyleName((current) => current || list.find((profile) => profile.isDefault)?.name || list[0]?.name || '');
+        setSelectedStyleId((current) => current || list.find((profile) => profile.isDefault)?.id || list[0]?.id || '');
         setStyleProfilesError(false);
       } catch (error) {
         console.error('No se pudieron cargar los estilos de email', error);
@@ -459,7 +463,7 @@ function ComposeInner() {
       return { subject: base.subject, body: base.body };
     }
 
-    const profile = styleProfiles.find(p => p.name === selectedStyleName) || styleProfiles[0];
+    const profile = styleProfiles.find(p => p.id === selectedStyleId) || styleProfiles[0];
     if (!profile) {
       return { subject: base.subject, body: base.body };
     }
@@ -485,7 +489,7 @@ function ComposeInner() {
       subject: ensureSubjectPrefix(styled.subject, base.leadData.firstName),
       body: htmlToPlainParas(styled.body),
     };
-  }, [buildBaseDraftForLead, draftSource, selectedStyleName, styleProfiles]);
+  }, [buildBaseDraftForLead, draftSource, selectedStyleId, styleProfiles]);
 
   const [showAiAdjustment, setShowAiAdjustment] = useState(false);
 
@@ -691,13 +695,14 @@ function ComposeInner() {
     setNativeDraftRewriting(true);
     setRewriteError(null);
     try {
-      const selectedStyle = styleProfiles.find((profile) => profile.name === selectedStyleName);
       const response = await fetch(`/api/native-drafts/${encodeURIComponent(nativeDraftId)}/rewrite`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           instruction,
-          styleProfileId: selectedStyle?.id || null,
+          styleProfileId: rewriteStyleProfileId || null,
+          expectedVersionId: nativeDraft.versionId,
+          ...(campaignStepId ? { campaignStepId } : {}),
         }),
       });
       const payload = await response.json().catch(() => null);
@@ -708,6 +713,7 @@ function ComposeInner() {
       setSubject(payload.draft?.content?.subject || '');
       setBody(payload.draft?.content?.text || '');
       setRewriteInstruction('');
+      setRewriteStyleProfileId('');
       if (campaignStepId) {
         setCampaignSendContextLoading(true);
         setCampaignSendContextReloadKey((value) => value + 1);
@@ -1322,20 +1328,19 @@ function ComposeInner() {
                         <select
                           id="native-compose-style"
                           className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                          disabled={nativeDraftRewriting || styleProfiles.length === 0 || composeControlsLocked}
-                          value={selectedStyleName}
+                          disabled={nativeDraftRewriting || composeControlsLocked}
+                          value={rewriteStyleProfileId || '__current_style__'}
                           onChange={(event) => {
-                            setSelectedStyleName(event.target.value);
+                            setRewriteStyleProfileId(event.target.value === '__current_style__' ? '' : event.target.value);
                             setRewriteError(null);
                           }}
                         >
-                          {styleProfiles.length === 0
-                            ? <option value="">Estilo actual del correo</option>
-                            : styleProfiles.map((profile) => (
-                              <option key={profile.id || profile.name} value={profile.name}>
-                                {profile.name}{profile.isDefault ? ' · Predeterminado' : ''}
-                              </option>
-                            ))}
+                          <option value="__current_style__">Conservar el estilo actual</option>
+                          {styleProfiles.map((profile) => (
+                            <option key={profile.id || profile.name} value={profile.id}>
+                              {profile.name}{profile.isDefault ? ' · Predeterminado' : ''}
+                            </option>
+                          ))}
                         </select>
                         {styleProfilesError ? (
                           <p className="text-xs leading-5 text-muted-foreground">No pudimos cargar tus estilos. Aún puedes indicar el ajuste manualmente.</p>
@@ -1407,7 +1412,7 @@ function ComposeInner() {
                       aria-pressed={draftSource === 'style'}
                       onClick={() => {
                         setDraftSource('style');
-                        if (!selectedStyleName && styleProfiles.length) setSelectedStyleName(styleProfiles[0].name);
+                        if (!selectedStyleId && styleProfiles.length) setSelectedStyleId(styleProfiles[0].id || '');
                       }}
                     >
                       Estilo
@@ -1419,10 +1424,10 @@ function ComposeInner() {
                       id="compose-style"
                       className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                       disabled={draftSource !== 'style' || styleProfiles.length === 0}
-                      value={selectedStyleName}
-                      onChange={(event) => setSelectedStyleName(event.target.value)}
+                      value={selectedStyleId}
+                      onChange={(event) => setSelectedStyleId(event.target.value)}
                     >
-                      {styleProfiles.length === 0 ? <option value="">No hay estilos guardados</option> : styleProfiles.map((profile) => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
+                      {styleProfiles.length === 0 ? <option value="">No hay estilos guardados</option> : styleProfiles.map((profile) => <option key={profile.id || profile.name} value={profile.id}>{profile.name}</option>)}
                     </select>
                   </div>
                 </CardContent>

@@ -146,7 +146,7 @@ test('company search accounts for its page credit and reuses provider organizati
       });
     }
     return Response.json({
-      people: [{ id: 'person-1', first_name: 'Ana', organization: { name: 'People Co' } }],
+      people: [{ id: 'person-1', first_name: 'Ana', organization: { id: 'org-1', name: 'People' } }],
     });
   };
 
@@ -163,6 +163,7 @@ test('company search accounts for its page credit and reuses provider organizati
     const result = await executeProviderLeadSearch(parsed.value, config, { APOLLO_API_KEY: 'apollo-test-key' });
     assert.equal(result.count, 1);
     assert.equal(result.organization_search_credits, 1);
+    assert.equal(result.leads[0]?.organization_name, 'People Co');
     assert.equal(result.leads[0]?.organization_domain, 'people.co');
     assert.equal(requests[0]?.pathname, '/api/v1/mixed_companies/search');
     assert.equal(requests[1]?.pathname, '/api/v1/mixed_people/api_search');

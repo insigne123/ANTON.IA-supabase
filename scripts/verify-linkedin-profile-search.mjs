@@ -16,18 +16,25 @@ async function main() {
   console.log('--- Verify LinkedIn Profile Search ---')
   console.log(`Base URL: ${baseUrl}`)
 
-  const response = await fetch(`${baseUrl}/api/leads/search`, {
+  const operationId = `linkedin-profile-smoke:${crypto.randomUUID()}`
+  const response = await fetch(`${baseUrl}/api/opportunities/enrich-apollo`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-internal-api-secret': internalSecret,
       'x-user-id': userId,
+      'Idempotency-Key': operationId,
     },
     body: JSON.stringify({
-      search_mode: 'linkedin_profile',
-      linkedin_url: linkedinUrl,
-      reveal_email: true,
-      reveal_phone: true,
+      operationId,
+      provider: 'apollo',
+      tableName: 'people_search_leads',
+      revealEmail: true,
+      revealPhone: true,
+      leads: [{
+        clientRef: `profile-search:${linkedinUrl}`,
+        linkedinUrl,
+      }],
     }),
   })
 
@@ -38,22 +45,22 @@ async function main() {
     process.exit(1)
   }
 
-  const lead = Array.isArray(data?.leads) ? data.leads[0] : null
-  const phone = lead?.primary_phone || lead?.phone_numbers?.[0]?.sanitized_number || null
+  const lead = Array.isArray(data?.enriched) ? data.enriched[0] : null
+  const phone = lead?.primaryPhone || lead?.phoneNumbers?.[0]?.sanitized_number || null
 
   console.log(JSON.stringify({
-    provider: response.headers.get('x-provider-used'),
-    count: data?.count,
-    requested_reveal: data?.requested_reveal,
-    effective_reveal: data?.effective_reveal,
+    operation_id: response.headers.get('x-operation-id') || data?.operationId,
+    provider: data?.providerUsed || response.headers.get('x-provider-used'),
+    queued: data?.queued,
+    requested_data: data?.requestedData,
     phone_enrichment: data?.phone_enrichment,
     lead: lead
       ? {
           id: lead.id,
-          name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim(),
+          name: lead.fullName || null,
           email: lead.email || null,
           phone,
-          enrichment_status: lead.enrichment_status || null,
+          enrichment_status: lead.enrichmentStatus || null,
         }
       : null,
   }, null, 2))

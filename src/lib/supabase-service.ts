@@ -7,11 +7,16 @@ import { v4 as uuidv4 } from 'uuid';
 const TABLE = 'leads';
 
 // Helper to map DB row to Lead type
-function mapRowToLead(row: any): Lead {
+function mapRowToLead(row: any, finder?: { id: string; full_name?: string | null; email?: string | null; avatar_url?: string | null }): Lead {
     return {
         id: row.id,
         userId: row.user_id,
         organizationId: row.organization_id,
+        foundBy: finder ? {
+            id: finder.id,
+            name: finder.full_name?.trim() || finder.email?.trim() || 'Miembro del equipo',
+            avatar: finder.avatar_url,
+        } : undefined,
         name: row.name,
         title: row.title,
         company: row.company,
@@ -84,7 +89,23 @@ export const supabaseService = {
             throw error;
         }
 
-        return (data || []).map(mapRowToLead);
+        const finderIds = [...new Set((data || []).map((row: any) => row.user_id).filter(Boolean))];
+        const finders = new Map<string, { id: string; full_name?: string | null; email?: string | null; avatar_url?: string | null }>();
+
+        if (finderIds.length > 0) {
+            const { data: profiles, error: profilesError } = await supabase
+                .from('profiles')
+                .select('id, full_name, email, avatar_url')
+                .in('id', finderIds);
+
+            if (profilesError) {
+                console.warn('Could not resolve lead finders:', profilesError);
+            } else {
+                for (const profile of profiles || []) finders.set(profile.id, profile);
+            }
+        }
+
+        return (data || []).map((row: any) => mapRowToLead(row, finders.get(row.user_id)));
     },
 
     // WARNING: This replaces all leads for the user. Use with caution or prefer add/remove.

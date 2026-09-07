@@ -9,6 +9,7 @@ import type {
 } from '@/lib/schemas/leads';
 import { CompanySearchOrganizationSchema } from '@/lib/schemas/leads';
 import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
+import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 
 const PATH = '/api/leads/search';
 const PROFILE_STATUS_PATH = '/api/leads/profile-status';
@@ -94,7 +95,10 @@ export async function searchLinkedInProfileLead(
   body: LinkedInProfileSearchRequest,
   signal?: AbortSignal,
 ): Promise<LeadSearchResponse> {
-  const linkedinUrl = String(body.linkedin_url || body.linkedin_profile_url || body.linkedinUrl || '').trim();
+  const linkedinUrl = normalizeLinkedinProfileUrl(
+    body.linkedin_url || body.linkedin_profile_url || body.linkedinUrl,
+  );
+  if (!linkedinUrl) throw new Error('La URL de LinkedIn no es válida.');
   const revealEmail = body.reveal_email ?? body.revealEmail ?? false;
   const revealPhone = body.reveal_phone ?? body.revealPhone ?? false;
   const operationId = `profile-match:${crypto.randomUUID()}`;
@@ -146,10 +150,13 @@ export async function searchLinkedInProfileLead(
     source_provider_id: enriched.sourceProviderId,
     apollo_id: enriched.sourceProviderId,
   };
+  const pendingProfile = result.phone_enrichment?.status === 'queued'
+    || String(enriched.enrichmentStatus || '').trim().toLowerCase().startsWith('pending')
+    || (result.queued && result.operationStatus === 'submitted');
   if (enriched.errorCode === 'APOLLO_CREDITS_EXHAUSTED') {
     throw new Error('La cuenta de Apollo no tiene créditos disponibles. Recarga créditos o espera al próximo ciclo de facturación.');
   }
-  if (!hasUsableLinkedInProfileData(lead)) {
+  if (!hasUsableLinkedInProfileData(lead) && !pendingProfile) {
     if (enriched.enrichmentStatus === 'not_found') {
       return {
         count: 0,
@@ -214,21 +221,28 @@ export async function enrichLinkedInProfileLead(input: {
   });
 
   const json = await res.json().catch(() => null);
-  const providerOutcomeUnknown = json?.error === 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN'
+  const providerOutcomeUnknown = json?.error === 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN';
+  const recoverablePending = (providerOutcomeUnknown || [
+    'ENRICHMENT_OPERATION_PROCESSING',
+    'APOLLO_ENRICHMENT_TARGET_BUSY',
+  ].includes(String(json?.error || '')))
     && Array.isArray(json?.enriched)
     && Boolean(json.enriched[0]?.id);
-  if (!res.ok && !providerOutcomeUnknown) {
+  if (!res.ok && !recoverablePending) {
     if (res.status === 429) {
       throw new Error('Alcanzaste el límite diario de enriquecimientos. El perfil seguirá disponible sin datos de contacto.');
     }
     throw new Error('No pudimos iniciar la búsqueda de datos de contacto. Inténtalo nuevamente.');
   }
-  if ((!json?.queued && json?.operationStatus !== 'completed' && !providerOutcomeUnknown)
+  if ((!json?.queued && json?.operationStatus !== 'completed' && !recoverablePending)
     || !Array.isArray(json?.enriched) || !json.enriched[0]?.id) {
     throw new Error('No pudimos confirmar la búsqueda de datos de contacto. Inténtalo nuevamente.');
   }
 
-  return { ...json, queued: Boolean(json.queued || json.operationStatus === 'completed') };
+  return {
+    ...json,
+    queued: Boolean(json.queued || json.operationStatus === 'completed' || recoverablePending),
+  };
 }
 
 export async function searchCompanyNameLeads(

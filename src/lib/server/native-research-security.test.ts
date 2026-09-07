@@ -148,6 +148,60 @@ test('official-site collection keeps bounded HTML and falls back to useful page 
   assert.equal(nativeResearchInternals.usefulOfficialPageContent(truncatedRegionalLanding), null);
 });
 
+test('challenge content is rejected from raw pages, cached pages, and company search results', () => {
+  const poisoned = [
+    'Acme ofrece soluciones empresariales para operaciones regionales. '.repeat(12),
+    'One moment, please... Loader Please wait while your request is being verified.',
+  ].join(' ');
+  const page = nativeResearchInternals.officialPageFromHtml(
+    new URL('https://acme.com/about'),
+    `<html><head><title>Acme</title></head><body><main>${poisoned}</main></body></html>`,
+  );
+
+  assert.equal(page.text, '');
+  assert.equal(nativeResearchInternals.usefulOfficialPageContent(page), null);
+  assert.equal(nativeResearchInternals.isRelevantSearchResult({
+    title: 'Acme Logistics',
+    snippet: poisoned,
+    link: 'https://news.example/acme-logistics',
+    companyName: 'Acme Logistics',
+    companyDomain: 'acme.com',
+  }), false);
+
+  const cached = nativeResearchInternals.companySignalsFromArtifactPayload({
+    companySignals: {
+      domain: 'acme.com',
+      fetchedAt: '2026-09-04T12:00:00.000Z',
+      official: {
+        url: 'https://acme.com/about',
+        title: 'Acme',
+        description: null,
+        text: poisoned,
+      },
+    },
+  }, 'acme.com');
+  assert.equal(cached?.official, null);
+
+  const standardCloudflare = nativeResearchInternals.officialPageFromHtml(
+    new URL('https://acme.com/cdn-cgi/challenge-platform/h/g/orchestrate'),
+    '<html><head><title>Just a moment...</title></head><body>Checking your browser before accessing Acme.</body></html>',
+  );
+  assert.equal(nativeResearchInternals.usefulOfficialPageContent(standardCloudflare), null);
+  assert.equal(nativeResearchInternals.isRelevantSearchResult({
+    title: 'Just a moment...',
+    snippet: 'Acme',
+    link: 'https://acme.com/cdn-cgi/challenge-platform/h/g/orchestrate',
+    companyName: 'Acme',
+    companyDomain: 'acme.com',
+  }), false);
+
+  const usefulPageWithCaptchaScript = nativeResearchInternals.officialPageFromHtml(
+    new URL('https://acme.com/security'),
+    '<html><head><title>Seguridad de Acme</title><script src="https://google.com/recaptcha/api.js"></script></head><body><main><p>Acme protege sus operaciones con controles de acceso y auditorías periódicas para sus servicios empresariales.</p></main></body></html>',
+  );
+  assert.match(nativeResearchInternals.usefulOfficialPageContent(usefulPageWithCaptchaScript)?.statement || '', /Acme protege sus operaciones/);
+});
+
 test('official-site pages produce atomic deduplicated sections and support legacy flattened artifacts', () => {
   const page = nativeResearchInternals.officialPageFromHtml(
     new URL('https://acme.com/services'),

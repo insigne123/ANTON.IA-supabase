@@ -1,4 +1,5 @@
 import type { NativeResearchLead, NativeResearchOptions } from '@/lib/native-research-contracts';
+import { isHardRejectedResearchText } from '@/lib/research-fact-eligibility';
 import { searchSerper, type SerperSearchItem } from '@/lib/server/serper-search';
 
 const MAX_PERSON_EVIDENCE_ITEMS = 3;
@@ -74,13 +75,16 @@ export function scorePublicPersonIdentityMatch(input: {
   item: SerperSearchItem;
   lead: NativeResearchLead;
 }) {
+  const rawStatement = `${input.item.title || ''} ${input.item.snippet || ''}`;
+  if (isHardRejectedResearchText(rawStatement)) return 0;
+
   const fullName = normalizeIdentityText(input.lead.fullName);
   const companyName = normalizeIdentityText(input.lead.companyName);
   const companyDomain = normalizeDomain(input.lead.companyDomain || input.lead.companyWebsite);
   const role = normalizeIdentityText(input.lead.title);
   if (!fullName || (!companyName && !companyDomain)) return 0;
 
-  const statement = normalizeIdentityText(`${input.item.title || ''} ${input.item.snippet || ''}`);
+  const statement = normalizeIdentityText(rawStatement);
   if (!containsExactTokenSequence(statement, fullName)) return 0;
   const resultDomain = normalizeDomain(input.item.link);
   const companyNameMatches = Boolean(companyName && containsExactTokenSequence(statement, companyName));

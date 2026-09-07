@@ -2,12 +2,26 @@ import { z } from 'zod';
 
 import { PrepareCampaignV2DraftResponseSchema } from '@/lib/campaigns-v2/contracts';
 import { AuthError } from '@/lib/server/auth-utils';
+import { resolveCampaignStepRewriteContext } from '@/lib/server/campaigns-v2/rewrite-context';
 import { createNativeDraft, getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { campaignV2ComposeUrl } from './state';
 import { assertCampaignV2CreatorAccess, isCampaignsV2Enabled } from './feature-access';
 
 type SupabaseClientLike = ReturnType<typeof getSupabaseAdminClient>;
+
+function campaignStyleProfileId(settings: unknown) {
+  const value = settings && typeof settings === 'object' && !Array.isArray(settings)
+    ? (settings as Record<string, unknown>).followUpDrafting
+    : null;
+  const styleProfileId = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>).styleProfileId
+    : null;
+  return typeof styleProfileId === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(styleProfileId.trim())
+    ? styleProfileId.trim()
+    : null;
+}
 
 const PrepareClaimSchema = z.object({
   claimed: z.boolean(),
@@ -37,7 +51,7 @@ export async function prepareCampaignV2Draft(input: {
   if (!stepResult.data) throw new AuthError('Campaign recipient step not found', 404);
   const campaignResult = await client
     .from('campaigns')
-    .select('user_id')
+    .select('user_id,settings')
     .eq('id', stepResult.data.campaign_id)
     .eq('organization_id', input.organizationId)
     .eq('outreach_version', 2)
@@ -87,11 +101,19 @@ export async function prepareCampaignV2Draft(input: {
 
   let result;
   try {
+    const sequenceContext = await resolveCampaignStepRewriteContext({
+      organizationId: input.organizationId,
+      userId: input.userId,
+      campaignStepId: input.stepId,
+      client,
+    });
     result = await createNativeDraft({
       organizationId: input.organizationId,
       userId: input.userId,
       snapshotId: claim.snapshotId,
       instruction: claim.instruction,
+      styleProfileId: campaignStyleProfileId(campaignResult.data.settings),
+      sequenceContext,
       idempotencyKey: `campaign-recipient-step:${input.stepId}`,
     });
   } catch (error) {

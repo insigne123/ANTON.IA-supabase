@@ -40,6 +40,14 @@ test('first-contact plan input is strict and bounds delays and instructions', ()
     ...valid,
     styleProfileId: '30000000-0000-4000-8000-000000000001',
   }).success, true);
+  assert.equal(CreateFirstContactPlanBodySchema.safeParse({
+    ...valid,
+    styleProfileId: 'preset:pas',
+  }).success, true);
+  assert.equal(CreateFirstContactPlanBodySchema.safeParse({
+    ...valid,
+    styleProfileId: 'preset:not-a-preset',
+  }).success, false);
 });
 
 test('first-contact plan steps expose strict current draft summaries and generation failures', () => {

@@ -7,13 +7,9 @@
   "mcp": {
     "supabase-production": {
       "type": "remote",
-      "url": "https://mcp.supabase.com/mcp?project_ref=yfdelflsheurzaicwayi&read_only=true&features=database,docs",
-      "enabled": true
-    },
-    "supabase-nonprod": {
-      "type": "remote",
-      "url": "https://mcp.supabase.com/mcp?project_ref=htketmmhsfmucevvqmxi&features=database,docs",
-      "enabled": true
+      "url": "https://mcp.supabase.com/mcp?project_ref=yfdelflsheurzaicwayi&features=database,docs",
+      "enabled": true,
+      "timeout": 120000
     }
   }
 }

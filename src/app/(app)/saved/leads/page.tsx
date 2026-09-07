@@ -114,6 +114,8 @@ export default function SavedLeadsPage() {
       'LinkedIn Empresa',
       'Ubicación',
       'Industria',
+      'Fuente',
+      'Encontrado por',
       'Estado',
     ];
 
@@ -129,6 +131,8 @@ export default function SavedLeadsPage() {
       (l as any).companyLinkedin || '',
       l.location || '',
       l.industry || '',
+      l.sourceProvider || '',
+      l.foundBy?.name || '',
       l.status || '',
     ]));
 
@@ -156,7 +160,7 @@ export default function SavedLeadsPage() {
       }
 
       if (!term) return true;
-      const haystack = [lead.name, lead.company, lead.title, lead.industry, lead.email].map((value) => String(value || '').toLowerCase());
+      const haystack = [lead.name, lead.company, lead.title, lead.industry, lead.email, lead.foundBy?.name].map((value) => String(value || '').toLowerCase());
       return haystack.some((value) => value.includes(term));
     });
   }, [savedLeads, showOnlyMyLeads, user, searchTerm, companyFilter, titleFilter, industryFilter, createdFrom, createdTo]);
@@ -221,6 +225,14 @@ export default function SavedLeadsPage() {
     return Number.isNaN(date.getTime())
       ? '—'
       : new Intl.DateTimeFormat('es', { day: '2-digit', month: 'short', year: 'numeric' }).format(date);
+  };
+
+  const finderName = (lead: Lead) => {
+    if (lead.foundBy?.name) return lead.foundBy.name;
+    if (user && lead.userId === user.id) {
+      return String(user.user_metadata?.full_name || user.email || 'Tú');
+    }
+    return 'Miembro del equipo';
   };
 
   async function handleConfirmEnrich(opts: { revealEmail: boolean; revealPhone: boolean }) {
@@ -505,7 +517,7 @@ export default function SavedLeadsPage() {
             </Alert>
           ) : (
           <div className="overflow-x-auto rounded-2xl border border-border/60 bg-background/60">
-            <Table className="min-w-[760px]">
+            <Table className="min-w-[780px]">
               <TableHeader>
                 <TableRow className="bg-muted/20 hover:bg-muted/20">
                   <TableHead className="w-10">
@@ -515,12 +527,11 @@ export default function SavedLeadsPage() {
                       aria-label="Seleccionar todos los leads visibles"
                     />
                   </TableHead>
-                  <TableHead>Lead</TableHead>
-                  <TableHead>Empresa</TableHead>
-                  <TableHead>Contacto</TableHead>
-                  <TableHead className="hidden lg:table-cell">Contexto</TableHead>
-                  <TableHead className="hidden xl:table-cell">Guardado</TableHead>
-                  <TableHead className="w-24 text-right"><span className="sr-only">Acciones</span></TableHead>
+                   <TableHead>Lead</TableHead>
+                   <TableHead>Empresa</TableHead>
+                   <TableHead>Datos Apollo</TableHead>
+                   <TableHead className="hidden lg:table-cell">Encontrado por</TableHead>
+                   <TableHead className="w-24 text-right"><span className="sr-only">Acciones</span></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -532,7 +543,6 @@ export default function SavedLeadsPage() {
                       <TableCell><Skeleton className="h-4 w-28" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-36" /></TableCell>
                       <TableCell className="hidden lg:table-cell"><Skeleton className="h-4 w-24" /></TableCell>
-                      <TableCell className="hidden xl:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
                       <TableCell><Skeleton className="ml-auto h-8 w-16" /></TableCell>
                     </TableRow>
                   ))
@@ -560,24 +570,29 @@ export default function SavedLeadsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="max-w-[180px] truncate font-medium">{l.company || '—'}</div>
+                      <div className="max-w-[200px] truncate font-medium">{l.company || 'Empresa no informada'}</div>
                       {l.companyWebsite ? (
-                        <a className="mt-0.5 block max-w-[180px] truncate text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground" href={asHttp(l.companyWebsite)} target="_blank" rel="noreferrer">
+                        <a className="mt-0.5 block max-w-[200px] truncate text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground" href={asHttp(l.companyWebsite)} target="_blank" rel="noreferrer">
                           {displayDomain(l.companyWebsite)}
                         </a>
+                      ) : l.industry ? (
+                        <div className="mt-0.5 max-w-[200px] truncate text-xs text-muted-foreground">{l.industry}</div>
                       ) : null}
                     </TableCell>
                     <TableCell>
-                      <div className="max-w-[220px] truncate text-sm">{l.email || 'Sin email'}</div>
                       {l.linkedinUrl ? (
-                        <a className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground" href={l.linkedinUrl} target="_blank" rel="noreferrer">LinkedIn</a>
-                      ) : null}
+                        <a className="text-sm font-medium underline underline-offset-4 hover:text-primary" href={l.linkedinUrl} target="_blank" rel="noreferrer">Ver perfil de LinkedIn</a>
+                      ) : (
+                        <div className="text-sm font-medium">Perfil identificado</div>
+                      )}
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        {l.sourceProvider === 'apollo' || l.apolloId || l.sourceProviderId ? 'Fuente: Apollo' : 'Fuente registrada'}
+                      </div>
                     </TableCell>
                     <TableCell className="hidden lg:table-cell">
-                      <div className="max-w-[180px] truncate text-sm">{l.industry || 'Sin industria'}</div>
-                      <div className="max-w-[180px] truncate text-xs text-muted-foreground">{[l.city, l.country].filter(Boolean).join(', ') || 'Sin ubicación'}</div>
+                      <div className="max-w-[180px] truncate text-sm font-medium">{finderName(l)}</div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">{formatSavedDate(l)}</div>
                     </TableCell>
-                    <TableCell className="hidden text-sm text-muted-foreground xl:table-cell">{formatSavedDate(l)}</TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-1">
                       <Button size="icon" variant="ghost" onClick={() => setSelectedLeadForComments(l)} aria-label={`Abrir comentarios de ${l.name || 'lead'}`} title="Comentarios">
@@ -591,7 +606,7 @@ export default function SavedLeadsPage() {
                   </TableRow>
                 )) : (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-52 text-center">
+                    <TableCell colSpan={6} className="h-52 text-center">
                       <div className="mx-auto flex max-w-md flex-col items-center gap-3 px-4">
                         <div className="flex h-11 w-11 items-center justify-center rounded-full border border-border/70 bg-muted/40">
                           <Search className="h-5 w-5 text-muted-foreground" />

@@ -54,6 +54,7 @@ function shouldPersistResearchReportTransition(
 ) {
   return !existing
     || (existing.generationMethod === 'fallback' && incomingMethod === 'model')
+    || (existing.status === 'partial' && existing.retryable && incomingMethod === 'model')
     || existing.promptVersion !== incomingPromptVersion
     || (incomingSellerProfileHash !== undefined
       && existing.document.synthesis.sellerProfileHash !== incomingSellerProfileHash);
@@ -197,6 +198,8 @@ export async function upsertResearchReportDocument(input: {
     .eq('organization_id', snapshot.scope.organizationId)
     .eq('user_id', snapshot.scope.ownerUserId)
     .eq('prompt_version', existing.promptVersion)
+    .eq('content_hash', existing.contentHash)
+    .eq('updated_at', existing.updatedAt)
     .select('*')
     .maybeSingle();
   if (error) throw error;
@@ -233,7 +236,7 @@ export async function ensureResearchReportDocument(input: {
   const existing = await load({ researchSnapshotId: snapshot.id, access: input.access });
   const expectedSellerProfileHash = sellerProfileHash(input.sellerProfile);
   if (existing) {
-    const needsRetry = existing.generationMethod === 'fallback' && existing.retryable;
+    const needsRetry = existing.status === 'partial' && existing.retryable;
     const needsPromptUpgrade = existing.promptVersion !== RESEARCH_REPORT_PROMPT_VERSION;
     const needsSellerProfileUpgrade = existing.document.synthesis.sellerProfileHash !== expectedSellerProfileHash;
     if (!needsRetry && !needsPromptUpgrade && !needsSellerProfileUpgrade) {

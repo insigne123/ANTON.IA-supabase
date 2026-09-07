@@ -5,7 +5,8 @@
 Tests are local-first and fail closed before connecting to Supabase. The only
 remote test target is nonproduction project `htketmmhsfmucevvqmxi`.
 Production project `yfdelflsheurzaicwayi` is forbidden for all test and QA
-writes and is available to OpenCode only for read-only diagnosis.
+writes. Its project-scoped MCP is reserved for diagnosis and explicitly
+requested forward-only migrations, never test execution.
 
 Never run a test suite with `.env.local`. Local and nonproduction test files set
 the following controls:

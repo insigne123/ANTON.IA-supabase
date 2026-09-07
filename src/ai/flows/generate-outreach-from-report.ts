@@ -267,6 +267,31 @@ function boundedWritingStyle(profile: Record<string, unknown>) {
       ...(typeof cta.duration === 'string' ? { duration: cta.duration.trim().slice(0, 80) } : {}),
     };
   }
+  for (const key of ['structure', 'do', 'dont']) {
+    const values = Array.isArray(profile[key])
+      ? profile[key].map((value) => String(value || '').trim()).filter(Boolean).slice(0, 12)
+      : [];
+    if (values.length) bounded[key] = values.map((value) => value.slice(0, 240));
+  }
+  const personalization = profile.personalization && typeof profile.personalization === 'object' && !Array.isArray(profile.personalization)
+    ? profile.personalization as Record<string, unknown>
+    : null;
+  if (personalization) {
+    bounded.personalization = {
+      useLeadName: personalization.useLeadName !== false,
+      useCompanyName: personalization.useCompanyName !== false,
+      useReportSignals: personalization.useReportSignals !== false,
+    };
+  }
+  const constraints = profile.constraints && typeof profile.constraints === 'object' && !Array.isArray(profile.constraints)
+    ? profile.constraints as Record<string, unknown>
+    : null;
+  if (constraints) {
+    bounded.constraints = {
+      noFabrication: constraints.noFabrication !== false,
+      noSensitiveClaims: constraints.noSensitiveClaims !== false,
+    };
+  }
   return bounded;
 }
 
@@ -381,7 +406,11 @@ Usa esta metadata solo para mantener continuidad y evitar repetir asuntos. Nunca
  - Usa uno o dos detalles de la evidencia, nunca una lista de categorías o servicios copiada de la web.
  - Si el detalle contiene varias categorías separadas por comas o por "y", elige solo una y redacta una oración sin enumeraciones.`;
 
-  return `Idioma: Español (Chile). Redacta un único correo frío B2B que parezca escrito personalmente por una persona ocupada, no por un equipo de marketing. El objetivo es abrir una conversación comercial relevante, no presentar un catálogo ni cerrar una venta en el primer contacto.
+  const language = String(input.context.style.profile.language || '').toLowerCase().startsWith('en')
+    ? 'English'
+    : 'Español (Chile)';
+
+  return `Idioma: ${language}. Redacta un único correo frío B2B que parezca escrito personalmente por una persona ocupada, no por un equipo de marketing. El objetivo es abrir una conversación comercial relevante, no presentar un catálogo ni cerrar una venta en el primer contacto.
 
 Usa exclusivamente WRITING_CONTEXT, REQUIRED_FACTUAL_PERSONALIZATION y REQUIRED_COMMERCIAL_ANGLE cuando exista. No inventes datos, métricas, clientes, necesidades ni fuentes. No muestres URLs, IDs, nombres de herramientas ni el proceso de investigación dentro del correo.
 
@@ -391,7 +420,7 @@ Reglas no negociables:
 - Asunto entre ${input.context.constraints.subject.minCharacters} y ${input.context.constraints.subject.maxCharacters} caracteres.
 - Devuelve entre ${modelBodyWords.min} y ${modelBodyWords.max} palabras sumando contextParagraph y offerParagraph. El servidor agregará el saludo y el CTA aprobado.
 - contextParagraph debe tener al menos ${minimumContextParagraphWords} palabras y offerParagraph al menos ${minimumOfferParagraphWords}; ambos deben aportar contenido útil.
-- Sigue WRITING_CONTEXT.style para el tono y las instrucciones de escritura, salvo que contradiga estas reglas.
+- Sigue todos los campos de WRITING_CONTEXT.style para tono, estructura, cosas que hacer y evitar, personalización y extensión, salvo que contradigan estas reglas. Si define un framework, aplícalo sin nombrarlo y no lo mezcles con otro.
 ${structureRules}
 - Cada párrafo debe tener como máximo dos frases; contextParagraph debe tener una sola frase.
 - No incluyas saludo ni constraints.cta.exactText. El servidor los agregará literalmente.

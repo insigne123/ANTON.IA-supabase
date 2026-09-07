@@ -146,15 +146,16 @@ function normalizeLeadForUI(raw: Lead, options?: {
   phoneStatus?: 'not_requested' | 'queued' | 'skipped' | 'failed' | undefined;
   revealEmail?: boolean;
   revealPhone?: boolean;
+  organization?: CompanySearchOrganization | null;
 }): UILaed {
   const name =
     raw.name?.trim() || `${raw.first_name || ''} ${raw.last_name || ''}`.trim() || '—';
 
   const company =
-    raw.organization_name?.trim() || raw.org_name?.trim() || raw.organization?.name?.trim() || '—';
+    options?.organization?.name?.trim() || raw.organization_name?.trim() || raw.org_name?.trim() || raw.organization?.name?.trim() || '—';
 
   const title = raw.title?.trim() || '—';
-  const industry = raw.organization_industry?.trim() || raw.industry?.trim() || raw.organization?.industry?.trim() || '—';
+  const industry = options?.organization?.industry?.trim() || raw.organization_industry?.trim() || raw.industry?.trim() || raw.organization?.industry?.trim() || '—';
 
   const location = [raw.city, raw.state, raw.country].filter(Boolean).join(', ') || '—';
 
@@ -163,11 +164,13 @@ function normalizeLeadForUI(raw: Lead, options?: {
     `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&size=40`;
 
   const companyWebsite =
+    options?.organization?.website_url?.trim() ||
+    options?.organization?.primary_domain?.trim() ||
     raw.organization_website?.trim() ||
     raw.organization?.website_url?.trim() ||
     raw.organization_domain?.trim() ||
     (raw.organization?.domain ? `https://${raw.organization.domain}` : null);
-  const companyLinkedin = raw.organization?.linkedin_url?.trim() || null;
+  const companyLinkedin = options?.organization?.linkedin_url?.trim() || raw.organization?.linkedin_url?.trim() || null;
   const linkedinUrl = raw.linkedin_url || null;
   const phoneNumbers = normalizeUiPhoneNumbers(raw.phone_numbers);
   const fallbackPhone = getPhoneFallback(phoneNumbers);
@@ -195,8 +198,8 @@ function normalizeLeadForUI(raw: Lead, options?: {
     phoneNumbers: revealPhone ? (phoneNumbers || null) : null,
     primaryPhone: revealPhone ? primaryPhone : null,
     enrichmentStatus: revealPhone || revealEmail ? enrichmentStatus : undefined,
-    country: null,
-    city: null,
+    country: raw.country || null,
+    city: raw.city || null,
     status: 'saved',
     emailEnrichment: revealEmail && raw.email ? { enriched: true } : undefined,
   };
@@ -603,7 +606,8 @@ export default function SearchPage() {
 
       setCompanyCandidates([]);
       setCompanySelectionPending(false);
-      setSelectedOrganization((current) => result.selected_organization || (candidates.length === 1 ? candidates[0] : current));
+      const canonicalOrganization = result.selected_organization || (candidates.length === 1 ? candidates[0] : selectedOrganization);
+      setSelectedOrganization(canonicalOrganization || null);
       setProfileSearchNotice(null);
       setLastProfilePhoneStatus(null);
       setProfilePhonePollingIds([]);
@@ -611,6 +615,7 @@ export default function SearchPage() {
       setLeads(result.leads.map((raw) => normalizeLeadForUI(raw, {
         revealEmail: true,
         revealPhone: true,
+        organization: canonicalOrganization,
       })));
       return;
     }

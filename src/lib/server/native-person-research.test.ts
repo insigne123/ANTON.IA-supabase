@@ -73,6 +73,25 @@ test('person search uses exact identity context and rejects name collisions', ()
   }) > scorePublicPersonIdentityMatch({ lead, item: rolelessMatch }));
 });
 
+test('person identity scoring rejects padded challenge snippets before matching identity terms', () => {
+  const poisonedSnippet = [
+    'Ana Silva forma parte del equipo ejecutivo de Acme Logistics. '.repeat(12),
+    'One moment, please... Loader Please wait while your request is being verified.',
+  ].join(' ');
+
+  assert.equal(scorePublicPersonIdentityMatch({
+    lead,
+    item: {
+      title: 'Ana Silva - Directora de Operaciones en Acme Logistics',
+      snippet: poisonedSnippet,
+      link: 'https://www.linkedin.com/in/ana-silva',
+      source: 'LinkedIn',
+      date: null,
+      position: 1,
+    },
+  }), 0);
+});
+
 test('person evidence stages fallbacks, deduplicates results, and stops when matches are sufficient', async () => {
   assert.deepEqual(buildPublicPersonSearchQueries(lead), [
     '"Ana Silva" "Acme Logistics" "Directora de Operaciones"',

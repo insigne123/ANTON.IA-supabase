@@ -10,7 +10,7 @@ export const NATIVE_COMPANY_RESEARCH_ICP_HASH = createHash('sha256')
   .digest('hex');
 export const NATIVE_COMPANY_RESEARCH_PROMPT_VERSION = 'native-research-prompt/v3';
 export const NATIVE_COMPANY_RESEARCH_PROVIDER = 'native-research-v1';
-export const NATIVE_COMPANY_RESEARCH_PROVIDER_VERSION = 'native-research-provider/v2';
+export const NATIVE_COMPANY_RESEARCH_PROVIDER_VERSION = 'native-research-provider/v3';
 
 export type CompanyResearchArtifactStatus = 'queued' | 'running' | 'completed' | 'partial' | 'insufficient_data' | 'failed' | 'cancelled';
 

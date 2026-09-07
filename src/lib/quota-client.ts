@@ -7,6 +7,7 @@ export type QuotaKind = 'leadSearch' | 'enrich' | 'research' | 'contact';
 export type QuotaLimits = Record<QuotaKind, number>;
 
 const CREDIT_KINDS: QuotaKind[] = ['leadSearch', 'enrich', 'research'];
+let quotaStorageScope = 'anonymous:personal';
 
 export function isCreditQuotaKind(kind: QuotaKind) {
   return kind !== 'contact';
@@ -25,11 +26,17 @@ type QuotaState = Record<QuotaKind, number>;
 const EMPTY: QuotaState = { leadSearch: 0, enrich: 0, research: 0, contact: 0 };
 
 function storageKey() {
-  return `anton.quota.${todayKeyUTC()}`;
+  return `anton.quota.${quotaStorageScope}.${todayKeyUTC()}`;
 }
 
 function limitsStorageKey() {
-  return `anton.quota.limits.${todayKeyUTC()}`;
+  return `anton.quota.limits.${quotaStorageScope}.${todayKeyUTC()}`;
+}
+
+export function setQuotaStorageScope(userId?: string | null, organizationId?: string | null) {
+  const user = String(userId || '').trim() || 'anonymous';
+  const organization = String(organizationId || '').trim() || 'personal';
+  quotaStorageScope = `${user}:${organization}`;
 }
 
 /** Emite un evento de cambio de cuota para re-render en UI sin polling. */

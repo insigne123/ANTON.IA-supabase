@@ -1,9 +1,11 @@
 import { z } from 'zod';
 
 import { AuthError } from '@/lib/server/auth-utils';
+import { EmailStyleSelectionSchema } from '@/lib/outsourcing-email-style-presets';
 import {
   createNativeDraft,
   getCurrentNativeDraft,
+  getNativeDraftWritingStyle,
 } from '@/lib/server/native-drafts';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { loadSellerProfile } from '@/lib/server/seller-profile';
@@ -20,7 +22,7 @@ export const DEFAULT_CAMPAIGN_V2_SEQUENCE_INSTRUCTION =
 
 export const CampaignV2DraftingConfigSchema = z.object({
   sequenceInstruction: z.string().trim().min(1).max(1_000),
-  styleProfileId: z.string().uuid().nullable(),
+  styleProfileId: EmailStyleSelectionSchema.nullable(),
 }).strict();
 export type CampaignV2DraftingConfig = z.infer<typeof CampaignV2DraftingConfigSchema>;
 
@@ -144,16 +146,25 @@ export async function pregenerateFirstContactPlanDrafts(input: {
     existingDrafts.set(step.id, draft);
   }
   const sellerProfile = await loadSellerProfile(input.userId);
+  const config = draftingConfig(campaign.settings);
+  const writingStyle = config.styleProfileId
+    ? undefined
+    : await getNativeDraftWritingStyle({
+        organizationId: input.organizationId,
+        userId: input.userId,
+        draft: initialDraft,
+      });
 
   await generateFollowUpDraftBatch({
     organizationId: input.organizationId,
     userId: input.userId,
     snapshotId: enrollment.research_snapshot_id,
-    config: draftingConfig(campaign.settings),
+    config,
     initialDraft,
     steps,
     existingDrafts,
     sellerProfile,
+    writingStyle,
     targetStepId: input.targetStepId,
   }, {
     createDraft: (request) => createNativeDraft(request),

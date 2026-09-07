@@ -4,6 +4,7 @@ import {
   type FirstContactPlan,
 } from '@/lib/campaigns-v2/contracts';
 import { AuthError } from '@/lib/server/auth-utils';
+import { materializeOutsourcingEmailStylePreset } from '@/lib/server/email-style-profiles';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { assertCampaignV2CreatorAccess, isCampaignsV2Enabled } from './feature-access';
 import {
@@ -226,23 +227,32 @@ export async function createFirstContactPlan(input: {
     userId: input.userId,
     client,
   });
-  if (!existing && text(draftResult.data.current_version_id) !== input.body.versionId) {
-    throw new AuthError('Native draft version is no longer current', 409);
+  if (!existing) {
+    if (text(draftResult.data.current_version_id) !== input.body.versionId) {
+      throw new AuthError('Native draft version is no longer current', 409);
+    }
+    const config = CampaignV2DraftingConfigSchema.parse({
+      sequenceInstruction: input.body.sequenceInstruction || DEFAULT_CAMPAIGN_V2_SEQUENCE_INSTRUCTION,
+      styleProfileId: input.body.styleProfileId ?? null,
+    });
+    const materializedStyle = await materializeOutsourcingEmailStylePreset({
+      selection: config.styleProfileId,
+      organizationId: input.organizationId,
+      userId: input.userId,
+      client,
+    });
+    const styleProfileId = materializedStyle?.id || config.styleProfileId;
+    const { error } = await client.rpc('create_first_contact_campaign_plan_v2', {
+      p_organization_id: input.organizationId,
+      p_user_id: input.userId,
+      p_draft_id: input.body.draftId,
+      p_version_id: input.body.versionId,
+      p_style_profile_id: styleProfileId,
+      p_sequence_instruction: config.sequenceInstruction,
+      p_steps: input.body.steps,
+    });
+    if (error) throw error;
   }
-  const config = CampaignV2DraftingConfigSchema.parse({
-    sequenceInstruction: input.body.sequenceInstruction || DEFAULT_CAMPAIGN_V2_SEQUENCE_INSTRUCTION,
-    styleProfileId: input.body.styleProfileId ?? null,
-  });
-  const { error } = await client.rpc('create_first_contact_campaign_plan_v2', {
-    p_organization_id: input.organizationId,
-    p_user_id: input.userId,
-    p_draft_id: input.body.draftId,
-    p_version_id: input.body.versionId,
-    p_style_profile_id: config.styleProfileId,
-    p_sequence_instruction: config.sequenceInstruction,
-    p_steps: input.body.steps,
-  });
-  if (error) throw error;
 
   await pregenerateFirstContactPlanDrafts({
     draftId: input.body.draftId,

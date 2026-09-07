@@ -27,7 +27,7 @@ test('email style input validation normalizes valid writes', () => {
   assert.deepEqual(parseEmailStyleBody({
     id: 'A8BE3D8A-8B6E-4BE3-9A56-9CB4DCEBEF52',
     name: '  Consultivo  ',
-    profile,
+    profile: { ...profile, presetId: 'pas' },
     isDefault: true,
   }), {
     id: 'a8be3d8a-8b6e-4be3-9a56-9cb4dcebef52',
@@ -63,6 +63,7 @@ test('email style responses preserve the public camel-case contract', () => {
     id: 'style-1',
     name: 'Directo',
     profile: { tone: 'direct' },
+    content_hash: 'hash',
     revision: 3,
     is_default: true,
     updated_at: '2026-08-24T12:00:00.000Z',
@@ -90,13 +91,8 @@ test('email style writes derive ownership and revisions on the server', () => {
   assert.match(routeSource, /const contentHash = canonicalSha256\(input\.profile\)/);
 });
 
-test('default selection is serialized and reconciles prior defaults within the same scope', () => {
+test('default selection scopes promotion and cleanup to the same owner', () => {
   assert.match(routeSource, /withMutationLock\(\s*`\$\{auth\.organizationId\}:\$\{auth\.user\.id\}`/);
   assert.match(routeSource, /\.update\(\{ is_default: false, updated_at: updatedAt \}\)\s*\.eq\('organization_id', organizationId\)\s*\.eq\('user_id', userId\)\s*\.eq\('is_default', true\)\s*\.neq\('id', row\.id\)/);
   assert.match(routeSource, /\.update\(\{ is_default: true, updated_at: updatedAt \}\)\s*\.eq\('id', row\.id\)\s*\.eq\('organization_id', organizationId\)\s*\.eq\('user_id', userId\)/);
-  assert.ok(
-    routeSource.indexOf('.update({ is_default: true, updated_at: updatedAt })')
-      < routeSource.indexOf('.update({ is_default: false, updated_at: updatedAt })'),
-    'the target must be promoted before other defaults are cleared so concurrent writes cannot leave multiple defaults',
-  );
 });

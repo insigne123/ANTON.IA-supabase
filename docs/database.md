@@ -11,27 +11,28 @@ production data; Auth identities are provisioned by scripts after reset.
 to a superseded nonproduction lineage and is never scanned by the CLI. Do not
 move archived files back into the active chain or mark them applied elsewhere.
 
-Database work is local-first:
+Database work follows the shortest proportional path for the requested change:
 
 1. Author and review the migration locally.
-2. Replay the complete history with a local reset.
-3. Run lint, pgTAP, integration, and unit tests.
-4. Review a dry run against the approved nonproduction project.
-5. Push to nonproduction only with explicit approval.
-6. Run the nonproduction smoke.
+2. Run the smallest relevant static, unit, type, and build checks available.
+3. Use local Supabase or nonproduction only when the user requests it or the
+   change specifically needs that environment.
+4. With an explicit production request, apply one reviewed forward-only
+   migration through the project-scoped `supabase-production` MCP.
+5. Verify schema, RLS, grants, and logs immediately before continuing a rollout.
 
-Production project `yfdelflsheurzaicwayi` is a forbidden write target for this
-workflow. Its OpenCode MCP is configured read-only. There is intentionally no
-`db:push:production` npm script, and no command in this document authorizes an
-ad hoc production push.
+Production project `yfdelflsheurzaicwayi` is the primary hosted target. It is
+writeable only for an explicitly requested migration or repair, never for
+tests, seeds, resets, or exploratory SQL. Use the project-scoped MCP rather
+than linking the development CLI or adding credentials to the repository.
 
 ## Targets and controls
 
 | Target | Ref | Data | Database writes |
 | --- | --- | --- | --- |
 | Local | None | Disposable and synthetic | Allowed through local npm scripts. |
-| Nonproduction | `htketmmhsfmucevvqmxi` | Synthetic only | Allowed only through guarded scripts after target verification and approval. |
-| Production | `yfdelflsheurzaicwayi` | Real | Forbidden here; read-only diagnosis only. |
+| Nonproduction | `htketmmhsfmucevvqmxi` | Synthetic only | Optional; allowed only through guarded scripts after explicit approval. |
+| Production | `yfdelflsheurzaicwayi` | Real | Explicit, reviewed forward-only migrations through `supabase-production`; never tests or resets. |
 
 `scripts/supabase-nonprod.mjs` hard-codes the nonproduction ref and rejects
 remote commands when the CLI link does not match it. Test scripts add a second
@@ -79,9 +80,9 @@ safe when replayed in repository order. Add or update pgTAP coverage under
 Do not copy schema or customer data from production to create a migration. Do
 not use `supabase db pull` against production as a shortcut.
 
-## Required local validation
+## Proportional validation
 
-Run the complete replay before considering a migration ready:
+When local Supabase is available and the change warrants a full replay, use:
 
 ```powershell
 npm run db:start
@@ -96,11 +97,16 @@ Check the first migration error rather than patching the resulting local
 database manually. Any manual local change disappears at the next reset and is
 not part of the schema source of truth.
 
+Docker and nonproduction are not automatic release gates. If they are
+unavailable, review the complete SQL, run the relevant application checks, and
+state which database checks were skipped. Never compensate by running a reset,
+seed, pgTAP suite, or exploratory validation against production.
+
 The current integration suite authenticates owner, member, and outsider users
 with the anon key and verifies organization isolation. Expand those contracts
 when a migration changes tenant ownership or RLS.
 
-## Nonproduction migration workflow
+## Optional nonproduction workflow
 
 Remote migration work must be explicitly requested. Authenticate the CLI with
 an account that can access only the intended nonproduction project when
@@ -135,6 +141,20 @@ npm run test:collaboration:pilot
 Never turn a failed dry run or smoke test into an automatic push. Resolve the
 problem locally, replay the full history, and repeat review.
 
+## Production migration workflow
+
+Production writes require an explicit user request. Confirm that the MCP is
+scoped to `yfdelflsheurzaicwayi`, inspect the exact SQL, and apply one small
+forward-only migration at a time with `supabase-production`. Do not link the
+development CLI to production and do not use `execute_sql` for DDL when
+`apply_migration` is available.
+
+After each migration, verify the affected tables or functions, primary keys,
+foreign keys, RLS policies, and grants. Check relevant logs before deploying
+dependent application code or Functions. If verification fails, stop and
+prepare a new corrective migration; never reset production or edit migration
+history.
+
 ## Rollback and repair
 
 Migrations are forward-only in shared environments. Do not delete migration
@@ -146,9 +166,8 @@ repair commands against a hosted project.
 - After a nonproduction push, create a reviewed corrective migration. Preserve
   data unless its deletion is explicitly part of the approved synthetic-data
   cleanup.
-- For production, stop and use the separate release/incident process in
-  [Deployment](./deployment.md). This documentation grants no production write
-  permission.
+- For production, use a new reviewed corrective migration and verify the
+  affected surface before resuming the release.
 
 Application rollback and database rollback are different. Reverting application
 code does not remove an applied migration, so compatibility must be considered
@@ -170,12 +189,11 @@ before any shared-environment push.
 ## Review checklist
 
 - The migration is new, forward-only, ordered, and reviewed.
-- `npm run test:reset`, `db:lint`, `db:test`, `test:integration`, and
-  `test:unit` pass on Node 22.
+- Relevant available tests pass on Node 22; skipped database checks are stated.
 - RLS behavior is checked as owner, member, and outsider where relevant.
 - No production data, credentials, project URLs, or user identifiers were
   added.
-- Nonproduction dry-run output contains only expected files.
+- Any requested nonproduction dry-run contains only expected files.
 - The nonproduction push, if any, had explicit approval and was followed by
   `npm run test:staging`.
-- No production database write command was run.
+- Every production write had explicit approval and was verified immediately.

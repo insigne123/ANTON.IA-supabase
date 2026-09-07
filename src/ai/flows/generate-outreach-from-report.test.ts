@@ -116,6 +116,51 @@ test('DraftContextV2 generation reserves enough model words for server normaliza
   }
 });
 
+test('DraftContextV2 generation passes the complete saved writing style to the model', async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      const request = JSON.parse(String(init?.body || '{}'));
+      prompt = String(request.messages?.[1]?.content || '');
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', contextParagraph: 'Acme reduce trabajo manual.', offerParagraph: 'Northstar ordena tareas repetitivas.' }) } }],
+        usage: {},
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    const base = draftContextFixture();
+    await generateOutreachFromDraftContextV2({
+      context: {
+        ...base,
+        style: {
+          ...base.style,
+          profile: {
+            tone: 'direct',
+            language: 'en',
+            structure: ['hook', 'value', 'cta'],
+            do: ['use one verified fact'],
+            dont: ['mix frameworks'],
+            personalization: { useLeadName: true, useCompanyName: true, useReportSignals: true },
+            constraints: { noFabrication: true, noSensitiveClaims: true },
+          },
+        },
+      },
+    });
+
+    assert.match(prompt, /^Idioma: English\./);
+    assert.match(prompt, /"structure":\["hook","value","cta"\]/);
+    assert.match(prompt, /"do":\["use one verified fact"\]/);
+    assert.match(prompt, /"dont":\["mix frameworks"\]/);
+    assert.match(prompt, /"noFabrication":true/);
+  } finally {
+    if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousOpenAiKey;
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test('DraftContextV2 generation ignores a generic priority hypothesis from the report', async () => {
   const previousOpenAiKey = process.env.OPENAI_API_KEY;
   const previousFetch = globalThis.fetch;

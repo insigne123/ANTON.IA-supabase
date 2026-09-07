@@ -6,6 +6,11 @@ import { useState } from 'react';
 import { AlertCircle, Mail, Phone } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import {
+    APOLLO_EMAIL_ENRICHMENT_CREDITS,
+    APOLLO_PHONE_ENRICHMENT_CREDITS,
+    apolloEnrichmentCreditCost,
+} from '@/lib/apollo-credit-costs';
 
 interface EnrichmentOptionsDialogProps {
     open: boolean;
@@ -20,6 +25,8 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
     const [revealPhone, setRevealPhone] = useState(false);
 
     const hasSelection = revealEmail || revealPhone;
+    const creditsPerContact = apolloEnrichmentCreditCost({ revealEmail, revealPhone });
+    const estimatedCredits = leadCount * creditsPerContact;
 
     const handleConfirm = () => {
         onConfirm({ revealEmail, revealPhone });
@@ -49,7 +56,7 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
                             </span>
                         </Label>
                         <Badge variant="secondary" className="shrink-0 tabular-nums">
-                            Correo
+                            {APOLLO_EMAIL_ENRICHMENT_CREDITS} crédito
                         </Badge>
                     </div>
 
@@ -65,15 +72,20 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
                             </span>
                         </Label>
                         <Badge variant="secondary" className="shrink-0 tabular-nums">
-                            Asíncrono
+                            {APOLLO_PHONE_ENRICHMENT_CREDITS} créditos
                         </Badge>
                     </div>
 
                     {hasSelection ? (
                         <div className="rounded-2xl border border-border/60 bg-muted/30 p-3 text-sm" role="status" aria-live="polite">
-                            <div className="font-medium">{leadCount === 1 ? '1 contacto seleccionado' : `${leadCount} contactos seleccionados`}</div>
+                            <div className="flex items-center justify-between gap-3 font-medium">
+                                <span>{leadCount === 1 ? '1 contacto seleccionado' : `${leadCount} contactos seleccionados`}</span>
+                                <span className="tabular-nums">
+                                    {estimatedCredits} {estimatedCredits === 1 ? 'crédito' : 'créditos'}
+                                </span>
+                            </div>
                             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                                La app cuenta una operación diaria por contacto enviado. El consumo del proveedor se registra por separado según los datos solicitados.
+                                Estimado de Apollo: {creditsPerContact} {creditsPerContact === 1 ? 'crédito' : 'créditos'} por contacto. La cuota diaria interna cuenta una operación por contacto enviado.
                             </p>
                         </div>
                     ) : (

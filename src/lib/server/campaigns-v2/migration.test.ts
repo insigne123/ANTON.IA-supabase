@@ -9,6 +9,7 @@ const pregeneratedDraftMigration = readFileSync(
 );
 const researchMessagingMigration = readFileSync('supabase/migrations/20260813093000_research_messaging_v1.sql', 'utf8');
 const prepareDraftSource = readFileSync('src/lib/server/campaigns-v2/prepare-draft.ts', 'utf8');
+const emailStylesRouteSource = readFileSync('src/app/api/email-styles/route.ts', 'utf8');
 const inboundIngestionSource = readFileSync('src/lib/server/inbound-reply-ingestion.ts', 'utf8');
 const trackingWebhookSource = readFileSync('src/app/api/tracking/webhook/route.ts', 'utf8');
 const unsubscribeRouteSource = readFileSync('src/app/api/tracking/unsubscribe/route.ts', 'utf8');
@@ -156,8 +157,12 @@ test('pre-generated draft revisions remain not due and due promotion reuses exis
     'create or replace function public.promote_due_campaign_recipient_steps_v2',
     'revoke all on function public.create_first_contact_campaign_plan_v2',
   );
+  assert.match(revisionSync, /set native_version_id = new\.id/);
+  assert.match(revisionSync, /when crs\.step_index = 0 then crs\.state/);
   assert.match(revisionSync, /when crs\.state = 'not_due' then 'not_due'/);
   assert.match(revisionSync, /and crs\.outbound_dispatch_id is null/);
+  assert.match(revisionSync, /and crs\.state not in \('sent', 'skipped', 'blocked'\)/);
+  assert.match(migration, /create trigger sync_campaign_recipient_step_draft_review_v2\s+after insert on public\.messaging_draft_versions\s+for each row execute function public\.sync_campaign_recipient_step_draft_review_v2\(\)/);
   assert.match(promotion, /when v_step\.native_draft_id is null then 'ready_to_prepare'/);
   assert.match(promotion, /md\.current_version_id = v_step\.native_version_id/);
   assert.match(promotion, /mdv\.approval ->> 'status' = 'approved'/);
@@ -220,6 +225,12 @@ test('draft pre-generation config and linking are service-owned, scoped, atomic,
   assert.match(pregeneratedDraftMigration, /revoke all on table public\.campaign_v2_draft_reservations from public, anon, authenticated/);
   assert.match(pregeneratedDraftMigration, /revoke all on function public\.bind_campaign_recipient_step_dispatch_v2\(\)[\s\S]+from public, anon, authenticated/);
   assert.match(pregeneratedDraftMigration, /revoke all on function public\.sync_campaign_recipient_step_draft_review_v2\(\)[\s\S]+from public, anon, authenticated/);
+});
+
+test('built-in email presets are exposed to selectors and materialized before native or campaign drafting', () => {
+  assert.match(emailStylesRouteSource, /includePresets/);
+  assert.match(emailStylesRouteSource, /outsourcingEmailStylePresetSelection/);
+  assert.match(prepareDraftSource, /campaignStyleProfileId/);
 });
 
 test('reserved follow-up drafts survive campaign deletion as blocked tombstones and are retained while live', () => {
@@ -332,6 +343,9 @@ test('Campaign V2 privacy cascade and deterministic preparation claims remain re
   assert.ok(snapshotGuard >= 0 && lockedStepRead > snapshotGuard);
   assert.match(claim, /'claimToken', v_claim_token/);
   assert.match(prepareDraftSource, /idempotencyKey: `campaign-recipient-step:\$\{input\.stepId\}`/);
+  assert.match(prepareDraftSource, /resolveCampaignStepRewriteContext/);
+  assert.match(prepareDraftSource, /styleProfileId: campaignStyleProfileId\(campaignResult\.data\.settings\)/);
+  assert.match(prepareDraftSource, /sequenceContext,/);
   assert.ok((prepareDraftSource.match(/\.eq\('preparation_claim_token', claim\.claimToken\)/g) || []).length >= 3);
   assert.match(prepareDraftSource, /preparation_claim_token: null/);
 });

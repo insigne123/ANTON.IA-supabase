@@ -30,13 +30,16 @@ test('plan reads project current strict draft summaries and per-step generation 
 
 test('plan creation is idempotent and retries missing pre-generated drafts before returning', () => {
   const existingRead = source.indexOf('const existing = await queryFirstContactPlan');
-  const createGuard = source.indexOf('if (!existing &&', existingRead);
+  const createGuard = source.indexOf('if (!existing) {', existingRead);
+  const materialize = source.indexOf('const materializedStyle = await materializeOutsourcingEmailStylePreset', createGuard);
   const rpc = source.indexOf("client.rpc('create_first_contact_campaign_plan_v2'", createGuard);
   const pregenerate = source.indexOf('await pregenerateFirstContactPlanDrafts', rpc);
   const finalRead = source.indexOf('const plan = await queryFirstContactPlan', pregenerate);
 
   assert.ok(existingRead >= 0 && existingRead < createGuard);
-  assert.ok(createGuard < rpc && rpc < pregenerate && pregenerate < finalRead);
-  assert.match(source, /p_style_profile_id: config\.styleProfileId/);
+  assert.ok(createGuard < materialize && materialize < rpc && rpc < pregenerate && pregenerate < finalRead);
+  assert.match(source, /if \(!existing\) \{[\s\S]+materializeOutsourcingEmailStylePreset[\s\S]+create_first_contact_campaign_plan_v2[\s\S]+\n  \}\n\n  await pregenerateFirstContactPlanDrafts/);
+  assert.match(source, /const materializedStyle = await materializeOutsourcingEmailStylePreset\([\s\S]+const styleProfileId = materializedStyle\?\.id \|\| config\.styleProfileId/);
+  assert.match(source, /p_style_profile_id: styleProfileId/);
   assert.match(source, /p_sequence_instruction: config\.sequenceInstruction/);
 });

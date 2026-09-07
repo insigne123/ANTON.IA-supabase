@@ -85,6 +85,33 @@ test('LinkedIn profile search returns professional profile fields', async () => 
   }
 });
 
+test('LinkedIn profile search preserves accented profile identity for Apollo matching', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: any = null;
+  globalThis.fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body || '{}'));
+    return Response.json({
+      queued: false,
+      operationId: 'profile-match:accented',
+      operationStatus: 'completed',
+      enriched: [{ id: 'person-1', fullName: 'Laura Sofía Sotelo Torres', enrichmentStatus: 'completed' }],
+    });
+  };
+  try {
+    await searchLinkedInProfileLead({
+      search_mode: 'linkedin_profile',
+      linkedin_url: 'https://cl.linkedin.com/in/laura-sof%C3%ADa-sotelo-torres-47423735/?trk=public_profile',
+      reveal_email: true,
+    });
+    assert.equal(
+      requestBody?.leads?.[0]?.linkedinUrl,
+      'https://www.linkedin.com/in/laura-sof%C3%ADa-sotelo-torres-47423735',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('LinkedIn profile search forwards queued phone enrichment metadata for polling', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = mockEnrichmentResponse(
@@ -116,6 +143,43 @@ test('LinkedIn profile search forwards queued phone enrichment metadata for poll
       reveal_email: true,
       reveal_phone: true,
     });
+    assert.equal(result.phone_enrichment?.status, 'queued');
+    assert.deepEqual(result.profile_tracking_ids, ['profile-target-1']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('LinkedIn profile search recovers an occupied target and keeps it pollable', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({
+    error: 'APOLLO_ENRICHMENT_TARGET_BUSY',
+    operationId: 'profile-match:retry',
+    operationStatus: 'submitted',
+    providerState: 'processing',
+    queued: true,
+    enriched: [{ id: 'profile-target-1', enrichmentStatus: 'pending_phone' }],
+    phone_enrichment: {
+      requested: true,
+      queued: true,
+      status: 'queued',
+      message: 'El telefono se esta preparando y se actualizara automaticamente.',
+      webhook_url: null,
+      provider_status: null,
+      provider_details: null,
+    },
+  }, { status: 409 });
+  try {
+    const result = await searchLinkedInProfileLead({
+      search_mode: 'linkedin_profile',
+      linkedin_url: 'https://www.linkedin.com/in/example',
+      reveal_email: true,
+      reveal_phone: true,
+    });
+    assert.equal(result.count, 1);
+    assert.equal(result.leads[0]?.id, 'profile-target-1');
+    assert.equal(result.leads[0]?.linkedin_url, 'https://www.linkedin.com/in/example');
+    assert.equal(result.leads[0]?.enrichment_status, 'pending_phone');
     assert.equal(result.phone_enrichment?.status, 'queued');
     assert.deepEqual(result.profile_tracking_ids, ['profile-target-1']);
   } finally {

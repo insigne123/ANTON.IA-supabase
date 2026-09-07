@@ -83,6 +83,7 @@ const FOLLOW_UP_INSTRUCTIONS = [
   'Mantén el cierre corto y directo. Reconoce que puede no ser prioridad y deja la puerta abierta.',
 ] as const;
 const GLOBAL_COHERENCE_NOTE = 'Mantén coherencia entre todos los seguimientos, usa un tema concreto distinto en cada mensaje y no repitas frases.';
+const AI_EDITABLE_STEP_STATES = new Set(['pending_initial_send', 'not_due', 'ready_to_prepare', 'review_required', 'approved']);
 
 function buildFollowUpSteps(count: number) {
   return Array.from({ length: count }, (_, index) => ({
@@ -374,6 +375,8 @@ export function FirstContactFollowUpPlan({
       body: JSON.stringify({
         instruction,
         styleProfileId: selectedStyleId || null,
+        expectedVersionId: step.draft.versionId,
+        campaignStepId: step.id,
       }),
     });
     const payload = await response.json().catch(() => null);
@@ -426,7 +429,7 @@ export function FirstContactFollowUpPlan({
   function openNote(target: AiNoteTarget) {
     setNoteTarget(target);
     setNoteInstruction('');
-    setNoteStyleProfileId(styleProfileId);
+    setNoteStyleProfileId('');
     setNoteError(null);
     setNoteSuccess(null);
     setNoteProgress(null);
@@ -447,7 +450,11 @@ export function FirstContactFollowUpPlan({
         return;
       }
 
-      const generatedSteps = (planRef.current?.steps || []).filter((step) => Boolean(step.draft));
+      const generatedSteps = (planRef.current?.steps || []).filter((step) => (
+        Boolean(step.draft)
+        && AI_EDITABLE_STEP_STATES.has(step.state)
+        && step.draft?.lifecycle !== 'archived'
+      ));
       const failures: string[] = [];
       let successCount = 0;
       const coherentInstruction = globalRewriteInstruction(instruction);
@@ -680,7 +687,11 @@ export function FirstContactFollowUpPlan({
   const offsets = plan.steps.map((step) => step.offsetDays);
   const canStopPlan = ['pending_initial_send', 'active'].includes(plan.enrollmentState);
   const planReadOnly = ['completed', 'stopped', 'blocked'].includes(plan.enrollmentState);
-  const generatedSteps = plan.steps.filter((step) => Boolean(step.draft));
+  const generatedSteps = plan.steps.filter((step) => (
+    Boolean(step.draft)
+    && AI_EDITABLE_STEP_STATES.has(step.state)
+    && step.draft?.lifecycle !== 'archived'
+  ));
 
   return (
     <>
@@ -710,6 +721,7 @@ export function FirstContactFollowUpPlan({
               const dirty = isEditorDirty(editor);
               const retrying = Boolean(retryingStepIds[step.id]);
               const busy = Boolean(editor?.saving || retrying || applyingNote);
+              const stepReadOnly = !AI_EDITABLE_STEP_STATES.has(step.state) || step.draft?.lifecycle === 'archived';
               const day = cumulativeDays(offsets, index);
               const subjectId = `follow-up-subject-${step.id}`;
               const bodyId = `follow-up-body-${step.id}`;
@@ -744,7 +756,7 @@ export function FirstContactFollowUpPlan({
                           maxLength={998}
                           onChange={(event) => setEditorState(step.id, { subject: event.target.value, error: null, feedback: null })}
                           className="h-11 border-slate-400 dark:border-slate-500"
-                          disabled={disabled || planReadOnly || busy || step.draft.lifecycle === 'archived'}
+                          disabled={disabled || planReadOnly || busy || stepReadOnly}
                           aria-describedby={feedbackId}
                           aria-invalid={Boolean(editor.error && !editor.subject.trim())}
                         />
@@ -758,7 +770,7 @@ export function FirstContactFollowUpPlan({
                           rows={9}
                           onChange={(event) => setEditorState(step.id, { body: event.target.value, error: null, feedback: null })}
                           className="min-h-52 resize-y border-slate-400 text-[15px] leading-7 dark:border-slate-500"
-                          disabled={disabled || planReadOnly || busy || step.draft.lifecycle === 'archived'}
+                          disabled={disabled || planReadOnly || busy || stepReadOnly}
                           aria-describedby={feedbackId}
                           aria-invalid={Boolean(editor.error && !editor.body.trim())}
                         />
@@ -775,7 +787,7 @@ export function FirstContactFollowUpPlan({
                             variant="outline"
                             className="min-h-11"
                             onClick={() => openNote({ kind: 'step', stepId: step.id, label: `${step.name} · Día ${day}` })}
-                            disabled={disabled || planReadOnly || busy || step.draft.lifecycle === 'archived'}
+                            disabled={disabled || planReadOnly || busy || stepReadOnly}
                           >
                             <Sparkles aria-hidden="true" /> Nota para IA
                           </Button>
@@ -784,7 +796,7 @@ export function FirstContactFollowUpPlan({
                             variant={dirty ? 'default' : 'outline'}
                             className="min-h-11"
                             onClick={() => void saveDraft(step.id)}
-                            disabled={disabled || planReadOnly || busy || !dirty || step.draft.lifecycle === 'archived'}
+                            disabled={disabled || planReadOnly || busy || !dirty || stepReadOnly}
                           >
                             {editor.saving ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Save aria-hidden="true" />}
                             {editor.saving ? 'Guardando…' : 'Guardar cambios'}
@@ -840,7 +852,7 @@ export function FirstContactFollowUpPlan({
             <SheetTitle>Nota para IA</SheetTitle>
             <SheetDescription className="leading-6">
               {noteTarget?.kind === 'all'
-                ? 'Aplicaremos la nota, uno por uno, a todos los seguimientos. El correo inicial no cambiará.'
+                ? 'Aplicaremos la nota, uno por uno, solo a los seguimientos que todavía no se enviaron. El correo inicial no cambiará.'
                 : `Aplicaremos la nota a ${noteTarget?.label || 'este seguimiento'}.`}
             </SheetDescription>
           </SheetHeader>

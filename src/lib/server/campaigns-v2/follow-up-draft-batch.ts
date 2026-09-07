@@ -6,6 +6,7 @@ import type { MessagingDraftV1 } from '@/lib/messaging-contracts';
 import {
   hasUsableDraftSellerOfferV2,
   type DraftSellerProfileV2,
+  type DraftWritingStyleV2,
 } from '@/lib/server/draft-context-v2';
 import {
   campaignFollowUpDraftIds,
@@ -59,6 +60,7 @@ export async function generateFollowUpDraftBatch(input: {
   steps: FollowUpDraftStep[];
   existingDrafts: Map<string, MessagingDraftV1>;
   sellerProfile?: DraftSellerProfileV2;
+  writingStyle?: DraftWritingStyleV2;
   targetStepId?: string;
 }, dependencies: FollowUpDraftBatchDependencies) {
   const steps = [...input.steps].sort((left, right) => left.index - right.index);
@@ -134,6 +136,7 @@ export async function generateFollowUpDraftBatch(input: {
         campaignRecipientStepId: step.id,
         reservedCampaignDraftIds: reserved,
         sellerProfile: input.sellerProfile,
+        writingStyle: input.writingStyle,
       });
       if (result.status !== 'drafted') {
         await dependencies.recordError({ stepId: step.id, error: result.message.slice(0, 2_000) });

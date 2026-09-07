@@ -18,9 +18,39 @@ export function researchTextKey(value: unknown) {
     .trim();
 }
 
+export function isHardRejectedResearchText(value: unknown) {
+  const normalized = researchTextKey(value);
+  if (!normalized) return false;
+
+  return [
+    /\b(?:cf chl|cf challenge|challenge platform|cloudflare ray id)\b/,
+    /\battention required cloudflare\b/,
+    /\b(?:one moment(?: please)?|just a moment(?: please)?)\b/,
+    /\b(?:loader|loading)\b.{0,80}\bplease wait\b/,
+    /\bplease wait while (?:your|the) request is being verified\b/,
+    /\b(?:checking|verifying) (?:your )?(?:browser|connection|request)\b/,
+    /\b(?:verify|confirm) (?:that )?you are (?:a )?human\b/,
+    /\b(?:complete|solve|enter) (?:the |this )?(?:captcha|recaptcha|hcaptcha|security challenge)\b/,
+    /\b(?:captcha|recaptcha|hcaptcha) (?:verification|challenge|required|failed)\b/,
+    /\benable javascript and cookies to continue\b/,
+    /\b(?:verifica|confirma) que eres (?:un )?humano\b/,
+    /\b(?:comprobando|verificando) (?:tu )?(?:navegador|conexion|solicitud)\b/,
+    /\bpor favor espera mientras (?:tu solicitud |se )?(?:es )?verific(?:a|ada|amos)\b/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+export function isHardRejectedResearchUrl(value: unknown) {
+  const url = safeResearchUrl(value);
+  if (!url) return false;
+  const parsed = new URL(url);
+  return /(?:^|\/)cdn-cgi\/(?:challenge-platform|challenge)(?:\/|$)/i.test(parsed.pathname)
+    || /(?:^|[.-])captcha(?:[.-]|$)/i.test(parsed.hostname);
+}
+
 export function isGenericResearchText(value: unknown) {
   const normalized = researchTextKey(value);
   if (!normalized) return true;
+  if (isHardRejectedResearchText(value)) return true;
   const hasBoilerplateOnly = [
     /\b(?:selecciona|elige|escoge) (?:tu |el |un )?(?:pais|region|idioma|ubicacion)\b/,
     /\b(?:select|choose) (?:(?:a|your) )?(?:country|region|language|location)\b/,
@@ -145,7 +175,7 @@ export function isQualifiedResearchFactEvidence(input: {
   companyDomain?: unknown;
 }) {
   const { evidence, source } = input;
-  if (!source || !safeResearchUrl(source.url)) return false;
+  if (!source || !safeResearchUrl(source.url) || isHardRejectedResearchUrl(source.url)) return false;
   if (
     !['fact', 'quote'].includes(evidence.kind)
     || evidence.extraction.method === 'model'
@@ -172,7 +202,7 @@ export function isQualifiedResearchPersonFactEvidence(input: {
   personName?: unknown;
 }) {
   const { evidence, source } = input;
-  if (!source || !safeResearchUrl(source.url) || source.provider === 'lead-input') return false;
+  if (!source || !safeResearchUrl(source.url) || isHardRejectedResearchUrl(source.url) || source.provider === 'lead-input') return false;
   if (
     evidence.subjectScope !== 'person'
     || !['fact', 'quote', 'profile_field'].includes(evidence.kind)
@@ -194,7 +224,7 @@ export function isRelevantResearchSignal(input: {
   companyDomain?: unknown;
 }) {
   const { evidence, source } = input;
-  if (!source || evidence.kind !== 'event' || !safeResearchUrl(source.url) || isGenericResearchText(evidence.statement)) {
+  if (!source || evidence.kind !== 'event' || !safeResearchUrl(source.url) || isHardRejectedResearchUrl(source.url) || isGenericResearchText(evidence.statement)) {
     return false;
   }
 

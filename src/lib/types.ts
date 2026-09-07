@@ -47,6 +47,11 @@ export interface Lead {
   id: string;
   userId?: string;
   organizationId?: string;
+  foundBy?: {
+    id: string;
+    name: string;
+    avatar?: string | null;
+  };
   name: string;
   title: string;
   company: string;
@@ -479,6 +484,8 @@ export type StyleProfile = {
   /** NUEVO: plantillas que definen el formato real del correo */
   subjectTemplate?: string;
   bodyTemplate?: string;
+  /** Identificador interno para presets integrados no persistidos todavía. */
+  presetId?: string;
 };
 
 

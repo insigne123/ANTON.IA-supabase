@@ -26,6 +26,7 @@ import {
   type DraftSellerProfileV2,
   type DraftWritingStyleV2,
 } from '@/lib/server/draft-context-v2';
+import { materializeOutsourcingEmailStylePreset } from '@/lib/server/email-style-profiles';
 import {
   createFailedDraftPreflightV2,
   draftContentFingerprintV2,
@@ -266,6 +267,21 @@ async function loadServerWritingStyle(input: NativeDraftAccess & {
   styleName?: string | null;
 }): Promise<DraftWritingStyleV2> {
   const admin = getSupabaseAdminClient();
+  const preset = await materializeOutsourcingEmailStylePreset({
+    selection: input.styleProfileId,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    client: admin,
+  });
+  if (preset) {
+    return normalizeDraftWritingStyleV2({
+      id: preset.id,
+      name: preset.name,
+      profile: preset.profile,
+      contentHash: preset.content_hash,
+      revision: preset.revision,
+    });
+  }
   const fields = 'id,name,profile,content_hash,revision,is_default';
   const styleProfileId = text(input.styleProfileId);
   const styleName = text(input.styleName);
@@ -647,6 +663,18 @@ export async function getCurrentNativeDraft(input: NativeDraftAccess & { draftId
   return draft ? MessagingDraftV1Schema.parse(draft) : null;
 }
 
+export async function getNativeDraftWritingStyle(input: NativeDraftAccess & {
+  draft: MessagingDraftV1;
+}) {
+  const metadata = assertNativeDraftMetadata({
+    metadata: await loadNativeDraftMetadata({ ...input, versionId: input.draft.versionId }),
+    draft: input.draft,
+  });
+  return metadata.styleProfileId
+    ? loadDraftWritingStyle({ access: input, styleProfileId: metadata.styleProfileId })
+    : createDefaultDraftWritingStyleV2();
+}
+
 export async function createNativeDraft(input: NativeDraftAccess & {
   snapshotId: string;
   styleProfileId?: string | null;
@@ -657,6 +685,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   campaignRecipientStepId?: string | null;
   reservedCampaignDraftIds?: { draftId: string; versionId: string };
   sellerProfile?: DraftSellerProfileV2;
+  writingStyle?: DraftWritingStyleV2;
 }, dependencies?: NativeDraftGenerationDependencies): Promise<NativeDraftGenerationResult> {
   const now = dependencies?.now?.() || new Date();
   const instruction = text(input.instruction);
@@ -671,7 +700,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   const snapshotEmail = text(parsedSnapshot.subject.email).toLowerCase();
   const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
   if (snapshotEmail && await isSuppressed(snapshotEmail, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
-  const style = await loadDraftWritingStyle({
+  const style = input.writingStyle || await loadDraftWritingStyle({
     access: input,
     styleProfileId: input.styleProfileId,
     styleName: input.styleName,
@@ -1004,6 +1033,7 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
   draft: MessagingDraftV1;
   instruction: string;
   styleProfileId?: string | null;
+  sequenceContext?: OutreachSequenceContextV2;
 }, dependencies?: NativeDraftGenerationDependencies) {
   const instruction = text(input.instruction);
   if (!instruction || instruction.length > 1_000) throw new Error('NATIVE_DRAFT_REWRITE_INSTRUCTION_INVALID');
@@ -1024,11 +1054,13 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
   const email = assertNativeDraftRecipient(snapshot, input.draft);
   const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
   if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
-  const style = await loadDraftWritingStyle({
-    access: input,
-    styleProfileId: input.styleProfileId || metadata.styleProfileId,
-    dependencies,
-  });
+  const requestedStyleProfileId = text(input.styleProfileId) || metadata.styleProfileId;
+  const style = requestedStyleProfileId
+    ? await loadDraftWritingStyle({ access: input, styleProfileId: requestedStyleProfileId, dependencies })
+    : createDefaultDraftWritingStyleV2();
+  const sequenceContext = input.sequenceContext
+    ? OutreachSequenceContextV2Schema.parse(input.sequenceContext)
+    : undefined;
   const preliminary = await createDraftContext({
     access: input,
     snapshotRow,
@@ -1074,7 +1106,11 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
 
     let generated: GeneratedOutreachFromDraftContextV2;
     try {
-      generated = await generate({ context, rewrite: { previous, errors: [], instruction } });
+      generated = await generate({
+        context,
+        ...(sequenceContext ? { sequenceContext } : {}),
+        rewrite: { previous, errors: [], instruction },
+      });
     } catch (error) {
       console.warn('[native-drafts] OpenAI requested rewrite failed:', error);
       throw new Error('NATIVE_DRAFT_OPENAI_REWRITE_FAILED');
@@ -1085,6 +1121,7 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
       try {
         generated = await generate({
           context,
+          ...(sequenceContext ? { sequenceContext } : {}),
           rewrite: {
             previous: generatedOutput,
             errors: validation.issues.map((issue) => issue.message),

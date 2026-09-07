@@ -215,7 +215,7 @@ function mapPerson(
       ? firstText(person.phone_number, person.mobile_phone, person.work_phone) || phoneNumbers[0]?.sanitized_number
       : undefined,
     phone_numbers: phoneNumbers,
-    organization_name: firstText(organization.name, person.organization_name, organizationContext?.name),
+    organization_name: firstText(organizationContext?.name, organization.name, person.organization_name),
     organization_domain: organizationDomain,
     organization_industry: organizationIndustry,
     organization_size: asNumber(
@@ -225,7 +225,7 @@ function mapPerson(
     ),
     organization: {
       id: firstText(organization.id, person.organization_id, organizationContext?.id),
-      name: firstText(organization.name, person.organization_name, organizationContext?.name),
+      name: firstText(organizationContext?.name, organization.name, person.organization_name),
       domain: organizationDomain,
       industry: organizationIndustry,
       website_url: firstText(organization.website_url, person.organization_website, organizationContext?.website_url),

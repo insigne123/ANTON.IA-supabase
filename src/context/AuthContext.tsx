@@ -6,12 +6,14 @@ import { supabase } from '@/lib/supabase';
 import { setLeadResearchStorageScope } from '@/lib/lead-research-storage';
 import { setEmailDraftStorageScope } from '@/lib/email-drafts-storage';
 import { setResearchedLeadsStorageScope } from '@/lib/researched-leads-storage';
-import { organizationService } from '@/lib/services/organization-service';
+import { setQuotaStorageScope } from '@/lib/quota-client';
+import { organizationService, type OrganizationRole } from '@/lib/services/organization-service';
 
 interface AuthContextType {
     user: User | null;
     session: Session | null;
     organizationId: string | null;
+    organizationRole: OrganizationRole | null;
     loading: boolean;
     error: string | null;
     signInWithGoogle: (nextPath?: string) => Promise<void>;
@@ -27,6 +29,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [session, setSession] = useState<Session | null>(null);
     const [organizationId, setOrganizationId] = useState<string | null>(null);
+    const [organizationRole, setOrganizationRole] = useState<OrganizationRole | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const sessionRef = useRef<Session | null>(null);
@@ -45,15 +48,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setResearchedLeadsStorageScope(userId);
         setLoading(true);
 
-        const nextOrganizationId = userId
-            ? await organizationService.getCurrentOrganizationId(userId)
-            : null;
+        let nextOrganizationId: string | null = null;
+        let nextOrganizationRole: OrganizationRole | null = null;
+        if (userId) {
+            try {
+                const organizationResult = await organizationService.listOrganizations();
+                nextOrganizationId = organizationResult.activeOrganizationId;
+                nextOrganizationRole = organizationResult.organizations.find(
+                    (organization) => organization.id === nextOrganizationId,
+                )?.role || null;
+            } catch (organizationError) {
+                console.error('Error fetching organization context:', organizationError);
+            }
+        }
         if (requestId !== scopeRequestRef.current) return;
 
         setLeadResearchStorageScope(userId, nextOrganizationId);
+        setQuotaStorageScope(userId, nextOrganizationId);
         setSession(nextSession);
         setUser(nextSession?.user ?? null);
         setOrganizationId(nextOrganizationId);
+        setOrganizationRole(nextOrganizationRole);
         setLoading(false);
     }, []);
 
@@ -133,7 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, session, organizationId, loading, error, signInWithGoogle, signInWithPassword, signUpWithPassword, signOut, refreshOrganization }}>
+        <AuthContext.Provider value={{ user, session, organizationId, organizationRole, loading, error, signInWithGoogle, signInWithPassword, signUpWithPassword, signOut, refreshOrganization }}>
             <Fragment key={`${user?.id || 'anonymous'}:${organizationId || 'personal'}`}>
                 {children}
             </Fragment>

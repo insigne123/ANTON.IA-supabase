@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 import {
   APOLLO_REQUESTED_FIELDS,
   type ApolloRequestedField,
@@ -115,15 +116,7 @@ function cleanDomain(value: unknown) {
 }
 
 function normalizeLinkedin(value: unknown) {
-  const raw = text(value, 500);
-  if (!raw) return '';
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== 'https:' || !/(^|\.)linkedin\.com$/i.test(parsed.hostname)) return '';
-    return parsed.toString();
-  } catch {
-    return '';
-  }
+  return normalizeLinkedinProfileUrl(text(value, 500));
 }
 
 function splitFullName(value: unknown) {
@@ -269,7 +262,7 @@ async function operationTargets(input: {
   const admin: any = getSupabaseAdminClient();
   const { data, error } = await admin
     .from('apollo_enrichment_callbacks')
-    .select('target_lead_id')
+    .select('target_lead_id, requested_fields')
     .eq('operation_id', input.operationId)
     .eq('user_id', input.userId)
     .eq('organization_id', input.organizationId)
@@ -277,7 +270,10 @@ async function operationTargets(input: {
     .eq('target_table', input.tableName)
     .order('created_at', { ascending: true });
   if (error || !Array.isArray(data)) return [];
-  return data.map((row: any) => ({ id: text(row?.target_lead_id, 255) })).filter((row) => row.id);
+  return data.map((row: any) => ({
+    id: text(row?.target_lead_id, 255),
+    requestedPhone: Array.isArray(row?.requested_fields) && row.requested_fields.includes('person.phone_numbers'),
+  })).filter((row) => row.id);
 }
 
 async function operationStateResponse(claim: EnrichmentQuotaOperationClaim, context: {
@@ -287,26 +283,39 @@ async function operationStateResponse(claim: EnrichmentQuotaOperationClaim, cont
   tableName: ApolloTargetTable;
 }) {
   const enriched = await operationTargets({ operationId: claim.operationId, ...context });
+  const replayEnriched = enriched.map((item) => ({ id: item.id }));
+  const pendingEnriched = enriched.map((item) => ({
+    id: item.id,
+    enrichmentStatus: item.requestedPhone ? 'pending_phone' : 'pending',
+  }));
   if (claim.responsePayload && claim.responseStatus) {
     const response = NextResponse.json({
       ...claim.responsePayload,
       operationId: claim.operationId,
       operationStatus: claim.status,
       usage: usage(claim),
-      ...(enriched.length > 0 ? { enriched } : {}),
+      ...(enriched.length > 0 ? { enriched: replayEnriched } : {}),
     }, { status: claim.responseStatus });
     if (claim.reused) response.headers.set('x-idempotent-replay', 'true');
     response.headers.set('x-operation-id', claim.operationId);
     return response;
   }
   const unknown = claim.providerState === 'unknown';
+  const phoneRequested = enriched.some((item) => item.requestedPhone);
   const response = NextResponse.json({
     error: unknown ? 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN' : 'ENRICHMENT_OPERATION_PROCESSING',
     operationId: claim.operationId,
     operationStatus: claim.status,
     providerState: claim.providerState,
     usage: usage(claim),
-    ...(enriched.length > 0 ? { queued: true, enriched } : {}),
+    ...(enriched.length > 0 ? {
+      queued: true,
+      enriched: pendingEnriched,
+      phone_enrichment: phoneEnrichmentResponse({
+        requested: phoneRequested,
+        enriched: pendingEnriched,
+      }),
+    } : {}),
   }, { status: unknown ? 409 : 202 });
   response.headers.set('retry-after', unknown ? '0' : '5');
   response.headers.set('x-idempotent-replay', 'true');
@@ -803,6 +812,8 @@ export async function POST(request: NextRequest) {
   const callbacks: CallbackHandle[] = [];
   const submittedCallbacks = new Set<string>();
   let targets: PreparedTarget[] = [];
+  let requestedRevealPhone = false;
+  let busyTargetId: string | null = null;
 
   try {
     try {
@@ -828,6 +839,7 @@ export async function POST(request: NextRequest) {
     const revealEmail = parseFlag(body.revealEmail, true);
     const revealPhone = parseFlag(body.revealPhone, false);
     if (!revealEmail.ok || !revealPhone.ok) return NextResponse.json({ error: 'INVALID_REVEAL_FLAGS' }, { status: 400 });
+    requestedRevealPhone = revealPhone.value;
     const mode = resolveMode(body.mode, trustedInternal, revealPhone.value);
     if (!mode.ok) return NextResponse.json({ error: mode.error }, { status: 400 });
     resource = quotaResource(mode.mode);
@@ -918,18 +930,25 @@ export async function POST(request: NextRequest) {
 
     if (!matchOnly) {
       for (const target of targets) {
+        try {
           const callback = await createApolloEnrichmentCallback({
             operationId: operation.operationId,
             claimToken: claim.claimToken,
             userId,
-          organizationId,
-          quotaResource: resource,
-          targetTable: tableName,
-          targetId: target.id,
-          apolloPersonId: target.sourceProviderId,
-          requestedFields: requestedFields(revealEmail.value, revealPhone.value),
-        });
-        callbacks.push({ ...callback, targetId: target.id });
+            organizationId,
+            quotaResource: resource,
+            targetTable: tableName,
+            targetId: target.id,
+            apolloPersonId: target.sourceProviderId,
+            requestedFields: requestedFields(revealEmail.value, revealPhone.value),
+          });
+          callbacks.push({ ...callback, targetId: target.id });
+        } catch (error) {
+          if (String((error as { message?: string } | null)?.message || '') === 'APOLLO_ENRICHMENT_TARGET_BUSY') {
+            busyTargetId = target.id;
+          }
+          throw error;
+        }
       }
     }
 
@@ -1192,8 +1211,13 @@ export async function POST(request: NextRequest) {
     if (revealPhone.value) response.headers.set('retry-after', '5');
     return response;
   } catch (error) {
+    const code = String((error as { message?: string } | null)?.message || 'ENRICHMENT_REQUEST_FAILED');
+    const targetBusy = code === 'APOLLO_ENRICHMENT_TARGET_BUSY';
     if (!providerBoundaryCrossed && claim?.claimToken && organizationId) {
-      await markTargetsFailed({ targets, tableName, userId, organizationId }).catch(() => undefined);
+      const targetsToFail = targetBusy && busyTargetId
+        ? targets.filter((target) => target.id !== busyTargetId)
+        : targets;
+      await markTargetsFailed({ targets: targetsToFail, tableName, userId, organizationId }).catch(() => undefined);
       for (const callback of callbacks) {
         await settleApolloEnrichmentCallback({
           callbackId: callback.callbackId,
@@ -1210,7 +1234,31 @@ export async function POST(request: NextRequest) {
       }).catch(() => undefined);
     }
 
-    const code = String((error as { message?: string } | null)?.message || 'ENRICHMENT_REQUEST_FAILED');
+    if (targetBusy && busyTargetId) {
+      const pendingTargets = targets
+        .filter((target) => target.id === busyTargetId)
+        .map((target) => ({
+          id: target.id,
+          clientRef: target.clientRef,
+          enrichmentStatus: requestedRevealPhone ? 'pending_phone' : 'pending',
+        }));
+      const response = NextResponse.json({
+        error: code,
+        operationId: claim?.operationId,
+        operationStatus: 'submitted',
+        providerState: 'processing',
+        queued: requestedRevealPhone,
+        enriched: pendingTargets,
+        phone_enrichment: phoneEnrichmentResponse({
+          requested: requestedRevealPhone,
+          enriched: pendingTargets,
+        }),
+      }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
+      if (claim?.operationId) response.headers.set('x-operation-id', claim.operationId);
+      response.headers.set('retry-after', '5');
+      return response;
+    }
+
     const exposed = new Set([
       'IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST',
       'ENRICHMENT_TARGET_NOT_FOUND',

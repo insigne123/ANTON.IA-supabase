@@ -32,6 +32,12 @@ export type DailyQuotaResult = {
   limit: number;
   dayKey: string;
   resetAtISO: string;
+  mode?: 'user' | 'team' | 'hybrid';
+  binding?: 'user' | 'team';
+  groupId?: string | null;
+  legacy?: boolean;
+  user?: { count: number; limit: number } | null;
+  team?: { count: number; limit: number } | null;
 };
 
 export type EnrichmentQuotaOperationStatus = 'claimed' | 'submitted' | 'completed' | 'failed';
@@ -167,7 +173,7 @@ export async function claimEnrichmentQuotaOperation(params: {
   }
 
   const organizationId = await resolveOrganizationIdForQuota(userId, params.organizationId);
-  const quota = await resolveDailyCreditQuotaContext(userId);
+  const quota = await resolveDailyCreditQuotaContext(userId, organizationId);
   const { data, error } = await (getSupabaseAdmin() as any).rpc('claim_antonia_quota_operation_v1', {
     p_organization_id: organizationId,
     p_user_id: userId,
@@ -361,12 +367,15 @@ async function resolveOrganizationIdForQuota(userId: string, organizationId?: st
     .select('organization_id')
     .eq('user_id', userId)
     .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .limit(2);
 
   if (error) throw error;
 
-  const resolvedOrgId = (data as { organization_id?: string } | null)?.organization_id;
+  const memberships = (data || []) as Array<{ organization_id?: string }>;
+  if (memberships.length > 1) {
+    throw new Error(`organizationId is required for multi-organization user ${userId}`);
+  }
+  const resolvedOrgId = memberships[0]?.organization_id;
   if (!resolvedOrgId) throw new Error(`User ${userId} has no organization for quota`);
   return resolvedOrgId;
 }
@@ -438,30 +447,22 @@ async function resolveContactQuotaContext(params: { userId: string; fallbackLimi
   return resolveUserScopedQuotaContext({ ...params, resource: 'contact' });
 }
 
-async function resolveDailyCreditQuotaContext(userId: string): Promise<UserScopedQuotaContext> {
+async function resolveDailyCreditQuotaContext(userId: string, organizationId: string): Promise<UserScopedQuotaContext> {
   if (!(await hasUserEnrichmentSearchCreditAccess(userId))) {
     return { limit: 0, scope: 'user' };
   }
-
-  const { data, error } = await getSupabaseAdmin()
-    .from('user_quota_overrides')
-    .select('daily_credit_limit')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (error && !isMissingUserQuotaOverridesTable(error)) throw error;
-  const override = Number((data as { daily_credit_limit?: number | null } | null)?.daily_credit_limit || 0);
-  const limit = Number.isFinite(override) && override > 0
-    ? Math.min(DEFAULT_DAILY_CREDIT_LIMIT, Math.trunc(override))
-    : DEFAULT_DAILY_CREDIT_LIMIT;
-  return { limit, scope: 'user' };
+  const status = await getDailyCreditQuotaStatus({ userId, organizationId });
+  return {
+    limit: status.limit,
+    scope: status.binding === 'team' ? 'organization' : 'user',
+  };
 }
 
 export async function getEffectiveDailyQuotaLimits(params: { userId: string; organizationId?: string }): Promise<EffectiveDailyQuotaLimits> {
   // A mission controls its own automated work, not the account allowance shown
   // across the workspace. Resolve membership here so invalid callers still fail closed.
-  await resolveOrganizationIdForQuota(params.userId, params.organizationId);
-  const credits = await resolveDailyCreditQuotaContext(params.userId);
+  const organizationId = await resolveOrganizationIdForQuota(params.userId, params.organizationId);
+  const credits = await resolveDailyCreditQuotaContext(params.userId, organizationId);
   const contactQuota = await resolveContactQuotaContext({
     userId: params.userId,
     fallbackLimit: DEFAULT_DAILY_QUOTA_LIMITS.contact,
@@ -529,26 +530,55 @@ async function countContactsToday(params: { userId: string; organizationId: stri
   return count || 0;
 }
 
-async function getDailyCreditQuotaStatus(params: { userId: string; limit?: number }): Promise<DailyQuotaResult> {
-  const dayKey = todayKeyUTC();
-  const quota = typeof params.limit === 'number'
-    ? { limit: Math.min(DEFAULT_DAILY_CREDIT_LIMIT, Math.max(0, Math.trunc(params.limit))) }
-    : await resolveDailyCreditQuotaContext(params.userId);
-  const { data, error } = await getSupabaseAdmin()
-    .from('antonia_user_daily_credits')
-    .select('usage_count')
-    .eq('user_id', params.userId)
-    .eq('date', dayKey)
-    .maybeSingle();
-  if (error) throw error;
-  const count = Math.max(0, Number((data as { usage_count?: number } | null)?.usage_count || 0));
-  return {
-    allowed: count < quota.limit,
-    count,
-    limit: quota.limit,
-    dayKey,
-    resetAtISO: nextDayStartISOUTC(),
+function parseDailyCreditStatus(result: Record<string, any>, fallbackDay: string): DailyQuotaResult {
+  const count = Number(result.count);
+  const limit = Number(result.limit);
+  const mode = String(result.mode || 'user');
+  const binding = String(result.binding || 'user');
+  if (typeof result.allowed !== 'boolean'
+    || !Number.isFinite(count)
+    || !Number.isFinite(limit)
+    || !['user', 'team', 'hybrid'].includes(mode)
+    || !['user', 'team'].includes(binding)) {
+    throw new Error('Invalid daily credit status response');
+  }
+  const bucket = (prefix: 'user' | 'team') => {
+    const rawCount = result[`${prefix}_count`];
+    const rawLimit = result[`${prefix}_limit`];
+    if (rawCount == null || rawLimit == null) return null;
+    const bucketCount = Number(rawCount);
+    const bucketLimit = Number(rawLimit);
+    return Number.isFinite(bucketCount) && Number.isFinite(bucketLimit)
+      ? { count: bucketCount, limit: bucketLimit }
+      : null;
   };
+  return {
+    allowed: result.allowed,
+    count,
+    limit,
+    dayKey: String(result.day_key || fallbackDay),
+    resetAtISO: nextDayStartISOUTC(),
+    mode: mode as NonNullable<DailyQuotaResult['mode']>,
+    binding: binding as NonNullable<DailyQuotaResult['binding']>,
+    groupId: typeof result.group_id === 'string' ? result.group_id : null,
+    legacy: Boolean(result.legacy),
+    user: bucket('user'),
+    team: bucket('team'),
+  };
+}
+
+async function getDailyCreditQuotaStatus(params: { userId: string; organizationId: string }): Promise<DailyQuotaResult> {
+  const dayKey = todayKeyUTC();
+  const { data, error } = await (getSupabaseAdmin() as any).rpc('get_antonia_credit_status_v2', {
+    p_organization_id: params.organizationId,
+    p_user_id: params.userId,
+    p_day: dayKey,
+  });
+  if (error) throw error;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('Invalid daily credit status response');
+  }
+  return parseDailyCreditStatus(data as Record<string, any>, dayKey);
 }
 
 export async function getUserScopedAntoniaQuotaStatus(params: {
@@ -560,7 +590,7 @@ export async function getUserScopedAntoniaQuotaStatus(params: {
 }): Promise<DailyQuotaResult> {
   const orgId = await resolveOrganizationIdForQuota(params.userId, params.organizationId);
   if (params.resource !== 'contact') {
-    return getDailyCreditQuotaStatus({ userId: params.userId });
+    return getDailyCreditQuotaStatus({ userId: params.userId, organizationId: orgId });
   }
   const { count: used, limit } = await getContactQuotaUsage({
     userId: params.userId,
@@ -652,7 +682,7 @@ export async function checkAndConsumeDailyQuota(
   }
 
   const atomicResource = resource as AtomicDailyQuotaResource;
-  const quota = await resolveDailyCreditQuotaContext(userId);
+  const quota = await resolveDailyCreditQuotaContext(userId, orgId);
 
   const { data, error } = await (getSupabaseAdmin() as any).rpc('consume_antonia_daily_quota_v1', {
     p_organization_id: orgId,
@@ -664,18 +694,18 @@ export async function checkAndConsumeDailyQuota(
   });
   if (error) throw error;
 
-  const rawResult = data as { allowed?: boolean; count?: number; limit?: number } | null;
+  const rawResult = data as Record<string, any> | null;
   if (!rawResult || typeof rawResult.allowed !== 'boolean' || !Number.isFinite(Number(rawResult.count))) {
     throw new Error('Invalid atomic quota response');
   }
 
-  const result = {
-    allowed: rawResult.allowed,
-    count: Number(rawResult.count),
-    limit: Number(rawResult.limit ?? quota.limit),
-    dayKey: date,
-    resetAtISO: nextDayStartISOUTC(),
-  };
+  const result = parseDailyCreditStatus({
+    ...rawResult,
+    mode: rawResult.mode || 'user',
+    binding: rawResult.binding || 'user',
+    user_count: rawResult.user_count ?? rawResult.count,
+    user_limit: rawResult.user_limit ?? rawResult.limit ?? quota.limit,
+  }, date);
   await recordQuotaDecision({ userId, organizationId: orgId, resource, requestedCount: count, scope: quota.scope, result });
   return result;
 }
@@ -717,7 +747,7 @@ export async function getDailyQuotaStatus(
 
   if (ATOMIC_DAILY_QUOTA_RESOURCES.has(resource as AtomicDailyQuotaResource)) {
     try {
-      return await getDailyCreditQuotaStatus({ userId });
+      return await getDailyCreditQuotaStatus({ userId, organizationId: orgId });
     } catch {
       return { allowed: false, count: 0, limit, dayKey: date, resetAtISO: nextDayStartISOUTC() };
     }
