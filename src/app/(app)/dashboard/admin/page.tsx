@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   Activity,
   BriefcaseBusiness,
@@ -10,7 +10,6 @@ import {
   CircleAlert,
   Coins,
   Globe2,
-  LogOut,
   Mail,
   Phone,
   Plus,
@@ -24,7 +23,6 @@ import {
 } from 'lucide-react';
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts';
 
-import { useAuth } from '@/context/AuthContext';
 import type { AdminDashboardOverview, AdminDimension } from '@/lib/admin-dashboard-types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,6 +30,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ChartContainer, ChartTooltipContent } from '@/components/ui/chart';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
@@ -121,7 +126,6 @@ function DimensionList({ title, items, empty }: { title: string; items: AdminDim
 }
 
 export default function AdminDashboardPage() {
-  const { signOut } = useAuth();
   const range = useMemo(initialRange, []);
   const [from, setFrom] = useState(range.from);
   const [to, setTo] = useState(range.to);
@@ -138,8 +142,10 @@ export default function AdminDashboardPage() {
   const [assignmentPrimary, setAssignmentPrimary] = useState(false);
   const [mutationMessage, setMutationMessage] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const latestOverviewRequest = useRef(0);
 
   async function loadOverview(options: { silent?: boolean } = {}) {
+    const requestId = ++latestOverviewRequest.current;
     if (options.silent) setRefreshing(true);
     else setLoading(true);
     setError(null);
@@ -151,14 +157,18 @@ export default function AdminDashboardPage() {
       const response = await fetch(`/api/dashboard/admin/overview?${params.toString()}`, { cache: 'no-store' });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || 'No pudimos cargar el panel administrativo.');
+      if (requestId !== latestOverviewRequest.current) return;
       setOverview(payload as AdminDashboardOverview);
       if (!assignmentGroupId && payload.groups?.[0]?.id) setAssignmentGroupId(payload.groups[0].id);
       if (!assignmentUserId && payload.users?.[0]?.id) setAssignmentUserId(payload.users[0].id);
     } catch (loadError) {
+      if (requestId !== latestOverviewRequest.current) return;
       setError(loadError instanceof Error ? loadError.message : 'No pudimos cargar el panel administrativo.');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === latestOverviewRequest.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }
 
@@ -237,70 +247,77 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="min-h-full">
-      <div className="mx-auto w-full max-w-[1480px] px-4 py-1 sm:px-2 lg:px-4 lg:py-3">
-        <header className="flex flex-col gap-5 border-b border-border/60 pb-6 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mx-auto w-full max-w-[1320px] pb-10">
+        <header className="flex flex-col gap-4 border-b border-border/60 pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-primary">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-primary">
               <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-              <span>Espacio administrativo</span>
+              <span>Administración</span>
             </div>
-            <h1 className="text-3xl font-semibold tracking-[-0.035em] sm:text-4xl">{overview?.organization.name || 'GrupoExpro'}</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Observa cómo trabaja el equipo, dónde se concentra el uso y qué resultados está generando.
+            <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">{overview?.organization.name || 'GrupoExpro'}</h1>
+            <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">
+              Actividad, uso y resultados del equipo en un solo lugar.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button asChild variant="outline">
+            <Button asChild>
               <Link href="/dashboard/admin/credits">
                 <Coins className="h-4 w-4" aria-hidden="true" />
-                Créditos
+                Configurar créditos
               </Link>
             </Button>
-            <Button type="button" variant="outline" onClick={() => void loadOverview({ silent: true })} disabled={loading || refreshing}>
-              <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} aria-hidden="true" />
-              Actualizar
-            </Button>
-            <Button type="button" variant="ghost" onClick={() => void signOut()}>
-              <LogOut className="h-4 w-4" aria-hidden="true" />
-              Salir
+            <Button type="button" variant="ghost" onClick={() => void loadOverview({ silent: true })} disabled={loading || refreshing}>
+              <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
+              {refreshing ? 'Actualizando' : 'Actualizar'}
             </Button>
           </div>
         </header>
 
-        <section aria-labelledby="filters-title" className="mt-5 rounded-2xl border border-border/60 bg-card/75 p-4 shadow-sm sm:p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
+        <section aria-labelledby="filters-title" className="mt-4 rounded-2xl border border-border/60 bg-card/60 p-4">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+            <div className="min-w-0">
               <h2 id="filters-title" className="text-sm font-semibold">Período y alcance</h2>
-              <p className="mt-1 text-xs text-muted-foreground">Las cifras se recalculan para el rango y la segmentación elegidos.</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Ajusta el rango o enfoca los resultados por grupo y usuario.</p>
             </div>
-            <div className="grid w-full gap-3 sm:grid-cols-2 lg:w-auto lg:grid-cols-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="admin-from">Desde</Label>
-                <Input id="admin-from" type="date" value={from} max={to} onChange={(event) => setFrom(event.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="admin-to">Hasta</Label>
-                <Input id="admin-to" type="date" value={to} min={from} onChange={(event) => setTo(event.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="admin-group">Grupo</Label>
-                <select id="admin-group" value={groupId} onChange={(event) => setGroupId(event.target.value)} className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
-                  <option value="">Todos los grupos</option>
-                  {activeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="admin-user">Usuario</Label>
-                <select id="admin-user" value={userId} onChange={(event) => setUserId(event.target.value)} className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
-                  <option value="">Todo el equipo</option>
-                  {users.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
-                </select>
-                {userId ? (
-                  <Link href={`/dashboard/admin/users/${userId}`} className="inline-flex min-h-8 items-center text-xs font-medium text-primary underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    Ver historial del usuario
-                  </Link>
-                ) : null}
-              </div>
+            {loading || refreshing ? <p className="text-xs text-muted-foreground" role="status">Actualizando resultados…</p> : null}
+          </div>
+          <div className="grid w-full gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="admin-from">Desde</Label>
+              <Input id="admin-from" type="date" value={from} max={to} onChange={(event) => setFrom(event.target.value)} className="rounded-xl" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="admin-to">Hasta</Label>
+              <Input id="admin-to" type="date" value={to} min={from} onChange={(event) => setTo(event.target.value)} className="rounded-xl" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="admin-group">Grupo</Label>
+              <Select value={groupId || 'all-groups'} onValueChange={(value) => setGroupId(value === 'all-groups' ? '' : value)}>
+                <SelectTrigger id="admin-group" className="rounded-xl">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all-groups">Todos los grupos</SelectItem>
+                  {activeGroups.map((group) => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="admin-user">Usuario</Label>
+              <Select value={userId || 'all-users'} onValueChange={(value) => setUserId(value === 'all-users' ? '' : value)}>
+                <SelectTrigger id="admin-user" className="rounded-xl">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all-users">Todo el equipo</SelectItem>
+                  {users.map((user) => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {userId ? (
+                <Link href={`/dashboard/admin/users/${userId}`} className="inline-flex min-h-7 items-center rounded-md text-xs font-medium text-primary underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                  Ver historial del usuario
+                </Link>
+              ) : null}
             </div>
           </div>
         </section>
@@ -318,7 +335,7 @@ export default function AdminDashboardPage() {
             <Skeleton className="h-80 rounded-2xl" />
           </div>
         ) : overview ? (
-          <div className="mt-5 space-y-5">
+          <div className="mt-5 space-y-5" aria-busy={loading || refreshing}>
             {overview.coverage.note ? (
               <div className="flex items-start gap-3 rounded-2xl border border-amber-300/50 bg-amber-50/70 p-4 text-sm dark:border-amber-500/30 dark:bg-amber-500/10">
                 <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden="true" />

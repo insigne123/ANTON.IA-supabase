@@ -54,6 +54,8 @@ type OrganizationDraft = {
 };
 
 const MAX_LIMIT = 1_000_000;
+const LIMIT_INPUT_CLASS = 'rounded-xl [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
+const EDITOR_DIALOG_CLASS = 'flex max-h-[calc(100dvh_-_2rem)] w-[calc(100%_-_2rem)] max-w-md flex-col gap-0 overflow-hidden rounded-[24px] border-border/70 p-0 shadow-2xl [overflow-wrap:anywhere] sm:max-w-md [&>button]:right-3 [&>button]:top-3 [&>button]:flex [&>button]:h-10 [&>button]:w-10 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-full';
 
 const MODE_DETAILS: Record<AdminCreditMode, { label: string; description: string }> = {
   user: {
@@ -450,35 +452,29 @@ export default function AdminCreditsPage() {
 
   return (
     <div className="min-h-full">
-      <div className="mx-auto w-full max-w-[1480px] px-4 py-1 sm:px-2 lg:px-4 lg:py-3">
-        <header className="flex flex-col gap-5 border-b border-border/60 pb-6 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mx-auto w-full max-w-[1320px] pb-10">
+        <header className="flex flex-col gap-4 border-b border-border/60 pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-primary">
-              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-              <span>Espacio administrativo</span>
-            </div>
-            <h1 className="text-3xl font-semibold tracking-[-0.035em] sm:text-4xl">Créditos diarios</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+            <Button asChild variant="ghost" size="sm" className="-ml-2 mb-2 rounded-lg text-muted-foreground">
+              <Link href="/dashboard/admin">
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                Panel administrativo
+              </Link>
+            </Button>
+            <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">Créditos diarios</h1>
+            <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">
               Define cómo se distribuye el uso diario entre la organización, los equipos y cada persona.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button asChild variant="ghost">
-              <Link href="/dashboard/admin">
-                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                Volver al panel
-              </Link>
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void loadCredits({ silent: true })}
-              disabled={loading || refreshing || isMutating}
-            >
-              <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
-              {refreshing ? 'Actualizando' : 'Actualizar'}
-            </Button>
-          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => void loadCredits({ silent: true })}
+            disabled={loading || refreshing || isMutating}
+          >
+            <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
+            {refreshing ? 'Actualizando' : 'Actualizar'}
+          </Button>
         </header>
 
         {loading && !overview ? <LoadingState /> : null}
@@ -502,7 +498,7 @@ export default function AdminCreditsPage() {
         ) : null}
 
         {overview ? (
-          <div className="mt-5 space-y-5" aria-busy={refreshing || isMutating}>
+          <div className="mt-4 space-y-4" aria-busy={refreshing || isMutating}>
             <section
               aria-label="Próxima aplicación de cambios"
               className="flex items-start gap-3 rounded-2xl border border-border/60 bg-muted/30 px-4 py-3.5 sm:px-5"
@@ -582,7 +578,7 @@ export default function AdminCreditsPage() {
                   ) : null}
 
                   <form onSubmit={saveOrganizationPolicy} className="mt-5 border-t border-border/60 pt-5" noValidate>
-                    <div className="grid gap-4 lg:grid-cols-3">
+                    <div className="grid gap-4 xl:grid-cols-3">
                       <div className="space-y-1.5">
                         <Label htmlFor="organization-credit-mode">Modo de consumo</Label>
                         <Select
@@ -594,7 +590,7 @@ export default function AdminCreditsPage() {
                           }}
                           disabled={isMutating}
                         >
-                          <SelectTrigger id="organization-credit-mode" aria-describedby="organization-mode-help">
+                          <SelectTrigger id="organization-credit-mode" aria-describedby="organization-mode-help" className="rounded-xl">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -626,9 +622,10 @@ export default function AdminCreditsPage() {
                           disabled={isMutating}
                           aria-invalid={Boolean(organizationErrors.userLimit)}
                           aria-describedby={organizationErrors.userLimit ? 'organization-user-limit-error' : 'organization-user-limit-help'}
+                          className={LIMIT_INPUT_CLASS}
                         />
                         {organizationErrors.userLimit ? (
-                          <p id="organization-user-limit-error" className="text-xs text-destructive">{organizationErrors.userLimit}</p>
+                          <p id="organization-user-limit-error" role="alert" className="text-xs text-destructive">{organizationErrors.userLimit}</p>
                         ) : (
                           <p id="organization-user-limit-help" className="text-xs leading-5 text-muted-foreground">
                             Se usa en los modos por usuario e híbrido.
@@ -654,9 +651,10 @@ export default function AdminCreditsPage() {
                           disabled={isMutating}
                           aria-invalid={Boolean(organizationErrors.teamLimit)}
                           aria-describedby={organizationErrors.teamLimit ? 'organization-team-limit-error' : 'organization-team-limit-help'}
+                          className={LIMIT_INPUT_CLASS}
                         />
                         {organizationErrors.teamLimit ? (
-                          <p id="organization-team-limit-error" className="text-xs text-destructive">{organizationErrors.teamLimit}</p>
+                          <p id="organization-team-limit-error" role="alert" className="text-xs text-destructive">{organizationErrors.teamLimit}</p>
                         ) : (
                           <p id="organization-team-limit-help" className="text-xs leading-5 text-muted-foreground">
                             Se usa en los modos por equipo e híbrido.
@@ -712,7 +710,7 @@ export default function AdminCreditsPage() {
                         <div
                           key={team.id}
                           role="listitem"
-                          className="grid gap-4 border-t border-border/60 px-5 py-4 first:border-t-0 md:grid-cols-[minmax(180px,0.8fr)_minmax(240px,1fr)_auto] md:items-center"
+                          className="grid gap-4 border-t border-border/60 px-5 py-4 first:border-t-0 lg:grid-cols-[minmax(180px,0.8fr)_minmax(240px,1fr)_auto] lg:items-center"
                         >
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium">{team.name}</p>
@@ -733,7 +731,7 @@ export default function AdminCreditsPage() {
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="w-full md:w-auto"
+                            className="w-full rounded-xl lg:w-auto"
                             onClick={() => openTeamEditor(team)}
                             disabled={isMutating}
                             aria-label={`Editar límite de ${team.name}`}
@@ -777,7 +775,7 @@ export default function AdminCreditsPage() {
                         <div
                           key={user.id}
                           role="listitem"
-                          className="grid gap-4 border-t border-border/60 px-5 py-5 first:border-t-0 lg:grid-cols-[minmax(220px,1fr)_minmax(190px,0.75fr)_minmax(260px,1.1fr)_auto] lg:items-center"
+                          className="grid gap-4 border-t border-border/60 px-5 py-5 first:border-t-0 xl:grid-cols-[minmax(220px,1fr)_minmax(190px,0.75fr)_minmax(260px,1.1fr)_auto] xl:items-center"
                         >
                           <div className="min-w-0">
                             <div className="flex min-w-0 items-center gap-3">
@@ -834,7 +832,7 @@ export default function AdminCreditsPage() {
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="w-full lg:w-auto"
+                            className="w-full rounded-xl xl:w-auto"
                             onClick={() => openUserEditor(user)}
                             disabled={isMutating}
                             aria-label={`Editar política de ${user.name}`}
@@ -874,95 +872,102 @@ export default function AdminCreditsPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Límite de {editingTeam?.name}</DialogTitle>
-            <DialogDescription>
+        <DialogContent className={EDITOR_DIALOG_CLASS}>
+          <DialogHeader className="shrink-0 px-5 pb-4 pt-5 pr-14 text-left sm:px-6 sm:pt-6 sm:pr-14">
+            <DialogTitle className="text-left leading-7">Límite de {editingTeam?.name}</DialogTitle>
+            <DialogDescription className="text-left leading-6">
               Programa el cupo compartido que tendrá este equipo desde el próximo reinicio UTC.
             </DialogDescription>
           </DialogHeader>
           {editingTeam ? (
-            <form onSubmit={saveTeamLimit} noValidate>
-              <div className="rounded-xl bg-muted/30 p-3 text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-muted-foreground">Uso actual</span>
-                  <span className="font-medium tabular-nums">
-                    {formatNumber(editingTeam.usage)} de {formatNumber(editingTeam.currentLimit)}
-                  </span>
-                </div>
-                {editingTeam.pendingPolicy ? (
-                  <div className="mt-2 flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">Límite programado</span>
+            <form onSubmit={saveTeamLimit} className="flex min-h-0 flex-1 flex-col overflow-hidden" noValidate>
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pb-5 sm:px-6">
+                <div className="rounded-2xl border border-border/50 bg-muted/25 p-4 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Uso actual</span>
                     <span className="font-medium tabular-nums">
-                      {formatNumber(editingTeam.pendingPolicy.teamDailyLimit ?? 0)}
+                      {formatNumber(editingTeam.usage)} de {formatNumber(editingTeam.currentLimit)}
                     </span>
                   </div>
-                ) : null}
-              </div>
-
-              <div className="mt-5 space-y-1.5">
-                <Label htmlFor="team-daily-limit">Límite diario del equipo</Label>
-                <Input
-                  id="team-daily-limit"
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  max={MAX_LIMIT}
-                  step={1}
-                  value={teamLimitDraft}
-                  onChange={(event) => {
-                    setTeamLimitDraft(event.target.value);
-                    setTeamFieldError(null);
-                    setTeamMutationError(null);
-                  }}
-                  disabled={isMutating}
-                  aria-invalid={Boolean(teamFieldError)}
-                  aria-describedby={teamFieldError ? 'team-limit-error' : 'team-limit-help'}
-                  autoFocus
-                />
-                {teamFieldError ? (
-                  <p id="team-limit-error" role="alert" className="text-xs leading-5 text-destructive">{teamFieldError}</p>
-                ) : (
-                  <p id="team-limit-help" className="text-xs leading-5 text-muted-foreground">
-                    Entre 0 y {formatNumber(MAX_LIMIT)} créditos diarios.
-                  </p>
-                )}
-              </div>
-
-              {teamMutationError ? (
-                <div role="alert" className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 p-3 text-xs leading-5">
-                  <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
-                  <p>{teamMutationError}</p>
+                  {editingTeam.pendingPolicy ? (
+                    <div className="mt-2 flex items-center justify-between gap-3 border-t border-border/50 pt-2">
+                      <span className="text-muted-foreground">Límite programado</span>
+                      <span className="font-medium tabular-nums">
+                        {formatNumber(editingTeam.pendingPolicy.teamDailyLimit ?? 0)}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
 
-              <DialogFooter className="mt-6 gap-2 sm:items-center sm:justify-between sm:space-x-0">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void restoreTeamPolicy()}
-                  disabled={isMutating}
-                >
-                  {mutationKey === `team-restore:${editingTeam.id}` ? (
-                    <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                <div className="mt-5 space-y-1.5">
+                  <Label htmlFor="team-daily-limit">Límite diario del equipo</Label>
+                  <Input
+                    id="team-daily-limit"
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    max={MAX_LIMIT}
+                    step={1}
+                    value={teamLimitDraft}
+                    onChange={(event) => {
+                      setTeamLimitDraft(event.target.value);
+                      setTeamFieldError(null);
+                      setTeamMutationError(null);
+                    }}
+                    disabled={isMutating}
+                    aria-invalid={Boolean(teamFieldError)}
+                    aria-describedby={teamFieldError ? 'team-limit-error' : 'team-limit-help'}
+                    className={LIMIT_INPUT_CLASS}
+                  />
+                  {teamFieldError ? (
+                    <p id="team-limit-error" role="alert" className="text-xs leading-5 text-destructive">{teamFieldError}</p>
                   ) : (
-                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                    <p id="team-limit-help" className="text-xs leading-5 text-muted-foreground">
+                      Entre 0 y {formatNumber(MAX_LIMIT)} créditos diarios.
+                    </p>
                   )}
-                  Usar política general
-                </Button>
-                <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                  <DialogClose asChild>
-                    <Button type="button" variant="ghost" disabled={isMutating}>Cancelar</Button>
-                  </DialogClose>
-                  <Button type="submit" disabled={!teamDraftDirty || isMutating}>
-                    {mutationKey === `team:${editingTeam.id}` ? (
+                </div>
+
+                {teamMutationError ? (
+                  <div role="alert" className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 p-3 text-xs leading-5">
+                    <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+                    <p>{teamMutationError}</p>
+                  </div>
+                ) : null}
+
+                <div className="mt-5 border-t border-border/60 pt-3">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-auto min-h-10 w-full justify-start whitespace-normal rounded-xl px-2 py-2 text-left leading-5 text-muted-foreground hover:text-foreground"
+                    onClick={() => void restoreTeamPolicy()}
+                    disabled={isMutating}
+                  >
+                    {mutationKey === `team-restore:${editingTeam.id}` ? (
                       <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
                     ) : (
-                      <Save className="h-4 w-4" aria-hidden="true" />
+                      <RotateCcw className="h-4 w-4" aria-hidden="true" />
                     )}
-                    {mutationKey === `team:${editingTeam.id}` ? 'Guardando' : 'Guardar límite'}
+                    Usar política de la organización
                   </Button>
+                  <p className="px-2 pt-1 text-xs leading-5 text-muted-foreground">
+                    Quita la excepción del equipo desde el próximo reinicio.
+                  </p>
                 </div>
+              </div>
+
+              <DialogFooter className="shrink-0 gap-2 border-t border-border/60 bg-background/95 px-5 py-4 sm:flex-row sm:justify-end sm:space-x-0 sm:px-6">
+                <DialogClose asChild>
+                  <Button type="button" variant="ghost" className="w-full rounded-xl sm:w-auto" disabled={isMutating}>Cancelar</Button>
+                </DialogClose>
+                <Button type="submit" className="w-full rounded-xl sm:w-auto" disabled={!teamDraftDirty || isMutating}>
+                  {mutationKey === `team:${editingTeam.id}` ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                  ) : (
+                    <Save className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  {mutationKey === `team:${editingTeam.id}` ? 'Guardando' : 'Guardar límite'}
+                </Button>
               </DialogFooter>
             </form>
           ) : null}
@@ -979,118 +984,126 @@ export default function AdminCreditsPage() {
           }
         }}
       >
-        <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Política de {editingUser?.name}</DialogTitle>
-            <DialogDescription>
+        <DialogContent className={EDITOR_DIALOG_CLASS}>
+          <DialogHeader className="shrink-0 px-5 pb-4 pt-5 pr-14 text-left sm:px-6 sm:pt-6 sm:pr-14">
+            <DialogTitle className="text-left leading-7">Política de {editingUser?.name}</DialogTitle>
+            <DialogDescription className="text-left leading-6">
               Configura una excepción individual. El cambio se aplicará en el próximo reinicio UTC.
             </DialogDescription>
           </DialogHeader>
           {editingUser ? (
-            <form onSubmit={saveUserPolicy} noValidate>
-              <div className="rounded-xl bg-muted/30 p-3 text-sm">
-                <div className="flex items-start gap-2">
-                  <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <div>
-                    <p className="font-medium">{editingUser.primaryTeam?.name || 'Sin equipo principal'}</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      {editingUser.pendingTeam
-                        ? `Cambiará a ${editingUser.pendingTeam.name} en el próximo reinicio.`
-                        : 'Equipo principal usado para los modos por equipo e híbrido.'}
-                    </p>
+            <form onSubmit={saveUserPolicy} className="flex min-h-0 flex-1 flex-col overflow-hidden" noValidate>
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pb-5 sm:px-6">
+                <div className="rounded-2xl border border-border/50 bg-muted/25 p-4 text-sm">
+                  <div className="flex items-start gap-2">
+                    <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <div className="min-w-0">
+                      <p className="font-medium">{editingUser.primaryTeam?.name || 'Sin equipo principal'}</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {editingUser.pendingTeam
+                          ? `Cambiará a ${editingUser.pendingTeam.name} en el próximo reinicio.`
+                          : 'Equipo principal usado para los modos por equipo e híbrido.'}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="mt-5 space-y-1.5">
-                <Label htmlFor="user-credit-mode">Modo de consumo</Label>
-                <Select
-                  value={userModeDraft}
-                  onValueChange={(value) => {
-                    setUserModeDraft(value as AdminCreditMode);
-                    setUserFieldError(null);
-                    setUserMutationError(null);
-                  }}
-                  disabled={isMutating}
-                >
-                  <SelectTrigger id="user-credit-mode" aria-describedby="user-mode-help">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(MODE_DETAILS) as AdminCreditMode[]).map((mode) => (
-                      <SelectItem key={mode} value={mode}>{MODE_DETAILS[mode].label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p id="user-mode-help" className="text-xs leading-5 text-muted-foreground">
-                  {MODE_DETAILS[userModeDraft].description}
-                </p>
-              </div>
-
-              <div className="mt-4 space-y-1.5">
-                <Label htmlFor="user-daily-limit">Límite diario del usuario</Label>
-                <Input
-                  id="user-daily-limit"
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  max={MAX_LIMIT}
-                  step={1}
-                  value={userLimitDraft}
-                  onChange={(event) => {
-                    setUserLimitDraft(event.target.value);
-                    setUserFieldError(null);
-                    setUserMutationError(null);
-                  }}
-                  disabled={isMutating}
-                  aria-invalid={Boolean(userFieldError)}
-                  aria-describedby={userFieldError ? 'user-limit-error' : 'user-limit-help'}
-                />
-                {userFieldError ? (
-                  <p id="user-limit-error" role="alert" className="text-xs leading-5 text-destructive">{userFieldError}</p>
-                ) : (
-                  <p id="user-limit-help" className="text-xs leading-5 text-muted-foreground">
-                    {userModeDraft === 'team'
-                      ? 'Se conserva para cuando esta persona vuelva a usar un cupo personal.'
-                      : `Entre 0 y ${formatNumber(MAX_LIMIT)} créditos diarios.`}
+                <div className="mt-5 space-y-1.5">
+                  <Label htmlFor="user-credit-mode">Modo de consumo</Label>
+                  <Select
+                    value={userModeDraft}
+                    onValueChange={(value) => {
+                      setUserModeDraft(value as AdminCreditMode);
+                      setUserFieldError(null);
+                      setUserMutationError(null);
+                    }}
+                    disabled={isMutating}
+                  >
+                    <SelectTrigger id="user-credit-mode" aria-describedby="user-mode-help" className="rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(MODE_DETAILS) as AdminCreditMode[]).map((mode) => (
+                        <SelectItem key={mode} value={mode}>{MODE_DETAILS[mode].label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p id="user-mode-help" className="text-xs leading-5 text-muted-foreground">
+                    {MODE_DETAILS[userModeDraft].description}
                   </p>
-                )}
-              </div>
-
-              {userMutationError ? (
-                <div role="alert" className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 p-3 text-xs leading-5">
-                  <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
-                  <p>{userMutationError}</p>
                 </div>
-              ) : null}
 
-              <DialogFooter className="mt-6 gap-2 sm:items-center sm:justify-between sm:space-x-0">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void restoreUserPolicy()}
-                  disabled={isMutating}
-                >
-                  {mutationKey === `user-restore:${editingUser.id}` ? (
-                    <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                <div className="mt-4 space-y-1.5">
+                  <Label htmlFor="user-daily-limit">Límite diario del usuario</Label>
+                  <Input
+                    id="user-daily-limit"
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    max={MAX_LIMIT}
+                    step={1}
+                    value={userLimitDraft}
+                    onChange={(event) => {
+                      setUserLimitDraft(event.target.value);
+                      setUserFieldError(null);
+                      setUserMutationError(null);
+                    }}
+                    disabled={isMutating}
+                    aria-invalid={Boolean(userFieldError)}
+                    aria-describedby={userFieldError ? 'user-limit-error' : 'user-limit-help'}
+                    className={LIMIT_INPUT_CLASS}
+                  />
+                  {userFieldError ? (
+                    <p id="user-limit-error" role="alert" className="text-xs leading-5 text-destructive">{userFieldError}</p>
                   ) : (
-                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                    <p id="user-limit-help" className="text-xs leading-5 text-muted-foreground">
+                      {userModeDraft === 'team'
+                        ? 'Se conserva para cuando esta persona vuelva a usar un cupo personal.'
+                        : `Entre 0 y ${formatNumber(MAX_LIMIT)} créditos diarios.`}
+                    </p>
                   )}
-                  Restaurar política heredada
-                </Button>
-                <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                  <DialogClose asChild>
-                    <Button type="button" variant="ghost" disabled={isMutating}>Cancelar</Button>
-                  </DialogClose>
-                  <Button type="submit" disabled={!userDraftDirty || isMutating}>
-                    {mutationKey === `user:${editingUser.id}` ? (
+                </div>
+
+                {userMutationError ? (
+                  <div role="alert" className="mt-4 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 p-3 text-xs leading-5">
+                    <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+                    <p>{userMutationError}</p>
+                  </div>
+                ) : null}
+
+                <div className="mt-5 border-t border-border/60 pt-3">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-auto min-h-10 w-full justify-start whitespace-normal rounded-xl px-2 py-2 text-left leading-5 text-muted-foreground hover:text-foreground"
+                    onClick={() => void restoreUserPolicy()}
+                    disabled={isMutating}
+                  >
+                    {mutationKey === `user-restore:${editingUser.id}` ? (
                       <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
                     ) : (
-                      <Save className="h-4 w-4" aria-hidden="true" />
+                      <RotateCcw className="h-4 w-4" aria-hidden="true" />
                     )}
-                    {mutationKey === `user:${editingUser.id}` ? 'Guardando' : 'Guardar política'}
+                    Restaurar política heredada
                   </Button>
+                  <p className="px-2 pt-1 text-xs leading-5 text-muted-foreground">
+                    Vuelve a la política del equipo o de la organización.
+                  </p>
                 </div>
+              </div>
+
+              <DialogFooter className="shrink-0 gap-2 border-t border-border/60 bg-background/95 px-5 py-4 sm:flex-row sm:justify-end sm:space-x-0 sm:px-6">
+                <DialogClose asChild>
+                  <Button type="button" variant="ghost" className="w-full rounded-xl sm:w-auto" disabled={isMutating}>Cancelar</Button>
+                </DialogClose>
+                <Button type="submit" className="w-full rounded-xl sm:w-auto" disabled={!userDraftDirty || isMutating}>
+                  {mutationKey === `user:${editingUser.id}` ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                  ) : (
+                    <Save className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  {mutationKey === `user:${editingUser.id}` ? 'Guardando' : 'Guardar política'}
+                </Button>
               </DialogFooter>
             </form>
           ) : null}
