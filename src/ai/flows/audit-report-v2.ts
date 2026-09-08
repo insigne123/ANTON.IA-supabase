@@ -11,7 +11,7 @@ import {
 } from '@/lib/report-v2-contracts';
 import { stripInternalIdsForReportPrompt } from './write-report-v2-section';
 
-export const AUDIT_REPORT_V2_PROMPT_VERSION = 'report-v2/p7-audit/1';
+export const AUDIT_REPORT_V2_PROMPT_VERSION = 'report-v2/p7-audit/2';
 
 export const AuditIssueTypeV2Schema = z.enum([
   'duplication',
@@ -51,7 +51,7 @@ Jurisdiccion del contacto: ${input.contactCountry}
 
 Revisa cada parrafo y reporta todo defecto con su ubicacion exacta:
 
-1. DUPLICACION: frases repetidas o solapadas dentro del mismo parrafo.
+1. DUPLICACION: frases repetidas o solapadas dentro del mismo parrafo. En discovery es normal repetir una idea dentro de la pregunta que la valida; no marques esa pareja contexto/pregunta como defecto.
 2. TRUNCADO: el parrafo termina a mitad de palabra o frase.
 3. RUIDO TECNICO: HTML, clases CSS, rutas de archivo o URLs de assets.
 4. COPIA LITERAL: reproduce el titulo, snippet o slogan de una fuente.
@@ -60,7 +60,7 @@ Revisa cada parrafo y reporta todo defecto con su ubicacion exacta:
 7. HIPOTESIS DURA: una conjetura aparece como hecho confirmado.
 8. VACUIDAD: no contiene ningun dato especifico de la cuenta.
 
-Por defecto devuelve seccion, indice, tipo, fragmento y severidad block o warn. Block obliga a regenerar la seccion. No propongas correcciones.`;
+Por defecto devuelve seccion, indice, tipo, fragmento y severidad block o warn. El fragmento de una duplicacion debe aparecer literalmente al menos dos veces en el parrafo. Block obliga a regenerar la seccion. No propongas correcciones.`;
 }
 
 function normalized(value: string) {
@@ -75,18 +75,106 @@ function similarity(left: string, right: string) {
   return intersection / Math.max(leftTerms.size, rightTerms.size);
 }
 
-function duplicatedFragment(text: string) {
+function questionRanges(words: string[]) {
+  const ranges: Array<{ start: number; end: number }> = [];
+  let start = -1;
+  let sentenceStart = 0;
+  words.forEach((word, index) => {
+    if (word.includes('¿')) start = index;
+    if (start < 0 && word.includes('?')) start = sentenceStart;
+    if (start >= 0 && word.includes('?')) {
+      ranges.push({ start, end: index });
+      start = -1;
+    }
+    if (/[.!?]$/.test(word)) sentenceStart = index + 1;
+  });
+  return ranges;
+}
+
+function occurrenceInQuestion(ranges: Array<{ start: number; end: number }>, start: number, end: number) {
+  return ranges.some((range) => range.start <= start && end <= range.end);
+}
+
+function sentenceIds(words: string[]) {
+  let sentence = 0;
+  return words.map((word) => {
+    const current = sentence;
+    if (/[.!?]$/.test(word)) sentence += 1;
+    return current;
+  });
+}
+
+function isMeaningfulDuplication(
+  left: { sentence: number; inQuestion: boolean },
+  right: { sentence: number; inQuestion: boolean },
+  wordCount: number,
+  ignoreQuestionEcho: boolean,
+) {
+  if (ignoreQuestionEcho && left.inQuestion !== right.inQuestion) return false;
+  return left.sentence === right.sentence || wordCount >= 8;
+}
+
+function repeatedFragment(text: string, fragment: string, ignoreQuestionEcho = false) {
   const words = text.split(/\s+/).filter(Boolean);
+  const targetWords = normalized(fragment).split(' ').filter(Boolean);
+  if (targetWords.length < 3 || normalized(fragment).length <= 20) return false;
+  const ranges = questionRanges(words);
+  const sentences = sentenceIds(words);
+  const occurrences: Array<{ start: number; end: number; inQuestion: boolean }> = [];
+  for (let index = 0; index <= words.length - targetWords.length; index += 1) {
+    if (normalized(words.slice(index, index + targetWords.length).join(' ')) !== targetWords.join(' ')) continue;
+    occurrences.push({
+      start: index,
+      end: index + targetWords.length - 1,
+      inQuestion: occurrenceInQuestion(ranges, index, index + targetWords.length - 1),
+    });
+  }
+  return occurrences.some((occurrence, index) => occurrences.slice(index + 1).some((other) => isMeaningfulDuplication(
+    { sentence: sentences[occurrence.start], inQuestion: occurrence.inQuestion },
+    { sentence: sentences[other.start], inQuestion: other.inQuestion },
+    targetWords.length,
+    ignoreQuestionEcho,
+  )));
+}
+
+function duplicatedFragment(text: string, ignoreQuestionEcho = false) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const ranges = questionRanges(words);
+  const sentences = sentenceIds(words);
   for (let size = Math.min(12, Math.floor(words.length / 2)); size >= 3; size -= 1) {
-    const seen = new Set<string>();
+    const seen = new Map<string, Array<{ start: number; inQuestion: boolean }>>();
     for (let index = 0; index <= words.length - size; index += 1) {
       const fragment = normalized(words.slice(index, index + size).join(' '));
       if (fragment.length <= 20) continue;
-      if (seen.has(fragment)) return words.slice(index, index + size).join(' ');
-      seen.add(fragment);
+      const inQuestion = occurrenceInQuestion(ranges, index, index + size - 1);
+      const previous = seen.get(fragment) || [];
+      if (previous.some((item) => isMeaningfulDuplication(
+        { sentence: sentences[item.start], inQuestion: item.inQuestion },
+        { sentence: sentences[index], inQuestion },
+        size,
+        ignoreQuestionEcho,
+      ))) return words.slice(index, index + size).join(' ');
+      previous.push({ start: index, inQuestion });
+      seen.set(fragment, previous);
     }
   }
   return null;
+}
+
+function retainGroundedDuplicationIssues(issues: AuditIssueV2[], sections: SectionV2[]) {
+  const sectionsByKey = new Map(sections.map((section) => [section.key, section]));
+  return issues.filter((issue) => {
+    if (issue.type !== 'duplication' || issue.paragraphIndex === null) return issue.type !== 'duplication';
+    const paragraph = sectionsByKey.get(issue.section)?.paragraphs[issue.paragraphIndex];
+    return Boolean(paragraph && repeatedFragment(paragraph.text, issue.fragment, issue.section === 'discovery'));
+  });
+}
+
+function deduplicateIssues(issues: AuditIssueV2[]) {
+  return [...new Map(issues.map((issue) => [
+    `${issue.section}:${issue.paragraphIndex}:${issue.type}:${normalized(issue.fragment)}`,
+    issue,
+  ])).values()];
 }
 
 export function deterministicAuditReportV2(input: {
@@ -107,7 +195,7 @@ export function deterministicAuditReportV2(input: {
       const add = (type: AuditIssueV2['type'], fragment: string, severity: AuditIssueV2['severity']) => {
         issues.push({ section: section.key, paragraphIndex, type, fragment: fragment.slice(0, 1_000), severity });
       };
-      const duplicate = duplicatedFragment(paragraph.text);
+      const duplicate = duplicatedFragment(paragraph.text, section.key === 'discovery');
       if (duplicate) add('duplication', duplicate, 'block');
       if (!/[.!?:;)]$/.test(paragraph.text.trim())) add('truncated', paragraph.text.slice(-120), 'block');
       const noise = paragraph.text.match(/<[^>]*>|wp-content\S*|elementor\S*|hummingbird\S*|\/assets\/\S*|https?:\/\/\S+/i)?.[0];
@@ -136,13 +224,6 @@ export function deterministicAuditReportV2(input: {
     });
   });
   return issues;
-}
-
-function deduplicateIssues(issues: AuditIssueV2[]) {
-  return [...new Map(issues.map((issue) => [
-    `${issue.section}:${issue.paragraphIndex}:${issue.type}:${normalized(issue.fragment)}`,
-    issue,
-  ])).values()];
 }
 
 export async function auditReportV2(input: {
@@ -174,7 +255,8 @@ export async function auditReportV2(input: {
     temperature: 0,
   });
   if (input.writerModels.includes(generated.telemetry.modelName)) throw new Error('REPORT_V2_AUDITOR_MODEL_COLLISION');
-  const issues = deduplicateIssues([...deterministicIssues, ...generated.data.issues]);
+  const groundedModelIssues = retainGroundedDuplicationIssues(generated.data.issues, input.sections);
+  const issues = deduplicateIssues([...deterministicIssues, ...groundedModelIssues]);
   return {
     model: generated.telemetry.modelName,
     issues,

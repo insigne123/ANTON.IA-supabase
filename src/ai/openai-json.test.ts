@@ -132,6 +132,45 @@ test('keeps GLM provider configuration and JSON object response format', async (
   }
 });
 
+test('removes boolean finite bounds from OpenAI JSON schemas', async () => {
+  const previous = {
+    apiKey: process.env.OPENAI_API_KEY,
+    baseUrl: process.env.OPENAI_BASE_URL,
+    model: process.env.OPENAI_MODEL,
+  };
+  const originalFetch = globalThis.fetch;
+  let requestedBody: RequestBody = {};
+
+  process.env.OPENAI_API_KEY = 'test-openai-key';
+  delete process.env.OPENAI_BASE_URL;
+  delete process.env.OPENAI_MODEL;
+  globalThis.fetch = async (_input, init) => {
+    requestedBody = JSON.parse(String(init?.body || '{}'));
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"score":0.5,"website":"https://example.com"}' } }] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    await generateStructured({
+      prompt: 'Return a score.',
+      schema: z.object({ score: z.number().finite(), website: z.string().url() }),
+      provider: 'openai',
+    });
+
+    const scoreSchema = requestedBody.response_format?.json_schema?.schema?.properties as Record<string, any>;
+    assert.notEqual(scoreSchema.score?.exclusiveMaximum, true);
+    assert.notEqual(scoreSchema.score?.exclusiveMinimum, true);
+    assert.notEqual(scoreSchema.website?.format, 'uri');
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnv('OPENAI_API_KEY', previous.apiKey);
+    restoreEnv('OPENAI_BASE_URL', previous.baseUrl);
+    restoreEnv('OPENAI_MODEL', previous.model);
+  }
+});
+
 test('falls back to the next model when runtime Zod parsing rejects output', async () => {
   const previous = {
     apiKey: process.env.OPENAI_API_KEY,

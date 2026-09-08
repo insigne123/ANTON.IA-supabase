@@ -125,6 +125,7 @@ export function projectResearchSnapshotV1ToReportV2(input: {
   const companyDomain = text(snapshot.subject.company.domain);
   if (!companyDomain) throw new Error('REPORT_V2_COMPANY_DOMAIN_REQUIRED');
   const generatedAt = new Date(input.generatedAt).toISOString();
+  const nativeExtractionFallback = snapshot.request.provider === 'native-research-v1';
   const entity = resolveEntityFromExistingContextV2({
     contact: {
       fullName: snapshot.subject.person.fullName,
@@ -188,7 +189,10 @@ export function projectResearchSnapshotV1ToReportV2(input: {
       id,
       sourceId,
       text: truncateAtWord(evidence.statement, 2_000),
-      observedAt: instant(evidence.observedAt) || source.publishedAt || source.modifiedAt,
+      observedAt: instant(evidence.observedAt)
+        || source.publishedAt
+        || source.modifiedAt
+        || (nativeExtractionFallback ? instant(evidence.extractedAt) : null),
       jurisdiction: source.jurisdiction,
       locator: evidence.locator ? truncateAtWord(`${evidence.locator.kind}:${evidence.locator.value}`, 500) : null,
     })];

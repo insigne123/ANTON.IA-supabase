@@ -1207,7 +1207,9 @@ function buildSnapshot(input: {
       statement,
       sourceId: value.source.id,
       ...(value.locator ? { locator: value.locator } : {}),
-      ...(isoDateOrNull(value.observedAt) ? { observedAt: isoDateOrNull(value.observedAt)! } : {}),
+      ...(isoDateOrNull(value.observedAt) || isoDateOrNull(value.extractedAt)
+        ? { observedAt: isoDateOrNull(value.observedAt) || isoDateOrNull(value.extractedAt)! }
+        : {}),
       extractedAt: isoDateOrNull(value.extractedAt) || now,
       confidence: Math.max(0, Math.min(1, value.confidence ?? 0.7)),
       extraction: { method: value.extractionMethod || 'provider', provider: NATIVE_PROVIDER, version: 'native-research/v2' },

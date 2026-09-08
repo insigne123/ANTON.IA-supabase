@@ -53,6 +53,20 @@ test('keeps undated evidence as graph facts but never promotes it to a factual V
   assert.deepEqual(projection.shortIdMap, {});
 });
 
+test('uses native extraction time for legacy native evidence without observedAt', () => {
+  const raw = structuredClone(draftSnapshotFixture());
+  raw.request.provider = 'native-research-v1';
+  const projection = projectResearchSnapshotV1ToReportV2({
+    snapshot: raw,
+    sellerProfile,
+    icpRules: null,
+    generatedAt: DRAFT_FIXTURE_NOW.toISOString(),
+  });
+
+  assert.equal(projection.facts[0]?.observedAt, '2026-08-20T12:00:00.000Z');
+  assert.ok(projection.claims.length > 0);
+});
+
 test('projected graph can be embedded without dangling source, fact, or short-ID references', () => {
   const raw = structuredClone(draftSnapshotFixture());
   raw.evidence = raw.evidence.map((evidence) => ({ ...evidence, observedAt: '2026-08-20T12:00:00.000Z' }));

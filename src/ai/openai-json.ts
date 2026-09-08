@@ -78,10 +78,10 @@ function deterministicSchemaName(schema: object) {
 function responseFormat<T extends z.ZodTypeAny>(schema: T, provider: StructuredProvider) {
   if (provider !== 'openai') return { type: 'json_object' };
 
-  const jsonSchema = zodToJsonSchema(schema, {
+  const jsonSchema = sanitizeOpenAiJsonSchema(zodToJsonSchema(schema, {
     target: 'openAi',
     $refStrategy: 'none',
-  });
+  })) as Record<string, unknown>;
   return {
     type: 'json_schema',
     json_schema: {
@@ -90,6 +90,18 @@ function responseFormat<T extends z.ZodTypeAny>(schema: T, provider: StructuredP
       schema: jsonSchema,
     },
   };
+}
+
+function sanitizeOpenAiJsonSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeOpenAiJsonSchema);
+  if (!value || typeof value !== 'object') return value;
+
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key, item]) => !(
+      (key === 'exclusiveMaximum' || key === 'exclusiveMinimum')
+      && typeof item === 'boolean'
+    ) && !(key === 'format' && item === 'uri'))
+    .map(([key, item]) => [key, sanitizeOpenAiJsonSchema(item)]));
 }
 
 function getStructuredProviderConfig(requestedProvider?: StructuredProvider): StructuredProviderConfig {

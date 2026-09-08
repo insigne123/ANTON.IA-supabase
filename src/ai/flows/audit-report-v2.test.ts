@@ -55,6 +55,53 @@ test('P7 excludes the accepted writer model and combines deterministic and model
   assert.deepEqual(result.blockingSections, []);
 });
 
+test('does not block a discovery question that intentionally echoes its context', () => {
+  const issues = deterministicAuditReportV2({
+    sections: [{
+      key: 'discovery', title: 'Discovery', blocks: [], paragraphs: [{
+        text: 'La empresa enfrenta procesos de reclutamiento y seleccion. ¿Cuales son sus procesos de reclutamiento y seleccion actuales?',
+        claimIds: ['c01'], context: 'target',
+      }],
+    }],
+    claims: facts,
+    sources,
+    contactCountry: 'PE',
+  });
+  assert.equal(issues.some((issue) => issue.type === 'duplication'), false);
+});
+
+test('does not block a short phrase reused across separate sentences', () => {
+  const issues = deterministicAuditReportV2({
+    sections: [{
+      key: 'signals', title: 'Signals', blocks: [], paragraphs: [{
+        text: 'La cuenta muestra interes en la gestion del talento. Conviene revisar como aborda la gestion del talento en sus operaciones.',
+        claimIds: ['c01'], context: 'target',
+      }],
+    }],
+    claims: facts,
+    sources,
+    contactCountry: 'PE',
+  });
+  assert.equal(issues.some((issue) => issue.type === 'duplication'), false);
+});
+
+test('ignores an ungrounded model duplication finding', async () => {
+  const result = await auditReportV2({
+    sections: [{ key: 'company', title: 'Company', paragraphs: [{ text: 'Acme has 300 workers.', claimIds: ['c01'], context: 'target' }], blocks: [] }],
+    claims: facts,
+    sources,
+    contactCountry: 'PE',
+    writerModels: ['gpt-5.6-luna'],
+  }, {
+    generate: (async () => ({
+      data: { issues: [{ section: 'company', paragraphIndex: 0, type: 'duplication', fragment: 'Acme has 300 workers', severity: 'block' }] },
+      telemetry: { modelName: 'gpt-5.6-sol', durationMs: 1 },
+    })) as any,
+  });
+  assert.equal(result.issues.some((issue) => issue.type === 'duplication'), false);
+  assert.deepEqual(result.blockingSections, []);
+});
+
 test('rewrites each blocking section once and leaves accepted sections untouched', async () => {
   const sections: SectionV2[] = [
     { key: 'company', title: 'Company', paragraphs: [], blocks: [] },
