@@ -49,7 +49,7 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
   {
     label: 'Administración',
     items: [
-      { href: '/dashboard/admin', icon: ShieldCheck, label: 'Admin', feature: 'admin-dashboard' },
+      { href: '/dashboard/admin', icon: ShieldCheck, label: 'Administración', feature: 'admin-dashboard' },
     ],
   },
   {

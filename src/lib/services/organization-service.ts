@@ -107,8 +107,8 @@ export const organizationService = {
         return requestJson<OrganizationDetailsResponse>(`/api/organizations/${encodeURIComponent(orgId)}`);
     },
 
-    async createInvite(email: string, role: 'admin' | 'member' = 'member') {
-        const orgId = await this.getCurrentOrganizationId();
+    async createInvite(email: string, role: 'admin' | 'member' = 'member', organizationId?: string | null) {
+        const orgId = String(organizationId || '').trim() || await this.getCurrentOrganizationId();
         if (!orgId) return null;
         return requestJson<{ inviteUrl: string; expiresAt: string }>(
             `/api/organizations/${encodeURIComponent(orgId)}/invites`,

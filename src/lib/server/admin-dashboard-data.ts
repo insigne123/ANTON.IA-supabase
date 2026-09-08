@@ -117,6 +117,17 @@ function formatUserName(user: any) {
   );
 }
 
+function safeAvatarUrl(value: unknown) {
+  const normalized = normalize(value);
+  if (!normalized) return null;
+  try {
+    const url = new URL(normalized);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readRows(query: any, label: string, errors: string[]): Promise<any[]> {
   const result = await query.limit(MAX_ROWS) as QueryResult;
   if (result.error) {
@@ -161,6 +172,11 @@ export async function loadAdminDashboardOverview(
   if (groupMembersResult.error) errors.push('organization_reporting_group_members');
   if (organizationMembersResult.error) errors.push('organization_members');
   if (usersResult.error) errors.push('auth.users');
+
+  if (errors.length > 0) {
+    console.error('[admin-dashboard-data] Unable to load organization roster:', errors.join(', '));
+    throw new Error('No pudimos cargar las personas y los equipos. Inténtalo de nuevo.');
+  }
 
   const groups = (groupsResult.data || []) as any[];
   const groupMembers = (groupMembersResult.data || []) as any[];
@@ -350,14 +366,48 @@ export async function loadAdminDashboardOverview(
     const userContacted = sentContacted.filter((row) => rowUserId(row) === userId);
     const userResearch = filteredResearch.filter((row) => rowUserId(row) === userId);
     const userReplies = repliedContacted.filter((row) => rowUserId(row) === userId);
+    const userLedger = filteredLedger.filter((row) => rowUserId(row) === userId);
+    const userEmailEvents = filteredEmailEvents.filter((event) => rowUserId(contactedById.get(normalize(event.contacted_id))) === userId);
+    const userSentEmailEvents = userEmailEvents.filter((event) => eventMatches(event.event_type, ['sent']));
+    const userReplyEmailEvents = userEmailEvents.filter((event) => eventMatches(event.event_type, ['reply', 'replied', 'received']));
+    const userSentLedgerEvents = userLedger.filter((event) => eventMatches(event.event_type, ['email.sent', 'outbound.sent', 'dispatch.sent']));
+    const userReplyLedgerEvents = userLedger.filter((event) => eventMatches(event.event_type, ['reply.received', 'contact.replied']));
+    const activityDates = [
+      ...userLeads.map((row) => rowDate(row, ['created_at'])),
+      ...userContacted.map((row) => rowDate(row, ['sent_at'])),
+      ...userReplies.map((row) => rowDate(row, ['replied_at'])),
+      ...userResearch.flatMap((row) => [rowDate(row, ['created_at']), rowDate(row, ['completed_at'])]),
+      ...userEmailEvents.map((row) => rowDate(row, ['event_at', 'created_at'])),
+      ...userLedger.map((row) => rowDate(row, ['occurred_at'])),
+    ].filter((date): date is Date => Boolean(date && date >= from && date < to));
+    const contacted = Math.max(
+      countUnique(userContacted, (row) => row.lead_id || row.id),
+      countUnique(userSentEmailEvents, (row) => row.lead_id || row.contacted_id || row.id),
+      countUnique(userSentLedgerEvents, (row) => row.lead_id || row.entity_id || row.id),
+    );
+    const replies = Math.max(
+      countUnique(userReplies, (row) => row.lead_id || row.id),
+      countUnique(userReplyEmailEvents, (row) => row.lead_id || row.contacted_id || row.id),
+      countUnique(userReplyLedgerEvents, (row) => row.lead_id || row.contacted_id || row.entity_id || row.id),
+    );
+    const userEmailsSent = Math.max(
+      sentEmailContacts.filter((row) => rowUserId(row) === userId).length,
+      userSentEmailEvents.length,
+      userSentLedgerEvents.length,
+    );
     return {
       leads: userLeads.length,
-      contacted: countUnique(userContacted, (row) => row.lead_id || row.id),
+      contacted,
       researched: userResearch.length || countUnique(
-        researchLedgerEvents.filter((event) => rowUserId(event) === userId),
+        userLedger.filter((event) => eventMatches(event.event_type, ['research.completed', 'research.requested', 'lead.researched', 'backfill.research'])),
         (row) => row.research_job_id || row.entity_id || row.lead_id || row.id,
       ),
-      replies: countUnique(userReplies, (row) => row.lead_id || row.id),
+      replies,
+      responseRate: userEmailsSent > 0 ? Math.min(100, Math.round((replies / userEmailsSent) * 1000) / 10) : 0,
+      activeDays: new Set(activityDates.map((date) => date.toISOString().slice(0, 10))).size,
+      lastActivityAt: activityDates.length > 0
+        ? new Date(Math.max(...activityDates.map((date) => date.getTime()))).toISOString()
+        : null,
     };
   };
 
@@ -366,23 +416,37 @@ export async function loadAdminDashboardOverview(
     .map((member) => {
       const userId = normalize(member.user_id);
       const authUser = userById.get(userId);
+      const userMetrics = metricsForUser(userId);
+      const metadata = authUser?.user_metadata || {};
       return {
         id: userId,
         email: normalize(authUser?.email) || `${userId.slice(0, 8)}…`,
         name: formatUserName(authUser),
+        avatarUrl: safeAvatarUrl(metadata.avatar_url || metadata.picture),
         role: member.role,
+        memberSince: normalize(member.created_at) || null,
+        lastSignInAt: normalize(authUser?.last_sign_in_at) || null,
+        lastActivityAt: userMetrics.lastActivityAt,
+        emailConfirmed: Boolean(authUser?.email_confirmed_at || authUser?.confirmed_at),
         groups: (membershipsByUser.get(userId) || []).map((membership) => ({
           id: String(membership.group_id),
           name: normalize(groupById.get(String(membership.group_id))?.name) || 'Sin grupo',
           primary: Boolean(membership.is_primary),
         })),
-        metrics: metricsForUser(userId),
+        metrics: {
+          leads: userMetrics.leads,
+          contacted: userMetrics.contacted,
+          researched: userMetrics.researched,
+          replies: userMetrics.replies,
+          responseRate: userMetrics.responseRate,
+          activeDays: userMetrics.activeDays,
+        },
       };
     })
     .sort((left, right) => (right.metrics.contacted + right.metrics.leads) - (left.metrics.contacted + left.metrics.leads));
 
   const groupMetrics = groups
-    .filter((group) => !groupFilter || String(group.id) === groupFilter)
+    .filter((group) => Boolean(group.is_active) && (!groupFilter || String(group.id) === groupFilter))
     .map((group) => {
       const groupLeads = filteredLeads.filter((row) => attributedToGroup(rowUserId(row), String(group.id)));
       const groupContacted = sentContacted.filter((row) => attributedToGroup(rowUserId(row), String(group.id)));
@@ -441,6 +505,17 @@ export async function loadAdminDashboardOverview(
     organization: {
       id: String(organizationResult.data?.id || organizationId),
       name: normalize(organizationResult.data?.name) || organizationName,
+    },
+    filterOptions: {
+      groups: groups
+        .filter((group) => Boolean(group.is_active))
+        .map((group) => ({ id: String(group.id), name: normalize(group.name) || 'Equipo' })),
+      users: organizationMembers
+        .map((member) => {
+          const memberId = normalize(member.user_id);
+          return { id: memberId, name: formatUserName(userById.get(memberId)) };
+        })
+        .sort((left, right) => left.name.localeCompare(right.name)),
     },
     dateRange: { from: query.from, to: query.to },
     generatedAt: new Date().toISOString(),

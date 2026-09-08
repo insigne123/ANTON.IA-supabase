@@ -28,7 +28,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import type {
   AdminUserProfile,
@@ -46,7 +45,7 @@ const SOURCE_LABELS: Record<AdminUserTimelineSource, string> = {
 };
 
 const ROLE_LABELS = {
-  owner: 'Owner',
+  owner: 'Propietario',
   admin: 'Administrador',
   member: 'Miembro',
 };
@@ -171,7 +170,7 @@ function Timeline({ items }: { items: AdminUserTimelineItem[] }) {
   }
 
   return (
-    <ScrollArea className="h-[68vh] min-h-[440px] max-h-[760px]">
+    <div tabIndex={0} role="region" aria-label="Actividad de la persona" className="lg:max-h-[760px] lg:overflow-y-auto">
       <ol className="px-5 pb-6 pt-2 sm:px-6" aria-label="Actividad cronológica, más reciente primero">
         {items.map((item, index) => {
           const Icon = CATEGORY_ICONS[item.category];
@@ -204,7 +203,7 @@ function Timeline({ items }: { items: AdminUserTimelineItem[] }) {
           );
         })}
       </ol>
-    </ScrollArea>
+    </div>
   );
 }
 
@@ -259,11 +258,11 @@ export default function AdminUserProfilePage() {
 
   return (
     <div className="min-h-full">
-      <main className="mx-auto w-full max-w-[1240px] px-4 pb-10 pt-2 sm:px-6 lg:px-8 lg:pt-4">
+      <div className="mx-auto w-full max-w-[1240px] pb-10 pt-1">
         <Button asChild variant="ghost" size="sm" className="mb-4 -ml-2 text-muted-foreground hover:text-foreground">
-          <Link href="/dashboard/admin">
+          <Link href="/dashboard/admin/users">
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            Volver al panel
+            Volver a Personas
           </Link>
         </Button>
 
@@ -415,7 +414,7 @@ export default function AdminUserProfilePage() {
             </footer>
           </div>
         ) : null}
-      </main>
+      </div>
     </div>
   );
 }

@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
-  ArrowLeft,
   Building2,
   CheckCircle2,
   CircleAlert,
@@ -455,12 +454,6 @@ export default function AdminCreditsPage() {
       <div className="mx-auto w-full max-w-[1320px] pb-10">
         <header className="flex flex-col gap-4 border-b border-border/60 pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <Button asChild variant="ghost" size="sm" className="-ml-2 mb-2 rounded-lg text-muted-foreground">
-              <Link href="/dashboard/admin">
-                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                Panel administrativo
-              </Link>
-            </Button>
             <h1 className="text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">Créditos diarios</h1>
             <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">
               Define cómo se distribuye el uso diario entre la organización, los equipos y cada persona.

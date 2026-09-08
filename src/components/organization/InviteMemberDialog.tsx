@@ -33,7 +33,12 @@ function formatExpiration(value: string) {
     }).format(date)}.`;
 }
 
-export function InviteMemberDialog({ onInviteSent }: { onInviteSent?: () => void }) {
+type InviteMemberDialogProps = {
+    organizationId?: string | null;
+    onInviteSent?: () => void;
+};
+
+export function InviteMemberDialog({ organizationId, onInviteSent }: InviteMemberDialogProps) {
     const { toast } = useToast();
     const [open, setOpen] = useState(false);
     const [email, setEmail] = useState('');
@@ -71,7 +76,7 @@ export function InviteMemberDialog({ onInviteSent }: { onInviteSent?: () => void
 
         setLoading(true);
         try {
-            const result = await organizationService.createInvite(normalizedEmail, role);
+            const result = await organizationService.createInvite(normalizedEmail, role, organizationId);
             if (!result?.inviteUrl || !result.expiresAt) throw new Error('invalid-invite-result');
 
             setEmail(normalizedEmail);
@@ -149,7 +154,7 @@ export function InviteMemberDialog({ onInviteSent }: { onInviteSent?: () => void
                         <DialogHeader>
                             <DialogTitle>Invitar al equipo</DialogTitle>
                             <DialogDescription className="leading-6">
-                                Genera un enlace personal para sumar a alguien a este workspace.
+                                Genera un enlace personal para sumar a alguien a esta organización.
                             </DialogDescription>
                         </DialogHeader>
 
@@ -191,7 +196,7 @@ export function InviteMemberDialog({ onInviteSent }: { onInviteSent?: () => void
                                 <p id="invite-role-help" className="text-sm leading-6 text-muted-foreground">
                                     {role === 'admin'
                                         ? 'Puede invitar personas, gestionar roles y remover integrantes que no sean propietarios.'
-                                        : 'Puede colaborar en el workspace, pero no gestionar personas ni invitaciones.'}
+                                        : 'Puede colaborar en la organización, pero no gestionar personas ni invitaciones.'}
                                 </p>
                             </div>
 

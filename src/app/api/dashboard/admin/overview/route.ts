@@ -59,6 +59,6 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
-    return adminDashboardAuthErrorResponse(error) || NextResponse.json({ error: 'Unable to load dashboard' }, { status: 500 });
+    return adminDashboardAuthErrorResponse(error) || NextResponse.json({ error: 'No pudimos cargar el panel. Inténtalo de nuevo.' }, { status: 500 });
   }
 }

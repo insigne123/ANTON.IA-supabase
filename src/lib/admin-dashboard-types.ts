@@ -12,7 +12,12 @@ export type AdminReportingUser = {
   id: string;
   email: string;
   name: string;
+  avatarUrl: string | null;
   role: 'owner' | 'admin' | 'member';
+  memberSince: string | null;
+  lastSignInAt: string | null;
+  lastActivityAt: string | null;
+  emailConfirmed: boolean;
   groups: Array<{
     id: string;
     name: string;
@@ -23,6 +28,8 @@ export type AdminReportingUser = {
     contacted: number;
     researched: number;
     replies: number;
+    responseRate: number;
+    activeDays: number;
   };
 };
 
@@ -35,6 +42,10 @@ export type AdminDashboardOverview = {
   organization: {
     id: string;
     name: string;
+  };
+  filterOptions: {
+    groups: Array<{ id: string; name: string }>;
+    users: Array<{ id: string; name: string }>;
   };
   dateRange: {
     from: string;

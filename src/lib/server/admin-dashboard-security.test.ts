@@ -10,6 +10,8 @@ const userProfileRoute = readFileSync('src/app/api/dashboard/admin/users/[userId
 const userProfileData = readFileSync('src/lib/server/admin-user-profile-data.ts', 'utf8');
 const sidebarSource = readFileSync('src/components/app-sidebar.tsx', 'utf8');
 const hostingConfig = readFileSync('apphosting.yaml', 'utf8');
+const peoplePage = readFileSync('src/app/(app)/dashboard/admin/users/page.tsx', 'utf8');
+const teamsPage = readFileSync('src/app/(app)/dashboard/admin/teams/page.tsx', 'utf8');
 
 test('admin dashboard authorization fails closed on the configured tenant and privileged roles', () => {
   assert.match(authSource, /process\.env\.ADMIN_DASHBOARD_ORGANIZATION_ID/);
@@ -53,7 +55,7 @@ test('admin routes derive tenant scope from authorization instead of request inp
 test('admin navigation and hosting configuration use the same production organization', () => {
   const organizationId = 'e73dd11f-c8db-4ffc-9711-47dc74295064';
   assert.match(sidebarSource, /label: 'Administración'/);
-  assert.match(sidebarSource, /href: '\/dashboard\/admin'.*label: 'Admin'/);
+  assert.match(sidebarSource, /href: '\/dashboard\/admin'.*label: 'Administración'/);
   assert.match(sidebarSource, /process\.env\.NEXT_PUBLIC_ADMIN_DASHBOARD_ORGANIZATION_ID/);
   assert.match(sidebarSource, /process\.env\.NEXT_PUBLIC_ADMIN_DASHBOARD_ALLOWED_EMAILS/);
   assert.match(sidebarSource, /organizationRole === 'owner' \|\| organizationRole === 'admin'/);
@@ -61,4 +63,22 @@ test('admin navigation and hosting configuration use the same production organiz
   assert.match(hostingConfig, new RegExp(`NEXT_PUBLIC_ADMIN_DASHBOARD_ORGANIZATION_ID[\\s\\S]*${organizationId}`));
   assert.match(hostingConfig, /ADMIN_DASHBOARD_ALLOWED_EMAILS[\s\S]*gmeneses@grupoexpro\.com,nicolas\.yarur\.g@yago\.cl/);
   assert.match(hostingConfig, /NEXT_PUBLIC_ADMIN_DASHBOARD_ALLOWED_EMAILS[\s\S]*gmeneses@grupoexpro\.com,nicolas\.yarur\.g@yago\.cl/);
+});
+
+test('people management derives the actor role from the dashboard organization roster', () => {
+  assert.doesNotMatch(peoplePage, /organizationRole/);
+  assert.match(peoplePage, /overview\?\.users\.find\(\(person\) => person\.id === currentUser\?\.id\)\?\.role/);
+  assert.match(peoplePage, /updateMemberRole\(overview\.organization\.id/);
+  assert.match(peoplePage, /removeMember\(overview\.organization\.id/);
+  assert.match(peoplePage, /InviteMemberDialog organizationId=\{overview\.organization\.id\}/);
+});
+
+test('management pages discard failed roster loads and teams guard all mutations', () => {
+  assert.match(peoplePage, /catch \(loadError\)[\s\S]*setOverview\(null\)/);
+  assert.match(teamsPage, /catch \(error\)[\s\S]*setOverview\(null\)/);
+  assert.match(teamsPage, /const managementDisabled = !overview \|\| loading \|\| refreshing \|\| Boolean\(loadError\) \|\| Boolean\(mutationKey\)/);
+  for (const handler of ['createTeam', 'assignPerson', 'removeAssignment']) {
+    assert.match(teamsPage, new RegExp(`async function ${handler}\\([^]*?if \\(managementDisabled\\) return;`));
+  }
+  assert.match(teamsPage, /overview\.coverage\.note/);
 });
