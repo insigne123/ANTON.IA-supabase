@@ -6,6 +6,11 @@ import {
   type ResearchSnapshotV1,
 } from '@/lib/research-contracts';
 import {
+  REPORT_V2_SCHEMA_VERSION,
+  validateReportV2,
+  type ReportV2,
+} from '@/lib/report-v2-contracts';
+import {
   isDraftableCompanyFactClaim,
   isDraftablePersonFactClaim,
   isFreshResearchClaim,
@@ -160,6 +165,12 @@ export const DraftHypothesisV2Schema = z.object({
 export type DraftHypothesisV2 = z.infer<typeof DraftHypothesisV2Schema>;
 
 export const DraftReportOutreachV2Schema = z.object({
+  document: z.object({
+    id: z.string().trim().min(1).max(256),
+    schemaVersion: z.enum(['research-report-document/v1', REPORT_V2_SCHEMA_VERSION]),
+    revision: z.number().int().positive(),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict().optional(),
   synthesis: z.object({
     method: z.enum(['model', 'fallback']),
     status: z.enum(['completed', 'partial']),
@@ -171,6 +182,8 @@ export const DraftReportOutreachV2Schema = z.object({
   }).strict(),
 }).strict();
 export type DraftReportOutreachV2 = z.infer<typeof DraftReportOutreachV2Schema>;
+
+export type DraftReportDocumentMetadataV2 = NonNullable<DraftReportOutreachV2['document']>;
 
 export const DraftContextV2Schema = z.object({
   schemaVersion: z.literal(DRAFT_CONTEXT_V2_SCHEMA_VERSION),
@@ -247,7 +260,8 @@ export type BuildDraftContextV2Input = {
   };
   seller: DraftSellerProfileV2;
   style: DraftWritingStyleV2;
-  reportDocument?: ResearchReportDocumentV1 | null;
+  reportDocument?: ResearchReportDocumentV1 | ReportV2 | null;
+  reportDocumentMetadata?: DraftReportDocumentMetadataV2 | null;
   now?: Date;
 };
 
@@ -501,26 +515,77 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
     })
     .sort((left, right) => right.confidence - left.confidence || left.claimId.localeCompare(right.claimId))
     .slice(0, 20);
-  const reportDocument = input.reportDocument
-    ? validateResearchReportDocumentCitationsV1(input.reportDocument, snapshot)
-    : null;
+  let reportDocument: ResearchReportDocumentV1 | ReportV2 | null = null;
+  if (input.reportDocument?.schemaVersion === 'research-report-document/v1') {
+    reportDocument = validateResearchReportDocumentCitationsV1(input.reportDocument, snapshot);
+  } else if (input.reportDocument?.schemaVersion === REPORT_V2_SCHEMA_VERSION) {
+    const document = validateReportV2(input.reportDocument);
+    if (
+      document.researchSnapshotId !== snapshot.id
+      || document.scope.organizationId !== snapshot.scope.organizationId
+      || document.scope.ownerUserId !== snapshot.scope.ownerUserId
+    ) throw new Error('RESEARCH_REPORT_V2_DOCUMENT_SCOPE_MISMATCH');
+    reportDocument = document;
+  }
   const eligibleFactClaimIds = new Set(evidence.flatMap((item) => item.supportedFactClaimIds));
   const eligibleHypothesisIds = new Set(hypotheses.map((item) => item.claimId));
-  const report = reportDocument ? DraftReportOutreachV2Schema.parse({
-    synthesis: {
-      method: reportDocument.synthesis.method,
-      status: reportDocument.synthesis.status,
-    },
-    outreachBrief: {
-      selectedFactualAnchorClaimIds: unique(
-        reportDocument.outreachBrief.factualAnchors.flatMap((anchor) => anchor.citations.claimIds),
-      ).filter((claimId) => eligibleFactClaimIds.has(claimId)),
-      selectedHypothesisIds: unique(
-        reportDocument.outreachBrief.hypotheses.flatMap((hypothesis) => hypothesis.citations.claimIds),
-      ).filter((claimId) => eligibleHypothesisIds.has(claimId)),
-      doNotClaim: reportDocument.outreachBrief.doNotClaim,
-    },
-  }) : null;
+  const report = reportDocument ? (() => {
+    const computedMetadata: DraftReportDocumentMetadataV2 = {
+      id: reportDocument.id,
+      schemaVersion: reportDocument.schemaVersion,
+      revision: reportDocument.revision,
+      contentHash: canonicalSha256(reportDocument),
+    };
+    const metadata = input.reportDocumentMetadata || computedMetadata;
+    if (
+      metadata.schemaVersion !== computedMetadata.schemaVersion
+      || metadata.revision !== computedMetadata.revision
+      || metadata.contentHash !== computedMetadata.contentHash
+    ) throw new Error('RESEARCH_REPORT_DOCUMENT_METADATA_MISMATCH');
+    if (reportDocument.schemaVersion === 'research-report-document/v1') {
+      return DraftReportOutreachV2Schema.parse({
+        document: metadata,
+        synthesis: {
+          method: reportDocument.synthesis.method,
+          status: reportDocument.synthesis.status,
+        },
+        outreachBrief: {
+          selectedFactualAnchorClaimIds: unique(
+            reportDocument.outreachBrief.factualAnchors.flatMap((anchor) => anchor.citations.claimIds),
+          ).filter((claimId) => eligibleFactClaimIds.has(claimId)),
+          selectedHypothesisIds: unique(
+            reportDocument.outreachBrief.hypotheses.flatMap((hypothesis) => hypothesis.citations.claimIds),
+          ).filter((claimId) => eligibleHypothesisIds.has(claimId)),
+          doNotClaim: reportDocument.outreachBrief.doNotClaim,
+        },
+      });
+    }
+    const angleClaimIds = reportDocument.sections.find((section) => section.key === 'angle')?.paragraphs
+      .flatMap((paragraph) => paragraph.claimIds) || [];
+    const mappedClaims = angleClaimIds.flatMap((claimId) => {
+      const claim = reportDocument.evidenceGraph.claims.find((item) => item.id === claimId);
+      const internalId = reportDocument.evidenceGraph.shortIdMap[claimId];
+      return claim && internalId ? [{ claim, internalId }] : [];
+    });
+    return DraftReportOutreachV2Schema.parse({
+      document: metadata,
+      synthesis: { method: 'model', status: reportDocument.synthesis.status },
+      outreachBrief: {
+        selectedFactualAnchorClaimIds: unique(mappedClaims
+          .filter(({ claim }) => claim.type === 'fact')
+          .map(({ internalId }) => internalId))
+          .filter((claimId) => eligibleFactClaimIds.has(claimId)),
+        selectedHypothesisIds: unique(mappedClaims
+          .filter(({ claim }) => claim.type === 'hypothesis')
+          .map(({ internalId }) => internalId))
+          .filter((claimId) => eligibleHypothesisIds.has(claimId)),
+        doNotClaim: unique([
+          ...reportDocument.analysis.verdict.blockers,
+          ...reportDocument.evidenceGraph.gaps.map((gap) => gap.unknown),
+        ]).slice(0, 20),
+      },
+    });
+  })() : null;
   const quality = qualityForSnapshot(snapshot);
   const capturedAt = nullableText(input.artifact.capturedAt);
   const contentHash = artifactHashMatches ? artifactHash : '';

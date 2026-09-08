@@ -23,6 +23,7 @@ import {
   requiredReportAwareDraftPersonalizationV2,
   type DraftContextBuildResult,
   type DraftContextV2,
+  type DraftReportDocumentMetadataV2,
   type DraftSellerProfileV2,
   type DraftWritingStyleV2,
 } from '@/lib/server/draft-context-v2';
@@ -50,7 +51,15 @@ import { loadSellerProfile } from '@/lib/server/seller-profile';
 import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
 import { ResearchSnapshotV1Schema, type ResearchSnapshotV1 } from '@/lib/research-contracts';
 import type { ResearchReportDocumentV1 } from '@/lib/research-report-contracts';
-import { ensureResearchReportDocument } from '@/lib/server/research-report-documents';
+import {
+  ensureResearchReportDocument,
+  loadResearchReportDocument,
+  type StoredResearchReportDocument,
+} from '@/lib/server/research-report-documents';
+import {
+  loadResearchReportDocumentV2,
+  type StoredResearchReportDocumentV2,
+} from '@/lib/server/research-report-v2-documents';
 
 export type NativeDraftAccess = {
   organizationId: string;
@@ -93,6 +102,10 @@ type NativeDraftGenerationMetadata = {
   researchSnapshotId: string;
   styleProfileId: string | null;
   claimIds: string[];
+  reportDocumentId?: string | null;
+  reportSchemaVersion?: string | null;
+  reportRevision?: number | null;
+  reportContentHash?: string | null;
 };
 
 type NativeDraftGenerationMetadataInput = NativeDraftGenerationMetadata & NativeDraftAccess & {
@@ -158,6 +171,18 @@ export type NativeDraftGenerationDependencies = {
     sellerProfile?: DraftSellerProfileV2 | null;
     generatedAt?: string;
   }) => Promise<ResearchReportDocumentV1>;
+  loadReportDocumentV1?: (input: {
+    researchSnapshotId: string;
+    access: NativeDraftAccess;
+    reportDocumentId?: string;
+    includeSuppressed?: boolean;
+  }) => Promise<StoredResearchReportDocument | null>;
+  loadReportDocumentV2?: (input: {
+    researchSnapshotId: string;
+    access: NativeDraftAccess;
+    reportDocumentId?: string;
+    includeSuppressed?: boolean;
+  }) => Promise<StoredResearchReportDocumentV2 | null>;
   claimGeneration?: (input: NativeDraftAccess & { draftId: string; snapshotId: string; email: string }) => Promise<NativeDraftGenerationClaim>;
   releaseGeneration?: (input: NativeDraftAccess & { draftId: string; claimToken: string }) => Promise<boolean>;
   isSuppressed?: (email: string, access: NativeDraftAccess) => Promise<boolean>;
@@ -165,6 +190,7 @@ export type NativeDraftGenerationDependencies = {
   findExistingContentFingerprints?: (input: NativeDraftAccess & { email: string; excludeVersionId?: string | null }) => Promise<string[]>;
   generate?: (input: GenerateOutreachFromDraftContextV2Input) => Promise<GeneratedOutreachFromDraftContextV2>;
   persistDraft?: (draft: MessagingDraftV1) => Promise<MessagingDraftV1>;
+  persistDraftWithMetadata?: (draft: MessagingDraftV1, metadata: NativeDraftGenerationMetadataInput) => Promise<MessagingDraftV1>;
   appendRevision?: (draft: MessagingDraftV1, changes: { content: MessagingContentV1 }) => Promise<MessagingDraftV1>;
   persistMetadata?: (input: NativeDraftGenerationMetadataInput) => Promise<void>;
   replaceMetadata?: (input: NativeDraftGenerationMetadataInput) => Promise<void>;
@@ -225,6 +251,44 @@ function strings(value: unknown) {
 
 function unique(values: string[]) {
   return [...new Set(values.map(text).filter(Boolean))];
+}
+
+function reportMetadataForContext(context: DraftContextV2) {
+  const report = context.report?.document;
+  return {
+    reportDocumentId: report?.id || null,
+    reportSchemaVersion: report?.schemaVersion || null,
+    reportRevision: report?.revision || null,
+    reportContentHash: report?.contentHash || null,
+  };
+}
+
+function sameReportMetadata(left: NativeDraftGenerationMetadata, right: ReturnType<typeof reportMetadataForContext>) {
+  return (text(left.reportDocumentId) || null) === right.reportDocumentId
+    && (text(left.reportSchemaVersion) || null) === right.reportSchemaVersion
+    && (Number(left.reportRevision) || null) === right.reportRevision
+    && (text(left.reportContentHash) || null) === right.reportContentHash;
+}
+
+function pinnedReportMetadata(metadata: NativeDraftGenerationMetadata): DraftReportDocumentMetadataV2 | null {
+  const id = text(metadata.reportDocumentId);
+  if (!id) return null;
+  const schemaVersion = text(metadata.reportSchemaVersion);
+  const revision = Number(metadata.reportRevision);
+  const contentHash = text(metadata.reportContentHash);
+  if (
+    (schemaVersion !== 'research-report-document/v1' && schemaVersion !== 'research-report-document/v2')
+    || !Number.isInteger(revision)
+    || revision < 1
+    || !/^[a-f0-9]{64}$/.test(contentHash)
+  ) throw new Error('NATIVE_DRAFT_REPORT_PROVENANCE_INVALID');
+  return { id, schemaVersion, revision, contentHash };
+}
+
+function requiredPinnedReportMetadata(metadata: NativeDraftGenerationMetadata) {
+  const pinned = pinnedReportMetadata(metadata);
+  if (!pinned) throw new Error('NATIVE_DRAFT_REPORT_PROVENANCE_MISSING');
+  return pinned;
 }
 
 function parseNativeSnapshotRow(row: NativeSnapshotRow, expectedSnapshotId: string) {
@@ -426,6 +490,10 @@ async function persistNativeDraftMetadata(input: NativeDraftGenerationMetadataIn
     prompt_version: input.promptVersion,
     style_profile_id: input.styleProfileId,
     claim_ids: input.claimIds,
+    report_document_id: input.reportDocumentId || null,
+    report_schema_version: input.reportSchemaVersion || null,
+    report_revision: input.reportRevision || null,
+    report_content_hash: input.reportContentHash || null,
   };
   const { error } = await client.from('messaging_draft_generation_metadata').upsert(payload, {
     onConflict: 'version_id',
@@ -434,7 +502,7 @@ async function persistNativeDraftMetadata(input: NativeDraftGenerationMetadataIn
   if (error) throw error;
   const { data: persisted, error: readError } = await client
     .from('messaging_draft_generation_metadata')
-    .select('version_id,draft_id,organization_id,user_id,research_snapshot_id,generation_method,provider,model,prompt_version,style_profile_id,claim_ids')
+    .select('version_id,draft_id,organization_id,user_id,research_snapshot_id,generation_method,provider,model,prompt_version,style_profile_id,claim_ids,report_document_id,report_schema_version,report_revision,report_content_hash')
     .eq('version_id', input.versionId)
     .maybeSingle();
   if (readError) throw readError;
@@ -449,8 +517,46 @@ async function persistNativeDraftMetadata(input: NativeDraftGenerationMetadataIn
     && (text(persisted.model) || null) === input.model
     && text(persisted.prompt_version) === input.promptVersion
     && (text(persisted.style_profile_id) || null) === input.styleProfileId
-    && JSON.stringify(unique(strings(persisted.claim_ids)).sort()) === JSON.stringify(unique(input.claimIds).sort());
+    && JSON.stringify(unique(strings(persisted.claim_ids)).sort()) === JSON.stringify(unique(input.claimIds).sort())
+    && (text(persisted.report_document_id) || null) === (input.reportDocumentId || null)
+    && (text(persisted.report_schema_version) || null) === (input.reportSchemaVersion || null)
+    && (Number(persisted.report_revision) || null) === (input.reportRevision || null)
+    && (text(persisted.report_content_hash) || null) === (input.reportContentHash || null);
   if (!sameIdentity) throw new Error('NATIVE_DRAFT_METADATA_CONFLICT');
+}
+
+async function persistNativeDraftWithMetadata(
+  draftInput: MessagingDraftV1,
+  metadata: NativeDraftGenerationMetadataInput,
+) {
+  const draft = MessagingDraftV1Schema.parse(draftInput);
+  const { data, error } = await getSupabaseAdminClient().rpc('create_native_messaging_draft_v1', {
+    p_payload: draft,
+    p_content_hash: hashMessagingDraftContent(draft),
+    p_metadata: {
+      versionId: metadata.versionId,
+      draftId: metadata.draftId,
+      organizationId: metadata.organizationId,
+      userId: metadata.userId,
+      researchSnapshotId: metadata.researchSnapshotId,
+      generationMethod: metadata.generationMethod,
+      provider: metadata.provider,
+      model: metadata.model,
+      promptVersion: metadata.promptVersion,
+      styleProfileId: metadata.styleProfileId,
+      claimIds: unique(metadata.claimIds),
+      reportDocumentId: metadata.reportDocumentId || null,
+      reportSchemaVersion: metadata.reportSchemaVersion || null,
+      reportRevision: metadata.reportRevision || null,
+      reportContentHash: metadata.reportContentHash || null,
+    },
+  });
+  if (error) throw error;
+  const persisted = MessagingDraftV1Schema.parse(data);
+  if (canonicalSha256(persisted) !== canonicalSha256(draft)) {
+    throw new Error('NATIVE_DRAFT_PERSISTENCE_CONFLICT');
+  }
+  return persisted;
 }
 
 async function replaceNativeDraftMetadata(input: NativeDraftGenerationMetadataInput) {
@@ -464,6 +570,10 @@ async function replaceNativeDraftMetadata(input: NativeDraftGenerationMetadataIn
       prompt_version: input.promptVersion,
       style_profile_id: input.styleProfileId,
       claim_ids: unique(input.claimIds),
+      report_document_id: input.reportDocumentId || null,
+      report_schema_version: input.reportSchemaVersion || null,
+      report_revision: input.reportRevision || null,
+      report_content_hash: input.reportContentHash || null,
     })
     .eq('version_id', input.versionId)
     .eq('draft_id', input.draftId)
@@ -480,7 +590,7 @@ async function loadNativeDraftMetadata(input: NativeDraftAccess & {
 }): Promise<NativeDraftGenerationMetadata | null> {
   const { data, error } = await getSupabaseAdminClient()
     .from('messaging_draft_generation_metadata')
-    .select('version_id,draft_id,research_snapshot_id,style_profile_id,claim_ids')
+    .select('version_id,draft_id,research_snapshot_id,style_profile_id,claim_ids,report_document_id,report_schema_version,report_revision,report_content_hash')
     .eq('organization_id', input.organizationId)
     .eq('user_id', input.userId)
     .eq('version_id', input.versionId)
@@ -493,6 +603,10 @@ async function loadNativeDraftMetadata(input: NativeDraftAccess & {
     researchSnapshotId: text(data.research_snapshot_id),
     styleProfileId: text(data.style_profile_id) || null,
     claimIds: unique(strings(data.claim_ids)),
+    reportDocumentId: text(data.report_document_id) || null,
+    reportSchemaVersion: text(data.report_schema_version) || null,
+    reportRevision: Number(data.report_revision) || null,
+    reportContentHash: text(data.report_content_hash) || null,
   };
 }
 
@@ -608,20 +722,15 @@ async function createDraftContext(input: {
   styleName?: string | null;
   style?: DraftWritingStyleV2;
   seller?: DraftSellerProfileV2;
+  pinnedReportDocument?: DraftReportDocumentMetadataV2 | null;
   ensureReportDocument?: boolean;
   dependencies?: NativeDraftGenerationDependencies;
   now: Date;
 }) {
   const snapshot = parseNativeSnapshotRow(input.snapshotRow, input.snapshotId);
-  const ensureReportDocument = input.dependencies?.ensureReportDocument || (async (request: {
-    snapshot: ResearchSnapshotV1;
-    access: NativeDraftAccess;
-    sellerProfile?: DraftSellerProfileV2 | null;
-    generatedAt?: string;
-  }) => (await ensureResearchReportDocument(request)).document);
   const seller = input.seller
     || await (input.dependencies?.loadSellerProfile?.(input.access.userId) || loadSellerProfile(input.access.userId));
-  const [style, reportDocument] = await Promise.all([
+  const [style, reportSelection] = await Promise.all([
     input.style || loadDraftWritingStyle({
       access: input.access,
       styleProfileId: input.styleProfileId,
@@ -629,12 +738,72 @@ async function createDraftContext(input: {
       dependencies: input.dependencies,
     }),
     input.ensureReportDocument !== false && snapshot.subject.email
-      ? ensureReportDocument({
-        snapshot,
-        access: input.access,
-        sellerProfile: seller,
-        generatedAt: input.now.toISOString(),
-      })
+      ? (async () => {
+        if (input.pinnedReportDocument) {
+          const stored = input.pinnedReportDocument.schemaVersion === 'research-report-document/v2'
+            ? await (input.dependencies?.loadReportDocumentV2 || loadResearchReportDocumentV2)({
+              researchSnapshotId: snapshot.id,
+              access: input.access,
+              reportDocumentId: input.pinnedReportDocument.id,
+              includeSuppressed: true,
+            })
+            : await (input.dependencies?.loadReportDocumentV1 || loadResearchReportDocument)({
+              researchSnapshotId: snapshot.id,
+              access: input.access,
+              reportDocumentId: input.pinnedReportDocument.id,
+              includeSuppressed: true,
+            });
+          if (!stored) throw new Error('NATIVE_DRAFT_REPORT_PROVENANCE_CHANGED');
+          return { document: stored.document, metadata: input.pinnedReportDocument };
+        }
+        if (input.dependencies?.ensureReportDocument) {
+          const document = await input.dependencies.ensureReportDocument({
+            snapshot,
+            access: input.access,
+            sellerProfile: seller,
+            generatedAt: input.now.toISOString(),
+          });
+          return {
+            document,
+            metadata: {
+              id: document.id,
+              schemaVersion: document.schemaVersion,
+              revision: document.revision,
+              contentHash: canonicalSha256(document),
+            } satisfies DraftReportDocumentMetadataV2,
+          };
+        }
+        const reportV2 = await (input.dependencies?.loadReportDocumentV2 || loadResearchReportDocumentV2)({
+          researchSnapshotId: snapshot.id,
+          access: input.access,
+        });
+        if (reportV2) {
+          return {
+            document: reportV2.document,
+            metadata: {
+              id: reportV2.id,
+              schemaVersion: reportV2.schemaVersion,
+              revision: reportV2.document.revision,
+              contentHash: reportV2.contentHash,
+            } satisfies DraftReportDocumentMetadataV2,
+          };
+        }
+        const reportV1 = await ensureResearchReportDocument({
+          snapshot,
+          access: input.access,
+          sellerProfile: seller,
+          generatedAt: input.now.toISOString(),
+        });
+        return {
+          document: reportV1.document,
+          metadata: {
+            id: reportV1.id,
+            schemaVersion: reportV1.schemaVersion,
+            revision: reportV1.document.revision,
+            contentHash: reportV1.contentHash,
+          } satisfies DraftReportDocumentMetadataV2,
+        };
+      })()
       : Promise.resolve(null),
   ]);
   return {
@@ -648,7 +817,8 @@ async function createDraftContext(input: {
       },
       seller,
       style,
-      reportDocument,
+      reportDocument: reportSelection?.document,
+      reportDocumentMetadata: reportSelection?.metadata,
       now: input.now,
     }),
   };
@@ -791,30 +961,41 @@ export async function createNativeDraft(input: NativeDraftAccess & {
       now,
     });
     if (contextResult.status === 'blocked') return contextBlockResult(contextResult, now);
-    const context = contextResult.context;
+    let context = contextResult.context;
     const findPersistedDraft = dependencies?.findPersistedDraft || ((request) => getMessagingDraftVersionV1(request));
     const existing = await findPersistedDraft({ ...input, draftId, versionId });
     if (existing) {
       const loadMetadata = dependencies?.loadMetadata || loadNativeDraftMetadata;
-      const persistMetadata = dependencies?.persistMetadata || persistNativeDraftMetadata;
       try {
         const metadata = await loadMetadata({ ...input, versionId: existing.versionId });
         if (!metadata) {
-          await persistMetadata({
-            versionId: existing.versionId,
-            draftId: existing.draftId,
-            organizationId: input.organizationId,
-            userId: input.userId,
-            researchSnapshotId: input.snapshotId,
-            generationMethod: 'model',
-            provider: 'openai',
-            model: 'persisted-recovery',
-            promptVersion: NATIVE_DRAFT_PROMPT_VERSION,
-            styleProfileId: style.id,
-            claimIds: unique(requiredReportAwareDraftPersonalizationV2(context).map((item) => item.claimId)),
+          return failureResult({
+            context,
+            code: 'generation_metadata_persist_failed',
+            message: 'El borrador persistido no tiene trazabilidad verificable y no puede reutilizarse.',
+            now,
           });
         }
+        if (!sameReportMetadata(metadata, reportMetadataForContext(context))) {
+          const pinned = requiredPinnedReportMetadata(metadata);
+          const pinnedContext = await createDraftContext({
+            access: input,
+            snapshotRow,
+            snapshotId: input.snapshotId,
+            style,
+            seller: preliminary.result.context.seller,
+            pinnedReportDocument: pinned,
+            dependencies,
+            now,
+          });
+          if (pinnedContext.result.status === 'blocked') return contextBlockResult(pinnedContext.result, now);
+          context = pinnedContext.result.context;
+          if (!sameReportMetadata(metadata, reportMetadataForContext(context))) {
+            throw new Error('NATIVE_DRAFT_REPORT_PROVENANCE_CHANGED');
+          }
+        }
       } catch (error) {
+        if (error instanceof Error && error.message === 'NATIVE_DRAFT_REPORT_PROVENANCE_CHANGED') throw error;
         console.error('[native-drafts] metadata recovery failed:', error);
         return failureResult({
           context,
@@ -918,34 +1099,41 @@ export async function createNativeDraft(input: NativeDraftAccess & {
       preflight: validation.preflight,
       createdAt: now.toISOString(),
     });
-    const persistDraft = dependencies?.persistDraft || ensureMessagingDraftV1;
-    const persisted = await persistDraft(draft);
-    const persistMetadata = dependencies?.persistMetadata || persistNativeDraftMetadata;
-    try {
-      await persistMetadata({
-        versionId: persisted.versionId,
-        draftId: persisted.draftId,
-        organizationId: input.organizationId,
-        userId: input.userId,
-        researchSnapshotId: input.snapshotId,
-        generationMethod: 'model',
-        provider: generated.provider,
-        model: generated.model,
-        promptVersion: generated.promptVersion,
-        styleProfileId: style.id,
-        claimIds: unique([
-          ...generatedOutput.personalization.map((provenance) => provenance.claimId),
-          ...generatedOutput.hypothesisIds,
-        ]),
-      });
-    } catch (error) {
-      console.error('[native-drafts] metadata persistence failed:', error);
-      return failureResult({
-        context,
-        code: 'generation_metadata_persist_failed',
-        message: 'No se pudo guardar la trazabilidad del borrador; no puede aprobarse ni enviarse.',
-        now,
-      });
+    const metadata: NativeDraftGenerationMetadataInput = {
+      versionId: draft.versionId,
+      draftId: draft.draftId,
+      organizationId: input.organizationId,
+      userId: input.userId,
+      researchSnapshotId: input.snapshotId,
+      generationMethod: 'model',
+      provider: generated.provider,
+      model: generated.model,
+      promptVersion: generated.promptVersion,
+      styleProfileId: style.id,
+      claimIds: unique([
+        ...generatedOutput.personalization.map((provenance) => provenance.claimId),
+        ...generatedOutput.hypothesisIds,
+      ]),
+      ...reportMetadataForContext(context),
+    };
+    let persisted: MessagingDraftV1;
+    if (!dependencies?.persistDraft && !dependencies?.persistMetadata) {
+      persisted = await (dependencies?.persistDraftWithMetadata || persistNativeDraftWithMetadata)(draft, metadata);
+    } else {
+      const persistDraft = dependencies.persistDraft || ensureMessagingDraftV1;
+      persisted = await persistDraft(draft);
+      const persistMetadata = dependencies.persistMetadata || persistNativeDraftMetadata;
+      try {
+        await persistMetadata({ ...metadata, versionId: persisted.versionId, draftId: persisted.draftId });
+      } catch (error) {
+        console.error('[native-drafts] metadata persistence failed:', error);
+        return failureResult({
+          context,
+          code: 'generation_metadata_persist_failed',
+          message: 'No se pudo guardar la trazabilidad del borrador; no puede aprobarse ni enviarse.',
+          now,
+        });
+      }
     }
     return {
       status: 'drafted',
@@ -1020,6 +1208,10 @@ export async function reviseNativeDraft(input: NativeDraftAccess & {
       || copiedMetadata.researchSnapshotId !== input.draft.researchSnapshotId
       || copiedMetadata.styleProfileId !== metadata.styleProfileId
       || JSON.stringify(copiedMetadata.claimIds.slice().sort()) !== JSON.stringify(metadata.claimIds.slice().sort())
+      || (text(copiedMetadata.reportDocumentId) || null) !== (text(metadata.reportDocumentId) || null)
+      || (text(copiedMetadata.reportSchemaVersion) || null) !== (text(metadata.reportSchemaVersion) || null)
+      || (Number(copiedMetadata.reportRevision) || null) !== (Number(metadata.reportRevision) || null)
+      || (text(copiedMetadata.reportContentHash) || null) !== (text(metadata.reportContentHash) || null)
     ) {
       throw new Error('NATIVE_DRAFT_METADATA_PERSIST_FAILED');
     }
@@ -1045,6 +1237,7 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
     metadata: await loadMetadata({ ...input, versionId: input.draft.versionId }),
     draft: input.draft,
   });
+  const pinnedReportDocument = requiredPinnedReportMetadata(metadata);
   const snapshotRow = await (dependencies?.getSnapshot?.({
     snapshotId: input.draft.researchSnapshotId,
     access: input,
@@ -1087,6 +1280,7 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
       snapshotRow,
       snapshotId: input.draft.researchSnapshotId,
       style,
+      pinnedReportDocument,
       dependencies,
       now,
     });
@@ -1094,6 +1288,9 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
       throw new NativeDraftPreflightError(contextBlockResult(contextResult, now).preflight);
     }
     const context = contextResult.context;
+    if (metadata.reportDocumentId && !sameReportMetadata(metadata, reportMetadataForContext(context))) {
+      throw new Error('NATIVE_DRAFT_REPORT_PROVENANCE_CHANGED');
+    }
     const previous = outputForPersistedDraft({ draft: input.draft, context, metadata });
     const findExistingContentFingerprints = dependencies?.findExistingContentFingerprints || findExistingNativeDraftContentFingerprints;
     const existingContentFingerprints = await findExistingContentFingerprints({
@@ -1162,6 +1359,7 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
         ...generatedOutput.personalization.map((item) => item.claimId),
         ...generatedOutput.hypothesisIds,
       ]),
+      ...reportMetadataForContext(context),
     });
     return {
       draft: persisted,
@@ -1195,6 +1393,7 @@ export async function approveNativeDraft(input: NativeDraftAccess & {
     metadata: await loadMetadata({ ...input, versionId: current.versionId }),
     draft: current,
   });
+  const pinnedReportDocument = requiredPinnedReportMetadata(metadata);
   const email = assertNativeDraftRecipient(snapshot, current);
   const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
   if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
@@ -1229,6 +1428,7 @@ export async function approveNativeDraft(input: NativeDraftAccess & {
       snapshotRow,
       snapshotId: current.researchSnapshotId,
       style,
+      pinnedReportDocument,
       dependencies,
       now,
     });

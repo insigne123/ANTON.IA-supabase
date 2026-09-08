@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   RESEARCH_REPORT_PROMPT_VERSION,
+  ReportSynthesisFailed,
   buildDeterministicResearchReportDocumentV1,
   researchReportSynthesisInternals,
   sellerProfileHash,
@@ -83,15 +84,15 @@ test('defaults every specialized research analyst to Terra', async () => {
   const selectedModels: string[] = [];
 
   try {
-    await synthesizeResearchReportDocumentV1({
-      snapshot: draftSnapshotFixture(),
-      sellerProfile: { companyName: 'Northstar', services: ['Automatización de operaciones'] },
-    }, {
-      generate: async (input) => {
-        selectedModels.push(input.openAiModel);
-        throw new Error('stop after model selection');
-      },
-    });
+    await assert.rejects(() => synthesizeResearchReportDocumentV1({
+        snapshot: draftSnapshotFixture(),
+        sellerProfile: { companyName: 'Northstar', services: ['Automatización de operaciones'] },
+      }, {
+        generate: async (input) => {
+          selectedModels.push(input.openAiModel);
+          throw new Error('stop after model selection');
+        },
+      }), ReportSynthesisFailed);
     assert.equal(selectedModels.length, 5);
     assert.deepEqual(new Set(selectedModels), new Set(['gpt-5.6-terra']));
   } finally {
@@ -178,10 +179,9 @@ test('deterministic fallback reads as a pre-contact brief instead of pasted sour
   assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(result, snapshot));
 });
 
-test('rejects verbatim page copy in the executive analyst output', async () => {
+test('omits verbatim page copy in the executive analyst output', async () => {
   const snapshot = draftSnapshotFixture();
   const generatedAt = '2026-08-24T18:14:00.000Z';
-  const fallback = buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt });
   const copiedClaim = snapshot.claims.find((claim) => claim.id === 'claim-acme-overview')!;
 
   const result = await synthesizeResearchReportDocumentV1({ snapshot, generatedAt }, {
@@ -198,8 +198,7 @@ test('rejects verbatim page copy in the executive analyst output', async () => {
   });
 
   assert.equal(result.metadata.status, 'partial');
-  assert.deepEqual(result.document.narrative?.executiveSummary, fallback.narrative?.executiveSummary);
-  assert.match(result.document.narrative?.executiveSummary[0]?.text || '', /^Antes de contactar/);
+  assert.deepEqual(result.document.narrative?.executiveSummary, []);
 });
 
 test('seller profile remains private context and supports cautious model service fit', async () => {
@@ -234,7 +233,6 @@ test('seller profile remains private context and supports cautious model service
 test('rejects invalid citations and unsupported numeric assertions only in their sections', async () => {
   const snapshot = draftSnapshotFixture();
   const generatedAt = '2026-08-24T18:20:00.000Z';
-  const fallback = buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt });
 
   const result = await synthesizeResearchReportDocumentV1({ snapshot, generatedAt }, {
     generate: async (input) => {
@@ -259,8 +257,8 @@ test('rejects invalid citations and unsupported numeric assertions only in their
   assert.equal(result.metadata.status, 'partial');
   assert.equal(result.metadata.retryable, true);
   assert.equal(result.metadata.errorCode, 'report_synthesis_partial');
-  assert.deepEqual(result.document.narrative?.executiveSummary, fallback.narrative?.executiveSummary);
-  assert.deepEqual(result.document.narrative?.companyProfile, fallback.narrative?.companyProfile);
+  assert.deepEqual(result.document.narrative?.executiveSummary, []);
+  assert.deepEqual(result.document.narrative?.companyProfile, []);
   assert.equal(
     result.document.narrative?.leadContext[0].text,
     'La evidencia pública vincula a Ada Lovelace con la dirección de Operaciones.',
@@ -271,7 +269,6 @@ test('rejects invalid citations and unsupported numeric assertions only in their
 test('rejects unsupported entities, customer claims, needs, and causal conclusions', async () => {
   const snapshot = draftSnapshotFixture();
   const generatedAt = '2026-08-24T18:22:00.000Z';
-  const fallback = buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt });
 
   const result = await synthesizeResearchReportDocumentV1({ snapshot, generatedAt }, {
     generate: async (input) => {
@@ -293,8 +290,8 @@ test('rejects unsupported entities, customer claims, needs, and causal conclusio
   });
 
   assert.equal(result.metadata.status, 'partial');
-  assert.deepEqual(result.document.narrative?.companyProfile, fallback.narrative?.companyProfile);
-  assert.deepEqual(result.document.narrative?.commercialReading, fallback.narrative?.commercialReading);
+  assert.deepEqual(result.document.narrative?.companyProfile, []);
+  assert.deepEqual(result.document.narrative?.commercialReading, []);
   assert.equal(
     result.document.narrative?.leadContext[0].text,
     'La evidencia pública vincula a Ada Lovelace con la dirección de Operaciones.',
@@ -305,7 +302,6 @@ test('rejects unsupported entities, customer claims, needs, and causal conclusio
 test('rejects unsupported market-leadership prose', async () => {
   const snapshot = draftSnapshotFixture();
   const generatedAt = '2026-08-24T18:23:00.000Z';
-  const fallback = buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt });
 
   const result = await synthesizeResearchReportDocumentV1({ snapshot, generatedAt }, {
     generate: async (input) => {
@@ -320,18 +316,17 @@ test('rejects unsupported market-leadership prose', async () => {
     },
   });
 
-  assert.deepEqual(result.document.narrative?.companyProfile, fallback.narrative?.companyProfile);
+  assert.deepEqual(result.document.narrative?.companyProfile, []);
   assert.equal(result.metadata.status, 'partial');
 });
 
-test('one analyst rejection falls back only that section and marks model synthesis partial', async () => {
+test('one analyst rejection omits only that section and marks model synthesis partial', async () => {
   const snapshot = draftSnapshotFixture();
   const generatedAt = '2026-08-24T18:25:00.000Z';
   const sellerProfile = {
     companyName: 'Northstar',
     valueProposition: 'Automatización responsable de operaciones.',
   };
-  const fallback = buildDeterministicResearchReportDocumentV1({ snapshot, sellerProfile, generatedAt });
 
   const result = await synthesizeResearchReportDocumentV1({ snapshot, sellerProfile, generatedAt }, {
     generate: async (input) => {
@@ -345,7 +340,7 @@ test('one analyst rejection falls back only that section and marks model synthes
   assert.equal(result.document.synthesis.method, 'model');
   assert.equal(result.metadata.status, 'partial');
   assert.equal(result.metadata.retryable, true);
-  assert.deepEqual(result.document.narrative?.leadContext, fallback.narrative?.leadContext);
+  assert.deepEqual(result.document.narrative?.leadContext, []);
   assert.equal(
     result.document.narrative?.companyProfile[0].text,
     'La propuesta de Acme pone el foco en reducir trabajo manual dentro de las operaciones.',
@@ -357,7 +352,6 @@ test('one analyst rejection falls back only that section and marks model synthes
 test('one analyst timeout cannot block the other specialized sections', async () => {
   const snapshot = draftSnapshotFixture();
   const generatedAt = '2026-08-24T18:27:00.000Z';
-  const fallback = buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt });
   const startedAt = Date.now();
   let timedOutSignalAborted = false;
 
@@ -381,7 +375,7 @@ test('one analyst timeout cannot block the other specialized sections', async ()
   assert.equal(timedOutSignalAborted, true);
   assert.equal(result.metadata.status, 'partial');
   assert.equal(result.metadata.retryable, true);
-  assert.deepEqual(result.document.narrative?.leadContext, fallback.narrative?.leadContext);
+  assert.deepEqual(result.document.narrative?.leadContext, []);
   assert.equal(
     result.metadata.model,
     'mixed:model-commercialReading,model-companyProfile,model-executiveSummary,model-serviceFit',
@@ -389,28 +383,21 @@ test('one analyst timeout cannot block the other specialized sections', async ()
   assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(result.document, snapshot));
 });
 
-test('all analyst failures return the deterministic cited fallback', async () => {
+test('all analyst failures throw ReportSynthesisFailed without a publishable document', async () => {
   const snapshot = draftSnapshotFixture({ includeRole: false });
   const generatedAt = '2026-08-24T18:30:00.000Z';
-  const expected = buildDeterministicResearchReportDocumentV1({ snapshot, generatedAt });
   let calls = 0;
-  const result = await synthesizeResearchReportDocumentV1({ snapshot, generatedAt }, {
-    generate: async () => {
-      calls += 1;
-      throw new Error('provider unavailable');
-    },
-  });
+  await assert.rejects(
+    () => synthesizeResearchReportDocumentV1({ snapshot, generatedAt }, {
+      generate: async () => {
+        calls += 1;
+        throw new Error('provider unavailable');
+      },
+    }),
+    (error: unknown) => error instanceof ReportSynthesisFailed && error.code === 'report_synthesis_failed',
+  );
 
   assert.equal(calls, 3);
-  assert.deepEqual(result.document, expected);
-  assert.equal(result.document.synthesis.method, 'fallback');
-  assert.equal(result.document.synthesis.status, 'partial');
-  assert.equal(result.metadata.generationMethod, 'fallback');
-  assert.equal(result.metadata.model, null);
-  assert.equal(result.metadata.retryable, true);
-  assert.equal(result.metadata.errorCode, 'report_synthesis_failed');
-  assert.deepEqual(result.document.person.verifiedFacts, []);
-  assert.doesNotThrow(() => validateResearchReportDocumentCitationsV1(result.document, snapshot));
 });
 
 test('canonical detail remains exhaustive while each analyst input stays bounded', async () => {

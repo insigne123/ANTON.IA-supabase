@@ -1,4 +1,10 @@
 import type { NativeResearchStatus } from '@/lib/native-research-contracts';
+import {
+  REPORT_V2_SCHEMA_VERSION,
+  ReportV2Schema,
+  validateReportV2,
+  type ReportV2,
+} from '@/lib/report-v2-contracts';
 import { ResearchSnapshotV1Schema, type ResearchSnapshotV1 } from '@/lib/research-contracts';
 import {
   ResearchReportDocumentV1Schema,
@@ -127,7 +133,7 @@ export type ResearchReportCompanySections = {
 
 export type ResearchReportGap = {
   id: string;
-  section: ResearchReportSectionV1;
+  section: ResearchReportSectionV1 | ReportV2['sections'][number]['key'];
   description: string;
 };
 
@@ -157,8 +163,8 @@ export type ResearchReportView = {
   completeness: {
     status: 'complete' | 'partial';
     score: number;
-    coveredSections: ResearchReportSectionV1[];
-    missingSections: ResearchReportSectionV1[];
+    coveredSections: string[];
+    missingSections: string[];
     claimCoverage?: {
       available: number;
       represented: number;
@@ -211,7 +217,49 @@ export type ResearchReportDetail = {
   reportId: string | null;
   result: ResearchWorkspaceResult;
   reportDocument: ResearchReportDocumentV1 | null;
+  reportSynthesis: ResearchReportSynthesisViewState | null;
+  reportDocuments: VersionedResearchReportDocument[];
+  reportSyntheses: VersionedResearchReportSynthesis[];
+  preferredReportSchemaVersion: ResearchReportSchemaVersion | null;
+  preferredReportDocument: ResearchReportDocumentV1 | ReportV2 | null;
+  preferredReportSynthesis: ResearchReportSynthesisViewState | null;
 };
+
+export const RESEARCH_REPORT_V1_SCHEMA_VERSION = 'research-report-document/v1' as const;
+export type ResearchReportSchemaVersion = typeof RESEARCH_REPORT_V1_SCHEMA_VERSION | typeof REPORT_V2_SCHEMA_VERSION;
+
+export type VersionedResearchReportDocument = {
+  schemaVersion: ResearchReportSchemaVersion;
+  document: ResearchReportDocumentV1 | ReportV2;
+  metadata: Record<string, unknown>;
+};
+
+export type VersionedResearchReportSynthesis = {
+  schemaVersion: ResearchReportSchemaVersion;
+  synthesis: ResearchReportSynthesisViewState;
+};
+
+export type ResearchReportSynthesisViewState = {
+  status: 'queued' | 'running' | 'retry_scheduled' | 'completed' | 'partial' | 'failed_permanent';
+  retryable: boolean;
+  attemptCount: number;
+  nextRetryAt: string | null;
+  errorCode: string | null;
+  updatedAt: string | null;
+};
+
+function parseResearchReportSynthesis(value: unknown): ResearchReportSynthesisViewState | null {
+  const rawSynthesis = record(value);
+  const synthesisStatus = text(rawSynthesis.status);
+  return ['queued', 'running', 'retry_scheduled', 'completed', 'partial', 'failed_permanent'].includes(synthesisStatus) ? {
+    status: synthesisStatus as ResearchReportSynthesisViewState['status'],
+    retryable: rawSynthesis.retryable === true,
+    attemptCount: Math.max(0, Math.trunc(numberOrNull(rawSynthesis.attemptCount ?? rawSynthesis.attempt_count) || 0)),
+    nextRetryAt: nullableText(rawSynthesis.nextRetryAt ?? rawSynthesis.next_retry_at),
+    errorCode: nullableText(rawSynthesis.errorCode ?? rawSynthesis.error_code),
+    updatedAt: nullableText(rawSynthesis.updatedAt ?? rawSynthesis.updated_at ?? rawSynthesis.generatedAt ?? rawSynthesis.generated_at),
+  } : null;
+}
 
 export type ResearchReadiness =
   | 'ready'
@@ -709,9 +757,134 @@ function reportCoverage(input: {
 /** Projects the immutable snapshot into a readable report without filling gaps with generated prose. */
 export function buildResearchReport(
   result: ResearchWorkspaceResult,
-  reportDocument?: ResearchReportDocumentV1 | null,
+  reportDocument?: ResearchReportDocumentV1 | ReportV2 | null,
 ): ResearchReportView {
   const snapshot = result.snapshot;
+  if (reportDocument?.schemaVersion === REPORT_V2_SCHEMA_VERSION) {
+    const factsById = new Map(reportDocument.evidenceGraph.facts.map((fact) => [fact.id, fact]));
+    const sourcesById = new Map(reportDocument.evidenceGraph.sources.map((source) => [source.id, source]));
+    const claimsById = new Map(reportDocument.evidenceGraph.claims.map((claim) => [claim.id, claim]));
+    const evidenceForClaim = (claim: ReportV2['evidenceGraph']['claims'][number]) => claim.evidenceIds.flatMap((factId) => {
+      const fact = factsById.get(factId);
+      const source = fact ? sourcesById.get(fact.sourceId) : null;
+      if (!fact || !source) return [];
+      return [{
+        id: fact.id,
+        statement: fact.text,
+        sourceId: source.id,
+        sourceUrl: source.canonicalUrl,
+        sourceTitle: source.title,
+        sourceType: source.sourceType,
+        publishedAt: source.publishedAt || source.modifiedAt,
+        retrievedAt: source.retrievedAt,
+        confidence: claim.confidence,
+      } satisfies ResearchReportEvidence];
+    });
+    const visibleClaim = (claim: ReportV2['evidenceGraph']['claims'][number]): ResearchReportClaim => ({
+      id: claim.id,
+      kind: claim.dimension,
+      statement: claim.statement,
+      classification: claim.type === 'hypothesis' ? 'hypothesis' : 'fact',
+      confidence: claim.confidence,
+      validUntil: null,
+      observedAt: claim.observedAt,
+      canonicalClaimIds: claim.internalId ? [claim.internalId] : [claim.id],
+      evidence: evidenceForClaim(claim),
+    });
+    const sectionClaims = (...keys: ReportV2['sections'][number]['key'][]) => {
+      const ids = reportDocument.sections.filter((section) => keys.includes(section.key)).flatMap((section) => [
+        ...section.paragraphs.flatMap((paragraph) => paragraph.claimIds),
+        ...section.blocks.flatMap((block) => block.claimIds),
+      ]);
+      return [...new Set(ids)].flatMap((id) => {
+        const claim = claimsById.get(id);
+        return claim ? [visibleClaim(claim)] : [];
+      });
+    };
+    const allClaims = reportDocument.evidenceGraph.claims.map(visibleClaim);
+    const companyClaims = allClaims.filter((claim) => claim.kind.startsWith('company_'));
+    const companySections: ResearchReportCompanySections = {
+      overview: companyClaims.filter((claim) => ['company_overview', 'company_legal_form'].includes(claim.kind)),
+      offerings: companyClaims.filter((claim) => claim.kind === 'company_service'),
+      market: companyClaims.filter((claim) => ['company_industry', 'company_geography'].includes(claim.kind)),
+      scale: companyClaims.filter((claim) => claim.kind === 'company_size'),
+    };
+    const profileFields = profileFieldsFor({
+      ...result.lead,
+      fullName: reportDocument.entity.contact.fullName,
+      title: reportDocument.entity.contact.title,
+      linkedinUrl: reportDocument.entity.contact.linkedinUrl,
+      country: reportDocument.entity.contactCountry,
+    });
+    const companyContext = companyContextFieldsFor({
+      ...result.lead,
+      companyName: reportDocument.entity.companyName,
+      companyDomain: reportDocument.entity.companyDomain,
+    });
+    const evidenceRecords = reportDocument.evidenceGraph.facts.flatMap((fact) => {
+      const source = sourcesById.get(fact.sourceId);
+      return source ? [{
+        id: fact.id,
+        statement: fact.text,
+        sourceId: source.id,
+        sourceUrl: source.canonicalUrl,
+        sourceTitle: source.title,
+        sourceType: source.sourceType,
+        publishedAt: source.publishedAt || source.modifiedAt,
+        retrievedAt: source.retrievedAt,
+        confidence: null,
+      } satisfies ResearchReportEvidence] : [];
+    });
+    const sources = reportDocument.evidenceGraph.sources.map((source) => ({
+      id: `source:${source.id}`,
+      statement: source.title,
+      sourceId: source.id,
+      sourceUrl: source.canonicalUrl,
+      sourceTitle: source.title,
+      sourceType: source.sourceType,
+      publishedAt: source.publishedAt || source.modifiedAt,
+      retrievedAt: source.retrievedAt,
+      confidence: null,
+    } satisfies ResearchReportEvidence));
+    const signals = allClaims.filter((claim) => claim.kind === 'signal');
+    const opportunities = sectionClaims('fit', 'angle', 'discovery', 'objections', 'risks')
+      .filter((claim) => claim.classification === 'hypothesis' || ['risk', 'regulatory'].includes(claim.kind));
+    const executive = sectionClaims('verdict');
+    const personFacts = sectionClaims('contact');
+    return {
+      executive: executive.length > 0 ? executive : allClaims.slice(0, 4),
+      person: { fields: profileFields, facts: personFacts },
+      company: companyClaims,
+      companyContext,
+      companySections,
+      signals,
+      opportunities,
+      gaps: reportDocument.evidenceGraph.gaps.map((gap) => ({
+        id: gap.id,
+        section: gap.section,
+        description: `${gap.unknown} ${gap.howToFind}`,
+      })),
+      contradictions: [],
+      evidenceRecords,
+      sources,
+      updatedAt: reportDocument.synthesis.generatedAt,
+      completeness: {
+        status: reportDocument.synthesis.status === 'completed' ? 'complete' : 'partial',
+        score: reportDocument.coverage.ratio,
+        coveredSections: reportDocument.coverage.filled,
+        missingSections: reportDocument.coverage.missing,
+      },
+      coverage: {
+        claims: reportDocument.evidenceGraph.claims.length,
+        evidenceRecords: evidenceRecords.length,
+        companyFacts: companyClaims.length,
+        signals: signals.length,
+        sources: sources.length,
+        profileFields: profileFields.length,
+      },
+      missing: { company: companyClaims.length === 0, person: profileFields.length === 0 && personFacts.length === 0 },
+    };
+  }
   const companyContext = companyContextFieldsFor(result.lead, reportDocument?.company.importedContext);
 
   if (snapshot && reportDocument) {
@@ -1150,10 +1323,83 @@ export function parseResearchReportDetail(
     }
   }
 
+  const reportSynthesis = parseResearchReportSynthesis(root.reportSynthesis ?? root.report_synthesis);
+  const parseVersionedDocument = (value: unknown): VersionedResearchReportDocument | null => {
+    const entry = record(value);
+    const schemaVersion = text(entry.schemaVersion ?? entry.schema_version);
+    if (schemaVersion === RESEARCH_REPORT_V1_SCHEMA_VERSION) {
+      if (!parsedSnapshot.success) return null;
+      const parsed = ResearchReportDocumentV1Schema.safeParse(entry.document);
+      if (!parsed.success) return null;
+      try {
+        return {
+          schemaVersion: RESEARCH_REPORT_V1_SCHEMA_VERSION,
+          document: validateResearchReportDocumentCitationsV1(parsed.data, parsedSnapshot.data),
+          metadata: record(entry.metadata),
+        };
+      } catch {
+        return null;
+      }
+    }
+    if (schemaVersion === REPORT_V2_SCHEMA_VERSION) {
+      const parsed = ReportV2Schema.safeParse(entry.document);
+      if (!parsed.success) return null;
+      try {
+        const document = validateReportV2(parsed.data);
+        if (
+          !parsedSnapshot.success
+          || document.researchSnapshotId !== parsedSnapshot.data.id
+          || document.scope.organizationId !== parsedSnapshot.data.scope.organizationId
+          || document.scope.ownerUserId !== parsedSnapshot.data.scope.ownerUserId
+        ) return null;
+        return { schemaVersion: REPORT_V2_SCHEMA_VERSION, document, metadata: record(entry.metadata) };
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+  const reportDocuments = list(root.reportDocuments ?? root.report_documents)
+    .map(parseVersionedDocument)
+    .filter((entry): entry is VersionedResearchReportDocument => Boolean(entry));
+  if (reportDocument && !reportDocuments.some((entry) => entry.schemaVersion === RESEARCH_REPORT_V1_SCHEMA_VERSION)) {
+    reportDocuments.push({ schemaVersion: RESEARCH_REPORT_V1_SCHEMA_VERSION, document: reportDocument, metadata: {} });
+  }
+  const reportSyntheses = list(root.reportSyntheses ?? root.report_syntheses).flatMap((value) => {
+    const entry = record(value);
+    const schemaVersion = text(entry.schemaVersion ?? entry.schema_version);
+    if (schemaVersion !== RESEARCH_REPORT_V1_SCHEMA_VERSION && schemaVersion !== REPORT_V2_SCHEMA_VERSION) return [];
+    const synthesis = parseResearchReportSynthesis(entry.synthesis);
+    return synthesis ? [{ schemaVersion, synthesis } as VersionedResearchReportSynthesis] : [];
+  });
+  if (reportSynthesis && !reportSyntheses.some((entry) => entry.schemaVersion === RESEARCH_REPORT_V1_SCHEMA_VERSION)) {
+    reportSyntheses.push({ schemaVersion: RESEARCH_REPORT_V1_SCHEMA_VERSION, synthesis: reportSynthesis });
+  }
+  const requestedPreferred = text(root.preferredReportSchemaVersion ?? root.preferred_report_schema_version);
+  const preferredReportSchemaVersion = (
+    requestedPreferred === REPORT_V2_SCHEMA_VERSION || requestedPreferred === RESEARCH_REPORT_V1_SCHEMA_VERSION
+  ) && reportDocuments.some((entry) => entry.schemaVersion === requestedPreferred)
+    ? requestedPreferred
+    : reportDocuments.some((entry) => entry.schemaVersion === REPORT_V2_SCHEMA_VERSION)
+      ? REPORT_V2_SCHEMA_VERSION
+      : reportDocuments.some((entry) => entry.schemaVersion === RESEARCH_REPORT_V1_SCHEMA_VERSION)
+        ? RESEARCH_REPORT_V1_SCHEMA_VERSION
+        : null;
+  const preferredReportDocument = reportDocuments.find((entry) => entry.schemaVersion === preferredReportSchemaVersion)?.document || null;
+  const preferredReportSynthesis = reportSyntheses.find((entry) => entry.schemaVersion === preferredReportSchemaVersion)?.synthesis
+    || (!preferredReportSchemaVersion ? reportSyntheses.find((entry) => entry.schemaVersion === REPORT_V2_SCHEMA_VERSION)?.synthesis : null)
+    || reportSynthesis;
+
   return {
     reportId: nullableText(root.reportId ?? root.report_id),
     result,
     reportDocument,
+    reportSynthesis,
+    reportDocuments,
+    reportSyntheses,
+    preferredReportSchemaVersion,
+    preferredReportDocument,
+    preferredReportSynthesis,
   };
 }
 

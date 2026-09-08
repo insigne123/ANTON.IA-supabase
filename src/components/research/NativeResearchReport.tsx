@@ -16,6 +16,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { REPORT_V2_SCHEMA_VERSION, type ReportV2 } from '@/lib/report-v2-contracts';
 import type { ResearchReportDocumentV1 } from '@/lib/research-report-contracts';
 import { cn } from '@/lib/utils';
 import {
@@ -32,6 +33,7 @@ import {
   type ResearchReportClaim,
   type ResearchReportEvidence,
   type ResearchReportProfileField,
+  type ResearchReportSynthesisViewState,
   type ResearchWorkspaceResult,
   type ResearchWorkspaceStatus,
 } from '@/lib/research-workspace';
@@ -39,7 +41,8 @@ import {
 export type NativeResearchReportProps = {
   result: ResearchWorkspaceResult;
   /** Must already be schema- and citation-validated against result.snapshot. */
-  reportDocument?: ResearchReportDocumentV1 | null;
+  reportDocument?: ResearchReportDocumentV1 | ReportV2 | null;
+  reportSynthesis?: ResearchReportSynthesisViewState | null;
   status?: ResearchWorkspaceStatus;
   readiness?: ResearchReadiness;
   researchSnapshotId?: string | null;
@@ -55,6 +58,8 @@ export type NativeResearchReportProps = {
   refreshLabel?: string;
   refreshingLabel?: string;
   onRefresh?: () => void;
+  retryingSynthesis?: boolean;
+  onRetrySynthesis?: () => void;
   className?: string;
 };
 
@@ -331,6 +336,7 @@ export function NativeResearchReportSkeleton({ className }: { className?: string
 export function NativeResearchReport({
   result,
   reportDocument,
+  reportSynthesis,
   status = result.status,
   readiness: readinessProp,
   researchSnapshotId = result.researchSnapshotId,
@@ -346,6 +352,8 @@ export function NativeResearchReport({
   onCreateDraft,
   onCompleteProfile,
   onRefresh,
+  retryingSynthesis = false,
+  onRetrySynthesis,
   className,
 }: NativeResearchReportProps) {
   const id = useId();
@@ -362,7 +370,9 @@ export function NativeResearchReport({
   });
   const qualityScore = result.quality.score ?? result.score;
   const eligible = result.draftEligibility.eligible === true;
-  const actionAvailable = !profileCompletionRequired && canShowResearchDraftAction({
+  const synthesisPending = Boolean(reportSynthesis && ['queued', 'running', 'retry_scheduled'].includes(reportSynthesis.status));
+  const synthesisFailed = reportSynthesis?.status === 'failed_permanent';
+  const actionAvailable = !profileCompletionRequired && !synthesisPending && !synthesisFailed && canShowResearchDraftAction({
     readiness,
     snapshotId: researchSnapshotId,
     eligible,
@@ -378,32 +388,45 @@ export function NativeResearchReport({
   const showCompanyContextGuidance = needsCompanyContext && refreshAvailable;
   const hasReviewPoints = report.gaps.length > 0 || report.contradictions.length > 0;
   const updatedAt = dateLabel(report.updatedAt);
-  const narrative = reportDocument?.narrative;
+  const narrative = reportDocument?.schemaVersion === 'research-report-document/v1' ? reportDocument.narrative : null;
   const canonicalClaimById = new Map((result.snapshot?.claims || []).map((claim) => [claim.id, claim]));
   const canonicalEvidenceById = new Map((result.snapshot?.evidence || []).map((evidence) => [evidence.id, evidence]));
   const canonicalSourceById = new Map((result.snapshot?.sources || []).map((source) => [source.id, source]));
-  const decorateNarrative = (paragraphs: Array<{ text: string; claimIds: string[]; evidenceIds: string[] }>) => paragraphs.map((paragraph) => {
+  const v2ClaimById = new Map(reportDocument?.schemaVersion === REPORT_V2_SCHEMA_VERSION
+    ? reportDocument.evidenceGraph.claims.map((claim) => [claim.id, claim])
+    : []);
+  const decorateNarrative = (paragraphs: Array<{
+    text: string;
+    claimIds: string[];
+    evidenceIds?: string[];
+    classification?: 'fact' | 'hypothesis' | 'signal' | 'fit';
+    observedAt?: string | null;
+  }>) => paragraphs.map((paragraph) => {
     const claims = paragraph.claimIds.map((claimId) => canonicalClaimById.get(claimId)).filter(Boolean);
-    const classification: 'fact' | 'hypothesis' | 'signal' = claims.some((claim) => claim?.classification === 'hypothesis')
+    const v2Claims = paragraph.claimIds.map((claimId) => v2ClaimById.get(claimId)).filter(Boolean);
+    const classification: 'fact' | 'hypothesis' | 'signal' | 'fit' = paragraph.classification || (claims.some((claim) => claim?.classification === 'hypothesis') || v2Claims.some((claim) => claim?.type === 'hypothesis')
       ? 'hypothesis'
-      : claims.some((claim) => ['news_signal', 'hiring_signal', 'technology_signal', 'site_signal'].includes(claim?.kind || ''))
+      : claims.some((claim) => ['news_signal', 'hiring_signal', 'technology_signal', 'site_signal'].includes(claim?.kind || '')) || v2Claims.some((claim) => claim?.dimension === 'signal')
         ? 'signal'
-        : 'fact';
-    const evidence = paragraph.evidenceIds.map((evidenceId) => canonicalEvidenceById.get(evidenceId)).find(Boolean);
+        : 'fact');
+    const evidence = (paragraph.evidenceIds || []).map((evidenceId) => canonicalEvidenceById.get(evidenceId)).find(Boolean);
     const source = evidence ? canonicalSourceById.get(evidence.sourceId) : null;
     return {
       ...paragraph,
       classification,
-      observedAt: evidence?.observedAt || source?.publishedAt || source?.retrievedAt || null,
+      observedAt: paragraph.observedAt || evidence?.observedAt || source?.publishedAt || source?.retrievedAt || v2Claims.map((claim) => claim?.observedAt).find(Boolean) || null,
     };
   });
-  const executiveNarrative = narrative ? decorateNarrative(narrative.executiveSummary) : [];
-  const companyNarrative = narrative ? decorateNarrative(narrative.companyProfile) : [];
-  const leadNarrative = narrative ? decorateNarrative(narrative.leadContext) : [];
-  const commercialNarrative = narrative ? decorateNarrative(narrative.commercialReading) : [];
+  const v2Paragraphs = (...keys: ReportV2['sections'][number]['key'][]) => reportDocument?.schemaVersion === REPORT_V2_SCHEMA_VERSION
+    ? reportDocument.sections.filter((section) => keys.includes(section.key)).flatMap((section) => section.paragraphs)
+    : [];
+  const executiveNarrative = narrative ? decorateNarrative(narrative.executiveSummary) : decorateNarrative(v2Paragraphs('verdict'));
+  const companyNarrative = narrative ? decorateNarrative(narrative.companyProfile) : decorateNarrative(v2Paragraphs('snapshot', 'company'));
+  const leadNarrative = narrative ? decorateNarrative(narrative.leadContext) : decorateNarrative(v2Paragraphs('contact', 'committee'));
+  const commercialNarrative = narrative ? decorateNarrative(narrative.commercialReading) : decorateNarrative(v2Paragraphs('signals', 'angle', 'discovery', 'objections', 'risks'));
   const serviceFitNarrative = narrative?.serviceFit
     ? decorateNarrative(narrative.serviceFit).map((paragraph) => ({ ...paragraph, classification: 'fit' as const }))
-    : [];
+    : decorateNarrative(v2Paragraphs('fit').map((paragraph) => ({ ...paragraph, classification: 'fit' as const })));
   const companyClaims = Object.values(report.companySections).flat();
   const commercialClaims = [...report.signals, ...report.opportunities];
   const showServiceFit = serviceFitNarrative.length > 0;
@@ -497,6 +520,35 @@ export function NativeResearchReport({
           <p className="text-xs text-muted-foreground">{sourceCount} {sourceCount === 1 ? 'fuente revisable' : 'fuentes revisables'}</p>
         </div>
       </header>
+
+      {synthesisPending ? (
+        <div className="flex items-start gap-3 rounded-2xl border border-sky-200 bg-sky-50/75 px-4 py-3 text-sm text-sky-950 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100" role="status">
+          <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          <div>
+            <p className="font-medium">Estamos preparando el reporte completo</p>
+            <p className="mt-1 text-xs leading-5 opacity-80">
+              {reportSynthesis?.status === 'retry_scheduled'
+                ? 'La evidencia está guardada y volveremos a intentarlo automáticamente.'
+                : 'La evidencia ya está disponible. Esta vista se actualizará cuando termine la interpretación.'}
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {synthesisFailed ? (
+        <div className="flex flex-col items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-950 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100 sm:flex-row sm:items-center sm:justify-between" role="alert">
+          <div>
+            <p className="font-medium">No pudimos preparar el reporte completo</p>
+            <p className="mt-1 text-xs leading-5 opacity-80">La evidencia sigue guardada. Puedes iniciar un nuevo intento sin repetir la investigación.</p>
+          </div>
+          {onRetrySynthesis ? (
+            <Button type="button" variant="outline" size="sm" className="shrink-0 rounded-full bg-background/80" onClick={onRetrySynthesis} disabled={retryingSynthesis}>
+              <RefreshCw className={cn(retryingSynthesis && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
+              {retryingSynthesis ? 'Reintentando…' : 'Reintentar reporte'}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       <section aria-labelledby={`${id}-executive`}>
         <SectionHeading

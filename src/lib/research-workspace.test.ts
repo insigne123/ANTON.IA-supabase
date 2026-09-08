@@ -21,7 +21,7 @@ import {
   shouldPollResearchRun,
   type ResearchWorkspaceLead,
 } from '@/lib/research-workspace';
-import { draftSnapshotFixture } from '@/lib/server/draft-v2-test-fixtures';
+import { draftReportV2Fixture, draftSnapshotFixture } from '@/lib/server/draft-v2-test-fixtures';
 
 const leads: ResearchWorkspaceLead[] = [
   { key: 'lead-ana', id: 'lead-ana', fullName: 'Ana Silva', email: 'ana@example.com', companyName: 'Acme' },
@@ -204,9 +204,19 @@ test('maps a validated report document first and keeps claim, evidence, and sour
     },
     snapshot,
     reportDocument: document,
+    reportSynthesis: {
+      status: 'completed',
+      retryable: false,
+      attemptCount: 1,
+      nextRetryAt: null,
+      errorCode: null,
+      updatedAt: '2026-09-08T10:00:00.000Z',
+    },
   });
 
   assert.ok(detail?.reportDocument);
+  assert.equal(detail.reportSynthesis?.status, 'completed');
+  assert.equal(detail.reportSynthesis?.attemptCount, 1);
   const report = buildResearchReport(detail.result, detail.reportDocument);
   assert.equal(report.executive[0].statement, 'Ada Lovelace ocupa el cargo de Directora de Operaciones.');
   assert.equal(report.coverage.claims, 3);
@@ -224,6 +234,83 @@ test('maps a validated report document first and keeps claim, evidence, and sour
     'Perfil de empresa',
   ]);
   assert.equal(report.companySections.overview[0].evidence[0].sourceUrl, 'https://acme.example/about');
+});
+
+test('prefers a valid visible Report V2 document and its synthesis state', () => {
+  const snapshot = draftSnapshotFixture();
+  const legacyDocument = buildDeterministicResearchReportDocumentV1({
+    snapshot,
+    generatedAt: '2026-08-22T12:00:00.000Z',
+  });
+  const v2Document = draftReportV2Fixture();
+  const detail = parseResearchReportDetail({
+    reportId: 'report-ada',
+    status: 'completed',
+    researchSnapshotId: snapshot.id,
+    result: {
+      status: 'completed',
+      researchSnapshotId: snapshot.id,
+      lead: { fullName: 'Ada Lovelace', email: 'ada@acme.example', companyName: 'Acme' },
+      evidence: [], sources: [], quality: { score: 82, sufficientResearch: true },
+      draftEligibility: { eligible: true, blockReason: null }, warnings: [],
+    },
+    snapshot,
+    reportDocument: legacyDocument,
+    reportDocuments: [
+      { schemaVersion: 'research-report-document/v1', document: legacyDocument, metadata: {} },
+      { schemaVersion: 'research-report-document/v2', document: v2Document, metadata: { deliveryState: 'visible' } },
+    ],
+    reportSyntheses: [
+      {
+        schemaVersion: 'research-report-document/v1',
+        synthesis: { status: 'completed', retryable: false, attemptCount: 1, nextRetryAt: null, errorCode: null, updatedAt: v2Document.synthesis.generatedAt },
+      },
+      {
+        schemaVersion: 'research-report-document/v2',
+        synthesis: { status: 'completed', retryable: false, attemptCount: 2, nextRetryAt: null, errorCode: null, updatedAt: v2Document.synthesis.generatedAt },
+      },
+    ],
+    preferredReportSchemaVersion: 'research-report-document/v2',
+  });
+
+  assert.equal(detail?.reportDocument?.schemaVersion, 'research-report-document/v1');
+  assert.equal(detail?.preferredReportSchemaVersion, 'research-report-document/v2');
+  assert.equal(detail?.preferredReportDocument?.schemaVersion, 'research-report-document/v2');
+  assert.equal(detail?.preferredReportSynthesis?.attemptCount, 2);
+  assert.equal(buildResearchReport(detail!.result, detail!.preferredReportDocument).executive[0].statement, 'Acme ayuda a equipos de operaciones a reducir trabajo manual.');
+});
+
+test('rejects an invalid Report V2 payload and safely falls back to V1', () => {
+  const snapshot = draftSnapshotFixture();
+  const legacyDocument = buildDeterministicResearchReportDocumentV1({
+    snapshot,
+    generatedAt: '2026-08-22T12:00:00.000Z',
+  });
+  const v2Document = draftReportV2Fixture();
+  const detail = parseResearchReportDetail({
+    reportId: 'report-ada',
+    status: 'completed',
+    researchSnapshotId: snapshot.id,
+    result: {
+      status: 'completed',
+      researchSnapshotId: snapshot.id,
+      lead: { fullName: 'Ada Lovelace', email: 'ada@acme.example', companyName: 'Acme' },
+      evidence: [], sources: [], quality: { score: 82, sufficientResearch: true },
+      draftEligibility: { eligible: true, blockReason: null }, warnings: [],
+    },
+    snapshot,
+    reportDocument: legacyDocument,
+    reportDocuments: [{
+      schemaVersion: 'research-report-document/v2',
+      document: { ...v2Document, sections: v2Document.sections.slice(1) },
+      metadata: { deliveryState: 'visible' },
+    }],
+    preferredReportSchemaVersion: 'research-report-document/v2',
+  });
+
+  assert.equal(detail?.reportDocuments.length, 1);
+  assert.equal(detail?.preferredReportSchemaVersion, 'research-report-document/v1');
+  assert.equal(detail?.preferredReportDocument?.schemaVersion, 'research-report-document/v1');
 });
 
 test('keeps historical payloads readable and explicitly marks unavailable company information', () => {

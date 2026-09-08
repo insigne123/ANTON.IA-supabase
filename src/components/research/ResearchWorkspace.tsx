@@ -508,6 +508,39 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     }
   }, []);
 
+  const retryReportSynthesis = useCallback(async (reportId: string) => {
+    setReportDetailLoading((current) => ({ ...current, [reportId]: true }));
+    setReportDetailErrors((current) => ({ ...current, [reportId]: '' }));
+    try {
+      const response = await fetch(`/api/native-research/${encodeURIComponent(reportId)}`, { method: 'POST' });
+      if (!response.ok) throw new Error('NATIVE_RESEARCH_REPORT_RETRY_FAILED');
+      setReportDetails((current) => {
+        const detail = current[reportId];
+        return detail ? {
+          ...current,
+          [reportId]: {
+            ...detail,
+            reportSynthesis: {
+              status: 'queued',
+              retryable: false,
+              attemptCount: 0,
+              nextRetryAt: null,
+              errorCode: null,
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        } : current;
+      });
+    } catch {
+      setReportDetailErrors((current) => ({
+        ...current,
+        [reportId]: 'No pudimos reintentar la preparación del reporte. Inténtalo nuevamente.',
+      }));
+    } finally {
+      setReportDetailLoading((current) => ({ ...current, [reportId]: false }));
+    }
+  }, []);
+
   useEffect(() => {
     if (!activeBatch?.runId) return;
     void fetchRun(activeBatch.runId, batchLeads, true);
@@ -567,6 +600,12 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const activeStatus = activeItem?.status || 'idle';
   const activeReportId = activeItem?.reportId || null;
   const activeReportDetail = activeReportId ? reportDetails[activeReportId] || null : null;
+  const activeReportSynthesis = activeReportDetail?.preferredReportSynthesis || activeReportDetail?.reportSynthesis || null;
+  const activeReportSynthesisPending = Boolean(
+    activeReportSynthesis
+    && ['queued', 'running', 'retry_scheduled'].includes(activeReportSynthesis.status),
+  );
+  const activeReportSynthesisFailed = activeReportSynthesis?.status === 'failed_permanent';
   const activeReportDetailError = activeReportId ? reportDetailErrors[activeReportId] || '' : '';
   const activeReportDetailPending = Boolean(
     activeItem?.result
@@ -594,6 +633,14 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     ) return;
     void fetchReportDetail(activeReportId, activeItem.result);
   }, [activeItem?.result, activeReportDetail, activeReportDetailError, activeReportId, activeStatus, fetchReportDetail]);
+
+  useEffect(() => {
+    if (!activeReportId || !activeItem?.result || !activeReportSynthesisPending) return;
+    const interval = window.setInterval(() => {
+      void fetchReportDetail(activeReportId, activeItem.result);
+    }, 5_000);
+    return () => window.clearInterval(interval);
+  }, [activeItem?.result, activeReportId, activeReportSynthesisPending, fetchReportDetail]);
 
   useEffect(() => {
     setSelectedKeys((current) => current.filter((key) => selectableQueueLeads.some((lead) => lead.key === key)));
@@ -1238,20 +1285,23 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                           <NativeResearchReport
                             key={activeItem.id}
                             result={activeReportDetail?.result || activeItem.result}
-                            reportDocument={activeReportDetail?.reportDocument}
+                            reportDocument={activeReportDetail?.preferredReportDocument || activeReportDetail?.reportDocument}
+                            reportSynthesis={activeReportSynthesis}
                             status={activeStatus}
                             readiness={activeReadiness}
                             researchSnapshotId={activeItem.researchSnapshotId}
                             canCreateDraft={activeItem.canCreateDraft}
                             profileCompletionRequired={profileRequiredItemId === activeItem.id}
                             creatingDraft={creatingDraftId === activeItem.id}
-                            createDraftDisabled={draftRequestPending}
+                            createDraftDisabled={draftRequestPending || activeReportDetailLoading || Boolean(activeReportDetailError) || activeReportSynthesisPending || activeReportSynthesisFailed}
                             createDraftLabel="Crear borrador y revisar"
                             creatingDraftLabel="Preparando borrador…"
                             onCreateDraft={(styleProfileId) => void createDraft(activeItem, styleProfileId)}
                             onCompleteProfile={() => router.push('/profile')}
                             refreshing={creatingBatch}
                             onRefresh={selectionLocked || researchUnavailable ? undefined : () => void refreshActiveResearch()}
+                            retryingSynthesis={Boolean(activeReportId && reportDetailLoading[activeReportId])}
+                            onRetrySynthesis={activeReportSynthesisFailed && activeReportId ? () => void retryReportSynthesis(activeReportId) : undefined}
                           />
                         </>
                       ) : (

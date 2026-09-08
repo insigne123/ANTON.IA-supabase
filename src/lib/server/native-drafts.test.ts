@@ -17,6 +17,7 @@ import type { OutreachSequenceContextV2 } from '@/lib/campaigns-v2/outreach-sequ
 import {
   DRAFT_FIXTURE_IDS,
   DRAFT_FIXTURE_NOW,
+  draftReportV2Fixture,
   draftSnapshotFixture,
 } from './draft-v2-test-fixtures';
 import type { GeneratedOutreachFromDraftContextV2 } from '@/ai/flows/generate-outreach-from-report';
@@ -151,7 +152,143 @@ test('native drafting acquires the privacy claim before synthesizing the report 
   assert.deepEqual(events.slice(0, 2), ['claim', 'report']);
 });
 
-test('native drafting repairs missing generation metadata before replaying a persisted draft', async () => {
+test('native drafting can persist the initial draft and provenance in one atomic operation', async () => {
+  const fixture = dependencies();
+  let atomicMetadata: any = null;
+  fixture.value.persistDraft = undefined;
+  fixture.value.persistMetadata = undefined;
+  fixture.value.persistDraftWithMetadata = async (draft, metadata) => {
+    atomicMetadata = metadata;
+    return draft;
+  };
+  fixture.value.generate = async ({ context }) => generated(context);
+
+  const result = await createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, fixture.value);
+
+  assert.equal(result.status, 'drafted');
+  assert.equal(atomicMetadata?.versionId, result.status === 'drafted' ? result.draft.versionId : null);
+  assert.equal(atomicMetadata?.reportSchemaVersion, 'research-report-document/v1');
+  assert.match(atomicMetadata?.reportContentHash || '', /^[a-f0-9]{64}$/);
+});
+
+test('native drafting prefers visible Report V2 and persists its exact document provenance', async () => {
+  const fixture = dependencies();
+  const document = draftReportV2Fixture();
+  const reportDocumentId = '70000000-0000-4000-8000-000000000001';
+  const requestedReportDocumentIds: Array<string | undefined> = [];
+  fixture.value.ensureReportDocument = undefined;
+  fixture.value.loadReportDocumentV2 = async (input) => {
+    requestedReportDocumentIds.push(input.reportDocumentId);
+    return {
+    id: reportDocumentId,
+    researchSnapshotId: document.researchSnapshotId,
+    organizationId: document.scope.organizationId,
+    userId: document.scope.ownerUserId,
+    schemaVersion: document.schemaVersion,
+    deliveryState: 'visible',
+    status: document.synthesis.status,
+    generationMethod: 'model',
+    provider: 'openai',
+    model: 'writer-test',
+    promptVersion: document.synthesis.promptVersion,
+    contentHash: canonicalSha256(document),
+    retryable: false,
+    errorCode: null,
+    errorMessage: null,
+    document,
+    generatedAt: document.synthesis.generatedAt,
+    createdAt: document.synthesis.generatedAt,
+    updatedAt: document.synthesis.generatedAt,
+    };
+  };
+  fixture.value.generate = async ({ context }) => generated(context);
+
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+
+  assert.equal(result.status, 'drafted');
+  assert.equal(result.context.report?.document?.id, reportDocumentId);
+  assert.equal(fixture.metadata[0]?.reportDocumentId, reportDocumentId);
+  assert.equal(fixture.metadata[0]?.reportSchemaVersion, 'research-report-document/v2');
+  assert.equal(fixture.metadata[0]?.reportRevision, document.revision);
+  assert.equal(fixture.metadata[0]?.reportContentHash, canonicalSha256(document));
+
+  if (result.status !== 'drafted') return;
+  const rewriteDependencies: NativeDraftGenerationDependencies = {
+    ...fixture.value,
+    loadMetadata: async () => fixture.metadata[0],
+    generate: async ({ context }) => ({
+      ...generated(context),
+      subject: 'Menos tareas manuales en Acme',
+      body: `Hola Ada,
+
+Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+
+En Northstar automatizamos operaciones repetitivas para reducir tareas manuales y mantener la información disponible para el equipo.`,
+    }),
+    appendRevision: async (parent, changes) => createChildMessagingDraftV1(parent, {
+      ...changes,
+      versionId: '70000000-0000-4000-8000-000000000002',
+      createdAt: DRAFT_FIXTURE_NOW.toISOString(),
+    }),
+    replaceMetadata: async () => {},
+  };
+  const rewritten = await rewriteNativeDraft({
+    ...access,
+    draft: result.draft,
+    instruction: 'Hazlo más directo.',
+  }, rewriteDependencies);
+
+  assert.equal(rewritten.draft.revision, 2);
+  assert.equal(requestedReportDocumentIds[requestedReportDocumentIds.length - 1], reportDocumentId);
+});
+
+test('requested rewrites fail closed when the pinned report row no longer matches provenance', async () => {
+  const fixture = dependencies();
+  const document = draftReportV2Fixture();
+  fixture.value.ensureReportDocument = undefined;
+  fixture.value.loadReportDocumentV2 = async () => ({
+    id: '70000000-0000-4000-8000-000000000003',
+    researchSnapshotId: document.researchSnapshotId,
+    organizationId: document.scope.organizationId,
+    userId: document.scope.ownerUserId,
+    schemaVersion: document.schemaVersion,
+    deliveryState: 'visible',
+    status: document.synthesis.status,
+    generationMethod: 'model',
+    provider: 'openai',
+    model: 'writer-test',
+    promptVersion: document.synthesis.promptVersion,
+    contentHash: canonicalSha256(document),
+    retryable: false,
+    errorCode: null,
+    errorMessage: null,
+    document,
+    generatedAt: document.synthesis.generatedAt,
+    createdAt: document.synthesis.generatedAt,
+    updatedAt: document.synthesis.generatedAt,
+  });
+  fixture.value.generate = async ({ context }) => generated(context);
+  const initial = await createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, fixture.value);
+  assert.equal(initial.status, 'drafted');
+  if (initial.status !== 'drafted') return;
+
+  let generationCalls = 0;
+  await assert.rejects(
+    () => rewriteNativeDraft({ ...access, draft: initial.draft, instruction: 'Hazlo más directo.' }, {
+      ...fixture.value,
+      loadMetadata: async () => fixture.metadata[0],
+      loadReportDocumentV2: async () => null,
+      generate: async ({ context }) => { generationCalls += 1; return generated(context); },
+    }),
+    /NATIVE_DRAFT_REPORT_PROVENANCE_CHANGED/,
+  );
+  assert.equal(generationCalls, 0);
+});
+
+test('native drafting refuses to invent missing generation metadata for a persisted draft', async () => {
   const fixture = dependencies();
   const campaignRecipientStepId = '60000000-0000-4000-8000-000000000001';
   fixture.value.generate = async ({ context }) => generated(context);
@@ -168,10 +305,10 @@ test('native drafting repairs missing generation metadata before replaying a per
   assert.equal(fixture.persisted.length, 1);
 
   const persisted = fixture.persisted[0];
-  let repairedMetadata: any = null;
+  let metadataWrites = 0;
   fixture.value.findPersistedDraft = async () => persisted;
   fixture.value.loadMetadata = async () => null;
-  fixture.value.persistMetadata = async (input) => { repairedMetadata = input; };
+  fixture.value.persistMetadata = async () => { metadataWrites += 1; };
 
   const replay = await createNativeDraft({
     ...access,
@@ -179,12 +316,9 @@ test('native drafting repairs missing generation metadata before replaying a per
     campaignRecipientStepId,
   }, fixture.value);
 
-  assert.equal(replay.status, 'drafted');
+  assert.equal(replay.status, 'failed');
   assert.equal(fixture.claimCount(), 2);
-  assert.equal(repairedMetadata?.draftId, persisted.draftId);
-  assert.equal(repairedMetadata?.versionId, persisted.versionId);
-  assert.equal(repairedMetadata?.model, 'persisted-recovery');
-  assert.deepEqual(repairedMetadata?.claimIds, ['claim-acme-overview']);
+  assert.equal(metadataWrites, 0);
 });
 
 test('suppressed historical snapshots never synthesize a report document', async () => {
@@ -602,7 +736,11 @@ test('requested AI rewrites create a canonical revision and replace its generati
   const replacedMetadata: any[] = [];
   const rewriteDependencies: NativeDraftGenerationDependencies = {
     ...fixture.value,
+    loadReportDocumentV1: async () => ({
+      document: await fixture.value.ensureReportDocument!({} as any),
+    } as any),
     loadMetadata: async () => ({
+      ...fixture.metadata[0],
       versionId: initial.draft.versionId,
       draftId: initial.draft.draftId,
       researchSnapshotId: DRAFT_FIXTURE_IDS.snapshot,
@@ -680,6 +818,7 @@ test('requested AI rewrites fail closed when provenance points to another resear
   const rewriteDependencies: NativeDraftGenerationDependencies = {
     ...fixture.value,
     loadMetadata: async () => ({
+      ...fixture.metadata[0],
       versionId: initial.draft.versionId,
       draftId: initial.draft.draftId,
       researchSnapshotId: '70000000-0000-4000-8000-000000000007',
@@ -720,6 +859,7 @@ test('manual revisions claim the draft and preserve canonical snapshot metadata'
   const revisionDependencies: NativeDraftGenerationDependencies = {
     ...fixture.value,
     loadMetadata: async ({ versionId }) => ({
+      ...fixture.metadata[0],
       versionId,
       draftId: initial.draft.draftId,
       researchSnapshotId: DRAFT_FIXTURE_IDS.snapshot,

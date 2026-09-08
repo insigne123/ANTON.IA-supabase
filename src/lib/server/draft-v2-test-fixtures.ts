@@ -5,6 +5,7 @@ import {
   type DraftContextV2,
 } from './draft-context-v2';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
+import { ReportV2Schema, type ReportV2 } from '@/lib/report-v2-contracts';
 import { ResearchSnapshotV1Schema, type ResearchSnapshotV1 } from '@/lib/research-contracts';
 
 export const DRAFT_FIXTURE_NOW = new Date('2026-08-22T12:00:00.000Z');
@@ -16,6 +17,10 @@ export const DRAFT_FIXTURE_IDS = {
 
 const capturedAt = '2026-08-20T12:00:00.000Z';
 const validUntil = '2026-09-20T12:00:00.000Z';
+const reportSectionKeys = [
+  'verdict', 'snapshot', 'contact', 'committee', 'company', 'volume', 'regulatory', 'signals', 'fit', 'angle',
+  'discovery', 'objections', 'risks', 'gaps', 'sources',
+] as const;
 
 export function draftSnapshotFixture(input: { includeRole?: boolean } = {}): ResearchSnapshotV1 {
   const includeRole = input.includeRole ?? true;
@@ -167,4 +172,103 @@ export function draftContextFixture(input: {
   });
   if (result.status !== 'ready') throw new Error(`Expected a ready fixture context, received ${result.reason}`);
   return result.context;
+}
+
+export function draftReportV2Fixture(): ReportV2 {
+  return ReportV2Schema.parse({
+    kind: 'research_report_document',
+    schemaVersion: 'research-report-document/v2',
+    id: 'report-v2-acme',
+    revision: 2,
+    researchSnapshotId: DRAFT_FIXTURE_IDS.snapshot,
+    scope: { organizationId: DRAFT_FIXTURE_IDS.organization, ownerUserId: DRAFT_FIXTURE_IDS.user },
+    language: 'es',
+    entity: {
+      companyName: 'Acme',
+      companyDomain: 'acme.example',
+      contactCountry: 'PE',
+      operatingCountries: ['PE'],
+      countryScopedPaths: {},
+      excludedPaths: [],
+      contact: {
+        fullName: 'Ada Lovelace',
+        title: 'Directora de Operaciones',
+        seniority: 'director',
+        department: 'Operaciones',
+        tenureMonths: null,
+        companyTenureMonths: null,
+        linkedinUrl: 'https://www.linkedin.com/in/ada-lovelace',
+      },
+      ambiguities: [],
+    },
+    qualification: { verdict: 'qualified', reasons: [], redirectTo: [], allowedDepth: 'deep' },
+    evidenceGraph: {
+      sources: [{
+        id: 'src_aaaaaaaaaa',
+        url: 'https://acme.example/about',
+        canonicalUrl: 'https://acme.example/about',
+        title: 'Acme',
+        sourceType: 'corporate',
+        jurisdiction: 'PE',
+        publishedAt: null,
+        modifiedAt: capturedAt,
+        retrievedAt: capturedAt,
+        ownDomain: true,
+        contentHash: 'b'.repeat(64),
+      }],
+      facts: [{
+        id: 'f_bbbbbbbbbb',
+        sourceId: 'src_aaaaaaaaaa',
+        text: 'Acme ayuda a equipos de operaciones a reducir trabajo manual.',
+        observedAt: capturedAt,
+        jurisdiction: 'PE',
+        locator: 'Página corporativa',
+      }],
+      claims: [{
+        id: 'c01',
+        internalId: 'claim-acme-overview',
+        type: 'fact',
+        dimension: 'company_overview',
+        statement: 'Acme ayuda a equipos de operaciones a reducir trabajo manual.',
+        evidenceIds: ['f_bbbbbbbbbb'],
+        observedAt: capturedAt,
+        freshnessDays: 2,
+        jurisdiction: 'PE',
+        confidence: 0.9,
+      }],
+      signals: [], gaps: [], assumptions: [], estimates: [], deliverables: [],
+      shortIdMap: { c01: 'claim-acme-overview' },
+    },
+    analysis: {
+      verdict: {
+        headline: 'La cuenta coincide con el perfil objetivo.',
+        qualification: 'qualified',
+        recommendedProduct: 'Automatización de operaciones',
+        nextAction: 'Validar el proceso operativo actual.',
+        blockers: [],
+      },
+      buyingCommittee: [], volumeModel: null, signalIds: [], fitByProduct: [],
+      entryAngle: { channel: 'email', timing: 'Esta semana', hooks: ['Reducción de trabajo manual'] },
+      discoveryQuestions: [], objections: [], riskClaimIds: [], gapIds: [],
+    },
+    sections: reportSectionKeys.map((key) => ({
+      key,
+      title: `Sección ${key}`,
+      paragraphs: key === 'angle' ? [{
+        text: 'Explorar la reducción de trabajo manual en operaciones.',
+        claimIds: ['c01'],
+        context: 'target',
+      }] : [],
+      blocks: [],
+    })),
+    coverage: { ratio: 1, filled: ['company_overview'], missing: [] },
+    audit: { status: 'passed', model: 'auditor-test', issues: [] },
+    synthesis: {
+      status: 'completed',
+      provider: 'openai',
+      promptVersion: 'report-v2-test/v1',
+      generatedAt: DRAFT_FIXTURE_NOW.toISOString(),
+      acceptedModelBySection: { angle: 'writer-test' },
+    },
+  });
 }

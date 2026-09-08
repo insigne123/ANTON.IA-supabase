@@ -7,20 +7,24 @@ import {
   createDefaultDraftWritingStyleV2,
   normalizeDraftSellerProfileV2,
   requiredReportAwareDraftPersonalizationV2,
+  type DraftReportDocumentMetadataV2,
 } from './draft-context-v2';
 import {
   DRAFT_FIXTURE_NOW,
+  draftReportV2Fixture,
   draftSnapshotFixture,
 } from './draft-v2-test-fixtures';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
 import { buildDeterministicResearchReportDocumentV1 } from '@/ai/flows/synthesize-research-report';
 import { ResearchReportDocumentV1Schema, type ResearchReportDocumentV1 } from '@/lib/research-report-contracts';
+import type { ReportV2 } from '@/lib/report-v2-contracts';
 
 function build(input: {
   includeRole?: boolean;
   capturedAt?: string;
   overallConfidence?: number;
-  reportDocument?: ResearchReportDocumentV1;
+  reportDocument?: ResearchReportDocumentV1 | ReportV2;
+  reportDocumentMetadata?: DraftReportDocumentMetadataV2;
 } = {}) {
   const baseSnapshot = draftSnapshotFixture({ includeRole: input.includeRole });
   const snapshot = input.overallConfidence == null
@@ -39,6 +43,7 @@ function build(input: {
     }),
     style: createDefaultDraftWritingStyleV2(),
     reportDocument: input.reportDocument,
+    reportDocumentMetadata: input.reportDocumentMetadata,
     now: DRAFT_FIXTURE_NOW,
   });
 }
@@ -188,6 +193,39 @@ test('company evidence takes priority over a formal person role in draft persona
   assert.deepEqual(result.context.report?.outreachBrief.selectedHypothesisIds, ['claim-acme-opportunity']);
   assert.equal(result.context.report?.synthesis.method, 'fallback');
   assert.equal(requiredReportAwareDraftPersonalizationV2(result.context)[0].claimId, 'claim-acme-overview');
+});
+
+test('DraftContextV2 maps Report V2 short claims to canonical snapshot claims and pins exact provenance', () => {
+  const reportDocument = draftReportV2Fixture();
+  const metadata = {
+    id: 'persisted-report-row-id',
+    schemaVersion: reportDocument.schemaVersion,
+    revision: reportDocument.revision,
+    contentHash: canonicalSha256(reportDocument),
+  } satisfies DraftReportDocumentMetadataV2;
+  const result = build({ reportDocument, reportDocumentMetadata: metadata });
+
+  assert.equal(result.status, 'ready');
+  if (result.status !== 'ready') return;
+  assert.deepEqual(result.context.report?.document, metadata);
+  assert.deepEqual(result.context.report?.outreachBrief.selectedFactualAnchorClaimIds, ['claim-acme-overview']);
+  assert.equal(result.context.report?.synthesis.method, 'model');
+});
+
+test('DraftContextV2 rejects Report V2 provenance that does not match the supplied document', () => {
+  const reportDocument = draftReportV2Fixture();
+  assert.throws(
+    () => build({
+      reportDocument,
+      reportDocumentMetadata: {
+        id: 'persisted-report-row-id',
+        schemaVersion: reportDocument.schemaVersion,
+        revision: reportDocument.revision,
+        contentHash: 'f'.repeat(64),
+      },
+    }),
+    /RESEARCH_REPORT_DOCUMENT_METADATA_MISMATCH/,
+  );
 });
 
 test('dangling report references are rejected before they can enter DraftContextV2', () => {

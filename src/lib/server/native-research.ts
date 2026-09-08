@@ -64,10 +64,17 @@ import {
 import { collectPublicPersonEvidence, type PublicPersonEvidenceResult } from '@/lib/server/native-person-research';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
 import {
-  ensureResearchReportDocument,
+  tryEnsureResearchReportDocument,
   researchReportDocumentMetadata,
 } from '@/lib/server/research-report-documents';
-import { loadSellerProfile } from '@/lib/server/seller-profile';
+import {
+  RESEARCH_REPORT_V2_SCHEMA_VERSION,
+  enqueueResearchReportSynthesis,
+  publicResearchReportSynthesisState,
+} from '@/lib/server/research-report-synthesis-state';
+import { RESEARCH_REPORT_V2_RUNTIME_VERSION } from '@/lib/server/research-report-v2-documents';
+import { loadReportV2SellerConfiguration, loadSellerProfile } from '@/lib/server/seller-profile';
+import { processResearchReportSynthesisQueue } from '@/lib/server/research-report-worker';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import {
   researchBrand,
@@ -2116,16 +2123,51 @@ async function persistNativeSnapshot(input: {
 async function ensureNativeResearchReport(job: NativeResearchJob, snapshot: ResearchSnapshotV1) {
   const access = { organizationId: job.organizationId, userId: job.userId };
   const sellerProfile = await loadSellerProfile(job.userId);
-  return ensureResearchReportDocument({ snapshot, access, sellerProfile });
+  return tryEnsureResearchReportDocument({ snapshot, access, sellerProfile });
+}
+
+async function tryEnqueueNativeResearchReportV2(job: NativeResearchJob, snapshot: ResearchSnapshotV1) {
+  try {
+    const configuration = await loadReportV2SellerConfiguration({
+      organizationId: job.organizationId,
+      userId: job.userId,
+    });
+    if (configuration.mode === 'off') return;
+    await enqueueResearchReportSynthesis({
+      researchSnapshotId: snapshot.id,
+      schemaVersion: RESEARCH_REPORT_V2_SCHEMA_VERSION,
+      promptVersion: RESEARCH_REPORT_V2_RUNTIME_VERSION,
+      sellerProfileHash: configuration.synthesisContextHash,
+    });
+  } catch (error) {
+    console.error('[native-research] Report V2 enqueue failed:', {
+      jobId: job.id,
+      researchSnapshotId: snapshot.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function attachReportSynthesis(result: NativeResearchResult, report: Awaited<ReturnType<typeof ensureNativeResearchReport>>) {
-  const metadata = researchReportDocumentMetadata(report);
+  if (report.document) {
+    const metadata = researchReportDocumentMetadata(report.document);
+    result.reportSynthesis = {
+      status: metadata.status,
+      generationMethod: 'model',
+      retryable: metadata.retryable,
+      errorCode: metadata.errorCode,
+    };
+    return;
+  }
+  const state = publicResearchReportSynthesisState(report.synthesis);
+  if (!state) return;
   result.reportSynthesis = {
-    status: metadata.status,
-    generationMethod: metadata.generationMethod,
-    retryable: metadata.retryable,
-    errorCode: metadata.errorCode,
+    status: state.status,
+    generationMethod: null,
+    retryable: state.retryable,
+    errorCode: state.errorCode,
+    attemptCount: state.attemptCount,
+    nextRetryAt: state.nextRetryAt,
   };
 }
 
@@ -2253,6 +2295,7 @@ async function processJob(job: NativeResearchJob) {
         job: recoveredJob,
         output: { snapshot: durableSnapshot, result: recoveredResult },
       });
+      await tryEnqueueNativeResearchReportV2(recoveredJob, durableSnapshot);
       await completeLeadResearchRequestClaim({
         ...owned,
         providerReportId: recoveredJob.providerReportId,
@@ -2399,6 +2442,7 @@ async function processJob(job: NativeResearchJob) {
       return false;
     }
     const snapshotId = await persistNativeSnapshot({ job, output });
+    await tryEnqueueNativeResearchReportV2(job, output.snapshot);
     await completeLeadResearchRequestClaim({
       ...owned,
       providerReportId: job.providerReportId,
@@ -2505,6 +2549,11 @@ export async function processNativeResearchQueue(input: {
   for (const job of jobs) {
     if (await processJob(job)) completed += 1;
   }
+  await processResearchReportSynthesisQueue({
+    limit,
+    organizationId: input.organizationId,
+    userId: input.userId,
+  });
   return { claimed: jobs.length, completed, failed: jobs.length - completed };
 }
 

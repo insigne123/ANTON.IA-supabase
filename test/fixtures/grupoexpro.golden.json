@@ -1,0 +1,76 @@
+{
+  "capturedAt": "2026-09-08T00:00:00.000Z",
+  "contact": {
+    "fullName": "Bruno Sanchez Wieser",
+    "title": "Recruitment Coordinator @GrupoExpro Talent Sourcing | Client Advisory | Career Reintegration",
+    "normalizedTitle": "Coordinador de Reclutamiento y Seleccion",
+    "company": "GrupoExpro",
+    "country": "Peru",
+    "department": "Recursos Humanos",
+    "seniorityFromProvider": "manager",
+    "linkedin": "https://www.linkedin.com/in/bruno-sanchez-wieser-a7355098"
+  },
+  "domain": "grupoexpro.com",
+  "providerFixture": "grupoexpro/provider-context.json",
+  "serperFixture": "grupoexpro/serper-results.json",
+  "sellerProfile": {
+    "companyName": "Tenant de prueba",
+    "products": [
+      {
+        "key": "product-a",
+        "name": "Producto A",
+        "description": "Producto de prueba con alcance declarado por el tenant.",
+        "jurisdictions": ["CL"],
+        "volumeAssumptions": {
+          "scenarioMultipliers": [1.5, 2.5, 3.5],
+          "minutesPerEvent": 5
+        }
+      }
+    ],
+    "icpRules": {
+      "products": {
+        "product-a": {
+          "jurisdictions": ["CL"],
+          "reasonOutOfJurisdiction": "El producto de prueba solo opera en Chile.",
+          "headcount": { "min": 300, "max": null },
+          "titlesReject": ["coordinador", "coordinator"],
+          "departmentsRejectWhenPure": ["recursos humanos"],
+          "seniorityAccept": ["c_suite", "vp", "director", "head", "manager"],
+          "titlesPrefer": ["Director Corporativo de Negocios", "Gerente de Operaciones"]
+        }
+      }
+    }
+  },
+  "sources": [
+    {
+      "url": "https://grupoexpro.com/quienes-somos/",
+      "fixture": "grupoexpro/quienes-somos.html",
+      "jurisdiction": "GLOBAL"
+    },
+    {
+      "url": "https://grupoexpro.com/peru/quienes-somos/",
+      "fixture": "grupoexpro/peru.html",
+      "jurisdiction": "PE"
+    },
+    {
+      "url": "https://revistaseguridad.cl/2026/04/27/servicios-transitorios-grupoexpro/",
+      "fixture": "grupoexpro/press.html",
+      "jurisdiction": "CL"
+    },
+    {
+      "url": "https://theorg.com/org/grupoexpro/teams/recruitment-and-selection",
+      "fixture": "grupoexpro/theorg.html",
+      "jurisdiction": "GLOBAL"
+    }
+  ],
+  "expected": {
+    "contactCountry": "PE",
+    "seniority": "coordinator",
+    "qualificationVerdict": "account_qualified_contact_rejected",
+    "minimumRedirects": 2,
+    "minimumSignals": 3,
+    "minimumCommitteeMembersOutsideImportedContact": 1,
+    "maximumOwnDomainSourceRatio": 0.6,
+    "requiredNumbers": [12000, 300, 28]
+  }
+}

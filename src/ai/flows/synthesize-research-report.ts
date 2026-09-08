@@ -106,6 +106,18 @@ export type ResearchReportSynthesisResult = {
   };
 };
 
+export class ReportSynthesisFailed extends Error {
+  readonly code = 'report_synthesis_failed';
+  readonly retryable = true;
+  readonly failedSectionCount: number;
+
+  constructor(failedSectionCount: number, cause?: unknown) {
+    super('No specialized report section produced valid model output.', { cause });
+    this.name = 'ReportSynthesisFailed';
+    this.failedSectionCount = failedSectionCount;
+  }
+}
+
 const reportSectionDescriptions: Record<ResearchReportSectionV1, string> = {
   person_verified: 'No se encontraron hechos publicos verificables sobre la persona con coincidencia de identidad suficiente.',
   company_overview: 'No hay una descripcion publica verificable de la empresa.',
@@ -965,34 +977,6 @@ export async function synthesizeResearchReportDocumentV1(
   });
   const seller = normalizeSellerProfile(input.sellerProfile);
   const body = deterministicSynthesisBody(snapshot, generatedAt);
-  const fallbackNarrative = deterministicNarrative(snapshot, seller, generatedAt);
-  const fallbackResult = (failed = true): ResearchReportSynthesisResult => {
-    const document = createDocument({
-      snapshot,
-      body,
-      narrative: fallbackNarrative,
-      sellerProfile: seller,
-      method: 'fallback',
-      model: null,
-      generatedAt,
-    });
-    return {
-      document,
-      metadata: {
-        status: 'partial',
-        generationMethod: 'fallback',
-        provider: 'openai',
-        model: null,
-        promptVersion: RESEARCH_REPORT_PROMPT_VERSION,
-        sellerProfileHash: document.synthesis.sellerProfileHash || sellerProfileHash(input.sellerProfile),
-        retryable: failed,
-        errorCode: failed ? 'report_synthesis_failed' : null,
-        errorMessage: failed
-          ? 'All applicable specialized OpenAI sections failed or returned invalid canonical citations.'
-          : null,
-      },
-    };
-  };
   const openAiModel = process.env.NATIVE_RESEARCH_REPORT_MODEL
     || process.env.SUPLIA_OPENAI_REASONING_MODEL
     || process.env.OPENAI_REASONING_MODEL
@@ -1002,7 +986,7 @@ export async function synthesizeResearchReportDocumentV1(
     const request = analystPrompt({ section, snapshot, canonical: body, seller });
     return request.selectedClaimIds.size > 0 ? [{ section, ...request }] : [];
   });
-  if (prepared.length === 0) return fallbackResult(false);
+  if (prepared.length === 0) throw new ReportSynthesisFailed(0);
   const analystTimeoutMs = Math.max(1, dependencies.analystTimeoutMs || DEFAULT_ANALYST_TIMEOUT_MS);
   const settled = await Promise.allSettled(prepared.map((request) => withAnalystTimeout(
     (signal) => generate({
@@ -1016,11 +1000,11 @@ export async function synthesizeResearchReportDocumentV1(
     analystTimeoutMs,
   )));
   const narrative: Required<ResearchReportNarrativeV1> = {
-    executiveSummary: fallbackNarrative.executiveSummary,
-    leadContext: fallbackNarrative.leadContext,
-    companyProfile: fallbackNarrative.companyProfile,
-    commercialReading: fallbackNarrative.commercialReading,
-    serviceFit: fallbackNarrative.serviceFit || [],
+    executiveSummary: [],
+    leadContext: [],
+    companyProfile: [],
+    commercialReading: [],
+    serviceFit: [],
   };
   let validModelSectionCount = 0;
   let failedSectionCount = 0;
@@ -1056,7 +1040,7 @@ export async function synthesizeResearchReportDocumentV1(
   });
 
   const model = modelProvenance(modelNames);
-  if (validModelSectionCount === 0 || !model) return fallbackResult();
+  if (validModelSectionCount === 0 || !model) throw new ReportSynthesisFailed(failedSectionCount);
 
   try {
     const document = createDocument({
@@ -1081,12 +1065,13 @@ export async function synthesizeResearchReportDocumentV1(
         retryable: failedSectionCount > 0,
         errorCode: failedSectionCount > 0 ? 'report_synthesis_partial' : null,
         errorMessage: failedSectionCount > 0
-          ? 'One or more specialized OpenAI sections used the deterministic fallback.'
+          ? 'One or more specialized OpenAI sections were omitted after validation failed.'
           : null,
       },
     };
-  } catch {
-    return fallbackResult();
+  } catch (error) {
+    if (error instanceof ReportSynthesisFailed) throw error;
+    throw new ReportSynthesisFailed(failedSectionCount, error);
   }
 }
 

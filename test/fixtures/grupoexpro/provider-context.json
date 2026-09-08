@@ -1,0 +1,16 @@
+{
+  "provider": "apollo",
+  "capturedAt": "2026-09-08T00:00:00.000Z",
+  "networkCallPerformed": false,
+  "contact": {
+    "fullName": "Bruno Sanchez Wieser",
+    "title": "Recruitment Coordinator @GrupoExpro Talent Sourcing | Client Advisory | Career Reintegration",
+    "normalizedTitle": "Coordinador de Reclutamiento y Seleccion",
+    "company": "GrupoExpro",
+    "country": "Peru",
+    "department": "Recursos Humanos",
+    "seniorityFromProvider": "manager",
+    "linkedin": "https://www.linkedin.com/in/bruno-sanchez-wieser-a7355098"
+  },
+  "persistedPeople": []
+}

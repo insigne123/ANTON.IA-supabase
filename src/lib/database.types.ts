@@ -3394,6 +3394,10 @@ export type Database = {
           organization_id: string
           prompt_version: string
           provider: string | null
+          report_content_hash: string | null
+          report_document_id: string | null
+          report_revision: number | null
+          report_schema_version: string | null
           research_snapshot_id: string | null
           style_profile_id: string | null
           user_id: string
@@ -3408,6 +3412,10 @@ export type Database = {
           organization_id: string
           prompt_version: string
           provider?: string | null
+          report_content_hash?: string | null
+          report_document_id?: string | null
+          report_revision?: number | null
+          report_schema_version?: string | null
           research_snapshot_id?: string | null
           style_profile_id?: string | null
           user_id: string
@@ -3422,6 +3430,10 @@ export type Database = {
           organization_id?: string
           prompt_version?: string
           provider?: string | null
+          report_content_hash?: string | null
+          report_document_id?: string | null
+          report_revision?: number | null
+          report_schema_version?: string | null
           research_snapshot_id?: string | null
           style_profile_id?: string | null
           user_id?: string
@@ -3434,6 +3446,29 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messaging_draft_generation_metadata_report_scope_fk"
+            columns: [
+              "report_document_id",
+              "organization_id",
+              "user_id",
+              "research_snapshot_id",
+              "report_schema_version",
+              "report_revision",
+              "report_content_hash",
+            ]
+            isOneToOne: false
+            referencedRelation: "research_report_documents"
+            referencedColumns: [
+              "id",
+              "organization_id",
+              "user_id",
+              "research_snapshot_id",
+              "schema_version",
+              "revision",
+              "content_hash",
+            ]
           },
           {
             foreignKeyName: "messaging_draft_generation_metadata_research_snapshot_id_fkey"
@@ -4784,6 +4819,7 @@ export type Database = {
         Row: {
           content_hash: string
           created_at: string
+          delivery_state: string
           document: Json
           error_code: string | null
           error_message: string | null
@@ -4795,15 +4831,18 @@ export type Database = {
           prompt_version: string
           provider: string
           research_snapshot_id: string
+          revision: number
           retryable: boolean
           schema_version: string
           status: string
+          synthesis_context_hash: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
           content_hash: string
           created_at?: string
+          delivery_state?: string
           document: Json
           error_code?: string | null
           error_message?: string | null
@@ -4815,15 +4854,18 @@ export type Database = {
           prompt_version: string
           provider: string
           research_snapshot_id: string
+          revision: number
           retryable?: boolean
           schema_version: string
           status: string
+          synthesis_context_hash?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
           content_hash?: string
           created_at?: string
+          delivery_state?: string
           document?: Json
           error_code?: string | null
           error_message?: string | null
@@ -4835,9 +4877,11 @@ export type Database = {
           prompt_version?: string
           provider?: string
           research_snapshot_id?: string
+          revision?: number
           retryable?: boolean
           schema_version?: string
           status?: string
+          synthesis_context_hash?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -4851,6 +4895,87 @@ export type Database = {
           },
           {
             foreignKeyName: "research_report_documents_snapshot_scope_fk"
+            columns: ["research_snapshot_id", "organization_id", "user_id"]
+            isOneToOne: false
+            referencedRelation: "research_snapshots"
+            referencedColumns: ["id", "organization_id", "user_id"]
+          },
+        ]
+      }
+      research_report_synthesis_states: {
+        Row: {
+          attempt_count: number
+          claim_token: string | null
+          claimed_at: string | null
+          completed_at: string | null
+          created_at: string
+          error_code: string | null
+          error_message: string | null
+          id: string
+          next_retry_at: string
+          organization_id: string
+          prompt_version: string
+          report_document_id: string | null
+          research_snapshot_id: string
+          retryable: boolean
+          schema_version: string
+          seller_profile_hash: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          attempt_count?: number
+          claim_token?: string | null
+          claimed_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          next_retry_at?: string
+          organization_id: string
+          prompt_version: string
+          report_document_id?: string | null
+          research_snapshot_id: string
+          retryable?: boolean
+          schema_version: string
+          seller_profile_hash: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          attempt_count?: number
+          claim_token?: string | null
+          claimed_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          next_retry_at?: string
+          organization_id?: string
+          prompt_version?: string
+          report_document_id?: string | null
+          research_snapshot_id?: string
+          retryable?: boolean
+          schema_version?: string
+          seller_profile_hash?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "research_report_synthesis_states_report_document_id_fkey"
+            columns: ["report_document_id"]
+            isOneToOne: false
+            referencedRelation: "research_report_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "research_report_synthesis_states_snapshot_scope_fk"
             columns: ["research_snapshot_id", "organization_id", "user_id"]
             isOneToOne: false
             referencedRelation: "research_snapshots"

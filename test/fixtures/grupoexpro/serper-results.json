@@ -1,0 +1,47 @@
+{
+  "capturedAt": "2026-09-08T00:00:00.000Z",
+  "results": [
+    {
+      "family": "scale",
+      "title": "GrupoExpro - Quienes somos",
+      "link": "https://grupoexpro.com/quienes-somos/",
+      "date": "2026-04-02",
+      "fixture": "quienes-somos.html"
+    },
+    {
+      "family": "press",
+      "title": "Servicios transitorios impulsaron el empleo formal en 2025",
+      "link": "https://revistaseguridad.cl/2026/04/27/servicios-transitorios-grupoexpro/",
+      "date": "2026-04-27",
+      "fixture": "press.html"
+    },
+    {
+      "family": "people",
+      "title": "GrupoExpro - Recruitment and Selection",
+      "link": "https://theorg.com/org/grupoexpro/teams/recruitment-and-selection",
+      "date": null,
+      "fixture": "theorg.html"
+    },
+    {
+      "family": "awards",
+      "title": "GrupoExpro reconocida en Best WorkPlaces 2025",
+      "link": "https://noticiaslaborales.example/2025/11/18/grupoexpro-best-workplaces/",
+      "date": "2025-11-18",
+      "fixture": "award.html"
+    },
+    {
+      "family": "hiring",
+      "title": "GrupoExpro amplia su equipo de operaciones en Peru",
+      "link": "https://empleosperu.example/2026/06/12/grupoexpro-operaciones/",
+      "date": "2026-06-12",
+      "fixture": "hiring.html"
+    },
+    {
+      "family": "registry",
+      "title": "Registro de empresas de servicios temporales",
+      "link": "https://registrotrabajo.example/2026/03/05/grupoexpro/",
+      "date": "2026-03-05",
+      "fixture": "registry.html"
+    }
+  ]
+}

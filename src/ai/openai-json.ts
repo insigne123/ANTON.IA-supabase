@@ -1,7 +1,9 @@
 import { z } from 'genkit';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 type StructuredOptions<T extends z.ZodTypeAny> = {
   prompt: string;
+  systemPrompt?: string;
   schema: T;
   temperature?: number;
   openAiModel?: string;
@@ -35,6 +37,7 @@ const DEFAULT_OPENAI_MODEL = 'gpt-5.6-luna';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_GLM_MODEL = process.env.GLM_MODEL || 'glm-5.2';
 const DEFAULT_GLM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
+const DEFAULT_SYSTEM_PROMPT = 'You are a strict JSON generator. Return valid JSON only.';
 
 function env(name: string) {
   return String(process.env[name] || '').trim();
@@ -60,6 +63,33 @@ function chatCompletionsUrl(baseUrl: string) {
 
 function usesDefaultTemperatureOnly(model: string) {
   return /^gpt-5(?:[.-]|$)/i.test(model);
+}
+
+function deterministicSchemaName(schema: object) {
+  const serialized = JSON.stringify(schema);
+  let hash = 2166136261;
+  for (let i = 0; i < serialized.length; i++) {
+    hash ^= serialized.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `structured_output_${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function responseFormat<T extends z.ZodTypeAny>(schema: T, provider: StructuredProvider) {
+  if (provider !== 'openai') return { type: 'json_object' };
+
+  const jsonSchema = zodToJsonSchema(schema, {
+    target: 'openAi',
+    $refStrategy: 'none',
+  });
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: deterministicSchemaName(jsonSchema),
+      strict: true,
+      schema: jsonSchema,
+    },
+  };
 }
 
 function getStructuredProviderConfig(requestedProvider?: StructuredProvider): StructuredProviderConfig {
@@ -157,11 +187,11 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
   const requestBody = {
     model,
     ...(usesDefaultTemperatureOnly(model) ? {} : { temperature }),
-    response_format: { type: 'json_object' },
+    response_format: responseFormat(opts.schema, config.provider),
     messages: [
       {
         role: 'system',
-        content: 'You are a strict JSON generator. Return valid JSON only.',
+        content: opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
       },
       {
         role: 'user',

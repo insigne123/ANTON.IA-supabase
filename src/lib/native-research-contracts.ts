@@ -127,10 +127,12 @@ export type NativeResearchResult = {
   draftEligibility: ResearchDraftEligibility;
   warnings: string[];
   reportSynthesis?: {
-    status: 'completed' | 'partial';
-    generationMethod: 'model' | 'fallback';
+    status: 'queued' | 'running' | 'retry_scheduled' | 'completed' | 'partial' | 'failed_permanent';
+    generationMethod: 'model' | null;
     retryable: boolean;
     errorCode: string | null;
+    attemptCount?: number;
+    nextRetryAt?: string | null;
   };
   snapshot?: ResearchSnapshotV1;
 };

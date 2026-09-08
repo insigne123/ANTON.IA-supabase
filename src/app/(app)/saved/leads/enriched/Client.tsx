@@ -361,6 +361,39 @@ export default function EnrichedLeadsClient() {
     }
   }, []);
 
+  const retryNativeResearchSynthesis = useCallback(async (reportId: string) => {
+    setNativeReportDetailLoading((current) => ({ ...current, [reportId]: true }));
+    setNativeReportDetailErrors((current) => ({ ...current, [reportId]: '' }));
+    try {
+      const response = await fetch(`/api/native-research/${encodeURIComponent(reportId)}`, { method: 'POST' });
+      if (!response.ok) throw new Error('NATIVE_RESEARCH_REPORT_RETRY_FAILED');
+      setNativeReportDetails((current) => {
+        const detail = current[reportId];
+        return detail ? {
+          ...current,
+          [reportId]: {
+            ...detail,
+            reportSynthesis: {
+              status: 'queued',
+              retryable: false,
+              attemptCount: 0,
+              nextRetryAt: null,
+              errorCode: null,
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        } : current;
+      });
+    } catch {
+      setNativeReportDetailErrors((current) => ({
+        ...current,
+        [reportId]: 'No pudimos reintentar la preparación del reporte. Inténtalo nuevamente.',
+      }));
+    } finally {
+      setNativeReportDetailLoading((current) => ({ ...current, [reportId]: false }));
+    }
+  }, []);
+
   const loadData = useCallback(async () => {
     const requestId = ++loadDataRequestIdRef.current;
     setLoadError('');
@@ -1218,6 +1251,11 @@ export default function EnrichedLeadsClient() {
   const nativeReportToView = reportLead ? nativeResearchForLead(reportLead) : null;
   const nativeReportIdToView = String(nativeReportToView?.reportId || '').trim();
   const nativeReportDetailToView = nativeReportIdToView ? nativeReportDetails[nativeReportIdToView] || null : null;
+  const nativeReportSynthesisToView = nativeReportDetailToView?.preferredReportSynthesis || nativeReportDetailToView?.reportSynthesis || null;
+  const nativeReportSynthesisPending = Boolean(
+    nativeReportSynthesisToView
+    && ['queued', 'running', 'retry_scheduled'].includes(nativeReportSynthesisToView.status),
+  );
   const nativeReportDetailError = nativeReportIdToView ? nativeReportDetailErrors[nativeReportIdToView] || '' : '';
   const nativeReportIsPending = Boolean(
     openReport
@@ -1244,6 +1282,14 @@ export default function EnrichedLeadsClient() {
     ) return;
     void loadNativeResearchDetail(nativeReportToView);
   }, [loadNativeResearchDetail, nativeReportDetailError, nativeReportDetailToView, nativeReportIdToView, nativeReportToView, openReport]);
+
+  useEffect(() => {
+    if (!openReport || !nativeReportToView || !nativeReportIdToView || !nativeReportSynthesisPending) return;
+    const interval = window.setInterval(() => {
+      void loadNativeResearchDetail(nativeReportToView);
+    }, 5_000);
+    return () => window.clearInterval(interval);
+  }, [loadNativeResearchDetail, nativeReportIdToView, nativeReportSynthesisPending, nativeReportToView, openReport]);
 
   return (
     <div className="space-y-4 pb-8">
@@ -1856,7 +1902,8 @@ export default function EnrichedLeadsClient() {
                   ) : null}
                   <NativeResearchReport
                     result={nativeReportDetailToView?.result || nativeReportToView.result}
-                    reportDocument={nativeReportDetailToView?.reportDocument}
+                    reportDocument={nativeReportDetailToView?.preferredReportDocument || nativeReportDetailToView?.reportDocument}
+                    reportSynthesis={nativeReportSynthesisToView}
                     status={nativeReportToView.status}
                     researchSnapshotId={nativeReportToView.researchSnapshotId}
                     canCreateDraft={canContact(reportLead)}
@@ -1867,6 +1914,10 @@ export default function EnrichedLeadsClient() {
                       setOpenReport(false);
                       openResearchWorkspace([reportLead.id], { refresh: true });
                     }}
+                    retryingSynthesis={Boolean(nativeReportIdToView && nativeReportDetailLoading[nativeReportIdToView])}
+                    onRetrySynthesis={nativeReportSynthesisToView?.status === 'failed_permanent'
+                      ? () => void retryNativeResearchSynthesis(nativeReportIdToView)
+                      : undefined}
                     className="px-5 py-5 sm:px-6 sm:py-6"
                   />
                 </>

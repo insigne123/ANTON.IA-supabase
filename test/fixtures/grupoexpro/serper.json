@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "report-v2-serper-fixture/v1",
+  "capturedAt": "2026-09-08T00:00:00.000Z",
+  "searches": [
+    {
+      "provider": "serper",
+      "kind": "organic",
+      "query": "GrupoExpro Chile Peru Colombia",
+      "localization": {
+        "language": "es",
+        "countryCode": "pe",
+        "location": "Lima, Peru"
+      },
+      "items": [
+        {
+          "title": "GrupoExpro Chile",
+          "link": "https://grupoexpro.com/chile/?utm_source=serper",
+          "snippet": "Operacion de GrupoExpro en Chile.",
+          "source": "GrupoExpro",
+          "date": null,
+          "position": 1
+        },
+        {
+          "title": "GrupoExpro Peru",
+          "link": "https://grupoexpro.com/peru/",
+          "snippet": "Operacion de GrupoExpro en Peru.",
+          "source": "GrupoExpro",
+          "date": null,
+          "position": 2
+        },
+        {
+          "title": "GrupoExpro Colombia",
+          "link": "https://grupoexpro.com/colombia/",
+          "snippet": "Operacion de GrupoExpro en Colombia.",
+          "source": "GrupoExpro",
+          "date": null,
+          "position": 3
+        }
+      ]
+    },
+    {
+      "provider": "serper",
+      "kind": "news",
+      "query": "GrupoExpro Director Corporativo de Negocios 2026",
+      "localization": {
+        "language": "es",
+        "countryCode": "cl",
+        "location": "Santiago, Chile"
+      },
+      "items": [
+        {
+          "title": "Servicios transitorios impulsaron el empleo formal en 2025",
+          "link": "https://revistaseguridad.cl/2026/04/27/servicios-transitorios-grupoexpro/?utm_medium=search",
+          "snippet": "Gonzalo Meneses Zorrilla, Director Corporativo de Negocios de GrupoExpro, explico la estacionalidad del empleo.",
+          "source": "Revista Seguridad",
+          "date": "2026-04-27",
+          "position": 1
+        }
+      ]
+    }
+  ]
+}

@@ -35,7 +35,7 @@ test('generates a structured phone script through the generic Luna model', async
     });
     assert.equal(result.opening, 'Hola Ana.');
     assert.equal(requestedBody.model, 'gpt-5.6-luna');
-    assert.equal(requestedBody.response_format && requestedBody.response_format.type, 'json_object');
+    assert.equal(requestedBody.response_format && requestedBody.response_format.type, 'json_schema');
     assert.match(String((requestedBody.messages as Array<{ content: string }>)[1].content), /ANTON\.IA/);
   } finally {
     globalThis.fetch = originalFetch;
