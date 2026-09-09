@@ -130,7 +130,7 @@ test('account credits use organization policy buckets instead of mission budgets
     leadSearch: 50,
     enrich: 50,
     research: 50,
-    contact: 100,
+    contact: 50,
   });
   assert.match(source, /DEFAULT_DAILY_QUOTA_LIMITS/);
   assert.doesNotMatch(source, /resolveMissionQuotaDefaults/);

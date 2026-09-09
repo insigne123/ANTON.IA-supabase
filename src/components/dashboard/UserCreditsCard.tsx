@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { parseCreditStatus, personalCreditSummary, type CreditStatus } from '@/lib/personal-credit-summary';
 
 type QuotaBucket = { count: number; limit: number } | null;
 
@@ -49,7 +50,8 @@ async function requestUserCredits(signal?: AbortSignal) {
   try {
     const response = await fetch('/api/quota/status', { cache: 'no-store', signal: controller.signal });
     if (!response.ok) throw new Error(`USER_CREDIT_REQUEST_${response.status}`);
-    return (await response.json()) as QuotaStatusResponse;
+    const result = (await response.json()) as QuotaStatusResponse;
+    return { credits: parseCreditStatus(result?.credits) };
   } finally {
     window.clearTimeout(timeout);
     signal?.removeEventListener('abort', abort);
@@ -57,7 +59,7 @@ async function requestUserCredits(signal?: AbortSignal) {
 }
 
 export default function UserCreditsCard({ className }: { className?: string }) {
-  const [credits, setCredits] = useState<QuotaStatusResponse['credits'] | null>(null);
+  const [credits, setCredits] = useState<CreditStatus | null>(null);
   const [state, setState] = useState<CreditsState>('loading');
 
   useEffect(() => {
@@ -86,15 +88,14 @@ export default function UserCreditsCard({ className }: { className?: string }) {
   }
 
   // Cupo personal primero, según preferencia del usuario.
-  const personal = credits?.user ?? null;
-  const usingTeamFallback = !personal && credits != null;
-  const used = personal?.count ?? credits?.count ?? 0;
-  const limit = personal?.limit ?? credits?.limit ?? 0;
+  const personal = credits ? personalCreditSummary(credits) : null;
+  const used = personal?.used ?? 0;
+  const limit = personal?.limit ?? 0;
   const remaining = Math.max(0, limit - used);
   const usedPercent = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   const lowBalance = limit > 0 && remaining <= Math.max(5, Math.round(limit * 0.2));
   const resetLabel = timeLabel(credits?.resetAtISO);
-  const usesTeamQuota = usingTeamFallback && credits?.binding === 'team';
+  const usesTeamQuota = credits?.binding === 'team';
 
   const statusLabel =
     state === 'loading'
@@ -103,8 +104,8 @@ export default function UserCreditsCard({ className }: { className?: string }) {
         ? 'Tu sesión ya no está disponible. Recarga la página para continuar.'
         : state === 'error'
           ? 'No pudimos actualizar tu cupo. Puedes reintentarlo.'
-          : usesTeamQuota
-            ? `Usas el cupo de tu equipo${resetLabel ? ` · se reinicia a las ${resetLabel}` : ''}`
+          : !personal
+            ? 'Cupo personal no activo'
             : `Cupo personal${resetLabel ? ` · se reinicia a las ${resetLabel}` : ''}`;
 
   return (
@@ -123,7 +124,7 @@ export default function UserCreditsCard({ className }: { className?: string }) {
             </span>
             <div className="min-w-0">
               <h2 className="text-sm font-semibold">Mis créditos</h2>
-              <p className="truncate text-xs text-muted-foreground" role="status" aria-live="polite">
+              <p className="text-xs leading-5 text-muted-foreground" role="status" aria-live="polite">
                 {statusLabel}
               </p>
             </div>
@@ -132,7 +133,7 @@ export default function UserCreditsCard({ className }: { className?: string }) {
             type="button"
             variant="ghost"
             size="sm"
-            className="h-9 px-3 text-xs text-muted-foreground"
+            className="h-10 shrink-0 px-2 text-xs text-muted-foreground"
             onClick={() => void refresh()}
             disabled={state === 'loading'}
           >
@@ -156,9 +157,15 @@ export default function UserCreditsCard({ className }: { className?: string }) {
                 : 'No pudimos actualizar tu cupo. Puedes reintentarlo sin afectar tu uso.'}
             </p>
           </div>
+        ) : !personal ? (
+          <p className="py-4 text-sm leading-6 text-muted-foreground" role="status">
+            {credits?.mode === 'team'
+              ? 'Tu cuenta utiliza créditos compartidos del equipo. No tienes un cupo personal activo.'
+              : 'No hay un cupo personal disponible para mostrar. Consulta la asignación con tu administrador.'}
+          </p>
         ) : (
           <div className="space-y-3" aria-live="polite">
-            <div className="flex items-end gap-2">
+            <div className="flex flex-wrap items-end gap-2">
               <span
                 className={cn(
                   'text-3xl font-semibold tracking-[-0.04em] tabular-nums',
@@ -193,10 +200,7 @@ export default function UserCreditsCard({ className }: { className?: string }) {
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3 text-[11px] text-muted-foreground">
-          <span>{usesTeamQuota ? 'Cupo del equipo aplicado a tu cuenta' : 'Tu cupo asignado de hoy'}</span>
-          <Badge variant="secondary" className="font-medium">
-            Cupo personal
-          </Badge>
+          <span>{state === 'error' && credits ? 'Mostrando el último saldo consultado' : usesTeamQuota ? 'El límite del equipo también condiciona el uso' : 'Asignación diaria · reinicio a medianoche UTC'}</span>
         </div>
       </CardContent>
     </Card>

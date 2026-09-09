@@ -9,6 +9,6 @@ test('account credits share a 50-operation daily limit while contacts remain sep
     leadSearch: 50,
     enrich: 50,
     research: 50,
-    contact: 100,
+    contact: 50,
   });
 });
