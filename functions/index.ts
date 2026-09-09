@@ -5939,6 +5939,11 @@ export const campaignProcessingTick = functions.scheduler.onSchedule({
             path: '/api/cron/campaigns-v2',
             method: 'POST',
         }),
+        invokeFirebaseSchedulerBridge({
+            name: 'bulk-campaign-delivery',
+            path: '/api/cron/bulk-campaigns',
+            method: 'GET',
+        }),
     ]);
     const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
     if (failures.length > 0) {

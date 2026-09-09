@@ -71,6 +71,29 @@ No forman parte de la entrega del dashboard y no se borran ni se incluyen autom�
 
 Estos documentos son registros de sus trabajos, no una certificación conjunta de release.
 
+## Integración con lo publicado (021) — 2026-09-09/10
+
+Se auditó el ZIP fuente del rollout activo `build-2026-09-09-021` y la copia
+`bulk-deploy` que lo originó (7d84848 + cambios locales de campañas):
+
+- El dashboard publicado ya incluye Mis créditos en su versión 7d84848; los textos
+  Créditos Apollo solo existen en el componente sin uso `ApolloCreditsCard.tsx`.
+- El subconjunto de campañas publicado se integró a main tomando el contenido del
+  workspace principal (idéntico al desplegado, más correcciones de codificación y
+  nombre de export en `campaigns/history/page.tsx`, que no cambian comportamiento).
+- `apphosting.yaml` final = versión desplegada en 021 (flags bulk con automatización
+  apagada). **No** incluye el bloque `SHARED_PUBLIC_COMPANY_RESEARCH_ENABLED`, que
+  pertenece a otro trabajo cuyo esquema aún no está confirmado en producción; su
+  dueño debe re-aplicarlo cuando corresponda:
+  `SHARED_PUBLIC_COMPANY_RESEARCH_ENABLED=true` (RUNTIME).
+- `functions/index.ts` (puente bulk-campaign-delivery), `campaigns/page.tsx`
+  (conmutador por flag), `privacy-subject-data.ts` (lookup bulk) y las migraciones
+  `2026091010*`–`2026091016*` se integraron tal como están desplegadas. La migración
+  `20260910170000_bulk_revision_binding.sql` se incluye junto a su test porque el
+  test la requiere; **ninguna migración se aplica con el deploy** (App Hosting no
+  ejecuta migraciones) y su aplicación remota sigue pendiente por el canal autorizado.
+- Funciones Cloud y feature flags no se modifican en esta entrega.
+
 ## Validación de esta entrega
 
 - Node 22.23.2.

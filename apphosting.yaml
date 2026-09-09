@@ -207,6 +207,15 @@ env:
     value: "true"
     availability: [RUNTIME]
 
+  # === Campañas colectivas (bulk) ===
+  - variable: BULK_CAMPAIGNS_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+
+  - variable: BULK_CAMPAIGNS_AUTOMATION_ENABLED
+    value: "false"
+    availability: [RUNTIME]
+
   - variable: SERPER_TIMEOUT_MS
     value: "6000"
     availability: [RUNTIME]

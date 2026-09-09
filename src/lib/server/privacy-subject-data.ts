@@ -1,9 +1,11 @@
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { isPrivacyAdminEmail } from '@/lib/server/privacy-admin';
+import { lookupBulkCampaignSubject, type BulkCampaignSubjectRecord } from '@/lib/server/bulk-campaign-privacy';
 
 export type PrivacySubjectLookupData = {
   email: string;
   summary: {
+    bulkCampaignRecipients?: number;
     profiles: number;
     leads: number;
     enrichedLeads: number;
@@ -25,6 +27,7 @@ export type PrivacySubjectLookupData = {
     leadResponses: number;
   };
   records: {
+    bulkCampaignRecipients?: BulkCampaignSubjectRecord[];
     profiles: Array<{ id: string; email: string; full_name: string | null; updated_at: string | null }>;
     leads: Array<{ id: string; user_id?: string | null; organization_id?: string | null; name: string | null; title: string | null; company: string | null; email: string; status: string | null; created_at: string | null }>;
     enrichedLeads: Array<{ id: string; user_id?: string | null; organization_id?: string | null; full_name: string | null; title: string | null; company_name: string | null; email: string; created_at: string | null; updated_at: string | null }>;
@@ -78,6 +81,7 @@ export async function lookupPrivacySubjectData(rawEmail: string): Promise<Privac
   const admin = getSupabaseAdminClient();
   const { data, error } = await admin.rpc('lookup_research_messaging_subject_v1', { p_email: email });
   if (error) throw error;
+  const bulkCampaignRecipients = await lookupBulkCampaignSubject(email, admin);
 
   const result = data && typeof data === 'object' ? data as Record<string, unknown> : {};
   const campaignV2 = result.campaignV2 && typeof result.campaignV2 === 'object'
@@ -132,6 +136,7 @@ export async function lookupPrivacySubjectData(rawEmail: string): Promise<Privac
   return {
     email,
     summary: {
+      bulkCampaignRecipients: bulkCampaignRecipients.length,
       profiles: profiles.length,
       leads: leads.length,
       enrichedLeads: enrichedLeads.length,
@@ -153,6 +158,7 @@ export async function lookupPrivacySubjectData(rawEmail: string): Promise<Privac
       leadResponses: leadResponses.length,
     },
     records: {
+      bulkCampaignRecipients,
       profiles,
       leads,
       enrichedLeads,
