@@ -138,19 +138,21 @@ export default function SummaryCards() {
     <Card
       aria-busy={loading}
       aria-label="Resumen general"
-      className="overflow-hidden rounded-2xl border-border/60 bg-border/60 shadow-[0_12px_28px_-26px_rgba(15,23,42,0.28)]"
+      className="overflow-hidden rounded-2xl border-border/60 bg-card shadow-[0_12px_28px_-26px_rgba(15,23,42,0.28)]"
     >
-      <CardContent className="grid grid-cols-2 gap-px p-0 md:grid-cols-4">
+      <CardContent className="grid grid-cols-2 gap-px bg-border/60 p-0 md:grid-cols-4">
         {metrics.map((metric) => (
-          <div key={metric.title} className="min-w-0 bg-card px-4 py-3.5 dark:bg-card/90 sm:px-5">
-            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-              <metric.icon className="h-3.5 w-3.5" aria-hidden="true" />
-              <span className="truncate">{metric.title}</span>
+          <div key={metric.title} className="min-w-0 bg-card px-4 py-4 dark:bg-card/90 sm:px-5">
+            <div className="flex items-center gap-2.5">
+              <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                <metric.icon className="h-3.5 w-3.5" aria-hidden="true" />
+              </span>
+              <span className="truncate text-xs font-medium text-muted-foreground">{metric.title}</span>
             </div>
             {loading ? (
-              <Skeleton className="mt-2 h-7 w-14" />
+              <Skeleton className="mt-2.5 h-7 w-14" />
             ) : (
-              <div className="mt-1 text-2xl font-semibold leading-7 tracking-tight tabular-nums">{metric.value.toLocaleString('es')}</div>
+              <div className="mt-1.5 text-2xl font-semibold leading-7 tracking-[-0.02em] tabular-nums">{metric.value.toLocaleString('es')}</div>
             )}
           </div>
         ))}

@@ -85,7 +85,7 @@ export function EnrichmentOptionsDialog({ open, onOpenChange, onConfirm, loading
                                 </span>
                             </div>
                             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                                Estimado de Apollo: {creditsPerContact} {creditsPerContact === 1 ? 'crédito' : 'créditos'} por contacto. La cuota diaria interna cuenta una operación por contacto enviado.
+                                Estimado: {creditsPerContact} {creditsPerContact === 1 ? 'crédito' : 'créditos'} por contacto. Tu cuota diaria cuenta una operación por contacto enviado.
                             </p>
                         </div>
                     ) : (

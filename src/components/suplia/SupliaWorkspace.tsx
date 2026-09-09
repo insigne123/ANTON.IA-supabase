@@ -338,7 +338,7 @@ function safeHref(value: string) {
 function getToolRunTitle(toolRun: SupliaToolRun) {
   const name = toolRun.toolName.replace(/\./g, ' · ').replace(/_/g, ' ');
   if (/fullenrich/i.test(toolRun.toolName)) return 'Proveedor anterior';
-  if (/apollo|prospecting\.search/i.test(toolRun.toolName)) return 'Apollo';
+  if (/apollo|prospecting\.search/i.test(toolRun.toolName)) return 'Búsqueda de leads';
   if (/gmail|mailbox/i.test(toolRun.toolName)) return 'Gmail';
   if (/crm/i.test(toolRun.toolName)) return 'CRM';
   if (/email|campaign/i.test(toolRun.toolName)) return 'Email';
@@ -349,7 +349,7 @@ function getToolRunTitle(toolRun: SupliaToolRun) {
 function getToolVerb(toolRun: SupliaToolRun) {
   if (toolRun.status === 'running' || toolRun.status === 'queued') {
     if (/fullenrich/i.test(toolRun.toolName)) return 'Consultando proveedor anterior';
-    if (/apollo|prospecting\.search/i.test(toolRun.toolName)) return 'Buscando con Apollo';
+    if (/apollo|prospecting\.search/i.test(toolRun.toolName)) return 'Buscando leads';
     if (/gmail|mailbox/i.test(toolRun.toolName)) return 'Consultando Gmail';
     if (/crm/i.test(toolRun.toolName)) return 'Registrando en CRM';
     if (/web|serp|research/i.test(toolRun.toolName)) return 'Investigando en la web';
@@ -420,7 +420,7 @@ function getJobStatusLabel(status?: string | null, progressLabel?: string | null
 function formatProviderLabel(provider?: unknown) {
   const value = cleanText(provider).toLowerCase();
   if (value === 'fullenrich') return 'Proveedor anterior';
-  if (value === 'apollo') return 'Apollo';
+  if (value === 'apollo') return 'Proveedor externo';
   if (value === 'pdl') return 'People Data Labs';
   if (value === 'serpapi') return 'SerpAPI';
   if (value === 'brand.dev' || value === 'branddev') return 'Brand.dev';
@@ -2507,7 +2507,7 @@ export function SupliaWorkspace() {
                   <DropdownMenuContent align="start" className="w-64 rounded-[13px]">
                     <DropdownMenuLabel>Herramientas</DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => startQuickAction('prospecting')}>Busqueda con Apollo</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => startQuickAction('prospecting')}>Buscar leads</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => startQuickAction('research')}>Investigacion web</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => startQuickAction('contact')}>Generar correo</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => startQuickAction('followup')}>Registrar seguimiento</DropdownMenuItem>

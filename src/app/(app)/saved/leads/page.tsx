@@ -529,7 +529,7 @@ export default function SavedLeadsPage() {
                   </TableHead>
                    <TableHead>Lead</TableHead>
                    <TableHead>Empresa</TableHead>
-                   <TableHead>Datos Apollo</TableHead>
+                   <TableHead>Origen</TableHead>
                    <TableHead className="hidden lg:table-cell">Encontrado por</TableHead>
                    <TableHead className="w-24 text-right"><span className="sr-only">Acciones</span></TableHead>
                 </TableRow>
@@ -586,7 +586,7 @@ export default function SavedLeadsPage() {
                         <div className="text-sm font-medium">Perfil identificado</div>
                       )}
                       <div className="mt-0.5 text-xs text-muted-foreground">
-                        {l.sourceProvider === 'apollo' || l.apolloId || l.sourceProviderId ? 'Fuente: Apollo' : 'Fuente registrada'}
+                        {l.sourceProvider === 'apollo' || l.apolloId || l.sourceProviderId ? 'Fuente externa' : 'Fuente registrada'}
                       </div>
                     </TableCell>
                     <TableCell className="hidden lg:table-cell">

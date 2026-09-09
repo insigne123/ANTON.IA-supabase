@@ -899,7 +899,7 @@ export default function SearchPage() {
     try {
       const enriched = await enrichApolloOrganization({ domain, operationId });
       if (!enriched) {
-        toast({ title: 'Sin datos adicionales', description: 'Apollo no encontró más información pública para esta empresa.' });
+        toast({ title: 'Sin datos adicionales', description: 'No encontramos más información pública para esta empresa.' });
         return;
       }
       organizationEnrichmentOperationsRef.current.delete(domain);
@@ -1460,7 +1460,7 @@ export default function SearchPage() {
                         {industries.map((industry) => <SelectItem key={industry} value={industry} disabled={isLoading}>{INDUSTRY_LABELS_ES[industry] || industry}</SelectItem>)}
                       </SelectContent>
                     </Select>
-                    <p className="text-xs text-muted-foreground">Apollo usa este valor como palabra clave para encontrar empresas relacionadas.</p>
+                    <p className="text-xs text-muted-foreground">Usamos este valor como palabra clave para encontrar empresas relacionadas.</p>
                   </div>
                    <div className="space-y-2">
                      <Label htmlFor="companyKeywords">Palabras clave de empresa</Label>
