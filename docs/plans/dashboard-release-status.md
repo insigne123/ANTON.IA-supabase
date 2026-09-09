@@ -27,6 +27,13 @@ Verificación por la API de Firebase App Hosting en esta sesión:
 | build-2026-09-09-017 | SUCCEEDED (verificación anterior) | Publicó `7d84848`. |
 | build-2026-09-09-020 | SUCCEEDED | Actualizado a las 20:53:45 UTC. |
 | build-2026-09-09-021 | SUCCEEDED | Actualizado a las 21:05:19 UTC. |
+| build-2026-09-09-022 | SUCCEEDED | Despliegue final de esta entrega (commit `e32a198`), actualizado a las 23:30:43 UTC. Fuente: clon limpio de `main`, sin trabajo concurrente sin commitear. |
+
+Verificación posterior al 022: `/api/campaigns/bulk` y `/api/cron/bulk-campaigns`
+responden `401 Unauthorized` sin credenciales (rutas publicadas y protegidas);
+`/dashboard` responde `307` a login sin sesión (app sirviendo). La comprobación
+visual autenticada del dashboard (Mis créditos, modo equipo, claro/oscuro, móvil)
+queda en manos del usuario con recarga forzada.
 
 Los posteriores reemplazaron el despliegue 017. El registro de campañas
 (`bulk-campaigns-deployment-status.md`) documenta una publicación desde una copia
