@@ -25,6 +25,11 @@ export async function POST(req: NextRequest) {
     }
     const snapshotId = String(body?.researchSnapshotId || body?.snapshotId || '').trim();
     if (!snapshotId) return NextResponse.json({ error: 'NATIVE_DRAFT_SNAPSHOT_REQUIRED' }, { status: 400 });
+    if (body.instruction != null && (typeof body.instruction !== 'string'
+      || (body.instruction !== '' && !body.instruction.trim()) || body.instruction.trim().length > 1_000)) {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_INSTRUCTION_INVALID' }, { status: 400 });
+    }
+    const userInstruction = typeof body.instruction === 'string' ? body.instruction.trim() : '';
     const rawStyleProfileId = typeof body?.styleProfileId === 'string' ? body.styleProfileId : null;
     const styleProfileId = rawStyleProfileId ? normalizeEmailStyleSelection(rawStyleProfileId) : null;
     if (rawStyleProfileId?.trim() && !styleProfileId) {
@@ -40,6 +45,7 @@ export async function POST(req: NextRequest) {
       userId: auth.user.id,
       snapshotId,
       styleProfileId,
+      ...(userInstruction ? { userInstruction } : {}),
       styleName: typeof body?.styleName === 'string' ? body.styleName : null,
       idempotencyKey: typeof body?.idempotencyKey === 'string' ? body.idempotencyKey : req.headers.get('idempotency-key'),
     });
@@ -67,6 +73,9 @@ export async function POST(req: NextRequest) {
     }
     if (error?.message === 'NATIVE_DRAFT_GENERATION_IN_PROGRESS') {
       return NextResponse.json({ error: 'NATIVE_DRAFT_GENERATION_IN_PROGRESS' }, { status: 409 });
+    }
+    if (error?.message === 'NATIVE_DRAFT_INSTRUCTION_INVALID') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_INSTRUCTION_INVALID' }, { status: 400 });
     }
     if (error?.message === 'NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND') {
       return NextResponse.json({ error: 'NATIVE_DRAFT_SNAPSHOT_NOT_FOUND' }, { status: 404 });

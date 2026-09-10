@@ -834,6 +834,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   styleProfileId?: string | null;
   styleName?: string | null;
   idempotencyKey?: string | null;
+  userInstruction?: string | null;
   instruction?: string | null;
   sequenceContext?: OutreachSequenceContextV2;
   campaignRecipientStepId?: string | null;
@@ -842,8 +843,9 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   writingStyle?: DraftWritingStyleV2;
 }, dependencies?: NativeDraftGenerationDependencies): Promise<NativeDraftGenerationResult> {
   const now = dependencies?.now?.() || new Date();
+  const userInstruction = text(input.userInstruction);
   const instruction = text(input.instruction);
-  if (instruction.length > 1_000) throw new Error('NATIVE_DRAFT_INSTRUCTION_INVALID');
+  if (userInstruction.length > 1_000 || instruction.length > 1_000) throw new Error('NATIVE_DRAFT_INSTRUCTION_INVALID');
   const sequenceContext = input.sequenceContext
     ? OutreachSequenceContextV2Schema.parse(input.sequenceContext)
     : undefined;
@@ -907,6 +909,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   const identity = campaignRecipientStepId ? null : canonicalSha256({
     schemaVersion: NATIVE_DRAFT_PROMPT_VERSION,
     idempotencyKey: text(input.idempotencyKey) || null,
+    ...(userInstruction ? { userInstruction } : {}),
     instruction: instruction || null,
     sequenceContext: sequenceContext || null,
     snapshotId: parsedSnapshot.id,
@@ -1007,6 +1010,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
     try {
       generated = await generate({
         context,
+        ...(userInstruction ? { userInstruction } : {}),
         ...(instruction ? { instruction } : {}),
         ...(sequenceContext ? { sequenceContext } : {}),
       });
@@ -1026,6 +1030,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
       try {
         generated = await generate({
           context,
+          ...(userInstruction ? { userInstruction } : {}),
           ...(instruction ? { instruction } : {}),
           ...(sequenceContext ? { sequenceContext } : {}),
           rewrite: {

@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ResearchReportProgress } from '@/components/research/ResearchReportProgress';
@@ -76,7 +77,7 @@ export type NativeResearchReportProps = {
   createDraftDisabled?: boolean;
   createDraftLabel?: string;
   creatingDraftLabel?: string;
-  onCreateDraft?: (styleProfileId: string | null) => void;
+  onCreateDraft?: (styleProfileId: string | null, instruction?: string) => void;
   onCompleteProfile?: () => void;
   refreshing?: boolean;
   refreshLabel?: string;
@@ -508,6 +509,9 @@ export function NativeResearchReport({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [draftStyles, setDraftStyles] = useState<DraftStyleOption[]>([]);
   const [draftStyleId, setDraftStyleId] = useState(DEFAULT_DRAFT_STYLE);
+  const [draftInstruction, setDraftInstruction] = useState({ reportIdentity, value: '' });
+  const currentDraftInstruction = draftInstruction.reportIdentity === reportIdentity ? draftInstruction.value : '';
+  useEffect(() => { setDraftInstruction({ reportIdentity, value: '' }); }, [reportIdentity]);
   const showActionFooter = (profileCompletionRequired && Boolean(onCompleteProfile))
     || (actionAvailable && Boolean(onCreateDraft))
     || refreshAvailable
@@ -991,6 +995,17 @@ export function NativeResearchReport({
         </section>
       </Collapsible>
 
+      {actionAvailable && onCreateDraft ? (
+        <div className="space-y-2">
+          <Label htmlFor={`${id}-draft-instruction`}>Indicaciones para el borrador <span className="font-normal text-muted-foreground">(opcional)</span></Label>
+          <Textarea id={`${id}-draft-instruction`} rows={3} maxLength={1_000}
+            className="min-h-24 resize-y" value={currentDraftInstruction}
+            onChange={(event) => setDraftInstruction({ reportIdentity, value: event.target.value })}
+            disabled={creatingDraft || createDraftDisabled}
+            placeholder="Ej. usa un tono más directo y enfócate en una consecuencia práctica." />
+        </div>
+      ) : null}
+
       {showActionFooter ? <footer aria-label="Acciones del informe" className={cn('flex flex-col gap-3 border-t border-border/70 pt-5 sm:flex-row sm:items-center sm:justify-between', !isPreview && 'sticky bottom-0 z-10 -mx-1 bg-background/90 px-1 pb-1 pt-4 backdrop-blur supports-[backdrop-filter]:bg-background/75')}>
         <div className="min-w-0">
           <p className="text-sm font-medium">
@@ -1038,7 +1053,7 @@ export function NativeResearchReport({
               <Button
                 type="button"
                 className="min-h-11 w-full shrink-0 rounded-full sm:w-auto"
-                onClick={() => onCreateDraft(draftStyleId === DEFAULT_DRAFT_STYLE ? null : draftStyleId)}
+                onClick={() => onCreateDraft(draftStyleId === DEFAULT_DRAFT_STYLE ? null : draftStyleId, currentDraftInstruction.trim() || undefined)}
                 disabled={creatingDraft || createDraftDisabled}
                 aria-describedby={`${id}-action-help`}
               >

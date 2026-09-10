@@ -1101,7 +1101,7 @@ export default function EnrichedLeadsClient() {
     }
   }
 
-  async function generateEmailFromReportFor(lead: EnrichedLead, styleProfileId: string | null = null) {
+  async function generateEmailFromReportFor(lead: EnrichedLead, styleProfileId: string | null = null, instruction?: string) {
     if (nativeDraftRequestRef.current) return;
     if (!nativeResearchStatusKnown) return;
     if (!canContact(lead)) {
@@ -1138,7 +1138,7 @@ export default function EnrichedLeadsClient() {
       const response = await fetch('/api/native-drafts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `native-draft:${researchSnapshotId}` },
-        body: JSON.stringify({ researchSnapshotId, styleProfileId }),
+        body: JSON.stringify({ researchSnapshotId, styleProfileId, ...(instruction ? { instruction } : {}) }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.draft?.draftId) {
@@ -1950,7 +1950,7 @@ export default function EnrichedLeadsClient() {
                     canCreateDraft={canContact(reportLead)}
                     creatingDraft={creatingDraftId === reportLead.id}
                     createDraftDisabled={draftRequestPending}
-                    onCreateDraft={(styleProfileId) => void generateEmailFromReportFor(reportLead, styleProfileId)}
+                    onCreateDraft={(styleProfileId, instruction) => void generateEmailFromReportFor(reportLead, styleProfileId, instruction)}
                     onRefresh={() => {
                       setOpenReport(false);
                       openResearchWorkspace([reportLead.id], { refresh: true });
@@ -2333,4 +2333,3 @@ export default function EnrichedLeadsClient() {
     </div>
   );
 }
-

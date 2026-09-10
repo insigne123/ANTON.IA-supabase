@@ -801,7 +801,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     await startResearchFor([activeLead], true);
   }
 
-  async function createDraft(item: ResearchWorkspaceRunItem, styleProfileId: string | null = null) {
+  async function createDraft(item: ResearchWorkspaceRunItem, styleProfileId: string | null = null, instruction?: string) {
     if (!item.canCreateDraft || !item.researchSnapshotId || draftRequestRef.current) return;
     draftRequestRef.current = item.id;
     setProfileRequiredItemId((current) => current === item.id ? null : current);
@@ -810,7 +810,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
       const response = await fetch('/api/native-drafts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `native-draft:${item.researchSnapshotId}` },
-        body: JSON.stringify({ researchSnapshotId: item.researchSnapshotId, styleProfileId }),
+        body: JSON.stringify({ researchSnapshotId: item.researchSnapshotId, styleProfileId, ...(instruction ? { instruction } : {}) }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.draft?.draftId) {
@@ -1318,7 +1318,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                             createDraftDisabled={draftRequestPending || activeReportDetailLoading || Boolean(activeReportDetailError) || activeReportSynthesisPending || activeReportSynthesisFailed}
                             createDraftLabel="Crear borrador y revisar"
                             creatingDraftLabel="Preparando borrador…"
-                            onCreateDraft={(styleProfileId) => void createDraft(activeItem, styleProfileId)}
+                            onCreateDraft={(styleProfileId, instruction) => void createDraft(activeItem, styleProfileId, instruction)}
                             onCompleteProfile={() => router.push('/profile')}
                             refreshing={creatingBatch}
                             onRefresh={selectionLocked || researchUnavailable ? undefined : () => void refreshActiveResearch()}

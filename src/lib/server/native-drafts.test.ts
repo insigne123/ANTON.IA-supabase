@@ -591,6 +591,25 @@ test('native drafting passes a bounded campaign instruction and includes it in d
   );
 });
 
+test('direct writing instructions remain separate from campaign guidance and change draft identity', async () => {
+  const firstFixture = dependencies();
+  const secondFixture = dependencies();
+  const received: unknown[] = [];
+  firstFixture.value.generate = async ({ context, userInstruction, instruction }) => {
+    received.push({ userInstruction, instruction });
+    return generated(context);
+  };
+  secondFixture.value.generate = async ({ context }) => generated(context);
+  const input = { ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot, idempotencyKey: 'same-request', instruction: 'Presenta el beneficio.' };
+  const first = await createNativeDraft({ ...input, userInstruction: '  Usa un tono directo.  ' }, firstFixture.value);
+  const second = await createNativeDraft({ ...input, userInstruction: 'Usa un tono cercano.' }, secondFixture.value);
+  assert.deepEqual(received, [{ userInstruction: 'Usa un tono directo.', instruction: 'Presenta el beneficio.' }]);
+  assert.equal(first.status, 'drafted');
+  assert.equal(second.status, 'drafted');
+  if (first.status === 'drafted' && second.status === 'drafted') assert.notEqual(first.draft.draftId, second.draft.draftId);
+  await assert.rejects(() => createNativeDraft({ ...input, userInstruction: 'x'.repeat(1_001) }, dependencies().value), /NATIVE_DRAFT_INSTRUCTION_INVALID/);
+});
+
 test('native drafting includes the seller profile in deterministic identity', async () => {
   const firstFixture = dependencies();
   const secondFixture = dependencies();
