@@ -1342,7 +1342,10 @@ export default function SearchPage() {
     let attempts = 0;
     let failedAttempts = 0;
     let timeoutId: number | null = null;
-    const maxAttempts = 18;
+    // Apollo phone reveal arrives via webhook and has been observed to take
+    // over 2.5 minutes. Giving up at 90s showed a false failure while the
+    // backend completed successfully seconds later.
+    const maxAttempts = 60;
     const startedAt = Date.now();
     const maxDurationMs = maxAttempts * 5000;
     const finishWithoutContact = (description: string, items: Awaited<ReturnType<typeof getLinkedInProfileStatuses>> = []) => {
