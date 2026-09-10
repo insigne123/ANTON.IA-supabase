@@ -36,7 +36,16 @@ Incluye bundle Git de todas las referencias y HEADs detached, 20 archivos tar.gz
 - Compilación Next.js completa, lint y tipos aprobados.
 - Chrome con API simulada: campañas y búsqueda por empresas aprobadas.
 - Nueva prueba funcional: instrucción directa separada de campaña, longitud máxima e identidad distinta de borrador.
-- Publicación y eliminación final se registran después de confirmar sus resultados.
+- App consolidada `d729c0c` publicada desde main limpio con `firebase deploy --only apphosting:studio --project leadflowai-3yjcy --non-interactive`. Firebase confirmó rollout completo; backend actualizado a `2026-09-10T16:09:50Z`, `reconciling: false`.
+- Verificación HTTP: `/login` 200; `/api/native-drafts` (POST), `/api/campaigns/bulk` y `/api/leads/search/checkpoint` 401 sin sesión; pantalla protegida redirige al login. No equivale a prueba autenticada de proveedores reales. La consulta complementaria de revisión Cloud Run por gcloud no estuvo disponible por autenticación vencida.
+
+## Limpieza completada
+
+- Eliminados los 20 worktrees históricos y sus carpetas, después del respaldo y verificación de HEAD/estado.
+- Eliminadas 12 ramas locales alternativas y 7 ramas remotas alternativas de la app.
+- `git worktree list`: solo `C:/Users/nicol/Desktop/ANTON.IA` en main.
+- `git branch -avv`: solo main, origin/main y el alias origin/HEAD.
+- La documentación final se registra en un commit posterior sin cambios de código respecto del artefacto desplegado `d729c0c`.
 
 ## Trabajo futuro
 
