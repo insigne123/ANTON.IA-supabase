@@ -16,6 +16,7 @@ import {
   researchReportDocumentV2Metadata,
 } from '@/lib/server/research-report-v2-documents';
 import { processResearchReportSynthesisQueue } from '@/lib/server/research-report-worker';
+import { loadReportV2SellerConfiguration } from '@/lib/server/seller-profile';
 import {
   RESEARCH_REPORT_V1_SCHEMA_VERSION,
   RESEARCH_REPORT_V2_SCHEMA_VERSION,
@@ -43,6 +44,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ report
       ? await getNativeSnapshot({ snapshotId: job.researchSnapshotId, access })
       : null;
     const snapshot = snapshotRow?.payload ? ResearchSnapshotV1Schema.parse(snapshotRow.payload) : null;
+    const configuration = snapshot ? await loadReportV2SellerConfiguration({ organizationId: job.organizationId, userId: job.userId }) : null;
     const [reportSynthesisState, reportSynthesisStateV2] = snapshot
       ? await Promise.all([
         loadResearchReportSynthesisState({
@@ -105,11 +107,10 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ report
       reportSynthesis: legacySynthesis,
       reportDocuments,
       reportSyntheses,
-      preferredReportSchemaVersion: reportDocumentV2
+      questionnaireEnabled: configuration?.questionnaireMode === 'visible',
+      preferredReportSchemaVersion: configuration?.mode === 'visible' && (reportSynthesisStateV2 || !reportDocument)
         ? RESEARCH_REPORT_V2_SCHEMA_VERSION
-        : reportDocument
-          ? RESEARCH_REPORT_V1_SCHEMA_VERSION
-          : null,
+        : RESEARCH_REPORT_V1_SCHEMA_VERSION,
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error: any) {
     if (error?.name === 'AuthError') return handleAuthError(error);
@@ -132,7 +133,9 @@ export async function POST(_req: NextRequest, context: { params: Promise<{ repor
       loadResearchReportSynthesisState({ researchSnapshotId: job.researchSnapshotId, schemaVersion: RESEARCH_REPORT_V2_SCHEMA_VERSION, access }),
       loadResearchReportSynthesisState({ researchSnapshotId: job.researchSnapshotId, schemaVersion: RESEARCH_REPORT_V1_SCHEMA_VERSION, access }),
     ]);
-    const target = states.find((state) => state?.status === 'failed_permanent');
+    const configuration = await loadReportV2SellerConfiguration({ organizationId: job.organizationId, userId: job.userId });
+    const preferredState = configuration.mode === 'visible' && states[0] ? states[0] : states[1];
+    const target = preferredState?.status === 'failed_permanent' ? preferredState : null;
     if (!target) return NextResponse.json({ error: 'REPORT_SYNTHESIS_NOT_RETRYABLE' }, { status: 409 });
     await retryResearchReportSynthesis({
       researchSnapshotId: job.researchSnapshotId,

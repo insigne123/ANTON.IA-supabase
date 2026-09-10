@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'genkit';
 
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
+import { reportGenerationOptions } from '@/ai/report-models';
 import {
   ResearchClaimV1Schema,
   ResearchSnapshotV1Schema,
@@ -173,12 +174,7 @@ export async function enrichCompanyResearchSnapshotV1(
 
   try {
     const result = await generateStructuredWithTelemetry({
-      provider: 'openai',
-      openAiModel: process.env.COMPANY_RESEARCH_OPENAI_MODEL
-        || process.env.NATIVE_RESEARCH_REPORT_MODEL
-        || process.env.SUPLIA_OPENAI_REASONING_MODEL
-        || process.env.OPENAI_REASONING_MODEL
-        || 'gpt-5.6-terra',
+      ...reportGenerationOptions('reasoning'),
       temperature: 0.1,
       schema: CompanyProfileOutputSchema,
       prompt: buildPrompt(snapshot, apolloContext),

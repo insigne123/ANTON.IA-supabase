@@ -122,6 +122,11 @@ export type NativeResearchResult = {
     expiresAt: string | null;
     artifactId: string | null;
     cacheIdentity: string | null;
+    revision?: number;
+    metrics?: {
+      company: { state: 'hit' | 'miss' | 'busy'; expired: boolean; queries: number; pages: number; extractionBatches: number; elapsedMs: number; costUsd: null };
+      lead: { queries: number; elapsedMs: number; costUsd: null } | null;
+    };
   };
   quality: ResearchQualityAssessment;
   draftEligibility: ResearchDraftEligibility;

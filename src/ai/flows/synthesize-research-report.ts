@@ -1,6 +1,7 @@
 import { z } from 'genkit';
 
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
+import { getReportModels, reportGenerationOptions } from '@/ai/report-models';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
 import {
   ResearchReportDocumentV1Schema,
@@ -972,15 +973,12 @@ export async function synthesizeResearchReportDocumentV1(
   const snapshot = ResearchSnapshotV1Schema.parse(input.snapshot);
   const generatedAt = input.generatedAt || new Date().toISOString();
   const generate: GenerateReport = dependencies.generate || (async (options) => {
-    const generated = await generateStructuredWithTelemetry(options);
+    const generated = await generateStructuredWithTelemetry({ ...options, ...reportGenerationOptions('reasoning') });
     return { data: generated.data, telemetry: { modelName: generated.telemetry.modelName } };
   });
   const seller = normalizeSellerProfile(input.sellerProfile);
   const body = deterministicSynthesisBody(snapshot, generatedAt);
-  const openAiModel = process.env.NATIVE_RESEARCH_REPORT_MODEL
-    || process.env.SUPLIA_OPENAI_REASONING_MODEL
-    || process.env.OPENAI_REASONING_MODEL
-    || 'gpt-5.6-terra';
+  const openAiModel = getReportModels('reasoning')[0];
   const prepared = narrativeSections.flatMap((section) => {
     if (section === 'serviceFit' && !sellerHasOffer(seller)) return [];
     const request = analystPrompt({ section, snapshot, canonical: body, seller });

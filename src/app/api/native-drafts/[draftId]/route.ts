@@ -33,12 +33,26 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ draft
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return NextResponse.json({ error: 'NATIVE_DRAFT_INVALID_JSON' }, { status: 400 });
     }
+    const expectedVersionId = typeof body.expectedVersionId === 'string' ? body.expectedVersionId.trim() : '';
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(expectedVersionId)) {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_EXPECTED_VERSION_REQUIRED' }, { status: 400 });
+    }
+    if (expectedVersionId !== current.versionId) {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_VERSION_CONFLICT' }, { status: 409 });
+    }
+    const contentText = body.text ?? body.body;
+    if ((body.subject === undefined && contentText === undefined)
+      || (body.subject !== undefined && (typeof body.subject !== 'string' || !body.subject.trim()))
+      || (contentText !== undefined && (typeof contentText !== 'string' || !contentText.trim()))) {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_CONTENT_INVALID' }, { status: 400 });
+    }
     const draft = await reviseNativeDraft({
       organizationId,
       userId: auth.user.id,
       draft: current,
+      expectedVersionId,
       subject: body?.subject,
-      text: body?.text || body?.body,
+      text: contentText,
     });
     return NextResponse.json({ ok: true, draft }, { status: 201, headers: { 'Cache-Control': 'no-store' } });
   } catch (error: any) {
@@ -48,6 +62,9 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ draft
     }
     if (isNativeDraftVersionConflict(error)) {
       return NextResponse.json({ error: 'NATIVE_DRAFT_VERSION_CONFLICT' }, { status: 409 });
+    }
+    if (error?.message === 'NATIVE_DRAFT_ARCHIVED') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_ARCHIVED' }, { status: 409 });
     }
     if (error?.message === 'NATIVE_DRAFT_PRIVACY_SUPPRESSED') {
       return NextResponse.json({ error: 'NATIVE_DRAFT_PRIVACY_SUPPRESSED' }, { status: 409 });

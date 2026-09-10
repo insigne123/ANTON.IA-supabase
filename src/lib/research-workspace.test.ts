@@ -12,6 +12,7 @@ import {
   isSellerProfileIncompleteDraftError,
   parseResearchReportDetail,
   parseResearchWorkspaceRun,
+  projectResearchReportFieldAnswers,
   researchDraftErrorMessage,
   researchDraftBlockReasonLabel,
   researchEvidenceKindLabel,
@@ -215,6 +216,7 @@ test('maps a validated report document first and keeps claim, evidence, and sour
   });
 
   assert.ok(detail?.reportDocument);
+  assert.equal(detail?.questionnaireEnabled, false);
   assert.equal(detail.reportSynthesis?.status, 'completed');
   assert.equal(detail.reportSynthesis?.attemptCount, 1);
   const report = buildResearchReport(detail.result, detail.reportDocument);
@@ -271,8 +273,10 @@ test('prefers a valid visible Report V2 document and its synthesis state', () =>
       },
     ],
     preferredReportSchemaVersion: 'research-report-document/v2',
+    questionnaireEnabled: true,
   });
 
+  assert.equal(detail?.questionnaireEnabled, true);
   assert.equal(detail?.reportDocument?.schemaVersion, 'research-report-document/v1');
   assert.equal(detail?.preferredReportSchemaVersion, 'research-report-document/v2');
   assert.equal(detail?.preferredReportDocument?.schemaVersion, 'research-report-document/v2');
@@ -568,8 +572,7 @@ test('allows only safe external source protocols', () => {
   assert.equal(safeResearchSourceUrl('/relative-source'), null);
 });
 
-test('maps technical research warnings into user-facing guidance', () => {
-  assert.equal(
+test('maps technical research warnings into user-facing guidance', () => {  assert.equal(
     researchWarningLabel('official_site_fetch_failed'),
     'No pudimos consultar el sitio oficial; se usaron otras fuentes.',
   );
@@ -579,4 +582,50 @@ test('maps technical research warnings into user-facing guidance', () => {
   );
   assert.equal(researchWarningLabel('custom_provider_error'), 'Hay una señal que conviene validar antes de contactar.');
   assert.equal(researchWarningLabel('Revisa la fecha de esta señal.'), 'Revisa la fecha de esta señal.');
+});
+
+test('projects questionnaire field answers without leaking private contact data', () => {
+  const fixture = draftSnapshotFixture();
+  const run = parseResearchWorkspaceRun({
+    run: {
+      id: 'run-fields',
+      status: 'completed',
+      items: [{
+        id: 'item-fields',
+        position: 0,
+        lead_ref: 'lead-ada',
+        status: 'completed',
+        job: {
+          status: 'completed',
+          research_snapshot_id: fixture.id,
+          result_payload: {
+            status: 'completed',
+            researchSnapshotId: fixture.id,
+            lead: { fullName: 'Ada Lovelace', email: 'ada.lovelace@acme.example', companyName: 'Acme' },
+            score: 82,
+            evidence: [],
+            sources: [],
+            quality: { score: 82, sufficientResearch: true },
+            draftEligibility: { eligible: false, blockReason: null },
+            snapshot: fixture,
+          },
+        },
+      }],
+    },
+  }, []);
+
+  assert.ok(run?.items[0].result);
+  const report = buildResearchReport(run.items[0].result);
+  const answers = projectResearchReportFieldAnswers(report, run.items[0].result);
+  assert.ok(answers.length > 0);
+  assert.deepEqual(
+    [...new Set(answers.map((answer) => answer.group))].sort(),
+    ['commercial', 'company', 'contact', 'decision', 'personalization'],
+  );
+  const phone = answers.find((answer) => answer.key === 'contact.phone');
+  assert.equal(phone?.status, 'restricted');
+  const email = answers.find((answer) => answer.key === 'contact.email');
+  assert.equal(email?.status, 'confirmed');
+  const joined = answers.map((answer) => `${answer.value} ${answer.detail || ''}`).join(' ');
+  assert.ok(joined.includes('ada.lovelace@acme.example'));
 });

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { generateStructuredWithTelemetry, type StructuredTelemetry } from '@/ai/openai-json';
-import { getOpenAiModelsForTier } from '@/ai/model-router';
+import { reportGenerationOptions } from '@/ai/report-models';
 import { truncateAtWord } from '@/lib/report-v2-extraction';
 import {
   ReportV2SectionKeySchema,
@@ -9,7 +9,7 @@ import {
   type SectionV2,
 } from '@/lib/report-v2-contracts';
 
-export const WRITE_REPORT_V2_SECTION_PROMPT_VERSION = 'report-v2/p6-section/1';
+export const WRITE_REPORT_V2_SECTION_PROMPT_VERSION = 'report-v2/p6-section/3';
 const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi;
 
 export const WRITE_REPORT_V2_SECTION_SYSTEM_PROMPT = `Eres el redactor del reporte. Conviertes un analisis ya hecho en prosa clara para un vendedor. No
@@ -23,13 +23,31 @@ export type SectionRepairMetricV2 = {
   invalidClaimIds: string[];
 };
 
-export function stripInternalIdsForReportPrompt(value: unknown): unknown {
-  if (typeof value === 'string') return value.replace(UUID_PATTERN, '[internal-id-removed]');
-  if (Array.isArray(value)) return value.map(stripInternalIdsForReportPrompt);
+export function stripInternalIdsForReportPrompt(value: unknown, preserveText = false): unknown {
+  if (typeof value === 'string') return preserveText ? value : value.replace(UUID_PATTERN, '[internal-id-removed]');
+  if (Array.isArray(value)) return value.map((item) => stripInternalIdsForReportPrompt(item, preserveText));
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value as Record<string, unknown>)
     .filter(([key]) => !['internalId', 'internal_id', 'uuid'].includes(key))
-    .map(([key, item]) => [key, stripInternalIdsForReportPrompt(item)]));
+    .map(([key, item]) => [key, stripInternalIdsForReportPrompt(item, preserveText)]));
+}
+
+// Tables remove repeated field names, never evidence text, references or scope.
+export function serializeReportV2Context(value: unknown): string {
+  function compact(item: unknown): unknown {
+    if (!item || typeof item !== 'object') return item;
+    if (!Array.isArray(item)) return Object.fromEntries(Object.entries(item).map(([key, child]) => [key, compact(child)]));
+    const rows = item.map(compact);
+    if (rows.length < 2 || rows.some((row) => !row || typeof row !== 'object' || Array.isArray(row))) return rows;
+    const records = rows as Record<string, unknown>[];
+    const columns = Object.keys(records[0]);
+    if (!columns.length || !records.every((row) => JSON.stringify(Object.keys(row)) === JSON.stringify(columns))) return rows;
+    const table = { columns, rows: records.map((row) => columns.map((key) => row[key])) };
+    return JSON.stringify(table).length < JSON.stringify(rows).length ? table : rows;
+  }
+  // Preserve literal UUIDs in source passages; only named internal metadata is removed.
+  const normalized = JSON.parse(JSON.stringify(stripInternalIdsForReportPrompt(value, true)) ?? 'null');
+  return JSON.stringify(compact(normalized));
 }
 
 export function repairSectionParagraphsV2(input: {
@@ -78,8 +96,8 @@ export function buildWriteReportV2SectionPrompt(input: {
   return `Seccion: "${input.section}"
 Tarea de la seccion: ${input.sectionInstruction}
 Idioma: ${input.language}
-Analisis de entrada: ${JSON.stringify(stripInternalIdsForReportPrompt(input.analysisSection))}
-Claims citables: ${JSON.stringify(stripInternalIdsForReportPrompt(input.claimsIndex))}
+Analisis de entrada: ${serializeReportV2Context(input.analysisSection)}
+Claims citables: ${serializeReportV2Context(input.claimsIndex)}
 
 Reglas de redaccion:
 - Escribe para un vendedor que va a usar esto en los proximos diez minutos. Directo, concreto, sin relleno corporativo.
@@ -123,8 +141,7 @@ export async function writeReportV2Section(input: {
       ? `\n\nCorreccion obligatoria: Los siguientes IDs no existen: ${JSON.stringify(invalidFromFirst)}. Usa unicamente: ${JSON.stringify(validClaimIds)}.`
       : '';
     const result = await generate({
-      provider: 'openai',
-      openAiModels: getOpenAiModelsForTier('balanced'),
+      ...reportGenerationOptions('balanced'),
       systemPrompt: WRITE_REPORT_V2_SECTION_SYSTEM_PROMPT,
       prompt: `${basePrompt}${feedback}`,
       schema,

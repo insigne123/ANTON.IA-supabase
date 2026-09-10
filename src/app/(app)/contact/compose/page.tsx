@@ -37,6 +37,9 @@ import { useContactability } from '@/hooks/use-contactability';
 import { assessCampaignQa } from '@/lib/campaign-qa';
 import { resolveManualEmailOperation, type ManualEmailOperation } from '@/lib/manual-send-idempotency';
 import { FirstContactFollowUpPlan } from '@/components/campaigns-v2/FirstContactFollowUpPlan';
+import { RewriteProposalReview } from '@/components/campaigns-v2/RewriteProposalReview';
+import { quickRewrites, readRewriteProposal, reconcileSavedText, versionConflictMessage, type RewriteProposal } from '@/components/campaigns-v2/draft-editor-behavior';
+import { useComposeUnsavedGuard } from '@/components/campaigns-v2/useComposeUnsavedGuard';
 import {
   campaignV2DispatchReceipt,
   campaignV2SendAvailability,
@@ -109,9 +112,18 @@ function ComposeInner() {
   const [nativeDraftRewriting, setNativeDraftRewriting] = useState(false);
   const [rewriteInstruction, setRewriteInstruction] = useState('');
   const [rewriteError, setRewriteError] = useState<string | null>(null);
+  const [proposal, setProposal] = useState<RewriteProposal | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [creatingDraft, setCreatingDraft] = useState(false);
+  const [creationError, setCreationError] = useState<string | null>(null);
 
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const editorTextRef = useRef({ subject, body });
+  editorTextRef.current = { subject, body };
+  const currentVersionRef = useRef(nativeDraft?.versionId);
+  currentVersionRef.current = nativeDraft?.versionId;
+  const draftOperationRef = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [draftSource, setDraftSource] = useState<'investigation' | 'style'>('investigation');
@@ -147,17 +159,10 @@ function ComposeInner() {
     setRewriteInstruction('');
     setRewriteStyleProfileId('');
     setRewriteError(null);
+    setProposal(null);
+    setSaveError(null);
   }, [nativeDraftId]);
 
-  useEffect(() => {
-    if (!followUpDirty) return;
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', warnBeforeUnload);
-    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
-  }, [followUpDirty]);
 
   useEffect(() => {
     if (!campaignStepId) {
@@ -214,8 +219,7 @@ function ComposeInner() {
       const raw = sessionStorage.getItem(key);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
-      // limpiar buffer para no dejar basura
-      sessionStorage.removeItem(key);
+      // Keep this tab-scoped fallback available for retries and Strict Mode effect replay.
       return parsed;
     } catch { return null; }
   }
@@ -493,20 +497,6 @@ function ComposeInner() {
 
   const [showAiAdjustment, setShowAiAdjustment] = useState(false);
 
-  useEffect(() => {
-    if (!lead || nativeDraftId) return;
-    let cancelled = false;
-    void buildDraftForLead(lead).then((tuned) => {
-      if (cancelled) return;
-      setSubject(tuned.subject);
-      setBody(tuned.body);
-    }).catch((e: any) => {
-      if (cancelled) return;
-      toast({ variant: 'destructive', title: 'Error', description: e?.message || 'No se pudo aplicar la personalizacion.' });
-    });
-    return () => { cancelled = true; };
-  }, [lead, buildDraftForLead, nativeDraftId, toast]);
-
   const { email: composeEmail } = lead ? extractPrimaryEmail(lead) : { email: '' };
   const contactability = useContactability(composeEmail);
   const campaignQa = assessCampaignQa({
@@ -530,6 +520,7 @@ function ComposeInner() {
       || body !== String(nativeDraft?.content?.text || '')
     ),
   );
+  useComposeUnsavedGuard(hasNativeEdits || followUpDirty || followUpBusy || Boolean(proposal) || nativeDraftSaving || nativeDraftRewriting || nativeDraftApproving || isLoading || creatingDraft || Boolean(rewriteInstruction.trim()));
   const nativeReviewComplete = Boolean(
     isCanonicalDraft
     && nativeDraft?.lifecycle === 'ready'
@@ -571,6 +562,7 @@ function ComposeInner() {
   const sendOrganizationId = String(campaignSendContext?.organizationId || nativeDraft?.organizationId || '').trim();
 
   const canContinueWithContact = () => {
+    if (!isCanonicalDraft || proposal || rewriteInstruction.trim() || draftOperationRef.current || nativeDraftSaving || nativeDraftRewriting || nativeDraftApproving || isLoading) return false;
     if (followUpDirty || followUpBusy) {
       toast({
         title: followUpBusy ? 'Seguimientos en proceso' : 'Guarda los seguimientos',
@@ -637,35 +629,47 @@ function ComposeInner() {
     }
   };
 
-  const saveNativeDraft = async () => {
-    if (!nativeDraftId || !hasNativeEdits) return;
+  const saveNativeDraft = async (proposed?: RewriteProposal) => {
+    if (!nativeDraftId || !nativeDraft?.versionId || (!hasNativeEdits && !proposed) || draftOperationRef.current || nativeDraftArchived || followUpDirty || followUpBusy || isLoading || sendReceipt || sendOperation) return;
+    if (proposed && (proposed !== proposal || proposed.expectedVersionId !== nativeDraft.versionId || hasNativeEdits)) { setSaveError(versionConflictMessage); return; }
+    if (editorTextRef.current.subject !== subject || editorTextRef.current.body !== body) { setSaveError(versionConflictMessage); return; }
+    if (!subject.trim() || !body.trim()) { setSaveError('Completa el asunto y el mensaje antes de guardar.'); return; }
+    const submitted = { subject, body };
+    draftOperationRef.current = true;
     setNativeDraftSaving(true);
+    setSaveError(null);
     try {
       const response = await fetch(`/api/native-drafts/${encodeURIComponent(nativeDraftId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject, text: body }),
+        body: JSON.stringify({ subject: proposed?.subject ?? subject, text: proposed?.body ?? body, expectedVersionId: proposed?.expectedVersionId ?? nativeDraft.versionId }),
       });
       const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.draft) throw new Error('No se pudo guardar el correo.');
+      if (response.status === 409) throw new Error(versionConflictMessage);
+      if (!response.ok || payload?.draft?.draftId !== nativeDraftId || !payload?.draft?.versionId
+        || typeof payload?.draft?.content?.subject !== 'string' || typeof payload?.draft?.content?.text !== 'string') throw new Error(payload?.message || 'No pudimos confirmar la versión guardada. Tu texto se conserva.');
       setNativeDraft(payload.draft);
-      setSubject(payload?.draft?.content?.subject || subject);
-      setBody(payload?.draft?.content?.text || body);
+      setProposal(null);
+      const nextText = reconcileSavedText(editorTextRef.current, submitted, { subject: payload.draft.content.subject, body: payload.draft.content.text });
+      setSubject(nextText.subject);
+      setBody(nextText.body);
       if (campaignStepId) {
         setCampaignSendContextLoading(true);
         setCampaignSendContextReloadKey((value) => value + 1);
       }
       toast({ title: 'Cambios guardados', description: 'Revisa el correo y confirma la revisión antes de enviarlo.' });
-    } catch (error) {
+    } catch (error: any) {
       console.error('No se pudo guardar el correo', error);
-      toast({ variant: 'destructive', title: 'No se pudo guardar', description: 'Vuelve a intentarlo.' });
+      setSaveError(error?.message || 'No se pudo guardar. Tus cambios se conservan.');
     } finally {
+      draftOperationRef.current = false;
       setNativeDraftSaving(false);
     }
   };
 
   const approveNativeDraft = async () => {
-    if (!nativeDraftId || !nativeDraft?.versionId || hasNativeEdits || nativeDraftArchived || campaignQaBlocksSend || contactabilityChecking) return;
+    if (!nativeDraftId || !nativeDraft?.versionId || hasNativeEdits || nativeDraftArchived || campaignQaBlocksSend || contactabilityChecking || proposal || rewriteInstruction.trim() || draftOperationRef.current || followUpDirty || followUpBusy || isLoading || sendReceipt || sendOperation) return;
+    draftOperationRef.current = true;
     setNativeDraftApproving(true);
     try {
       const response = await fetch(`/api/native-drafts/${encodeURIComponent(nativeDraftId)}/approve`, {
@@ -680,18 +684,20 @@ function ComposeInner() {
         setCampaignSendContextLoading(true);
         setCampaignSendContextReloadKey((value) => value + 1);
       }
-      toast({ title: 'Correo revisado', description: 'Ya está listo para enviarse.' });
+      toast({ title: 'Correo revisado', description: 'Registramos la revisión. El correo aún no se ha enviado.' });
     } catch (error) {
       console.error('No se pudo confirmar la revisión del correo', error);
       toast({ variant: 'destructive', title: 'No se pudo confirmar la revisión', description: 'Revisa el correo e inténtalo nuevamente.' });
     } finally {
+      draftOperationRef.current = false;
       setNativeDraftApproving(false);
     }
   };
 
-  const rewriteNativeDraftWithAi = async () => {
-    const instruction = rewriteInstruction.trim();
-    if (!nativeDraftId || !instruction || hasNativeEdits || nativeDraftArchived) return;
+  const rewriteNativeDraftWithAi = async (quickInstruction?: string, subjectOnly = false) => {
+    const instruction = (quickInstruction || rewriteInstruction).trim();
+    if (!nativeDraftId || !nativeDraft?.versionId || !instruction || hasNativeEdits || nativeDraftArchived || proposal || draftOperationRef.current || followUpDirty || followUpBusy || isLoading || sendReceipt || sendOperation) return;
+    draftOperationRef.current = true;
     setNativeDraftRewriting(true);
     setRewriteError(null);
     try {
@@ -700,32 +706,25 @@ function ComposeInner() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           instruction,
+          previewOnly: true,
           styleProfileId: rewriteStyleProfileId || null,
           expectedVersionId: nativeDraft.versionId,
           ...(campaignStepId ? { campaignStepId } : {}),
         }),
       });
       const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.draft) {
+      if (response.status === 409) throw new Error(versionConflictMessage);
+      if (!response.ok) {
         throw new Error(payload?.message || 'No se pudo aplicar el ajuste.');
       }
-      setNativeDraft(payload.draft);
-      setSubject(payload.draft?.content?.subject || '');
-      setBody(payload.draft?.content?.text || '');
+      if (currentVersionRef.current !== nativeDraft.versionId || editorTextRef.current.subject !== subject || editorTextRef.current.body !== body) throw new Error(versionConflictMessage);
+      setProposal(readRewriteProposal(payload, nativeDraft.versionId, subjectOnly ? body : undefined));
       setRewriteInstruction('');
-      setRewriteStyleProfileId('');
-      if (campaignStepId) {
-        setCampaignSendContextLoading(true);
-        setCampaignSendContextReloadKey((value) => value + 1);
-      }
-      toast({
-        title: 'Correo ajustado',
-        description: 'Creamos una nueva revisión. Confírmala antes de enviar.',
-      });
     } catch (error: any) {
       console.error('No se pudo ajustar el correo con IA', error);
       setRewriteError(error?.message || 'No pudimos aplicar el ajuste. Inténtalo nuevamente.');
     } finally {
+      draftOperationRef.current = false;
       setNativeDraftRewriting(false);
     }
   };
@@ -810,6 +809,7 @@ function ComposeInner() {
       return;
     }
     setIsLoading(true);
+    draftOperationRef.current = true;
     setSendError(null);
     try {
       const researchSnapshotId = String(findReportForLead({
@@ -841,6 +841,7 @@ function ComposeInner() {
       }
       toast({ variant: 'destructive', title: 'No se pudo enviar con Outlook', description: message });
     } finally {
+      draftOperationRef.current = false;
       setIsLoading(false);
     }
   };
@@ -861,6 +862,7 @@ function ComposeInner() {
       return;
     }
     setIsLoading(true);
+    draftOperationRef.current = true;
     setSendError(null);
     try {
       const researchSnapshotId = String(findReportForLead({
@@ -891,6 +893,7 @@ function ComposeInner() {
       }
       toast({ variant: 'destructive', title: 'No se pudo enviar con Gmail', description: message });
     } finally {
+      draftOperationRef.current = false;
       setIsLoading(false);
     }
   };
@@ -956,6 +959,9 @@ function ComposeInner() {
             type="button"
             className="w-full sm:w-auto"
             onClick={() => {
+              if ((hasNativeEdits || proposal || followUpDirty || followUpBusy) && !window.confirm('¿Recargar y descartar los cambios o propuestas sin guardar?')) return;
+              setProposal(null);
+              setSaveError(null);
               if (campaignStepId) setCampaignSendContextReloadKey((value) => value + 1);
               if (isCanonicalDraft) setNativeDraftReloadKey((value) => value + 1);
               else setLeadReloadKey((value) => value + 1);
@@ -983,6 +989,44 @@ function ComposeInner() {
               <p className="text-sm leading-6 text-muted-foreground">Vuelve a la lista, elige un contacto y abre su correo desde allí.</p>
             </div>
             <Button type="button" onClick={() => router.back()}>Volver</Button>
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
+  if (!isCanonicalDraft) {
+    const report = findReportForLead({ leadId: id, email: composeEmail, companyDomain: lead?.companyDomain, companyName: lead?.companyName });
+    const snapshotId = String(report?.raw?.research_snapshot_id || report?.raw?.researchSnapshotId || '').trim();
+    const researchHref = lead?._sourceTable === 'opportunities' ? '/saved/opportunities/enriched' : '/saved/leads/enriched';
+    const createDraft = async () => {
+      if (!snapshotId || creatingDraft) return;
+      setCreatingDraft(true);
+      setCreationError(null);
+      try {
+        const response = await fetch('/api/native-drafts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `native-draft:${snapshotId}` },
+          body: JSON.stringify({ researchSnapshotId: snapshotId }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.draft?.draftId) throw new Error(payload?.message || 'No pudimos crear el borrador. Revisa o actualiza la investigación del contacto.');
+        router.replace(`/contact/compose?draftId=${encodeURIComponent(payload.draft.draftId)}`);
+      } catch (error: any) {
+        setCreationError(error?.message || 'No pudimos crear el borrador. Inténtalo nuevamente.');
+      } finally { setCreatingDraft(false); }
+    };
+    return (
+      <main className="mx-auto max-w-2xl space-y-5 px-4 py-6 sm:px-6">
+        <h1 className="text-2xl font-semibold tracking-tight">Preparar correo</h1>
+        <Card><CardHeader><CardTitle className="text-base">{lead.fullName || 'Contacto'}</CardTitle><CardDescription>{composeEmail || 'Sin email disponible'}</CardDescription></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm leading-6 text-muted-foreground">{snapshotId ? 'Crea un borrador desde la investigación guardada. Después podrás editarlo, revisarlo y decidir si enviarlo.' : 'Este contacto necesita una investigación actualizada antes de crear el correo. Abre la lista, selecciona este contacto y elige Investigar.'} Nada se enviará desde este paso.</p>
+            {creationError ? <Alert variant="destructive"><AlertTitle>No se pudo preparar</AlertTitle><AlertDescription>{creationError}</AlertDescription></Alert> : null}
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {snapshotId ? <Button disabled={creatingDraft || !composeEmail} onClick={() => void createDraft()}>{creatingDraft ? 'Creando borrador…' : 'Crear borrador para revisar'}</Button> : null}
+              {creatingDraft ? <Button variant="outline" disabled>Ir a investigar el contacto</Button> : <Button asChild variant={snapshotId ? 'outline' : 'default'}><Link href={researchHref}>Ir a investigar el contacto</Link></Button>}
+            </div>
           </CardContent>
         </Card>
       </main>
@@ -1027,7 +1071,7 @@ function ComposeInner() {
                 <p className="text-sm font-medium">{nextStep ? `Próximo: ${nextStep.name}` : 'Seguimiento configurado'}</p>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
                   {nextDate
-                    ? `Programado para el ${nextDate}.`
+                    ? `Fecha prevista: ${nextDate}. Revisa su estado en Campañas; esta fecha no confirma un envío automático.`
                     : `${activeFollowUpPlan.steps.length} ${activeFollowUpPlan.steps.length === 1 ? 'correo quedó preparado' : 'correos quedaron preparados'} para continuar después del envío inicial.`}
                 </p>
               </div>
@@ -1051,19 +1095,23 @@ function ComposeInner() {
   const dispatchLocksCompose = Boolean(sendReceipt);
   const composeControlsLocked = dispatchLocksCompose || isLoading || Boolean(sendOperation);
   const leaveCompose = () => {
-    if (followUpDirty || followUpBusy) {
+    if (hasNativeEdits || proposal || followUpDirty || followUpBusy || rewriteInstruction.trim() || draftOperationRef.current || isLoading) {
       toast({
         title: followUpBusy ? 'Hay una operación en curso' : 'Hay cambios sin guardar',
         description: followUpBusy
           ? 'Espera a que termine antes de salir.'
-          : 'Guarda los seguimientos antes de salir de esta pantalla.',
+          : 'Guarda tus cambios y aplica o descarta las propuestas antes de salir.',
       });
       return;
     }
-    router.back();
+    if (window.history.state?.composeUnsavedGuard === window.location.href) window.history.go(-2);
+    else router.back();
   };
   const isSafeRequestRetry = Boolean(sendError && sendOperation && !sendReceipt);
   const isSendBlocked = isLoading
+    || Boolean(rewriteInstruction.trim())
+    || Boolean(proposal)
+    || !isCanonicalDraft
     || nativeDraftSaving
     || nativeDraftApproving
     || nativeDraftRewriting
@@ -1076,6 +1124,10 @@ function ComposeInner() {
     || Boolean(campaignStepId && campaignSendDecision?.kind === 'blocked')
     || dispatchLocksCompose;
   const isReviewActionBlocked = nativeDraftApproving
+    || Boolean(rewriteInstruction.trim())
+    || followUpDirty
+    || followUpBusy
+    || Boolean(proposal)
     || nativeDraftSaving
     || nativeDraftRewriting
     || isLoading
@@ -1089,10 +1141,10 @@ function ComposeInner() {
       className: 'border-border bg-muted/40 text-foreground',
       icon: FileText,
     }
-    : hasNativeEdits
+    : hasNativeEdits || proposal
       ? {
-        title: 'Cambios pendientes de revisión',
-        description: 'Guárdalos y confirma la revisión antes de enviar.',
+        title: proposal ? 'Propuesta pendiente' : 'Cambios pendientes de revisión',
+        description: proposal ? 'Compara el antes y después. Aplica o descarta la propuesta para continuar.' : 'Guárdalos y confirma la revisión antes de enviar.',
         className: 'border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100',
         icon: RefreshCw,
       }
@@ -1155,6 +1207,8 @@ function ComposeInner() {
       </header>
 
       <section aria-label="Estado del correo" className="grid gap-2">
+        <p className="break-words text-xs leading-5 text-muted-foreground">Perfil remitente: {currentProfile?.full_name || 'Sin nombre configurado'}{currentProfile?.email ? ` · ${currentProfile.email}` : ''}<br />Envío por {sendProvider === 'outlook' ? 'Outlook' : 'Gmail'}: se usará la cuenta conectada al proveedor, que puede diferir del perfil.<br />Versión guardada: <span className="break-all">{nativeDraft?.versionId || 'No disponible'}</span></p>
+        {saveError ? <Alert variant="destructive"><AlertTitle>No se guardaron los cambios</AlertTitle><AlertDescription>{saveError}</AlertDescription></Alert> : null}
         {isCanonicalDraft ? (
           <div
             id="review-status"
@@ -1259,15 +1313,16 @@ function ComposeInner() {
             </CardHeader>
             <CardContent className="space-y-4 p-4 sm:p-5">
               <div className="space-y-2">
-                <Label htmlFor="compose-subject" className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Asunto</Label>
+                  <Label htmlFor="compose-subject" className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Asunto</Label>
                 <Input
                   id="compose-subject"
                   value={subject}
-                  onChange={(event) => setSubject(event.target.value)}
+                  maxLength={998}
+                  onChange={(event) => { editorTextRef.current = { ...editorTextRef.current, subject: event.target.value }; setSubject(event.target.value); }}
                   placeholder="Escribe un asunto"
                   className="h-11"
                   aria-describedby={isCanonicalDraft ? 'review-status' : undefined}
-                  disabled={nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
+                  disabled={Boolean(proposal) || followUpDirty || followUpBusy || nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
                 />
               </div>
               <div className="space-y-2">
@@ -1275,16 +1330,19 @@ function ComposeInner() {
                 <Textarea
                   id="compose-body"
                   value={body}
-                  onChange={(event) => setBody(event.target.value)}
+                  maxLength={100_000}
+                  onChange={(event) => { editorTextRef.current = { ...editorTextRef.current, body: event.target.value }; setBody(event.target.value); }}
                   placeholder="Escribe tu mensaje"
                   rows={16}
                   className="min-h-[390px] resize-y text-[15px] leading-7"
                   aria-describedby={isCanonicalDraft ? 'review-status' : undefined}
-                  disabled={nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
+                  disabled={Boolean(proposal) || followUpDirty || followUpBusy || nativeDraftArchived || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
                 />
               </div>
             </CardContent>
           </Card>
+
+          {proposal ? <div className="mt-4"><RewriteProposalReview before={{ subject, body }} proposal={proposal} busy={nativeDraftSaving} disabled={composeControlsLocked || nativeDraftArchived || followUpDirty || followUpBusy} onApply={() => void saveNativeDraft(proposal)} onDiscard={() => { setProposal(null); setSaveError(null); }} /></div> : null}
 
           {isCanonicalDraft && nativeDraft?.channel === 'email' && !campaignStepId && nativeDraft?.versionId ? (
             <section aria-label="Seguimientos del correo inicial">
@@ -1292,7 +1350,7 @@ function ComposeInner() {
                 draftId={nativeDraftId}
                 versionId={nativeDraft.versionId}
                 styleProfiles={styleProfiles}
-                disabled={nativeDraftArchived || hasNativeEdits || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
+                disabled={nativeDraftArchived || hasNativeEdits || Boolean(proposal) || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || composeControlsLocked}
                 disabledReason={hasNativeEdits ? 'Guarda primero los cambios del correo inicial para continuar con la secuencia.' : null}
                 onPlanChange={handleFollowUpPlanChange}
                 onDirtyChange={setFollowUpDirty}
@@ -1323,12 +1381,15 @@ function ComposeInner() {
                   <CollapsibleContent>
                     <CardContent className="space-y-4 border-t border-border/60 pt-4">
                       <p className="text-xs leading-5 text-muted-foreground">Cambia el tono o la estructura sin perder el contexto investigado.</p>
+                      <div className="flex flex-wrap gap-2">
+                        {quickRewrites.map((quick) => <Button key={quick.label} type="button" variant="outline" size="sm" disabled={Boolean(proposal) || followUpDirty || followUpBusy || hasNativeEdits || nativeDraftArchived || nativeDraftRewriting || nativeDraftSaving || nativeDraftApproving || composeControlsLocked} onClick={() => void rewriteNativeDraftWithAi(quick.instruction, quick.subjectOnly)}>{quick.label}</Button>)}
+                      </div>
                       <div className="space-y-1.5">
                         <Label htmlFor="native-compose-style" className="text-xs font-medium text-muted-foreground">Estilo</Label>
                         <select
                           id="native-compose-style"
                           className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                          disabled={nativeDraftRewriting || composeControlsLocked}
+                          disabled
                           value={rewriteStyleProfileId || '__current_style__'}
                           onChange={(event) => {
                             setRewriteStyleProfileId(event.target.value === '__current_style__' ? '' : event.target.value);
@@ -1336,12 +1397,8 @@ function ComposeInner() {
                           }}
                         >
                           <option value="__current_style__">Conservar el estilo actual</option>
-                          {styleProfiles.map((profile) => (
-                            <option key={profile.id || profile.name} value={profile.id}>
-                              {profile.name}{profile.isDefault ? ' · Predeterminado' : ''}
-                            </option>
-                          ))}
                         </select>
+                        <p className="text-xs leading-5 text-muted-foreground">La propuesta conserva la plantilla del borrador. Puedes pedir otro tono o una redacción diferente en la instrucción.</p>
                         {styleProfilesError ? (
                           <p className="text-xs leading-5 text-muted-foreground">No pudimos cargar tus estilos. Aún puedes indicar el ajuste manualmente.</p>
                         ) : null}
@@ -1373,10 +1430,10 @@ function ComposeInner() {
                         variant="secondary"
                         className="w-full"
                         onClick={() => void rewriteNativeDraftWithAi()}
-                        disabled={!rewriteInstruction.trim() || hasNativeEdits || nativeDraftArchived || nativeDraftRewriting || nativeDraftSaving || nativeDraftApproving || composeControlsLocked}
+                        disabled={Boolean(proposal) || followUpDirty || followUpBusy || !rewriteInstruction.trim() || hasNativeEdits || nativeDraftArchived || nativeDraftRewriting || nativeDraftSaving || nativeDraftApproving || composeControlsLocked}
                       >
                         {nativeDraftRewriting ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Sparkles data-icon="inline-start" />}
-                        {nativeDraftRewriting ? 'Ajustando…' : 'Aplicar ajuste'}
+                        {nativeDraftRewriting ? 'Preparando propuesta…' : 'Ver propuesta'}
                       </Button>
                     </CardContent>
                   </CollapsibleContent>
@@ -1440,7 +1497,11 @@ function ComposeInner() {
 
       <footer aria-label="Acciones del correo" className="sticky bottom-3 z-10 flex flex-col gap-3 rounded-2xl border border-border/60 bg-background/95 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
         <p id="send-summary" className="text-xs leading-5 text-muted-foreground">
-          {sendReceipt
+          {proposal
+            ? 'Aplica o descarta la propuesta de IA antes de revisar o enviar.'
+            : rewriteInstruction.trim()
+            ? 'Prepara la propuesta o borra la nota para IA antes de revisar o enviar.'
+            : sendReceipt
             ? 'Este intento ya tiene una confirmación durable. Revisa su estado antes de continuar.'
             : isSafeRequestRetry
               ? 'El reintento conservará la misma operación y la misma clave de envío.'
@@ -1481,7 +1542,7 @@ function ComposeInner() {
               type="button"
               className="w-full sm:w-auto"
               onClick={() => void saveNativeDraft()}
-              disabled={nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || isLoading || dispatchLocksCompose}
+              disabled={followUpDirty || followUpBusy || nativeDraftSaving || nativeDraftApproving || nativeDraftRewriting || isLoading || dispatchLocksCompose}
               aria-describedby="review-status"
             >
               {nativeDraftSaving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <FileText data-icon="inline-start" />}
@@ -1522,10 +1583,17 @@ function ComposeInner() {
 
 export const dynamic = 'force-dynamic';
 
+function ComposeRoute() {
+  const params = useSearchParams();
+  // Late responses from a previous contact must never populate the next editor.
+  const identity = `${params.get('draftId') || params.get('id') || ''}:${params.get('campaignStepId') || ''}`;
+  return <ComposeInner key={identity} />;
+}
+
 export default function ComposePage() {
   return (
     <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Cargando correo…</div>}>
-      <ComposeInner />
+      <ComposeRoute />
     </Suspense>
   );
 }

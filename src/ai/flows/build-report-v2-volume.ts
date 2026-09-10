@@ -14,10 +14,9 @@ export type VolumeAssumptionsV2 = {
 
 function scaleFromClaim(claim: ClaimV2) {
   if (claim.type !== 'fact' || claim.dimension !== 'company_size') return null;
-  const matches = claim.statement.match(/\b\d{1,3}(?:[.,]\d{3})+|\b\d+\b/g) || [];
-  const values = matches.map((value) => Number(/[.,]\d{3}(?:\D|$)/.test(value) ? value.replace(/[.,]/g, '') : value.replace(',', '.')))
-    .filter((value) => Number.isFinite(value) && value > 0);
-  return values.length > 0 ? Math.max(...values) : null;
+  const match = claim.statement.match(/\b(\d+(?:[.,]\d{3})*)\s+(?:colaboradores|empleados|trabajadores|employees|workers|people)\b/i);
+  const value = match ? Number(match[1].replace(/[.,]/g, '')) : null;
+  return value && Number.isFinite(value) ? value : null;
 }
 
 export function buildReportV2VolumeModel(input: {
@@ -29,6 +28,8 @@ export function buildReportV2VolumeModel(input: {
   const minutesPerEvent = Number(input.assumptions?.minutesPerEvent);
   if (multipliers.length !== 3 || !Number.isFinite(minutesPerEvent) || minutesPerEvent <= 0) return null;
   const candidates = input.claims.flatMap((claim) => {
+    if (claim.jurisdiction && claim.jurisdiction !== 'GLOBAL' && claim.jurisdiction !== input.entity.contactCountry) return [];
+    if (claim.scope === 'sector' || claim.scope === 'person') return [];
     const value = scaleFromClaim(claim);
     return value == null ? [] : [{ claim, value }];
   }).sort((left, right) => right.value - left.value);
@@ -49,7 +50,7 @@ export function buildReportV2VolumeModel(input: {
     rationale: 'Tiempo por evento configurado por el tenant para estimar carga operativa.',
     editable: true,
   };
-  const ambiguousGeography = base.claim.jurisdiction === 'GLOBAL' && input.entity.operatingCountries.length > 1;
+  const ambiguousGeography = base.claim.scope === 'group' || !base.claim.jurisdiction || base.claim.jurisdiction === 'GLOBAL';
   const caveats = ambiguousGeography
     ? ['La cifra base es global; falta confirmar que parte corresponde a la operacion del contacto.']
     : [];

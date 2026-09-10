@@ -13,7 +13,7 @@ function normalizeEmailKey(email?: string | null) {
     return e;
 }
 
-function mapRowToEnrichedLead(row: any): EnrichedLead {
+export function mapRowToEnrichedLead(row: any): EnrichedLead {
     return {
         id: row.id,
         sourceProvider: row.source_provider || row.data?.sourceProvider,
@@ -28,7 +28,7 @@ function mapRowToEnrichedLead(row: any): EnrichedLead {
         linkedinUrl: row.linkedin_url,
         emailStatus: row.email_status || row.data?.emailStatus,
         companyDomain: row.data?.companyDomain,
-        companyWebsite: row.data?.companyWebsite,
+        companyWebsite: row.data?.companyWebsite || row.data?.organization?.website_url,
         companyLinkedinUrl: row.data?.companyLinkedinUrl,
         descriptionSnippet: row.data?.descriptionSnippet,
         createdAt: row.created_at,

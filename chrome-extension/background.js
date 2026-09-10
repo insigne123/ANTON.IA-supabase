@@ -175,3 +175,4 @@ async function handleSendDM(payload, sendResponse) {
 }
 
 console.log('[Anton.IA Background] Initialization complete');
+importScripts('prospecting-background.js');

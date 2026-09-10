@@ -166,7 +166,7 @@ function renderActionContent(activity: any) {
     const getLink = () => {
         if (entity_type === 'campaign' && entity_id) return '/campaigns';
         if (entity_type === 'lead') return `/saved/leads`;
-        if (entity_type === 'member' || entity_type === 'organization') return `/settings/organization`;
+        if (entity_type === 'member' || entity_type === 'organization') return `/profile`;
         return null;
     };
 

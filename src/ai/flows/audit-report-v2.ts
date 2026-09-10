@@ -1,17 +1,20 @@
 import { z } from 'zod';
 
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
-import { getOpenAiModelsForTier } from '@/ai/model-router';
+import { reportGenerationOptions } from '@/ai/report-models';
 import {
   ReportV2SectionKeySchema,
   type ClaimV2,
   type ReportV2SectionKey,
   type SectionV2,
   type SourceV2,
+  type FactV2,
+  type EntityResolutionV2,
 } from '@/lib/report-v2-contracts';
-import { stripInternalIdsForReportPrompt } from './write-report-v2-section';
+import { serializeReportV2Context } from './write-report-v2-section';
+import type { SellerProfileContextV2 } from './reason-about-report-v2-account';
 
-export const AUDIT_REPORT_V2_PROMPT_VERSION = 'report-v2/p7-audit/2';
+export const AUDIT_REPORT_V2_PROMPT_VERSION = 'report-v2/p7-audit/7';
 
 export const AuditIssueTypeV2Schema = z.enum([
   'duplication',
@@ -27,7 +30,7 @@ export const AuditIssueTypeV2Schema = z.enum([
 export const AuditIssueV2Schema = z.object({
   section: ReportV2SectionKeySchema,
   paragraphIndex: z.number().int().nonnegative().nullable(),
-  type: AuditIssueTypeV2Schema,
+  type: AuditIssueTypeV2Schema.describe('hard_hypothesis incluye experiencia, traccion, clientes, conversaciones o resultados del vendedor no respaldados, incluso en aperturas sugeridas. generic incluye falta de metrica por piloto o falta de personalizacion por cargo.'),
   fragment: z.string().trim().min(1).max(1_000),
   severity: z.enum(['block', 'warn']),
 }).strict();
@@ -44,10 +47,20 @@ export function buildAuditReportV2Prompt(input: {
   sections: SectionV2[];
   claimIds: string[];
   contactCountry: string;
+  claims?: ClaimV2[];
+  facts?: FactV2[];
+  entity?: EntityResolutionV2;
+  companyContext?: string | null;
+  sellerProfile?: SellerProfileContextV2;
 }) {
-  return `Secciones a auditar: ${JSON.stringify(stripInternalIdsForReportPrompt(input.sections))}
+  return `Secciones a auditar: ${serializeReportV2Context(input.sections)}
 Claims validos: ${JSON.stringify(input.claimIds)}
 Jurisdiccion del contacto: ${input.contactCountry}
+Afirmaciones y alcance real: ${serializeReportV2Context(input.claims || [])}
+Pasajes de respaldo: ${serializeReportV2Context(input.facts || [])}
+Perfil disponible (contexto importado utilizable): ${serializeReportV2Context(input.entity || null)}
+Descripcion corporativa importada (utilizable como perfil, sin cita web): ${input.companyContext || 'No disponible'}
+Oferta del vendedor (contexto declarado, utilizable para recomendar): ${serializeReportV2Context(input.sellerProfile || null)}
 
 Revisa cada parrafo y reporta todo defecto con su ubicacion exacta:
 
@@ -55,10 +68,22 @@ Revisa cada parrafo y reporta todo defecto con su ubicacion exacta:
 2. TRUNCADO: el parrafo termina a mitad de palabra o frase.
 3. RUIDO TECNICO: HTML, clases CSS, rutas de archivo o URLs de assets.
 4. COPIA LITERAL: reproduce el titulo, snippet o slogan de una fuente.
-5. CITA INVALIDA: claimIds inexistentes o parrafos sin citas.
+5. CITA INVALIDA: claimIds inexistentes o citas que no respaldan lo afirmado. Las preguntas, recomendaciones, hipotesis y datos del perfil no requieren citas.
 6. JURISDICCION: aplica otro pais a ${input.contactCountry} sin marcar contexto de casa matriz.
-7. HIPOTESIS DURA: una conjetura aparece como hecho confirmado.
-8. VACUIDAD: no contiene ningun dato especifico de la cuenta.
+7. HIPOTESIS DURA: una conjetura aparece como hecho confirmado. Incluye afirmaciones sobre el vendedor, no solo sobre la empresa objetivo.
+8. VACUIDAD: recomendaciones que no consideran el rol ni la oferta, o pilotos sin metrica observable propia (que medir y unidad/comparacion); generic con warn por cada oportunidad afectada. Para Finanzas, revisa si el caso aborda facturacion, cobranza, cierre o excepciones financieras compatibles con la oferta/contexto, en vez de sustituirlo por tareas de RRHH. No exijas que la empresa tenga un problema confirmado para explorar una hipotesis.
+
+POLITICA DE REVISION:
+- basis=source debe estar respaldado semanticamente. basis=profile usa datos del perfil, no necesita otra fuente. basis=analysis admite conocimiento general del rol/sector y posibilidades comerciales. basis=recommendation admite acciones y preguntas sin citas.
+- Falta de noticias, dimensionamiento, forma legal o comite nominal NO invalida un reporte. Las secciones opcionales vacias no son defectos.
+- Escenarios ilustrativos con rango, formula y supuestos explicitos y valoraciones cualitativas etiquetadas como heuristicas no calibradas son analisis permitido sin fuente web. No los confundas con hechos observados. Bloquea porcentajes de respuesta/conversion presentados como calibrados sin datos, eventos recientes inventados y clientes/casos de exito ficticios. Una pregunta que presupone trabajo manual no confirmado merece warn; debe preguntar si existe. El cargo original exacto no es copia literal indebida.
+- No bloquees por ausencia de cita en el contacto importado del comite. No confundas rol con presupuesto confirmado.
+- Una pregunta terminada en comillas o un parentesis esta completa. La duplicacion, estilo o longitud se marcan warn, no block.
+- Bloquea solo errores materiales: identidad equivocada, cifras o hechos inventados, citas falsas, datos de grupo presentados como locales, hipotesis presentadas como problemas confirmados, HTML/assets visibles.
+- No marques ausencia de informacion como error factual. Revisa solo lo que el texto realmente afirma. Cada fragmento debe aparecer literalmente en la seccion indicada.
+- Usa TODO el contexto anterior, no solo claims: una descripcion de negocio presente en la descripcion corporativa con basis=profile NO necesita cita web. No marques como inventada la oferta explicita del vendedor.
+- RESPALDO DEL VENDEDOR: comprueba toda afirmacion de experiencia, traccion, clientes, conversaciones en curso, casos de exito o resultados contra el perfil del vendedor. 'Estamos conversando con equipos', 'ya ayudamos a empresas', 'nuestros clientes' o un ahorro logrado son hechos, incluso entre comillas en angle y con basis=recommendation. Si no tienen respaldo explicito, reporta hard_hypothesis con severity=block y el fragmento literal. Una capacidad de automatizacion NO prueba clientes ni experiencia; la evidencia sobre el objetivo tampoco. No lo rebajes a generic/estilo. Una capacidad explicitamente ofrecida, una pregunta exploratoria o una metrica propuesta SIN promesa no son traccion inventada y no requieren citas artificiales.
+- Referenciar servicios generales de la empresa para proponer un piloto local NO equivale a afirmar que sus sistemas ya estan instalados en ese pais. jurisdiction=null significa alcance no precisado, no pais incorrecto. Marca jurisdiccion solo cuando el texto atribuya explicitamente una cifra, sistema instalado o norma de otro pais a la operacion local. No exijas otra fuente para recomendar explorar un proceso.
 
 Por defecto devuelve seccion, indice, tipo, fragmento y severidad block o warn. El fragmento de una duplicacion debe aparecer literalmente al menos dos veces en el parrafo. Block obliga a regenerar la seccion. No propongas correcciones.`;
 }
@@ -196,13 +221,13 @@ export function deterministicAuditReportV2(input: {
         issues.push({ section: section.key, paragraphIndex, type, fragment: fragment.slice(0, 1_000), severity });
       };
       const duplicate = duplicatedFragment(paragraph.text, section.key === 'discovery');
-      if (duplicate) add('duplication', duplicate, 'block');
-      if (!/[.!?:;)]$/.test(paragraph.text.trim())) add('truncated', paragraph.text.slice(-120), 'block');
-      const noise = paragraph.text.match(/<[^>]*>|wp-content\S*|elementor\S*|hummingbird\S*|\/assets\/\S*|https?:\/\/\S+/i)?.[0];
+       if (duplicate) add('duplication', duplicate, 'warn');
+       if (!/[.!?:;)][\s"'\u00bb\u2019\u201d)]*$/.test(paragraph.text.trim())) add('truncated', paragraph.text.slice(-120), 'warn');
+       const noise = paragraph.text.match(/<[^>]*>|wp-content\S*|elementor\S*|hummingbird\S*|\/assets\/\S*/i)?.[0];
       if (noise) add('technical_noise', noise, 'block');
       const copied = literalCandidates.find((candidate) => candidate.length >= 20 && similarity(paragraph.text, candidate) > 0.8);
-      if (copied) add('literal_copy', copied, 'block');
-      if (paragraph.claimIds.length === 0) add('invalid_citation', paragraph.text.slice(0, 160), 'block');
+      if (copied) add('literal_copy', copied, 'warn');
+      if ((!paragraph.basis || paragraph.basis === 'source') && paragraph.claimIds.length === 0) add('invalid_citation', paragraph.text.slice(0, 160), 'block');
       paragraph.claimIds.forEach((claimId) => {
         const claim = claimsById.get(claimId);
         if (!claim) {
@@ -233,29 +258,39 @@ export async function auditReportV2(input: {
   sourceSnippets?: string[];
   contactCountry: string;
   writerModels: string[];
+  facts?: FactV2[];
+  entity?: EntityResolutionV2;
+  signal?: AbortSignal;
+  companyContext?: string | null;
+  sellerProfile?: SellerProfileContextV2;
 }, dependencies: {
   generate?: typeof generateStructuredWithTelemetry;
 } = {}) {
-  const models = [...new Set([
-    ...getOpenAiModelsForTier('critical'),
-    ...getOpenAiModelsForTier('reasoning'),
-  ])].filter((model) => !input.writerModels.includes(model));
-  if (models.length === 0) throw new Error('REPORT_V2_DISTINCT_AUDITOR_MODEL_REQUIRED');
   const deterministicIssues = deterministicAuditReportV2(input);
   const generated = await (dependencies.generate || generateStructuredWithTelemetry)({
-    provider: 'openai',
-    openAiModels: models,
+    ...reportGenerationOptions('reasoning'),
+    signal: input.signal,
     systemPrompt: AUDIT_REPORT_V2_SYSTEM_PROMPT,
     prompt: buildAuditReportV2Prompt({
       sections: input.sections,
       claimIds: input.claims.map((claim) => claim.id),
       contactCountry: input.contactCountry,
+      claims: input.claims,
+      facts: input.facts,
+      entity: input.entity,
+      companyContext: input.companyContext,
+      sellerProfile: input.sellerProfile,
     }),
     schema: AuditOutputV2Schema,
     temperature: 0,
   });
-  if (input.writerModels.includes(generated.telemetry.modelName)) throw new Error('REPORT_V2_AUDITOR_MODEL_COLLISION');
-  const groundedModelIssues = retainGroundedDuplicationIssues(generated.data.issues, input.sections);
+  const groundedModelIssues = retainGroundedDuplicationIssues(generated.data.issues, input.sections).filter((issue) => {
+    const section = input.sections.find((section) => section.key === issue.section);
+    if (!section?.paragraphs.length) return false;
+    const paragraphs = issue.paragraphIndex === null ? section.paragraphs : section.paragraphs.slice(issue.paragraphIndex, issue.paragraphIndex + 1);
+    return paragraphs.some((paragraph) => normalized(paragraph.text).includes(normalized(issue.fragment)));
+  }).map((issue) => ['duplication', 'truncated', 'literal_copy', 'generic'].includes(issue.type)
+    ? { ...issue, severity: 'warn' as const } : issue);
   const issues = deduplicateIssues([...deterministicIssues, ...groundedModelIssues]);
   return {
     model: generated.telemetry.modelName,

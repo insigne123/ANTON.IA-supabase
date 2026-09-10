@@ -43,4 +43,10 @@ session-ses_*.md
 /research-*.png
 /suplia-claude-*.png
 /suplia-review-*.png
-/public/downloads/antonia-linkedin-extension.zip
+!/public/downloads/antonia-linkedin-extension.zip
+/chrome-extension/panel.js
+/chrome-extension/panel.css
+/chrome-extension/dist/
+/chrome-extension/antonia-linkedin-workspace-*.zip
+# One-off operational script with a real recipient and campaign; retain locally.
+/scripts/send-campaign-owner-preview.mjs

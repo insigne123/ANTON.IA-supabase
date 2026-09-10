@@ -27,7 +27,16 @@ async function fixtureContext() {
     sources,
     providerContext: provider.contact,
     capturedAt: golden.capturedAt,
-  }, { generate: (async () => ({ claims: [], notFoundFields: [...REPORT_V2_TARGET_FIELDS] })) as any });
+  }, { generate: (async (options: any) => {
+    const encoded = JSON.parse(options.prompt.match(/Evidencia: (.*)/)[1]);
+    const evidence = Array.isArray(encoded) ? encoded : encoded.rows.map((row: unknown[]) => Object.fromEntries(encoded.columns.map((key: string, index: number) => [key, row[index]])));
+    const fact = evidence.find((item: any) => item.text.includes('Gonzalo Meneses Zorrilla'));
+    return { claims: fact ? [{
+      targetField: 'executives', dimension: 'buying_committee', scope: 'person',
+      statement: 'Gonzalo Meneses Zorrilla es Director Corporativo de Negocios de GrupoExpro.',
+      evidenceIds: [fact.id], observedAt: null, jurisdiction: 'CL', confidence: 0.85,
+    }] : [], notFoundFields: [...REPORT_V2_TARGET_FIELDS] };
+  }) as any });
   const { claims } = consolidateReportV2Claims({ drafts: extracted.claimDrafts, facts: extracted.facts });
   return { entity, qualification, claims };
 }

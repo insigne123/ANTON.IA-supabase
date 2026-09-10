@@ -120,8 +120,8 @@ export const organizationService = {
         return (await this.getOrganizationDetails())?.invites || [];
     },
 
-    async revokeInvite(inviteId: string): Promise<boolean> {
-        const orgId = await this.getCurrentOrganizationId();
+    async revokeInvite(inviteId: string, organizationId?: string): Promise<boolean> {
+        const orgId = organizationId || await this.getCurrentOrganizationId();
         if (!orgId) return false;
         await requestJson(`/api/organizations/${encodeURIComponent(orgId)}/invites/${encodeURIComponent(inviteId)}`, {
             method: 'DELETE',

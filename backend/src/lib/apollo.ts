@@ -1,5 +1,11 @@
 import type { GatewayConfig, GatewayEnvironment } from './gateway';
-import type { EnrichmentInput, LeadSearchInput, OrganizationEnrichmentInput } from './validation';
+import type {
+  EnrichmentInput,
+  LeadSearchInput,
+  OrganizationEnrichmentInput,
+  OrganizationPeopleSearchInput,
+  OrganizationSearchInput,
+} from './validation';
 
 const APOLLO_BASE_URL = 'https://api.apollo.io/api/v1';
 
@@ -360,12 +366,138 @@ async function findOrganizations(name: string, apiKey: string, config: GatewayCo
     .filter((organization): organization is NonNullable<typeof organization> => organization !== null);
 }
 
+function searchOrganizationsPagination(payload: unknown) {
+  const record = asRecord(payload) || {};
+  const pagination = asRecord(record.pagination) || {};
+  return {
+    page: asNumber(pagination.page) ?? 1,
+    perPage: asNumber(pagination.per_page) ?? 0,
+    totalEntries: asNumber(pagination.total_entries),
+    totalPages: asNumber(pagination.total_pages),
+  };
+}
+
+export async function executeApolloOrganizationSearch(input: OrganizationSearchInput, apiKey: string, config: GatewayConfig) {
+  if (!apiKey) throw new ApolloGatewayError(503, 'APOLLO_PROVIDER_NOT_CONFIGURED');
+
+  const query = new URLSearchParams();
+  query.set('per_page', String(Math.min(100, Math.max(1, input.perPage))));
+  query.set('page', String(Math.min(500, Math.max(1, input.page))));
+  // Company-first: keywords go only to the organization endpoint, never to people q_keywords.
+  appendAll(query, 'q_organization_keyword_tags[]', input.companyKeywords.map(asText).filter(Boolean));
+  appendAll(query, 'organization_locations[]', input.companyLocations.map(asText).filter(Boolean));
+  appendAll(query, 'organization_num_employees_ranges[]', input.employeeRanges);
+  appendAll(query, 'q_organization_domains_list[]', input.organizationDomains.map(asText).filter(Boolean));
+
+  const payload = await requestApollo('/mixed_companies/search', apiKey, config, { query });
+  if (!Array.isArray(payload.organizations)) {
+    throw new ApolloGatewayError(502, 'APOLLO_UPSTREAM_INVALID_RESPONSE');
+  }
+  const organizations = payload.organizations
+    .map(mapOrganization)
+    .filter((organization): organization is NonNullable<typeof organization> => organization !== null);
+  const pagination = searchOrganizationsPagination(payload);
+  return {
+    count: organizations.length,
+    organizations,
+    search_mode: 'organization_search' as const,
+    search_strategy: 'organizations_then_people' as const,
+    organization_search_credits: 1,
+    page: pagination.page,
+    per_page: query.get('per_page') ? Number(query.get('per_page')) : input.perPage,
+    total_entries: pagination.totalEntries,
+    total_pages: pagination.totalPages,
+  };
+}
+
+export async function executeApolloOrganizationPeopleSearch(input: OrganizationPeopleSearchInput, apiKey: string, config: GatewayConfig) {
+  if (!apiKey) throw new ApolloGatewayError(503, 'APOLLO_PROVIDER_NOT_CONFIGURED');
+  if (!input.organizationId) throw new ApolloGatewayError(502, 'APOLLO_UPSTREAM_INVALID_RESPONSE');
+
+  const excluded = new Set(input.excludePersonIds.map((id) => id.trim()).filter(Boolean));
+  const query = new URLSearchParams();
+  query.set('per_page', String(Math.min(100, Math.max(1, input.perPage))));
+  query.set('page', String(Math.min(500, Math.max(1, input.page))));
+  // Strict per-company window: only this organization, plus person filters.
+  // No organization_locations, no employee ranges, no q_keywords here.
+  appendAll(query, 'organization_ids[]', [input.organizationId]);
+  appendAll(query, 'person_titles[]', input.titles.map(asText).filter(Boolean));
+  if (input.titles.length > 0) query.set('include_similar_titles', String(input.includeSimilarTitles));
+  appendAll(query, 'person_seniorities[]', input.seniorities.map(asText).filter(Boolean));
+  appendAll(query, 'person_locations[]', input.personLocations.map(asText).filter(Boolean));
+
+  const payload = await requestApollo('/mixed_people/api_search', apiKey, config, { query });
+  if (!Array.isArray(payload.people)) {
+    throw new ApolloGatewayError(502, 'APOLLO_UPSTREAM_INVALID_RESPONSE');
+  }
+  const people: Array<NonNullable<ReturnType<typeof mapPerson>>> = [];
+  const seen = new Set<string>();
+  const paginationRecord = asRecord(payload.pagination) || {};
+  for (const value of payload.people) {
+    const person = mapPerson(value, { includeContact: false });
+    if (!person || seen.has(person.id) || excluded.has(person.id)) continue;
+    seen.add(person.id);
+    people.push(person);
+  }
+  return {
+    count: people.length,
+    raw_count: payload.people.length,
+    leads: people,
+    search_mode: 'organization_people' as const,
+    search_strategy: 'organizations_then_people' as const,
+    organization_id: input.organizationId,
+    page: asNumber(paginationRecord.page) ?? input.page,
+    per_page: asNumber(paginationRecord.per_page) ?? input.perPage,
+    total_entries: asNumber(payload.total_entries ?? paginationRecord.total_entries),
+    total_pages: asNumber(paginationRecord.total_pages),
+    enrichment_requested: false,
+    organization_search_credits: 0,
+  };
+}
+
 export function getApolloApiKey(environment: GatewayEnvironment = process.env) {
   return String(environment.APOLLO_API_KEY || '').trim();
 }
 
 export async function executeApolloLeadSearch(input: LeadSearchInput, apiKey: string, config: GatewayConfig) {
   if (!apiKey) throw new ApolloGatewayError(503, 'APOLLO_PROVIDER_NOT_CONFIGURED');
+
+  if (input.searchMode === 'organization_search') {
+    return executeApolloOrganizationSearch(
+      {
+        provider: input.provider,
+        userId: input.userId,
+        companyKeywords: input.companyKeywords,
+        companyLocations: input.companyLocations,
+        employeeRanges: input.employeeRanges,
+        organizationDomains: input.organizationDomains,
+        page: input.page ?? 1,
+        perPage: input.perPage ?? 25,
+      },
+      apiKey,
+      config,
+    );
+  }
+
+  if (input.searchMode === 'organization_people') {
+    const organizationId = input.organizationId || input.organizationIds?.[0] || input.selectedOrganizationId || '';
+    return executeApolloOrganizationPeopleSearch(
+      {
+        provider: input.provider,
+        userId: input.userId,
+        organizationId,
+        titles: input.titles,
+        seniorities: input.seniorities,
+        personLocations: input.personLocations,
+        includeSimilarTitles: input.includeSimilarTitles,
+        page: input.page ?? 1,
+        perPage: input.perPage ?? 50,
+        excludePersonIds: input.excludePersonIds ?? [],
+      },
+      apiKey,
+      config,
+    );
+  }
 
   if (input.searchMode === 'company_name') {
     const domains = [...input.organizationDomains];

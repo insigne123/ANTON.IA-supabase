@@ -17,6 +17,8 @@ import {
 
 import { PageHeader } from '@/components/page-header';
 import NativeResearchReport from '@/components/research/NativeResearchReport';
+import { ResearchReportProgress } from '@/components/research/ResearchReportProgress';
+import { researchDetailLoadingState, researchItemPresentation } from '@/lib/research-report-loading';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card';
@@ -321,6 +323,12 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const currentRunIdRef = useRef<string | null>(null);
   const runRequestRef = useRef<string | null>(null);
   const reportDetailRequestsRef = useRef<Set<string>>(new Set());
+  const reportDetailControllersRef = useRef(new Set<AbortController>());
+  useEffect(() => () => {
+    reportDetailControllersRef.current.forEach((controller) => controller.abort());
+    reportDetailControllersRef.current.clear();
+    reportDetailRequestsRef.current.clear();
+  }, []);
   const draftRequestRef = useRef<string | null>(null);
   const resolvedHandoffRef = useRef<string | null>(null);
   const persistedItemsRequestRef = useRef(0);
@@ -488,21 +496,27 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const fetchReportDetail = useCallback(async (reportId: string, fallbackResult: ResearchWorkspaceRunItem['result']) => {
     if (!reportId || !fallbackResult || reportDetailRequestsRef.current.has(reportId)) return;
     reportDetailRequestsRef.current.add(reportId);
+    const controller = new AbortController();
+    reportDetailControllersRef.current.add(controller);
     setReportDetailLoading((current) => ({ ...current, [reportId]: true }));
     setReportDetailErrors((current) => ({ ...current, [reportId]: '' }));
     try {
-      const response = await fetch(`/api/native-research/${encodeURIComponent(reportId)}`, { cache: 'no-store' });
+      const response = await fetch(`/api/native-research/${encodeURIComponent(reportId)}`, { cache: 'no-store', signal: controller.signal });
       const payload = await response.json().catch(() => null);
+      if (controller.signal.aborted) return;
       if (!response.ok) throw new Error('NATIVE_RESEARCH_DETAIL_FAILED');
       const detail = parseResearchReportDetail(payload, fallbackResult);
       if (!detail) throw new Error('NATIVE_RESEARCH_DETAIL_INVALID');
       setReportDetails((current) => ({ ...current, [reportId]: detail }));
     } catch {
+      if (controller.signal.aborted) return;
       setReportDetailErrors((current) => ({
         ...current,
-        [reportId]: 'No pudimos cargar la versión completa. Mostramos la evidencia disponible en esta selección.',
+        [reportId]: 'No pudimos actualizar el informe completo. Mostramos la evidencia disponible; reintenta para comprobar su estado.',
       }));
     } finally {
+      reportDetailControllersRef.current.delete(controller);
+      if (controller.signal.aborted) return;
       reportDetailRequestsRef.current.delete(reportId);
       setReportDetailLoading((current) => ({ ...current, [reportId]: false }));
     }
@@ -520,6 +534,9 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
           ...current,
           [reportId]: {
             ...detail,
+            preferredReportSynthesis: {
+              status: 'queued', retryable: false, attemptCount: 0, nextRetryAt: null, errorCode: null, updatedAt: new Date().toISOString(),
+            },
             reportSynthesis: {
               status: 'queued',
               retryable: false,
@@ -556,10 +573,30 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   }, [activeBatch?.runId, batchLeads, fetchRun, isPolling]);
 
   const activeRunItems = useMemo(() => activeRun?.items || [], [activeRun]);
-  const runItems = useMemo(
+  const baseRunItems = useMemo(
     () => mergeResearchRunItems(persistedItems, activeRunItems),
     [activeRunItems, persistedItems],
   );
+  const runItems = useMemo(() => baseRunItems.map((item) => {
+    const detail = item.reportId ? reportDetails[item.reportId] : null;
+    return researchItemPresentation(item, detail, Boolean(item.reportId && reportDetailErrors[item.reportId]));
+  }), [baseRunItems, reportDetails, reportDetailErrors]);
+
+  // Research completion is not editorial completion. Track all batch reports,
+  // not only the selected lead, with bounded concurrent detail reads.
+  useEffect(() => {
+    const poll = (includePending = false) => {
+      baseRunItems.filter((item) => {
+        if (!item.reportId || !item.result || !['completed', 'partial', 'insufficient_data'].includes(item.status)) return false;
+        if (reportDetailErrors[item.reportId]) return false;
+        const detail = reportDetails[item.reportId];
+        return !reportDetailRequestsRef.current.has(item.reportId) && (!detail || (includePending && researchDetailLoadingState(detail).pending));
+      }).slice(0, Math.max(0, 4 - reportDetailRequestsRef.current.size)).forEach((item) => void fetchReportDetail(item.reportId!, item.result));
+    };
+    poll();
+    const timer = window.setInterval(() => poll(true), 5_000);
+    return () => window.clearInterval(timer);
+  }, [baseRunItems, fetchReportDetail, reportDetails, reportDetailErrors]);
   const itemByLeadKey = useMemo(
     () => new Map(runItems.map((item) => [item.lead.key, item])),
     [runItems],
@@ -600,11 +637,8 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   const activeStatus = activeItem?.status || 'idle';
   const activeReportId = activeItem?.reportId || null;
   const activeReportDetail = activeReportId ? reportDetails[activeReportId] || null : null;
-  const activeReportSynthesis = activeReportDetail?.preferredReportSynthesis || activeReportDetail?.reportSynthesis || null;
-  const activeReportSynthesisPending = Boolean(
-    activeReportSynthesis
-    && ['queued', 'running', 'retry_scheduled'].includes(activeReportSynthesis.status),
-  );
+  const activeReportSynthesis = activeReportDetail?.preferredReportSynthesis || null;
+  const activeReportSynthesisPending = Boolean(activeReportDetail && researchDetailLoadingState(activeReportDetail).pending);
   const activeReportSynthesisFailed = activeReportSynthesis?.status === 'failed_permanent';
   const activeReportDetailError = activeReportId ? reportDetailErrors[activeReportId] || '' : '';
   const activeReportDetailPending = Boolean(
@@ -616,8 +650,9 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   );
   const activeReportDetailLoading = activeReportDetailPending || Boolean(activeReportId && reportDetailLoading[activeReportId] && !activeReportDetail);
   const activeInFlightCount = runItems.filter((item) => isResearchInFlight(item.status)).length;
-  const activeRunInFlightCount = activeRunItems.filter((item) => isResearchInFlight(item.status)).length;
-  const activeRunProgress = Math.max(8, Math.round(((activeRunItems.length - activeRunInFlightCount) / Math.max(activeRunItems.length, 1)) * 100));
+  const activeRunInFlightCount = runItems.filter((item) => activeRunItems.some((active) => active.id === item.id) && isResearchInFlight(item.status)).length;
+  const activeRunProgress = Math.round(((activeRunItems.length - activeRunInFlightCount) / Math.max(activeRunItems.length, 1)) * 100);
+  const batchPending = isPolling || activeRunInFlightCount > 0;
   const activeRunBlocksNewBatch = Boolean(activeBatch && runLoading) || isPolling || creatingBatch;
   const handoffPending = !handoffReady || !handoffResolved;
   const selectionLocked = activeRunBlocksNewBatch || handoffPending;
@@ -633,14 +668,6 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     ) return;
     void fetchReportDetail(activeReportId, activeItem.result);
   }, [activeItem?.result, activeReportDetail, activeReportDetailError, activeReportId, activeStatus, fetchReportDetail]);
-
-  useEffect(() => {
-    if (!activeReportId || !activeItem?.result || !activeReportSynthesisPending) return;
-    const interval = window.setInterval(() => {
-      void fetchReportDetail(activeReportId, activeItem.result);
-    }, 5_000);
-    return () => window.clearInterval(interval);
-  }, [activeItem?.result, activeReportId, activeReportSynthesisPending, fetchReportDetail]);
 
   useEffect(() => {
     setSelectedKeys((current) => current.filter((key) => selectableQueueLeads.some((lead) => lead.key === key)));
@@ -957,15 +984,15 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <p className="text-sm font-medium">
-                      {isPolling ? 'Estamos reuniendo información para tu selección' : activeRun?.status === 'completed' ? 'La selección está lista para revisar' : 'Revisa el estado de tu selección'}
+                      {batchPending ? 'Estamos preparando los informes de tu selección' : activeRun?.status === 'completed' ? 'La selección está lista para revisar' : 'Revisa el estado de tu selección'}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {isPolling
+                      {batchPending
                         ? `${activeInFlightCount} ${activeInFlightCount === 1 ? 'lead sigue en curso' : 'leads siguen en curso'}. Puedes continuar revisando esta pantalla.`
                         : `${readyItems.length} ${readyItems.length === 1 ? 'lead está listo para redactar' : 'leads están listos para redactar'}.`}
                     </p>
                   </div>
-                  {isPolling ? <div className="w-full sm:w-52"><Progress value={activeRunProgress} className="h-1.5" aria-label={`Progreso de la selección: ${activeRunProgress}%`} /></div> : null}
+                  {batchPending ? <div className="w-full sm:w-52"><Progress value={Math.min(95, activeRunProgress)} className="h-1.5" aria-label={`Progreso de la selección: ${activeRunProgress}%`} /></div> : null}
                 </div>
               </div>
             ) : null}
@@ -1207,7 +1234,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
             {!activeItem?.result ? <CardHeader className="shrink-0 gap-2 border-b border-border/60 pb-4">
               <h2 id="research-detail-heading" className="text-[1.35rem] font-semibold leading-none tracking-[-0.03em]">Detalle de investigación</h2>
               <CardDescription className="leading-6">Selecciona un lead para revisar su estado, evidencia y fuentes antes de redactar.</CardDescription>
-            </CardHeader> : <h2 id="research-detail-heading" className="sr-only">Informe de investigación</h2>}
+            </CardHeader> : <h2 id="research-detail-heading" className="sr-only">Informe de investigación</h2> /* Solo título accesible: el informe completo ya muestra su propio encabezado. */}
             <CardContent className={cn(
               'space-y-5 p-4 outline-none sm:p-6 xl:p-8',
               embedded && 'min-h-0 flex-1 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
@@ -1240,17 +1267,8 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                       </header> : null}
 
                       {isResearchInFlight(activeStatus) ? (
-                        <div className="rounded-2xl border border-sky-200 bg-sky-50/75 p-4 dark:border-sky-500/30 dark:bg-sky-500/10">
-                          <div className="flex items-start gap-3">
-                            <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-sky-700 motion-reduce:animate-none dark:text-sky-300" aria-hidden="true" />
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-sky-950 dark:text-sky-100">Estamos reuniendo señales públicas</p>
-                              <p className="mt-1 text-xs leading-5 text-sky-900/75 dark:text-sky-100/75">El resultado se guarda en tu selección. Puedes seguir revisando otros leads.</p>
-                            </div>
-                          </div>
-                          <Progress value={progressFor(activeStatus)} className="mt-3 h-1.5" aria-label={`Progreso de investigación de ${activeLead.fullName || activeLead.companyName || 'lead'}: ${researchStatusLabel(activeStatus)}`} />
-                        </div>
-                      ) : activeStatus === 'failed' || activeStatus === 'cancelled' ? (
+                        <ResearchReportProgress key={activeItem?.id || activeLead.key} startedAt={activeReportDetail?.result.startedAt || activeItem?.startedAt} retryScheduled={activeReportSynthesis?.status === 'retry_scheduled'} />
+                      ) : (activeStatus === 'failed' || activeStatus === 'cancelled') && !activeItem?.result ? (
                         <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-4 text-rose-950 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100">
                           <p className="text-sm font-medium">Esta investigación necesita atención</p>
                           <p className="mt-1 text-xs leading-5 opacity-80">Incluye este lead en una nueva selección cuando tengas más información o quieras volver a investigarlo.</p>
@@ -1284,10 +1302,14 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                           ) : null}
                           <NativeResearchReport
                             key={activeItem.id}
+                            variant="full"
+                            questionnaireEnabled={Boolean(activeReportDetail?.questionnaireEnabled)}
                             result={activeReportDetail?.result || activeItem.result}
-                            reportDocument={activeReportDetail?.preferredReportDocument || activeReportDetail?.reportDocument}
+                            reportDocument={activeReportDetail?.preferredReportDocument}
+                            startedAt={activeReportDetail?.result.startedAt || activeItem.startedAt}
+                            loadError={Boolean(activeReportDetailError)}
                             reportSynthesis={activeReportSynthesis}
-                            status={activeStatus}
+                            status={activeReportDetail?.result.status || activeItem.result.status}
                             readiness={activeReadiness}
                             researchSnapshotId={activeItem.researchSnapshotId}
                             canCreateDraft={activeItem.canCreateDraft}

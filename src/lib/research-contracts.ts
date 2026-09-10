@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PublicCompanyReferenceSchema } from './public-company-research-contracts';
 
 const nonEmptyString = z.string().trim().min(1);
 const identifier = nonEmptyString.max(256);
@@ -493,6 +494,7 @@ const ResearchSnapshotV1BaseSchema = z.object({
   evidence: z.array(ResearchEvidenceV1Schema),
   claims: z.array(ResearchClaimV1Schema),
   contradictions: z.array(ResearchContradictionV1Schema),
+  publicCompanyResearch: PublicCompanyReferenceSchema.optional(),
   quality: z.object({
     assessmentVersion: z.literal('research-quality/v1'),
     coverage: z.object({

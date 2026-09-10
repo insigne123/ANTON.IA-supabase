@@ -1,4 +1,4 @@
-﻿
+
 'use client';
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 
@@ -43,6 +43,7 @@ import {
 import { saveResearchWorkspaceHandoff } from '@/lib/research-workspace-handoff';
 import type { NativeResearchLeadStatus } from '@/lib/native-research-contracts';
 import NativeResearchReport, { NativeResearchReportSkeleton } from '@/components/research/NativeResearchReport';
+import { researchDetailLoadingState } from '@/lib/research-report-loading';
 import ResearchWorkspace from '@/components/research/ResearchWorkspace';
 import {
   MAX_NATIVE_DRAFT_BATCH_SIZE,
@@ -142,6 +143,12 @@ export default function EnrichedLeadsClient() {
   const [nativeReportDetailLoading, setNativeReportDetailLoading] = useState<Record<string, boolean>>({});
   const [nativeReportDetailErrors, setNativeReportDetailErrors] = useState<Record<string, string>>({});
   const nativeReportDetailRequestsRef = useRef<Set<string>>(new Set());
+  const nativeReportControllersRef = useRef(new Set<AbortController>());
+  useEffect(() => () => {
+    nativeReportControllersRef.current.forEach((controller) => controller.abort());
+    nativeReportControllersRef.current.clear();
+    nativeReportDetailRequestsRef.current.clear();
+  }, []);
   const nativeDraftRequestRef = useRef<string | null>(null);
   const nativeResearchStatusRequestIdRef = useRef(0);
   const loadDataRequestIdRef = useRef(0);
@@ -341,21 +348,27 @@ export default function EnrichedLeadsClient() {
     const reportId = String(status.reportId || '').trim();
     if (!reportId || !status.result || nativeReportDetailRequestsRef.current.has(reportId)) return;
     nativeReportDetailRequestsRef.current.add(reportId);
+    const controller = new AbortController();
+    nativeReportControllersRef.current.add(controller);
     setNativeReportDetailLoading((current) => ({ ...current, [reportId]: true }));
     setNativeReportDetailErrors((current) => ({ ...current, [reportId]: '' }));
     try {
-      const response = await fetch(`/api/native-research/${encodeURIComponent(reportId)}`, { cache: 'no-store' });
+      const response = await fetch(`/api/native-research/${encodeURIComponent(reportId)}`, { cache: 'no-store', signal: controller.signal });
       const payload = await response.json().catch(() => null);
+      if (controller.signal.aborted) return;
       if (!response.ok) throw new Error('NATIVE_RESEARCH_DETAIL_FAILED');
       const detail = parseResearchReportDetail(payload, status.result);
       if (!detail) throw new Error('NATIVE_RESEARCH_DETAIL_INVALID');
       setNativeReportDetails((current) => ({ ...current, [reportId]: detail }));
     } catch {
+      if (controller.signal.aborted) return;
       setNativeReportDetailErrors((current) => ({
         ...current,
-        [reportId]: 'No pudimos cargar la versión completa. Mostramos la evidencia disponible en este reporte.',
+        [reportId]: 'No pudimos actualizar el informe completo. Reintenta para comprobar su estado.',
       }));
     } finally {
+      nativeReportControllersRef.current.delete(controller);
+      if (controller.signal.aborted) return;
       nativeReportDetailRequestsRef.current.delete(reportId);
       setNativeReportDetailLoading((current) => ({ ...current, [reportId]: false }));
     }
@@ -373,6 +386,9 @@ export default function EnrichedLeadsClient() {
           ...current,
           [reportId]: {
             ...detail,
+            preferredReportSynthesis: {
+              status: 'queued', retryable: false, attemptCount: 0, nextRetryAt: null, errorCode: null, updatedAt: new Date().toISOString(),
+            },
             reportSynthesis: {
               status: 'queued',
               retryable: false,
@@ -607,10 +623,22 @@ export default function EnrichedLeadsClient() {
     if (!nativeResearchStatusKnown) return false;
     const native = nativeResearchForLead(lead);
     if (native?.result) {
-      return nativeResearchCanCreateDraft(lead, native);
+      const detail = nativeReportDetails[native.reportId];
+      return !nativeReportDetailErrors[native.reportId] && Boolean(detail && researchDetailLoadingState(detail).showReport && !researchDetailLoadingState(detail).failed)
+        && nativeResearchCanCreateDraft(lead, native);
     }
     return hasReport(lead) && Boolean(lead.email);
-  }, [hasReport, nativeResearchForLead, nativeResearchStatusKnown]);
+  }, [hasReport, nativeResearchForLead, nativeResearchStatusKnown, nativeReportDetails, nativeReportDetailErrors]);
+
+  const reportStatusLabelFor = (lead: EnrichedLead) => {
+    const native = nativeResearchForLead(lead);
+    if (!native?.result) return null;
+    if (nativeReportDetailErrors[native.reportId]) return 'Revisar informe';
+    const detail = nativeReportDetails[native.reportId];
+    if (!detail) return 'Comprobando informe';
+    const state = researchDetailLoadingState(detail);
+    return state.pending ? 'Preparando informe' : state.failed || state.unavailable ? 'Revisar informe' : null;
+  };
 
   // Normaliza cadenas (quita acentos y pasa a minúsculas)
   const norm = useCallback((s?: string | null) =>
@@ -1251,11 +1279,7 @@ export default function EnrichedLeadsClient() {
   const nativeReportToView = reportLead ? nativeResearchForLead(reportLead) : null;
   const nativeReportIdToView = String(nativeReportToView?.reportId || '').trim();
   const nativeReportDetailToView = nativeReportIdToView ? nativeReportDetails[nativeReportIdToView] || null : null;
-  const nativeReportSynthesisToView = nativeReportDetailToView?.preferredReportSynthesis || nativeReportDetailToView?.reportSynthesis || null;
-  const nativeReportSynthesisPending = Boolean(
-    nativeReportSynthesisToView
-    && ['queued', 'running', 'retry_scheduled'].includes(nativeReportSynthesisToView.status),
-  );
+  const nativeReportSynthesisToView = nativeReportDetailToView?.preferredReportSynthesis || null;
   const nativeReportDetailError = nativeReportIdToView ? nativeReportDetailErrors[nativeReportIdToView] || '' : '';
   const nativeReportIsPending = Boolean(
     openReport
@@ -1284,12 +1308,23 @@ export default function EnrichedLeadsClient() {
   }, [loadNativeResearchDetail, nativeReportDetailError, nativeReportDetailToView, nativeReportIdToView, nativeReportToView, openReport]);
 
   useEffect(() => {
-    if (!openReport || !nativeReportToView || !nativeReportIdToView || !nativeReportSynthesisPending) return;
-    const interval = window.setInterval(() => {
-      void loadNativeResearchDetail(nativeReportToView);
-    }, 5_000);
+    const targets = [...new Map([
+      ...pageLeads.map(nativeResearchForLead),
+      ...(openReport ? [nativeReportToView] : []),
+    ].filter((status): status is NativeResearchLeadStatus => Boolean(status?.result))
+      .map((status) => [status.reportId, status])).values()];
+    const poll = (includePending = false) => {
+      targets.filter((status) => {
+        if (nativeReportDetailErrors[status.reportId] || nativeReportDetailRequestsRef.current.has(status.reportId)) return false;
+        const detail = nativeReportDetails[status.reportId];
+        return !detail || (includePending && researchDetailLoadingState(detail).pending);
+      }).slice(0, Math.max(0, 4 - nativeReportDetailRequestsRef.current.size))
+        .forEach((status) => void loadNativeResearchDetail(status));
+    };
+    poll();
+    const interval = window.setInterval(() => poll(true), 5_000);
     return () => window.clearInterval(interval);
-  }, [loadNativeResearchDetail, nativeReportIdToView, nativeReportSynthesisPending, nativeReportToView, openReport]);
+  }, [loadNativeResearchDetail, pageLeads, nativeResearchForLead, nativeReportDetails, nativeReportDetailErrors, nativeReportToView, openReport]);
 
   return (
     <div className="space-y-4 pb-8">
@@ -1548,7 +1583,7 @@ export default function EnrichedLeadsClient() {
                       <h2 className="truncate font-semibold">{e.fullName || 'Lead sin nombre'}</h2>
                       <p className="mt-0.5 truncate text-sm text-muted-foreground">{e.title || 'Sin cargo'} · {e.companyName || 'Sin empresa'}</p>
                     </div>
-                    {viewable ? (
+                    {reportStatusLabelFor(e) ? <span className="shrink-0 text-xs font-medium text-muted-foreground">{reportStatusLabelFor(e)}</span> : viewable ? (
                       native?.status === 'insufficient_data' || !isNativeResearchReport(native) ? (
                         <span className="shrink-0 text-xs font-medium text-amber-700 dark:text-amber-300">Información limitada</span>
                       ) : <span className="shrink-0 text-xs font-medium text-emerald-700 dark:text-emerald-300">Investigado</span>
@@ -1728,7 +1763,7 @@ export default function EnrichedLeadsClient() {
                       })()}
                     </TableCell>
                     <TableCell className="py-3">
-                      {hasViewableReport(e) ? (
+                      {reportStatusLabelFor(e) ? <span className="text-xs font-medium text-muted-foreground">{reportStatusLabelFor(e)}</span> : hasViewableReport(e) ? (
                         nativeResearchForLead(e)?.status === 'insufficient_data' || !isNativeResearchReport(nativeResearchForLead(e)) ? (
                           <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-300"><AlertTriangle className="h-3.5 w-3.5" />Información limitada</span>
                         ) : (
@@ -1901,8 +1936,14 @@ export default function EnrichedLeadsClient() {
                     </div>
                   ) : null}
                   <NativeResearchReport
+                    key={nativeReportIdToView}
+                    variant="preview"
+                    hideHeader
+                    questionnaireEnabled={Boolean(nativeReportDetailToView?.questionnaireEnabled)}
                     result={nativeReportDetailToView?.result || nativeReportToView.result}
-                    reportDocument={nativeReportDetailToView?.preferredReportDocument || nativeReportDetailToView?.reportDocument}
+                    reportDocument={nativeReportDetailToView?.preferredReportDocument}
+                    startedAt={nativeReportDetailToView?.result.startedAt}
+                    loadError={Boolean(nativeReportDetailError)}
                     reportSynthesis={nativeReportSynthesisToView}
                     status={nativeReportToView.status}
                     researchSnapshotId={nativeReportToView.researchSnapshotId}
@@ -2292,5 +2333,4 @@ export default function EnrichedLeadsClient() {
     </div>
   );
 }
-
 

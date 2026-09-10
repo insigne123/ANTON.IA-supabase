@@ -12,7 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
-import { companySizes, industries } from '@/lib/data';
+import { companySizes } from '@/lib/data';
+import { organizationService } from '@/lib/services/organization-service';
 import type { Lead as UILaed, SavedSearch } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Search, Save, X, ChevronDown, Loader2, Bookmark, BookmarkPlus, Trash2, Info, AlertCircle, Building2, CheckCircle2, Mail, Phone, SlidersHorizontal } from 'lucide-react';
@@ -27,7 +28,9 @@ import {
   getLinkedInProfileStatuses,
   enrichApolloOrganization,
   ApolloOrganizationEnrichmentClientError,
+  searchCompanies,
   searchCompanyNameLeads,
+  searchCompanyPeople,
   searchLeads,
   searchLinkedInProfileLead,
   type CompanySearchOrganization,
@@ -380,38 +383,9 @@ function splitFilterInput(value?: string) {
 
 const DEFAULT_FILTERS = DEFAULT_LEAD_SEARCH_FILTERS;
 
-const INDUSTRY_LABELS_ES: Record<string, string> = {
-  'Human Resources': 'Recursos humanos',
-  Technology: 'Tecnología',
-  Healthcare: 'Salud',
-  Finance: 'Finanzas',
-  Manufacturing: 'Manufactura',
-  Retail: 'Comercio minorista',
-  Education: 'Educación',
-  Accounting: 'Contabilidad',
-  'Architecture & Planning': 'Arquitectura y planificación',
-  'Apparel & Fashion': 'Moda y confección',
-  Automotive: 'Automotriz',
-  'Building Materials': 'Materiales de construcción',
-  Biotechnology: 'Biotecnología',
-  'Environment Services': 'Servicios ambientales',
-  'Electrical/Electronic Manufacturing': 'Fabricación eléctrica y electrónica',
-  'Computer Software': 'Software',
-  Entertainment: 'Entretenimiento',
-  'Education Management': 'Gestión educativa',
-  Construction: 'Construcción',
-  'Financial Services': 'Servicios financieros',
-  'Government Administration': 'Administración pública',
-  Hospitality: 'Hotelería y hospitalidad',
-  'Health, Wellness & Fitness': 'Salud, bienestar y fitness',
-  'Higher Education': 'Educación superior',
-  'Information Services': 'Servicios de información',
-};
-
 function hasBatchSearchFilters(filters: LeadSearchFilters) {
   return Boolean(
-    filters.industry.trim()
-    || splitFilterInput(filters.companyKeywords).length
+    splitFilterInput(filters.companyKeywords).length
     || splitFilterInput(filters.location).length
     || splitFilterInput(filters.personLocation).length
     || filters.sizeRange.trim()
@@ -457,6 +431,320 @@ export default function SearchPage() {
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
+  // Company-first flow: filtros → empresas → ventanas por empresa (50 por empresa).
+  type CompanyWindowState = {
+    organization: CompanySearchOrganization;
+    leads: UILaed[];
+    page: number;
+    perPage: number;
+    totalEntries?: number;
+    totalPages?: number;
+    isLoading: boolean;
+    isExpanding: boolean;
+    hasMore: boolean;
+    error: string;
+    deliveredIds: string[];
+  };
+  const [filterStep, setFilterStep] = useState<'filters' | 'companies' | 'people'>('filters');
+  const [companies, setCompanies] = useState<CompanySearchOrganization[]>([]);
+  const [companiesPage, setCompaniesPage] = useState(1);
+  const [companiesTotalPages, setCompaniesTotalPages] = useState(1);
+  const [companiesTotalEntries, setCompaniesTotalEntries] = useState<number | undefined>(undefined);
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<string>>(new Set());
+  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
+  const [companyWindows, setCompanyWindows] = useState<Record<string, CompanyWindowState>>({});
+  const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
+  const [isLoadingCompanyPeople, setIsLoadingCompanyPeople] = useState(false);
+  const companiesAbortRef = useRef<AbortController | null>(null);
+  const companyPeopleAbortRef = useRef<AbortController | null>(null);
+  const companyRun = useRef(0);
+  const expandingCompanies = useRef(new Set<string>());
+
+  const activeWindow = activeCompanyId ? companyWindows[activeCompanyId] : undefined;
+  const companyWindowList = useMemo(
+    () => Object.values(companyWindows).sort((a, b) => a.organization.name.localeCompare(b.organization.name, 'es')),
+    [companyWindows],
+  );
+  const [savedApolloIds, setSavedApolloIds] = useState<Set<string>>(new Set());
+
+  const refreshSavedApolloIds = async () => {
+    try {
+      const [saved, enriched] = await Promise.all([
+        supabaseService.getLeads().catch(() => [] as UILaed[]),
+        enrichedLeadsStorage.get().catch(() => [] as any[]),
+      ]);
+      const ids = new Set<string>();
+      for (const lead of (saved || []) as any[]) {
+        const apolloId = String(lead?.sourceProviderId || lead?.apolloId || '').trim();
+        if (apolloId) ids.add(apolloId);
+        const lid = String(lead?.id || '').trim();
+        // Legacy rows may already store the Apollo id as the primary id.
+        if (lid && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lid)) ids.add(lid);
+      }
+      const enrichedList = Array.isArray(enriched) ? enriched : (enriched as any)?.leads || [];
+      for (const lead of enrichedList as any[]) {
+        const apolloId = String(lead?.sourceProviderId || lead?.sourceProvider_id || lead?.apolloId || '').trim();
+        if (apolloId) ids.add(apolloId);
+      }
+      setSavedApolloIds(ids);
+    } catch {
+      // Saved exclusion is best-effort; windows still work without it.
+    }
+  };
+
+  useEffect(() => {
+    void refreshSavedApolloIds();
+  }, []);
+
+  const getCompanyPersonFilters = () => {
+    // Industry is legacy: never sent to Apollo. If a saved search still carries it,
+    // surface it once as company keywords so the user reviews it explicitly.
+    const legacyIndustry = String((filters as any)?.industry || '').trim();
+    const companyKeywords = [...splitFilterInput(filters.companyKeywords), ...(legacyIndustry ? [legacyIndustry] : [])]
+      .map((item) => item.trim()).filter(Boolean);
+    return {
+      legacyIndustry,
+      companyKeywords,
+      companyLocations: splitFilterInput(filters.location),
+      sizeRanges: [String(filters.sizeRange || '').trim()].filter(Boolean),
+      titles: splitTitlesInput(filters.title),
+      seniorities: Array.isArray(filters.seniorities) ? filters.seniorities : [],
+      personLocations: splitFilterInput(filters.personLocation),
+      leadsPerCompany: Math.min(100, Math.max(1, Number(filters.maxResults) || 50)),
+    };
+  };
+
+  const handleSearchCompanies = async (page = 1) => {
+    const { legacyIndustry, companyKeywords, companyLocations, sizeRanges } = getCompanyPersonFilters();
+    if (companyKeywords.length === 0 && companyLocations.length === 0 && sizeRanges.length === 0) {
+      const message = 'Agrega al menos un filtro de empresa para iniciar la búsqueda.';
+      setError(message);
+      toast({ title: 'Revisa los criterios', description: message });
+      return;
+    }
+    if (legacyIndustry) {
+      toast({
+        title: 'Revisa tus criterios',
+        description: `Tu búsqueda guardada usaba Industria (“${legacyIndustry}”). La movimos a Palabras clave para que la revises antes de continuar.`,
+      });
+    }
+    companiesAbortRef.current?.abort();
+    const controller = new AbortController();
+    companiesAbortRef.current = controller;
+    setIsLoadingCompanies(true);
+    setIsLoading(true);
+    setError('');
+    setHasSearched(true);
+    try {
+      const result = await searchCompanies({
+        company_keywords: companyKeywords,
+        company_location: companyLocations,
+        employee_ranges: sizeRanges,
+        page,
+        per_page: 25,
+      } as any, controller.signal);
+      if (controller.signal.aborted) return;
+      const orgs = Array.isArray(result.organizations) ? result.organizations : [];
+      setCompanies((current) => page === 1 ? orgs : [...new Map([...current, ...orgs].map((org) => [org.id, org])).values()]);
+      setCompaniesPage(Number(result.page ?? page) || page);
+      setCompaniesTotalPages(Number(result.total_pages ?? 1) || 1);
+      setCompaniesTotalEntries(result.total_entries);
+      if (page === 1) setSelectedCompanyIds(new Set());
+      setFilterStep('companies');
+      if (orgs.length === 0) {
+        setError('No encontramos empresas con estos filtros. Prueba ampliando palabras clave, sede o tamaño.');
+      }
+    } catch (searchError: any) {
+      if (searchError?.name === 'AbortError') return;
+      const friendlyMessage = getFriendlySearchErrorMessage(searchError?.message);
+      setError(friendlyMessage);
+      toast({ title: 'No se pudo completar la búsqueda', description: friendlyMessage });
+    } finally {
+      if (companiesAbortRef.current === controller) {
+        setIsLoadingCompanies(false);
+        setIsLoading(false);
+      }
+    }
+  };
+
+  const fetchCompanyWindowPage = async (organization: CompanySearchOrganization, page: number, perPage: number, excludeIds: string[], signal?: AbortSignal) => {
+    const { titles, seniorities, personLocations } = getCompanyPersonFilters();
+    const result = await searchCompanyPeople({
+      organization_id: organization.id,
+      titles,
+      seniorities,
+      person_locations: personLocations,
+      include_similar_titles: true,
+      page,
+      per_page: perPage,
+      exclude_person_ids: [],
+    }, signal);
+    const rawLeads = Array.isArray((result as any)?.leads) ? (result as any).leads : [];
+    // Exclude already saved (by Apollo id) and already delivered in this window.
+    const delivered = new Set(excludeIds.map((id) => String(id)));
+    const fresh = rawLeads.filter((raw: any) => {
+      const apolloId = String(raw?.id || raw?.source_provider_id || '').trim();
+      if (!apolloId) return false;
+      if (delivered.has(apolloId)) return false;
+      if (savedApolloIds.has(apolloId)) return false;
+      return true;
+    });
+    return {
+      leads: fresh.map((raw: any) => normalizeLeadForUI(raw, { revealEmail: true, revealPhone: false, organization })),
+      totalEntries: (result as any)?.total_entries as number | undefined,
+      totalPages: (result as any)?.total_pages as number | undefined,
+      hasMore: page < 500 && (typeof result.total_entries === 'number' ? page * perPage < result.total_entries : Number(result.raw_count ?? rawLeads.length) >= perPage),
+    };
+  };
+
+  const handleSearchCompanyPeople = async () => {
+    if (isLoadingCompanyPeople) return;
+    const run = ++companyRun.current;
+    companyPeopleAbortRef.current?.abort();
+    const controller = new AbortController();
+    companyPeopleAbortRef.current = controller;
+    const selected = companies.filter((org) => selectedCompanyIds.has(org.id));
+    if (selected.length === 0) {
+      toast({ title: 'Selecciona empresas', description: 'Elige al menos una empresa para buscar contactos.' });
+      return;
+    }
+    const { leadsPerCompany } = getCompanyPersonFilters();
+    setIsLoadingCompanyPeople(true);
+    setIsLoading(true);
+    setError('');
+    try {
+      // Concurrency limited so one slow company does not block the rest.
+      const nextWindows: Record<string, CompanyWindowState> = {};
+      const queue = [...selected];
+      const workers = Array.from({ length: Math.min(5, queue.length) }, async () => {
+        while (queue.length > 0) {
+          if (controller.signal.aborted || run !== companyRun.current) return;
+          const organization = queue.shift();
+          if (!organization) return;
+          try {
+            if (companyWindows[organization.id]) {
+              nextWindows[organization.id] = companyWindows[organization.id];
+              continue;
+            }
+            const { leads, totalEntries, totalPages, hasMore } = await fetchCompanyWindowPage(organization, 1, leadsPerCompany, [], controller.signal);
+            nextWindows[organization.id] = {
+              organization,
+              leads,
+              page: 1,
+              perPage: leadsPerCompany,
+              totalEntries,
+              totalPages,
+              isLoading: false,
+              isExpanding: false,
+              hasMore,
+              error: leads.length === 0 ? 'Sin contactos con estos filtros en esta empresa.' : '',
+              deliveredIds: leads.map((lead: UILaed) => String(lead.id)),
+            };
+          } catch (windowError: any) {
+            nextWindows[organization.id] = {
+              organization,
+              leads: [],
+              page: 0,
+              perPage: leadsPerCompany,
+              isLoading: false,
+              isExpanding: false,
+              hasMore: true,
+              error: getFriendlySearchErrorMessage(windowError?.message),
+              deliveredIds: [],
+            };
+          }
+        }
+      });
+      await Promise.all(workers);
+      if (controller.signal.aborted || run !== companyRun.current) return;
+      setCompanyWindows(nextWindows);
+      setActiveCompanyId(selected[0]?.id || null);
+      setFilterStep('people');
+      // Flatten for the existing save flow.
+      setLeads(Object.values(nextWindows).flatMap((window) => window.leads));
+      setSelectedLeads(new Set());
+      setPageIndex(0);
+    } finally {
+      if (run === companyRun.current) {
+        setIsLoadingCompanyPeople(false);
+        setIsLoading(false);
+      }
+    }
+  };
+
+  const handleExpandCompany = async (organizationId: string) => {
+    const window = companyWindows[organizationId];
+    if (!window || window.isExpanding || window.isLoading || !window.hasMore) return;
+    if (expandingCompanies.current.has(organizationId)) return;
+    expandingCompanies.current.add(organizationId);
+    const run = companyRun.current;
+    setCompanyWindows((current) => ({
+      ...current,
+      [organizationId]: { ...current[organizationId], isExpanding: true, error: '' },
+    }));
+    try {
+      const nextPage = window.page + 1;
+      const { leads, totalEntries, totalPages, hasMore } = await fetchCompanyWindowPage(
+        window.organization, nextPage, window.perPage, window.deliveredIds,
+      );
+      if (run !== companyRun.current) return;
+      setCompanyWindows((current) => {
+        const existing = current[organizationId];
+        if (!existing) return current;
+        const merged = [...existing.leads];
+        const seen = new Set(existing.deliveredIds);
+        for (const lead of leads) {
+          if (seen.has(String(lead.id))) continue;
+          seen.add(String(lead.id));
+          merged.push(lead);
+        }
+        const next = {
+          ...existing,
+          leads: merged,
+          page: nextPage,
+          totalEntries: totalEntries ?? existing.totalEntries,
+          totalPages: totalPages ?? existing.totalPages,
+          isExpanding: false,
+          // If Apollo returned fewer than requested, assume exhaustion for these filters.
+          hasMore,
+          error: leads.length === 0 ? (hasMore ? 'Esta página no añadió contactos nuevos. Puedes seguir expandiendo.' : 'No quedan más contactos con estos filtros en esta empresa.') : '',
+          deliveredIds: Array.from(seen),
+        };
+        return { ...current, [organizationId]: next };
+      });
+      setLeads((current) => {
+        const seen = new Set(current.map((lead: UILaed) => String(lead.id)));
+        const additions = leads.filter((lead: UILaed) => !seen.has(String(lead.id)));
+        return [...current, ...additions];
+      });
+      if (leads.length > 0) {
+        toast({ title: `Se agregaron ${leads.length} contactos`, description: window.organization.name });
+      }
+    } catch (expandError: any) {
+      if (run !== companyRun.current) return;
+      if ((expandError as any)?.name === 'AbortError') return;
+      setCompanyWindows((current) => ({
+        ...current,
+        [organizationId]: {
+          ...current[organizationId],
+          isExpanding: false,
+          error: getFriendlySearchErrorMessage((expandError as any)?.message),
+        },
+      }));
+    } finally {
+      expandingCompanies.current.delete(organizationId);
+    }
+  };
+
+  const toggleCompanySelection = (organizationId: string, checked: boolean) => {
+    setSelectedCompanyIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(organizationId);
+      else next.delete(organizationId);
+      return next;
+    });
+  };
+
   useEffect(() => { setPageIndex(0); }, [leads]);
 
   // Cargar leads guardados y contactados para verificar estado
@@ -493,9 +781,73 @@ export default function SearchPage() {
     }
   };
 
-  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState({ ...DEFAULT_FILTERS, maxResults: 50 });
+  const [checkpointReady, setCheckpointReady] = useState(false);
+  const [checkpointLoading, setCheckpointLoading] = useState(true);
+  const [checkpointNotice, setCheckpointNotice] = useState('');
+  const checkpointRevision = useRef(0);
+  const checkpointOrganization = useRef('');
+  const checkpointQueue = useRef(Promise.resolve());
+  const checkpointStopped = useRef(false);
+  useEffect(() => {
+    const unsubscribe = organizationService.subscribeToCurrentOrganizationChanges(() => window.location.reload());
+    return () => { unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/leads/search/checkpoint', { cache: 'no-store' }).then(async (response) => {
+      if (!response.ok) throw new Error('unavailable');
+      const data = await response.json();
+      if (cancelled) return;
+      checkpointRevision.current = data.revision;
+      checkpointOrganization.current = String(data.scope || '').split(':')[0];
+      const snapshot = data.snapshot;
+      if (snapshot?.version === 1 && snapshot.filters && Array.isArray(snapshot.companies) && snapshot.companyWindows && typeof snapshot.companyWindows === 'object') {
+        setFilters(normalizeSavedSearchCriteria(snapshot.filters));
+        setCompanies(snapshot.companies);
+        setCompaniesPage(snapshot.companiesPage || 1);
+        setCompaniesTotalPages(snapshot.companiesTotalPages || 1);
+        setCompaniesTotalEntries(snapshot.companiesTotalEntries);
+        setSelectedCompanyIds(new Set(snapshot.selectedCompanyIds || []));
+        setActiveCompanyId(snapshot.activeCompanyId || null);
+        const restored = Object.fromEntries(Object.entries(snapshot.companyWindows).map(([id, value]) => [id, { ...(value as CompanyWindowState), isLoading: false, isExpanding: false }]));
+        setCompanyWindows(restored);
+        setLeads(Object.values(restored).flatMap((item) => item.leads || []));
+        setFilterStep(['filters', 'companies', 'people'].includes(snapshot.filterStep) ? snapshot.filterStep : 'filters');
+        setCheckpointNotice('Búsqueda recuperada. Puedes continuar desde donde quedaste.');
+      }
+      setCheckpointReady(true);
+    }).catch(() => {
+      if (!cancelled) setCheckpointNotice('La recuperación de búsquedas no está disponible. El avance se conserva mientras mantengas esta pantalla abierta.');
+    }).finally(() => { if (!cancelled) setCheckpointLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!checkpointReady || filters.searchMode !== 'filters' || isLoading || Object.values(companyWindows).some((item) => item.isExpanding || item.isLoading)) return;
+    const snapshot = { version: 1, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds: [...selectedCompanyIds], activeCompanyId, companyWindows, filterStep };
+    const timeout = window.setTimeout(() => {
+      checkpointQueue.current = checkpointQueue.current.then(async () => {
+        if (checkpointStopped.current) return;
+        const response = await fetch('/api/leads/search/checkpoint', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-organization-id': checkpointOrganization.current },
+          body: JSON.stringify({ revision: checkpointRevision.current, snapshot }),
+        });
+        if (!response.ok) {
+          checkpointStopped.current = true;
+          setCheckpointNotice(response.status === 409 ? 'Otra pestaña actualizó esta búsqueda. Recarga para recuperar su avance.' : 'No pudimos guardar el avance. Mantén esta pantalla abierta.');
+          return;
+        }
+        checkpointRevision.current = (await response.json()).revision;
+      }).catch(() => { setCheckpointNotice('No pudimos guardar el avance de la búsqueda.'); });
+    }, 400);
+    return () => window.clearTimeout(timeout);
+  }, [checkpointReady, filters, companies, companiesPage, companiesTotalPages, companiesTotalEntries, selectedCompanyIds, activeCompanyId, companyWindows, filterStep, isLoading]);
 
   const handleFilterChange = (field: keyof typeof filters, value: any) => {
+    companyRun.current += 1;
+    companyPeopleAbortRef.current?.abort();
     setError('');
     if (field === 'searchMode') {
       setAdvancedFiltersOpen(value === 'linkedin_profile');
@@ -512,8 +864,32 @@ export default function SearchPage() {
       setSelectedOrganization(null);
       setCompanySelectionPending(false);
     }
+    if (field !== 'searchMode') {
+      // Any company/person filter change invalidates company windows.
+      setFilterStep('filters');
+      setCompanies([]);
+      setCompanyWindows({});
+      setSelectedCompanyIds(new Set());
+      setActiveCompanyId(null);
+    }
     setActiveSavedSearchId(null);
     setFilters(prev => ({ ...prev, [field]: value }));
+  };
+
+  const resetCompanyFirstFlow = () => {
+    companyRun.current += 1;
+    companiesAbortRef.current?.abort();
+    companyPeopleAbortRef.current?.abort();
+    setFilterStep('filters');
+    setCompanies([]);
+    setCompaniesPage(1);
+    setCompaniesTotalPages(1);
+    setCompaniesTotalEntries(undefined);
+    setSelectedCompanyIds(new Set());
+    setActiveCompanyId(null);
+    setCompanyWindows({});
+    setIsLoadingCompanies(false);
+    setIsLoadingCompanyPeople(false);
   };
 
   const [isSaving, setIsSaving] = useState(false);
@@ -562,6 +938,7 @@ export default function SearchPage() {
       // Actualizar estado local de guardados
       const all = await supabaseService.getLeads();
       setSavedIds(new Set(all.map(l => l.id)));
+      await refreshSavedApolloIds();
 
       const savedToEnrichedOnly = enrichedAdded > 0 && resSv.addedCount === 0;
       const phonePendingNote =
@@ -878,14 +1255,24 @@ export default function SearchPage() {
   };
 
   const handleSearch = async () => {
+    if (filters.searchMode === 'filters') {
+      resetCompanyFirstFlow();
+      await handleSearchCompanies(1);
+      return;
+    }
     await executeSearch();
   };
 
   const handleAbort = () => {
+    companyRun.current += 1;
     searchRunIdRef.current += 1;
     abortRef.current?.abort();
+    companiesAbortRef.current?.abort();
+    companyPeopleAbortRef.current?.abort();
     submittingRef.current = false;
     setIsLoading(false);
+    setIsLoadingCompanies(false);
+    setIsLoadingCompanyPeople(false);
     toast({ title: 'Búsqueda cancelada' });
   };
 
@@ -926,7 +1313,7 @@ export default function SearchPage() {
     abortRef.current?.abort();
     submittingRef.current = false;
     setIsLoading(false);
-    setFilters(DEFAULT_FILTERS);
+    setFilters({ ...DEFAULT_FILTERS, maxResults: 50 });
     setHasSearched(false);
     setActiveSavedSearchId(null);
     setAdvancedFiltersOpen(false);
@@ -941,6 +1328,7 @@ export default function SearchPage() {
     setCompanyCandidates([]);
     setSelectedOrganization(null);
     setCompanySelectionPending(false);
+    resetCompanyFirstFlow();
   };
 
   useEffect(() => {
@@ -1166,12 +1554,21 @@ export default function SearchPage() {
 
   const handleLoadSearch = (search: SavedSearch) => {
     const criteria = normalizeSavedSearchCriteria(search.criteria);
+    const legacyIndustry = String((criteria as any)?.industry || '').trim();
+    const migrated = legacyIndustry
+      ? {
+          ...criteria,
+          industry: '',
+          companyKeywords: [legacyIndustry, String(criteria.companyKeywords || '').trim()].filter(Boolean).join(', '),
+        }
+      : criteria;
     searchRunIdRef.current += 1;
     abortRef.current?.abort();
     profileStatusAbortRef.current?.abort();
     submittingRef.current = false;
     setIsLoading(false);
-    setFilters(criteria);
+    setFilters(migrated);
+    resetCompanyFirstFlow();
     setActiveSavedSearchId(search.id);
     setAdvancedFiltersOpen(Boolean(
       criteria.title ||
@@ -1194,7 +1591,12 @@ export default function SearchPage() {
     setCompanyCandidates([]);
     setSelectedOrganization(null);
     setCompanySelectionPending(false);
-    toast({ title: 'Filtros cargados', description: `Se han aplicado los filtros de "${search.name}".` });
+    toast({
+      title: 'Filtros cargados',
+      description: legacyIndustry
+        ? `Industria (“${legacyIndustry}”) se movió a Palabras clave. Revísala antes de buscar.`
+        : `Se han aplicado los filtros de "${search.name}".`,
+    });
   };
 
   const handleRequestDeleteSearch = (e: React.MouseEvent, search: SavedSearch) => {
@@ -1227,6 +1629,8 @@ export default function SearchPage() {
         title="Búsqueda de Leads"
         description="Define tu audiencia, busca prospectos y guarda criterios para volver a usarlos."
       />
+      {checkpointNotice ? <p role="status" className="text-sm text-muted-foreground">{checkpointNotice}</p> : null}
+      {filters.searchMode === 'filters' && error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
 
       <Card className="overflow-hidden rounded-2xl border-border/60 bg-card/90 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/75">
         <CardHeader className="gap-3 border-b border-border/60 bg-muted/10 p-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0 sm:px-5">
@@ -1304,7 +1708,7 @@ export default function SearchPage() {
         <CardContent className="space-y-5 p-4 sm:p-5">
           <fieldset
             ref={criteriaRef}
-            disabled={isLoading}
+            disabled={isLoading || checkpointLoading}
             tabIndex={-1}
             aria-invalid={missingFilterError || undefined}
             aria-describedby={filters.searchMode === 'filters' ? 'filterRequirement' : undefined}
@@ -1444,72 +1848,66 @@ export default function SearchPage() {
                 ) : null}
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-5">
                 <p id="filterRequirement" className={cn('text-sm text-muted-foreground', missingFilterError && 'font-medium text-destructive')}>
                   {missingFilterError
                     ? error
-                    : 'Todos los campos son opcionales, pero necesitas completar al menos uno para buscar.'}
+                    : 'Primero elige empresas con estos filtros. Después buscaremos contactos solo dentro de las que selecciones.'}
                 </p>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="industry">Industria</Label>
-                    <Select value={filters.industry || 'all'} onValueChange={(value) => handleFilterChange('industry', value === 'all' ? '' : value)}>
-                      <SelectTrigger id="industry"><SelectValue placeholder="Cualquier industria" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all" disabled={isLoading}>Cualquier industria</SelectItem>
-                        {industries.map((industry) => <SelectItem key={industry} value={industry} disabled={isLoading}>{INDUSTRY_LABELS_ES[industry] || industry}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">Usamos este valor como palabra clave para encontrar empresas relacionadas.</p>
-                  </div>
-                   <div className="space-y-2">
-                     <Label htmlFor="companyKeywords">Palabras clave de empresa</Label>
-                     <Input id="companyKeywords" aria-describedby="companyKeywordsHelp" placeholder="Ej. payroll, onboarding" value={filters.companyKeywords} onChange={(event) => handleFilterChange('companyKeywords', event.target.value)} />
-                     <p id="companyKeywordsHelp" className="text-xs text-muted-foreground">Busca términos asociados a la actividad o propuesta de la empresa. Separa varios con comas.</p>
-                   </div>
-                   <div className="space-y-2">
-                     <Label htmlFor="location">Sede de la empresa</Label>
-                     <Input id="location" aria-describedby="companyLocationHelp" placeholder="Ej. Chile, Argentina" value={filters.location} onChange={(event) => handleFilterChange('location', event.target.value)} />
-                     <p id="companyLocationHelp" className="text-xs text-muted-foreground">Filtra por la ubicación de la organización, no por la residencia del lead.</p>
-                   </div>
-                   <div className="space-y-2">
-                     <Label htmlFor="personLocation">Ubicación del lead</Label>
-                     <Input id="personLocation" aria-describedby="personLocationHelp" placeholder="Ej. Santiago, Buenos Aires" value={filters.personLocation} onChange={(event) => handleFilterChange('personLocation', event.target.value)} />
-                     <p id="personLocationHelp" className="text-xs text-muted-foreground">Filtra por la ubicación personal o laboral del prospecto.</p>
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="sizeRange">Tamaño de empresa</Label>
-                    <Select name="sizeRange" value={filters.sizeRange || 'all'} onValueChange={(value) => handleFilterChange('sizeRange', value === 'all' ? '' : value)}>
-                      <SelectTrigger id="sizeRange"><SelectValue placeholder="Cualquier tamaño" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all" disabled={isLoading}>Cualquier tamaño</SelectItem>
-                        {companySizes.map((size) => <SelectItem key={size} value={size} disabled={isLoading}>{size.replace('+', ' o más')}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                {(filters as any)?.industry ? (
+                  <Alert className="border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                    <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+                    <AlertTitle>Revisa tus criterios</AlertTitle>
+                    <AlertDescription>
+                      Esta búsqueda aún usa el filtro antiguo de Industria. Ya no lo enviamos a Apollo. Muévelo a Palabras clave antes de continuar.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold tracking-tight">Empresas</h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="companyKeywords">Palabras clave de empresa</Label>
+                      <Input id="companyKeywords" aria-describedby="companyKeywordsHelp" placeholder="Ej. fashion, retail, moda" value={filters.companyKeywords} onChange={(event) => handleFilterChange('companyKeywords', event.target.value)} />
+                      <p id="companyKeywordsHelp" className="text-xs text-muted-foreground">Busca términos asociados a la actividad de la empresa. Separa varios con comas.</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="location">Sede de la empresa</Label>
+                      <Input id="location" aria-describedby="companyLocationHelp" placeholder="Ej. Chile, Argentina" value={filters.location} onChange={(event) => handleFilterChange('location', event.target.value)} />
+                      <p id="companyLocationHelp" className="text-xs text-muted-foreground">Filtra por la ubicación de la organización, no por la residencia del lead.</p>
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="sizeRange">Tamaño de empresa</Label>
+                      <Select name="sizeRange" value={filters.sizeRange || 'all'} onValueChange={(value) => handleFilterChange('sizeRange', value === 'all' ? '' : value)}>
+                        <SelectTrigger id="sizeRange"><SelectValue placeholder="Cualquier tamaño" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all" disabled={isLoading}>Cualquier tamaño</SelectItem>
+                          {companySizes.map((size) => <SelectItem key={size} value={size} disabled={isLoading}>{size.replace('+', ' o más')}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 </div>
-                <Collapsible open={advancedFiltersOpen} onOpenChange={setAdvancedFiltersOpen}>
-                  <CollapsibleTrigger asChild>
-                    <Button type="button" variant="ghost" size="sm" className="px-0 text-muted-foreground hover:bg-transparent hover:text-foreground">
-                      <SlidersHorizontal className="h-4 w-4" />
-                      Cargo, nivel y volumen
-                      <ChevronDown className={`h-4 w-4 transition-transform ${advancedFiltersOpen ? 'rotate-180' : ''}`} />
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="pt-2">
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                      <div className="space-y-2">
-                        <Label htmlFor="title">Cargo o posición</Label>
-                        <Input id="title" placeholder="Ej. Marketing Director" value={filters.title} onChange={(event) => handleFilterChange('title', event.target.value)} />
-                      </div>
-                      <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" disabled={isLoading} />
-                      <div className="space-y-2">
-                        <Label htmlFor="filterMaxResults">Máximo de resultados</Label>
-                        <Input id="filterMaxResults" type="number" min={1} max={100} value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', Math.min(100, Math.max(1, Number(event.target.value) || 25)))} />
-                      </div>
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold tracking-tight">Contactos a buscar en esas empresas</h3>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="title">Cargo o posición</Label>
+                      <Input id="title" placeholder="Ej. Marketing Director" value={filters.title} onChange={(event) => handleFilterChange('title', event.target.value)} />
                     </div>
-                  </CollapsibleContent>
-                </Collapsible>
+                    <MultiCheckDropdown label="Nivel de responsabilidad" options={APOLLO_SENIORITIES} value={filters.seniorities} onChange={(next) => handleFilterChange('seniorities', next)} placeholder="Todos los niveles" disabled={isLoading} />
+                    <div className="space-y-2">
+                      <Label htmlFor="personLocation">Ubicación del lead</Label>
+                      <Input id="personLocation" aria-describedby="personLocationHelp" placeholder="Ej. Santiago, Buenos Aires" value={filters.personLocation} onChange={(event) => handleFilterChange('personLocation', event.target.value)} />
+                      <p id="personLocationHelp" className="text-xs text-muted-foreground">Filtra por la ubicación personal o laboral del prospecto.</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="filterMaxResults">Leads por empresa</Label>
+                      <Input id="filterMaxResults" type="number" min={1} max={100} value={String(filters.maxResults)} onChange={(event) => handleFilterChange('maxResults', Math.min(100, Math.max(1, Number(event.target.value) || 50)))} />
+                      <p className="text-xs text-muted-foreground">Cada empresa seleccionada cargará hasta esta cantidad. Puedes expandirla después.</p>
+                    </div>
+                  </div>
+                </div>
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   La búsqueda no enriquece contactos. Puedes enriquecerlos después desde Leads guardados.
                 </p>
@@ -1521,11 +1919,111 @@ export default function SearchPage() {
           <div className="sticky bottom-2 z-10 flex flex-col gap-2 rounded-xl border border-border/70 bg-card/95 p-2 pt-2 shadow-lg backdrop-blur sm:static sm:flex-row sm:items-center sm:justify-end sm:rounded-none sm:border-x-0 sm:border-b-0 sm:bg-transparent sm:p-0 sm:pt-4 sm:shadow-none sm:backdrop-blur-none">
             <Button variant="ghost" className="shadow-none" onClick={handleClear} disabled={isLoading}><X className="h-4 w-4" />Limpiar</Button>
             {isLoading ? <Button variant="outline" className="shadow-none" onClick={handleAbort}>Cancelar</Button> : null}
-            <Button className="shadow-none sm:min-w-36" onClick={handleSearch} disabled={isLoading}>
+            <Button className="shadow-none sm:min-w-36" onClick={handleSearch} disabled={isLoading || checkpointLoading}>
               {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              {isLoading ? 'Buscando…' : 'Buscar leads'}
+              {isLoading ? 'Buscando…' : filters.searchMode === 'filters' ? 'Buscar empresas' : 'Buscar leads'}
             </Button>
           </div>
+
+          {filters.searchMode === 'filters' && filterStep !== 'filters' ? (
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Etapas de búsqueda">
+                {(['filters', 'companies', 'people'] as const).map((step, index) => {
+                  const labels = { filters: '1. Filtros', companies: '2. Empresas', people: '3. Contactos' } as const;
+                  const active = filterStep === step;
+                  const done = (filterStep === 'companies' && step === 'filters') || (filterStep === 'people' && step !== 'people');
+                  return (
+                    <div key={step} className="flex items-center gap-2">
+                      <Badge variant={active ? 'default' : done ? 'secondary' : 'outline'}>{labels[step]}</Badge>
+                      {index < 2 ? <span className="text-muted-foreground">→</span> : null}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => setFilterStep('filters')} disabled={isLoading}>
+                  Editar filtros
+                </Button>
+                {filterStep === 'people' ? (
+                  <Button type="button" variant="outline" size="sm" onClick={() => setFilterStep('companies')} disabled={isLoading}>
+                    Cambiar empresas
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {filters.searchMode === 'filters' && filterStep === 'companies' ? (
+            <div className="mt-4 space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="font-medium">
+                    {isLoadingCompanies ? 'Buscando empresas…' : companies.length > 0 ? `${companies.length} empresas encontradas` : 'Empresas'}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Selecciona las que te interesen. Cada una cargará hasta {getCompanyPersonFilters().leadsPerCompany} contactos.
+                    {companiesTotalEntries ? ` Total estimado: ${companiesTotalEntries}.` : ''}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm" disabled={isLoading || companies.length === 0} onClick={() => setSelectedCompanyIds(new Set(companies.map((org) => org.id)))}>
+                    Seleccionar cargadas
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" disabled={isLoading} onClick={() => setSelectedCompanyIds(new Set())}>
+                    Limpiar selección
+                  </Button>
+                </div>
+              </div>
+              {isLoadingCompanies ? (
+                <div className="space-y-2" aria-busy="true" aria-label="Buscando empresas">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <div key={index} className="flex items-center gap-3 rounded-xl border border-border/60 bg-background p-3">
+                      <Skeleton className="h-4 w-4" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-48 max-w-full" />
+                        <Skeleton className="h-3 w-64 max-w-full" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : companies.length > 0 ? (
+                <div className="space-y-2">
+                  {companies.map((org) => {
+                    const checked = selectedCompanyIds.has(org.id);
+                    return (
+                      <label key={org.id} className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/60 bg-background p-3 transition hover:border-primary/40 focus-within:ring-2 focus-within:ring-ring">
+                        <Checkbox
+                          aria-label={`Seleccionar ${org.name}`}
+                          checked={checked}
+                          onCheckedChange={(value) => toggleCompanySelection(org.id, Boolean(value))}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium">{org.name}</span>
+                          <span className="block truncate text-sm text-muted-foreground">{org.primary_domain || org.website_url || 'Sin dominio visible'}</span>
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            {[org.city, org.country].filter(Boolean).join(', ') || 'Ubicación no disponible'}
+                            {typeof org.estimated_num_employees === 'number' ? ` · ${org.estimated_num_employees} empleados` : ''}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                  {companiesPage < companiesTotalPages && companiesPage < 500 ? <Button variant="outline" disabled={isLoading} onClick={() => void handleSearchCompanies(companiesPage + 1)}>Cargar más empresas</Button> : null}
+                  <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:items-center sm:justify-between">
+                    <span className="text-sm text-muted-foreground" role="status">
+                      {selectedCompanyIds.size} empresa{selectedCompanyIds.size === 1 ? '' : 's'} seleccionada{selectedCompanyIds.size === 1 ? '' : 's'}
+                    </span>
+                    <Button type="button" disabled={isLoadingCompanyPeople || selectedCompanyIds.size === 0} onClick={() => void handleSearchCompanyPeople()}>
+                      {isLoadingCompanyPeople ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                      {isLoadingCompanyPeople ? 'Buscando contactos…' : `Buscar contactos${selectedCompanyIds.size > 0 ? ` (${selectedCompanyIds.size})` : ''}`}
+                    </Button>
+                  </div>
+                </div>
+              ) : !error ? (
+                <p className="text-sm text-muted-foreground">Ajusta los filtros y busca empresas para continuar.</p>
+              ) : null}
+            </div>
+          ) : null}
 
           {profileSearchNotice ? (
             <Alert
@@ -1596,6 +2094,150 @@ export default function SearchPage() {
         </CardContent>
       </Card>
 
+      {filters.searchMode === 'filters' && filterStep === 'people' ? (
+        <Card className="overflow-hidden rounded-2xl border-border/60 bg-card/90 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/75">
+          <CardHeader className="flex flex-col gap-3 border-b border-border/60 bg-muted/10 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <div className="space-y-1">
+              <h2 className="text-lg font-semibold tracking-tight">Contactos por empresa</h2>
+              <CardDescription role="status" aria-live="polite" aria-atomic="true">
+                {isLoadingCompanyPeople
+                  ? 'Buscando contactos en las empresas seleccionadas…'
+                  : companyWindowList.length > 0
+                    ? `${companyWindowList.reduce((total, window) => total + window.leads.length, 0)} contactos en ${companyWindowList.length} empresas.`
+                    : 'Selecciona empresas y busca contactos para ver resultados.'}
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={selectedLeads.size === 0 || isSaving}
+              onClick={handleSaveSelectedLeads}
+              className="shadow-none"
+            >
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {isSaving ? 'Guardando…' : `Guardar seleccionados${selectedLeads.size > 0 ? ` (${selectedLeads.size})` : ''}`}
+            </Button>
+          </CardHeader>
+          <CardContent className="p-4 sm:p-5">
+            {companyWindowList.length === 0 && !isLoadingCompanyPeople ? (
+              <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-6 py-8 text-center">
+                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                  <Building2 className="h-5 w-5" />
+                </div>
+                <p className="font-medium">Sin ventanas todavía</p>
+                <p className="mt-1 max-w-md text-sm text-muted-foreground">Vuelve a Empresas, selecciona al menos una y busca contactos.</p>
+              </div>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+                <div className="space-y-2" role="group" aria-label="Empresas seleccionadas">
+                  <Label className="text-xs uppercase tracking-wide text-muted-foreground">Empresas</Label>
+                  {companyWindowList.map((window) => {
+                    const active = window.organization.id === activeCompanyId;
+                    return (
+                      <button
+                        key={window.organization.id}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => setActiveCompanyId(window.organization.id)}
+                        className={cn(
+                          'flex w-full items-center justify-between gap-2 rounded-xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                          active ? 'border-primary/50 bg-primary/5' : 'border-border/60 bg-background hover:border-primary/30',
+                        )}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium">{window.organization.name}</span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {window.organization.primary_domain || window.organization.website_url || 'Sin dominio'}
+                          </span>
+                        </span>
+                        <Badge variant={active ? 'default' : 'secondary'}>{window.leads.length}</Badge>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="min-w-0 space-y-3">
+                  {!activeWindow ? (
+                    <p className="text-sm text-muted-foreground">Elige una empresa para ver sus contactos.</p>
+                  ) : (
+                    <>
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <h3 className="truncate text-base font-semibold">{activeWindow.organization.name}</h3>
+                          <p className="truncate text-sm text-muted-foreground">
+                            {activeWindow.organization.primary_domain || activeWindow.organization.website_url || ''}
+                            {activeWindow.totalEntries ? ` · ${activeWindow.totalEntries} estimados` : ''}
+                          </p>
+                        </div>
+                        <span className="text-sm text-muted-foreground" role="status">
+                          {activeWindow.leads.length} contacto{activeWindow.leads.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      {activeWindow.error && activeWindow.leads.length === 0 ? (
+                        <Alert className="border-amber-200 bg-amber-50/80 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                          <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+                          <AlertTitle>Sin resultados en esta empresa</AlertTitle>
+                          <AlertDescription>{activeWindow.error}</AlertDescription>
+                        </Alert>
+                      ) : activeWindow.leads.length > 0 ? (
+                        <div className="max-h-[65vh] space-y-2 overflow-y-auto">
+                          {activeWindow.leads.map((lead) => {
+                            const already = savedIds.has(lead.id) || savedApolloIds.has(String(lead.id));
+                            const contacted = !!((lead.id && contactedIds.has(lead.id)) || (lead.email && contactedIds.has(lead.email)));
+                            const disabled = already || contacted;
+                            return (
+                              <div key={lead.id} className="flex items-start gap-3 rounded-xl border border-border/60 p-3">
+                                <Checkbox
+                                  aria-label={`Seleccionar ${lead.name}`}
+                                  disabled={disabled}
+                                  checked={selectedLeads.has(lead.id)}
+                                  onCheckedChange={(checked) => handleSelectLead(lead.id, Boolean(checked))}
+                                  className="mt-1"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <p className="truncate font-medium">{lead.name}</p>
+                                      <p className="line-clamp-2 text-sm text-muted-foreground">{lead.title}</p>
+                                    </div>
+                                    {already ? <Badge variant="secondary">Guardado</Badge> : contacted ? <Badge variant="outline">Contactado</Badge> : null}
+                                  </div>
+                                  <p className="mt-1 truncate text-sm">{lead.company}</p>
+                                  {lead.email ? <p className="truncate text-xs text-muted-foreground">{lead.email}</p> : null}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                      {activeWindow.error && activeWindow.leads.length > 0 ? (
+                        <p className="text-sm text-amber-700 dark:text-amber-200">{activeWindow.error}</p>
+                      ) : null}
+                      <div className="flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-xs text-muted-foreground">
+                          {activeWindow.hasMore
+                            ? `Página ${activeWindow.page}. Puedes cargar hasta ${activeWindow.perPage} más.`
+                            : 'No quedan más contactos con estos filtros en esta empresa.'}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={!activeWindow.hasMore || activeWindow.isExpanding}
+                          onClick={() => void handleExpandCompany(activeWindow.organization.id)}
+                        >
+                          {activeWindow.isExpanding ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                          {activeWindow.isExpanding ? 'Buscando más…' : activeWindow.page === 0 ? 'Reintentar' : `Expandir · hasta ${activeWindow.perPage} más`}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {filters.searchMode === 'filters' ? null : (
       <Card className="overflow-hidden rounded-2xl border-border/60 bg-card/90 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.16)] dark:bg-card/75">
         <CardHeader className="flex flex-col gap-3 border-b border-border/60 bg-muted/10 p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="space-y-1">
@@ -1806,6 +2448,7 @@ export default function SearchPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       <Dialog open={saveSearchOpen} onOpenChange={setSaveSearchOpen}>
         <DialogContent>

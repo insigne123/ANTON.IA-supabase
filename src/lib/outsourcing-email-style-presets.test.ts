@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { generateMailFromStyle } from './ai/style-mail';
+import { GRUPOEXPRO_REFERENCE_TEMPLATES } from './email-studio/grupoexpro-templates';
 import {
   EmailStyleSelectionSchema,
   OUTSOURCING_EMAIL_STYLE_PRESETS,
@@ -67,4 +68,33 @@ test('outsourcing email presets expose stable selectable ids', () => {
   }
   assert.equal(EmailStyleSelectionSchema.safeParse('preset:not-a-preset').success, false);
   assert.equal(EmailStyleSelectionSchema.safeParse('not-a-uuid').success, false);
+});
+
+test('six service references are not globally selectable or implicitly approved', () => {
+  assert.equal(GRUPOEXPRO_REFERENCE_TEMPLATES.length, 6);
+  assert.equal(new Set(GRUPOEXPRO_REFERENCE_TEMPLATES.map((item) => item.id)).size, 6);
+  for (const item of GRUPOEXPRO_REFERENCE_TEMPLATES) {
+    assert.equal(item.status, 'editable-reference');
+    assert.equal(EmailStyleSelectionSchema.safeParse(item.id).success, false);
+    assert.equal(getOutsourcingEmailStylePresetFromSelection(`preset:${item.id}`), null);
+    const copy = `${item.profile.subjectTemplate}\n${item.profile.bodyTemplate}`;
+    assert.doesNotMatch(copy, /\d|garantiz|garantia|ley\s|sin costo|libre de responsabilidad|ranking|Workges/i);
+    assert.equal((copy.match(/\?/g) || []).length, 1);
+    assert.equal(item.profile.constraints.noFabrication, true);
+    assert.doesNotMatch(copy, /explorar si|te escribo para|soluciones integrales|prioridades/i);
+    assert.match(item.profile.instructions, /no autoriza capacidades/);
+    assert.ok(item.profile.do.some((rule) => /sin repetir el inicial/.test(rule)));
+  }
+});
+
+test('service references render the actual sender, not a hardcoded brand identity', () => {
+  for (const item of GRUPOEXPRO_REFERENCE_TEMPLATES) {
+    const preview = generateMailFromStyle(item.profile, null, { fullName: 'Ana Perez', companyName: 'Acme' }, {
+      sender: { name: 'Pat', email: 'pat@example.test', company: 'Sender Org' },
+    });
+    assert.match(preview.subject, /Acme/);
+    assert.match(preview.body, /Hola Ana/);
+    assert.match(preview.body, /Pat/);
+    assert.doesNotMatch(preview.body, /\{\{|\[\[|GrupoExpro/);
+  }
 });

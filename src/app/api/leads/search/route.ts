@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from "next/server";
 import { normalizeDomainList } from "@/lib/domain";
 import {
+  CompanyFilterSearchRequestSchema,
   CompanyNameSearchRequestSchema,
+  CompanyPeopleSearchRequestSchema,
   N8NRequestBodySchema,
   LinkedInProfileSearchRequestSchema,
   LeadsResponseSchema
@@ -174,6 +176,9 @@ function pickLeadSearchMeta(json: unknown) {
       ? Number(source.organization_search_credits)
       : undefined,
     debug_logs: Array.isArray(source.debug_logs) ? source.debug_logs : undefined,
+    total_entries: source.total_entries,
+    total_pages: source.total_pages,
+    raw_count: source.raw_count,
   };
 }
 
@@ -271,6 +276,61 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
     return await fetch(url, { ...init, signal: ctrl.signal });
   } finally {
     clearTimeout(t);
+  }
+}
+
+function asBackendStringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+  return String(value ?? '').split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function normalizeEmployeeRangeForBackend(value: string): string | null {
+  const normalized = String(value || '').trim().toLowerCase().replace(/\s+empleados?$/, '').trim();
+  const bounded = normalized.match(/^(\d+)\s*(?:-|,|a)\s*(\d+)$/);
+  if (bounded) {
+    const minimum = Number(bounded[1]);
+    const maximum = Number(bounded[2]);
+    if (minimum >= 0 && maximum >= minimum && maximum <= 10_000_000) return `${minimum},${maximum}`;
+    return null;
+  }
+  const openEnded = normalized.match(/^(\d+)\s*\+$/);
+  if (openEnded) {
+    const minimum = Number(openEnded[1]);
+    return minimum <= 10_000_000 ? `${minimum},10000000` : null;
+  }
+  return null;
+}
+
+async function callBackendRaw(payload: any): Promise<{ ok: true; json: any } | { ok: false; error: string }> {
+  const backendSecret = String(process.env.ENRICHMENT_SERVICE_SECRET || '').trim();
+  if (!backendSecret) return { ok: false, error: 'BACKEND_AUTH_NOT_CONFIGURED' };
+  try {
+    const res = await fetchWithTimeout(
+      LEAD_SEARCH_URL,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "x-api-secret-key": backendSecret,
+        },
+        body: JSON.stringify(payload),
+      },
+      TIMEOUT_MS
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ok: false, error: `SERVICE_HTTP_${res.status}:${text}` };
+    }
+    const raw = await res.text();
+    if (!raw || !raw.trim()) return { ok: false, error: 'SERVICE_EMPTY_BODY' };
+    try {
+      return { ok: true, json: JSON.parse(raw) };
+    } catch {
+      return { ok: false, error: `SERVICE_BAD_JSON:${raw.slice(0, 300)}` };
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Unknown' };
   }
 }
 
@@ -455,6 +515,156 @@ export async function POST(req: NextRequest) {
     };
 
     if (!Array.isArray(body)) {
+      const rawBody = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+      const explicitMode = String(rawBody.search_mode || rawBody.searchMode || '').trim().toLowerCase();
+
+      if (explicitMode === 'companies' || explicitMode === 'organizations' || explicitMode === 'organization_search') {
+        const companiesParsed = CompanyFilterSearchRequestSchema.safeParse(body);
+        if (!companiesParsed.success) {
+          return NextResponse.json({ error: 'INVALID_REQUEST_BODY', details: companiesParsed.error.flatten() }, { status: 400 });
+        }
+        const companiesReq = companiesParsed.data as any;
+        const providerDecision = resolveLeadProvider({ organizationId });
+        await recordSearchRequest({
+          searchMode: 'companies',
+          organizationId,
+          providerRequested: providerDecision.requestedProvider,
+          providerUsed: providerDecision.provider,
+        });
+        const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
+        if ('error' in quotaReservation && quotaReservation.error) {
+          return await auditSearchResponse(quotaReservation.error, {
+            requestId, userId, organizationId, actorType, searchMode: 'companies',
+            providerRequested: providerDecision.requestedProvider, providerUsed: providerDecision.provider,
+          });
+        }
+        const companyKeywords = [...new Set([
+          ...asBackendStringList(companiesReq.company_keywords), ...asBackendStringList(companiesReq.companyKeywords),
+        ])];
+        const companyLocation = [...new Set([
+          ...asBackendStringList(companiesReq.company_location), ...asBackendStringList(companiesReq.companyLocation),
+          ...(companiesReq.location ? asBackendStringList(companiesReq.location) : []),
+        ])];
+        const employeeRanges = [...new Set([
+          ...asBackendStringList(companiesReq.employee_ranges), ...asBackendStringList(companiesReq.employeeRanges),
+          ...(companiesReq.sizeRange ? [String(companiesReq.sizeRange)] : []),
+        ])].map(normalizeEmployeeRangeForBackend).filter((range): range is string => Boolean(range));
+        if (companyKeywords.length === 0 && companyLocation.length === 0 && employeeRanges.length === 0) {
+          return NextResponse.json({ error: 'INVALID_REQUEST_BODY', message: 'Agrega al menos un filtro de empresa.' }, { status: 400 });
+        }
+        const page = Math.min(500, Math.max(1, Number(companiesReq.page ?? 1) || 1));
+        // `page`/`per_page` accept both aliases; `perPage` wins when both are present.
+        const perPage = Math.min(100, Math.max(1, Number(companiesReq.perPage ?? companiesReq.per_page ?? 25) || 25));
+        const backendPayload = {
+          provider: providerDecision.provider,
+          user_id: userId,
+          search_mode: 'organization_search',
+          company_keywords: companyKeywords,
+          company_location: companyLocation,
+          employee_ranges: employeeRanges,
+          page,
+          per_page: perPage,
+        };
+        const backend = await callBackendRaw(backendPayload);
+        if (!backend.ok) {
+          return NextResponse.json({ error: 'SERVICE_ERROR', message: backend.error }, { status: 502 });
+        }
+        const payload = (backend.json ?? {}) as Record<string, any>;
+        const response = NextResponse.json({
+          count: Number(payload.count ?? (Array.isArray(payload.organizations) ? payload.organizations.length : 0)) || 0,
+          organizations: Array.isArray(payload.organizations) ? payload.organizations : [],
+          search_mode: 'companies',
+          search_strategy: 'organizations_then_people',
+          page: Number(payload.page ?? page) || page,
+          per_page: Number(payload.per_page ?? perPage) || perPage,
+          total_entries: Number.isFinite(Number(payload.total_entries)) ? Number(payload.total_entries) : undefined,
+          total_pages: Number.isFinite(Number(payload.total_pages)) ? Number(payload.total_pages) : undefined,
+          organization_search_credits: Number.isFinite(Number(payload.organization_search_credits)) ? Number(payload.organization_search_credits) : 1,
+          providerRequested: providerDecision.requestedProvider,
+          providerUsed: providerDecision.provider,
+        }, { status: 200 });
+        response.headers.set('x-search-mode', 'companies');
+        response.headers.set('x-provider-used', providerDecision.provider);
+        response.headers.set('x-quota-count', String(quotaReservation.quota.count));
+        response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
+        return await auditSearchResponse(response, {
+          requestId, userId, organizationId, actorType, searchMode: 'companies',
+          providerRequested: providerDecision.requestedProvider, providerUsed: providerDecision.provider,
+          quotaCount: quotaReservation.quota.count, quotaLimit: quotaReservation.quota.limit,
+        });
+      }
+
+      if (explicitMode === 'company_people' || explicitMode === 'organization_people') {
+        const peopleParsed = CompanyPeopleSearchRequestSchema.safeParse(body);
+        if (!peopleParsed.success) {
+          return NextResponse.json({ error: 'INVALID_REQUEST_BODY', details: peopleParsed.error.flatten() }, { status: 400 });
+        }
+        const peopleReq = peopleParsed.data as any;
+        const providerDecision = resolveLeadProvider({ organizationId });
+        await recordSearchRequest({
+          searchMode: 'company_people',
+          organizationId,
+          providerRequested: providerDecision.requestedProvider,
+          providerUsed: providerDecision.provider,
+        });
+        const quotaReservation = await reserveLeadSearchQuota(userId, organizationId);
+        if ('error' in quotaReservation && quotaReservation.error) {
+          return await auditSearchResponse(quotaReservation.error, {
+            requestId, userId, organizationId, actorType, searchMode: 'company_people',
+            providerRequested: providerDecision.requestedProvider, providerUsed: providerDecision.provider,
+          });
+        }
+        const organizationIdValue = String(peopleReq.organization_id || peopleReq.organizationId || peopleReq.selected_organization_id || '').trim();
+        const titles = [...new Set([
+          ...asBackendStringList(peopleReq.titles),
+          ...(peopleReq.title ? asBackendStringList(peopleReq.title) : []),
+        ])];
+        const seniorities = [...new Set(asBackendStringList(peopleReq.seniorities))];
+        const personLocations = [...new Set([
+          ...asBackendStringList(peopleReq.person_locations), ...asBackendStringList(peopleReq.personLocations),
+          ...(peopleReq.personLocation ? asBackendStringList(peopleReq.personLocation) : []),
+        ])];
+        const excludePersonIds = [...new Set([
+          ...asBackendStringList(peopleReq.exclude_person_ids), ...asBackendStringList(peopleReq.excludePersonIds),
+        ])].slice(0, 500);
+        const page = Math.min(500, Math.max(1, Number(peopleReq.page ?? 1) || 1));
+        const perPage = Math.min(100, Math.max(1, Number(peopleReq.perPage ?? peopleReq.per_page ?? 50) || 50));
+        const backendPayload = {
+          provider: providerDecision.provider,
+          user_id: userId,
+          search_mode: 'organization_people',
+          organization_id: organizationIdValue,
+          titles,
+          seniorities,
+          person_locations: personLocations,
+          include_similar_titles: peopleReq.include_similar_titles ?? true,
+          page,
+          per_page: perPage,
+          exclude_person_ids: excludePersonIds,
+        };
+        let response = await callLeadSearchService(backendPayload, {
+          search_mode: 'company_people',
+          organization_id: organizationIdValue,
+          page,
+          per_page: perPage,
+          providerRequested: providerDecision.requestedProvider,
+          providerUsed: providerDecision.provider,
+          providerDefault: providerDecision.defaultProvider,
+          providerForcedReason: providerDecision.forcedProviderReason,
+          fallbackApplied: false,
+        });
+        response = await excludeSavedSearchResults(response, organizationId!);
+        response.headers.set('x-search-mode', 'company_people');
+        response.headers.set('x-provider-used', providerDecision.provider);
+        response.headers.set('x-quota-count', String(quotaReservation.quota.count));
+        response.headers.set('x-quota-limit', String(quotaReservation.quota.limit));
+        return await auditSearchResponse(response, {
+          requestId, userId, organizationId, actorType, searchMode: 'company_people',
+          providerRequested: providerDecision.requestedProvider, providerUsed: providerDecision.provider,
+          quotaCount: quotaReservation.quota.count, quotaLimit: quotaReservation.quota.limit,
+        });
+      }
+
       const profileParsed = LinkedInProfileSearchRequestSchema.safeParse(body);
       if (profileParsed.success) {
         const providerDecision = resolveLeadProvider({ organizationId });
@@ -638,6 +848,25 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+async function excludeSavedSearchResults(response: NextResponse, organizationId: string) {
+  if (!response.ok) return response;
+  const data = await response.json();
+  const identity = (lead: any) => String(lead.source_provider_id || lead.apollo_id || lead.id);
+  const ids = (data.leads || []).map(identity);
+  const excluded = new Set<string>();
+  const admin = getSupabaseAdminClient() as any;
+  if (ids.length) {
+    for (const table of ['leads', 'enriched_leads', 'enriched_opportunities']) {
+      const { data: saved, error } = await admin.from(table).select('source_provider_id')
+        .eq('organization_id', organizationId).eq('source_provider', 'apollo').in('source_provider_id', ids);
+      if (error) return NextResponse.json({ error: 'SAVED_LEADS_LOOKUP_FAILED' }, { status: 503 });
+      for (const row of saved || []) excluded.add(row.source_provider_id);
+    }
+  }
+  const fresh = (data.leads || []).filter((lead: any) => !excluded.has(identity(lead)));
+  return NextResponse.json({ ...data, leads: fresh, count: fresh.length, leads_count: fresh.length }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
 
 function cleanDomain(urlLike?: string | null): string | undefined {

@@ -39,7 +39,7 @@ test('projects dated snapshot evidence into stable V2 facts, claims, and compact
   assert.ok(first.sources.every((source) => /^[a-f0-9]{64}$/.test(source.contentHash)));
 });
 
-test('keeps undated evidence as graph facts but never promotes it to a factual V2 claim', () => {
+test('keeps undated evergreen evidence without inventing a date', () => {
   const projection = projectResearchSnapshotV1ToReportV2({
     snapshot: draftSnapshotFixture(),
     sellerProfile,
@@ -49,11 +49,19 @@ test('keeps undated evidence as graph facts but never promotes it to a factual V
 
   assert.equal(projection.facts.length, 2);
   assert.ok(projection.facts.every((fact) => fact.observedAt === null));
-  assert.equal(projection.claims.length, 0);
-  assert.deepEqual(projection.shortIdMap, {});
+  assert.equal(projection.claims.length, 2);
+  assert.ok(projection.claims.every((claim) => claim.observedAt === null));
 });
 
-test('uses native extraction time for legacy native evidence without observedAt', () => {
+test('expired factual claims are excluded without deleting their audit evidence', () => {
+  const snapshot = draftSnapshotFixture();
+  snapshot.claims.forEach((claim) => { claim.freshness.validUntil = DRAFT_FIXTURE_NOW.toISOString(); });
+  const projection = projectResearchSnapshotV1ToReportV2({ snapshot, sellerProfile, icpRules: null, generatedAt: DRAFT_FIXTURE_NOW.toISOString() });
+  assert.equal(projection.claims.length, 0);
+  assert.equal(projection.facts.length, snapshot.evidence.length);
+});
+
+test('does not mistake native extraction time for the date of a fact', () => {
   const raw = structuredClone(draftSnapshotFixture());
   raw.request.provider = 'native-research-v1';
   const projection = projectResearchSnapshotV1ToReportV2({
@@ -63,7 +71,7 @@ test('uses native extraction time for legacy native evidence without observedAt'
     generatedAt: DRAFT_FIXTURE_NOW.toISOString(),
   });
 
-  assert.equal(projection.facts[0]?.observedAt, '2026-08-20T12:00:00.000Z');
+  assert.equal(projection.facts[0]?.observedAt, null);
   assert.ok(projection.claims.length > 0);
 });
 

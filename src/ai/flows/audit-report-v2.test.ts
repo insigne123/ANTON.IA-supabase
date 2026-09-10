@@ -36,7 +36,7 @@ test('deterministic auditor detects every known v1 defect class that can block p
     .forEach((type) => assert.ok(issueTypes.has(type as any), `Missing ${type}`));
 });
 
-test('P7 excludes the accepted writer model and combines deterministic and model findings', async () => {
+test('P7 uses a separate Luna review with the actual evidence', async () => {
   let options: any = null;
   const result = await auditReportV2({
     sections: [{ key: 'company', title: 'Company', paragraphs: [{ text: 'Acme has 300 workers.', claimIds: ['c01'], context: 'target' }], blocks: [] }],
@@ -44,14 +44,20 @@ test('P7 excludes the accepted writer model and combines deterministic and model
     sources,
     contactCountry: 'PE',
     writerModels: ['gpt-5.6-luna'],
+    companyContext: 'Acme ofrece soporte operativo y administracion.',
+    sellerProfile: { products: [{ key: 'automation', description: 'Asistente documental' }] },
   }, {
     generate: (async (input: any) => {
       options = input;
-      return { data: { issues: [] }, telemetry: { modelName: 'gpt-5.6-sol', durationMs: 1 } };
+      return { data: { issues: [] }, telemetry: { modelName: 'gpt-5.6-luna', durationMs: 1 } };
     }) as any,
   });
-  assert.ok(!options.openAiModels.includes('gpt-5.6-luna'));
-  assert.equal(result.model, 'gpt-5.6-sol');
+  assert.deepEqual(options.openAiModels, ['gpt-5.6-luna']);
+  assert.equal(options.allowDefaultModelFallback, false);
+  assert.ok(options.prompt.includes(facts[0].statement));
+  assert.match(options.prompt, /Acme ofrece soporte operativo y administracion/);
+  assert.match(options.prompt, /Asistente documental/);
+  assert.equal(result.model, 'gpt-5.6-luna');
   assert.deepEqual(result.blockingSections, []);
 });
 
@@ -116,4 +122,81 @@ test('rewrites each blocking section once and leaves accepted sections untouched
   assert.equal(calls, 1);
   assert.equal(result.sections[0].title, 'Company');
   assert.equal(result.sections[1].title, 'Rewritten');
+});
+
+test('recommendations and imported profile paragraphs need no citations and closing quotes are not truncation', async () => {
+  const input = {
+    sections: [
+      { key: 'discovery', title: 'Preguntas', blocks: [], paragraphs: [{ text: 'Preguntar: «¿Como coordinan las entrevistas?»', claimIds: [], context: 'target', basis: 'recommendation' }] },
+      { key: 'volume', title: 'Volumen', blocks: [], paragraphs: [] },
+    ], claims: [], sources: [], contactCountry: 'PE', writerModels: ['gpt-5.6-terra'],
+  } as any;
+  assert.deepEqual(deterministicAuditReportV2(input), []);
+  const result = await auditReportV2(input, {
+    generate: (async () => ({ data: { issues: [{ section: 'volume', paragraphIndex: null, type: 'generic', fragment: 'No hay dimensionamiento.', severity: 'block' }] }, telemetry: { modelName: 'gpt-5.6-terra', durationMs: 1 } })) as any,
+  });
+  assert.deepEqual(result.blockingSections, []);
+});
+
+test('auditor requests seller-evidence review and retains material blocks inside recommended openings', async () => {
+  for (const fragment of ['Estamos conversando con equipos de reclutamiento', 'Ya ayudamos a empresas del sector', 'Nuestros clientes ahorraron un 30%']) {
+    let calls = 0;
+    const result = await auditReportV2({
+      sections: [{ key: 'angle', title: 'Apertura', blocks: [], paragraphs: [{ text: `Propuesta: "${fragment}. Me gustaria entender su proceso."`, basis: 'recommendation', claimIds: [], context: 'target' }] }],
+      claims: [], sources: [], contactCountry: 'PE', writerModels: ['gpt-5.6-luna'],
+      sellerProfile: { companyName: 'Seller', products: [{ key: 'automation', description: 'Automatizacion documental.' }] },
+    }, {
+      generate: (async (options: any) => {
+        calls++;
+        assert.match(options.prompt, /RESPALDO DEL VENDEDOR/);
+        assert.match(options.prompt, /incluso entre comillas en angle y con basis=recommendation/);
+        assert.match(options.prompt, /hard_hypothesis con severity=block/);
+        assert.match(options.prompt, /Una capacidad de automatizacion NO prueba clientes ni experiencia/);
+        assert.match(options.schema.shape.issues.element.shape.type.description, /vendedor no respaldados/);
+        const data = { issues: [{ section: 'angle', paragraphIndex: 0, type: 'hard_hypothesis', fragment, severity: 'block' }] };
+        assert.doesNotThrow(() => options.schema.parse(data));
+        return { data, telemetry: { modelName: 'gpt-5.6-luna', durationMs: 1 } };
+      }) as any,
+    });
+    assert.equal(calls, 1);
+    assert.deepEqual(result.blockingSections, ['angle']);
+    assert.equal(result.issues[0].severity, 'block');
+    assert.equal(result.issues[0].fragment, fragment);
+  }
+});
+
+test('supported seller activity, neutral capacity and proposed measurements remain admissible without decorative citations', async () => {
+  const texts = [
+    'Desarrollamos automatizacion documental; me gustaria entender su proceso.',
+    'Hemos implementado un piloto documental en Example.',
+    'Proponemos medir minutos por expediente antes y despues, sin prometer un ahorro.',
+  ];
+  const result = await auditReportV2({
+    sections: [{ key: 'angle', title: 'Apertura', blocks: [], paragraphs: texts.map((text) => ({ text, basis: 'recommendation', claimIds: [], context: 'target' })) }],
+    claims: [], sources: [], contactCountry: 'PE', writerModels: ['gpt-5.6-luna'],
+    sellerProfile: { products: [{ key: 'automation', description: 'Desarrollamos automatizacion documental. Hemos implementado un piloto documental en Example.' }] },
+  } as any, {
+    generate: (async (options: any) => {
+      assert.match(options.prompt, /Hemos implementado un piloto documental en Example/);
+      assert.match(options.prompt, /Una capacidad explicitamente ofrecida, una pregunta exploratoria o una metrica propuesta SIN promesa/);
+      return { data: { issues: [] }, telemetry: { modelName: 'gpt-5.6-luna', durationMs: 1 } };
+    }) as any,
+  });
+  assert.deepEqual(result.issues, []);
+});
+
+test('auditor preserves located pilot-metric and role-specificity warnings without confusing them with invented facts', async () => {
+  const fragment = 'Para Finanzas, automatizar ingreso de personal y medir eficiencia.';
+  const result = await auditReportV2({
+    sections: [{ key: 'fit', title: 'Piloto', blocks: [], paragraphs: [{ text: fragment, basis: 'recommendation', claimIds: [], context: 'target' }] }],
+    claims: [], sources: [], contactCountry: 'PE', writerModels: ['gpt-5.6-luna'],
+  } as any, {
+    generate: (async (options: any) => {
+      assert.match(options.prompt, /pilotos sin metrica observable propia/);
+      assert.match(options.prompt, /facturacion, cobranza, cierre o excepciones financieras/);
+      return { data: { issues: [{ section: 'fit', paragraphIndex: 0, type: 'generic', fragment, severity: 'warn' }] }, telemetry: { modelName: 'gpt-5.6-luna', durationMs: 1 } };
+    }) as any,
+  });
+  assert.equal(result.issues[0].type, 'generic');
+  assert.deepEqual(result.blockingSections, []);
 });

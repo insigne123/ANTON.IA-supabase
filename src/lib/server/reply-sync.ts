@@ -47,12 +47,14 @@ type InboundReply = {
   text?: string | null;
   html?: string | null;
   snippet?: string | null;
+  references?: string | null;
 };
 
 export type ReplySyncResult = {
   scanned: number;
   synced: number;
   skippedNoToken: number;
+  nextCursor: string | null;
   errors: Array<{ contactedId?: string; email?: string | null; provider?: string | null; error: string }>;
 };
 
@@ -114,10 +116,11 @@ function gmailMessageToReply(message: any): InboundReply {
     internetMessageId: getHeader(headers, 'Message-ID').replace(/^<|>$/g, '') || null,
     subject: getHeader(headers, 'Subject'),
     from: getHeader(headers, 'From'),
-    receivedAt: message?.internalDate ? new Date(Number(message.internalDate)).toISOString() : new Date().toISOString(),
+    receivedAt: message?.internalDate && Number.isFinite(Number(message.internalDate)) ? new Date(Number(message.internalDate)).toISOString() : '',
     text: bodies.text,
     html: bodies.html,
     snippet: message?.snippet || null,
+    references: `${getHeader(headers, 'In-Reply-To')} ${getHeader(headers, 'References')}`,
   };
 }
 
@@ -130,10 +133,15 @@ function pickInboundCandidate(messages: InboundReply[], row: ContactedRow, myEma
     .filter((message) => {
       const fromEmail = extractEmailAddress(message.from);
       const receivedAtMs = Date.parse(message.receivedAt || '');
-      if (!message.id || Number.isNaN(receivedAtMs)) return false;
+      if (!message.id || Number.isNaN(receivedAtMs) || !leadEmail || !Number.isFinite(sentAtMs) || !sentAtMs) return false;
       if (sentAtMs && receivedAtMs <= sentAtMs + 1000) return false;
       if (senderEmail && fromEmail === senderEmail) return false;
-      if (leadEmail && fromEmail !== leadEmail && !isSystemSender(fromEmail)) return false;
+      const threadMatches = Boolean(row.thread_id && message.threadId === row.thread_id)
+        || Boolean(row.conversation_id && message.conversationId === row.conversation_id);
+      const parentId = String(row.internet_message_id || '').replace(/^<|>$/g, '');
+      const references: string[] = String(message.references || '').match(/<[^<>\s]+>/g) || [];
+      if (!threadMatches && !(parentId && references.includes(`<${parentId}>`))) return false;
+      if (fromEmail !== leadEmail && !(isSystemSender(fromEmail) && detectDeliveryFailure({ subject: message.subject, from: message.from, text: message.text, html: message.html }))) return false;
       return true;
     })
     .sort((a, b) => Date.parse(b.receivedAt) - Date.parse(a.receivedAt))[0] || null;
@@ -144,7 +152,7 @@ async function fetchGmailMessage(accessToken: string, id: string) {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: 'no-store',
   });
-  if (!res.ok) return null;
+  if (!res.ok) throw new Error(`Gmail message lookup failed (${res.status})`);
   return res.json();
 }
 
@@ -153,7 +161,7 @@ async function fetchGmailThread(accessToken: string, threadId: string) {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: 'no-store',
   });
-  if (!res.ok) return [];
+  if (!res.ok) throw new Error(`Gmail thread lookup failed (${res.status})`);
   const data = await res.json();
   return Array.isArray(data?.messages) ? data.messages : [];
 }
@@ -175,28 +183,34 @@ async function searchGmailReplies(accessToken: string, row: ContactedRow) {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: 'no-store',
   });
-  if (!list.ok) return [];
+  if (!list.ok) throw new Error(`Gmail search failed (${list.status})`);
   const data = await list.json();
   const ids = (data?.messages || []).map((item: any) => item.id).filter(Boolean);
   const messages = await Promise.all(ids.map((id: string) => fetchGmailMessage(accessToken, id)));
   return messages.filter(Boolean);
 }
 
-async function findGmailReply(accessToken: string, row: ContactedRow): Promise<InboundReply | null> {
+export async function findGmailReply(accessToken: string, row: ContactedRow): Promise<InboundReply | null> {
   const profile = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: 'no-store',
-  }).then((res) => res.ok ? res.json() : null).catch(() => null);
+  }).then((res) => {
+    if (!res.ok) throw new Error(`Gmail profile lookup failed (${res.status})`);
+    return res.json();
+  });
   const myEmail = profile?.emailAddress || null;
 
   let messages: any[] = [];
   if (row.thread_id) {
     messages = await fetchGmailThread(accessToken, row.thread_id);
   } else if (row.message_id) {
-    const sent = await fetchGmailMessage(accessToken, row.message_id).catch(() => null);
-    if (sent?.threadId) messages = await fetchGmailThread(accessToken, sent.threadId);
+    const sent = await fetchGmailMessage(accessToken, row.message_id);
+    if (sent?.threadId) {
+      row = { ...row, thread_id: sent.threadId };
+      messages = await fetchGmailThread(accessToken, sent.threadId);
+    }
   }
-  if (messages.length === 0) messages = await searchGmailReplies(accessToken, row);
+  if (messages.length === 0 && !row.thread_id && row.internet_message_id) messages = await searchGmailReplies(accessToken, row);
 
   return pickInboundCandidate(messages.map(gmailMessageToReply), row, myEmail);
 }
@@ -225,34 +239,40 @@ function outlookMessageToReply(message: any): InboundReply {
     internetMessageId: String(message?.internetMessageId || '').replace(/^<|>$/g, '') || null,
     subject: message?.subject || null,
     from: message?.from?.emailAddress?.address || null,
-    receivedAt: message?.receivedDateTime || new Date().toISOString(),
+    receivedAt: message?.receivedDateTime || '',
     text: message?.bodyPreview || null,
     html: message?.body?.content || null,
     snippet: message?.bodyPreview || null,
+    references: `${getHeader(message?.internetMessageHeaders, 'In-Reply-To')} ${getHeader(message?.internetMessageHeaders, 'References')}`,
   };
 }
 
-async function findOutlookReply(accessToken: string, row: ContactedRow): Promise<InboundReply | null> {
-  const select = '$select=id,subject,conversationId,internetMessageId,from,receivedDateTime,bodyPreview,body';
+export async function findOutlookReply(accessToken: string, row: ContactedRow): Promise<InboundReply | null> {
+  const sentAt = Date.parse(row.sent_at || '');
+  if (!Number.isFinite(sentAt)) return null;
+  const select = '$select=id,subject,conversationId,internetMessageId,internetMessageHeaders,from,receivedDateTime,bodyPreview,body';
   let items: any[] = [];
 
   if (row.conversation_id) {
     const params = new URLSearchParams();
-    params.set('$filter', `conversationId eq '${escapeODataLiteral(row.conversation_id)}'`);
+    params.set('$filter', `receivedDateTime gt ${new Date(sentAt).toISOString()} and conversationId eq '${escapeODataLiteral(row.conversation_id)}'`);
     params.set('$top', '25');
+    params.set('$orderby', 'receivedDateTime desc');
     const res = await graphFetch(accessToken, `/me/messages?${params.toString()}&${select}`);
-    if (res.ok) {
+    if (!res.ok) throw new Error(`Outlook conversation lookup failed (${res.status})`);
+    {
       const data = await res.json();
       items = Array.isArray(data?.value) ? data.value : [];
     }
   }
 
-  if (items.length === 0 && row.email) {
+  if (items.length === 0 && !row.conversation_id && row.internet_message_id && row.email) {
     const params = new URLSearchParams();
     params.set('$search', `"from:${normalizeEmail(row.email)}"`);
     params.set('$top', '10');
     const res = await graphFetch(accessToken, `/me/messages?${params.toString()}&${select}`);
-    if (res.ok) {
+    if (!res.ok) throw new Error(`Outlook search failed (${res.status})`);
+    {
       const data = await res.json();
       items = Array.isArray(data?.value) ? data.value : [];
     }
@@ -372,23 +392,28 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
   return true;
 }
 
-export async function syncRepliesForOrganization(supabase: any, input: { organizationId: string; userId?: string | null; limit?: number }): Promise<ReplySyncResult> {
-  const limit = Math.min(Math.max(Number(input.limit || 200), 1), 500);
-  const result: ReplySyncResult = { scanned: 0, synced: 0, skippedNoToken: 0, errors: [] };
+export async function syncRepliesForOrganization(supabase: any, input: { organizationId: string; userId?: string | null; limit?: number; cursor?: string | null }): Promise<ReplySyncResult> {
+  const limit = Number.isFinite(input.limit) ? Math.min(Math.max(Math.trunc(input.limit!), 1), 500) : 200;
+  const result: ReplySyncResult = { scanned: 0, synced: 0, skippedNoToken: 0, errors: [], nextCursor: null };
 
   let query = supabase
     .from('contacted_leads')
     .select('id, user_id, organization_id, mission_id, lead_id, name, email, company, role, subject, sent_at, status, provider, message_id, thread_id, conversation_id, internet_message_id, lifecycle_state, reply_intent, replied_at')
     .eq('organization_id', input.organizationId)
-    .order('sent_at', { ascending: false })
-    .limit(limit);
+    .in('provider', ['gmail', 'outlook'])
+    .is('replied_at', null)
+    .or('status.is.null,status.not.in.(replied,failed)')
+    .order('id', { ascending: true })
+    .limit(limit + 1);
 
   if (input.userId) query = query.eq('user_id', input.userId);
+  if (input.cursor) query = query.gt('id', input.cursor);
 
   const { data, error } = await query;
   if (error) throw error;
 
-  const rows = (data || []).filter((row: any) => row.provider === 'gmail' || row.provider === 'outlook').filter((row: any) => row.status !== 'replied' && !row.replied_at && row.status !== 'failed') as ContactedRow[];
+  const rows = (data || []).slice(0, limit) as ContactedRow[];
+  result.nextCursor = (data || []).length > limit ? rows[rows.length - 1].id : null;
   result.scanned = rows.length;
 
   const tokenCache = new Map<string, string | null>();

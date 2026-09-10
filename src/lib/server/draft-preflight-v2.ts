@@ -5,7 +5,7 @@ import {
   canonicalSha256,
   type MessagingPreflightV1,
 } from '@/lib/messaging-contracts';
-import type { DraftContextV2 } from '@/lib/server/draft-context-v2';
+import { DRAFT_STYLE_ADVISORIES, type DraftContextV2 } from '@/lib/server/draft-context-v2';
 
 export const DRAFT_PREFLIGHT_V2_VERSION = 'native-draft-preflight/v2';
 
@@ -40,6 +40,7 @@ export type DraftPreflightIssueV2 = {
     | 'personalization_invalid'
     | 'source_url_invalid'
     | 'hypothesis_invalid'
+    | 'unsupported_material_claim'
     | 'hypothesis_unqualified';
   message: string;
   location: 'subject' | 'body' | 'research';
@@ -180,9 +181,12 @@ function sentenceParts(value: string) {
 }
 
 const draftCtaCue = /\b(?:agenda(?:mos|r)?|agend(?:amos|ar)?|coordina(?:mos|r)?\s+(?:una\s+)?(?:reunion|reunión|llamada|call|cita)|conversemos|conversar|hablemos|hablar|reunion|reunión|llamada|call|calendly|calendar|te parece|te sirve|podemos (?:hablar|conversar|coordinar)|responde|disponibilidad)\b/i;
-const commercialActionCue = /\b(?:ayud\w*|automat\w*|orden\w*|reun\w*|encontr\w*|respond\w*|actualiz\w*|dej\w*|part\w*|trabaj\w*)\b/i;
 const commercialOutcomeCue = /\b(?:para\s+\p{L}|podr[ií]a|quiz[aá]s|si\b|cuando\b|as[ií]|sin\s+\p{L})/iu;
 const abstractCommercialLanguage = /\b(?:no\s+(?:quiero|quisiera|busco)\s+asumir|sin\s+asumir|explorar\s+si|prioridades?\s+(?:actuales|comerciales)|(?:ese|este|un)\s+relato|relato\s+comercial|narrativa\s+comercial|mensajes?\s+comerciales?)\b/i;
+
+// Reviewed commercial wording is advisory only. It can appear in a report-backed draft
+// and is left for human editing; it never blocks creation by itself.
+const editorialPhrases = new Set(DRAFT_STYLE_ADVISORIES.map(normalizeForMatch));
 
 function isUnapprovedDraftCtaSentence(sentence: string) {
   return draftCtaCue.test(sentence) || /[¿?]/.test(sentence);
@@ -192,10 +196,9 @@ export function stripUnapprovedDraftCtasV2(body: string, approvedCta: string) {
   const withoutApprovedCta = approvedCta ? body.split(approvedCta).join(' ') : body;
   return withoutApprovedCta
     .split(/\n{2,}/)
-    .map((paragraph) => sentenceParts(paragraph)
+    .map((paragraph) => paragraph.split('\n').map((line) => sentenceParts(line)
       .filter((sentence) => !isUnapprovedDraftCtaSentence(sentence))
-      .join(' '))
-    .map(text)
+      .join(' ')).filter(Boolean).join('\n'))
     .filter(Boolean)
     .join('\n\n');
 }
@@ -229,17 +232,18 @@ function hasGroundedPersonalization(
   content: string,
 ) {
   const evidenceById = new Map(context.evidence.map((evidence) => [evidence.evidenceId, evidence]));
-  const normalizedContent = normalizeForMatch(content);
+  const sentences = sentenceParts(content).map(normalizeForMatch);
   return personalization.every((item) => {
     const statement = draftEvidencePersonalizationStatementV2(
       evidenceById.get(item.evidenceId)?.statement || '',
     );
     const materialTerms = [...new Set(materialPersonalizationTerms(statement))];
-    const matchedTerms = materialTerms.filter((term) => normalizedContent.includes(term));
     // A faithful paraphrase often changes verbs and nouns. Two material terms
     // still bind the copy to the selected evidence without requiring verbatim text.
     const minimumMatches = Math.min(2, materialTerms.length);
-    return Boolean(statement && minimumMatches > 0 && matchedTerms.length >= minimumMatches);
+    return Boolean(statement && minimumMatches > 0 && sentences.some((sentence) => (
+      materialTerms.filter((term) => sentence.split(' ').some((word) => word.startsWith(term))).length >= minimumMatches
+    )));
   });
 }
 
@@ -309,7 +313,8 @@ export function repairCataloguedDraftPersonalizationV2(
 
 function commercialOfferParagraph(body: string, approvedCta: string) {
   const paragraphs = bodyParagraphs(approvedCta ? body.split(approvedCta).join(' ') : body);
-  return paragraphs[paragraphs.length - 1] || '';
+  // The offer can span prose and bullets; the first two blocks remain greeting and anchor.
+  return paragraphs.slice(2).join('\n\n') || paragraphs[paragraphs.length - 1] || '';
 }
 
 const sellerOfferStopWords = new Set([
@@ -344,7 +349,7 @@ function isGroundedInSellerOffer(context: DraftContextV2, offerParagraph: string
 
 function isGroundedInTargetEvidence(context: DraftContextV2, offerParagraph: string) {
   const outputTerms = new Set(materialPersonalizationTerms(offerParagraph));
-  return context.evidence.some((evidence) => materialPersonalizationTerms(
+  return context.evidence.filter((evidence) => evidence.supportedFactClaimIds.length > 0).some((evidence) => materialPersonalizationTerms(
     draftEvidencePersonalizationStatementV2(evidence.statement),
   ).some((term) => outputTerms.has(term)));
 }
@@ -357,7 +362,6 @@ function hasCommercialRelevance(context: DraftContextV2, body: string, approvedC
     || sellerName === normalizeForMatch('Mi empresa')
     || normalizedOffer.includes(sellerName);
   return sellerMentioned
-    && commercialActionCue.test(offerParagraph)
     && commercialOutcomeCue.test(offerParagraph)
     && isGroundedInSellerOffer(context, offerParagraph)
     && isGroundedInTargetEvidence(context, offerParagraph);
@@ -394,6 +398,23 @@ function duplicateSentence(body: string) {
   return false;
 }
 
+function materialQuantities(sentence: string) {
+  return [...sentence.matchAll(/\b\d+(?:[.,]\d+)*(?:[ \t]+(?:mil|millones?)\b)?(?:[ \t]*%|[ \t]+por[ \t]+ciento\b)?/giu)].map((match) => {
+    const after = sentence.slice(match.index + match[0].length);
+    const percent = /%|por[ \t]+ciento/i.test(match[0]);
+    // Bind to a single metric, never arbitrary trailing prose or the next line.
+    const following = after.match(percent ? /^[ \t]+(?:de[l]?[ \t]+)?([\p{L}]+)/u : /^[ \t]+([\p{L}]+)/u)?.[1] || '';
+    const connector = /^(?:a|al|con|de|del|el|en|es|la|las|los|para|por|que|y|o|e|sin|sobre)$/i;
+    const preceding = sentence.slice(0, match.index).replace(/(?:\s+(?:en|un|el|de|del))+[ \t]*$/i, '').trim().match(/([\p{L}]+)$/u)?.[1] || '';
+    const metric = following && !connector.test(following) ? following : percent ? preceding : '';
+    return {
+      raw: match[0] + (following && !connector.test(following) ? ` ${following}` : ''),
+      key: normalizeForMatch(`${match[0].replace(/%/g, ' por ciento ')} ${metric}`),
+      index: match.index,
+    };
+  });
+}
+
 export function draftContentFingerprintV2(subject: string, body: string) {
   return canonicalSha256({
     subject: normalizeForMatch(subject),
@@ -424,6 +445,7 @@ export function validateDraftPreflightV2(
   const rawBody = String(output.body || '').trim();
   const body = text(output.body);
   const issues: DraftPreflightIssueV2[] = [];
+  const warnings = context.warnings.slice(0, 100);
   const add = (code: DraftPreflightIssueV2['code'], message: string, location: DraftPreflightIssueV2['location']) => {
     issues.push({ code, message, location });
   };
@@ -437,7 +459,7 @@ export function validateDraftPreflightV2(
     add('body_length', `El cuerpo debe tener entre ${context.constraints.body.minWords} y ${context.constraints.body.maxWords} palabras.`, 'body');
   }
   if (bodyParagraphs(rawBody).length < 4) {
-    add('body_structure', 'El correo debe separar el saludo, dos párrafos útiles y el CTA con líneas en blanco.', 'body');
+    warnings.push('Revisa la legibilidad: separa el saludo, el contenido útil y el CTA según la plantilla.');
   }
   if (hasPlaceholder(subject) || hasPlaceholder(body)) {
     add('unresolved_placeholder', 'El correo contiene placeholders sin resolver.', 'body');
@@ -447,12 +469,22 @@ export function validateDraftPreflightV2(
   for (const phrase of context.constraints.prohibitedPhrases) {
     const normalizedPhrase = normalizeForMatch(phrase);
     if (normalizedPhrase && normalizedContent.includes(normalizedPhrase)) {
-      add('prohibited_phrase', `El correo contiene una frase prohibida: ${phrase}.`, 'body');
+      if (editorialPhrases.has(normalizedPhrase)) {
+        warnings.push(`Revisa el estilo de esta expresión: ${phrase}.`);
+      } else {
+        add('prohibited_phrase', `El correo contiene una frase prohibida: ${phrase}.`, 'body');
+      }
+    }
+  }
+  for (const phrase of DRAFT_STYLE_ADVISORIES) {
+    const normalizedAdvisory = normalizeForMatch(phrase);
+    if (normalizedAdvisory && normalizedContent.includes(normalizedAdvisory)) {
+      warnings.push(`Revisa el estilo de esta expresión: ${phrase}.`);
     }
   }
   for (const title of contactTitles(context)) {
     if (normalizedContent.includes(title)) {
-      add('prohibited_phrase', 'El correo no debe repetir literalmente el cargo formal del contacto o del remitente.', 'body');
+      warnings.push('Revisa si necesitas repetir literalmente el cargo formal del contacto o del remitente.');
     }
   }
 
@@ -461,6 +493,47 @@ export function validateDraftPreflightV2(
   const bodyOutsideRequiredCta = requiredCta
     ? body.split(requiredCta).join(' ')
     : body;
+  // Numbers are checked per sentence and subject, not against a global bag of digits.
+  // This is a conservative lexical guard, not a semantic entailment model.
+  const citedEvidence = output.personalization.flatMap((item) => context.evidence.filter((evidence) => (
+    evidence.evidenceId === item.evidenceId && evidence.supportedFactClaimIds.includes(item.claimId)
+  )));
+  const sellerStatements = [context.seller.valueProposition, ...context.seller.services, ...context.seller.proofPoints]
+    .filter((statement): statement is string => Boolean(statement));
+  const materialContent = `${subject}\n\n${requiredCta ? rawBody.split(context.constraints.cta.exactText).join(' ') : rawBody}`;
+  // Only line-leading ordinal punctuation is formatting. Remaining digits still get checked.
+  const materialSentences = materialContent.replace(/^[ \t]*\d+[.)][ \t]+(?=\S)/gm, '').split(/\r?\n/).flatMap(sentenceParts);
+  for (const sentence of materialSentences) {
+    const normalized = normalizeForMatch(sentence);
+    const sellerScoped = normalized.includes(normalizeForMatch(context.seller.companyName))
+      || /\b(?:nosotros|nuestro|nuestra|tenemos|contamos|operamos|cubrimos|llevamos)\b/.test(normalized);
+    const sources = sellerScoped ? sellerStatements : citedEvidence.map((evidence) => evidence.statement);
+    const quantities = materialQuantities(sentence);
+    for (const quantity of quantities) {
+      const supported = sources.some((source) => {
+        if (!materialQuantities(source).some((item) => item.key === quantity.key)) return false;
+        const terms = new Set(materialPersonalizationTerms(source));
+        return materialPersonalizationTerms(sentence).filter((term) => terms.has(term)).length >= 2;
+      });
+      if (!supported) {
+        const start = Math.max(0, quantity.index - 100);
+        const excerpt = `${start ? '...' : ''}${sentence.slice(start, start + 240)}${sentence.length > start + 240 ? '...' : ''}`;
+        add('unsupported_material_claim', `La cifra o su alcance no están respaldados para este sujeto: ${quantity.raw}. Oración (extracto limitado): ${JSON.stringify(excerpt)}`, 'body');
+      }
+    }
+    for (const evidence of citedEvidence) {
+      const terms = materialPersonalizationTerms(evidence.statement);
+      const overlap = terms.filter((term) => materialPersonalizationTerms(sentence).includes(term)).length;
+      if (sellerScoped || overlap < 2) continue;
+      const source = normalizeForMatch(evidence.statement);
+      const conditional = /\b(?:planea|prev[eé]|proyecta|siempre que|sujeto a|podria|si obtiene)\b/;
+      const negative = /\b(?:no|nunca|sin)\b/;
+      if ((conditional.test(source) && !conditional.test(normalized))
+        || (negative.test(source) && !negative.test(normalized))) {
+        add('unsupported_material_claim', 'La redacción elimina una condición o negación material de la evidencia.', 'body');
+      }
+    }
+  }
   const hasExtraQuestion = /[¿?]/.test(bodyOutsideRequiredCta);
   if (
     requiredCtaCount !== context.constraints.cta.maximumCount
@@ -471,10 +544,10 @@ export function validateDraftPreflightV2(
   }
 
   if (!hasCommercialRelevance(context, rawBody, requiredCta)) {
-    add('commercial_relevance', 'El último párrafo útil debe conectar una capacidad declarada en el perfil con una acción concreta y una consecuencia práctica.', 'body');
+    warnings.push('Revisa la relevancia comercial: conecta una capacidad declarada en el perfil con una acción concreta y una consecuencia práctica.');
   }
   if (abstractCommercialLanguage.test(bodyOutsideRequiredCta)) {
-    add('abstract_language', 'El correo usa lenguaje meta o abstracto en lugar de explicar una acción comercial concreta.', 'body');
+    warnings.push('El correo usa lenguaje meta o abstracto en lugar de explicar una acción comercial concreta.');
   }
 
   const existingFingerprints = new Set(options.existingContentFingerprints || []);
@@ -482,7 +555,7 @@ export function validateDraftPreflightV2(
     add('duplicate_content', 'El asunto y cuerpo duplican un borrador existente para este destinatario.', 'body');
   }
   if (duplicateSentence(body)) {
-    add('duplicate_sentence', 'El cuerpo repite una misma oración.', 'body');
+    warnings.push('El cuerpo repite una misma oración.');
   }
 
   const evidenceById = new Map(context.evidence.map((evidence) => [evidence.evidenceId, evidence]));
@@ -506,11 +579,11 @@ export function validateDraftPreflightV2(
       add('source_url_invalid', 'La URL de fuente no coincide con la evidencia declarada.', 'research');
     }
   }
-  if (output.personalization.length > 0 && !hasGroundedPersonalization(context, output.personalization, `${subject} ${body}`)) {
+  if (output.personalization.length > 0 && !hasGroundedPersonalization(context, output.personalization, rawBody)) {
     add('personalization_invalid', 'La personalización debe conservar los conceptos materiales de la evidencia seleccionada.', 'body');
   }
   if (output.personalization.length > 0 && hasCataloguedPersonalization(context, output.personalization, body)) {
-    add('personalization_invalid', 'La personalización enumera la fuente como una ficha; debe usar solo uno o dos detalles en lenguaje natural.', 'body');
+    warnings.push('La personalización enumera la fuente como una ficha; usa solo uno o dos detalles en lenguaje natural.');
   }
 
   const hypothesesById = new Map(context.hypotheses.map((hypothesis) => [hypothesis.claimId, hypothesis]));
@@ -521,13 +594,12 @@ export function validateDraftPreflightV2(
     add('hypothesis_unqualified', 'Las hipótesis deben mantenerse explícitamente como posibilidades, no como hechos.', 'body');
   }
 
-  const warnings = context.warnings.slice(0, 100);
   const preflight = issues.length === 0
     ? MessagingPreflightV1Schema.parse({
       status: 'passed',
       checkedAt: (options.now || new Date()).toISOString(),
       errors: [],
-      warnings,
+      warnings: warnings.slice(0, 100),
     })
     : createFailedDraftPreflightV2(issues.map((issue) => issue.message), warnings, options.now || new Date());
   return {

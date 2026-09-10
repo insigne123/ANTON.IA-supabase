@@ -22,6 +22,8 @@ import {
     OutboundPreProviderDeferredError,
 } from '@/lib/server/outbound-dispatch';
 import { ensureMessagingDraftV1, getCurrentMessagingDraftVersionV1 } from '@/lib/server/messaging-drafts';
+import { resolveCampaignReplyTarget, ReplyTargetError } from '@/lib/server/reply-target';
+import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +37,13 @@ export async function POST(req: NextRequest) {
         }
 
         const body = await req.json();
+        if (['replyTarget', 'replyTo', 'inReplyTo', 'threadId', 'conversationId', 'parentMessageId'].some((key) => key in body)) {
+            return NextResponse.json({ error: 'Reply targets must be derived from canonical campaign history' }, { status: 400 });
+        }
+        const deliveryMode = body.deliveryMode === undefined ? 'new_message' : body.deliveryMode;
+        if (!['new_message', 'reply_first', 'reply_previous'].includes(deliveryMode)) {
+            return NextResponse.json({ error: 'deliveryMode must be new_message, reply_first or reply_previous' }, { status: 400 });
+        }
         const {
             provider: rawProvider,
             to,
@@ -340,6 +349,17 @@ export async function POST(req: NextRequest) {
             metadata: messagingMetadata,
             provider: {
                 async send({ dispatchId }) {
+                    // Resolve only after the durable claim: replays never reselect a parent or send again.
+                    let replyTarget;
+                    try {
+                        replyTarget = deliveryMode === 'new_message' ? null
+                            : await resolveCampaignReplyTarget(getSupabaseAdminClient(), sendDraft, dispatchProvider, deliveryMode);
+                    } catch (error) {
+                        if (error instanceof ReplyTargetError) {
+                            return { outcome: 'rejected' as const, code: 'reply_target_unavailable', message: error.message, response: { providerInvoked: false } };
+                        }
+                        throw new OutboundPreProviderDeferredError('Reply history could not be verified. The provider was not invoked.', { code: 'reply_history_unavailable', cause: error });
+                    }
                     let quota;
                     try {
                         const quotaLimits = await getEffectiveDailyQuotaLimits({ userId: user.id, organizationId: orgId });
@@ -365,12 +385,13 @@ export async function POST(req: NextRequest) {
                     }
 
                     const providerReceipt = provider === 'google'
-                        ? await sendGmail(accessToken, delivery.to, delivery.subject, prepared.html, { textBody: prepared.text, unsubscribeUrl, idempotencyKey })
+                        ? await sendGmail(accessToken, delivery.to, delivery.subject, prepared.html, { textBody: prepared.text, unsubscribeUrl, idempotencyKey, ...(replyTarget ? { replyTarget } : {}) })
                         : await sendOutlook(accessToken, delivery.to, delivery.subject, prepared.html, {
                             textBody: prepared.text,
                             unsubscribeUrl,
                             idempotencyKey,
                             requestReceipts: sendDraft.content.deliveryOptions?.requestReceipts === true,
+                            ...(replyTarget ? { replyTarget } : {}),
                         });
                     const receipt = providerReceipt && typeof providerReceipt === 'object' ? providerReceipt as Record<string, unknown> : {};
                     const providerMessageId = String(receipt.id || receipt.messageId || receipt.internetMessageId || '').trim();

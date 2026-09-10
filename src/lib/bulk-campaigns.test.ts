@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRecipientHistory, defaultAudience, isCampaignMessageLocked, matchAudience, renderCampaignMessage, nextCampaignMessage, CampaignInputSchema, type AudiencePerson, type CampaignRecipient } from './bulk-campaigns';
+import { AI_RANK_CANDIDATE_LIMIT, buildCandidatesCsv, buildRecipientHistory, defaultAudience, isCampaignMessageLocked, matchAudience, renderCampaignMessage, nextCampaignMessage, validateRanking, CampaignInputSchema, type AudiencePerson, type CampaignRecipient, type EnrichedCandidate } from './bulk-campaigns';
 
-const person: AudiencePerson = { email: 'ana@example.com', name: 'Ana Pérez', company: 'Empresa', title: 'Operaciones', country: 'Chile', industry: '', size: '11-50', seniority: 'Manager', leadRef: 'lead', contacted: false, lastSentAt: null, replied: false, blockedReason: null, reasons: [] };
+const person: AudiencePerson = { email: 'ana@example.com', name: 'Ana Pérez', company: 'Empresa', title: 'Operaciones', country: 'Chile', industry: '', size: '11-50', seniority: 'Manager', leadRef: 'lead', contacted: false, lastSentAt: null, replied: false, blockedReason: null, reasons: [], enriched: true };
 test('audience excludes prior contacts and missing industry evidence', () => {
   assert.ok(matchAudience(person, defaultAudience));
   assert.equal(matchAudience({ ...person, contacted: true }, defaultAudience), null);
@@ -65,6 +65,46 @@ test('only untouched or deferred messages can be revised', () => {
   assert.equal(isCampaignMessageLocked('failed', deliveries), true);
   assert.equal(isCampaignMessageLocked('missing', deliveries), false);
   assert.equal(isCampaignMessageLocked('deferred', deliveries), false);
+});
+test('enrichedOnly drops saved leads without Apollo enrichment', () => {
+  assert.ok(matchAudience(person, defaultAudience));
+  assert.equal(matchAudience({ ...person, enriched: false }, defaultAudience), null);
+  assert.ok(matchAudience({ ...person, enriched: false }, { ...defaultAudience, enrichedOnly: false }));
+});
+const candidate: EnrichedCandidate = {
+  email: 'ana@example.com', name: 'Ana Pérez', company: 'Falabella', title: 'Jefa de Reclutamiento',
+  seniority: 'Manager', departments: ['Recursos Humanos'], industry: 'Retail', size: '1000+',
+  country: 'Chile', city: 'Santiago', headline: 'Lidero talento', emailStatus: 'verified', leadRef: 'lead-1',
+  contacted: false, replied: false, blockedReason: null, lastSentAt: null,
+};
+test('candidates CSV is compact, escaped and bounded', () => {
+  const tricky = { ...candidate, email: 'a,b@example.com', company: 'Acme "Corp"' };
+  const { csv, included, total } = buildCandidatesCsv([candidate, tricky]);
+  assert.equal(total, 2);
+  assert.equal(included, 2);
+  const lines = csv.split('\n');
+  assert.equal(lines.length, 3);
+  assert.ok(lines[0].startsWith('email,name,title,'));
+  assert.ok(lines[2].includes('"Acme ""Corp"""'));
+  const many = Array.from({ length: AI_RANK_CANDIDATE_LIMIT + 50 }, (_, index) => ({ ...candidate, email: `lead${index}@example.com` }));
+  const capped = buildCandidatesCsv(many);
+  assert.equal(capped.included, AI_RANK_CANDIDATE_LIMIT);
+  assert.equal(capped.total, many.length);
+});
+test('ranking validation only accepts known emails, dedupes, sorts and caps', () => {
+  const others = { ...candidate, email: 'beto@example.com' };
+  const items = [
+    { email: 'inventado@example.com', score: 99, reason: 'No existe' },
+    { email: 'ANA@example.com', score: 60, reason: 'Aceptable' },
+    { email: 'ana@example.com', score: 90, reason: 'La mejor opción' },
+    { email: 'beto@example.com', score: 70, reason: 'Buena opción' },
+    { email: 'mal', score: 50, reason: 'Correo inválido' },
+  ];
+  const ranked = validateRanking(items, [candidate, others], 10);
+  assert.deepEqual(ranked.map(item => item.email), ['ana@example.com', 'beto@example.com']);
+  assert.equal(ranked[0].score, 90);
+  assert.deepEqual(validateRanking(items, [candidate, others], 1).map(item => item.email), ['ana@example.com']);
+  assert.deepEqual(validateRanking('no-es-lista', [candidate], 10), []);
 });
 test('recipient history merges legacy contact, replies and campaign steps in order', () => {
   const events = buildRecipientHistory({

@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- Prototipo de referencia de la Consola SUPL.IA. Acompana a docs/suplia-v2-cowork-plan.md.
+     Abrir en un navegador. Datos de ejemplo; nombres de herramientas del catalogo real. -->
+<style>:root{color-scheme:light}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Consola SUPL.IA</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#f6f7f8;
+  --rail:#eceef0;
+  --surface:#ffffff;
+  --sunken:#f1f3f4;
+  --ink:#101317;
+  --ink-2:#3d464e;
+  --muted:#5b656e;
+  --faint:#8a939b;
+  --line:#e0e4e7;
+  --line-2:#cdd3d8;
+  --accent:#06616b;
+  --accent-ink:#044a52;
+  --accent-wash:#e2f0f1;
+  --ok:#17734a;
+  --ok-wash:#e2f1e9;
+  --warn:#8a5a00;
+  --warn-wash:#faefd9;
+  --danger:#a02a20;
+  --danger-wash:#f8e6e4;
+  --credit:#6d4aa8;
+  --credit-wash:#eee8f7;
+  --code-bg:#141a1f;
+  --code-ink:#dbe3e8;
+  --on-accent:#ffffff;
+  --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r-sm:6px; --r-md:10px; --r-lg:14px;
+  --shadow:0 1px 2px rgba(16,19,23,.05),0 12px 32px -18px rgba(16,19,23,.35);
+}
+:root:not([data-theme="light"]) { }
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#121619; --rail:#171c20; --surface:#1c2226; --sunken:#22282d;
+    --ink:#e8edf0; --ink-2:#bcc6cd; --muted:#94a0a8; --faint:#6f7c85;
+    --line:#2b3338; --line-2:#3b444b;
+    --accent:#4fb3bd; --accent-ink:#7fcdd5; --accent-wash:#123336;
+    --ok:#5cba8b; --ok-wash:#14301f; --warn:#d9a441; --warn-wash:#33270f;
+    --danger:#e0776b; --danger-wash:#361a17; --credit:#b195e0; --credit-wash:#241a36;
+    --code-bg:#0d1114; --code-ink:#cfd8de; --on-accent:#08191b;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px -18px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#121619; --rail:#171c20; --surface:#1c2226; --sunken:#22282d;
+  --ink:#e8edf0; --ink-2:#bcc6cd; --muted:#94a0a8; --faint:#6f7c85;
+  --line:#2b3338; --line-2:#3b444b;
+  --accent:#4fb3bd; --accent-ink:#7fcdd5; --accent-wash:#123336;
+  --ok:#5cba8b; --ok-wash:#14301f; --warn:#d9a441; --warn-wash:#33270f;
+  --danger:#e0776b; --danger-wash:#361a17; --credit:#b195e0; --credit-wash:#241a36;
+  --code-bg:#0d1114; --code-ink:#cfd8de; --on-accent:#08191b;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px -18px rgba(0,0,0,.8);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* ---------- page frame ---------- */
+.page{padding:0 16px;padding-block:20px 28px;max-width:1560px;margin:0 auto}
+.intro{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between;margin-bottom:16px}
+.intro h1{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 4px;text-wrap:balance}
+.intro p{margin:0;color:var(--muted);max-width:62ch}
+.intro .eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin:0 0 6px}
+.intro-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* ---------- console shell ---------- */
+.console{border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface);box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;height:min(860px,calc(100dvh - 150px));min-height:640px}
+.topbar{display:flex;align-items:center;gap:12px;padding:0 14px;height:52px;border-bottom:1px solid var(--line);background:var(--surface);flex:0 0 auto}
+.brand{display:flex;align-items:center;gap:9px;min-width:0}
+.mark{width:24px;height:24px;border-radius:7px;background:var(--accent);display:grid;place-items:center;flex:0 0 auto}
+.mark svg{display:block}
+.mark path,.avatar path{stroke:var(--on-accent)}
+.brand-name{font-weight:600;letter-spacing:-.01em;white-space:nowrap}
+.brand-name span{color:var(--faint);font-weight:450}
+.topbar-sep{width:1px;height:20px;background:var(--line);flex:0 0 auto}
+.topbar-spacer{flex:1 1 auto}
+.meter{display:flex;align-items:center;gap:8px;padding:4px 9px;border:1px solid var(--line);border-radius:999px;background:var(--sunken)}
+.meter-label{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.meter-bar{width:52px;height:5px;border-radius:3px;background:var(--line-2);overflow:hidden}
+.meter-fill{height:100%;background:var(--credit);width:38%}
+.meter-num{font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.tbtn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:var(--r-sm);color:var(--muted);border:1px solid transparent;white-space:nowrap}
+.tbtn:hover{background:var(--sunken);color:var(--ink)}
+.tbtn.on{background:var(--accent-wash);color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 28%,transparent)}
+.tbtn .k{font-family:var(--mono);font-size:11px}
+
+/* ---------- body grid ---------- */
+.body{flex:1 1 auto;display:grid;grid-template-columns:216px minmax(0,1fr) minmax(0,0fr);min-height:0;transition:grid-template-columns .32s cubic-bezier(.2,.7,.3,1)}
+.body.canvas-open{grid-template-columns:216px minmax(0,1fr) minmax(0,420px)}
+.body.rail-closed{grid-template-columns:0px minmax(0,1fr) minmax(0,0fr)}
+.body.rail-closed.canvas-open{grid-template-columns:0px minmax(0,1fr) minmax(0,420px)}
+
+/* ---------- rail ---------- */
+.rail{border-right:1px solid var(--line);background:var(--rail);overflow:hidden auto;display:flex;flex-direction:column;gap:2px;padding:12px 10px}
+.rail-h{font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);padding:12px 8px 5px}
+.rail-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:var(--r-sm);color:var(--ink-2);text-align:left;width:100%;font-size:13px}
+.rail-item:hover{background:color-mix(in srgb,var(--ink) 6%,transparent)}
+.rail-item.active{background:var(--surface);color:var(--ink);font-weight:500;box-shadow:0 1px 2px rgba(16,19,23,.06)}
+.rail-item .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto}
+.rail-new{border:1px dashed var(--line-2);justify-content:center;color:var(--muted);margin-bottom:6px}
+.skill-pill{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:var(--r-sm);font-size:12.5px;color:var(--ink-2)}
+.skill-pill:hover{background:color-mix(in srgb,var(--ink) 6%,transparent)}
+.skill-dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:0 0 auto}
+.skill-dot.off{background:var(--line-2)}
+.rail-foot{margin-top:auto;padding:10px 8px 2px;border-top:1px solid var(--line);font-size:12px;color:var(--faint)}
+
+/* ---------- thread ---------- */
+.center{display:flex;flex-direction:column;min-width:0;background:var(--ground)}
+.scenario-strip{display:flex;gap:6px;align-items:center;padding:9px 20px;border-bottom:1px solid var(--line);background:var(--surface);overflow-x:auto;flex:0 0 auto}
+.scenario-strip .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--faint);margin-right:2px;white-space:nowrap}
+.chip-btn{padding:4px 10px;border-radius:999px;border:1px solid var(--line);font-size:12.5px;color:var(--muted);white-space:nowrap}
+.chip-btn:hover{border-color:var(--line-2);color:var(--ink)}
+.chip-btn.on{background:var(--ink);color:var(--ground);border-color:var(--ink)}
+.thread{flex:1 1 auto;overflow-y:auto;padding:22px 20px 8px;scroll-behavior:smooth}
+.thread-inner{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+.turn{display:flex;flex-direction:column;gap:10px}
+.msg-user{align-self:flex-end;max-width:82%;background:var(--sunken);border:1px solid var(--line);border-radius:var(--r-md) var(--r-md) 3px var(--r-md);padding:9px 13px;color:var(--ink)}
+.msg-assist{display:flex;flex-direction:column;gap:10px}
+.assist-head{display:flex;align-items:center;gap:8px}
+.avatar{width:21px;height:21px;border-radius:6px;background:var(--accent);display:grid;place-items:center;flex:0 0 auto}
+.assist-name{font-size:12.5px;font-weight:500;color:var(--muted)}
+.tier{font-family:var(--mono);font-size:10px;padding:1px 5px;border-radius:4px;background:var(--sunken);color:var(--faint);border:1px solid var(--line)}
+.prose{color:var(--ink);max-width:66ch}
+.prose p{margin:0 0 9px}
+.prose p:last-child{margin-bottom:0}
+.prose strong{font-weight:600}
+.prose ul{margin:0 0 9px;padding-left:18px}
+.prose li{margin-bottom:3px}
+.caret{display:inline-block;width:7px;height:15px;background:var(--accent);vertical-align:-2px;margin-left:1px;animation:blink 1s steps(2,end) infinite}
+@keyframes blink{50%{opacity:0}}
+
+/* thinking */
+.thinking{border-left:2px solid var(--line-2);padding:2px 0 2px 11px}
+.thinking-h{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--faint);font-style:italic}
+.thinking-body{font-size:12.5px;color:var(--muted);margin-top:4px;max-width:62ch;font-style:italic}
+.thinking[data-open="false"] .thinking-body{display:none}
+
+/* tool chip */
+.tool{display:flex;align-items:flex-start;gap:9px;padding:8px 11px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);max-width:100%}
+.tool-ico{width:18px;height:18px;border-radius:5px;display:grid;place-items:center;flex:0 0 auto;margin-top:1px;background:var(--sunken)}
+.tool-main{min-width:0;flex:1 1 auto;display:block}
+.tool-name{display:block;font-family:var(--mono);font-size:12px;color:var(--ink);word-break:break-all}
+.tool-sub{display:block;font-size:12px;color:var(--muted);margin-top:1px}
+.tool-state{font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;padding:2px 6px;border-radius:4px;flex:0 0 auto;margin-top:1px}
+.s-run{background:var(--accent-wash);color:var(--accent-ink)}
+.s-ok{background:var(--ok-wash);color:var(--ok)}
+.s-wait{background:var(--warn-wash);color:var(--warn)}
+.s-err{background:var(--danger-wash);color:var(--danger)}
+.spin{width:11px;height:11px;border:1.5px solid var(--line-2);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* approval card */
+.approval{border:1px solid var(--warn);border-radius:var(--r-md);background:var(--surface);overflow:hidden}
+.approval.credit{border-color:color-mix(in srgb,var(--credit) 55%,var(--line))}
+.approval.strong{border-color:var(--danger)}
+.appr-bar{height:3px;background:var(--warn)}
+.approval.credit .appr-bar{background:var(--credit)}
+.approval.strong .appr-bar{background:var(--danger)}
+.appr-body{padding:12px 14px}
+.appr-top{display:flex;align-items:center;gap:8px;margin-bottom:3px;flex-wrap:wrap}
+.appr-title{font-weight:600;font-size:13.5px}
+.badge{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:4px;white-space:nowrap}
+.b-warn{background:var(--warn-wash);color:var(--warn)}
+.b-credit{background:var(--credit-wash);color:var(--credit)}
+.b-danger{background:var(--danger-wash);color:var(--danger)}
+.b-ok{background:var(--ok-wash);color:var(--ok)}
+.appr-desc{font-size:13px;color:var(--muted);margin-bottom:10px;max-width:60ch}
+.appr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;margin-bottom:11px}
+.appr-cell{background:var(--surface);padding:7px 10px}
+.appr-k{font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+.appr-v{font-size:13px;font-weight:500;margin-top:2px;font-variant-numeric:tabular-nums}
+.appr-v.cost{color:var(--credit)}
+.appr-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 13px;border-radius:var(--r-sm);font-size:13px;font-weight:500;border:1px solid var(--line-2);color:var(--ink);background:var(--surface)}
+.btn:hover{background:var(--sunken)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn-primary:hover{background:var(--accent-ink)}
+.btn-ghost{border-color:transparent;color:var(--muted)}
+.btn-ghost:hover{color:var(--ink)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.strong-confirm{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.strong-confirm input{height:32px;border:1px solid var(--line-2);border-radius:var(--r-sm);padding:0 10px;font-family:var(--mono);font-size:12.5px;background:var(--sunken);color:var(--ink);width:150px}
+.appr-resolved{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ok);padding:9px 14px;background:var(--ok-wash)}
+
+/* ask card */
+.ask{border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);padding:12px 14px}
+.ask-q{font-weight:500;margin-bottom:9px}
+.ask-opts{display:flex;flex-direction:column;gap:6px}
+.ask-opt{text-align:left;border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 11px}
+.ask-opt:hover{border-color:var(--accent);background:var(--accent-wash)}
+.ask-opt .ol{font-weight:500;font-size:13px}
+.ask-opt .od{font-size:12px;color:var(--muted);margin-top:1px}
+
+/* artifact + file cards */
+.card-ref{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);text-align:left;width:100%}
+.card-ref:hover{border-color:var(--line-2);background:var(--sunken)}
+.card-ico{width:30px;height:30px;border-radius:var(--r-sm);display:grid;place-items:center;flex:0 0 auto;background:var(--accent-wash);color:var(--accent-ink)}
+.card-ico.file{background:var(--ok-wash);color:var(--ok)}
+.card-main{min-width:0;flex:1 1 auto;display:block}
+.card-t{display:block;font-weight:500;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-s{display:block;font-size:11.5px;color:var(--faint);font-family:var(--mono);margin-top:1px}
+
+/* job promotion */
+.jobbar{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--r-md);background:var(--surface)}
+.jobbar-main{flex:1 1 auto;min-width:0;display:block}
+.jobbar-t{display:block;font-size:13px;font-weight:500}
+.jobbar-s{display:block;font-size:12px;color:var(--muted)}
+.progress{height:4px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:6px}
+.progress i{display:block;height:100%;background:var(--accent);width:0;transition:width .5s ease}
+
+/* event tag (inspector on) */
+.etag{display:none;font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;color:var(--faint);align-items:center;gap:5px;padding-left:2px}
+.insp-on .etag{display:flex}
+.etag b{font-weight:500;color:var(--accent)}
+
+/* composer */
+.composer-wrap{flex:0 0 auto;padding:10px 20px 16px;background:var(--ground)}
+.composer{max-width:720px;margin:0 auto;border:1px solid var(--line-2);border-radius:var(--r-lg);background:var(--surface);box-shadow:var(--shadow);overflow:hidden}
+.composer textarea{width:100%;border:none;background:none;resize:none;padding:12px 14px 4px;color:var(--ink);font:inherit;min-height:44px;max-height:130px;outline:none}
+.composer textarea::placeholder{color:var(--faint)}
+.composer-bar{display:flex;align-items:center;gap:6px;padding:6px 8px 8px 10px}
+.cbtn{width:28px;height:28px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--muted)}
+.cbtn:hover{background:var(--sunken);color:var(--ink)}
+.composer-hint{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-left:auto;padding-right:4px;white-space:nowrap}
+.send{width:30px;height:30px;border-radius:var(--r-sm);background:var(--accent);color:var(--on-accent);display:grid;place-items:center}
+.send:hover{background:var(--accent-ink)}
+.send:disabled{background:var(--line-2);color:var(--faint)}
+
+/* ---------- canvas ---------- */
+.canvas{border-left:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.canvas-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);flex:0 0 auto}
+.canvas-title{font-weight:600;font-size:13.5px;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vpill{font-family:var(--mono);font-size:10.5px;padding:2px 6px;border-radius:4px;background:var(--sunken);color:var(--muted);border:1px solid var(--line);white-space:nowrap}
+.canvas-actions{display:flex;gap:4px;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap;flex:0 0 auto}
+.abtn{display:inline-flex;align-items:center;gap:5px;height:27px;padding:0 9px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12px;color:var(--ink-2)}
+.abtn:hover{background:var(--sunken);border-color:var(--line-2)}
+.canvas-body{flex:1 1 auto;overflow:auto;padding:12px}
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.tbl th{text-align:left;font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);font-weight:500;padding:0 8px 7px;border-bottom:1px solid var(--line);position:sticky;top:-12px;background:var(--surface)}
+.tbl td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl tr:hover td{background:var(--sunken)}
+.cell-name{font-weight:500}
+.cell-sub{color:var(--faint);font-size:11.5px;margin-top:1px}
+.score{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px}
+.score i{display:block;width:26px;height:4px;border-radius:3px;background:var(--line-2);position:relative;overflow:hidden}
+.score i b{position:absolute;inset:0 auto 0 0;background:var(--accent);display:block}
+.canvas-foot{border-top:1px solid var(--line);padding:8px 12px;font-size:11.5px;color:var(--faint);flex:0 0 auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chartwrap{padding:4px 0 10px}
+
+/* ---------- inspector ---------- */
+.inspector{border-top:1px solid var(--line);background:var(--code-bg);color:var(--code-ink);height:0;overflow:hidden;transition:height .28s ease;flex:0 0 auto}
+.insp-on .inspector{height:186px}
+.insp-head{display:flex;align-items:center;gap:9px;padding:7px 14px;border-bottom:1px solid rgba(255,255,255,.09)}
+.insp-title{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:#8fa2ad}
+.insp-legend{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:#6f8290}
+.insp-log{height:calc(186px - 33px);overflow-y:auto;padding:6px 14px 12px;font-family:var(--mono);font-size:11.5px;line-height:1.65}
+.ev{display:flex;gap:10px;padding:1px 0}
+.ev-seq{color:#5f7280;flex:0 0 auto;font-variant-numeric:tabular-nums}
+.ev-type{flex:0 0 auto;min-width:132px}
+.ev-payload{color:#93a5b1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.e-text{color:#7fcdd5}.e-tool{color:#8fd6a8}.e-appr{color:#e2b45f}.e-art{color:#b7a0e8}.e-file{color:#8fd6a8}.e-turn{color:#8fa2ad}.e-think{color:#6f8290}.e-err{color:#e0776b}
+
+/* ---------- legend below console ---------- */
+.notes{margin-top:22px;display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.note{background:var(--surface);padding:14px 16px}
+.note h3{margin:0 0 5px;font-size:13px;font-weight:600}
+.note code{font-family:var(--mono);font-size:11.5px;color:var(--accent-ink);background:var(--accent-wash);padding:1px 4px;border-radius:3px}
+.note p{margin:0;font-size:12.5px;color:var(--muted)}
+.foot{margin-top:16px;font-size:12px;color:var(--faint);max-width:78ch}
+
+@media (max-width:1080px){
+  .body,.body.canvas-open,.body.rail-closed,.body.rail-open,.body.rail-closed.canvas-open{grid-template-columns:0px minmax(0,1fr) 0px}
+  .rail{position:absolute;left:0;top:52px;bottom:0;width:216px;z-index:6;display:none}
+  .body.rail-open .rail{display:flex}
+  .canvas{position:absolute;right:0;top:52px;bottom:0;width:min(400px,92vw);z-index:5;display:none;box-shadow:-14px 0 40px -30px rgba(0,0,0,.6)}
+  .body.canvas-open .canvas{display:flex}
+  .console{position:relative}
+}
+@media (max-width:620px){
+  .page{padding-block:14px 20px}
+  .console{height:calc(100dvh - 120px);border-radius:var(--r-md)}
+  .thread{padding:16px 12px 6px}
+  .composer-wrap{padding:8px 12px 12px}
+  .canvas{top:auto;height:66%;width:100%;border-left:none;border-top:1px solid var(--line-2);border-radius:var(--r-lg) var(--r-lg) 0 0}
+  .meter,.topbar-sep{display:none}
+  .insp-on .inspector{height:150px}
+  .insp-log{height:117px}
+  .ev-type{min-width:108px}
+}
+</style>
+
+<div class="page">
+  <div class="intro">
+    <div>
+      <p class="eyebrow">ANTON.IA · Prototipo de referencia</p>
+      <h1>Consola SUPL.IA — loop agéntico con aprobaciones</h1>
+      <p>Prototipo funcional del chat operativo: escribe o elige un escenario y verás el turno reproducirse evento por evento, igual que lo emitirá el backend. Con el inspector encendido, cada bloque muestra el evento SSE que lo produce.</p>
+    </div>
+    <div class="intro-actions">
+      <button class="btn" id="btnTheme" aria-label="Cambiar tema">Tema</button>
+      <button class="btn btn-primary" id="btnReplay">Reproducir turno</button>
+    </div>
+  </div>
+
+  <div class="console" id="console">
+    <div class="topbar">
+      <div class="brand">
+        <span class="mark"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 11.5 8 3l5 8.5" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.4 9.2h5.2" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg></span>
+        <span class="brand-name">SUPL.IA <span>· Yago SpA</span></span>
+      </div>
+      <div class="topbar-sep"></div>
+      <div class="meter" title="Créditos Apollo consumidos hoy por la organización">
+        <span class="meter-label">Créditos hoy</span>
+        <span class="meter-bar"><i class="meter-fill" id="meterFill"></i></span>
+        <span class="meter-num" id="meterNum">38 / 100</span>
+      </div>
+      <div class="topbar-spacer"></div>
+      <button class="tbtn" id="btnRail">Conversaciones</button>
+      <button class="tbtn" id="btnInsp">Inspector <span class="k">SSE</span></button>
+      <button class="tbtn" id="btnCanvas">Canvas</button>
+    </div>
+
+    <div class="body canvas-open" id="body">
+      <!-- RAIL -->
+      <aside class="rail">
+        <button class="rail-item rail-new">+ Nueva conversación</button>
+        <div class="rail-h">Hoy</div>
+        <button class="rail-item active"><span class="t">Constructoras Santiago · contratando</span></button>
+        <button class="rail-item"><span class="t">Objeciones campaña DT agosto</span></button>
+        <button class="rail-item"><span class="t">Borrador RRHH · Grupo Marchant</span></button>
+        <div class="rail-h">Esta semana</div>
+        <button class="rail-item"><span class="t">ICP seguridad privada v3</span></button>
+        <button class="rail-item"><span class="t">Reporte semanal pipeline</span></button>
+        <div class="rail-h">Skills activas</div>
+        <button class="skill-pill"><span class="skill-dot"></span>copy-frio-chile</button>
+        <button class="skill-pill"><span class="skill-dot"></span>icp-constructoras</button>
+        <button class="skill-pill"><span class="skill-dot"></span>follow-up-sin-respuesta</button>
+        <button class="skill-pill"><span class="skill-dot off"></span>brief-competitivo</button>
+        <div class="rail-foot">Programado · 3 rutinas activas</div>
+      </aside>
+
+      <!-- CENTER -->
+      <section class="center">
+        <div class="scenario-strip">
+          <span class="lbl">Escenario</span>
+          <button class="chip-btn on" data-sc="0">Prospectar y exportar</button>
+          <button class="chip-btn" data-sc="1">Analizar respuestas</button>
+          <button class="chip-btn" data-sc="2">Redactar y enviar</button>
+        </div>
+        <div class="thread" id="thread"><div class="thread-inner" id="threadInner"></div></div>
+        <div class="composer-wrap">
+          <div class="composer">
+            <textarea id="input" rows="1" placeholder="Pide un objetivo comercial. SUPL.IA decide qué herramientas usar."></textarea>
+            <div class="composer-bar">
+              <button class="cbtn" id="btnAttach" title="Adjuntar archivo" aria-label="Adjuntar archivo"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M10.5 5.5 6 10a1.8 1.8 0 0 0 2.5 2.5l4.8-4.8a3.2 3.2 0 0 0-4.5-4.5L3.6 8.4a4.6 4.6 0 0 0 6.5 6.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>
+              <button class="cbtn" id="btnTools" title="Herramientas" aria-label="Herramientas"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="6" cy="4.5" r="1.6" fill="currentColor"/><circle cx="10.5" cy="8" r="1.6" fill="currentColor"/><circle cx="5" cy="11.5" r="1.6" fill="currentColor"/></svg></button>
+              <span class="composer-hint" id="hint">tier: orchestrator · gpt-5.6-terra</span>
+              <button class="send" id="btnSend" aria-label="Enviar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 13V3.5M4 7l4-3.6L12 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CANVAS -->
+      <aside class="canvas" id="canvas">
+        <div class="canvas-head">
+          <span class="card-ico" style="width:22px;height:22px;border-radius:6px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="2.5" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M2.5 6.5h11M6.5 6.5v7" stroke="currentColor" stroke-width="1.3"/></svg></span>
+          <span class="canvas-title" id="canvasTitle">Constructoras Santiago · shortlist</span>
+          <span class="vpill" id="canvasVer">v3</span>
+          <button class="cbtn" id="btnCanvasClose" aria-label="Cerrar canvas"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+        </div>
+        <div class="canvas-actions" id="canvasActions"></div>
+        <div class="canvas-body" id="canvasBody"></div>
+        <div class="canvas-foot" id="canvasFoot"></div>
+      </aside>
+    </div>
+
+    <div class="inspector">
+      <div class="insp-head">
+        <span class="insp-title">Stream del turno</span>
+        <span class="insp-legend" id="inspMeta">turn_01K7 · 0 eventos</span>
+      </div>
+      <div class="insp-log" id="inspLog"></div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note">
+      <h3>El loop encadena</h3>
+      <p>Cada herramienta vuelve al modelo como <code>role:"tool"</code> y el loop sigue. Tres o cuatro llamadas en un turno, no una.</p>
+    </div>
+    <div class="note">
+      <h3>La política manda, no el modelo</h3>
+      <p>El servidor resuelve <code>getSupliaPolicy(nombre)</code> sobre la herramienta que llegó. El modelo pide; nunca decide su propio permiso.</p>
+    </div>
+    <div class="note">
+      <h3>El costo se ve antes</h3>
+      <p>Toda acción con <code>credits &gt; 0</code> muestra créditos y alcance en la tarjeta. El violeta está reservado para eso.</p>
+    </div>
+    <div class="note">
+      <h3>Aprobar continúa el turno</h3>
+      <p>El resultado vuelve al loop y el modelo lo analiza. Nunca una plantilla fija como <code>successMessage()</code>.</p>
+    </div>
+    <div class="note">
+      <h3>El turno vive en la base</h3>
+      <p><code>suplia_turn_events</code> es append-only. Cerrar el navegador no pierde el turno: se reanuda por <code>seq</code>.</p>
+    </div>
+    <div class="note">
+      <h3>El artefacto es el entregable</h3>
+      <p>Listas, reportes y borradores salen del hilo al canvas, versionados y exportables a xlsx, csv o pdf.</p>
+    </div>
+  </div>
+
+  <p class="foot">Datos de ejemplo: empresas, contactos y cifras son ficticios, para mostrar el comportamiento de la interfaz. Los nombres de herramientas, tiers de modelo y estados corresponden al catálogo real de <code style="font-family:var(--mono)">src/lib/server/suplia-tools.ts</code>.</p>
+</div>
+
+<script>
+(function(){
+"use strict";
+var $=function(s){return document.querySelector(s)};
+var thread=$("#threadInner"), threadBox=$("#thread"), log=$("#inspLog"), body=$("#body"), consoleEl=$("#console");
+var seq=0, playing=false, token=0, reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function el(tag,cls,html){var e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;return e}
+function sleep(ms){return new Promise(function(r){setTimeout(r,reduced?Math.min(ms,60):ms)})}
+function scroll(){threadBox.scrollTop=threadBox.scrollHeight}
+
+/* ---------- inspector ---------- */
+var EV_CLASS={ "turn.started":"e-turn","turn.completed":"e-turn","text.delta":"e-text","thinking.delta":"e-think",
+  "tool.started":"e-tool","tool.completed":"e-tool","approval.requested":"e-appr","approval.resolved":"e-appr",
+  "artifact.created":"e-art","artifact.updated":"e-art","file.ready":"e-file","job.progress":"e-turn","error":"e-err"};
+function emit(type,payload){
+  seq++;
+  var row=el("div","ev");
+  row.appendChild(el("span","ev-seq",String(seq).padStart(3,"0")));
+  row.appendChild(el("span","ev-type "+(EV_CLASS[type]||"e-turn"),type));
+  row.appendChild(el("span","ev-payload",payload?escapeHtml(JSON.stringify(payload)):""));
+  log.appendChild(row); log.scrollTop=log.scrollHeight;
+  $("#inspMeta").textContent="turn_01K7 · "+seq+" eventos";
+}
+function escapeHtml(s){return String(s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]})}
+function tag(name){var t=el("div","etag");t.innerHTML='<b>'+name+'</b>';return t}
+
+/* ---------- thread blocks ---------- */
+function userMsg(text){
+  var turn=el("div","turn"); var m=el("div","msg-user"); m.textContent=text; turn.appendChild(m);
+  thread.appendChild(turn); scroll(); return turn;
+}
+function assistShell(tier){
+  var turn=el("div","turn"); var wrap=el("div","msg-assist");
+  var head=el("div","assist-head");
+  head.innerHTML='<span class="avatar"><svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 11.5 8 3l5 8.5" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.4 9.2h5.2" stroke="#fff" stroke-width="1.9" stroke-linecap="round"/></svg></span>'
+    +'<span class="assist-name">SUPL.IA</span><span class="tier">'+tier+'</span>';
+  wrap.appendChild(head); turn.appendChild(wrap); thread.appendChild(turn); scroll();
+  return wrap;
+}
+function addThinking(wrap,text){
+  var t=el("div","thinking"); t.dataset.open="false";
+  var h=el("button","thinking-h"); h.type="button";
+  h.innerHTML='<svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg> Pensó durante 4 s';
+  var b=el("div","thinking-body"); b.textContent=text;
+  h.addEventListener("click",function(){t.dataset.open = t.dataset.open==="true"?"false":"true"});
+  t.appendChild(h); t.appendChild(b);
+  wrap.appendChild(tag("thinking.delta")); wrap.appendChild(t); scroll();
+}
+async function typeText(wrap,html,speed){
+  wrap.appendChild(tag("text.delta"));
+  var p=el("div","prose"); wrap.appendChild(p);
+  var chunks=html.split(/(?<=[\s>])/);
+  var buf="";
+  for(var i=0;i<chunks.length;i++){
+    if(token!==playToken)return;
+    buf+=chunks[i]; p.innerHTML=buf+'<span class="caret"></span>';
+    if(i%4===0)scroll();
+    await sleep(speed||16);
+  }
+  p.innerHTML=buf; emit("text.delta",{chars:html.replace(/<[^>]+>/g,"").length}); scroll();
+}
+function toolIcon(){return '<svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 5l3 3-3 3M9 11h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'}
+function addTool(wrap,name,sub){
+  var t=el("div","tool");
+  t.innerHTML='<span class="tool-ico">'+toolIcon()+'</span>'
+    +'<span class="tool-main"><span class="tool-name">'+escapeHtml(name)+'</span><span class="tool-sub">'+escapeHtml(sub)+'</span></span>'
+    +'<span class="tool-state s-run"><span class="spin" style="display:inline-block"></span></span>';
+  wrap.appendChild(tag("tool.started")); wrap.appendChild(t); scroll();
+  emit("tool.started",{name:name});
+  return t;
+}
+function finishTool(t,name,result,state){
+  var st=t.querySelector(".tool-state");
+  st.className="tool-state "+(state||"s-ok"); st.textContent=result;
+  emit("tool.completed",{name:name,status:state==="s-err"?"failed":"completed"});
+}
+function addApproval(wrap,cfg){
+  emit("approval.requested",{actionId:cfg.id,tool:cfg.tool,risk:cfg.risk});
+  var box=el("div","approval"+(cfg.kind==="credit"?" credit":"")+(cfg.kind==="strong"?" strong":""));
+  var badges='<span class="badge '+(cfg.kind==="strong"?"b-danger":cfg.kind==="credit"?"b-credit":"b-warn")+'">'+cfg.badge+'</span>';
+  var cells=cfg.cells.map(function(c){
+    return '<div class="appr-cell"><div class="appr-k">'+c[0]+'</div><div class="appr-v'+(c[2]?" cost":"")+'">'+c[1]+'</div></div>';
+  }).join("");
+  box.innerHTML='<div class="appr-bar"></div><div class="appr-body">'
+    +'<div class="appr-top"><span class="appr-title">'+escapeHtml(cfg.title)+'</span>'+badges+'</div>'
+    +'<div class="appr-desc">'+escapeHtml(cfg.desc)+'</div>'
+    +'<div class="appr-grid">'+cells+'</div>'
+    +(cfg.kind==="strong"?'<div class="strong-confirm"><input id="cf_'+cfg.id+'" placeholder="Escribe ENVIAR" aria-label="Confirmación fuerte"><span style="font-size:12px;color:var(--muted)">Confirmación textual obligatoria</span></div>':'')
+    +'<div class="appr-actions">'
+      +'<button class="btn btn-primary" data-act="ok"'+(cfg.kind==="strong"?" disabled":"")+'>'+(cfg.kind==="strong"?"Enviar ahora":"Aprobar y continuar")+'</button>'
+      +'<button class="btn" data-act="edit">Editar antes</button>'
+      +'<button class="btn btn-ghost" data-act="no">Descartar</button>'
+    +'</div></div>';
+  wrap.appendChild(tag("approval.requested")); wrap.appendChild(box); scroll();
+  if(cfg.kind==="strong"){
+    var inp=box.querySelector("input"), ok=box.querySelector('[data-act="ok"]');
+    inp.addEventListener("input",function(){ok.disabled=inp.value.trim().toUpperCase()!=="ENVIAR"});
+  }
+  return new Promise(function(resolve){
+    box.addEventListener("click",function(e){
+      var b=e.target.closest("[data-act]"); if(!b)return;
+      var act=b.dataset.act;
+      if(act==="edit"){return}
+      emit("approval.resolved",{actionId:cfg.id,decision:act==="ok"?"approved":"cancelled"});
+      box.querySelector(".appr-body").remove();
+      var res=el("div","appr-resolved");
+      res.innerHTML=(act==="ok"
+        ? '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5l3 3 6-6.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg> Aprobado por Nicolás · '+cfg.approvedNote
+        : '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg> Descartado — el turno continúa sin esta acción');
+      if(act!=="ok"){res.style.background="var(--sunken)";res.style.color="var(--muted)"}
+      box.appendChild(res); scroll(); resolve(act==="ok");
+    });
+  });
+}
+function addAsk(wrap,q,opts){
+  var box=el("div","ask");
+  box.innerHTML='<div class="ask-q">'+escapeHtml(q)+'</div><div class="ask-opts">'+opts.map(function(o,i){
+    return '<button class="ask-opt" data-i="'+i+'"><span class="ol">'+escapeHtml(o[0])+'</span><span class="od">'+escapeHtml(o[1])+'</span></button>';
+  }).join("")+'</div>';
+  wrap.appendChild(tag("ask.user")); wrap.appendChild(box); scroll();
+  return new Promise(function(res){
+    box.addEventListener("click",function(e){
+      var b=e.target.closest(".ask-opt"); if(!b)return;
+      var i=+b.dataset.i;
+      box.innerHTML='<div class="ask-q" style="margin:0;font-weight:450;color:var(--muted)">Respondiste: <strong style="color:var(--ink)">'+escapeHtml(opts[i][0])+'</strong></div>';
+      res(i);
+    });
+  });
+}
+function addArtifactRef(wrap,title,meta,onOpen){
+  emit("artifact.created",{type:meta.type,title:title});
+  var b=el("button","card-ref");
+  b.innerHTML='<span class="card-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="2.5" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M2.5 6.5h11M6.5 6.5v7" stroke="currentColor" stroke-width="1.3"/></svg></span>'
+   +'<span class="card-main"><span class="card-t">'+escapeHtml(title)+'</span><span class="card-s">'+escapeHtml(meta.sub)+'</span></span>'
+   +'<span class="badge b-ok">Abrir</span>';
+  b.addEventListener("click",onOpen);
+  wrap.appendChild(tag("artifact.created")); wrap.appendChild(b); scroll();
+}
+function addFile(wrap,name,meta){
+  emit("file.ready",{name:name,bytes:meta.bytes});
+  var b=el("button","card-ref");
+  b.innerHTML='<span class="card-ico file"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 2.5v8M5 7.5l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 13h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>'
+   +'<span class="card-main"><span class="card-t">'+escapeHtml(name)+'</span><span class="card-s">'+escapeHtml(meta.sub)+'</span></span>'
+   +'<span class="badge b-ok">Descargar</span>';
+  wrap.appendChild(tag("file.ready")); wrap.appendChild(b); scroll();
+}
+async function addJobBar(wrap,title,steps){
+  var b=el("div","jobbar");
+  b.innerHTML='<span class="card-ico" style="width:24px;height:24px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.4"/><path d="M8 5v3.2l2 1.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>'
+    +'<span class="jobbar-main"><span class="jobbar-t">'+escapeHtml(title)+'</span><span class="jobbar-s">Promovido a job — puedes cerrar la pestaña</span><span class="progress"><i></i></span></span>';
+  wrap.appendChild(tag("job.progress")); wrap.appendChild(b); scroll();
+  var bar=b.querySelector(".progress i"), sub=b.querySelector(".jobbar-s");
+  for(var i=0;i<steps.length;i++){
+    if(token!==playToken)return;
+    await sleep(620);
+    bar.style.width=Math.round((i+1)/steps.length*100)+"%";
+    sub.textContent=steps[i];
+    emit("job.progress",{step:steps[i],pct:Math.round((i+1)/steps.length*100)});
+  }
+}
+
+/* ---------- canvas renderers ---------- */
+var LEADS=[
+  ["Constructora Punta Norte","Obras civiles · 340 empleados","Rodrigo Cáceres","Gerente de Personas",92,"3 avisos activos"],
+  ["Edifica Andes SpA","Edificación en altura · 520 empleados","Marcela Ibáñez","Subgerenta RRHH",88,"Faena nueva Ñuñoa"],
+  ["Grupo Vial Marchant","Movimiento de tierra · 610 empleados","Pablo Suazo","Jefe de Administración",84,"7 avisos activos"],
+  ["Constructora Rehue","Montaje industrial · 275 empleados","Daniela Ortúzar","Gerenta de Operaciones",79,"Licitación adjudicada"],
+  ["Obras Quilín Ltda.","Infraestructura vial · 190 empleados","Ignacio Fuenzalida","Administrador de contratos",74,"2 avisos activos"],
+  ["Mendoza & Vera Ingeniería","Obras sanitarias · 155 empleados","Carolina Vera","Socia directora",68,"Sin señal reciente"]
+];
+function renderLeadList(){
+  $("#canvasTitle").textContent="Constructoras Santiago · shortlist";
+  $("#canvasVer").textContent="v3";
+  $("#canvasActions").innerHTML=[
+    ['<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 2.5v8M5 7.5l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>','Exportar .xlsx'],
+    ['','Copiar como CSV'],['','Crear campaña'],['','Historial v1–v3']
+  ].map(function(a){return '<button class="abtn">'+a[0]+a[1]+'</button>'}).join("");
+  var rows=LEADS.map(function(l){
+    return '<tr><td><div class="cell-name">'+l[0]+'</div><div class="cell-sub">'+l[1]+'</div></td>'
+      +'<td><div class="cell-name">'+l[2]+'</div><div class="cell-sub">'+l[3]+'</div></td>'
+      +'<td><span class="score"><i><b style="width:'+l[4]+'%"></b></i>'+l[4]+'</span><div class="cell-sub">'+l[5]+'</div></td></tr>';
+  }).join("");
+  $("#canvasBody").innerHTML='<table class="tbl"><thead><tr><th>Empresa</th><th>Contacto</th><th>Score · señal</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  $("#canvasFoot").innerHTML='<span class="badge b-ok">6 de 41</span><span>Descartados 35 por duplicado en CRM o sin email verificado</span>';
+}
+function renderChart(){
+  $("#canvasTitle").textContent="Objeciones · campaña DT agosto";
+  $("#canvasVer").textContent="v1";
+  $("#canvasActions").innerHTML='<button class="abtn">Exportar .png</button><button class="abtn">Ver código</button><button class="abtn">Crear playbook</button>';
+  var data=[["Ya tenemos proveedor",34],["Sin presupuesto ahora",26],["No es mi área",19],["Lo veo en enero",12],["Otras",9]];
+  var max=34, W=372, rowH=34, H=data.length*rowH+26;
+  var bars=data.map(function(d,i){
+    var w=Math.round(d[1]/max*212);
+    var y=i*rowH+16;
+    return '<text x="0" y="'+(y+4)+'" font-size="11.5" fill="var(--ink-2)" font-family="var(--sans)">'+d[0]+'</text>'
+      +'<rect x="150" y="'+(y-8)+'" width="'+w+'" height="14" rx="3" fill="var(--accent)" opacity="'+(1-i*0.13)+'"></rect>'
+      +'<text x="'+(150+w+7)+'" y="'+(y+4)+'" font-size="11" fill="var(--muted)" font-family="var(--mono)">'+d[1]+'%</text>';
+  }).join("");
+  $("#canvasBody").innerHTML='<div class="chartwrap"><svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:100%;overflow:visible" role="img" aria-label="Objeciones más frecuentes por porcentaje de respuestas">'
+    +'<line x1="150" y1="4" x2="150" y2="'+(H-14)+'" stroke="var(--line)" stroke-width="1"></line>'+bars+'</svg></div>'
+    +'<p style="font-size:12.5px;color:var(--muted);margin:6px 2px 0;max-width:60ch">Sobre 118 respuestas clasificadas. «Ya tenemos proveedor» concentra un tercio y aparece antes en el hilo que el resto, lo que sugiere responderla en el primer correo y no en el follow-up.</p>';
+  $("#canvasFoot").innerHTML='<span class="badge b-credit">code.run</span><span>Generado en sandbox · 2,4 s · sin acceso a red</span>';
+}
+function renderDraft(){
+  $("#canvasTitle").textContent="Correo · Grupo Vial Marchant";
+  $("#canvasVer").textContent="v2";
+  $("#canvasActions").innerHTML='<button class="abtn">Exportar .pdf</button><button class="abtn">Copiar</button><button class="abtn">Aplicar estilo guardado</button>';
+  $("#canvasBody").innerHTML=
+    '<div style="border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden">'
+    +'<div style="padding:9px 12px;border-bottom:1px solid var(--line);background:var(--sunken)">'
+      +'<div style="font-size:11.5px;color:var(--faint);font-family:var(--mono)">Para: p.suazo@ejemplo-marchant.cl</div>'
+      +'<div style="font-weight:600;margin-top:3px">Los F30-1 de sus 7 faenas, en una sola pantalla</div></div>'
+    +'<div style="padding:12px;font-size:13px;line-height:1.62;color:var(--ink-2)">'
+      +'<p style="margin:0 0 9px">Pablo, vi que Marchant tiene siete avisos abiertos para faenas en la RM. Con esa rotación, el registro en Mi DT y los F30-1 dejan de ser trámite y pasan a ser un riesgo de multa.</p>'
+      +'<p style="margin:0 0 9px">Automatizamos ese registro para constructoras del mismo tamaño: los contratos y desvinculaciones entran solos y los certificados quedan al día sin que nadie los persiga.</p>'
+      +'<p style="margin:0">¿Le hace sentido una llamada de quince minutos esta semana para ver si aplica a su operación?</p></div></div>'
+    +'<div style="margin-top:10px;padding:9px 11px;border:1px solid var(--line);border-radius:var(--r-sm);font-size:12.5px;color:var(--muted)">'
+      +'<span class="badge b-ok" style="margin-right:6px">Preflight OK</span>Contactabilidad verificada · sin baja registrada · dentro de ventana horaria</div>';
+  $("#canvasFoot").innerHTML='<span class="badge b-ok">skill</span><span>Redactado con <code style="font-family:var(--mono)">copy-frio-chile</code> · 96 palabras</span>';
+}
+
+/* ---------- scenarios ---------- */
+var playToken=0;
+var SCENARIOS=[
+{
+  prompt:"Busca constructoras en Santiago que estén contratando, cruza con el CRM y ármame una lista para contactar esta semana",
+  run:async function(wrap){
+    addThinking(wrap,"El usuario pide prospección operativa. Tengo el ICP de constructoras en memoria aprobada. Primero leo el contexto de la app y el perfil, luego busco empresas (consume créditos, requiere aprobación) y recién ahí cruzo contra el CRM para no pagar por duplicados.");
+    await sleep(700);
+    var t1=addTool(wrap,"app.context.get","Contexto de organización y cuotas del día");
+    await sleep(760); finishTool(t1,"app.context.get","62 créditos disponibles");
+    await sleep(260);
+    var t2=addTool(wrap,"profile.get_company_profile","Propuesta de valor y ICP guardado");
+    await sleep(680); finishTool(t2,"profile.get_company_profile","ICP constructoras v3");
+    await sleep(320);
+    await typeText(wrap,"Tengo tu ICP de constructoras cargado. Para buscar necesito consumir créditos de Apollo, así que te dejo la búsqueda armada antes de ejecutarla.");
+    await sleep(260);
+    var ok=await addApproval(wrap,{
+      id:"act_7f2a", tool:"prospecting.search_companies", risk:"medium", kind:"credit",
+      badge:"Consume créditos", title:"Buscar empresas en Apollo",
+      desc:"Constructoras en la Región Metropolitana, 150 a 800 empleados, con avisos de empleo activos en los últimos 30 días.",
+      cells:[["Resultados","hasta 50"],["Créditos","12",true],["Saldo tras ejecutar","50 / 100"],["Riesgo","medium"]],
+      approvedNote:"12 créditos consumidos"
+    });
+    if(!ok){ await typeText(wrap,"Sin la búsqueda no puedo traer empresas nuevas. Puedo trabajar sobre los 41 leads que ya tienes en el CRM si quieres avanzar igual."); emit("turn.completed",{status:"completed"}); return; }
+    setMeter(50);
+    var t3=addTool(wrap,"prospecting.search_companies","RM · construcción · 150-800 empleados · hiring");
+    await sleep(1500); finishTool(t3,"prospecting.search_companies","41 empresas");
+    await sleep(260);
+    var t4=addTool(wrap,"crm.search","Cruce contra leads y contactados de la organización");
+    await sleep(900); finishTool(t4,"crm.search","28 ya existen");
+    await sleep(240);
+    var t5=addTool(wrap,"prospecting.dedupe_against_crm","Descarta duplicados y bajas registradas");
+    await sleep(820); finishTool(t5,"prospecting.dedupe_against_crm","13 nuevas");
+    await sleep(240);
+    var t6=addTool(wrap,"prospecting.score_companies","Fit, intent y reach explicables");
+    await sleep(1000); finishTool(t6,"prospecting.score_companies","6 sobre 65");
+    await sleep(300);
+    await typeText(wrap,"De 41 empresas quedaron <strong>6 accionables</strong>: 28 ya estaban en tu CRM y 7 no tienen contacto con email verificado. Las ordené por señal de contratación, que es lo que mejor predice respuesta en este sector.");
+    await sleep(200);
+    addArtifactRef(wrap,"Constructoras Santiago · shortlist",{type:"lead_list",sub:"lead_list · 6 empresas · v3"},function(){openCanvas(renderLeadList)});
+    openCanvas(renderLeadList);
+    await sleep(600);
+    var t7=addTool(wrap,"export.xlsx","Una hoja por rango de score, con motivos");
+    await sleep(1000); finishTool(t7,"export.xlsx","28 KB");
+    addFile(wrap,"constructoras-santiago-2026-09-10.xlsx",{sub:"xlsx · 28 KB · expira en 7 días",bytes:28672});
+    await sleep(260);
+    await typeText(wrap,"Te dejé también el Excel. ¿Armo la secuencia de primer contacto para las tres primeras o prefieres revisar la lista antes?");
+    emit("turn.completed",{status:"completed",toolCalls:7,artifacts:1,files:1});
+  }
+},
+{
+  prompt:"Analiza las respuestas de la campaña de agosto y dime qué objeción se repite más",
+  run:async function(wrap){
+    addThinking(wrap,"Consulta analítica sobre datos propios. No necesita créditos externos: sincronizo respuestas, las clasifico y luego calculo la distribución con código en sandbox, porque el conteo cruzado no es una herramienta precocinada.");
+    await sleep(680);
+    var t1=addTool(wrap,"replies.sync","Últimos 30 días · mailbox conectado");
+    await sleep(1050); finishTool(t1,"replies.sync","118 respuestas");
+    await sleep(240);
+    var t2=addTool(wrap,"replies.classify_batch","Clasificación por intención y objeción");
+    await sleep(1250); finishTool(t2,"replies.classify_batch","118 clasificadas");
+    await sleep(280);
+    await typeText(wrap,"Tengo las 118 respuestas clasificadas. Voy a calcular la distribución y el momento del hilo en que aparece cada objeción.");
+    await sleep(200);
+    var t3=addTool(wrap,"code.run","python · pandas · matplotlib · sandbox sin red");
+    await sleep(1600); finishTool(t3,"code.run","2,4 s · 1 png");
+    await sleep(260);
+    await typeText(wrap,'La objeción dominante es <strong>«ya tenemos proveedor»</strong> con 34% de las respuestas. El dato útil no es el ranking sino <em>cuándo</em> aparece: llega casi siempre en la primera respuesta, no en el follow-up.');
+    addArtifactRef(wrap,"Objeciones · campaña DT agosto",{type:"risk_report",sub:"chart · 118 respuestas · v1"},function(){openCanvas(renderChart)});
+    openCanvas(renderChart);
+    await sleep(500);
+    var i=await addAsk(wrap,"¿Qué hago con esto?",[
+      ["Reescribir el primer correo","Adelantar el manejo de la objeción al mensaje inicial"],
+      ["Crear playbook de objeciones","Guardar las cinco respuestas como skill reutilizable"],
+      ["Solo dejar el reporte","Sin acción, lo reviso yo"]
+    ]);
+    await sleep(300);
+    if(i===0){ await typeText(wrap,"Voy a reescribir el asunto y el primer párrafo para que la diferenciación aparezca antes de que el prospecto piense en su proveedor actual. Te lo dejo como borrador aprobable, no lo aplico solo."); }
+    else if(i===1){ await typeText(wrap,"Creo la skill <code>objeciones-dt</code> con las cinco respuestas más frecuentes y su manejo. Queda disponible para todos los borradores de la organización."); }
+    else { await typeText(wrap,"Listo, el reporte queda guardado en el canvas con su versión. Puedes volver a él desde la conversación cuando quieras."); }
+    emit("turn.completed",{status:"completed",toolCalls:3,artifacts:1});
+  }
+},
+{
+  prompt:"Escríbeme el correo para Pablo Suazo de Grupo Vial Marchant y mándalo",
+  run:async function(wrap){
+    addThinking(wrap,"Redacción con envío real. El envío es la acción de mayor riesgo del sistema: requiere confirmación textual fuerte. Antes cargo la skill de copy frío y verifico contactabilidad, porque enviar a alguien dado de baja es un incidente de privacidad, no un error de copy.");
+    await sleep(700);
+    var t1=addTool(wrap,"skill.load","copy-frio-chile");
+    await sleep(720); finishTool(t1,"skill.load","cargada");
+    await sleep(240);
+    var t2=addTool(wrap,"crm.get_lead_detail","Pablo Suazo · Grupo Vial Marchant");
+    await sleep(760); finishTool(t2,"crm.get_lead_detail","sin contacto previo");
+    await sleep(240);
+    var t3=addTool(wrap,"research.similarweb","Señales públicas del dominio");
+    await sleep(900); finishTool(t3,"research.similarweb","7 avisos activos");
+    await sleep(300);
+    await typeText(wrap,"Escribí el correo apoyándome en la señal más concreta que tiene: siete faenas abiertas en la RM. Está en el canvas para que lo edites antes de enviar.");
+    addArtifactRef(wrap,"Correo · Grupo Vial Marchant",{type:"email_draft",sub:"email_draft · 96 palabras · v2"},function(){openCanvas(renderDraft)});
+    openCanvas(renderDraft);
+    await sleep(500);
+    var t4=addTool(wrap,"compliance.preflight_email","Contactabilidad, bajas y ventana horaria");
+    await sleep(950); finishTool(t4,"compliance.preflight_email","sin bloqueos");
+    await sleep(300);
+    var ok=await addApproval(wrap,{
+      id:"act_9c41", tool:"email.send", risk:"critical", kind:"strong",
+      badge:"Envío real", title:"Enviar el correo a Pablo Suazo",
+      desc:"Se enviará desde nicolas@yago.cl. Esta acción es irreversible y queda registrada en el historial de contactados.",
+      cells:[["Destinatario","1 persona"],["Remitente","nicolas@yago.cl"],["Preflight","Sin bloqueos"],["Riesgo","critical"]],
+      approvedNote:"enviado 10:42"
+    });
+    if(!ok){ await typeText(wrap,"No lo envié. El borrador queda en el canvas como v2; puedes retomarlo cuando quieras."); emit("turn.completed",{status:"completed"}); return; }
+    var t5=addTool(wrap,"email.send","Vía Gmail conectado");
+    await sleep(1100); finishTool(t5,"email.send","entregado");
+    await sleep(260);
+    await typeText(wrap,"Enviado. Lo dejé registrado en contactados y programé una revisión de respuesta para el viernes; si no contesta, te propongo el follow-up con el ángulo de multas, que es el que mejor funciona en este sector.");
+    await addJobBar(wrap,"Seguimiento programado · viernes 12",["Revisión de respuesta agendada","Follow-up preparado en borrador","Listo — sin acción pendiente"]);
+    emit("turn.completed",{status:"completed",toolCalls:5,artifacts:1});
+  }
+}];
+
+/* ---------- canvas control ---------- */
+function openCanvas(renderer){ if(renderer)renderer(); body.classList.add("canvas-open"); $("#btnCanvas").classList.add("on"); }
+function closeCanvas(){ body.classList.remove("canvas-open"); $("#btnCanvas").classList.remove("on"); }
+function setMeter(used){ $("#meterFill").style.width=used+"%"; $("#meterNum").textContent=used+" / 100"; }
+
+/* ---------- playback ---------- */
+async function play(index){
+  playToken++; var my=playToken; token=my; playing=true;
+  seq=0; log.innerHTML=""; thread.innerHTML=""; closeCanvas(); setMeter(38);
+  $("#btnReplay").textContent="Reproduciendo…"; $("#btnReplay").disabled=true;
+  var sc=SCENARIOS[index];
+  emit("turn.started",{conversationId:"conv_4b8e",mode:"agentic"});
+  userMsg(sc.prompt);
+  await sleep(420);
+  if(token!==my)return;
+  var wrap=assistShell(index===1?"balanced · gpt-5.6-luna":"orchestrator · gpt-5.6-terra");
+  $("#hint").textContent = index===1 ? "tier: balanced · gpt-5.6-luna" : "tier: orchestrator · gpt-5.6-terra";
+  try{ await sc.run(wrap); }catch(e){ /* interrupted */ }
+  if(token!==my)return;
+  playing=false; $("#btnReplay").textContent="Reproducir turno"; $("#btnReplay").disabled=false;
+}
+
+/* static first frame: scenario 1, already finished */
+function renderRestingState(){
+  seq=0; log.innerHTML=""; thread.innerHTML="";
+  emit("turn.started",{conversationId:"conv_4b8e",mode:"agentic"});
+  userMsg(SCENARIOS[0].prompt);
+  var wrap=assistShell("orchestrator · gpt-5.6-terra");
+  addThinking(wrap,"El usuario pide prospección operativa. Tengo el ICP de constructoras en memoria aprobada. Primero leo el contexto de la app y el perfil, luego busco empresas (consume créditos, requiere aprobación) y recién ahí cruzo contra el CRM para no pagar por duplicados.");
+  var pairs=[["app.context.get","Contexto de organización y cuotas del día","62 créditos disponibles"],
+             ["profile.get_company_profile","Propuesta de valor y ICP guardado","ICP constructoras v3"]];
+  pairs.forEach(function(p){var t=addTool(wrap,p[0],p[1]);finishTool(t,p[0],p[2])});
+  var p1=el("div","prose","Tengo tu ICP de constructoras cargado. Para buscar necesito consumir créditos de Apollo, así que te dejo la búsqueda armada antes de ejecutarla.");
+  wrap.appendChild(tag("text.delta")); wrap.appendChild(p1); emit("text.delta",{chars:132});
+  var resolved=el("div","approval credit");
+  resolved.innerHTML='<div class="appr-bar"></div><div class="appr-resolved"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5l3 3 6-6.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg> Aprobado por Nicolás · 12 créditos consumidos</div>';
+  wrap.appendChild(tag("approval.resolved")); wrap.appendChild(resolved);
+  emit("approval.requested",{actionId:"act_7f2a",tool:"prospecting.search_companies",risk:"medium"});
+  emit("approval.resolved",{actionId:"act_7f2a",decision:"approved"});
+  [["prospecting.search_companies","RM · construcción · 150-800 empleados · hiring","41 empresas"],
+   ["crm.search","Cruce contra leads y contactados de la organización","28 ya existen"],
+   ["prospecting.dedupe_against_crm","Descarta duplicados y bajas registradas","13 nuevas"],
+   ["prospecting.score_companies","Fit, intent y reach explicables","6 sobre 65"]].forEach(function(p){
+    var t=addTool(wrap,p[0],p[1]); finishTool(t,p[0],p[2]);
+  });
+  var p2=el("div","prose","De 41 empresas quedaron <strong>6 accionables</strong>: 28 ya estaban en tu CRM y 7 no tienen contacto con email verificado. Las ordené por señal de contratación, que es lo que mejor predice respuesta en este sector.");
+  wrap.appendChild(tag("text.delta")); wrap.appendChild(p2); emit("text.delta",{chars:214});
+  addArtifactRef(wrap,"Constructoras Santiago · shortlist",{type:"lead_list",sub:"lead_list · 6 empresas · v3"},function(){openCanvas(renderLeadList)});
+  var t7=addTool(wrap,"export.xlsx","Una hoja por rango de score, con motivos"); finishTool(t7,"export.xlsx","28 KB");
+  addFile(wrap,"constructoras-santiago-2026-09-10.xlsx",{sub:"xlsx · 28 KB · expira en 7 días",bytes:28672});
+  var p3=el("div","prose","Te dejé también el Excel. ¿Armo la secuencia de primer contacto para las tres primeras o prefieres revisar la lista antes?");
+  wrap.appendChild(tag("text.delta")); wrap.appendChild(p3);
+  emit("turn.completed",{status:"completed",toolCalls:7,artifacts:1,files:1});
+  setMeter(50); openCanvas(renderLeadList);
+  threadBox.scrollTop=threadBox.scrollHeight;
+}
+
+/* ---------- wiring ---------- */
+var current=0;
+document.querySelectorAll("[data-sc]").forEach(function(b){
+  b.addEventListener("click",function(){
+    document.querySelectorAll("[data-sc]").forEach(function(x){x.classList.remove("on")});
+    b.classList.add("on"); current=+b.dataset.sc; $("#input").value=""; play(current);
+  });
+});
+$("#btnReplay").addEventListener("click",function(){play(current)});
+$("#btnInsp").addEventListener("click",function(){consoleEl.classList.toggle("insp-on");this.classList.toggle("on")});
+$("#btnCanvas").addEventListener("click",function(){ body.classList.contains("canvas-open")?closeCanvas():openCanvas(); });
+$("#btnCanvasClose").addEventListener("click",closeCanvas);
+$("#btnRail").addEventListener("click",function(){body.classList.toggle("rail-closed");body.classList.toggle("rail-open");this.classList.toggle("on")});
+$("#btnTheme").addEventListener("click",function(){
+  var cur=document.documentElement.getAttribute("data-theme");
+  var next = cur==="dark" ? "light" : cur==="light" ? "dark"
+    : (window.matchMedia("(prefers-color-scheme: dark)").matches?"light":"dark");
+  document.documentElement.setAttribute("data-theme",next);
+  try{localStorage.setItem("suplia-proto-theme",next)}catch(e){}
+});
+try{var saved=localStorage.getItem("suplia-proto-theme");if(saved)document.documentElement.setAttribute("data-theme",saved)}catch(e){}
+
+var input=$("#input");
+input.addEventListener("input",function(){this.style.height="auto";this.style.height=Math.min(this.scrollHeight,130)+"px"});
+function sendFromInput(){
+  var v=input.value.trim(); if(!v||playing)return;
+  input.value=""; input.style.height="auto";
+  var low=v.toLowerCase(), idx=0;
+  if(/respuesta|objec|analiz|campa/.test(low))idx=1;
+  else if(/escrib|correo|mail|redact|env[ií]a/.test(low))idx=2;
+  SCENARIOS[idx].prompt=v;
+  document.querySelectorAll("[data-sc]").forEach(function(x,i){x.classList.toggle("on",i===idx)});
+  current=idx; play(idx);
+}
+$("#btnSend").addEventListener("click",sendFromInput);
+input.addEventListener("keydown",function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendFromInput()}});
+$("#btnAttach").addEventListener("click",function(){input.value="Cruza este CSV de asistentes a la feria con mi CRM y dime a quién no he contactado";input.focus()});
+$("#btnTools").addEventListener("click",function(){input.value="Analiza las respuestas de la campaña de agosto y dime qué objeción se repite más";input.focus()});
+
+renderRestingState();
+})();
+</script>
+
+</body>
+</html>

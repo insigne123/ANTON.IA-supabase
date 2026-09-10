@@ -1,3 +1,4 @@
+import timers from 'node:timers/promises';
 import { z } from 'genkit';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
@@ -8,6 +9,11 @@ type StructuredOptions<T extends z.ZodTypeAny> = {
   temperature?: number;
   openAiModel?: string;
   openAiModels?: string[];
+  allowDefaultModelFallback?: boolean;
+  timeoutMs?: number;
+  maxOutputTokens?: number;
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  maxAttempts?: number;
   provider?: StructuredProvider;
   signal?: AbortSignal;
 };
@@ -24,6 +30,7 @@ type StructuredProviderConfig = {
 
 export type StructuredTelemetry = {
   modelName: string;
+  requestedModel?: string;
   usage?: Record<string, unknown> | null;
   durationMs: number;
 };
@@ -61,7 +68,7 @@ function chatCompletionsUrl(baseUrl: string) {
   return normalized.endsWith('/chat/completions') ? normalized : `${normalized}/chat/completions`;
 }
 
-function usesDefaultTemperatureOnly(model: string) {
+function isGpt5Model(model: string) {
   return /^gpt-5(?:[.-]|$)/i.test(model);
 }
 
@@ -126,8 +133,8 @@ function getStructuredProviderConfig(requestedProvider?: StructuredProvider): St
   };
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function isCancellationError(error: any) {
+  return error?.name === 'AbortError' || error?.name === 'TimeoutError';
 }
 
 function isRetryableError(error: any) {
@@ -140,18 +147,20 @@ function isRetryableError(error: any) {
   );
 }
 
-async function withRetries<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+async function withRetries<T>(fn: () => Promise<T>, signal?: AbortSignal, attempts = 3): Promise<T> {
   let lastError: any;
   for (let i = 0; i < attempts; i++) {
+    signal?.throwIfAborted();
     try {
       return await fn();
     } catch (e: any) {
+      signal?.throwIfAborted();
       lastError = e;
       const finalTry = i === attempts - 1;
-      if (finalTry || !isRetryableError(e)) {
+      if (finalTry || isCancellationError(e) || !isRetryableError(e)) {
         throw e;
       }
-      await sleep(Math.min(700 * 2 ** i, 4000));
+      await timers.setTimeout(Math.min(700 * 2 ** i, 4000), undefined, { signal });
     }
   }
   throw lastError;
@@ -198,7 +207,11 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
   const startedAt = Date.now();
   const requestBody = {
     model,
-    ...(usesDefaultTemperatureOnly(model) ? {} : { temperature }),
+    ...(isGpt5Model(model) ? {} : { temperature }),
+    ...(config.provider === 'openai' && opts.maxOutputTokens !== undefined
+      ? { max_completion_tokens: opts.maxOutputTokens } : {}),
+    ...(config.provider === 'openai' && isGpt5Model(model) && opts.reasoningEffort !== undefined
+      ? { reasoning_effort: opts.reasoningEffort } : {}),
     response_format: responseFormat(opts.schema, config.provider),
     messages: [
       {
@@ -212,33 +225,52 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
     ],
   };
 
-  const res = await fetch(chatCompletionsUrl(config.baseUrl), {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${config.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
-    cache: 'no-store',
-    signal: opts.signal,
-  });
+  const timeoutController = opts.timeoutMs === undefined ? undefined : new AbortController();
+  const signal = timeoutController
+    ? (opts.signal ? AbortSignal.any([opts.signal, timeoutController.signal]) : timeoutController.signal)
+    : opts.signal;
+  const timeout = timeoutController && setTimeout(
+    () => timeoutController.abort(new DOMException('Structured generation timed out.', 'TimeoutError')),
+    opts.timeoutMs,
+  );
 
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`${config.displayName.toUpperCase()}_HTTP_${res.status}:${txt.slice(0, 400)}`);
+  try {
+    signal?.throwIfAborted();
+    const res = await fetch(chatCompletionsUrl(config.baseUrl), {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      cache: 'no-store',
+      signal,
+    });
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      throw new Error(`${config.displayName.toUpperCase()}_HTTP_${res.status}:${txt.slice(0, 400)}`);
+    }
+
+    const payload = await res.json();
+    signal?.throwIfAborted();
+    const content = normalizeContent(payload?.choices?.[0]?.message?.content);
+    const parsed = parseJsonFromModelText(content);
+    return {
+      data: opts.schema.parse(parsed),
+      telemetry: {
+        modelName: typeof payload?.model === 'string' && payload.model.trim() ? payload.model : model,
+        requestedModel: model,
+        usage: payload?.usage || null,
+        durationMs: Date.now() - startedAt,
+      },
+    };
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw error;
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
-
-  const payload = await res.json();
-  const content = normalizeContent(payload?.choices?.[0]?.message?.content);
-  const parsed = parseJsonFromModelText(content);
-  return {
-    data: opts.schema.parse(parsed),
-    telemetry: {
-      modelName: model,
-      usage: payload?.usage || null,
-      durationMs: Date.now() - startedAt,
-    },
-  };
 }
 
 export async function generateStructured<T extends z.ZodTypeAny>(
@@ -251,6 +283,7 @@ export async function generateStructured<T extends z.ZodTypeAny>(
 export async function generateStructuredWithTelemetry<T extends z.ZodTypeAny>(
   opts: StructuredOptions<T>
 ): Promise<StructuredResult<T>> {
+  opts.signal?.throwIfAborted();
   const config = getStructuredProviderConfig(opts.provider);
 
   if (!config.apiKey) {
@@ -261,14 +294,20 @@ export async function generateStructuredWithTelemetry<T extends z.ZodTypeAny>(
   const models = Array.from(new Set([
     ...(opts.openAiModels || []),
     opts.openAiModel,
-    config.defaultModel,
+    ...(opts.allowDefaultModelFallback === false ? [] : [config.defaultModel]),
   ].map((model) => String(model || '').trim()).filter(Boolean)));
+
+  if (!models.length) {
+    throw new Error('Specify openAiModel or openAiModels when default model fallback is disabled.');
+  }
 
   let lastError: any;
   for (const model of models) {
     try {
-      return await withRetries(() => tryChatCompletions({ ...opts, openAiModel: model }, config), 3);
+      return await withRetries(() => tryChatCompletions({ ...opts, openAiModel: model }, config), opts.signal, Math.max(1, Math.min(3, opts.maxAttempts ?? 3)));
     } catch (error) {
+      opts.signal?.throwIfAborted();
+      if (isCancellationError(error)) throw error;
       lastError = error;
       console.warn(`[${config.displayName}] Structured generation failed with ${model}:`, error);
     }

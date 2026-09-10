@@ -2,12 +2,14 @@
 import { encodeHeaderRFC2047, sanitizeHeaderText } from '@/lib/email-header-utils';
 import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
 import { ConfirmedProviderRejectionError } from '@/lib/server/outbound-dispatch';
+import type { GmailReplyTarget } from '@/lib/server/reply-target';
 
 type ServerEmailSendOptions = {
     unsubscribeUrl?: string | null;
     textBody?: string;
     idempotencyKey?: string;
     requestReceipts?: boolean;
+    replyTarget?: GmailReplyTarget;
 };
 
 function escapeODataLiteral(s: string) {
@@ -50,6 +52,12 @@ async function findRecentlySentOutlookMessage(token: string, params: { to: strin
     return matches.length === 1 ? matches[0] : null;
 }
 
+function rejectBeforeSend(error: unknown): never {
+    throw new ConfirmedProviderRejectionError(error instanceof Error ? error.message : String(error), {
+        code: 'pre_send_validation_failed', response: { providerInvoked: false, phase: 'pre_send' },
+    });
+}
+
 async function confirmedProviderRejection(provider: string, response: Response) {
     const body = await response.text();
     if (response.status >= 400 && response.status < 500 && ![408, 409, 425, 429].includes(response.status)) {
@@ -65,15 +73,46 @@ export async function sendGmail(accessToken: string, to: string, subject: string
     const prepared = prepareOutboundEmail({ html: htmlBody, text: options.textBody, unsubscribeUrl: options.unsubscribeUrl });
     const preflight = validateOutboundEmail({ to, subject, html: prepared.html, text: prepared.text, requireUnsubscribe: true, unsubscribeUrl: options.unsubscribeUrl });
     if (!preflight.ok) {
-        throw new Error(preflight.errors.join(' '));
+        rejectBeforeSend(preflight.errors.join(' '));
     }
-    // Construct raw email
+    let replyHeaders: string[] = [];
+    if (options.replyTarget) {
+        try {
+            const target = options.replyTarget;
+            if (target.provider !== 'gmail') throw new Error('Reply provider mismatch');
+            const parentResponse = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(target.messageId)}?format=metadata`, {
+                headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store',
+            });
+            if (!parentResponse.ok) throw new Error(`Gmail reply parent lookup failed (${parentResponse.status})`);
+            const parent = await parentResponse.json();
+            const header = (name: string) => {
+                const matches = (parent.payload?.headers || []).filter((item: any) => String(item.name).toLowerCase() === name.toLowerCase());
+                return matches.length === 1 ? String(matches[0].value || '').trim() : '';
+            };
+            const messageId = header('Message-ID');
+            const recipients = header('To').split(',').map((value: string) => (value.match(/<([^<>]+)>/)?.[1] || value).trim().toLowerCase());
+            const baseSubject = (value: string) => value.replace(/^(?:re:\s*)+/i, '').trim();
+            if (parent.id !== target.messageId || parent.threadId !== target.threadId
+                || !parent.labelIds?.includes('SENT') || recipients.length !== 1 || recipients[0] !== to.trim().toLowerCase()
+                || !/^<[^<>\s]+@[^<>\s]+>$/.test(messageId)
+                || !header('Subject') || baseSubject(header('Subject')) !== baseSubject(subject)) {
+                throw new Error('Gmail reply parent could not be verified; no message was sent');
+            }
+            const references = header('References');
+            if (references && !/^(?:<[^<>\s]+@[^<>\s]+>\s*)+$/.test(references)) throw new Error('Invalid Gmail parent References');
+            replyHeaders = [`In-Reply-To: ${messageId}`, `References: ${references ? `${references} ` : ''}${messageId}`];
+        } catch (error) {
+            rejectBeforeSend(error);
+        }
+    }
+    // The approved subject is never rewritten to force threading.
     const utf8Subject = encodeHeaderRFC2047(subject);
     const messageParts = [
         `To: ${to}`,
         'Content-Type: text/html; charset=utf-8',
         'MIME-Version: 1.0',
         `Subject: ${utf8Subject}`,
+        ...replyHeaders,
         ...(options.idempotencyKey ? [`X-ANTON-Dispatch: ${sanitizeHeaderText(options.idempotencyKey)}`] : []),
         '',
         prepared.html,
@@ -89,6 +128,7 @@ export async function sendGmail(accessToken: string, to: string, subject: string
         },
         body: JSON.stringify({
             raw: encodedMessage,
+            ...(options.replyTarget?.provider === 'gmail' ? { threadId: options.replyTarget.threadId } : {}),
         }),
     });
 
@@ -99,10 +139,11 @@ export async function sendGmail(accessToken: string, to: string, subject: string
 }
 
 export async function sendOutlook(accessToken: string, to: string, subject: string, htmlBody: string, options: ServerEmailSendOptions = {}) {
+    if (options.replyTarget) rejectBeforeSend('OUTLOOK_NATIVE_REPLY_UNSUPPORTED');
     const prepared = prepareOutboundEmail({ html: htmlBody, text: options.textBody, unsubscribeUrl: options.unsubscribeUrl });
     const preflight = validateOutboundEmail({ to, subject, html: prepared.html, text: prepared.text, requireUnsubscribe: true, unsubscribeUrl: options.unsubscribeUrl });
     if (!preflight.ok) {
-        throw new Error(preflight.errors.join(' '));
+        rejectBeforeSend(preflight.errors.join(' '));
     }
     const safeSubject = sanitizeHeaderText(subject);
     const sentAfter = new Date();
@@ -143,6 +184,8 @@ export async function sendOutlook(accessToken: string, to: string, subject: stri
         await confirmedProviderRejection('Outlook', res);
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
+    // A 202 has no ID. Missing/stripped correlation headers or delayed Sent Items
+    // visibility must remain unknown; never infer success from the parent or subject alone.
     const sentMeta = await findRecentlySentOutlookMessage(accessToken, {
         to,
         subject: safeSubject,

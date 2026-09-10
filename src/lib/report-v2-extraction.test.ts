@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { Readability } from '@mozilla/readability';
+import { JSDOM } from 'jsdom';
+
 import {
   canonicalResearchUrl,
   isCleanEvidenceText,
@@ -38,6 +41,69 @@ test('extracts readable evidence, dates, links, JSON-LD, tables and contextual n
   assert.equal(registry.source.publishedAt, '2026-03-05T17:00:00.000Z');
   assert.equal(registry.jsonLd.length, 1);
   assert.deepEqual(registry.tables[0]?.headers, ['Empresa', 'Estado']);
+});
+
+test('fallback preserves useful content, metadata, JSON-LD and country links without scripts or navigation', () => {
+  const title = 'Servicios de personal para empresas';
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'Organization',
+    name: 'Empresa de personal',
+    dateModified: '2026-04-02T18:18:45Z',
+  };
+  const html = `<html><head>
+    <title>${title}</title>
+    <meta name="description" content="Soluciones de personal para empresas.">
+  </head><body>
+    <h1>${title}</h1>
+    <script type="application/ld+json">${JSON.stringify(jsonLd)}</script>
+    <script>{"require":[["maybeDisableAnimations",null,null,[]]]}</script>
+    <style>body { color: purple; }</style>
+    <noscript>Activar JavaScript para continuar.</noscript>
+    <template><p>Contenido de plantilla.</p></template>
+    <nav hidden><a href="/chile/">Chile</a><a href="/peru/">Peru</a><a href="/colombia/">Colombia</a></nav>
+    <footer>Informacion legal y privacidad.</footer>
+    <form><button>Ingresar con cuenta.</button></form>
+    <svg aria-hidden="true"><text>Icono de menu</text></svg>
+  </body></html>`;
+  // A title-only page has no article, so this exercises the real body fallback.
+  const dom = new JSDOM(html);
+  assert.equal(new Readability(dom.window.document).parse(), null);
+  dom.window.close();
+
+  const evidence = parseWebEvidenceV2({
+    html,
+    url: 'https://example.test/',
+    retrievedAt: golden.capturedAt,
+  });
+
+  assert.equal(evidence.text, title);
+  assert.deepEqual(evidence.blocks, [title]);
+  assert.equal(evidence.source.title, title);
+  assert.equal(evidence.metaDescription, 'Soluciones de personal para empresas.');
+  assert.equal(evidence.source.modifiedAt, '2026-04-02T18:18:45.000Z');
+  assert.deepEqual(evidence.jsonLd, [jsonLd]);
+  assert.deepEqual(evidence.links, [
+    { text: 'Chile', url: 'https://example.test/chile' },
+    { text: 'Peru', url: 'https://example.test/peru' },
+    { text: 'Colombia', url: 'https://example.test/colombia' },
+  ]);
+});
+
+test('accepts long document and Open Graph titles within the 500-character source limit', () => {
+  for (const title of ['a'.repeat(500), 'a'.repeat(501), 'Servicios de personal '.repeat(100).trim()]) {
+    for (const metadata of [`<title>${title}</title>`, `<meta property="og:title" content="${title}">`]) {
+      const evidence = parseWebEvidenceV2({
+        html: `<html><head>${metadata}</head><body><p>Contenido util para empresas.</p></body></html>`,
+        url: 'https://example.test/',
+        retrievedAt: golden.capturedAt,
+      });
+
+      assert.ok(evidence.source.title.length <= 500);
+      assert.equal(evidence.source.title, title.length > 500 ? truncateAtWord(title, 497) : title);
+      assert.match(evidence.text, /Contenido util para empresas/);
+    }
+  }
 });
 
 test('filters technical noise and truncates only at a word boundary', () => {

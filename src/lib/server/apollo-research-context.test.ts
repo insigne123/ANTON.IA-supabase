@@ -28,6 +28,7 @@ function apolloRow(overrides: Record<string, unknown> = {}) {
       email: 'private@acme.example',
       primaryPhone: '+15550100001',
       organization: {
+        id: 'apollo-org-1',
         name: 'Acme',
         short_description: 'Acme coordina operaciones regionales.',
       },
@@ -44,6 +45,7 @@ test('Apollo research context is deterministic and strips all contact data', () 
   assert.match(context.fingerprint, /^sha256:[a-f0-9]{64}$/);
   assert.equal(context.person.fullName, 'Ada Lovelace');
   assert.equal(context.company.description, 'Acme coordina operaciones regionales.');
+  assert.equal(context.company.apolloOrganizationId, 'apollo-org-1');
   assert.equal(JSON.stringify(context).includes('private@acme.example'), false);
   assert.equal(JSON.stringify(context).includes('+15550100001'), false);
 
@@ -72,6 +74,21 @@ test('stored Apollo context is integrity-checked and re-sanitized before prompt 
   assert.equal(parseApolloResearchContext({ ...context, observedAt: '2026-09-02T00:00:00.000Z' }), null);
 });
 
+test('Apollo organization IDs cannot cross domains between observations or inside a row', () => {
+  const context = buildApolloResearchContextFromRows([
+    { table: 'enriched_leads', row: apolloRow() },
+    { table: 'people_search_leads', row: apolloRow({ organization_domain: 'other.example',
+      updated_at: '2026-09-02T00:00:00.000Z', data: {} }) },
+  ]);
+  assert.equal(context?.company.domain, 'other.example');
+  assert.equal(context?.company.apolloOrganizationId, undefined);
+  const conflicting = buildApolloResearchContextFromRows([
+    { table: 'enriched_leads', row: apolloRow({ data: { organization: { id: 'wrong-org', primary_domain: 'other.example' } } }) },
+  ]);
+  assert.equal(conflicting?.company.domain, 'acme.example');
+  assert.equal(conflicting?.company.apolloOrganizationId, undefined);
+});
+
 test('Apollo context hydrates research identity without importing operational email', () => {
   const context = buildApolloResearchContextFromRows([
     { table: 'enriched_leads', row: apolloRow() },
@@ -85,6 +102,7 @@ test('Apollo context hydrates research identity without importing operational em
   assert.equal(lead.fullName, 'Ada Lovelace');
   assert.equal(lead.companyName, 'Acme');
   assert.equal(lead.organizationIndustry, 'Software');
+  assert.equal(apolloCompanyResearchContext(context)?.company.apolloOrganizationId, 'apollo-org-1');
 });
 
 test('company cache context excludes person identity and is shared across people', () => {

@@ -39,21 +39,24 @@ test('generated drafts remain editable, retryable, and stable while generation r
   assert.match(composerSource, /Reintentar generación/);
 });
 
-test('AI notes save local edits first and adjust only editable unsent follow-ups', () => {
+test('AI notes require explicit saves and propose only for editable unsent follow-ups', () => {
   const rewriteFunction = composerSource.slice(
     composerSource.indexOf('async function rewriteDraft'),
     composerSource.indexOf('async function generatePlan'),
   );
-  assert.ok(rewriteFunction.indexOf('await patchDraft(stepId)') < rewriteFunction.indexOf('/rewrite`'));
+  assert.doesNotMatch(rewriteFunction, /await patchDraft/);
+  assert.match(rewriteFunction, /isEditorDirty\(editor\)/);
+  assert.match(rewriteFunction, /previewOnly: true/);
+  assert.match(rewriteFunction, /readRewriteProposal/);
   assert.match(rewriteFunction, /method: 'POST'/);
-  assert.match(rewriteFunction, /expectedVersionId: step\.draft\.versionId/);
+  assert.match(rewriteFunction, /expectedVersionId: editor\.versionId/);
   assert.match(rewriteFunction, /campaignStepId: step\.id/);
   assert.match(composerSource, /for \(const \[index, step\] of generatedSteps\.entries\(\)\) \{[\s\S]+await rewriteDraft\(step\.id, coherentInstruction/);
   assert.match(composerSource, /AI_EDITABLE_STEP_STATES\.has\(step\.state\)/);
   assert.match(composerSource, /Mantén coherencia entre todos los seguimientos/);
-  assert.match(composerSource, /Los demás seguimientos conservaron sus cambios/);
+  assert.match(composerSource, /Las propuestas ya preparadas se conservan/);
   assert.match(composerSource, /await loadPlan\(undefined, false\)/);
-  assert.match(composerSource, /solo a los seguimientos que todavía no se enviaron\. El correo inicial no cambiará/);
+  assert.match(composerSource, /Después podrás aplicar o descartar cada una\. El correo inicial no cambiará/);
   assert.match(composerSource, /event\.metaKey \|\| event\.ctrlKey/);
   assert.match(composerSource, /side="bottom"/);
   assert.match(composerSource, /sm:right-0[\s\S]+sm:h-full[\s\S]+sm:max-w-lg/);
@@ -65,5 +68,5 @@ test('dirty and busy follow-up state fences send and navigation in compose', () 
   assert.match(composeSource, /onDirtyChange=\{setFollowUpDirty\}/);
   assert.match(composeSource, /onBusyChange=\{setFollowUpBusy\}/);
   assert.match(composeSource, /\|\| followUpDirty[\s\S]+\|\| followUpBusy/);
-  assert.match(composeSource, /beforeunload/);
+  assert.match(composeSource, /useComposeUnsavedGuard\(hasNativeEdits \|\| followUpDirty/);
 });

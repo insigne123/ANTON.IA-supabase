@@ -226,6 +226,8 @@ export function parseWebEvidenceV2(input: {
       return [];
     }
   }).slice(0, 200);
+  document.querySelectorAll('script,style,noscript,template,nav,footer,form,svg')
+    .forEach((element) => element.remove());
   const article = new Readability(document.cloneNode(true) as Document).parse();
   const rawBlocks = String(article?.textContent || document.body?.textContent || '')
     .split(/(?:\r?\n){1,}|(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ])/u);
@@ -239,7 +241,7 @@ export function parseWebEvidenceV2(input: {
     id: buildStableReportV2Id('src', canonicalUrl),
     url: canonicalUrl,
     canonicalUrl,
-    title: title || new URL(canonicalUrl).hostname,
+    title: title.length > 500 ? truncateAtWord(title, 497) : title || new URL(canonicalUrl).hostname,
     sourceType: ownDomain(canonicalUrl, input.targetDomain) ? 'corporate' : classifySource(canonicalUrl),
     jurisdiction: inferredJurisdiction,
     publishedAt: parseInstant(publishedAt),

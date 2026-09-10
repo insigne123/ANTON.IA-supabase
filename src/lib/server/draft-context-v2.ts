@@ -11,17 +11,23 @@ import {
   type ReportV2,
 } from '@/lib/report-v2-contracts';
 import {
-  isDraftableCompanyFactClaim,
   isDraftablePersonFactClaim,
   isFreshResearchClaim,
+  isGenericResearchText,
+  isHardRejectedResearchUrl,
   isQualifiedResearchFactEvidence,
   isQualifiedResearchPersonFactEvidence,
   isRelevantResearchSignal,
+  isSameResearchCompanyDomain,
+  mentionsResearchCompany,
+  mentionsResearchPerson,
+  normalizeResearchCompanyDomain,
 } from '@/lib/research-fact-eligibility';
 import {
   assessResearchQuality,
   type ResearchQualityAssessment,
 } from '@/lib/native-research-quality';
+import { isDraftableCompanyFactWithPublicEvidence } from './draft-public-company-evidence';
 import {
   validateResearchReportDocumentCitationsV1,
   type ResearchReportDocumentV1,
@@ -32,13 +38,27 @@ export const DRAFT_CONTEXT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 export const MIN_DRAFT_QUALITY_SCORE = 48;
 
 export const DEFAULT_DRAFT_CTA = '¿Te parece si lo conversamos 15 minutos esta semana?';
-export const DRAFT_PROHIBITED_PHRASES = [
+export const DRAFT_BLOCKED_SAFETY_PHRASES = [
   'soy una ia',
   'como ia',
   'as an ai',
   'language model',
   '100% garantizado',
   'garantizamos resultados',
+  'draft_context',
+  'required_factual_personalization',
+  'claim id',
+  'evidence id',
+  'preflight',
+  'estrategia de redacción',
+  'contexto de redacción',
+] as const;
+
+// Only safety phrases can block draft creation. Commercial wording, including words
+// that can appear naturally in a report-backed message, is advisory and editable.
+export const DRAFT_PROHIBITED_PHRASES = DRAFT_BLOCKED_SAFETY_PHRASES;
+
+export const DRAFT_STYLE_ADVISORIES = [
   'entiendo que',
   'nos especializamos',
   'nuestras soluciones',
@@ -93,13 +113,6 @@ export const DRAFT_PROHIBITED_PHRASES = [
   'ángulo',
   'enfoque acotado',
   'secuencia',
-  'estrategia de redacción',
-  'contexto de redacción',
-  'draft_context',
-  'required_factual_personalization',
-  'claim id',
-  'evidence id',
-  'preflight',
   'no quiero asumir',
   'sin asumir',
   'asumir prioridades',
@@ -152,6 +165,16 @@ export const DraftEvidenceV2Schema = z.object({
     reliability: z.number().min(0).max(1),
   }).strict(),
   supportedFactClaimIds: z.array(z.string().trim().min(1).max(256)).max(50),
+  provenance: z.object({
+    kind: z.literal('report_v2'),
+    documentId: z.string().trim().min(1).max(256),
+    revision: z.number().int().positive(),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+    claimId: z.string().regex(/^c\d{2,4}$/),
+    factId: z.string().regex(/^f_[a-f0-9]{10}$/),
+    sourceId: z.string().regex(/^src_[a-f0-9]{10}$/),
+    sourceContentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict().optional(),
 }).strict();
 export type DraftEvidenceV2 = z.infer<typeof DraftEvidenceV2Schema>;
 
@@ -426,7 +449,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
   const factClaimsByEvidenceId = new Map<string, string[]>();
 
   const freshCompanyFactClaims = snapshot.claims.filter((claim) =>
-    isDraftableCompanyFactClaim({ snapshot, claim, nowMs }),
+    isDraftableCompanyFactWithPublicEvidence({ snapshot, claim, nowMs }),
   );
   const freshFactClaims = [
     ...freshCompanyFactClaims,
@@ -440,7 +463,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
     }
   }
 
-  const evidence = snapshot.evidence.flatMap((item) => {
+  let evidence = snapshot.evidence.flatMap((item) => {
     const source = sourceById.get(item.sourceId);
     const sourceUrl = validHttpUrl(source?.url);
     const qualifiedFact = isQualifiedResearchFactEvidence({
@@ -561,12 +584,106 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
       });
     }
     const angleClaimIds = reportDocument.sections.find((section) => section.key === 'angle')?.paragraphs
+      .filter((paragraph) => paragraph.context === 'target')
       .flatMap((paragraph) => paragraph.claimIds) || [];
-    const mappedClaims = angleClaimIds.flatMap((claimId) => {
+    if (!angleClaimIds.length) angleClaimIds.push(...reportDocument.sections
+      .filter((section) => ['company', 'verdict'].includes(section.key))
+      .flatMap((section) => section.paragraphs.filter((paragraph) => paragraph.basis === 'source' && paragraph.context === 'target').flatMap((paragraph) => paragraph.claimIds)));
+    const reportEvidence: DraftEvidenceV2[] = [];
+    const reportFacts = new Map(reportDocument.evidenceGraph.facts.map((fact) => [fact.id, fact]));
+    const reportSources = new Map(reportDocument.evidenceGraph.sources.map((source) => [source.id, source]));
+    const snapshotClaimIds = new Set(snapshot.claims.map((claim) => claim.id));
+    const companyIdentity = {
+      companyName: snapshot.subject.company.name,
+      companyDomain: snapshot.subject.company.domain,
+    };
+    const reportFactsAllowed = (reportDocument.audit.status === 'passed' || reportDocument.audit.issues.every((issue) => issue.severity === 'warn' && ['literal_copy', 'duplication', 'truncated', 'generic'].includes(issue.type)))
+      && isFreshDate(reportDocument.synthesis.generatedAt, nowMs)
+      && (!reportDocument.publicCompanyResearch || Date.parse(reportDocument.publicCompanyResearch.expiresAt) > nowMs)
+      && Boolean(companyIdentity.companyDomain)
+      && normalizeResearchCompanyDomain(reportDocument.entity.companyDomain) === normalizeResearchCompanyDomain(companyIdentity.companyDomain);
+    const mappedClaims = unique(angleClaimIds).flatMap((claimId) => {
       const claim = reportDocument.evidenceGraph.claims.find((item) => item.id === claimId);
       const internalId = reportDocument.evidenceGraph.shortIdMap[claimId];
-      return claim && internalId ? [{ claim, internalId }] : [];
+      if (!claim) return [];
+      // Persisted snapshot projections keep their original eligibility, including contradictions and expiry.
+      if (internalId && snapshotClaimIds.has(internalId)) return [{ claim, internalId }];
+      if (
+        !reportFactsAllowed || claim.type !== 'fact'
+        || !['company', 'country', 'person'].includes(claim.scope || '')
+        || claim.scope === 'country' && claim.jurisdiction !== reportDocument.entity.contactCountry
+        || isGenericResearchText(claim.statement)
+        || (claim.observedAt !== null && !isFreshDate(claim.observedAt, nowMs))
+        || (claim.dimension === 'signal' && !claim.observedAt)
+        || (claim.jurisdiction && claim.jurisdiction !== 'GLOBAL' && claim.jurisdiction !== reportDocument.entity.contactCountry)
+      ) return [];
+      const subjectScope = claim.scope === 'person' ? 'person' : 'company';
+      if (subjectScope === 'company') {
+        if (!['company_overview', 'company_industry', 'company_service', 'company_size', 'company_geography', 'company_legal_form', 'company_tech', 'signal'].includes(claim.dimension)) return [];
+        if (!mentionsResearchCompany(claim.statement, companyIdentity)) return [];
+      } else if (
+        !['contact_role', 'contact_tenure'].includes(claim.dimension)
+        || !mentionsResearchPerson(claim.statement, snapshot.subject.person.fullName)
+      ) return [];
+
+      // Report graph IDs belong to the pinned report, never to the immutable snapshot.
+      const prefix = `report-v2:${metadata.contentHash}`;
+      const draftClaimId = `${prefix}:claim:${claim.id}`;
+      const supported = claim.evidenceIds.flatMap((factId) => {
+        const fact = reportFacts.get(factId);
+        const source = fact ? reportSources.get(fact.sourceId) : undefined;
+        const url = validHttpUrl(source?.url);
+        if (
+          !fact || !source || !url || !validHttpUrl(source.canonicalUrl)
+          || isHardRejectedResearchUrl(url) || isHardRejectedResearchUrl(source.canonicalUrl)
+          || isGenericResearchText(fact.text)
+          || ['search', 'registry'].includes(source.sourceType)
+          || !isFreshDate(source.retrievedAt, nowMs)
+          || (fact.observedAt !== null && !isFreshDate(fact.observedAt, nowMs))
+          || [fact.jurisdiction, source.jurisdiction].some((jurisdiction) => jurisdiction && jurisdiction !== 'GLOBAL' && jurisdiction !== reportDocument.entity.contactCountry)
+        ) return [];
+        if (subjectScope === 'company') {
+          if (!isSameResearchCompanyDomain(url, companyIdentity.companyDomain) && !(
+            mentionsResearchCompany(`${source.title} ${url}`, companyIdentity)
+            && mentionsResearchCompany(fact.text, companyIdentity)
+          )) return [];
+        } else if (!mentionsResearchPerson(fact.text, snapshot.subject.person.fullName)) return [];
+        return [DraftEvidenceV2Schema.parse({
+          evidenceId: `${prefix}:evidence:${claim.id}:${fact.id}`,
+          // Only sourced graph text is evidence, never the paragraph's analysis or recommendation.
+          statement: fact.text,
+          subjectScope,
+          confidence: claim.confidence,
+          source: {
+            sourceId: `${prefix}:source:${source.id}`,
+            url,
+            title: source.title,
+            type: source.sourceType,
+            // V2 has no source reliability score; do not invent a positive one.
+            reliability: 0,
+          },
+          supportedFactClaimIds: [draftClaimId],
+          provenance: {
+            kind: 'report_v2',
+            documentId: metadata.id,
+            revision: metadata.revision,
+            contentHash: metadata.contentHash,
+            claimId: claim.id,
+            factId: fact.id,
+            sourceId: source.id,
+            sourceContentHash: source.contentHash,
+          },
+        })];
+      });
+      reportEvidence.push(...supported);
+      return supported.length ? [{ claim, internalId: draftClaimId }] : [];
     });
+    if (reportEvidence.length) {
+      // Retain snapshot fallback candidates even when a report has many supporting blocks.
+      evidence = [...reportEvidence.slice(0, 20), ...evidence].slice(0, 50);
+      eligibleFactClaimIds.clear();
+      evidence.forEach((item) => item.supportedFactClaimIds.forEach((claimId) => eligibleFactClaimIds.add(claimId)));
+    }
     return DraftReportOutreachV2Schema.parse({
       document: metadata,
       synthesis: { method: 'model', status: reportDocument.synthesis.status },
@@ -574,7 +691,7 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
         selectedFactualAnchorClaimIds: unique(mappedClaims
           .filter(({ claim }) => claim.type === 'fact')
           .map(({ internalId }) => internalId))
-          .filter((claimId) => eligibleFactClaimIds.has(claimId)),
+          .filter((claimId) => eligibleFactClaimIds.has(claimId)).slice(0, 20),
         selectedHypothesisIds: unique(mappedClaims
           .filter(({ claim }) => claim.type === 'hypothesis')
           .map(({ internalId }) => internalId))

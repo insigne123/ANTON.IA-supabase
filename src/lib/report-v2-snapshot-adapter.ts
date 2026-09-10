@@ -19,7 +19,7 @@ import { canonicalResearchUrl, resolveEntityFromExistingContextV2, truncateAtWor
 import { ResearchSnapshotV1Schema, type ResearchClaimKindV1, type ResearchSnapshotV1 } from '@/lib/research-contracts';
 import { qualifyEntityV2, type IcpRulesV2 } from '@/qualification/icp-gate';
 
-export const REPORT_V2_SNAPSHOT_ADAPTER_VERSION = 'report-v2/snapshot-adapter/1';
+export const REPORT_V2_SNAPSHOT_ADAPTER_VERSION = 'report-v2/snapshot-adapter/2';
 
 export type ReportV2SnapshotProjection = {
   entity: EntityResolutionV2;
@@ -99,12 +99,12 @@ function freshnessDays(observedAt: string | null, generatedAt: string) {
   return Math.max(0, Math.floor((Date.parse(generatedAt) - Date.parse(observedAt)) / 86_400_000));
 }
 
-function headcountFromClaims(claims: ClaimV2[]) {
+function headcountFromClaims(claims: ClaimV2[], country: EntityResolutionV2['contactCountry']) {
   const values = claims.flatMap((claim) => {
     if (claim.type !== 'fact' || claim.dimension !== 'company_size') return [];
-    return (claim.statement.match(/\b\d{1,3}(?:[.,]\d{3})+|\b\d+\b/g) || [])
-      .map((value) => Number(/[.,]\d{3}(?:\D|$)/.test(value) ? value.replace(/[.,]/g, '') : value.replace(',', '.')))
-      .filter((value) => Number.isInteger(value) && value > 0);
+    if (claim.scope === 'group' || claim.scope === 'sector' || claim.jurisdiction !== country) return [];
+    const match = claim.statement.match(/\b(\d+(?:[.,]\d{3})*)\s+(?:colaboradores|empleados|trabajadores|employees|workers|people)\b/i);
+    return match ? [Number(match[1].replace(/[.,]/g, ''))] : [];
   });
   return values.length > 0 ? Math.max(...values) : null;
 }
@@ -125,7 +125,6 @@ export function projectResearchSnapshotV1ToReportV2(input: {
   const companyDomain = text(snapshot.subject.company.domain);
   if (!companyDomain) throw new Error('REPORT_V2_COMPANY_DOMAIN_REQUIRED');
   const generatedAt = new Date(input.generatedAt).toISOString();
-  const nativeExtractionFallback = snapshot.request.provider === 'native-research-v1';
   const entity = resolveEntityFromExistingContextV2({
     contact: {
       fullName: snapshot.subject.person.fullName,
@@ -148,6 +147,8 @@ export function projectResearchSnapshotV1ToReportV2(input: {
   const sourceIdMap = new Map<string, string>();
   const sourcesById = new Map<string, SourceV2>();
   snapshot.sources.forEach((source) => {
+    // V2 reloads the original shared graph, including scope and uncited facts.
+    if (snapshot.publicCompanyResearch && source.provider === 'public-company') return;
     let canonicalUrl: string;
     try {
       canonicalUrl = canonicalResearchUrl(source.canonicalUrl || source.url);
@@ -189,10 +190,7 @@ export function projectResearchSnapshotV1ToReportV2(input: {
       id,
       sourceId,
       text: truncateAtWord(evidence.statement, 2_000),
-      observedAt: instant(evidence.observedAt)
-        || source.publishedAt
-        || source.modifiedAt
-        || (nativeExtractionFallback ? instant(evidence.extractedAt) : null),
+      observedAt: instant(evidence.observedAt),
       jurisdiction: source.jurisdiction,
       locator: evidence.locator ? truncateAtWord(`${evidence.locator.kind}:${evidence.locator.value}`, 500) : null,
     })];
@@ -200,6 +198,7 @@ export function projectResearchSnapshotV1ToReportV2(input: {
   const factsById = new Map(facts.map((fact) => [fact.id, fact]));
 
   const claimCandidates = snapshot.claims.slice().sort((left, right) => left.id.localeCompare(right.id)).flatMap((claim) => {
+    if (Date.parse(claim.freshness.validUntil) <= Date.parse(generatedAt)) return [];
     const dimension = DIMENSION_BY_V1_KIND[claim.kind];
     if (!dimension) return [];
     const evidenceIds = [...new Set(claim.supportingEvidenceIds.map((id) => factIdMap.get(id)).filter((id): id is string => Boolean(id)))];
@@ -216,7 +215,7 @@ export function projectResearchSnapshotV1ToReportV2(input: {
       confidence: claim.confidence,
     };
     if (claim.classification === 'fact') {
-      if (!observedAt || evidenceIds.length === 0) return [];
+      if (evidenceIds.length === 0 || dimension === 'signal' && !observedAt) return [];
       const parsed = ClaimV2Schema.safeParse({ ...base, type: 'fact', evidenceIds, observedAt });
       return parsed.success ? [parsed.data] : [];
     }
@@ -235,7 +234,7 @@ export function projectResearchSnapshotV1ToReportV2(input: {
   const qualification = qualifyEntityV2({
     entity,
     rules: input.icpRules,
-    headcount: headcountFromClaims(claims),
+    headcount: headcountFromClaims(claims, entity.contactCountry),
     productKeys: input.sellerProfile.products.map((product) => product.key),
   });
   const committee = buildReportV2Committee({ entity, qualification, claims });

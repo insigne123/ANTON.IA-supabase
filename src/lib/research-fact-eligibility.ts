@@ -19,6 +19,14 @@ export function researchTextKey(value: unknown) {
 }
 
 export function isHardRejectedResearchText(value: unknown) {
+  const raw = String(value || '');
+  if (
+    /<\s*(?:!doctype\b|\/?\s*[a-z])[^>]*(?:>|$)/i.test(raw)
+    || /\bdoctype\s+html\s*>/i.test(raw)
+    || /\b(?:elementor(?:-[a-z0-9_-]+)+|hummingbird-assets)\b/i.test(raw)
+    || /\b(?:wp-content|wp-includes)\//i.test(raw)
+  ) return true;
+
   const normalized = researchTextKey(value);
   if (!normalized) return false;
 

@@ -8,6 +8,7 @@ import { ResearchSnapshotV1Schema } from '@/lib/research-contracts';
 import { DRAFT_FIXTURE_NOW, draftSnapshotFixture } from '@/lib/server/draft-v2-test-fixtures';
 import {
   RESEARCH_REPORT_V2_RUNTIME_VERSION,
+  loadResearchReportDocumentV2,
   researchReportV2DocumentInternals,
   tryEnsureResearchReportDocumentV2,
   type StoredResearchReportDocumentV2,
@@ -100,6 +101,7 @@ test('persists Report V2 and completes the matching durable claim atomically wit
     loadState: async () => null,
     claim: async () => ({ state: { id: 'state-id' }, claimToken: 'claim-token' }) as any,
     project: () => value.projection,
+    research: async () => ({ ...value.projection, researchWarnings: [], researchMetrics: { queries: 0, pages: 0, elapsedMs: 0 } }),
     synthesize: async () => ({
       document: value.document,
       metrics: { sectionAcceptRate: 0.8, claimsPerSource: {}, ownDomainSourceRatio: 1, signalsWithDateCount: 0, committeeMembersFound: 0 },
@@ -114,6 +116,88 @@ test('persists Report V2 and completes the matching durable claim atomically wit
   assert.equal(result.document, value.stored);
   assert.equal(result.synthesis?.status, 'partial');
   assert.equal(completedRetryable, true);
+});
+
+test('exhausts the editorial retry after the second claimed V2 attempt and exposes an actionable task', async () => {
+  const value = fixture();
+  const failure: { value: { retryable?: boolean; errorCode?: string; errorMessage?: string } | null } = { value: null };
+  const result = await tryEnsureResearchReportDocumentV2({
+    snapshot: value.snapshot,
+    access: { organizationId: value.snapshot.scope.organizationId!, userId: value.snapshot.scope.ownerUserId },
+    sellerProfile: value.sellerProfile,
+    icpRules: null,
+    synthesisContextHash: 'a'.repeat(64),
+    deliveryState: 'visible',
+    generatedAt: DRAFT_FIXTURE_NOW.toISOString(),
+  }, {
+    loadForUpdate: async () => null,
+    loadState: async () => null,
+    claim: async () => ({ state: { id: 'state-id', attemptCount: 2 }, claimToken: 'claim-token' }) as any,
+    project: () => value.projection,
+    research: async () => ({ ...value.projection, researchWarnings: [], researchMetrics: { queries: 0, pages: 0, elapsedMs: 0 } }),
+    synthesize: async () => { throw new Error('editor failure'); },
+    fail: async (input) => {
+      failure.value = input;
+      return { status: 'failed_permanent', retryable: false } as any;
+    },
+  });
+
+  assert.equal(result.document, null);
+  assert.equal(failure.value?.retryable, false);
+  assert.equal(failure.value?.errorCode, 'report_v2_generation_failed');
+  assert.match(failure.value?.errorMessage || '', /Tarea accionable/);
+});
+
+test('cached synthesis requires matching delivery, context, runtime and durable document pointer', async () => {
+  for (const mismatch of ['none', 'delivery', 'context', 'runtime', 'pointer', 'retryable']) {
+    const value = fixture();
+    value.stored.retryable = false;
+    if (mismatch === 'delivery') value.stored.deliveryState = 'suppressed';
+    if (mismatch === 'runtime') value.stored.promptVersion = 'old';
+    const state = { reportDocumentId: mismatch === 'pointer' ? 'other' : value.stored.id, sellerProfileHash: mismatch === 'context' ? 'b'.repeat(64) : 'a'.repeat(64), status: 'partial', retryable: mismatch === 'retryable' } as any;
+    let claims = 0;
+    let persisted = 0;
+    const result = await tryEnsureResearchReportDocumentV2({
+      snapshot: value.snapshot, access: { organizationId: value.stored.organizationId, userId: value.stored.userId },
+      sellerProfile: value.sellerProfile, icpRules: null, synthesisContextHash: 'a'.repeat(64), deliveryState: 'visible',
+    }, {
+      loadForUpdate: async () => value.stored,
+      loadState: async () => state,
+      claim: async () => { claims++; return null; },
+      persist: async () => { persisted++; throw new Error('Unexpected write'); },
+      synthesize: async () => { throw new Error('Unexpected paid call'); },
+    });
+    assert.equal(claims, mismatch === 'none' ? 0 : 1);
+    assert.equal(persisted, 0);
+    assert.equal(result.metrics, null);
+    // Internal update reads may return suppressed content, but never promote it.
+    assert.equal(result.document?.deliveryState, value.stored.deliveryState);
+  }
+});
+
+test('scope mismatch rejects before cache access or synthesis', async () => {
+  for (const mismatch of ['owner', 'organization']) {
+    const value = fixture();
+    await assert.rejects(tryEnsureResearchReportDocumentV2({
+      snapshot: value.snapshot,
+      access: { organizationId: mismatch === 'organization' ? 'other-org' : value.stored.organizationId, userId: mismatch === 'owner' ? 'other-owner' : value.stored.userId },
+      sellerProfile: value.sellerProfile, icpRules: null, synthesisContextHash: 'a'.repeat(64), deliveryState: 'visible',
+    }, { loadForUpdate: async () => { assert.fail('must not read cache'); } }), /SCOPE_MISMATCH/);
+  }
+});
+
+test('public document reads constrain snapshot, owner, organizations and visible delivery', async () => {
+  const filters: unknown[][] = [];
+  const query = {
+    select() { return query; }, eq(...args: unknown[]) { filters.push(args); return query; },
+    in(...args: unknown[]) { filters.push(args); return query; }, order() { return query; }, limit() { return query; },
+    async maybeSingle() { return { data: null, error: null }; },
+  };
+  await loadResearchReportDocumentV2({ researchSnapshotId: 'snapshot', access: { organizationId: 'org', organizationIds: ['org', 'shared'], userId: 'owner' } }, { from: () => query });
+  assert.ok(filters.some(([key, value]) => key === 'delivery_state' && value === 'visible'));
+  assert.ok(filters.some(([key, value]) => key === 'user_id' && value === 'owner'));
+  assert.ok(filters.some(([key, value]) => key === 'research_snapshot_id' && value === 'snapshot'));
+  assert.deepEqual(filters.find(([key]) => key === 'organization_id'), ['organization_id', ['org', 'shared']]);
 });
 
 test('rejects a stored V2 row when its canonical content hash does not match', () => {

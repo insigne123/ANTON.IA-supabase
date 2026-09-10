@@ -1,4 +1,6 @@
 import type { NativeResearchStatus } from '@/lib/native-research-contracts';
+import { buildReportFieldAnswers } from '@/lib/report-field-answers';
+import type { ReportFieldAnswer } from '@/lib/report-field-answers';
 import {
   REPORT_V2_SCHEMA_VERSION,
   ReportV2Schema,
@@ -63,6 +65,8 @@ export type ResearchWorkspaceSource = {
 };
 
 export type ResearchWorkspaceResult = {
+  startedAt?: string | null;
+  reportSynthesis?: Pick<ResearchReportSynthesisViewState, 'status'> | null;
   status: ResearchWorkspaceStatus;
   researchSnapshotId: string | null;
   lead: Omit<ResearchWorkspaceLead, 'key'>;
@@ -186,6 +190,7 @@ export type ResearchReportView = {
 };
 
 export type ResearchWorkspaceRunItem = {
+  startedAt?: string | null;
   id: string;
   reportId: string | null;
   position: number;
@@ -215,6 +220,7 @@ export type ResearchWorkspaceRun = {
 
 export type ResearchReportDetail = {
   reportId: string | null;
+  questionnaireEnabled: boolean;
   result: ResearchWorkspaceResult;
   reportDocument: ResearchReportDocumentV1 | null;
   reportSynthesis: ResearchReportSynthesisViewState | null;
@@ -1252,6 +1258,8 @@ function normalizeResult(value: unknown): ResearchWorkspaceResult | null {
 
   return {
     status: normalizeResearchStatus(raw.status),
+    startedAt: nullableText(raw.startedAt ?? raw.started_at),
+    reportSynthesis: parseResearchReportSynthesis(raw.reportSynthesis ?? raw.report_synthesis),
     researchSnapshotId: nullableText(raw.researchSnapshotId ?? raw.research_snapshot_id),
     lead: {
       id: nullableText(lead.id),
@@ -1301,6 +1309,7 @@ export function parseResearchReportDetail(
   const parsedSnapshot = ResearchSnapshotV1Schema.safeParse(root.snapshot);
   const normalized = normalizeResult({
     ...rawResult,
+    startedAt: root.startedAt ?? rawResult.startedAt,
     status: rawResult.status ?? root.status,
     researchSnapshotId: rawResult.researchSnapshotId ?? root.researchSnapshotId ?? root.research_snapshot_id,
     ...(parsedSnapshot.success ? { snapshot: parsedSnapshot.data } : {}),
@@ -1376,22 +1385,28 @@ export function parseResearchReportDetail(
     reportSyntheses.push({ schemaVersion: RESEARCH_REPORT_V1_SCHEMA_VERSION, synthesis: reportSynthesis });
   }
   const requestedPreferred = text(root.preferredReportSchemaVersion ?? root.preferred_report_schema_version);
+  const rejectedPreferredDocument = list(root.reportDocuments ?? root.report_documents).some((entry) =>
+    text(record(entry).schemaVersion ?? record(entry).schema_version) === requestedPreferred)
+    && !reportDocuments.some((entry) => entry.schemaVersion === requestedPreferred)
+    && !reportSyntheses.some((entry) => entry.schemaVersion === requestedPreferred);
   const preferredReportSchemaVersion = (
     requestedPreferred === REPORT_V2_SCHEMA_VERSION || requestedPreferred === RESEARCH_REPORT_V1_SCHEMA_VERSION
-  ) && reportDocuments.some((entry) => entry.schemaVersion === requestedPreferred)
+  ) && !rejectedPreferredDocument
     ? requestedPreferred
     : reportDocuments.some((entry) => entry.schemaVersion === REPORT_V2_SCHEMA_VERSION)
       ? REPORT_V2_SCHEMA_VERSION
       : reportDocuments.some((entry) => entry.schemaVersion === RESEARCH_REPORT_V1_SCHEMA_VERSION)
         ? RESEARCH_REPORT_V1_SCHEMA_VERSION
         : null;
-  const preferredReportDocument = reportDocuments.find((entry) => entry.schemaVersion === preferredReportSchemaVersion)?.document || null;
   const preferredReportSynthesis = reportSyntheses.find((entry) => entry.schemaVersion === preferredReportSchemaVersion)?.synthesis
     || (!preferredReportSchemaVersion ? reportSyntheses.find((entry) => entry.schemaVersion === REPORT_V2_SCHEMA_VERSION)?.synthesis : null)
-    || reportSynthesis;
+    || (!preferredReportSchemaVersion || preferredReportSchemaVersion === RESEARCH_REPORT_V1_SCHEMA_VERSION ? reportSynthesis : null);
+  const preferredReportDocument = reportDocuments.find((entry) => entry.schemaVersion === preferredReportSchemaVersion)?.document
+    || (preferredReportSynthesis?.status === 'failed_permanent' ? reportDocument : null);
 
   return {
     reportId: nullableText(root.reportId ?? root.report_id),
+    questionnaireEnabled: root.questionnaireEnabled === true || root.questionnaire_enabled === true,
     result,
     reportDocument,
     reportSynthesis,
@@ -1484,6 +1499,7 @@ function normalizeRunItem(rawValue: unknown, fallbackPosition: number, leads: Re
 
   return {
     id: nullableText(raw.id ?? raw.job_id ?? raw.jobId ?? job.id) || `research-item-${position}`,
+    startedAt: nullableText(job.started_at ?? job.startedAt ?? job.created_at ?? job.createdAt),
     reportId: nullableText(raw.report_id ?? raw.reportId ?? job.provider_report_id ?? job.providerReportId),
     position,
     leadRef: leadRef || lead.key,
@@ -1549,4 +1565,16 @@ export function shouldPollResearchRun(run: ResearchWorkspaceRun | null): boolean
   if (run.items.length > 0 && run.items.every((item) => isResearchTerminal(item.status))) return false;
   if (isResearchInFlight(run.status)) return true;
   return run.items.some((item) => isResearchInFlight(item.status));
+}
+
+/**
+ * Additive questionnaire projection over a readable report. Delegates to the
+ * questionnaire slice; the full report payload and audit provenance are left
+ * untouched so pruning only ever affects this model-facing projection.
+ */
+export function projectResearchReportFieldAnswers(
+  report: ResearchReportView,
+  result?: ResearchWorkspaceResult,
+): ReportFieldAnswer[] {
+  return buildReportFieldAnswers(report, result);
 }

@@ -50,7 +50,7 @@ test('people search uses Apollo query filters and strips accidental contact data
     assert.equal(parsed.ok, true);
     if (!parsed.ok) return;
 
-    const result = await executeProviderLeadSearch(parsed.value, config, { APOLLO_API_KEY: 'apollo-test-key' });
+    const result = await executeProviderLeadSearch(parsed.value, config, { APOLLO_API_KEY: 'apollo-test-key' }) as any;
     assert.equal(result.count, 1);
     assert.equal(result.leads[0]?.name, 'Ana Pe***z');
     assert.equal(result.leads[0]?.email, undefined);
@@ -102,7 +102,7 @@ test('batch search reproduces the screenshot filters without adding hidden const
     assert.equal(parsed.ok, true);
     if (!parsed.ok) return;
 
-    const result = await executeProviderLeadSearch(parsed.value, config, { APOLLO_API_KEY: 'apollo-test-key' });
+    const result = await executeProviderLeadSearch(parsed.value, config, { APOLLO_API_KEY: 'apollo-test-key' }) as any;
     assert.equal(result.search_mode, 'batch');
     assert.equal(result.count, 0);
     assert.deepEqual(result.leads, []);
@@ -160,7 +160,7 @@ test('company search accounts for its page credit and reuses provider organizati
     assert.equal(parsed.ok, true);
     if (!parsed.ok) return;
 
-    const result = await executeProviderLeadSearch(parsed.value, config, { APOLLO_API_KEY: 'apollo-test-key' });
+    const result = await executeProviderLeadSearch(parsed.value, config, { APOLLO_API_KEY: 'apollo-test-key' }) as any;
     assert.equal(result.count, 1);
     assert.equal(result.organization_search_credits, 1);
     assert.equal(result.leads[0]?.organization_name, 'People Co');
@@ -459,6 +459,105 @@ test('Apollo configuration and timeout failures do not expose upstream details',
         && error.code === 'APOLLO_UPSTREAM_TIMEOUT'
         && !error.message.includes('private upstream detail'),
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('organization search uses keyword tags and never people q_keywords', async () => {
+  const requests: Array<{ url: URL; init?: RequestInit }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    requests.push({ url: new URL(String(input)), init });
+    return Response.json({
+      organizations: [{ id: 'org-1', name: 'Moda Chile SpA', primary_domain: 'modachile.cl' }],
+      pagination: { page: 2, per_page: 25, total_entries: 60, total_pages: 3 },
+    });
+  };
+
+  try {
+    const config = getGatewayConfig({ APOLLO_BACKEND_MAX_SEARCH_RESULTS: '100' });
+    const parsed = validateLeadSearchInput({
+      provider: 'apollo',
+      search_mode: 'organization_search',
+      company_keywords: ['fashion', 'moda'],
+      company_location: ['chile'],
+      employee_ranges: ['11-50'],
+      per_page: 25,
+      page: 2,
+    }, config);
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+
+    const result = await executeProviderLeadSearch(parsed.value, config, { APOLLO_API_KEY: 'apollo-test-key' }) as any;
+    assert.equal(result.search_mode, 'organization_search');
+    assert.equal((result as { search_strategy?: string }).search_strategy, 'organizations_then_people');
+    assert.equal(result.count, 1);
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]?.url.pathname, '/api/v1/mixed_companies/search');
+    const params = requests[0]?.url.searchParams;
+    assert.deepEqual(params?.getAll('q_organization_keyword_tags[]'), ['fashion', 'moda']);
+    assert.deepEqual(params?.getAll('organization_locations[]'), ['chile']);
+    assert.deepEqual(params?.getAll('organization_num_employees_ranges[]'), ['11,50']);
+    assert.equal(params?.get('q_keywords'), null);
+    assert.equal(params?.get('page'), '2');
+    assert.equal(params?.get('per_page'), '25');
+    assert.equal((result as { organization_search_credits?: number }).organization_search_credits, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('organization people search is scoped to one organization with its own page', async () => {
+  const requests: Array<{ url: URL; init?: RequestInit }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    requests.push({ url: new URL(String(input)), init });
+    return Response.json({
+      people: [
+        { id: 'person-1', first_name: 'Ana', organization: { id: 'org-3', name: 'Empresa 3' } },
+        { id: 'person-1', first_name: 'Ana', organization: { id: 'org-3', name: 'Empresa 3' } },
+        { id: 'person-2', first_name: 'Luis', organization: { id: 'org-3', name: 'Empresa 3' } },
+      ],
+      pagination: { page: 2, per_page: 50 },
+    });
+  };
+
+  try {
+    const config = getGatewayConfig({ APOLLO_BACKEND_MAX_SEARCH_RESULTS: '100' });
+    const parsed = validateLeadSearchInput({
+      provider: 'apollo',
+      search_mode: 'organization_people',
+      organization_id: 'org-3',
+      titles: ['Marketing Director'],
+      seniorities: ['director'],
+      person_locations: ['Santiago'],
+      page: 2,
+      per_page: 50,
+      exclude_person_ids: ['person-2'],
+    }, config);
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+
+    const result = await executeProviderLeadSearch(parsed.value, config, { APOLLO_API_KEY: 'apollo-test-key' }) as any;
+    assert.equal(result.search_mode, 'organization_people');
+    // person-2 excluded, duplicate person-1 collapsed
+    assert.equal(result.count, 1);
+    assert.equal(result.leads[0]?.id, 'person-1');
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]?.url.pathname, '/api/v1/mixed_people/api_search');
+    const params = requests[0]?.url.searchParams;
+    assert.deepEqual(params?.getAll('organization_ids[]'), ['org-3']);
+    assert.deepEqual(params?.getAll('person_titles[]'), ['Marketing Director']);
+    assert.deepEqual(params?.getAll('person_seniorities[]'), ['director']);
+    assert.deepEqual(params?.getAll('person_locations[]'), ['Santiago']);
+    assert.equal(params?.get('page'), '2');
+    assert.equal(params?.get('per_page'), '50');
+    assert.equal(params?.get('q_keywords'), null);
+    assert.deepEqual(params?.getAll('organization_locations[]'), []);
+    assert.deepEqual(params?.getAll('organization_num_employees_ranges[]'), []);
   } finally {
     globalThis.fetch = originalFetch;
   }

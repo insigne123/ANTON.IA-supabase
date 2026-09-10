@@ -11,7 +11,6 @@ import {
   MoreHorizontal,
   RefreshCw,
   Search,
-  Settings,
   SlidersHorizontal,
   Trash2,
   UserRound,
@@ -19,6 +18,7 @@ import {
 } from 'lucide-react';
 
 import { InviteMemberDialog } from '@/components/organization/InviteMemberDialog';
+import { PendingInvitations } from '@/components/admin/pending-invitations';
 import { PageHeader } from '@/components/page-header';
 import {
   AlertDialog,
@@ -309,7 +309,6 @@ function PeoplePageContent() {
     <div className="mx-auto w-full max-w-[1320px] pb-10">
       <PageHeader title="Personas" description={`Administra acceso y revisa el rendimiento de ${overview?.organization.name || 'la organización'}.`}>
         {overview && !loading && !refreshing && (currentRole === 'owner' || currentRole === 'admin') ? <InviteMemberDialog organizationId={overview.organization.id} onInviteSent={() => void loadPeople({ silent: true })} /> : null}
-        <Button asChild variant="ghost" size="icon" className="rounded-xl"><Link href="/settings/organization" aria-label="Abrir configuración de la organización"><Settings aria-hidden="true" /></Link></Button>
         <Button type="button" variant="ghost" size="icon" onClick={() => void loadPeople({ silent: true })} disabled={loading || refreshing} className="rounded-xl" aria-label="Actualizar personas">
           <RefreshCw className={cn(refreshing && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
         </Button>
@@ -356,6 +355,10 @@ function PeoplePageContent() {
               <div className="min-w-0 space-y-1.5"><Label htmlFor="people-sort">Ordenar por</Label><Select value={sort} onValueChange={(value) => setSort(value as PersonSort)}><SelectTrigger id="people-sort" className="h-10 rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="activity">Actividad reciente</SelectItem><SelectItem value="contacted">Más contactados</SelectItem><SelectItem value="replies">Más respuestas</SelectItem><SelectItem value="name">Nombre</SelectItem></SelectContent></Select></div>
             </div>
           </section>
+
+          {(currentRole === 'owner' || currentRole === 'admin') && !loading && !refreshing ? (
+            <PendingInvitations key={overview.organization.id} organizationId={overview.organization.id} />
+          ) : null}
 
           <Card className="overflow-hidden rounded-[24px] border-border/60 bg-card/90 dark:bg-card/75">
             <div className="flex items-center justify-between gap-4 border-b border-border/60 px-5 py-4 sm:px-6">

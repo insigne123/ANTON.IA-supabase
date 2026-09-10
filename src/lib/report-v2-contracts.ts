@@ -79,13 +79,14 @@ const claimBase = {
   freshnessDays: z.number().int().nonnegative().nullable(),
   jurisdiction,
   confidence,
+  scope: z.enum(['company', 'group', 'country', 'person', 'sector']).optional(),
 };
 
 export const FactClaimV2Schema = z.object({
   ...claimBase,
   type: z.literal('fact'),
   evidenceIds: uniqueIds(/^f_[a-f0-9]{10}$/, 1),
-  observedAt: z.string().datetime({ offset: true }),
+  observedAt: nullableInstant,
 }).strict();
 
 export const DerivedClaimV2Schema = z.object({
@@ -268,11 +269,11 @@ export const AnalysisV2Schema = z.object({
   }).strict(),
   discoveryQuestions: z.array(z.object({
     question: z.string().trim().min(2).max(500).endsWith('?'),
-    validatesClaimId: z.string().regex(/^c\d{2,4}$/),
+    validatesClaimId: z.string().regex(/^c\d{2,4}$/).nullable(),
   }).strict()).max(30),
   objections: z.array(z.object({
     objection: text.max(500),
-    derivedFrom: uniqueIds(/^c\d{2,4}$/, 1),
+    derivedFrom: uniqueIds(/^c\d{2,4}$/),
     response: text.max(1_000),
   }).strict()).max(30),
   riskClaimIds: uniqueIds(/^c\d{2,4}$/),
@@ -283,6 +284,7 @@ export const SectionParagraphV2Schema = z.object({
   text: text.max(2_000),
   claimIds: uniqueIds(/^c\d{2,4}$/),
   context: z.enum(['target', 'headquarters']).default('target'),
+  basis: z.enum(['source', 'profile', 'analysis', 'recommendation']).optional(),
 }).strict();
 
 export const SectionBlockV2Schema = z.object({
@@ -317,6 +319,9 @@ export const ReportV2Schema = z.object({
   id: text.max(256),
   revision: z.number().int().positive(),
   researchSnapshotId: text.max(256),
+  publicCompanyResearch: z.object({
+    artifactId: z.string().uuid(), revision: z.number().int().positive(), expiresAt: z.string().datetime({ offset: true }),
+  }).strict().optional(),
   scope: z.object({
     organizationId: text.max(256),
     ownerUserId: text.max(256),

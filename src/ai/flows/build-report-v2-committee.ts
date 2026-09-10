@@ -32,7 +32,7 @@ function peopleFromClaims(claims: ClaimV2[], companyName: string) {
   const escapedCompany = companyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return claims.flatMap((claim) => {
     if (claim.dimension !== 'buying_committee' || claim.type !== 'fact') return [];
-    const match = claim.statement.match(new RegExp(`^(.+?)\\s+es\\s+(.+?)\\s+de\\s+${escapedCompany}[.]?$`, 'iu'));
+    const match = claim.statement.match(new RegExp(`^(.+?)\\s+(?:es|figura como|se desempeña como)\\s+(.+?)\\s+(?:de|en)\\s+${escapedCompany}[.]?$`, 'iu'));
     if (!match) return [];
     return [{ name: match[1].trim(), title: match[2].trim(), claimId: claim.id }];
   });
@@ -54,7 +54,7 @@ export function buildReportV2Committee(input: {
       name,
       title,
       rank: rankForTitle(title, input.qualification.redirectTo),
-      rationale: 'Persisted provider context identifies a verified contact for this account.',
+      rationale: 'Contacto registrado para esta empresa, con correo verificado por el proveedor.',
       emailStatus: 'verified',
       linkedinUrl: person.linkedinUrl || null,
       claimIds: (person.claimIds || []).filter((id) => input.claims.some((claim) => claim.id === id)),
@@ -65,7 +65,7 @@ export function buildReportV2Committee(input: {
       name: person.name,
       title: person.title,
       rank: rankForTitle(person.title, input.qualification.redirectTo),
-      rationale: 'A public source names this person and role; contact details were not searched.',
+      rationale: 'Una fuente publica identifica a esta persona y cargo; no se buscaron sus datos de contacto.',
       emailStatus: 'not_searched',
       linkedinUrl: null,
       claimIds: [person.claimId],
@@ -76,7 +76,7 @@ export function buildReportV2Committee(input: {
       name: null,
       title: target.title,
       rank: index === 0 ? 'primary' : index === 1 ? 'alternative' : 'third',
-      rationale: target.rationale,
+      rationale: `Rol a involucrar segun los criterios comerciales: ${target.title}.`,
       emailStatus: 'not_searched',
       linkedinUrl: null,
       claimIds: [],
@@ -89,8 +89,8 @@ export function buildReportV2Committee(input: {
       ? 'rejected'
       : 'alternative',
     rationale: input.qualification.verdict === 'account_qualified_contact_rejected'
-      ? 'The ICP gate rejected this contact while preserving the account.'
-      : 'Imported entry contact; purchasing authority remains to be validated.',
+      ? 'La cuenta conserva interes, pero los criterios comerciales requieren otro rol de compra.'
+      : 'Contacto inicial del perfil; validar quien participa en la aprobacion si existe interes.',
     emailStatus: 'not_searched',
     linkedinUrl: input.entity.contact.linkedinUrl,
     claimIds: [],

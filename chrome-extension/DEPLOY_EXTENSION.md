@@ -1,105 +1,88 @@
-# Guía de Publicación de Extensión Anton.IA
+# Anton.IA — LinkedIn Workspace 4.0.1
 
-Esta carpeta contiene todo lo necesario para publicar la extensión en la Chrome Web Store.
+## Compilar e instalar
 
-## 1. Preparar el Paquete
-1. Asegúrate de que el archivo `icon.png` está en esta carpeta.
-2. Selecciona **todos los archivos** dentro de la carpeta `chrome-extension` (manifest.json, background.js, content.js, web_injector.js, popup.html, icon.png).
-3. Haz clic derecho -> **Enviar a** -> **Carpeta comprimida (en zip)**.
-4. Nombra al archivo `antonia-extension-v1.zip`.
+Requiere Node 22 y las dependencias del repositorio (`npm ci`).
 
-> **IMPORTANTE**: No comprimas la carpeta `chrome-extension` desde fuera. Debes entrar, seleccionar los archivos y comprimirlos, para que el `manifest.json` quede en la raíz del ZIP.
+```sh
+npm run extension:build
+```
 
-## 2. Configurar Cuenta de Desarrollador
-Si aún no tienes cuenta:
-1. Ve a [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/developer/dashboard).
-2. Regístrate con tu cuenta de Google.
-3. Paga la tarifa única de registro ($5 USD).
+1. Abre `chrome://extensions` o `edge://extensions` y activa **Modo desarrollador**.
+2. Pulsa **Cargar descomprimida** y selecciona `chrome-extension/`.
+3. Fija Anton.IA en la barra de herramientas. El icono abre el panel lateral.
+4. Pulsa **Conectar Anton.IA**. Inicia sesión en la app si hace falta y confirma **Conectar mi cuenta**.
+5. Mantén abierta la pestaña `/extension/connect`. Vuelve a LinkedIn y abre un perfil `/in/…`.
 
-## 3. Subir la Extensión
-1. En el Dashboard, haz clic en **"Nuevo elemento"** (New Item).
-2. Sube el archivo `antonia-extension-v1.zip` que creaste.
-3. Se abrirá el formulario de la ficha de la tienda.
+La aplicación elegida debe incluir `/extension/connect` y `/api/extension/workspace` de esta versión. Instalar solo la extensión contra una app anterior no habilita los nuevos flujos. Para probar localmente, inicia `npm run dev` y elige **Local · puerto 9003** en «Dirección de la app».
 
-## 4. Rellenar Información
-*   **Nombre**: Anton.IA Automation (Ya vendrá del manifest)
-*   **Descripción**: Automatización segura de LinkedIn para Anton.IA.
-*   **Categoría**: Productividad / Flujo de trabajo.
-*   **Icono**: Sube el mismo `icon.png` (debe ser 128x128 para la tienda, Chrome te avisará si necesita ajustes, pero usualmente acepta escalado automático o te pedirá otro tamaño).
-*   **Capturas de pantalla**: Sube al menos una captura (puedes tomar un screenshot de LinkedIn abriéndose con el modal de Anton.IA).
+Después de actualizar la extensión, recarga las pestañas de LinkedIn y conexión. Chrome no reemplaza los scripts ya inyectados.
 
-## 5. Privacidad y Visibilidad (Clave)
-*   **Visibilidad**:
-    *   **Público**: Cualquiera la encuentra.
-    *   **No listado (Unlisted)**: *RECOMENDADO PARA INICIO*. Solo usuarios con el link pueden instalarla. No aparece en busquedas.
-    *   **Privado**: Solo para emails de tu dominio (requiere configuración extra). 
-    
-    *Te sugiero "No listado" para compartir el link con tus usuarios fácilmente sin esperar revisiones largas.*
+## Funciones disponibles
 
-*   **Política de Privacidad**: Debes poner un link a tu política de privacidad si recolectas datos. Como la extensión usa `storage` y `tabs`, Google podría pedir justificación.
-    *   *Justificación*: "La extensión solo almacena temporalmente el estado de la automatización y no recolecta datos personales del usuario fuera de lo necesario para la función de mensaje directo solicitada explícitamente."
+- Panel React con Perfil, Investigación y Contactar; tema del sistema y teclado.
+- Captura de URL, nombre y titular del perfil visible; URL pegada manualmente.
+- Consulta de leads guardados dentro de la organización activa.
+- Guardado sin email, actualización de datos, email y teléfono.
+- Enriquecimiento explícito con Apollo mediante la búsqueda existente y sus cuotas.
+- Investigación nativa en el servidor, consulta de estado y hallazgos con fuentes.
+- Redacción LinkedIn con perfil del vendedor, hechos de investigación, tono, idioma y objetivo.
+- Edición, reescritura breve/cercana, copia y preparación del mensaje en una conversación confirmada.
+- Primer correo nativo y secuencia de 1–4 seguimientos para revisar en la app, sujetos a los flags y requisitos de investigación existentes.
 
-## 6. Publicar
-1. Dale a "Enviar a revisión".
-2. La revisión para "No listado" suele ser rápida (horas o pocos días).
-3. Una vez aprobada, copia el **Link de la tienda** y envíaselo a tus usuarios.
+### Límites de esta entrega
 
----
+- El nuevo panel **no pulsa Enviar** ni registra un mensaje preparado como enviado. El puente histórico usado desde la app sigue siendo independiente.
+- Se crean planes personalizados del motor de campañas V2. El selector de campañas existentes se integra con `/api/campaigns/bulk`: permite añadir un lead a una campaña propia en borrador o rechazada, conservando sus criterios y mensajes. Revalida la revisión, evita duplicados y no aprueba ni envía. Si el módulo colectivo no está desplegado y habilitado, explica que aún no está disponible. Activar ese módulo requiere resolver sus propios pendientes documentados en `docs/plans/bulk-campaigns-implementation-status.md`.
+- No se incluyen Sales Navigator, capturas masivas ni mensajes programados LinkedIn.
+- El teléfono puede llegar de forma asíncrona desde Apollo. El panel guarda el teléfono recibido en la respuesta; aún no sigue los callbacks de teléfono pendientes.
+- No abre el chat de una URL pegada automáticamente: abre ese perfil en LinkedIn antes de pulsar Preparar. Se ofrece Copiar cuando no puede confirmar el destinatario.
+- Conserva borradores LinkedIn en `chrome.storage.session`, separados por usuario, organización y perfil. Sobreviven al cierre del panel y reinicio del worker, pero no al cierre completo del navegador. Las investigaciones y borradores de email se guardan en el servidor.
+- Chrome 116+ es la versión mínima declarada. Edge requiere validar su soporte del panel lateral en el navegador de destino; la prueba automatizada se ejecutó en Chrome.
 
-## 7. Verificación y Troubleshooting
+## Autenticación y datos
 
-### Verificar Instalación
-Después de instalar la extensión:
+El panel no almacena JWT, refresh tokens ni claves de proveedor. Una pestaña de la app autorizada explícitamente ejecuta operaciones contra un único endpoint del mismo origen usando su sesión existente.
 
-1. **Verificar que esté activa:**
-   - Chrome → Extensiones (chrome://extensions/)
-   - Buscar "Anton.IA Automation"
-   - Debe estar activada (toggle azul)
+- Consentimiento vinculado a pestaña, nonce temporal, origen permitido y frame principal.
+- Solo el panel propio puede pedir operaciones al worker.
+- El servidor verifica sesión, usuario y organización en cada operación; un cambio exige reconexión.
+- Las consultas y escrituras de leads usan el cliente autenticado con RLS y filtro de organización.
+- La URL canónica determina un UUID por organización para que guardados concurrentes de la extensión converjan. Se reutilizan también registros previos con las variantes habituales de URL (www y barra final). No sustituye una futura restricción global de URL que cubra todos los importadores de la app.
+- Desconectar borra la conexión y los borradores de sesión de la extensión. Cerrar la pestaña de conexión invalida el enlace.
 
-2. **Verificar permisos:**
-   - Click en "Detalles" de la extensión
-   - Verificar que tenga acceso a:
-     - `https://www.linkedin.com/*`
-     - Tu dominio de producción
+## Distribución
 
-3. **Verificar detección en la app:**
-   - Abrir tu aplicación web
-   - Abrir Console (F12)
-   - Buscar mensaje: `[App] ✅ Extension detected`
-   - Ejecutar: `console.log(extensionService.isInstalled)` → debe retornar `true`
+```sh
+npm run extension:release
+```
 
-### Troubleshooting Común
+El resultado está en `chrome-extension/dist/`, con manifest de producción sin permisos localhost. Comprime **el contenido** de esa carpeta para que `manifest.json` esté en la raíz del ZIP. No empaquetes toda la carpeta de fuentes.
 
-**Problema: La app no detecta la extensión**
-- Solución: Recargar la página de la aplicación
-- Verificar en Console si aparece `[Anton.IA Ext] Web Injector Loaded`
-- Verificar que el dominio esté en `manifest.json` → `externally_connectable`
+La publicación en Chrome Web Store requiere ficha, capturas, política de privacidad coherente con los datos tratados y revisión de Google. Justificar `tabs` (perfil y pestaña de conexión), `sidePanel` (interfaz) y `storage` (conexión y borradores de sesión). No se ha publicado automáticamente en ninguna tienda.
 
-**Problema: No encuentra botones de LinkedIn**
-- Solución: LinkedIn cambió su UI, los selectores CSS necesitan actualizarse
-- Revisar Console para ver qué botones están disponibles
-- Reportar el error con screenshots
+## Validaciones
 
-**Problema: Timeout al enviar mensaje**
-- Solución: Verificar que estás en un perfil válido de LinkedIn
-- Verificar que el perfil permite enviar mensajes
-- Revisar Console del Service Worker (chrome://extensions/ → Service Worker)
+```sh
+npm run extension:test
+npm run typecheck
+```
 
-### Logs de Debugging
+Prueba de navegador opcional con Playwright disponible:
 
-La extensión ahora incluye logging comprehensivo:
+```sh
+node scripts/test-linkedin-extension-browser.mjs
+```
 
-**En la aplicación web (Console):**
-- `[App] Extension Service Status` - Estado de detección
-- `[App] 📤 Sending LinkedIn DM request` - Envío iniciado
-- `[App] 📥 Received extension response` - Respuesta recibida
+`PLAYWRIGHT_MODULE` permite apuntar a una instalación externa de Playwright y `EXTENSION_SCREENSHOT_DIR` a una carpeta existente para capturas. La prueba simula la frontera Chrome/API: no usa credenciales ni toca Supabase, LinkedIn o proveedores. Valida light/dark, 320/380/520 px, foco, ausencia de overflow y conectar/guardar/generar/preparar.
 
-**En LinkedIn (Console):**
-- `[Anton.IA] Extension Status` - Estado general
-- `[Anton.IA] Found editor` - Editor de mensajes encontrado
-- `[Anton.IA] Clicked Send Button` - Mensaje enviado
+Antes de distribuir a usuarios, comprobar manualmente con la app actualizada:
 
-**En Background Script (Service Worker):**
-- `[Anton.IA Background] API_BASE configured` - URL del API detectada
-- `[Anton.IA Background] Received` - Mensajes recibidos
+- Cuenta real y organización correcta; cambio de organización y logout.
+- Un perfil público compatible: guardar, enriquecer, recargar y confirmar persistencia.
+- Investigación completada por el worker desplegado y secuencia creada sin activar envíos.
+- Dos conversaciones abiertas: nunca insertar en el destinatario equivocado ni reemplazar un borrador.
+- LinkedIn sin botón Mensaje: feedback y copia funcionales.
+- Suspensión del worker y cierre de la pestaña de conexión.
 
+No se ejecutan suites ni seeds contra producción. Esta entrega no requiere una migración nueva.

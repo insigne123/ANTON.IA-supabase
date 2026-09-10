@@ -7,12 +7,13 @@ export const AudienceCriteriaSchema = z.object({
   sizes: terms, seniorities: terms,
   minimumDaysSinceSent: z.number().int().min(0).max(3650),
   excludeReplied: z.boolean(),
+  enrichedOnly: z.boolean().default(true),
 }).strict();
 export type AudienceCriteria = z.infer<typeof AudienceCriteriaSchema>;
 export const defaultAudience: AudienceCriteria = {
   relationship: 'never_contacted', titles: [], industries: [], countries: [],
   sizes: [], seniorities: [],
-  minimumDaysSinceSent: 0, excludeReplied: true,
+  minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: true,
 };
 export const CampaignMessageSchema = z.object({
   subject: z.string().trim().min(1, 'Escribe un asunto.').max(300),
@@ -67,7 +68,38 @@ export type AudiencePerson = {
   size: string; seniority: string;
   leadRef: string; lastSentAt: string | null; contacted: boolean; replied: boolean;
   blockedReason: string | null; reasons: string[];
+  enriched: boolean;
 };
+
+/** Saved lead with Apollo enrichment characteristics, plus contact-history eligibility. */
+export type EnrichedCandidate = {
+  email: string; name: string; company: string; title: string; seniority: string;
+  departments: string[]; industry: string; size: string; country: string; city: string;
+  headline: string; emailStatus: string; leadRef: string;
+  contacted: boolean; replied: boolean; blockedReason: string | null; lastSentAt: string | null;
+};
+
+export const AudienceRankItemSchema = z.object({
+  email: z.string().trim().email().transform(value => value.toLowerCase()),
+  score: z.number().int().min(0).max(100),
+  reason: z.string().trim().min(1).max(300),
+}).strict();
+export type AudienceRankItem = z.infer<typeof AudienceRankItemSchema>;
+
+export const AudienceRankRequestSchema = z.object({
+  description: z.string().trim().min(10).max(2000),
+  relationship: z.enum(['never_contacted', 'previously_contacted']),
+  minimumDaysSinceSent: z.number().int().min(0).max(3650).default(0),
+  excludeReplied: z.boolean().default(true),
+  maxResults: z.number().int().min(1).max(100).default(25),
+}).strict();
+export type AudienceRankRequest = z.infer<typeof AudienceRankRequestSchema>;
+
+export type RankedAudiencePerson = AudiencePerson & { score: number };
+
+export const AI_RANK_CANDIDATE_LIMIT = 300;
+export const AI_RANK_RESULT_LIMIT = 100;
+const AI_RANK_CSV_CHAR_LIMIT = 120_000;
 export type CampaignRecipient = AudiencePerson & {
   messages: Array<CampaignMessage & { draftId: string; versionId: string }>;
 };
@@ -81,6 +113,7 @@ export type CampaignDelivery = { draft_id: string; status: string; completed_at:
 
 const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 export function matchAudience(person: AudiencePerson, criteria: AudienceCriteria, now = Date.now()): string[] | null {
+  if (criteria.enrichedOnly && !person.enriched) return null;
   if (criteria.relationship === 'never_contacted' ? person.contacted : !person.contacted) return null;
   if (criteria.excludeReplied && person.replied) return null;
   const reasons = [person.contacted ? 'Contactado anteriormente' : 'Sin envíos registrados'];
@@ -113,6 +146,51 @@ export function renderCampaignMessage(message: CampaignMessage, person: Audience
   const result = { ...message, subject: render(message.subject), body: render(message.body) };
   if (/[\r\n]/.test(result.subject) || /\{\{|\}\}/.test(result.subject + result.body)) throw new Error('Revisa el asunto y las variables del correo.');
   return CampaignMessageSchema.parse(result);
+}
+
+function csvCell(value: string): string {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+/** Compact CSV of enriched candidates for the ranking model. Pure and bounded. */
+export function buildCandidatesCsv(candidates: EnrichedCandidate[]): { csv: string; included: number; total: number } {
+  const header = 'email,name,title,seniority,departments,company,industry,size,country,city,headline,email_status,contacted,replied,blocked';
+  const lines = [header];
+  let included = 0;
+  for (const person of candidates.slice(0, AI_RANK_CANDIDATE_LIMIT)) {
+    const line = [
+      person.email, person.name, person.title, person.seniority, person.departments.join(';'),
+      person.company, person.industry, person.size, person.country, person.city,
+      person.headline, person.emailStatus,
+      person.contacted ? 'yes' : 'no', person.replied ? 'yes' : 'no',
+      person.blockedReason || '',
+    ].map(csvCell).join(',');
+    if (lines.join('\n').length + line.length + 1 > AI_RANK_CSV_CHAR_LIMIT) break;
+    lines.push(line);
+    included++;
+  }
+  return { csv: lines.join('\n'), included, total: candidates.length };
+}
+
+/**
+ * Validate a model ranking against the server-provided candidate set.
+ * Unknown emails are dropped, duplicates keep the best score, output is
+ * sorted by score and capped. Never trusts model output for eligibility.
+ */
+export function validateRanking(items: unknown, candidates: EnrichedCandidate[], maxResults: number): AudienceRankItem[] {
+  if (!Array.isArray(items)) return [];
+  const known = new Set(candidates.map(person => person.email.trim().toLowerCase()));
+  const best = new Map<string, AudienceRankItem>();
+  for (const item of items) {
+    const parsed = AudienceRankItemSchema.safeParse(item);
+    if (!parsed.success || !known.has(parsed.data.email)) continue;
+    const prior = best.get(parsed.data.email);
+    if (!prior || parsed.data.score > prior.score) best.set(parsed.data.email, parsed.data);
+  }
+  return [...best.values()]
+    .sort((a, b) => b.score - a.score || a.email.localeCompare(b.email))
+    .slice(0, Math.max(1, Math.min(AI_RANK_RESULT_LIMIT, maxResults)));
 }
 
 const LOCKED_DELIVERY_STATES = new Set(['sent', 'pending', 'sending', 'unknown', 'failed']);

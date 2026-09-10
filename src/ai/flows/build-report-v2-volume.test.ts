@@ -43,3 +43,11 @@ test('does not invent a volume model without tenant inputs or a scale fact', () 
   assert.equal(buildReportV2VolumeModel({ claims: [scaleClaim], entity, assumptions: null }), null);
   assert.equal(buildReportV2VolumeModel({ claims: [], entity, assumptions: { scenarioMultipliers: [1, 2, 3], minutesPerEvent: 5 } }), null);
 });
+
+test('does not treat years or clients as employees and never projects another countrys headcount', () => {
+  const assumptions = { scenarioMultipliers: [1, 2, 3], minutesPerEvent: 5 };
+  assert.equal(buildReportV2VolumeModel({ entity, assumptions, claims: [{ ...scaleClaim, statement: 'GrupoExpro tiene 300 clientes desde 2026.' }] }), null);
+  assert.equal(buildReportV2VolumeModel({ entity, assumptions, claims: [{ ...scaleClaim, jurisdiction: 'CL' }] }), null);
+  const result = buildReportV2VolumeModel({ entity, assumptions, claims: [{ ...scaleClaim, statement: 'En 2026 GrupoExpro gestiona 300 colaboradores.', jurisdiction: 'PE' }] });
+  assert.equal(result?.model.scenarios[0].eventsPerYear, 300);
+});

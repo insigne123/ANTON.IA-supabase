@@ -20,7 +20,7 @@ import {
   SidebarTrigger
 } from '@/components/ui/sidebar';
 import {
-  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, Building2, LogOut, Shield, ShieldCheck, LayoutGrid, Bot, Link2
+  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, LogOut, Shield, ShieldCheck, LayoutGrid, Bot, Link2
 } from 'lucide-react';
 import Logo from './logo';
 import { useAuth } from '@/context/AuthContext';
@@ -43,7 +43,7 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
       { href: '/antonia', icon: Bot, label: 'Agente ANTON.IA' },
-      { href: '/profile', icon: User, label: 'Mi Perfil de Empresa' },
+      { href: '/profile', icon: User, label: 'Perfil' },
     ],
   },
   {
@@ -75,7 +75,6 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: '/connections', icon: Link2, label: 'Conexiones', aliases: ['/gmail', '/outlook'] },
       { href: '/settings/email-studio', icon: Settings, label: 'Email Studio' },
-      { href: '/settings/organization', icon: Building2, label: 'Organización' },
       {
         href: '/settings/privacy',
         icon: Shield,

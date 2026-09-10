@@ -610,8 +610,8 @@ export function LeadDetailDrawer({ lead, open, onOpenChange }: Props) {
                                         </Button>
                                     ) : (
                                         <Button asChild size="sm" variant="outline" className="h-8 text-xs">
-                                          <Link href={`/contact/compose?id=${lead.sourceId}&email=${lead.email}`}>
-                                                <Mail className="mr-1 h-3 w-3" /> Email
+                                          <Link href={`/contact/compose?id=${encodeURIComponent(lead.sourceId)}&email=${encodeURIComponent(lead.email)}`}>
+                                                <Mail className="mr-1 h-3 w-3" /> Preparar correo
                                           </Link>
                                         </Button>
                                     )
@@ -679,8 +679,8 @@ export function LeadDetailDrawer({ lead, open, onOpenChange }: Props) {
                                 </Button>
                             ) : (
                                 <Button asChild size="sm" className="h-8 text-xs">
-                                  <Link href={`/contact/compose?id=${lead.sourceId}&email=${lead.email}`}>
-                                        Enviar email
+                                  <Link href={`/contact/compose?id=${encodeURIComponent(lead.sourceId)}&email=${encodeURIComponent(lead.email)}`}>
+                                        Preparar correo
                                   </Link>
                                 </Button>
                             )

@@ -38,7 +38,7 @@ test('plan creation is idempotent and retries missing pre-generated drafts befor
 
   assert.ok(existingRead >= 0 && existingRead < createGuard);
   assert.ok(createGuard < materialize && materialize < rpc && rpc < pregenerate && pregenerate < finalRead);
-  assert.match(source, /if \(!existing\) \{[\s\S]+materializeOutsourcingEmailStylePreset[\s\S]+create_first_contact_campaign_plan_v2[\s\S]+\n  \}\n\n  await pregenerateFirstContactPlanDrafts/);
+  assert.match(source, /if \(!existing\) \{[\s\S]+materializeOutsourcingEmailStylePreset[\s\S]+create_first_contact_campaign_plan_v2[\s\S]+\r?\n  \}\r?\n\r?\n  await pregenerateFirstContactPlanDrafts/);
   assert.match(source, /const materializedStyle = await materializeOutsourcingEmailStylePreset\([\s\S]+const styleProfileId = materializedStyle\?\.id \|\| config\.styleProfileId/);
   assert.match(source, /p_style_profile_id: styleProfileId/);
   assert.match(source, /p_sequence_instruction: config\.sequenceInstruction/);

@@ -32,6 +32,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ draftI
       return NextResponse.json({ error: 'NATIVE_DRAFT_INVALID_JSON' }, { status: 400 });
     }
     const instruction = typeof body?.instruction === 'string' ? body.instruction.trim() : '';
+    if (body.previewOnly !== undefined && typeof body.previewOnly !== 'boolean') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_PREVIEW_INVALID' }, { status: 400 });
+    }
     const rawStyleProfileId = typeof body?.styleProfileId === 'string' ? body.styleProfileId : null;
     const styleProfileId = rawStyleProfileId ? normalizeEmailStyleSelection(rawStyleProfileId) : null;
     const expectedVersionId = typeof body?.expectedVersionId === 'string' ? body.expectedVersionId.trim() : '';
@@ -65,11 +68,13 @@ export async function POST(req: NextRequest, context: { params: Promise<{ draftI
       userId: auth.user.id,
       draft,
       instruction,
+      previewOnly: body.previewOnly === true,
+      expectedVersionId,
       styleProfileId,
       ...(sequenceContext ? { sequenceContext } : {}),
     });
     return NextResponse.json({ ok: true, ...result }, {
-      status: 201,
+      status: body.previewOnly === true ? 200 : 201,
       headers: { 'Cache-Control': 'no-store' },
     });
   } catch (error: any) {
@@ -82,10 +87,26 @@ export async function POST(req: NextRequest, context: { params: Promise<{ draftI
         error: 'NATIVE_DRAFT_PREFLIGHT_FAILED',
         message: 'El ajuste no cumple los controles de evidencia y calidad.',
         preflight: error.preflight,
+        issues: error.issues,
       }, { status: 422 });
     }
     if (isNativeDraftVersionConflict(error)) {
       return NextResponse.json({ error: 'NATIVE_DRAFT_VERSION_CONFLICT' }, { status: 409 });
+    }
+    if (error?.message === 'NATIVE_DRAFT_ARCHIVED') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_ARCHIVED' }, { status: 409 });
+    }
+    if (error?.message === 'NATIVE_DRAFT_PREVIEW_STYLE_CHANGE_UNSUPPORTED') {
+      return NextResponse.json({
+        error: error.message,
+        message: 'La propuesta debe usar el estilo actual del borrador. Conserva ese estilo para continuar.',
+      }, { status: 409 });
+    }
+    if (error?.message === 'EMAIL_STYLE_FORBIDDEN') {
+      return NextResponse.json({ error: 'EMAIL_STYLE_FORBIDDEN' }, { status: 403 });
+    }
+    if (error?.message === 'NATIVE_DRAFT_STYLE_NOT_FOUND') {
+      return NextResponse.json({ error: 'NATIVE_DRAFT_STYLE_NOT_FOUND' }, { status: 404 });
     }
     if (error?.message === 'NATIVE_DRAFT_PRIVACY_SUPPRESSED') {
       return NextResponse.json({ error: 'NATIVE_DRAFT_PRIVACY_SUPPRESSED' }, { status: 409 });

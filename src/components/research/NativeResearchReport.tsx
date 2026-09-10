@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import {
   CheckCircle2,
   ChevronDown,
@@ -16,12 +16,22 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ResearchReportProgress } from '@/components/research/ResearchReportProgress';
+import { researchReportLoadingState } from '@/lib/research-report-loading';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  ReportFieldAnswers,
+  ReportFieldStatusBadge,
+  selectPreviewReportFields,
+} from '@/components/research/ReportFieldAnswers';
+import type { ReportFieldAnswer } from '@/lib/report-field-answers';
 import { REPORT_V2_SCHEMA_VERSION, type ReportV2 } from '@/lib/report-v2-contracts';
 import type { ResearchReportDocumentV1 } from '@/lib/research-report-contracts';
 import { cn } from '@/lib/utils';
 import {
   buildResearchReport,
   canShowResearchDraftAction,
+  projectResearchReportFieldAnswers,
   researchDraftBlockReasonLabel,
   researchReadinessFor,
   researchReadinessLabel,
@@ -38,11 +48,25 @@ import {
   type ResearchWorkspaceStatus,
 } from '@/lib/research-workspace';
 
+export type NativeResearchReportVariant = 'preview' | 'full';
+
 export type NativeResearchReportProps = {
   result: ResearchWorkspaceResult;
   /** Must already be schema- and citation-validated against result.snapshot. */
   reportDocument?: ResearchReportDocumentV1 | ReportV2 | null;
   reportSynthesis?: ResearchReportSynthesisViewState | null;
+  startedAt?: string | null;
+  loadError?: boolean;
+  variant?: NativeResearchReportVariant;
+  /** Hides the inner header when an outer Dialog/Sheet already provides the title. */
+  hideHeader?: boolean;
+  /** Organization-scoped rollout for the expanded questionnaire surface. */
+  questionnaireEnabled?: boolean;
+  /** Compatible override for the lib `buildReportFieldAnswers` output. */
+  fieldAnswers?: ReportFieldAnswer[] | null;
+  fieldAnswersLoading?: boolean;
+  fieldAnswersError?: string | null;
+  onRetryFields?: () => void;
   status?: ResearchWorkspaceStatus;
   readiness?: ResearchReadiness;
   researchSnapshotId?: string | null;
@@ -317,6 +341,9 @@ function ReportCollapsibleSection({
   );
 }
 
+/* Questionnaire answers come from `projectResearchReportFieldAnswers`, which keeps
+   full audit provenance outside the model-facing/model-derived presentation. */
+
 export function NativeResearchReportSkeleton({ className }: { className?: string }) {
   return (
     <div className={cn('space-y-8', className)} aria-busy="true" aria-live="polite">
@@ -337,6 +364,15 @@ export function NativeResearchReport({
   result,
   reportDocument,
   reportSynthesis,
+  startedAt,
+  loadError = false,
+  variant = 'full',
+  hideHeader = false,
+  questionnaireEnabled = false,
+  fieldAnswers,
+  fieldAnswersLoading = false,
+  fieldAnswersError = null,
+  onRetryFields,
   status = result.status,
   readiness: readinessProp,
   researchSnapshotId = result.researchSnapshotId,
@@ -357,10 +393,10 @@ export function NativeResearchReport({
   className,
 }: NativeResearchReportProps) {
   const id = useId();
-  const report = buildResearchReport(result, reportDocument);
+  const report = useMemo(() => buildResearchReport(result, reportDocument), [result, reportDocument]);
   const evidenceCount = report.coverage.evidenceRecords;
   const sourceCount = report.coverage.sources;
-  const readiness = readinessProp || researchReadinessFor({
+  const baseReadiness = readinessProp || researchReadinessFor({
     status,
     lead: result.lead,
     result,
@@ -370,9 +406,11 @@ export function NativeResearchReport({
   });
   const qualityScore = result.quality.score ?? result.score;
   const eligible = result.draftEligibility.eligible === true;
-  const synthesisPending = Boolean(reportSynthesis && ['queued', 'running', 'retry_scheduled'].includes(reportSynthesis.status));
-  const synthesisFailed = reportSynthesis?.status === 'failed_permanent';
-  const actionAvailable = !profileCompletionRequired && !synthesisPending && !synthesisFailed && canShowResearchDraftAction({
+  const loadingState = researchReportLoadingState({ status, snapshotId: researchSnapshotId, document: reportDocument, synthesis: reportSynthesis });
+  const synthesisPending = loadingState.pending;
+  const synthesisFailed = loadingState.failed;
+  const readiness = synthesisFailed ? 'needs_attention' : synthesisPending ? 'in_progress' : baseReadiness;
+  const actionAvailable = loadingState.showReport && !loadError && !profileCompletionRequired && !synthesisFailed && canShowResearchDraftAction({
     readiness,
     snapshotId: researchSnapshotId,
     eligible,
@@ -401,10 +439,11 @@ export function NativeResearchReport({
     evidenceIds?: string[];
     classification?: 'fact' | 'hypothesis' | 'signal' | 'fit';
     observedAt?: string | null;
+    basis?: 'source' | 'profile' | 'analysis' | 'recommendation';
   }>) => paragraphs.map((paragraph) => {
     const claims = paragraph.claimIds.map((claimId) => canonicalClaimById.get(claimId)).filter(Boolean);
     const v2Claims = paragraph.claimIds.map((claimId) => v2ClaimById.get(claimId)).filter(Boolean);
-    const classification: 'fact' | 'hypothesis' | 'signal' | 'fit' = paragraph.classification || (claims.some((claim) => claim?.classification === 'hypothesis') || v2Claims.some((claim) => claim?.type === 'hypothesis')
+    const classification: 'fact' | 'hypothesis' | 'signal' | 'fit' = paragraph.classification || (paragraph.basis === 'analysis' || paragraph.basis === 'recommendation' || claims.some((claim) => claim?.classification === 'hypothesis') || v2Claims.some((claim) => claim?.type === 'hypothesis')
       ? 'hypothesis'
       : claims.some((claim) => ['news_signal', 'hiring_signal', 'technology_signal', 'site_signal'].includes(claim?.kind || '')) || v2Claims.some((claim) => claim?.dimension === 'signal')
         ? 'signal'
@@ -449,10 +488,23 @@ export function NativeResearchReport({
   const companyName = result.lead.companyName || result.lead.companyDomain || 'la empresa';
   const leadName = result.lead.fullName || result.lead.email || 'el contacto';
   const reportIdentity = researchSnapshotId || result.lead.id || result.lead.email || `${leadName}:${companyName}`;
+  const isPreview = variant === 'preview';
+  const localFieldAnswers = useMemo(
+    () => fieldAnswers ?? projectResearchReportFieldAnswers(report, result),
+    [fieldAnswers, report, result],
+  );
+  const previewFieldAnswers = useMemo(
+    () => selectPreviewReportFields(localFieldAnswers, 6),
+    [localFieldAnswers],
+  );
+  const assumptionFieldAnswers = useMemo(
+    () => localFieldAnswers.filter((answer) => answer.status === 'hypothesis' || answer.status === 'estimated'),
+    [localFieldAnswers],
+  );
   const [contactOpen, setContactOpen] = useState(false);
   const [companyOpen, setCompanyOpen] = useState(false);
-  const [commercialOpen, setCommercialOpen] = useState(hasCommercialReading);
-  const [reviewOpen, setReviewOpen] = useState(reviewNeedsAttention);
+  const [commercialOpen, setCommercialOpen] = useState(isPreview ? false : hasCommercialReading);
+  const [reviewOpen, setReviewOpen] = useState(isPreview ? false : reviewNeedsAttention);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [draftStyles, setDraftStyles] = useState<DraftStyleOption[]>([]);
   const [draftStyleId, setDraftStyleId] = useState(DEFAULT_DRAFT_STYLE);
@@ -464,10 +516,10 @@ export function NativeResearchReport({
   useEffect(() => {
     setContactOpen(false);
     setCompanyOpen(false);
-    setCommercialOpen(hasCommercialReading);
-    setReviewOpen(reviewNeedsAttention);
+    setCommercialOpen(isPreview ? false : hasCommercialReading);
+    setReviewOpen(isPreview ? false : reviewNeedsAttention);
     setDetailsOpen(false);
-  }, [hasCommercialReading, reportIdentity, reviewNeedsAttention]);
+  }, [hasCommercialReading, isPreview, reportIdentity, reviewNeedsAttention]);
 
   useEffect(() => {
     if (!actionAvailable) return;
@@ -491,8 +543,33 @@ export function NativeResearchReport({
     return () => controller.abort();
   }, [actionAvailable]);
 
+  if (!loadingState.showReport) return (
+    <article className={cn('min-w-0 space-y-6', className)} aria-label="Reporte de investigación">
+      <header>
+        <p className="text-xs text-muted-foreground">Informe de investigación</p>
+        <h2 className="mt-1 break-words text-2xl font-semibold tracking-tight">{companyName}</h2>
+        <p className="mt-2 text-sm text-muted-foreground">Para {leadName}</p>
+      </header>
+      {synthesisPending && !loadError ? (
+        <ResearchReportProgress key={reportIdentity} startedAt={startedAt || result.startedAt} retryScheduled={reportSynthesis?.status === 'retry_scheduled'} />
+      ) : (
+        <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/25 p-5" role="status">
+          <h3 className="font-semibold">{loadError ? 'No pudimos actualizar el informe' : synthesisFailed ? 'No pudimos preparar el informe completo' : 'El informe completo no está disponible'}</h3>
+          <p className="text-sm leading-6 text-muted-foreground">{loadError ? 'Reintenta la carga para comprobar su estado. No mostraremos un informe preliminar.' : 'No mostramos evidencia preliminar como informe final. Puedes volver a intentarlo.'}</p>
+          {!loadError && (onRetrySynthesis || onRefresh) ? (
+            <Button type="button" variant="outline" className="rounded-full" onClick={onRetrySynthesis || onRefresh} disabled={retryingSynthesis || refreshing}>
+              <RefreshCw className={cn((retryingSynthesis || refreshing) && 'animate-spin motion-reduce:animate-none')} aria-hidden="true" />
+              {retryingSynthesis || refreshing ? 'Reintentando…' : onRetrySynthesis ? 'Reintentar informe' : 'Actualizar investigación'}
+            </Button>
+          ) : null}
+        </div>
+      )}
+    </article>
+  );
+
   return (
     <article className={cn('min-w-0 space-y-7', className)} aria-label="Reporte de investigación">
+      {hideHeader ? null : (
       <header className="space-y-4 border-b border-border/60 pb-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
@@ -512,7 +589,7 @@ export function NativeResearchReport({
               <CircleAlert className={cn('mt-0.5 size-4 shrink-0', statusTone(status))} aria-hidden="true" />
             )}
             <p className="min-w-0 text-sm">
-              <span className={cn('font-semibold', statusTone(status))}>{researchStatusLabel(status)}</span>
+              <span className={cn('font-semibold', statusTone(status))}>{synthesisFailed ? 'Actualización fallida' : researchStatusLabel(status)}</span>
               <span className="px-1.5 text-muted-foreground" aria-hidden="true">·</span>
               <span className={readinessTone(readiness)}>{researchReadinessLabel(readiness)}</span>
             </p>
@@ -520,6 +597,7 @@ export function NativeResearchReport({
           <p className="text-xs text-muted-foreground">{sourceCount} {sourceCount === 1 ? 'fuente revisable' : 'fuentes revisables'}</p>
         </div>
       </header>
+      )}
 
       {synthesisPending ? (
         <div className="flex items-start gap-3 rounded-2xl border border-sky-200 bg-sky-50/75 px-4 py-3 text-sm text-sky-950 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100" role="status">
@@ -539,7 +617,7 @@ export function NativeResearchReport({
         <div className="flex flex-col items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50/80 px-4 py-3 text-sm text-rose-950 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100 sm:flex-row sm:items-center sm:justify-between" role="alert">
           <div>
             <p className="font-medium">No pudimos preparar el reporte completo</p>
-            <p className="mt-1 text-xs leading-5 opacity-80">La evidencia sigue guardada. Puedes iniciar un nuevo intento sin repetir la investigación.</p>
+            <p className="mt-1 text-xs leading-5 opacity-80">Mostramos el último informe disponible. La evidencia sigue guardada; puedes reintentar sin repetir la investigación.</p>
           </div>
           {onRetrySynthesis ? (
             <Button type="button" variant="outline" size="sm" className="shrink-0 rounded-full bg-background/80" onClick={onRetrySynthesis} disabled={retryingSynthesis}>
@@ -566,6 +644,147 @@ export function NativeResearchReport({
         </div>
       </section>
 
+      {isPreview ? (
+        questionnaireEnabled ? (
+        <section aria-labelledby={`${id}-key-fields`}>
+          <SectionHeading
+            id={`${id}-key-fields`}
+            eyebrow="Datos clave"
+            title="Lo confirmado y lo estimado"
+            description="Los datos más útiles para decidir el siguiente paso."
+          />
+          <div className="mt-4">
+            <ReportFieldAnswers
+              answers={previewFieldAnswers}
+              variant="preview"
+              loading={fieldAnswersLoading}
+              error={fieldAnswersError}
+              onRetry={onRetryFields}
+            />
+          </div>
+        </section>
+        ) : null
+      ) : (
+        <>
+          {questionnaireEnabled ? <section aria-labelledby={`${id}-key-fields`}>
+            <SectionHeading
+              id={`${id}-key-fields`}
+              eyebrow="Datos verificados"
+              title="Empresa, contacto y lectura"
+              description="Cada dato indica si está confirmado, estimado o es una hipótesis."
+            />
+            <div className="mt-4">
+              <ReportFieldAnswers
+                answers={localFieldAnswers}
+                variant="full"
+                loading={fieldAnswersLoading}
+                error={fieldAnswersError}
+                onRetry={onRetryFields}
+            />
+          </div>
+          </section> : null}
+
+          {report.signals.length > 0 ? (
+            <section aria-labelledby={`${id}-timeline`}>
+              <SectionHeading
+                id={`${id}-timeline`}
+                eyebrow="Señales"
+                title="Cronología de señales"
+                description="Hechos públicos recientes en orden de observación."
+              />
+              <ol className="relative mt-4 space-y-4 border-l border-border/60 pl-5">
+                {report.signals.slice(0, 6).map((signal) => {
+                  const observed = dateLabel(signal.observedAt);
+                  return (
+                    <li key={signal.id} className="relative min-w-0">
+                      <span className="absolute -left-[25px] top-1.5 size-2 rounded-full bg-primary/60 ring-4 ring-background" aria-hidden="true" />
+                      <p className="break-words text-sm leading-6 text-foreground/90">{signal.statement}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {observed ? `Observado el ${observed}` : 'Fecha por confirmar'}
+                        {signal.evidence.length > 0 ? ` · ${signal.evidence.length} ${signal.evidence.length === 1 ? 'fuente' : 'fuentes'}` : ''}
+                      </p>
+                      {signal.evidence.length > 0 ? (
+                        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1.5">
+                          {signal.evidence.slice(0, 2).map((evidence) => (
+                            <EvidenceLink key={evidence.id} evidence={evidence} />
+                          ))}
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          ) : null}
+
+          {report.opportunities.length > 0 ? (
+            <section aria-labelledby={`${id}-decision-map`}>
+              <SectionHeading
+                id={`${id}-decision-map`}
+                eyebrow="Decisión"
+                title="Mapa de decisión"
+                description="Caminos posibles según la evidencia. Valídalos en la conversación."
+              />
+              <ol className="mt-4 space-y-3">
+                {report.opportunities.slice(0, 5).map((opportunity, index) => (
+                  <li key={opportunity.id} className="flex min-w-0 items-start gap-3 rounded-2xl border border-border/60 bg-card/35 px-4 py-3">
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold tabular-nums text-primary" aria-hidden="true">
+                      {index + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="break-words text-sm leading-6 text-foreground/90">{opportunity.statement}</p>
+                      {opportunity.evidence.length > 0 ? (
+                        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1.5">
+                          {opportunity.evidence.slice(0, 2).map((evidence) => (
+                            <EvidenceLink key={evidence.id} evidence={evidence} />
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : null}
+
+          {questionnaireEnabled && assumptionFieldAnswers.length > 0 ? (
+            <section aria-labelledby={`${id}-assumptions`}>
+              <SectionHeading
+                id={`${id}-assumptions`}
+                eyebrow="Supuestos"
+                title="Supuestos y estimaciones"
+                description="Lo que aún necesita confirmación antes de usarlo como argumento."
+              />
+              <div className="mt-4 overflow-hidden rounded-2xl border border-border/60 bg-card/35">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[32%]">Campo</TableHead>
+                      <TableHead>Detalle</TableHead>
+                      <TableHead className="w-[132px]">Estado</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {assumptionFieldAnswers.slice(0, 8).map((answer) => (
+                      <TableRow key={answer.key}>
+                        <TableCell className="break-words align-top font-medium">{answer.label}</TableCell>
+                        <TableCell className="min-w-0 break-words align-top text-muted-foreground">
+                          <span className="block break-words text-sm leading-6 text-foreground/90">{answer.value}</span>
+                          {answer.detail ? <span className="mt-0.5 block text-xs">{answer.detail}</span> : null}
+                        </TableCell>
+                        <TableCell className="align-top">
+                          <ReportFieldStatusBadge status={answer.status} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </section>
+          ) : null}
+        </>
+      )}
+
       <div className="divide-y divide-border/60 rounded-3xl border border-border/70 bg-card/35 px-5 sm:px-6">
         <ReportCollapsibleSection
           id={`${id}-commercial`}
@@ -578,7 +797,7 @@ export function NativeResearchReport({
           <div className="space-y-6">
             <section aria-labelledby={`${id}-possible-challenges`}>
               <h4 id={`${id}-possible-challenges`} className="text-sm font-semibold">Posibles retos a validar</h4>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">Son hipótesis basadas en señales públicas. Confírmalas en la conversación.</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Son hipótesis basadas en el contexto de empresa, cargo, área y señales públicas. Confírmalas en la conversación.</p>
               <div className="mt-3 border-l-2 border-amber-400/50 pl-4 sm:pl-5">
                 <NarrativeOrClaims
                   paragraphs={commercialNarrative}
@@ -696,7 +915,9 @@ export function NativeResearchReport({
               <div>
                 <p className="font-medium">Evaluación</p>
                 <p className="mt-1 leading-6 text-muted-foreground">
-                  {qualityScore == null ? 'La calidad aún no fue evaluada.' : `Calidad general: ${qualityScore}/100.`}
+                  {reportDocument?.schemaVersion === REPORT_V2_SCHEMA_VERSION
+                    ? reportDocument.audit.status === 'passed' ? 'Revisión final completada.' : 'Revisión completada con observaciones. Consulta los límites antes de usar el reporte.'
+                    : qualityScore == null ? 'La calidad aún no fue evaluada.' : `Calidad general: ${qualityScore}/100.`}
                 </p>
               </div>
               <div>
@@ -770,7 +991,7 @@ export function NativeResearchReport({
         </section>
       </Collapsible>
 
-      {showActionFooter ? <footer className="flex flex-col gap-3 border-t border-border/70 pt-5 sm:flex-row sm:items-center sm:justify-between">
+      {showActionFooter ? <footer aria-label="Acciones del informe" className={cn('flex flex-col gap-3 border-t border-border/70 pt-5 sm:flex-row sm:items-center sm:justify-between', !isPreview && 'sticky bottom-0 z-10 -mx-1 bg-background/90 px-1 pb-1 pt-4 backdrop-blur supports-[backdrop-filter]:bg-background/75')}>
         <div className="min-w-0">
           <p className="text-sm font-medium">
             {profileCompletionRequired ? 'Completa tu perfil comercial' : actionAvailable ? 'Borrador disponible para revisión' : showCompanyContextGuidance ? 'Hace falta contexto de empresa' : 'Borrador no disponible'}

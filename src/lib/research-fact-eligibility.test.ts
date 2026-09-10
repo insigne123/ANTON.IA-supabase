@@ -23,6 +23,13 @@ test('hard-rejected challenge text cannot be diluted with substantive-looking pa
   assert.equal(isHardRejectedResearchText('Acme explica cómo reCAPTCHA ayuda a proteger formularios públicos.'), false);
 });
 
+test('hard-rejected research text excludes leaked HTML and static asset paths', () => {
+  assert.equal(isHardRejectedResearchText('GrupoExpro <section class="elementor-section elementor-element-026ce62">'), true);
+  assert.equal(isHardRejectedResearchText('com/wp-content/uploads/hummingbird-assets/09e805aff56cad98a711e'), true);
+  assert.equal(isHardRejectedResearchText('doctype html> GrupoExpro | Te ayudamos a encontrar el trabajo que necesitas'), true);
+  assert.equal(isHardRejectedResearchText('GrupoExpro ofrece servicios de reclutamiento y selección para distintas industrias.'), false);
+});
+
 test('ordinary navigation remains a conservative length-bounded generic filter', () => {
   assert.equal(isGenericResearchText('Skip to main content'), true);
   assert.equal(isGenericResearchText(`${'Acme publishes useful operational context. '.repeat(12)} Skip to main content`), false);

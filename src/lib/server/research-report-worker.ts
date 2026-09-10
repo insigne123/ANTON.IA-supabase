@@ -10,6 +10,17 @@ import {
 } from '@/lib/server/research-report-synthesis-state';
 import { loadReportV2SellerConfiguration, loadSellerProfile } from '@/lib/server/seller-profile';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import {
+  buildSynthesisActionableTask,
+  resolveSynthesisRetryPolicy,
+  SYNTHESIS_EDITORIAL_RETRY_LIMIT,
+} from '@/lib/research-synthesis-retry-policy';
+
+export {
+  buildSynthesisActionableTask,
+  resolveSynthesisRetryPolicy,
+  SYNTHESIS_EDITORIAL_RETRY_LIMIT,
+} from '@/lib/research-synthesis-retry-policy';
 
 type WorkerCandidate = {
   id: string;
@@ -17,6 +28,7 @@ type WorkerCandidate = {
   organization_id: string;
   user_id: string;
   schema_version: ResearchReportSchemaVersion;
+  attempt_count?: number | null;
 };
 
 export type ResearchReportWorkerDependencies = {
@@ -88,7 +100,7 @@ export async function processResearchReportSynthesisQueue(input: {
   const staleAt = new Date(now.getTime() - 15 * 60_000).toISOString();
   let query = admin
     .from('research_report_synthesis_states')
-    .select('id,research_snapshot_id,organization_id,user_id,schema_version')
+    .select('id,research_snapshot_id,organization_id,user_id,schema_version,attempt_count')
     .or(`and(status.in.(queued,retry_scheduled,partial),retryable.eq.true,attempt_count.lt.4,next_retry_at.lte.${dueAt}),and(status.eq.running,attempt_count.lt.4,claimed_at.lt.${staleAt})`)
     .order('next_retry_at', { ascending: true })
     .limit(limit);
@@ -100,6 +112,7 @@ export async function processResearchReportSynthesisQueue(input: {
   let completed = 0;
   let failed = 0;
   let skipped = 0;
+  let v2Attempted = false;
   for (const rawCandidate of data || []) {
     const candidate = rawCandidate as WorkerCandidate;
     try {
@@ -117,6 +130,15 @@ export async function processResearchReportSynthesisQueue(input: {
       const snapshot = ResearchSnapshotV1Schema.parse(snapshotRow.payload);
       const access = { organizationId: candidate.organization_id, userId: candidate.user_id };
       if (candidate.schema_version === RESEARCH_REPORT_V1_SCHEMA_VERSION) {
+        const configuration = await (dependencies.loadV2Configuration || loadReportV2SellerConfiguration)(access, admin);
+        if (configuration.mode === 'visible') {
+          await (dependencies.rejectCandidate || rejectResearchReportSynthesisCandidate)({
+            stateId: candidate.id, errorCode: 'report_v1_superseded',
+            errorMessage: 'Report V2 visible delivery supersedes V1 synthesis.', retryable: false, now: dueAt,
+          }, admin);
+          skipped += 1;
+          continue;
+        }
         const sellerProfile = await (dependencies.loadV1SellerProfile || loadSellerProfile)(candidate.user_id);
         const result = await (dependencies.processV1 || tryEnsureResearchReportDocument)({ snapshot, access, sellerProfile });
         if (terminal(result.synthesis?.status, result.synthesis?.retryable)) completed += 1;
@@ -137,6 +159,9 @@ export async function processResearchReportSynthesisQueue(input: {
           skipped += 1;
           continue;
         }
+        // A bounded report can take several minutes. Leave remaining candidates unclaimed for the next tick.
+        if (v2Attempted) { skipped += 1; continue; }
+        v2Attempted = true;
         const result = await (dependencies.processV2 || tryEnsureResearchReportDocumentV2)({
           snapshot,
           access,
@@ -164,12 +189,22 @@ export async function processResearchReportSynthesisQueue(input: {
     } catch (candidateError) {
       failed += 1;
       const failure = candidateFailure(candidateError);
+      const policy = resolveSynthesisRetryPolicy({
+        attemptCount: candidate.attempt_count,
+        retryable: failure.retryable,
+      });
+      const task = policy.shouldExposeTask
+        ? buildSynthesisActionableTask({
+            researchSnapshotId: candidate.research_snapshot_id,
+            errorCode: failure.code,
+          })
+        : null;
       try {
         await (dependencies.rejectCandidate || rejectResearchReportSynthesisCandidate)({
           stateId: candidate.id,
           errorCode: failure.code,
-          errorMessage: failure.message,
-          retryable: failure.retryable,
+          errorMessage: task ? `${failure.message} Tarea accionable: ${task.title}. ${task.howToFind}` : failure.message,
+          retryable: policy.retryable,
           now: dueAt,
         }, admin);
       } catch (stateError) {

@@ -2,10 +2,10 @@
 
 import { Suspense, useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 
 import { microsoftAuthService } from '@/lib/microsoft-auth-service';
+import { providerConnectionError } from '@/lib/provider-connection-feedback';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -18,10 +18,11 @@ function OutlookConnectPageInner() {
   const [browserReady, setBrowserReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activatingBrowser, setActivatingBrowser] = useState(false);
-  const [connecting, setConnecting] = useState(false);
-  const supabase = createClientComponentClient();
+  const [statusError, setStatusError] = useState('');
 
   const checkConnection = useCallback(async () => {
+    setLoading(true);
+    setStatusError('');
     try {
       const signedInBrowser = await microsoftAuthService.isSignedIn().catch(() => false);
       setBrowserReady(signedInBrowser);
@@ -30,8 +31,8 @@ function OutlookConnectPageInner() {
       if (!response.ok) throw new Error('Unable to load provider connection status');
       const connections = await response.json();
       setAutomationConnected(Boolean(connections?.outlook));
-    } catch (error) {
-      console.error('Error checking connection:', error);
+    } catch {
+      setStatusError('No pudimos consultar la conexion. Intenta nuevamente.');
     } finally {
       setLoading(false);
     }
@@ -44,14 +45,13 @@ function OutlookConnectPageInner() {
   useEffect(() => {
     const connected = searchParams.get('connected');
     const error = searchParams.get('error');
-    const details = searchParams.get('details');
 
     if (!connected && !error) return;
 
     if (connected === 'true') {
       toast({
         title: 'Outlook conectado',
-        description: 'La automatizacion ya puede usar tu cuenta. Si vas a enviar desde este navegador, activa tambien la sesion local.',
+        description: 'Cuenta vinculada. Los permisos se verificaron al conectar.',
       });
       void checkConnection();
     }
@@ -60,51 +60,15 @@ function OutlookConnectPageInner() {
       toast({
         variant: 'destructive',
         title: 'No se pudo conectar Outlook',
-        description: details || error,
+        description: providerConnectionError(error),
       });
     }
 
     router.replace('/outlook');
   }, [checkConnection, router, searchParams, toast]);
 
-  const handleConnect = async () => {
-    setConnecting(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toast({
-          variant: 'destructive',
-          title: 'Sesion expirada',
-          description: 'Vuelve a iniciar sesion en ANTON.IA antes de conectar Outlook.',
-        });
-        return;
-      }
-
-      const tenant = process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'common';
-      const clientId = process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID?.trim();
-      if (!clientId) {
-        toast({
-          variant: 'destructive',
-          title: 'Configuracion incompleta',
-          description: 'Falta NEXT_PUBLIC_AZURE_AD_CLIENT_ID.',
-        });
-        return;
-      }
-
-      const redirectUri = `${window.location.origin}/api/auth/callback/azure`;
-      const authUrl = new URL(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`);
-      authUrl.search = new URLSearchParams({
-        client_id: clientId,
-        response_type: 'code',
-        redirect_uri: redirectUri,
-        response_mode: 'query',
-        scope: 'offline_access User.Read Mail.Send Mail.Read',
-      }).toString();
-
-      window.location.assign(authUrl.toString());
-    } finally {
-      setConnecting(false);
-    }
+  const handleConnect = () => {
+    window.location.assign('/api/auth/connect/azure');
   };
 
   const handleActivateBrowser = async () => {
@@ -137,30 +101,33 @@ function OutlookConnectPageInner() {
           <div className="space-y-3">
             {loading ? (
               <div className="text-sm text-muted-foreground">Verificando conexion...</div>
+            ) : statusError ? (
+              <div role="alert" className="text-sm text-destructive">{statusError}<Button variant="ghost" onClick={() => void checkConnection()}>Reintentar</Button></div>
             ) : (
               <>
-                <div className={`flex items-center font-medium ${automationConnected ? 'text-green-600' : 'text-muted-foreground'}`}>
+                <div className={`flex items-center font-medium ${automationConnected ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`}>
                   {automationConnected ? <CheckCircle2 className="mr-2 h-5 w-5" /> : <XCircle className="mr-2 h-5 w-5" />}
-                  {automationConnected ? 'Automatizacion conectada' : 'Automatizacion no conectada'}
+                  {automationConnected ? 'Cuenta vinculada para automatizacion' : 'Automatizacion no conectada'}
                 </div>
-                <div className={`flex items-center font-medium ${browserReady ? 'text-green-600' : 'text-muted-foreground'}`}>
+                <div className={`flex items-center font-medium ${browserReady ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`}>
                   {browserReady ? <CheckCircle2 className="mr-2 h-5 w-5" /> : <XCircle className="mr-2 h-5 w-5" />}
-                  {browserReady ? 'Este navegador esta listo para envios manuales' : 'Este navegador puede pedir inicio de sesion al enviar manualmente'}
+                  {browserReady ? 'Hay una sesion de Microsoft en este navegador' : 'Este navegador puede pedir inicio de sesion al enviar manualmente'}
                 </div>
               </>
             )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={handleConnect} disabled={connecting}>
-              {connecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            <Button onClick={handleConnect}>
               {automationConnected ? 'Reconectar / Actualizar permisos' : 'Conectar con Outlook'}
             </Button>
-            <Button variant="outline" onClick={handleActivateBrowser} disabled={activatingBrowser || connecting}>
+            <Button variant="outline" onClick={handleActivateBrowser} disabled={activatingBrowser}>
               {activatingBrowser ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Activar sesion en este navegador
             </Button>
           </div>
+
+          {automationConnected && !loading && !statusError ? <p className="text-sm text-muted-foreground">Hay credenciales guardadas. Su vigencia se comprueba al usarlas; reconecta si el proveedor revoco el acceso.</p> : null}
 
           <div className="rounded-md border p-3 text-sm leading-relaxed bg-muted/50">
             <p className="font-medium">Que permite esta conexion?</p>

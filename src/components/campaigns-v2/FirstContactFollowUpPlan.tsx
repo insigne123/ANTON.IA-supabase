@@ -45,6 +45,8 @@ import {
 } from '@/lib/campaigns-v2-client';
 import type { StyleProfile } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { RewriteProposalReview } from './RewriteProposalReview';
+import { quickRewrites, readRewriteProposal, reconcileSavedText, versionConflictMessage, type RewriteProposal } from './draft-editor-behavior';
 
 type FirstContactFollowUpPlanProps = {
   draftId: string;
@@ -60,6 +62,8 @@ type FirstContactFollowUpPlanProps = {
 
 type DraftEditor = {
   draftId: string;
+  versionId: string;
+  proposal?: RewriteProposal | null;
   subject: string;
   body: string;
   savedSubject: string;
@@ -109,6 +113,7 @@ function editorFromStep(step: FirstContactFollowUpStep): DraftEditor | null {
   if (!step.draft) return null;
   return {
     draftId: step.draft.draftId,
+    versionId: step.draft.versionId,
     subject: step.draft.subject,
     body: step.draft.body,
     savedSubject: step.draft.subject,
@@ -192,6 +197,7 @@ export function FirstContactFollowUpPlan({
   const planRef = useRef<FirstContactFollowUpPlan | null>(null);
   const [editors, setEditors] = useState<Record<string, DraftEditor>>({});
   const editorsRef = useRef<Record<string, DraftEditor>>({});
+  const operationRef = useRef(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -211,6 +217,7 @@ export function FirstContactFollowUpPlan({
 
   const [noteTarget, setNoteTarget] = useState<AiNoteTarget | null>(null);
   const [noteInstruction, setNoteInstruction] = useState('');
+  const [noteSubjectOnly, setNoteSubjectOnly] = useState(false);
   const [noteStyleProfileId, setNoteStyleProfileId] = useState('');
   const [applyingNote, setApplyingNote] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
@@ -220,10 +227,12 @@ export function FirstContactFollowUpPlan({
   const addButtonRef = useRef<HTMLButtonElement | null>(null);
   const setupInstructionRef = useRef<HTMLTextAreaElement | null>(null);
   const sequenceHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const sequenceContainerRef = useRef<HTMLDivElement | null>(null);
+  const noteReturnTargetRef = useRef<AiNoteTarget | null>(null);
   const focusSequenceAfterGenerationRef = useRef(false);
 
   const selectableStyleProfiles = styleProfiles.filter((profile) => Boolean(profile.id));
-  const hasDirtyEditors = Object.values(editors).some(isEditorDirty);
+  const hasDirtyEditors = Object.values(editors).some((editor) => isEditorDirty(editor) || Boolean(editor.proposal)) || (setupOpen && Boolean(sequenceInstruction.trim())) || Boolean(noteTarget && noteInstruction.trim() && !noteSuccess);
   const isBusy = generating
     || applyingNote
     || stopping
@@ -264,7 +273,7 @@ export function FirstContactFollowUpPlan({
       const fromStep = editorFromStep(step);
       if (!fromStep) continue;
       const existing = current[step.id];
-      next[step.id] = existing?.draftId === fromStep.draftId && isEditorDirty(existing)
+      next[step.id] = existing?.draftId === fromStep.draftId && (isEditorDirty(existing) || existing.proposal || existing.saving)
         ? existing
         : fromStep;
     }
@@ -283,6 +292,7 @@ export function FirstContactFollowUpPlan({
     if (surfaceError) setLoadError(null);
     try {
       const result = await loadFirstContactFollowUpPlan(draftId, signal);
+      if (signal?.aborted) return null;
       setEnabled(result.enabled);
       commitPlan(result.plan);
       return result.plan;
@@ -303,10 +313,14 @@ export function FirstContactFollowUpPlan({
     return () => controller.abort();
   }, [commitPlan, loadPlan, reloadKey]);
 
-  function updatePlanWithNativeDraft(stepId: string, nativeDraft: any) {
+  function updatePlanWithNativeDraft(stepId: string, nativeDraft: any, submitted: DraftEditor) {
     const currentPlan = planRef.current;
     const currentStep = currentPlan?.steps.find((step) => step.id === stepId);
     if (!currentPlan || !currentStep?.draft || !nativeDraft) throw new Error('No pudimos actualizar este seguimiento.');
+    if (nativeDraft.draftId !== submitted.draftId || !nativeDraft.versionId
+      || typeof nativeDraft.content?.subject !== 'string' || typeof nativeDraft.content?.text !== 'string') {
+      throw new Error('No pudimos confirmar la versión guardada. Tu texto se conserva.');
+    }
 
     const summary: NonNullable<FirstContactFollowUpStep['draft']> = {
       ...currentStep.draft,
@@ -319,8 +333,9 @@ export function FirstContactFollowUpPlan({
     };
     setEditorState(stepId, {
       draftId: summary.draftId,
-      subject: summary.subject,
-      body: summary.body,
+      versionId: summary.versionId,
+      proposal: null,
+      ...reconcileSavedText(editorsRef.current[stepId], submitted, summary),
       savedSubject: summary.subject,
       savedBody: summary.body,
       error: null,
@@ -333,39 +348,51 @@ export function FirstContactFollowUpPlan({
     return summary;
   }
 
-  async function patchDraft(stepId: string) {
+  async function patchDraft(stepId: string, proposal?: RewriteProposal) {
     const editor = editorsRef.current[stepId];
     const step = planRef.current?.steps.find((item) => item.id === stepId);
     if (!editor || !step?.draft) throw new Error('Este correo todavía no tiene un borrador editable.');
+    if (proposal && (proposal !== editor.proposal || proposal.expectedVersionId !== editor.versionId || isEditorDirty(editor))) throw new Error(versionConflictMessage);
     if (!editor.subject.trim() || !editor.body.trim()) throw new Error('Completa el asunto y el mensaje antes de guardar.');
-    if (!isEditorDirty(editor)) return step.draft;
+    if (!isEditorDirty(editor) && !proposal) return step.draft;
 
     const response = await fetch(`/api/native-drafts/${encodeURIComponent(editor.draftId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subject: editor.subject.trim(), text: editor.body.trim() }),
+      body: JSON.stringify({ subject: proposal?.subject ?? editor.subject, text: proposal?.body ?? editor.body, expectedVersionId: proposal?.expectedVersionId ?? editor.versionId }),
     });
     const payload = await response.json().catch(() => null);
+    if (response.status === 409) throw new Error(versionConflictMessage);
     if (!response.ok || !payload?.draft) throw new Error(apiMessage(payload, 'No pudimos guardar este correo.'));
-    return updatePlanWithNativeDraft(stepId, payload.draft);
+    return updatePlanWithNativeDraft(stepId, payload.draft, editor);
   }
 
-  async function saveDraft(stepId: string) {
+  async function saveDraft(stepId: string, proposal?: RewriteProposal) {
     const editor = editorsRef.current[stepId];
-    if (!editor || editor.saving || applyingNote) return;
+    const currentPlan = planRef.current;
+    const step = currentPlan?.steps.find((item) => item.id === stepId);
+    if (!editor || operationRef.current || disabled || !step || !AI_EDITABLE_STEP_STATES.has(step.state)
+      || step.draft?.lifecycle === 'archived' || !['pending_initial_send', 'active'].includes(currentPlan!.enrollmentState)) return;
+    operationRef.current = true;
     setEditorState(stepId, { saving: true, error: null, feedback: null });
     try {
-      await patchDraft(stepId);
-      setEditorState(stepId, { feedback: 'Cambios guardados.', error: null });
+      await patchDraft(stepId, proposal);
+      setEditorState(stepId, { feedback: isEditorDirty(editorsRef.current[stepId])
+        ? 'Se guardó la versión enviada. Tus cambios posteriores siguen sin guardar.'
+        : 'Cambios guardados. Revisión pendiente; no se ha enviado el correo.', error: null });
     } catch (error: any) {
       setEditorState(stepId, { error: error?.message || 'No pudimos guardar este correo.' });
     } finally {
+      operationRef.current = false;
       setEditorState(stepId, { saving: false });
     }
   }
 
-  async function rewriteDraft(stepId: string, instruction: string, selectedStyleId: string) {
-    await patchDraft(stepId);
+  async function rewriteDraft(stepId: string, instruction: string, selectedStyleId: string, subjectOnly = false) {
+    const editor = editorsRef.current[stepId];
+    if (!editor) throw new Error('Este seguimiento todavía no tiene un borrador editable.');
+    if (isEditorDirty(editor)) throw new Error('Guarda explícitamente los cambios de este correo antes de pedir una propuesta.');
+    if (editor?.proposal) throw new Error('Aplica o descarta la propuesta anterior primero.');
     const step = planRef.current?.steps.find((item) => item.id === stepId);
     if (!step?.draft) throw new Error('Este seguimiento todavía no tiene un borrador editable.');
 
@@ -374,19 +401,24 @@ export function FirstContactFollowUpPlan({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         instruction,
+        previewOnly: true,
         styleProfileId: selectedStyleId || null,
-        expectedVersionId: step.draft.versionId,
+        expectedVersionId: editor.versionId,
         campaignStepId: step.id,
       }),
     });
     const payload = await response.json().catch(() => null);
-    if (!response.ok || !payload?.draft) throw new Error(apiMessage(payload, 'No pudimos aplicar el cambio.'));
-    updatePlanWithNativeDraft(stepId, payload.draft);
+    if (response.status === 409) throw new Error(versionConflictMessage);
+    if (!response.ok) throw new Error(apiMessage(payload, 'No pudimos preparar la propuesta.'));
+    const current = editorsRef.current[stepId];
+    if (!current || current.versionId !== editor.versionId || current.subject !== editor.subject || current.body !== editor.body || current.proposal) throw new Error(versionConflictMessage);
+    setEditorState(stepId, { proposal: readRewriteProposal(payload, editor.versionId, subjectOnly ? editor.body : undefined), error: null, feedback: null });
   }
 
   async function generatePlan() {
     const instruction = sequenceInstruction.trim();
-    if (!instruction || generating || disabled || !versionId) return;
+    if (!instruction || operationRef.current || disabled || !versionId) return;
+    operationRef.current = true;
     setGenerating(true);
     focusSequenceAfterGenerationRef.current = true;
     setGenerationError(null);
@@ -404,12 +436,14 @@ export function FirstContactFollowUpPlan({
     } catch (error: any) {
       setGenerationError(error?.message || 'No pudimos generar los seguimientos.');
     } finally {
+      operationRef.current = false;
       setGenerating(false);
     }
   }
 
   async function retryDraft(stepId: string) {
-    if (retryingStepIds[stepId] || disabled) return;
+    if (operationRef.current || disabled) return;
+    operationRef.current = true;
     setRetryingStepIds((current) => ({ ...current, [stepId]: true }));
     setRetryErrors((current) => {
       const next = { ...current };
@@ -422,13 +456,16 @@ export function FirstContactFollowUpPlan({
     } catch (error: any) {
       setRetryErrors((current) => ({ ...current, [stepId]: error?.message || 'No pudimos generar este seguimiento.' }));
     } finally {
+      operationRef.current = false;
       setRetryingStepIds((current) => ({ ...current, [stepId]: false }));
     }
   }
 
   function openNote(target: AiNoteTarget) {
+    noteReturnTargetRef.current = target;
     setNoteTarget(target);
     setNoteInstruction('');
+    setNoteSubjectOnly(false);
     setNoteStyleProfileId('');
     setNoteError(null);
     setNoteSuccess(null);
@@ -437,16 +474,16 @@ export function FirstContactFollowUpPlan({
 
   async function applyAiNote() {
     const instruction = noteInstruction.trim();
-    if (!noteTarget || !instruction || applyingNote) return;
+    if (!noteTarget || !instruction || operationRef.current || disabled) return;
+    operationRef.current = true;
     setApplyingNote(true);
     setNoteError(null);
     setNoteSuccess(null);
 
     try {
       if (noteTarget.kind === 'step') {
-        await rewriteDraft(noteTarget.stepId, instruction, noteStyleProfileId);
-        setNoteSuccess('Cambio aplicado. El correo quedó como una nueva revisión pendiente.');
-        await loadPlan(undefined, false).catch(() => undefined);
+        await rewriteDraft(noteTarget.stepId, instruction, noteStyleProfileId, noteSubjectOnly);
+        setNoteSuccess('Propuesta preparada. Cierra este panel para comparar, aplicar o descartar en el correo. No se ha guardado desde este editor.');
         return;
       }
 
@@ -459,25 +496,25 @@ export function FirstContactFollowUpPlan({
       let successCount = 0;
       const coherentInstruction = globalRewriteInstruction(instruction);
       for (const [index, step] of generatedSteps.entries()) {
-        setNoteProgress(`Actualizando ${index + 1} de ${generatedSteps.length} seguimientos…`);
+        setNoteProgress(`Preparando propuesta ${index + 1} de ${generatedSteps.length}…`);
         try {
-          await rewriteDraft(step.id, coherentInstruction, noteStyleProfileId);
+          await rewriteDraft(step.id, coherentInstruction, noteStyleProfileId, noteSubjectOnly);
           successCount += 1;
         } catch (error) {
           failures.push(step.name);
         }
       }
-      await loadPlan(undefined, false).catch(() => undefined);
       if (successCount > 0) {
-        setNoteSuccess(`Cambio aplicado a ${successCount} de ${generatedSteps.length} seguimientos.`);
+        setNoteSuccess(`${successCount} de ${generatedSteps.length} propuestas preparadas sin guardar. Cierra este panel y revisa cada correo para aplicar o descartar.`);
       }
       if (failures.length > 0) {
-        setNoteError(`No pudimos actualizar: ${failures.join(', ')}. Los demás seguimientos conservaron sus cambios.`);
+        setNoteError(`No pudimos preparar: ${failures.join(', ')}. Guarda sus cambios manuales o descarta propuestas pendientes antes de reintentar. Las propuestas ya preparadas se conservan.`);
       }
       if (generatedSteps.length === 0) setNoteError('Todavía no hay seguimientos generados para ajustar.');
     } catch (error: any) {
       setNoteError(error?.message || 'No pudimos aplicar el cambio. Inténtalo nuevamente.');
     } finally {
+      operationRef.current = false;
       setApplyingNote(false);
       setNoteProgress(null);
     }
@@ -492,12 +529,13 @@ export function FirstContactFollowUpPlan({
 
   async function stopPlan() {
     const currentPlan = planRef.current;
-    if (!currentPlan || stopping) return;
+    if (!currentPlan || operationRef.current || disabled) return;
     if (hasDirtyEditors) {
       setPlanFeedback('Guarda los cambios pendientes antes de detener los seguimientos.');
       setStopConfirmOpen(false);
       return;
     }
+    operationRef.current = true;
     setStopping(true);
     setStopError(null);
     setPlanFeedback(null);
@@ -519,6 +557,7 @@ export function FirstContactFollowUpPlan({
     } catch (error: any) {
       setStopError(error?.message || 'No pudimos detener los seguimientos.');
     } finally {
+      operationRef.current = false;
       setStopping(false);
     }
   }
@@ -695,20 +734,21 @@ export function FirstContactFollowUpPlan({
 
   return (
     <>
-      <div className={cn('flex flex-col items-center', className)}>
+      <div ref={sequenceContainerRef} className={cn('flex flex-col items-center', className)}>
         <div className="h-8 w-px bg-border/70" aria-hidden="true" />
         <Card className="w-full overflow-hidden border-border/60 shadow-[0_20px_60px_-48px_rgba(15,23,42,0.32)]">
           <div className="flex flex-col gap-4 border-b border-border/60 px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <div>
               <h2 ref={sequenceHeadingRef} tabIndex={-1} className="text-base font-semibold tracking-[-0.01em] outline-none">Seguimientos</h2>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">{stateLabel(plan.enrollmentState)} · {plan.steps.length} {plan.steps.length === 1 ? 'correo' : 'correos'}</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Las fechas indican la cadencia prevista, no confirman envío automático. Revisa y aprueba cada versión en Campañas.</p>
             </div>
             <Button
               type="button"
               variant="outline"
               className="min-h-11 w-full sm:w-auto"
               onClick={() => openNote({ kind: 'all', label: 'Toda la secuencia' })}
-              disabled={disabled || planReadOnly || generatedSteps.length === 0 || applyingNote}
+              disabled={disabled || planReadOnly || generatedSteps.length === 0 || isBusy || hasDirtyEditors}
             >
               <Sparkles aria-hidden="true" /> Toda la secuencia
             </Button>
@@ -734,6 +774,7 @@ export function FirstContactFollowUpPlan({
                     <div className="min-w-0 flex-1">
                       <h3 className="text-sm font-semibold">{step.name}</h3>
                       <p className="mt-1 text-xs leading-5 text-muted-foreground">Día {day} · {step.offsetDays} {step.offsetDays === 1 ? 'día' : 'días'} después del correo anterior{approvalLabel(step) ? ` · ${approvalLabel(step)}` : ''}</p>
+                      {editor ? <p className="mt-1 break-all text-xs text-muted-foreground">Versión: {editor.versionId}</p> : null}
                     </div>
                   </div>
 
@@ -741,7 +782,7 @@ export function FirstContactFollowUpPlan({
                     <div className="mt-5 rounded-xl border border-rose-400/60 bg-rose-50/70 px-4 py-4 dark:border-rose-500/50 dark:bg-rose-500/10" role="alert">
                       <p className="text-sm font-medium text-rose-800 dark:text-rose-200">No pudimos generar este correo</p>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">{retryErrors[step.id] || step.draftGeneration.error || 'El borrador no está disponible.'}</p>
-                      <Button type="button" variant="outline" className="mt-3 min-h-11" onClick={() => void retryDraft(step.id)} disabled={disabled || planReadOnly || retrying}>
+                      <Button type="button" variant="outline" className="mt-3 min-h-11" onClick={() => void retryDraft(step.id)} disabled={disabled || planReadOnly || isBusy}>
                         {retrying ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
                         {retrying ? 'Generando…' : 'Reintentar generación'}
                       </Button>
@@ -756,7 +797,7 @@ export function FirstContactFollowUpPlan({
                           maxLength={998}
                           onChange={(event) => setEditorState(step.id, { subject: event.target.value, error: null, feedback: null })}
                           className="h-11 border-slate-400 dark:border-slate-500"
-                          disabled={disabled || planReadOnly || busy || stepReadOnly}
+                          disabled={Boolean(editor.proposal) || disabled || planReadOnly || isBusy || stepReadOnly}
                           aria-describedby={feedbackId}
                           aria-invalid={Boolean(editor.error && !editor.subject.trim())}
                         />
@@ -770,11 +811,12 @@ export function FirstContactFollowUpPlan({
                           rows={9}
                           onChange={(event) => setEditorState(step.id, { body: event.target.value, error: null, feedback: null })}
                           className="min-h-52 resize-y border-slate-400 text-[15px] leading-7 dark:border-slate-500"
-                          disabled={disabled || planReadOnly || busy || stepReadOnly}
+                          disabled={Boolean(editor.proposal) || disabled || planReadOnly || isBusy || stepReadOnly}
                           aria-describedby={feedbackId}
                           aria-invalid={Boolean(editor.error && !editor.body.trim())}
                         />
                       </div>
+                      {editor.proposal ? <RewriteProposalReview before={editor} proposal={editor.proposal} autoFocus={false} busy={isBusy} disabled={disabled || planReadOnly || stepReadOnly} onApply={() => void saveDraft(step.id, editor.proposal!)} onDiscard={() => { setEditorState(step.id, { proposal: null, error: null }); sequenceHeadingRef.current?.focus(); }} /> : null}
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div id={feedbackId} className="min-h-5 text-xs leading-5" aria-live="polite">
                           {editor.error ? <span className="text-rose-700 dark:text-rose-300">{editor.error}</span> : null}
@@ -787,16 +829,16 @@ export function FirstContactFollowUpPlan({
                             variant="outline"
                             className="min-h-11"
                             onClick={() => openNote({ kind: 'step', stepId: step.id, label: `${step.name} · Día ${day}` })}
-                            disabled={disabled || planReadOnly || busy || stepReadOnly}
+                            disabled={Boolean(editor.proposal) || dirty || disabled || planReadOnly || isBusy || stepReadOnly}
                           >
-                            <Sparkles aria-hidden="true" /> Nota para IA
+                            <Sparkles aria-hidden="true" /> Proponer con IA
                           </Button>
                           <Button
                             type="button"
                             variant={dirty ? 'default' : 'outline'}
                             className="min-h-11"
                             onClick={() => void saveDraft(step.id)}
-                            disabled={disabled || planReadOnly || busy || !dirty || stepReadOnly}
+                            disabled={Boolean(editor.proposal) || disabled || planReadOnly || isBusy || !dirty || stepReadOnly}
                           >
                             {editor.saving ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Save aria-hidden="true" />}
                             {editor.saving ? 'Guardando…' : 'Guardar cambios'}
@@ -828,7 +870,7 @@ export function FirstContactFollowUpPlan({
                     }
                     setStopConfirmOpen(true);
                   }}
-                  disabled={disabled || stopping || applyingNote}
+                  disabled={disabled || isBusy}
                 >
                   <CircleStop aria-hidden="true" /> Detener seguimientos
                 </Button>
@@ -841,19 +883,32 @@ export function FirstContactFollowUpPlan({
       <Sheet
         open={Boolean(noteTarget)}
         onOpenChange={(open) => {
-          if (!open) setNoteTarget(null);
+          if (!open && !applyingNote) {
+            if (noteInstruction.trim() && !noteSuccess && !window.confirm('¿Cerrar y descartar esta nota para IA? Las propuestas preparadas se conservan.')) return;
+            setNoteTarget(null);
+          }
         }}
       >
         <SheetContent
           side="bottom"
+          showCloseButton={!applyingNote}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const target = noteReturnTargetRef.current;
+            const container = target?.kind === 'step'
+              ? document.getElementById(`follow-up-subject-${target.stepId}`)?.closest('li')
+              : sequenceContainerRef.current;
+            const reviewHeading = container?.querySelector<HTMLElement>('section[aria-label="Comparar propuesta de IA"] [tabindex="-1"]');
+            (reviewHeading || sequenceHeadingRef.current)?.focus();
+          }}
           className="flex max-h-[92dvh] w-full flex-col gap-0 rounded-t-2xl p-0 sm:inset-x-auto sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:h-full sm:max-h-none sm:w-full sm:max-w-lg sm:rounded-none sm:border-l sm:border-t-0 [&>button]:right-2.5 [&>button]:top-2.5 [&>button]:flex [&>button]:size-11 [&>button]:items-center [&>button]:justify-center"
         >
           <SheetHeader className="border-b border-border/60 px-5 py-5 pr-14 sm:px-6">
             <SheetTitle>Nota para IA</SheetTitle>
             <SheetDescription className="leading-6">
               {noteTarget?.kind === 'all'
-                ? 'Aplicaremos la nota, uno por uno, solo a los seguimientos que todavía no se enviaron. El correo inicial no cambiará.'
-                : `Aplicaremos la nota a ${noteTarget?.label || 'este seguimiento'}.`}
+                ? 'Prepararemos propuestas, una por correo. Después podrás aplicar o descartar cada una. El correo inicial no cambiará.'
+                : `Prepararemos una propuesta para ${noteTarget?.label || 'este seguimiento'}, sin guardarla.`}
             </SheetDescription>
           </SheetHeader>
 
@@ -865,10 +920,11 @@ export function FirstContactFollowUpPlan({
 
             <div className="space-y-2">
               <Label htmlFor="follow-up-ai-note">Qué quieres cambiar</Label>
+              <div className="flex flex-wrap gap-2">{quickRewrites.map((quick) => <Button key={quick.label} type="button" variant="outline" size="sm" disabled={applyingNote} onClick={() => { setNoteInstruction(quick.instruction); setNoteSubjectOnly(quick.subjectOnly); setNoteError(null); setNoteSuccess(null); }}>{quick.label}</Button>)}</div>
               <Textarea
                 id="follow-up-ai-note"
                 value={noteInstruction}
-                onChange={(event) => { setNoteInstruction(event.target.value); setNoteError(null); setNoteSuccess(null); }}
+                onChange={(event) => { setNoteInstruction(event.target.value); setNoteSubjectOnly(false); setNoteError(null); setNoteSuccess(null); }}
                 onKeyDown={handleNoteKeyDown}
                 rows={7}
                 maxLength={1_000}
@@ -880,26 +936,24 @@ export function FirstContactFollowUpPlan({
                 aria-describedby="follow-up-ai-note-hint"
                 autoFocus
               />
-              <p id="follow-up-ai-note-hint" className="text-xs leading-5 text-muted-foreground">Pulsa ⌘/Ctrl + Enter para aplicar el cambio.</p>
+              <p id="follow-up-ai-note-hint" className="text-xs leading-5 text-muted-foreground">Guarda primero los cambios manuales. Pulsa ⌘/Ctrl + Enter para preparar una propuesta.</p>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="follow-up-note-style">Estilo <span className="font-normal text-muted-foreground">(opcional)</span></Label>
+              <Label htmlFor="follow-up-note-style">Plantilla del borrador</Label>
               <Select
                 value={noteStyleProfileId || USE_INITIAL_STYLE}
                 onValueChange={(value) => setNoteStyleProfileId(value === USE_INITIAL_STYLE ? '' : value)}
-                disabled={applyingNote || selectableStyleProfiles.length === 0}
+                disabled
               >
                 <SelectTrigger id="follow-up-note-style" className="h-11 border-slate-400 dark:border-slate-500">
                   <SelectValue placeholder="Conservar el estilo actual" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={USE_INITIAL_STYLE} className="min-h-11">Conservar el estilo actual</SelectItem>
-                  {selectableStyleProfiles.map((profile) => (
-                    <SelectItem key={profile.id} value={profile.id!} className="min-h-11">{profile.name}</SelectItem>
-                  ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs leading-5 text-muted-foreground">Cada propuesta conserva su plantilla. Indica arriba los cambios de tono o redacción.</p>
             </div>
 
             <div aria-live="polite" className="space-y-3">
@@ -907,7 +961,7 @@ export function FirstContactFollowUpPlan({
               {noteSuccess ? (
                 <Alert className="border-emerald-200 bg-emerald-50/70 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
                   <CheckCircle2 className="size-4" aria-hidden="true" />
-                  <AlertTitle>Cambio aplicado</AlertTitle>
+                  <AlertTitle>Propuestas para revisar</AlertTitle>
                   <AlertDescription>{noteSuccess}</AlertDescription>
                 </Alert>
               ) : null}
@@ -921,9 +975,9 @@ export function FirstContactFollowUpPlan({
           </div>
 
           <SheetFooter className="border-t border-border/60 bg-background px-5 py-4 sm:px-6">
-            <Button type="button" className="min-h-11 w-full sm:w-auto" onClick={() => void applyAiNote()} disabled={applyingNote || !noteInstruction.trim()}>
+            <Button type="button" className="min-h-11 w-full sm:w-auto" onClick={() => void applyAiNote()} disabled={disabled || applyingNote || !noteInstruction.trim()}>
               {applyingNote ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
-              {applyingNote ? 'Aplicando…' : 'Aplicar cambio'}
+              {applyingNote ? 'Preparando…' : 'Preparar propuesta'}
             </Button>
           </SheetFooter>
         </SheetContent>

@@ -39,7 +39,11 @@ function collectTests(dir) {
   return files;
 }
 
-const testFiles = [
+const selectedTests = process.argv.slice(2);
+if (selectedTests.some((file) => !/\.test\.(mjs|js|ts)$/.test(file) || /\.(integration|e2e)\.test\./.test(file) || path.relative(ROOT, path.resolve(file)).startsWith('..'))) {
+  throw new Error('Only workspace unit test paths are accepted.');
+}
+const testFiles = selectedTests.length ? selectedTests.map((file) => path.resolve(file)) : [
   ...collectTests(path.join(ROOT, '__tests__')),
   ...collectTests(path.join(ROOT, 'src')),
 ].sort();

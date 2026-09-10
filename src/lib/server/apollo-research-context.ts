@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { canonicalJson } from '@/lib/messaging-contracts';
 import { NativeResearchLeadSchema, type NativeResearchLead } from '@/lib/native-research-contracts';
+import { publicCompanyCandidate, type PublicCompanyIdentity } from '@/lib/public-company-research-contracts';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export const APOLLO_RESEARCH_CONTEXT_VERSION = 'apollo-research-context/v1';
@@ -35,6 +36,7 @@ export type ApolloResearchContext = {
   };
   company: {
     name?: string;
+    apolloOrganizationId?: string;
     domain?: string;
     websiteUrl?: string;
     linkedinUrl?: string;
@@ -76,6 +78,11 @@ function nonnegativeNumber(value: unknown) {
   return Number.isFinite(normalized) && normalized >= 0 && normalized <= Number.MAX_SAFE_INTEGER
     ? normalized
     : undefined;
+}
+
+function apolloOrganizationId(value: unknown) {
+  const normalized = text(value, 255);
+  return /^[a-z0-9][a-z0-9_-]{2,254}$/i.test(normalized) ? normalized : '';
 }
 
 function iso(value: unknown) {
@@ -157,9 +164,12 @@ function rowObservation(table: ApolloContextTable, rowValue: unknown) {
       city: text(row.city, 2_000) || undefined,
       country: text(row.country, 2_000) || undefined,
     },
-    company: {
-      name: text(row.company_name || row.organization_name || row.org_name || row.company || organization.name, 300) || undefined,
-      domain: companyDomain || undefined,
+      company: {
+        name: text(row.company_name || row.organization_name || row.org_name || row.company || organization.name, 300) || undefined,
+        apolloOrganizationId: companyDomain && (!domain(organization.primary_domain || organization.domain) || domain(organization.primary_domain || organization.domain) === companyDomain) ? apolloOrganizationId(
+          organization.id || data.apolloOrganizationId,
+        ) || undefined : undefined,
+        domain: companyDomain || undefined,
       websiteUrl: websiteUrl || undefined,
       linkedinUrl: linkedinUrl(row.company_linkedin || organization.linkedin_url, true) || undefined,
       industry: text(row.organization_industry || row.industry || organization.industry, 2_000) || undefined,
@@ -173,6 +183,7 @@ function organizationObservation(rowValue: unknown) {
   const row = object(rowValue);
   const organization = object(row.organization_context);
   const companyDomain = domain(organization.primary_domain || row.normalized_domain);
+  if (row.normalized_domain && domain(row.normalized_domain) !== companyDomain) return null;
   const recordId = companyDomain;
   if (!recordId) return null;
   return {
@@ -182,8 +193,9 @@ function organizationObservation(rowValue: unknown) {
       observedAt: iso(row.observed_at || row.updated_at || row.created_at),
     },
     person: {},
-    company: {
-      name: text(organization.name, 300) || undefined,
+      company: {
+        apolloOrganizationId: apolloOrganizationId(organization.id || row.apollo_organization_id) || undefined,
+        name: text(organization.name, 300) || undefined,
       domain: companyDomain,
       websiteUrl: httpUrl(organization.website_url) || `https://${companyDomain}/`,
       linkedinUrl: linkedinUrl(organization.linkedin_url, true) || undefined,
@@ -211,6 +223,8 @@ function buildApolloResearchContextFromObservations(observationsValue: ApolloObs
   const company: ApolloResearchContext['company'] = {};
   for (const observation of observations) {
     Object.assign(person, Object.fromEntries(Object.entries(observation.person).filter(([, value]) => value != null)));
+    // An organization ID must never survive a domain change from another row.
+    if (observation.company.domain && observation.company.domain !== company.domain) delete company.apolloOrganizationId;
     Object.assign(company, Object.fromEntries(Object.entries(observation.company).filter(([, value]) => value != null)));
   }
   const sources = observations.map(({ source }) => source);
@@ -254,6 +268,7 @@ export function parseApolloResearchContext(value: unknown): ApolloResearchContex
   };
   const companyDomain = domain(rawCompany.domain);
   const company: ApolloResearchContext['company'] = {
+    ...(apolloOrganizationId(rawCompany.apolloOrganizationId) ? { apolloOrganizationId: apolloOrganizationId(rawCompany.apolloOrganizationId) } : {}),
     ...(text(rawCompany.name, 300) ? { name: text(rawCompany.name, 300) } : {}),
     ...(companyDomain ? { domain: companyDomain } : {}),
     ...(httpUrl(rawCompany.websiteUrl) ? { websiteUrl: httpUrl(rawCompany.websiteUrl) } : {}),
@@ -359,7 +374,7 @@ export async function loadApolloResearchContext(input: {
   if (companyDomain) {
     const { data, error } = await admin
       .from('apollo_organization_contexts')
-      .select('normalized_domain,organization_context,observed_at,updated_at,created_at')
+      .select('normalized_domain,apollo_organization_id,organization_context,observed_at,updated_at,created_at')
       .eq('organization_id', organizationId)
       .eq('user_id', userId)
       .eq('normalized_domain', companyDomain)
@@ -401,6 +416,54 @@ export function apolloResearchContextForPrompt(context: ApolloResearchContext | 
       totalFunding: context.company.totalFunding,
     },
   };
+}
+
+// Team-readable lead rows may supply company identity, never another owner's person context.
+export async function loadApolloPublicCompanyIdentity(input: {
+  organizationId: string;
+  userId: string;
+  lead: NativeResearchLead;
+  language: string;
+  depth: PublicCompanyIdentity['depth'];
+  apolloContext: ApolloResearchContext | null;
+}, admin: any = getSupabaseAdminClient()): Promise<PublicCompanyIdentity | null> {
+  const requestedDomain = input.lead.companyDomain?.toLowerCase().replace(/^www\./, '');
+  if (!requestedDomain) return null;
+  const candidate = (companyDomain: string, website: string, organizationId: string) => {
+    if (companyDomain !== requestedDomain) return null;
+    if (input.lead.companyWebsite && !publicCompanyCandidate({
+      companyDomain, companyWebsite: input.lead.companyWebsite, apolloOrganizationId: organizationId,
+      country: input.lead.country, language: input.language, depth: input.depth,
+    })) return null;
+    return publicCompanyCandidate({ companyDomain, companyWebsite: website, apolloOrganizationId: organizationId,
+      country: input.lead.country, language: input.language, depth: input.depth });
+  };
+  const company = input.apolloContext?.company;
+  const owned = candidate(company?.domain || '', company?.websiteUrl || '', company?.apolloOrganizationId || '');
+  if (owned) return owned;
+  if (!input.lead.id) return null;
+  const { data: member, error: membershipError } = await admin.from('organization_members')
+    .select('organization_id').eq('organization_id', input.organizationId).eq('user_id', input.userId).maybeSingle();
+  if (membershipError) throw membershipError;
+  if (!member) return null;
+  const identities: PublicCompanyIdentity[] = [];
+  for (const table of ['enriched_leads', 'enriched_opportunities']) {
+    const { data, error } = await admin.from(table)
+      .select(`id,stored_domain:${table === 'enriched_leads' ? 'organization_domain' : 'data->>companyDomain'},provider_domain:data->organization->>domain,primary_domain:data->organization->>primary_domain,provider_organization_id:data->organization->>id,website:data->organization->>website_url`)
+      .eq('id', input.lead.id).eq('organization_id', input.organizationId).eq('source_provider', 'apollo').maybeSingle();
+    if (error) throw error;
+    if (!data) continue;
+    // Do not synthesize a website or infer an organization ID from a contact ID/name.
+    const providerDomain = String(data.primary_domain || data.provider_domain || '').toLowerCase().replace(/^www\./, '');
+    if (data.stored_domain && String(data.stored_domain).toLowerCase().replace(/^www\./, '') !== providerDomain) return null;
+    if (data.primary_domain && data.provider_domain
+      && String(data.provider_domain).toLowerCase().replace(/^www\./, '') !== providerDomain) return null;
+    const identity = candidate(providerDomain, data.website || '', data.provider_organization_id || '');
+    if (!identity) return null;
+    identities.push(identity);
+  }
+  if (!identities.length || identities.some((identity) => canonicalJson(identity) !== canonicalJson(identities[0]))) return null;
+  return identities[0];
 }
 
 export const apolloResearchContextInternals = { TABLE_SELECTS, rowObservation, organizationObservation };

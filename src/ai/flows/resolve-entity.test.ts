@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import { parseWebEvidenceV2 } from '@/lib/report-v2-extraction';
 import { resolveEntityV2, RESOLVE_ENTITY_V2_SYSTEM_PROMPT } from './resolve-entity';
@@ -30,7 +31,7 @@ test('P1 keeps provider context non-probatory and deterministically corrects cou
         companyDomain: 'grupoexpro.com',
         contactCountry: 'CL',
         operatingCountries: ['CL'],
-        countryScopedPaths: { CL: '/chile/' },
+        countryScopedPaths: [{ country: 'CL', path: '/chile/' }],
         excludedPaths: ['/peru/'],
         contact: {
           fullName: provider.contact.fullName,
@@ -50,7 +51,13 @@ test('P1 keeps provider context non-probatory and deterministically corrects cou
   assert.equal(captured.systemPrompt, RESOLVE_ENTITY_V2_SYSTEM_PROMPT);
   assert.match(captured.prompt, /datos de proveedor, no evidencia/);
   assert.match(captured.prompt, /Coordinador.*SIEMPRE coordinator/);
+  const schema = zodToJsonSchema(captured.schema, { target: 'openAi', $refStrategy: 'none' }) as any;
+  assert.equal(schema.properties.countryScopedPaths.type, 'array');
+  assert.equal(schema.properties.countryScopedPaths.items.additionalProperties, false);
+  assert.deepEqual([...schema.required].sort(), Object.keys(schema.properties).sort());
   assert.equal(result.contactCountry, 'PE');
+  assert.equal(result.countryScopedPaths.CL, '/chile/');
+  assert.equal(result.countryScopedPaths.PE, '/peru/');
   assert.equal(result.contact.seniority, 'coordinator');
   assert.equal(result.contact.title, golden.contact.title);
   assert.ok(result.excludedPaths.includes('/chile/'));

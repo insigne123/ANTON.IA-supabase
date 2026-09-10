@@ -38,6 +38,7 @@ export type ReportV2OperationalMetrics = {
   signalsWithDateCount: number;
   committeeMembersFound: number;
   modelTelemetry?: ReportV2ModelTelemetry[];
+  research?: { queries: number; pages: number; elapsedMs: number };
 };
 
 export const REPORT_V2_REQUIRED_FIELDS: RequiredReportV2Field[] = [
@@ -88,7 +89,13 @@ export function computeReportV2Coverage(input: {
   sections: SectionV2[];
   claims: ClaimV2[];
   requiredFields?: RequiredReportV2Field[];
+  commercial?: boolean;
 }) {
+  if (input.commercial) {
+    const fields = ['verdict.conclusion', 'company.business_model', 'contact.role', 'fit.product', 'angle.anchor', 'discovery.validation'];
+    const filled = fields.filter((field) => input.sections.some((section) => section.key === field.split('.')[0] && section.paragraphs.some((paragraph) => paragraph.text.trim().length >= 30)));
+    return { ratio: filled.length / fields.length, filled, missing: fields.filter((field) => !filled.includes(field)) };
+  }
   const requiredFields = input.requiredFields || REPORT_V2_REQUIRED_FIELDS;
   const claimsById = new Map(input.claims.map((claim) => [claim.id, claim]));
   const sectionsByKey = new Map(input.sections.map((section) => [section.key, section]));
@@ -164,5 +171,194 @@ export function reportV2OperationalMetrics(input: {
     signalsWithDateCount: input.signals.filter((signal) => Boolean(signal.observedAt)).length,
     committeeMembersFound: input.committee.filter((member) => Boolean(member.name)).length,
     ...(input.modelTelemetry ? { modelTelemetry: input.modelTelemetry.slice(0, 100) } : {}),
+  };
+}
+
+const REPORT_V2_EVIDENCE_STOPWORDS = new Set([
+  'para', 'como', 'esta', 'este', 'esto', 'entre', 'desde', 'donde', 'cuando', 'porque',
+  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'una', 'unos', 'unas', 'los', 'las',
+]);
+
+/** Deterministic, dependency-free text normalization for evidence dedup. */
+export function normalizeReportV2EvidenceText(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function reportV2EvidenceTokens(value: unknown): string[] {
+  return normalizeReportV2EvidenceText(value)
+    .split(' ')
+    .filter((token) => token.length > 2 && !REPORT_V2_EVIDENCE_STOPWORDS.has(token));
+}
+
+export function reportV2TokenOverlap(left: string[], right: string[]): number {
+  if (left.length === 0 || right.length === 0) return 0;
+  const rightSet = new Set(right);
+  let intersection = 0;
+  new Set(left).forEach((token) => {
+    if (rightSet.has(token)) intersection += 1;
+  });
+  return intersection / Math.max(new Set(left).size, rightSet.size);
+}
+
+/** Exact-match fact dedup. Keeps the first occurrence; input order defines winners. */
+export function dedupeReportV2Facts(facts: FactV2[]): FactV2[] {
+  const seen = new Set<string>();
+  return facts.filter((fact) => {
+    const key = normalizeReportV2EvidenceText(fact.text);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export type ReportV2ClaimProjectionBudget = {
+  maxTotal?: number;
+  maxPerDimension?: number;
+};
+
+/**
+ * Semantic-ish deterministic claim dedup: same type + dimension with identical
+ * normalized statements or token overlap >= 0.8 merge into one claim.
+ * Provenance is preserved by unioning evidence ids; the stable id of the
+ * first occurrence wins so existing short-id maps keep working.
+ */
+export function dedupeReportV2Claims(claims: ClaimV2[]): ClaimV2[] {
+  const kept: ClaimV2[] = [];
+  const normalizedStatements: string[] = [];
+  const tokenSets: string[][] = [];
+  claims.forEach((candidate) => {
+    const normalizedStatement = normalizeReportV2EvidenceText(candidate.statement);
+    const tokens = reportV2EvidenceTokens(candidate.statement);
+    const duplicateIndex = kept.findIndex((existing, index) => (
+      existing.type === candidate.type
+      && existing.dimension === candidate.dimension
+      && (
+        normalizedStatements[index] === normalizedStatement
+        || reportV2TokenOverlap(tokenSets[index], tokens) >= 0.8
+      )
+    ));
+    if (duplicateIndex === -1) {
+      kept.push(candidate);
+      normalizedStatements.push(normalizedStatement);
+      tokenSets.push(tokens);
+      return;
+    }
+    const existing = kept[duplicateIndex];
+    const winner = candidate.confidence > existing.confidence ? candidate : existing;
+    kept[duplicateIndex] = {
+      ...winner,
+      id: existing.id,
+      internalId: existing.internalId,
+      evidenceIds: [...new Set([...existing.evidenceIds, ...candidate.evidenceIds])].sort(),
+      confidence: Math.max(existing.confidence, candidate.confidence),
+    } as ClaimV2;
+  });
+  return kept;
+}
+
+/**
+ * Deterministic ranking for the model-facing projection: confidence first,
+ * then stable id. Caps per dimension and in total. The full payload passed
+ * in is never mutated; pruning only affects this projection.
+ */
+export function pruneReportV2ClaimsForProjection(
+  claims: ClaimV2[],
+  budget: ReportV2ClaimProjectionBudget = {},
+): ClaimV2[] {
+  const maxTotal = Math.max(1, Math.trunc(Number(budget.maxTotal) || 60));
+  const maxPerDimension = Math.max(1, Math.trunc(Number(budget.maxPerDimension) || 8));
+  const ranked = [...dedupeReportV2Claims(claims)].sort((left, right) => (
+    right.confidence - left.confidence || left.id.localeCompare(right.id)
+  ));
+  const perDimension = new Map<string, number>();
+  const kept: ClaimV2[] = [];
+  ranked.forEach((claim) => {
+    const count = perDimension.get(claim.dimension) || 0;
+    if (count >= maxPerDimension || kept.length >= maxTotal) return;
+    perDimension.set(claim.dimension, count + 1);
+    kept.push(claim);
+  });
+  return kept;
+}
+
+export type ReportV2ModelEvidenceProjection = {
+  sources: SourceV2[];
+  facts: FactV2[];
+  claims: ClaimV2[];
+  totals: { sources: number; facts: number; claims: number };
+  pruned: { sources: number; facts: number; claims: number };
+};
+
+/**
+ * Builds the model-facing evidence projection. Sources are restricted to the
+ * ones backing projected facts; every input array is preserved untouched so
+ * persisted payloads and audit provenance keep the full graph.
+ */
+export function projectReportV2ModelEvidence(input: {
+  sources: SourceV2[];
+  facts: FactV2[];
+  claims: ClaimV2[];
+  budget?: ReportV2ClaimProjectionBudget & { maxFacts?: number };
+}): ReportV2ModelEvidenceProjection {
+  const maxFacts = Math.max(1, Math.trunc(Number(input.budget?.maxFacts) || 80));
+  // Keep canonical IDs and statements: text similarity must not move a citation
+  // to another source or turn a conflicting figure into the same claim.
+  const maxClaims = Math.max(1, Math.trunc(Number(input.budget?.maxTotal) || 60));
+  const maxPerDimension = Math.max(1, Math.trunc(Number(input.budget?.maxPerDimension) || 8));
+  const sourceIds = new Set(input.sources.map((source) => source.id));
+  const factsById = new Map(input.facts.map((fact) => [fact.id, fact]));
+  const claimsById = new Map(input.claims.map((claim) => [claim.id, claim]));
+  const candidates = [...input.claims].sort((a, b) => b.confidence - a.confidence || a.id.localeCompare(b.id));
+  const selectedFactIds = new Set<string>();
+  const selected = new Map<string, ClaimV2>();
+  candidates.forEach((candidate) => {
+    const closure = new Map<string, ClaimV2>();
+    const visiting = new Set<string>();
+    const visit = (id: string): boolean => {
+      if (visiting.has(id)) return false;
+      if (selected.has(id) || closure.has(id)) return true;
+      const claim = claimsById.get(id);
+      if (!claim || (claim.type === 'fact' && !claim.evidenceIds.length)) return false;
+      if (!claim.evidenceIds.every((factId) => {
+        const fact = factsById.get(factId);
+        return fact && sourceIds.has(fact.sourceId);
+      })) return false;
+      visiting.add(id);
+      if (claim.type === 'derived' && !claim.inputs.every(visit)) return false;
+      visiting.delete(id);
+      closure.set(id, claim);
+      return true;
+    };
+    if (!visit(candidate.id) || selected.size + closure.size > maxClaims) return;
+    const nextFacts = new Set(selectedFactIds);
+    const counts = new Map<string, number>();
+    for (const claim of [...selected.values(), ...closure.values()]) {
+      counts.set(claim.dimension, (counts.get(claim.dimension) || 0) + 1);
+      claim.evidenceIds.forEach((id) => nextFacts.add(id));
+    }
+    if (nextFacts.size > maxFacts || [...counts.values()].some((count) => count > maxPerDimension)) return;
+    closure.forEach((claim, id) => selected.set(id, claim));
+    nextFacts.forEach((id) => selectedFactIds.add(id));
+  });
+  const claims = [...selected.values()];
+  const projectedFacts = input.facts.filter((fact) => selectedFactIds.has(fact.id));
+  const referencedSourceIds = new Set(projectedFacts.map((fact) => fact.sourceId));
+  const sources = input.sources.filter((source) => referencedSourceIds.has(source.id));
+  return {
+    sources,
+    facts: projectedFacts,
+    claims,
+    totals: { sources: input.sources.length, facts: input.facts.length, claims: input.claims.length },
+    pruned: {
+      sources: input.sources.length - sources.length,
+      facts: input.facts.length - projectedFacts.length,
+      claims: input.claims.length - claims.length,
+    },
   };
 }

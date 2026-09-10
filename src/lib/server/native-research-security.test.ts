@@ -202,6 +202,37 @@ test('challenge content is rejected from raw pages, cached pages, and company se
   assert.match(nativeResearchInternals.usefulOfficialPageContent(usefulPageWithCaptchaScript)?.statement || '', /Acme protege sus operaciones/);
 });
 
+test('official pages reject leaked markup and cached static asset paths', () => {
+  const malformed = nativeResearchInternals.officialPageFromHtml(
+    new URL('https://acme.com/services'),
+    '<html><head><title>Acme</title></head><body><main><p>Acme ayuda a empresas con operaciones regionales y soporte especializado para distintos equipos.</p> <section class="elementor-section elementor-element-026ce62"></main></body></html>',
+  );
+  const malformedContent = nativeResearchInternals.usefulOfficialPageContent(malformed);
+  assert.match(malformedContent?.statement || '', /Acme ayuda a empresas/);
+  assert.doesNotMatch(malformedContent?.statement || '', /elementor|section/i);
+
+  const doctype = nativeResearchInternals.officialPageFromHtml(
+    new URL('https://acme.com/about'),
+    '<!doctype html><html><body><p>Acme coordina operaciones regionales con soporte especializado para empresas de distintos sectores.</p></body></html>',
+  );
+  assert.doesNotMatch(doctype.text, /doctype html/i);
+  assert.match(nativeResearchInternals.usefulOfficialPageContent(doctype)?.statement || '', /Acme coordina operaciones/);
+
+  const cached = nativeResearchInternals.companySignalsFromArtifactPayload({
+    companySignals: {
+      domain: 'acme.com',
+      fetchedAt: '2026-09-08T12:00:00.000Z',
+      official: {
+        url: 'https://acme.com/services',
+        title: 'Acme',
+        description: null,
+        text: 'Acme <link rel="stylesheet" href="https://acme.com/wp-content/uploads/hummingbird-assets/site.css">',
+      },
+    },
+  }, 'acme.com');
+  assert.equal(cached?.official, null);
+});
+
 test('official-site pages produce atomic deduplicated sections and support legacy flattened artifacts', () => {
   const page = nativeResearchInternals.officialPageFromHtml(
     new URL('https://acme.com/services'),

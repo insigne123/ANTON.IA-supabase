@@ -201,6 +201,52 @@ const domainArrayField = z.union([
 
 const singleDomainField = z.string().trim().min(1).optional();
 
+const stringListField = z.union([
+  z.array(z.string()),
+  z.string().transform((value) => value.split(',').map((item) => item.trim()).filter(Boolean)),
+]).optional().default([]);
+
+const pageField = z.number().int().min(1).max(500).optional();
+const perPageField = z.number().int().min(1).max(100).optional();
+
+export const CompanyFilterSearchRequestSchema = z.object({
+  search_mode: z.enum(['companies', 'organizations', 'organization_search']).optional().default('companies'),
+  company_keywords: stringListField,
+  companyKeywords: stringListField,
+  company_location: stringListField,
+  companyLocation: stringListField,
+  location: z.string().trim().optional(),
+  employee_ranges: stringListField,
+  employeeRanges: stringListField,
+  sizeRange: z.string().trim().optional(),
+  page: pageField,
+  per_page: perPageField,
+  perPage: perPageField,
+}).passthrough();
+
+export const CompanyPeopleSearchRequestSchema = z.object({
+  search_mode: z.enum(['company_people', 'organization_people']).optional().default('company_people'),
+  organization_id: z.string().trim().min(1).optional(),
+  organizationId: z.string().trim().min(1).optional(),
+  selected_organization_id: z.string().trim().min(1).optional(),
+  titles: stringListField,
+  title: z.string().trim().optional(),
+  seniorities: z.array(z.string()).optional().default([]),
+  person_locations: stringListField,
+  personLocations: stringListField,
+  personLocation: z.string().trim().optional(),
+  include_similar_titles: z.boolean().optional().default(true),
+  page: pageField,
+  per_page: perPageField,
+  perPage: perPageField,
+  exclude_person_ids: z.array(z.string()).optional().default([]),
+  excludePersonIds: z.array(z.string()).optional().default([]),
+}).superRefine((value, ctx) => {
+  if (!value.organization_id && !value.organizationId && !value.selected_organization_id) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'organization_id es obligatorio', path: ['organization_id'] });
+  }
+});
+
 export const CompanyNameSearchRequestSchema = z.object({
   user_id: z.string().trim().optional(),
   search_mode: z.literal('company_name').optional().default('company_name'),
@@ -313,4 +359,25 @@ export type LeadSearchResponse = z.infer<typeof LeadSearchResponseSchema>;
 export type LeadsSearchParams = z.infer<typeof N8NRequestBodySchema>;
 export type LinkedInProfileSearchRequest = z.infer<typeof LinkedInProfileSearchRequestSchema>;
 export type CompanyNameSearchRequest = z.infer<typeof CompanyNameSearchRequestSchema>;
+export type CompanyFilterSearchRequest = z.input<typeof CompanyFilterSearchRequestSchema>;
+export type CompanyPeopleSearchRequest = z.input<typeof CompanyPeopleSearchRequestSchema>;
 export type CompanySearchOrganization = z.infer<typeof CompanySearchOrganizationSchema>;
+
+export type CompanySearchResponse = {
+  count: number;
+  organizations: CompanySearchOrganization[];
+  search_mode: string;
+  page?: number;
+  per_page?: number;
+  total_entries?: number;
+  total_pages?: number;
+  organization_search_credits?: number;
+};
+
+export type CompanyPeopleSearchResponse = LeadSearchResponse & {
+  organization_id: string;
+  page?: number;
+  per_page?: number;
+  total_entries?: number;
+  total_pages?: number;
+};

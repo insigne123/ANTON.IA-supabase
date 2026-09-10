@@ -28,7 +28,7 @@ test('loads organization-owned Report V2 products, ICP, rollout mode, and stable
           products: [{ key: 'ops', name: 'Ops', services: ['Automation'], volumeAssumptions: { scenarioMultipliers: [1, 2, 3], minutesPerEvent: 5 } }],
         },
         icp: { products: { ops: { jurisdictions: ['CL'] } } },
-        research_config: { reportV2Mode: 'visible' },
+        research_config: { reportV2Mode: 'visible', reportQuestionnaireMode: 'visible' },
         profile_revision: 4,
       },
     },
@@ -37,6 +37,7 @@ test('loads organization-owned Report V2 products, ICP, rollout mode, and stable
   const second = await loadReportV2SellerConfiguration({ organizationId: 'org', userId: 'user' }, admin);
 
   assert.equal(first.mode, 'visible');
+  assert.equal(first.questionnaireMode, 'visible');
   assert.equal(first.profileRevision, 4);
   assert.equal(first.sellerProfile.companyName, 'Northstar');
   assert.equal(first.sellerProfile.products[0].key, 'ops');
@@ -86,4 +87,19 @@ test('does not silently accept malformed organization ICP settings', async () =>
 
 test('rollout mode remains default-off for unknown values', () => {
   assert.equal(sellerProfileInternals.reportV2Mode('enabled'), 'off');
+  assert.equal(sellerProfileInternals.reportQuestionnaireMode('enabled'), 'off');
+  assert.equal(sellerProfileInternals.reportQuestionnaireMode(undefined), 'off');
+});
+
+test('rollout remains part of synthesis identity until transactional delivery promotion is supported', async () => {
+  const hashes = [];
+  for (const mode of ['off', 'shadow', 'visible']) {
+    const admin = adminFixture({ antonia_workflow_settings: { data: {
+      user_company_profile: { products: [{ key: 'ops' }] }, research_config: { reportV2Mode: mode }, profile_revision: 1,
+    } } });
+    const configuration = await loadReportV2SellerConfiguration({ organizationId: 'org', userId: 'owner' }, admin);
+    assert.equal(configuration.mode, mode);
+    hashes.push(configuration.synthesisContextHash);
+  }
+  assert.equal(new Set(hashes).size, 3);
 });

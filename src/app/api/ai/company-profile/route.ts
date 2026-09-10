@@ -7,9 +7,9 @@ export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   try {
-    await requireAuth();
+    const auth = await requireAuth();
     const input = await req.json();
-    const output = await generateCompanyProfile(input);
+    const output = await generateCompanyProfile({ ...input, organizationId: auth.organizationId });
     return NextResponse.json(output);
   } catch (error: any) {
     if (error?.name === 'AuthError') return handleAuthError(error);

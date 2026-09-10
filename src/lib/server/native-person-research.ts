@@ -11,6 +11,7 @@ export type PublicPersonEvidenceResult = {
   fetchedAt: string;
   items: SerperSearchItem[];
   warnings: string[];
+  metrics?: { queries: number; elapsedMs: number; costUsd: null };
 };
 
 function text(value: unknown) {
@@ -121,6 +122,8 @@ export async function collectPublicPersonEvidence(input: {
   search?: typeof searchSerper;
 }): Promise<PublicPersonEvidenceResult> {
   const fetchedAt = new Date().toISOString();
+  const started = Date.now();
+  let attemptedSearches = 0;
   const queries = buildPublicPersonSearchQueries(input.lead);
   if (queries.length === 0) {
     return {
@@ -129,6 +132,7 @@ export async function collectPublicPersonEvidence(input: {
       fetchedAt,
       items: [],
       warnings: text(input.lead.fullName) ? ['person_search_identity_incomplete'] : [],
+      metrics: { queries: 0, elapsedMs: Date.now() - started, costUsd: null },
     };
   }
 
@@ -137,6 +141,7 @@ export async function collectPublicPersonEvidence(input: {
   let completedSearches = 0;
   for (let queryIndex = 0; queryIndex < queries.length; queryIndex += 1) {
     if (matched.size >= SUFFICIENT_PERSON_EVIDENCE_ITEMS) break;
+    attemptedSearches += 1;
     try {
       const result = await search({
         organizationId: input.organizationId,
@@ -174,6 +179,7 @@ export async function collectPublicPersonEvidence(input: {
     provider: 'serper',
     fetchedAt,
     items,
+    metrics: { queries: attemptedSearches, elapsedMs: Date.now() - started, costUsd: null },
     warnings: items.length > 0
       ? []
       : completedSearches > 0 ? ['person_public_evidence_missing'] : ['person_search_unavailable'],

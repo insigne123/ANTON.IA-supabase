@@ -2,6 +2,12 @@ import { AUDIT_REPORT_V2_PROMPT_VERSION } from '@/ai/flows/audit-report-v2';
 import { REASON_REPORT_V2_PROMPT_VERSION, type SellerProfileContextV2 } from '@/ai/flows/reason-about-report-v2-account';
 import { SYNTHESIZE_REPORT_V2_PROMPT_VERSION, ReportV2SynthesisFailed, synthesizeReportV2 } from '@/ai/flows/synthesize-report-v2';
 import { WRITE_REPORT_V2_SECTION_PROMPT_VERSION } from '@/ai/flows/write-report-v2-section';
+import { WRITE_REPORT_V2_PROMPT_VERSION } from '@/ai/flows/write-report-v2';
+import { REPORT_V2_SPECIALISTS_VERSION } from '@/ai/flows/report-v2-specialists';
+import { gatherReportV2Research, REPORT_V2_RESEARCH_VERSION } from './research-report-v2-research';
+import { loadOrGatherReportV2Research } from './research-report-v2-checkpoint';
+import { qualifyEntityV2 } from '@/qualification/icp-gate';
+import { buildReportV2Committee } from '@/ai/flows/build-report-v2-committee';
 import { canonicalSha256 } from '@/lib/messaging-contracts';
 import { REPORT_V2_SCHEMA_VERSION, validateReportV2, type ReportV2 } from '@/lib/report-v2-contracts';
 import { REPORT_V2_SNAPSHOT_ADAPTER_VERSION, projectResearchSnapshotV1ToReportV2 } from '@/lib/report-v2-snapshot-adapter';
@@ -17,6 +23,8 @@ import {
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import type { IcpRulesV2 } from '@/qualification/icp-gate';
 import type { ResearchReportDocumentAccess } from './research-report-documents';
+import { buildSynthesisActionableTask, resolveSynthesisRetryPolicy } from '@/lib/research-synthesis-retry-policy';
+import type { ResearchDepth } from '@/lib/research-depth-budgets';
 
 export const RESEARCH_REPORT_V2_RUNTIME_VERSION = `report-v2/runtime/1:${canonicalSha256({
   synthesis: SYNTHESIZE_REPORT_V2_PROMPT_VERSION,
@@ -24,6 +32,9 @@ export const RESEARCH_REPORT_V2_RUNTIME_VERSION = `report-v2/runtime/1:${canonic
   reason: REASON_REPORT_V2_PROMPT_VERSION,
   write: WRITE_REPORT_V2_SECTION_PROMPT_VERSION,
   audit: AUDIT_REPORT_V2_PROMPT_VERSION,
+  editor: WRITE_REPORT_V2_PROMPT_VERSION,
+  specialists: REPORT_V2_SPECIALISTS_VERSION,
+  research: REPORT_V2_RESEARCH_VERSION,
 }).slice(0, 16)}`;
 
 type ReportV2SynthesisResult = Awaited<ReturnType<typeof synthesizeReportV2>>;
@@ -62,6 +73,7 @@ export type EnsureResearchReportDocumentV2Dependencies = {
   loadState?: typeof loadResearchReportSynthesisState;
   claim?: typeof claimResearchReportSynthesis;
   project?: typeof projectResearchSnapshotV1ToReportV2;
+  research?: typeof gatherReportV2Research;
   synthesize?: typeof synthesizeReportV2;
   persist?: typeof persistResearchReportSynthesisResultV2;
   fail?: typeof failResearchReportSynthesis;
@@ -287,6 +299,7 @@ export async function tryEnsureResearchReportDocumentV2(input: {
   synthesisContextHash: string;
   deliveryState: 'visible' | 'suppressed';
   generatedAt?: string;
+  depth?: ResearchDepth;
 }, dependencies: EnsureResearchReportDocumentV2Dependencies = {}): Promise<ReportV2GenerationAttempt> {
   const snapshot = ResearchSnapshotV1Schema.parse(input.snapshot);
   const organizations = new Set(readableOrganizationIds(input.access));
@@ -339,8 +352,20 @@ export async function tryEnsureResearchReportDocumentV2(input: {
 
   try {
     const generatedAt = input.generatedAt || new Date().toISOString();
+    const depth: ResearchDepth = input.depth || (snapshot.request.depth === 'basic' ? 'express' : snapshot.request.depth);
     const project = dependencies.project || projectResearchSnapshotV1ToReportV2;
-    const projection = project({ snapshot, sellerProfile: input.sellerProfile, icpRules: input.icpRules, generatedAt });
+    const baseline = project({ snapshot, sellerProfile: input.sellerProfile, icpRules: input.icpRules, generatedAt });
+    const researchInput = { projection: baseline, sellerProfile: input.sellerProfile, organizationId: snapshot.scope.organizationId, language: snapshot.request.language, generatedAt,
+      depth,
+      ...(snapshot.publicCompanyResearch ? { publicCompanyResearch: snapshot.publicCompanyResearch } : {}) };
+    const projection = dependencies.research ? await dependencies.research(researchInput) : await loadOrGatherReportV2Research({ ...researchInput, researchSnapshotId: snapshot.id, ownerUserId: snapshot.scope.ownerUserId, synthesisContextHash: input.synthesisContextHash });
+    const localSizes = projection.claims.flatMap((claim) => {
+      if (claim.type !== 'fact' || claim.dimension !== 'company_size' || claim.jurisdiction !== projection.entity.contactCountry || !['company', 'country'].includes(claim.scope || '')) return [];
+      const match = claim.statement.match(/\b(\d+(?:[.,]\d{3})*)\s+(?:colaboradores|empleados|trabajadores|employees|workers|people)\b/i);
+      return match ? [Number(match[1].replace(/[.,]/g, ''))] : [];
+    });
+    projection.qualification = qualifyEntityV2({ entity: projection.entity, rules: input.icpRules, productKeys: input.sellerProfile.products.map((product) => product.key), headcount: new Set(localSizes).size === 1 ? localSizes[0] : null });
+    projection.committee = buildReportV2Committee({ entity: projection.entity, qualification: projection.qualification, claims: projection.claims });
     const synthesize = dependencies.synthesize || synthesizeReportV2;
     const synthesis = await synthesize({
       researchSnapshotId: snapshot.id,
@@ -348,11 +373,13 @@ export async function tryEnsureResearchReportDocumentV2(input: {
       language: snapshot.request.language,
       ...projection,
       sellerProfile: input.sellerProfile,
+      companyContext: snapshot.subject.company.description || null,
       generatedAt,
       promptVersion: RESEARCH_REPORT_V2_RUNTIME_VERSION,
-      revision: (existing?.document.revision || 0) + 1,
-      synthesisContextHash: input.synthesisContextHash,
-    });
+       revision: (existing?.document.revision || 0) + 1,
+       synthesisContextHash: input.synthesisContextHash,
+       depth,
+     });
     const persist = dependencies.persist || persistResearchReportSynthesisResultV2;
     const persisted = await persist({
       snapshot,
@@ -360,21 +387,33 @@ export async function tryEnsureResearchReportDocumentV2(input: {
       deliveryState: input.deliveryState,
       stateId: claimed.state.id,
       claimToken: claimed.claimToken,
-      now: generatedAt,
+      now: new Date().toISOString(),
     });
     return { ...persisted, metrics: synthesis.metrics };
   } catch (error) {
     const retryable = error instanceof ReportV2SynthesisFailed ? error.retryable : !permanentFailure(error);
+    const retryPolicy = resolveSynthesisRetryPolicy({
+      attemptCount: claimed.state.attemptCount,
+      retryable,
+    });
     const fail = dependencies.fail || failResearchReportSynthesis;
+    const errorCode = error instanceof ReportV2SynthesisFailed
+      ? error.code
+      : retryable ? 'report_v2_generation_failed' : 'report_v2_input_invalid';
+    const actionableTask = retryPolicy.shouldExposeTask
+      ? buildSynthesisActionableTask({ researchSnapshotId: snapshot.id, errorCode })
+      : null;
     const state = await fail({
       stateId: claimed.state.id,
       claimToken: claimed.claimToken,
       organizationId: snapshot.scope.organizationId,
       researchSnapshotId: snapshot.id,
       schemaVersion: RESEARCH_REPORT_V2_SCHEMA_VERSION,
-      errorCode: error instanceof ReportV2SynthesisFailed ? error.code : retryable ? 'report_v2_generation_failed' : 'report_v2_input_invalid',
-      errorMessage: error instanceof Error ? error.message : 'Report V2 generation failed.',
-      retryable,
+      errorCode,
+      errorMessage: actionableTask
+        ? `${error instanceof Error ? error.message : 'Report V2 generation failed.'} Tarea accionable: ${actionableTask.title}. ${actionableTask.howToFind}`
+        : error instanceof Error ? error.message : 'Report V2 generation failed.',
+      retryable: retryPolicy.retryable,
       now: input.generatedAt,
     });
     return { document: existing, synthesis: state, metrics: null };

@@ -1,7 +1,11 @@
 // src/lib/leads-client.ts
 import type {
+  CompanyFilterSearchRequest,
   CompanyNameSearchRequest,
+  CompanyPeopleSearchRequest,
+  CompanyPeopleSearchResponse,
   CompanySearchOrganization,
+  CompanySearchResponse,
   LeadSearchResponse,
   LeadsSearchParams,
   LinkedInProfileSearchRequest,
@@ -89,6 +93,49 @@ async function postSearch(body: SearchPayload, signal?: AbortSignal): Promise<Le
 
 export async function searchLeads(body: LeadsSearchParams, signal?: AbortSignal): Promise<LeadSearchResponse> {
   return postSearch(body, signal);
+}
+
+export async function searchCompanies(
+  body: CompanyFilterSearchRequest,
+  signal?: AbortSignal,
+): Promise<CompanySearchResponse> {
+  const res = await fetch(PATH, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...body, search_mode: 'companies' }),
+    cache: 'no-store',
+    signal,
+  });
+  const json: any = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(String(json?.message || json?.error || `HTTP_${res.status}`));
+  }
+  return {
+    count: Number(json?.count ?? (Array.isArray(json?.organizations) ? json.organizations.length : 0)) || 0,
+    organizations: Array.isArray(json?.organizations) ? json.organizations : [],
+    search_mode: 'companies',
+    page: json?.page,
+    per_page: json?.per_page,
+    total_entries: json?.total_entries,
+    total_pages: json?.total_pages,
+    organization_search_credits: json?.organization_search_credits,
+  };
+}
+
+export async function searchCompanyPeople(
+  body: CompanyPeopleSearchRequest,
+  signal?: AbortSignal,
+): Promise<CompanyPeopleSearchResponse> {
+  const result = await postSearch({ ...body, search_mode: 'company_people' } as any, signal);
+  const raw = result as any;
+  return {
+    ...result,
+    organization_id: String(raw.organization_id || (body as any).organization_id || (body as any).organizationId || ''),
+    page: raw.page,
+    per_page: raw.per_page,
+    total_entries: raw.total_entries,
+    total_pages: raw.total_pages,
+  };
 }
 
 export async function searchLinkedInProfileLead(
@@ -340,8 +387,12 @@ export async function getLinkedInProfileLead(
 }
 
 export type {
+  CompanyFilterSearchRequest,
   CompanyNameSearchRequest,
+  CompanyPeopleSearchRequest,
+  CompanyPeopleSearchResponse,
   CompanySearchOrganization,
+  CompanySearchResponse,
   LeadSearchResponse,
   LeadsSearchParams,
   LinkedInProfileSearchRequest,

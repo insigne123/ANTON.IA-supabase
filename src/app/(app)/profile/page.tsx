@@ -34,6 +34,7 @@ import {
   type ProfileSuggestionSelection,
 } from '@/lib/profile/profile-mappings';
 import { profileService } from '@/lib/services/profile-service';
+import { PasswordChangeForm } from '@/components/profile/password-change-form';
 import type { GenerateCompanyProfileOutput } from '@/ai/flows/generate-company-profile';
 
 const fieldCopy: Record<ProfileSuggestionField, string> = {
@@ -233,7 +234,7 @@ export default function ProfilePage() {
     <div className="mx-auto max-w-5xl pb-10 pt-2">
       <PageHeader
         title="Perfil"
-        description="Define como te presentas y que debe saber la IA sobre tu empresa."
+        description="Administra tu perfil comercial y la seguridad de tu cuenta."
       />
 
       {loadError ? (
@@ -396,6 +397,8 @@ export default function ProfilePage() {
           </Button>
         </div>
       ) : null}
+
+      <PasswordChangeForm />
 
       <Dialog open={Boolean(suggestion)} onOpenChange={(open) => { if (!open) closeSuggestionReview(); }}>
         <DialogContent className="max-h-[88vh] w-[calc(100%-1.5rem)] max-w-2xl overflow-y-auto rounded-3xl border-border/70 p-0">

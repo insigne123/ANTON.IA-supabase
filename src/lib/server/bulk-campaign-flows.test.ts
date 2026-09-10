@@ -24,7 +24,7 @@ function loadModule(file: string, modules: Record<string, any>) {
 function chain(result: any) {
   const self: any = {
     select() { return self; }, eq() { return self; }, ilike() { return self; },
-    order() { return self; }, limit() { return self; }, insert() { return self; },
+    order() { return self; }, limit() { return self; }, in() { return self; }, insert() { return self; },
     delete() { return self; }, single: async () => result,
     then(resolve: any, reject: any) { return Promise.resolve(result).then(resolve, reject); },
   };
@@ -45,6 +45,7 @@ test('search attaches deterministic reasons and drops rows outside the criteria'
   const { searchAudiencePage } = loadModule('src/lib/server/bulk-campaign-audience.ts', {
     zod: await import('zod'),
     '@/lib/server/auth-utils': {},
+    '@/ai/openai-json': { generateStructured: async () => { throw new Error('AI not used in this test'); } },
     '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ rpc: async () => ({ data: {
       total: 3,
       people: [
@@ -58,6 +59,33 @@ test('search attaches deterministic reasons and drops rows outside the criteria'
   assert.equal(result.total, 3);
   assert.deepEqual(result.people.map((person: any) => person.email), ['ana@example.com']);
   assert.deepEqual(result.people[0].reasons, ['Sin envíos registrados']);
+});
+
+test('AI ranking returns only known enriched candidates with deterministic eligibility', async () => {
+  const enrichedRows = [
+    { id: 'l1', email: 'ana@example.com', full_name: 'Ana Pérez', title: 'Jefa de Reclutamiento', company_name: 'Falabella', organization_industry: 'Retail', organization_size: '1000+', country: 'Chile', city: 'Santiago', headline: '', seniority: 'Manager', departments: ['RRHH'], email_status: 'verified', updated_at: '2026-09-01T00:00:00Z' },
+    { email: 'BET0@example.com', full_name: 'Beto', title: 'Vendedor', company_name: 'Tienda', organization_industry: 'Retail', updated_at: '2026-09-02T00:00:00Z' },
+    { email: 'sin-correo', full_name: 'Sin Correo' },
+  ];
+  const { rankAudience } = loadModule('src/lib/server/bulk-campaign-audience.ts', {
+    zod: await import('zod'),
+    '@/lib/server/auth-utils': {},
+    '@/ai/openai-json': { generateStructured: async () => ({ ranking: [
+      { email: 'fantasma@example.com', score: 99, reason: 'Inventado por el modelo' },
+      { email: 'ANA@EXAMPLE.COM', score: 88, reason: 'Cargo con poder de compra en retail' },
+      { email: 'bet0@example.com', score: 40, reason: 'Menor ajuste' },
+    ], explanation: 'ok' }) },
+    '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ from: () => chain({ data: [], error: null }) }) },
+    '@/lib/bulk-campaigns': await import('../bulk-campaigns'),
+  });
+  const auth: any = { organizationId: ORG, user: { id: OWNER }, supabase: { from: () => chain({ data: enrichedRows, error: null }) } };
+  const result = await rankAudience(auth, { description: 'Reclutadores con poder de compra en retail', relationship: 'never_contacted', maxResults: 10 });
+  assert.deepEqual(result.people.map((person: any) => person.email), ['ana@example.com', 'bet0@example.com']);
+  assert.equal(result.people[0].score, 88);
+  assert.ok(result.people[0].reasons[0].includes('88/100'));
+  assert.equal(result.candidateCount, 2);
+  assert.equal(result.rankedCount, 2);
+  assert.equal(result.ineligibleCount, 0);
 });
 
 test('recipient history is scoped to the campaign member and merges sources', async () => {
@@ -157,7 +185,7 @@ test('reapproval accepts prior initial send but still blocks new first contact a
       from: () => chain({ data: [], error: null }),
       rpc: async () => { writes++; return { data: stored, error: null }; },
     }) },
-    '@/lib/server/bulk-campaign-audience': { loadAudience: async () => [{ email: 'ana@example.com', contacted: true, replied, blockedReason: null }] },
+    '@/lib/server/bulk-campaign-audience': { loadAudience: async () => [{ email: 'ana@example.com', contacted: true, replied, blockedReason: null, enriched: true }] },
   });
   const auth = { organizationId: ORG, user: { id: OWNER }, supabase: { from: (table: string) => {
     const query = chain({ data: sent ? [{ draft_id: initial.draftId, status: 'sent' }] : [], error: null });

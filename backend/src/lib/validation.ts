@@ -9,7 +9,7 @@ export type ValidationResult<T> =
 
 export type LeadSearchInput = {
   provider: LeadProvider;
-  searchMode: 'batch' | 'company_name';
+  searchMode: 'batch' | 'company_name' | 'organization_search' | 'organization_people';
   userId?: string;
   revealEmail: boolean;
   revealPhone: boolean;
@@ -27,6 +27,35 @@ export type LeadSearchInput = {
   employeeRanges: string[];
   includeSimilarTitles: boolean;
   maxResults: number;
+  page?: number;
+  perPage?: number;
+  organizationId?: string;
+  organizationIds?: string[];
+  excludePersonIds?: string[];
+};
+
+export type OrganizationSearchInput = {
+  provider: LeadProvider;
+  userId?: string;
+  companyKeywords: string[];
+  companyLocations: string[];
+  employeeRanges: string[];
+  organizationDomains: string[];
+  page: number;
+  perPage: number;
+};
+
+export type OrganizationPeopleSearchInput = {
+  provider: LeadProvider;
+  userId?: string;
+  organizationId: string;
+  titles: string[];
+  seniorities: string[];
+  personLocations: string[];
+  includeSimilarTitles: boolean;
+  page: number;
+  perPage: number;
+  excludePersonIds: string[];
 };
 
 export type EnrichmentInput = {
@@ -134,11 +163,27 @@ function validWebhookUrl(value: string) {
   }
 }
 
+function boundedPage(value: unknown, fallback: number) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(500, Math.max(1, Math.floor(number)));
+}
+
+function boundedPerPage(value: unknown, fallback: number) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(100, Math.max(1, Math.floor(number)));
+}
+
+function boundedIdList(maxLength = 160) {
+  return z.array(boundedText(maxLength)).max(100, 'must contain at most 100 values').optional().default([]);
+}
+
 export function validateLeadSearchInput(value: unknown, config: GatewayConfig): ValidationResult<LeadSearchInput> {
   const schema = z.object({
     provider: z.literal('apollo').optional(),
     user_id: optionalIdentifier(),
-    search_mode: z.enum(['batch', 'company_name']),
+    search_mode: z.enum(['batch', 'company_name', 'organization_search', 'organization_people']),
     reveal_email: z.boolean().optional(),
     reveal_phone: z.boolean().optional(),
     company_name: boundedText(200).optional(),
@@ -149,6 +194,11 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
     selected_organization_website: z.string().trim().max(500).optional(),
     selected_organization_industry: boundedText(160).optional(),
     selected_organization_size: z.number().int().min(0).max(10_000_000).nullable().optional(),
+    organization_id: boundedText(200).optional(),
+    organization_ids: boundedIdList().optional().default([]),
+    exclude_person_ids: boundedIdList().optional().default([]),
+    page: z.number().int().min(1).max(500).optional(),
+    per_page: z.number().int().min(1).max(100).optional(),
     titles: boundedTextList(),
     seniorities: boundedTextList(),
     industry_keywords: boundedTextList(),
@@ -167,6 +217,22 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
       && input.organization_domains.length === 0
       && !input.selected_organization_id) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['company_name'], message: 'a company name, domain, or organization id is required' });
+    }
+
+    if (input.search_mode === 'organization_search'
+      && input.company_keywords.length === 0
+      && input.company_location.length === 0
+      && input.employee_range.length === 0
+      && input.employee_ranges.length === 0
+      && input.organization_domains.length === 0) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['search_mode'], message: 'at least one company filter is required' });
+    }
+
+    if (input.search_mode === 'organization_people'
+      && !input.organization_id
+      && (input.organization_ids || []).length === 0
+      && !input.selected_organization_id) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['organization_id'], message: 'an organization id is required' });
     }
 
     if (input.search_mode === 'batch'
@@ -214,7 +280,60 @@ export function validateLeadSearchInput(value: unknown, config: GatewayConfig): 
       personLocations: input.person_locations,
       employeeRanges: [...new Set([...input.employee_range, ...input.employee_ranges])],
       includeSimilarTitles: input.include_similar_titles,
-      maxResults: Math.min(input.max_results ?? 50, config.maxSearchResults),
+      maxResults: Math.min(input.max_results ?? input.per_page ?? 50, config.maxSearchResults),
+      page: boundedPage(input.page, 1),
+      perPage: boundedPerPage(input.per_page ?? input.max_results, input.search_mode === 'organization_people' ? 50 : 25),
+      organizationId: input.organization_id || input.selected_organization_id,
+      organizationIds: [...new Set([
+        ...(input.organization_ids || []),
+        ...(input.organization_id ? [input.organization_id] : []),
+        ...(input.selected_organization_id ? [input.selected_organization_id] : []),
+      ])].slice(0, 100),
+      excludePersonIds: [...new Set(input.exclude_person_ids || [])].slice(0, 500),
+    },
+  };
+}
+
+export function validateOrganizationSearchInput(value: unknown, config: GatewayConfig): ValidationResult<OrganizationSearchInput> {
+  const parsed = validateLeadSearchInput({ ...(value as Record<string, unknown> || {}), search_mode: 'organization_search' }, config);
+  if (!parsed.ok) return parsed as unknown as ValidationResult<OrganizationSearchInput>;
+  const input = parsed.value;
+  return {
+    ok: true,
+    value: {
+      provider: input.provider,
+      userId: input.userId,
+      companyKeywords: input.companyKeywords,
+      companyLocations: input.companyLocations,
+      employeeRanges: input.employeeRanges,
+      organizationDomains: input.organizationDomains,
+      page: input.page ?? 1,
+      perPage: input.perPage ?? 25,
+    },
+  };
+}
+
+export function validateOrganizationPeopleSearchInput(value: unknown, config: GatewayConfig): ValidationResult<OrganizationPeopleSearchInput> {
+  const parsed = validateLeadSearchInput({ ...(value as Record<string, unknown> || {}), search_mode: 'organization_people' }, config);
+  if (!parsed.ok) return parsed as unknown as ValidationResult<OrganizationPeopleSearchInput>;
+  const input = parsed.value;
+  const organizationId = input.organizationId || input.organizationIds?.[0] || '';
+  if (!organizationId) {
+    return { ok: false, issues: [{ path: 'organization_id', message: 'an organization id is required' }] };
+  }
+  return {
+    ok: true,
+    value: {
+      provider: input.provider,
+      userId: input.userId,
+      organizationId,
+      titles: input.titles,
+      seniorities: input.seniorities,
+      personLocations: input.personLocations,
+      includeSimilarTitles: input.includeSimilarTitles,
+      page: input.page ?? 1,
+      perPage: input.perPage ?? 50,
+      excludePersonIds: input.excludePersonIds ?? [],
     },
   };
 }

@@ -29,6 +29,8 @@ import { profileService, type Profile } from '@/lib/services/profile-service';
 import { defaultStyle } from '@/lib/style-profiles-storage';
 import type { CrossReport, EnrichedLead, StyleProfile } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { emailLibraryError, emailStyleDraftKey, type EmailLibraryScope } from '@/lib/email-studio/library-contract';
+import type { GRUPOEXPRO_REFERENCE_TEMPLATES } from '@/lib/email-studio/grupoexpro-templates';
 
 type SavedEmailStyle = {
   id: string;
@@ -37,6 +39,9 @@ type SavedEmailStyle = {
   revision: number;
   isDefault: boolean;
   updatedAt: string;
+  libraryScope: EmailLibraryScope;
+  sourceCollection?: string | null;
+  publishedAt?: string | null;
 };
 
 type ResearchLeadOption = {
@@ -73,6 +78,7 @@ function normalizeSavedStyle(style: SavedEmailStyle): SavedEmailStyle {
 
   return {
     ...style,
+    libraryScope: style.libraryScope || 'personal',
     id: String(style.id),
     name,
     revision: Number(style.revision || 0),
@@ -126,9 +132,19 @@ export default function EmailStyleDesigner() {
   const styleNameRef = useRef<HTMLInputElement>(null);
   const [styles, setStyles] = useState<SavedEmailStyle[]>([]);
   const [selectedStyleId, setSelectedStyleId] = useState('');
+  const [selectedRevision, setSelectedRevision] = useState<number | undefined>();
   const [styleName, setStyleName] = useState('Mi estilo de correo');
   const [profile, setProfile] = useState<StyleProfile>(() => createStyleDraft());
   const [isDefault, setIsDefault] = useState(true);
+  const [libraryScope, setLibraryScope] = useState<EmailLibraryScope>('personal');
+  const [sourceCollection, setSourceCollection] = useState<string | null>(null);
+  const [canPublish, setCanPublish] = useState(false);
+  const [references, setReferences] = useState<typeof GRUPOEXPRO_REFERENCE_TEMPLATES>([]);
+  const [isLoadingReferences, setIsLoadingReferences] = useState(false);
+  const baseline = useRef(emailStyleDraftKey('Mi estilo de correo', profile, true, 'personal'));
+  const dirty = emailStyleDraftKey(styleName, profile, isDefault, libraryScope) !== baseline.current;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
   const [isLoadingStyles, setIsLoadingStyles] = useState(true);
   const [stylesError, setStylesError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -149,14 +165,15 @@ export default function EmailStyleDesigner() {
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
   const [profileError, setProfileError] = useState(false);
 
-  const loadStyles = useCallback(async () => {
+  const loadStyles = useCallback(async (replaceDraft = true) => {
+    if (replaceDraft && dirtyRef.current && !window.confirm('Hay cambios sin guardar. ¿Quieres descartarlos y recargar?')) return;
     setIsLoadingStyles(true);
     setStylesError(null);
 
     try {
       const response = await fetch('/api/email-styles', { cache: 'no-store' });
       const payload = (await response.json().catch(() => null)) as
-        | { styles?: SavedEmailStyle[]; error?: string }
+        | { styles?: SavedEmailStyle[]; error?: string; canPublish?: boolean }
         | null;
 
       if (!response.ok || !Array.isArray(payload?.styles)) {
@@ -165,15 +182,26 @@ export default function EmailStyleDesigner() {
 
       const nextStyles = payload.styles.map(normalizeSavedStyle);
       setStyles(nextStyles);
+      setCanPublish(payload.canPublish === true);
 
-      if (nextStyles.length > 0) {
-        const next = nextStyles.find((style) => style.isDefault) || nextStyles[0];
+      if (replaceDraft && nextStyles.length > 0) {
+        const next = nextStyles.find((style) => style.isDefault && style.libraryScope === 'personal')
+          || nextStyles.find((style) => style.isDefault) || nextStyles[0];
         setSelectedStyleId(next.id);
+        setSelectedRevision(next.revision);
         setStyleName(next.name);
         setProfile(next.profile);
         setIsDefault(next.isDefault);
-      } else {
+        setLibraryScope(next.libraryScope);
+        setSourceCollection(next.sourceCollection || null);
+        baseline.current = emailStyleDraftKey(next.name, next.profile, next.isDefault, next.libraryScope);
+      } else if (replaceDraft) {
+        const draft = createStyleDraft();
+        setSelectedStyleId(''); setStyleName(draft.name); setProfile(draft);
+        setSelectedRevision(undefined);
+        setLibraryScope('personal'); setSourceCollection(null);
         setIsDefault(true);
+        baseline.current = emailStyleDraftKey(draft.name, draft, true, 'personal');
       }
     } catch (error) {
       console.error('[email-studio/styles/get]', error);
@@ -186,6 +214,27 @@ export default function EmailStyleDesigner() {
   useEffect(() => {
     void loadStyles();
   }, [loadStyles]);
+
+  useEffect(() => {
+    function beforeUnload(event: BeforeUnloadEvent) {
+      if (!dirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    }
+    function guardNavigation(event: MouseEvent) {
+      const anchor = (event.target as Element)?.closest?.('a[href]');
+      if (!anchor || !dirtyRef.current || event.defaultPrevented) return;
+      if (!window.confirm('Hay cambios sin guardar. ¿Quieres salir sin guardarlos?')) {
+        event.preventDefault(); event.stopPropagation();
+      }
+    }
+    window.addEventListener('beforeunload', beforeUnload);
+    document.addEventListener('click', guardNavigation, true);
+    return () => {
+      window.removeEventListener('beforeunload', beforeUnload);
+      document.removeEventListener('click', guardNavigation, true);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -275,15 +324,25 @@ export default function EmailStyleDesigner() {
   );
 
   const activePreset = STYLE_PRESETS.find((preset) => preset.profile.tone === profile.tone)?.id;
-  const isBusy = isAdjusting || isSaving;
+  const isBusy = isAdjusting || isSaving || isLoadingStyles || isLoadingReferences;
+  const readOnly = libraryScope === 'team' && !canPublish;
+
+  function discardChanges() {
+    return !dirty || window.confirm('Hay cambios sin guardar. ¿Quieres descartarlos?');
+  }
 
   function selectSavedStyle(id: string) {
+    if (!discardChanges()) return;
     const next = styles.find((style) => style.id === id);
     if (!next) return;
     setSelectedStyleId(next.id);
+    setSelectedRevision(next.revision);
     setStyleName(next.name);
     setProfile(next.profile);
     setIsDefault(next.isDefault);
+    setLibraryScope(next.libraryScope);
+    setSourceCollection(next.sourceCollection || null);
+    baseline.current = emailStyleDraftKey(next.name, next.profile, next.isDefault, next.libraryScope);
     setNameError(null);
     setSaveError(null);
     setSaveStatus(null);
@@ -292,11 +351,16 @@ export default function EmailStyleDesigner() {
   }
 
   function startNewStyle() {
+    if (!discardChanges()) return;
     const draft = createStyleDraft();
     setSelectedStyleId('');
+    setSelectedRevision(undefined);
     setStyleName(draft.name);
     setProfile(draft);
     setIsDefault(styles.length === 0);
+    setLibraryScope('personal');
+    setSourceCollection(null);
+    baseline.current = emailStyleDraftKey(draft.name, draft, styles.length === 0, 'personal');
     setNameError(null);
     setSaveError(null);
     setSaveStatus(null);
@@ -306,6 +370,7 @@ export default function EmailStyleDesigner() {
   }
 
   function applyPreset(presetId: PresetId) {
+    if (!discardChanges()) return;
     const preset = STYLE_PRESETS.find((item) => item.id === presetId);
     if (!preset) return;
     setProfile((current) => ({ ...current, ...preset.profile }));
@@ -313,10 +378,33 @@ export default function EmailStyleDesigner() {
     setAiFeedback(null);
   }
 
+  async function loadReferences() {
+    setIsLoadingReferences(true); setSaveError(null);
+    try {
+      const response = await fetch('/api/email-styles?referenceCollection=grupoexpro', { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || !Array.isArray(payload.references)) throw new Error(payload.error);
+      setReferences(payload.references);
+    } catch (error) { setSaveError(emailLibraryError(error)); }
+    finally { setIsLoadingReferences(false); }
+  }
+
+  function useReference(id: string) {
+    if (!discardChanges()) return;
+    const reference = references.find((item) => item.id === id);
+    if (!reference) return;
+    setSelectedStyleId(''); setStyleName(reference.name); setProfile(reference.profile);
+    setSelectedRevision(undefined);
+    setLibraryScope('personal'); setIsDefault(false); setSourceCollection('grupoexpro');
+    setSaveError(null); setSaveStatus(null);
+    // A reference remains an unsaved draft until an explicit save or publication.
+    baseline.current = '';
+  }
+
   async function adjustWithAi(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const instruction = aiInstruction.trim();
-    if (!instruction || isBusy) return;
+    if (!instruction || isBusy || readOnly) return;
 
     setIsAdjusting(true);
     setAiError(null);
@@ -366,7 +454,13 @@ export default function EmailStyleDesigner() {
     }
   }
 
-  async function saveStyle() {
+  async function saveStyle(action: 'save' | 'duplicate' | 'archive' = 'save', targetScope = libraryScope) {
+    if (isBusy || (readOnly && action !== 'duplicate')) return;
+    if (action !== 'save' && !discardChanges()) return;
+    if (action === 'archive' && !window.confirm('¿Archivar esta plantilla? Dejaria de estar disponible para nuevos correos.')) return;
+    const publishConfirmed = targetScope === 'team'
+      ? window.confirm('¿Confirmas que revisaste el contenido y autorizas su publicacion para tu equipo? Esto no acredita aprobacion de marketing externa.') : false;
+    if (targetScope === 'team' && !publishConfirmed) return;
     const name = styleName.trim();
     if (!name) {
       setNameError('Escribe un nombre para guardar este estilo.');
@@ -393,10 +487,15 @@ export default function EmailStyleDesigner() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: selected?.id,
-          name,
+          id: selectedStyleId || undefined,
+          expectedRevision: selectedStyleId ? selectedRevision : undefined,
+          action,
+          libraryScope: targetScope,
+          publishConfirmed,
+          sourceCollection,
+          name: action === 'duplicate' ? `${name.slice(0, 110)} (copia)` : name,
           profile: profileToSave,
-          isDefault,
+          isDefault: action === 'save' ? isDefault : false,
         }),
       });
       const payload = (await response.json().catch(() => null)) as
@@ -408,23 +507,39 @@ export default function EmailStyleDesigner() {
       }
 
       const saved = normalizeSavedStyle(payload.style);
+      if (action === 'archive') {
+        const draft = createStyleDraft();
+        setStyles((current) => current.filter((style) => style.id !== saved.id));
+        setSelectedStyleId(''); setSelectedRevision(undefined);
+        setStyleName(draft.name); setProfile(draft); setIsDefault(false);
+        setLibraryScope('personal'); setSourceCollection(null);
+        baseline.current = emailStyleDraftKey(draft.name, draft, false, 'personal');
+        dirtyRef.current = false;
+        await loadStyles();
+        setSaveStatus('Plantilla archivada.');
+        return;
+      }
       setStyles((current) => {
         const reconciled = saved.isDefault
-          ? current.map((style) => ({
+          ? current.map((style) => style.libraryScope === saved.libraryScope ? ({
               ...style,
               isDefault: false,
               profile: { ...style.profile, isDefault: false },
-            }))
+            }) : style)
           : current;
         const index = reconciled.findIndex((style) => style.id === saved.id);
         if (index < 0) return [saved, ...reconciled];
         return reconciled.map((style, itemIndex) => (itemIndex === index ? saved : style));
       });
       setSelectedStyleId(saved.id);
+      setSelectedRevision(saved.revision);
       setStyleName(saved.name);
       setProfile(saved.profile);
       setIsDefault(saved.isDefault);
-      setStylesError(null);
+      setLibraryScope(saved.libraryScope);
+      setSourceCollection(saved.sourceCollection || null);
+      baseline.current = emailStyleDraftKey(saved.name, saved.profile, saved.isDefault, saved.libraryScope);
+      await loadStyles(false);
       setSaveStatus('Estilo guardado.');
       toast({
         title: 'Estilo guardado',
@@ -432,7 +547,7 @@ export default function EmailStyleDesigner() {
       });
     } catch (error) {
       console.error('[email-studio/styles/post]', error);
-      setSaveError('No pudimos guardar el estilo. Revisa tu conexión e inténtalo otra vez.');
+      setSaveError(emailLibraryError(error));
     } finally {
       setIsSaving(false);
     }
@@ -477,7 +592,7 @@ export default function EmailStyleDesigner() {
                   <SelectContent>
                     {styles.map((style) => (
                       <SelectItem key={style.id} value={style.id}>
-                        {style.name}{style.isDefault ? ' · Predeterminado' : ''}
+                        {style.name} · {style.libraryScope === 'team' ? 'Equipo' : 'Personal'}{style.isDefault ? ' · Predeterminado' : ''}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -496,14 +611,46 @@ export default function EmailStyleDesigner() {
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                     {stylesError}
                   </span>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => void loadStyles()} className="h-7 shrink-0 px-2 text-current hover:bg-rose-100 dark:hover:bg-rose-900/40">
+                  <Button type="button" variant="ghost" size="sm" disabled={isBusy} onClick={() => void loadStyles()} className="h-7 shrink-0 px-2 text-current hover:bg-rose-100 dark:hover:bg-rose-900/40">
                     <RefreshCw aria-hidden="true" />
                     Reintentar
                   </Button>
                 </div>
               ) : null}
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="ghost" size="sm" disabled={isBusy} onClick={() => void loadStyles()}>Recargar biblioteca</Button>
+                {selectedStyleId ? <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void saveStyle('duplicate', 'personal')}>Duplicar en Personal</Button> : null}
+                {selectedStyleId && canPublish && libraryScope === 'personal' ? <Button type="button" variant="outline" size="sm" disabled={isBusy} onClick={() => void saveStyle('duplicate', 'team')}>Publicar copia para el equipo</Button> : null}
+                {selectedStyleId && !readOnly ? <Button type="button" variant="ghost" size="sm" disabled={isBusy} onClick={() => void saveStyle('archive')}>Archivar</Button> : null}
+              </div>
+              {readOnly ? <p className="text-sm text-muted-foreground">Plantilla del equipo. Puedes duplicarla en tu espacio personal para editarla.</p> : null}
+              <details className="rounded-xl border border-border p-3">
+                <summary className="cursor-pointer text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">Importar referencias de servicio</summary>
+                <p className="my-3 text-xs leading-5 text-muted-foreground">Referencias editables inspiradas en GrupoExpro, sin aprobacion de marketing acreditada. No se agregan al equipo hasta que un administrador las revise y publique.</p>
+                {references.length === 0 ? <Button type="button" variant="outline" disabled={isBusy} onClick={() => void loadReferences()}>Ver referencias GrupoExpro</Button> : (
+                  <div className="space-y-2">
+                    <Label htmlFor="email-reference">Servicio de referencia</Label>
+                    <Select onValueChange={useReference} disabled={isBusy} value="">
+                      <SelectTrigger id="email-reference"><SelectValue placeholder="Elegir una referencia editable" /></SelectTrigger>
+                      <SelectContent>{references.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </details>
             </div>
 
+            <fieldset disabled={isBusy || readOnly} className="min-w-0 space-y-6">
+            <legend className="sr-only">Editar plantilla</legend>
+            {!selectedStyleId ? <div className="space-y-2">
+              <Label htmlFor="email-library-scope">Guardar en</Label>
+              <Select value={libraryScope} onValueChange={(value) => setLibraryScope(value as EmailLibraryScope)} disabled={isBusy}>
+                <SelectTrigger id="email-library-scope"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="personal">Personal: solo yo</SelectItem>
+                  {canPublish ? <SelectItem value="team">Equipo: publicar tras revision</SelectItem> : null}
+                </SelectContent>
+              </Select>
+            </div> : null}
             <div className="space-y-2">
               <Label htmlFor="email-style-name">Nombre del estilo</Label>
               <Input
@@ -519,7 +666,7 @@ export default function EmailStyleDesigner() {
                 aria-invalid={Boolean(nameError)}
                 aria-describedby={nameError ? 'email-style-name-error' : undefined}
                 disabled={isBusy}
-                maxLength={80}
+                maxLength={120}
                 className="h-11 rounded-xl"
               />
               {nameError ? <p id="email-style-name-error" className="text-sm text-rose-600 dark:text-rose-300">{nameError}</p> : null}
@@ -575,6 +722,17 @@ export default function EmailStyleDesigner() {
             </fieldset>
 
             <div className="space-y-2">
+              <Label htmlFor="email-template-subject">Asunto de la plantilla</Label>
+              <Input id="email-template-subject" value={profile.subjectTemplate || ''} maxLength={500}
+                onChange={(event) => { setProfile((current) => ({ ...current, subjectTemplate: event.target.value })); setSaveStatus(null); }} />
+              <Label htmlFor="email-template-body">Cuerpo de la plantilla</Label>
+              <Textarea id="email-template-body" value={profile.bodyTemplate || ''} rows={10} maxLength={30000}
+                className="resize-y rounded-xl leading-6" aria-describedby="email-template-tokens"
+                onChange={(event) => { setProfile((current) => ({ ...current, bodyTemplate: event.target.value })); setSaveStatus(null); }} />
+              <p id="email-template-tokens" className="text-xs leading-5 text-muted-foreground">Variables: {'{{lead.firstName}}'}, {'{{company.name}}'}, {'{{sender.name}}'} y {'{{sender.company}}'}. Revisa el resultado antes de enviar.</p>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="email-style-instructions">Cómo debe sonar</Label>
               <Textarea
                 id="email-style-instructions"
@@ -625,7 +783,7 @@ export default function EmailStyleDesigner() {
             <div className="border-t border-border/70 pt-5">
               <Button type="button" onClick={() => void saveStyle()} disabled={!styleName.trim() || isBusy} className="h-11 w-full rounded-xl sm:w-auto">
                 {isSaving ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
-                {isSaving ? 'Guardando…' : 'Guardar estilo'}
+                {isSaving ? 'Guardando…' : libraryScope === 'team' ? 'Revisar y publicar' : 'Guardar estilo'}
               </Button>
               <div className="mt-2 min-h-5" aria-live="polite">
                 {saveError ? <p className="text-sm text-rose-600 dark:text-rose-300">{saveError}</p> : null}
@@ -637,6 +795,8 @@ export default function EmailStyleDesigner() {
                 ) : null}
               </div>
             </div>
+            </fieldset>
+            {dirty ? <p role="status" className="text-xs text-muted-foreground">Hay cambios sin guardar.</p> : null}
           </div>
         </section>
 
@@ -644,7 +804,7 @@ export default function EmailStyleDesigner() {
           <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <h2 id="email-preview-title" className="text-xl font-semibold tracking-tight text-foreground">Vista previa</h2>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">Se actualiza mientras defines el estilo.</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">Vista ilustrativa, no es el borrador final ni una validacion de afirmaciones. Se actualiza mientras editas.</p>
               <p className="mt-2 max-w-2xl break-words text-xs leading-5 text-muted-foreground">
                 <span className="font-medium text-foreground">Guía activa:</span>{' '}
                 {profile.instructions?.trim() || 'Sin instrucciones adicionales.'}

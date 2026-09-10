@@ -1,5 +1,5 @@
 import { generateStructured, generateStructuredWithTelemetry } from '@/ai/openai-json';
-import { getOpenAiModelsForTier } from '@/ai/model-router';
+import { reportGenerationOptions } from '@/ai/report-models';
 import {
   AnalysisV2Schema,
   type AnalysisV2,
@@ -10,10 +10,11 @@ import {
   type QualificationV2,
   type SignalV2,
 } from '@/lib/report-v2-contracts';
-import { stripInternalIdsForReportPrompt } from './write-report-v2-section';
+import { serializeReportV2Context } from './write-report-v2-section';
 import { buildReportV2VolumeModel, type VolumeAssumptionsV2 } from './build-report-v2-volume';
+import { briefReportV2Specialists } from './report-v2-specialists';
 
-export const REASON_REPORT_V2_PROMPT_VERSION = 'report-v2/p5-analysis/1';
+export const REASON_REPORT_V2_PROMPT_VERSION = 'report-v2/p5-analysis/6';
 
 export type SellerProductContextV2 = {
   key: string;
@@ -39,11 +40,21 @@ export function buildReasonReportV2Prompt(input: {
   qualification: QualificationV2;
   claims: ClaimV2[];
   sellerProfile: SellerProfileContextV2;
+  specialistBriefs?: unknown;
+  companyContext?: string | null;
+  signals?: SignalV2[];
+  gaps?: GapV2[];
+  committee?: CommitteeMemberV2[];
 }) {
-  return `Cuenta: ${JSON.stringify(stripInternalIdsForReportPrompt(input.entity))}
-Calificacion ICP: ${JSON.stringify(input.qualification)}
-Claims disponibles: ${JSON.stringify(stripInternalIdsForReportPrompt(input.claims))}
-Perfil del vendedor y sus productos: ${JSON.stringify(input.sellerProfile)}
+  return `Cuenta: ${serializeReportV2Context(input.entity)}
+Calificacion ICP: ${serializeReportV2Context(input.qualification)}
+Claims disponibles: ${serializeReportV2Context(input.claims)}
+Perfil del vendedor y sus productos: ${serializeReportV2Context(input.sellerProfile)}
+Contexto corporativo importado, utilizable como perfil: ${input.companyContext || 'No disponible'}
+Especialistas (analisis, no evidencia nueva): ${serializeReportV2Context(input.specialistBriefs || [])}
+Senales con sus IDs: ${serializeReportV2Context(input.signals || [])}
+Preguntas pendientes: ${serializeReportV2Context(input.gaps || [])}
+Contactos conocidos: ${serializeReportV2Context(input.committee || [])}
 
 Produce el objeto Analysis completo. Estas son las reglas del razonamiento:
 
@@ -64,12 +75,26 @@ COMITE DE COMPRA: investiga la cuenta, no solo la persona importada. Incluye per
 
 ENCAJE: evalua cada producto por separado. Si el encaje es hipotetico, incluye su pregunta de validacion.
 
-OBJECIONES: derivalas de evidencia concreta. Evita objeciones genericas.
+OBJECIONES: plantea objeciones posibles especificas del proceso y oferta, nunca como algo que el contacto ya dijo. Usa evidencia o razonamiento del rol.
 
 HUECOS: cada hueco debe indicar como obtener la informacion.
 
+UTILIDAD COMERCIAL:
+- Conserva en verdict.headline, verdict.blockers, entryAngle.timing y fitByProduct.rationale la prioridad y el encaje separados para cuenta y contacto, tamano de oportunidad/ticket segun datos autorizados (o sin datos), timing y factores de respuesta/conversion cualitativos no calibrados, nunca porcentajes inventados. En ausencia de noticias, explicita que no hay detonante reciente ni iniciativa de compra confirmados, sin impedir una conversacion exploratoria.
+- Analiza participantes, pasos manuales posibles, latencia, coste, errores y datos faltantes como hipotesis, no procesos instalados. Mapea por roles usuarios, dueno del dolor, evaluadores, presupuesto, firmante y bloqueadores dentro del razonamiento; no inventes nombres. Pregunta primero si existe friccion manual, no la presupongas. Mantiene todo el razonamiento en espanol si el contexto es espanol.
+- El perfil importado permite identificar empresa, cargo, area y pais sin exigir otra fuente. Si no hay una contradiccion concreta, no llenes el reporte de dudas de identidad.
+- Usa conocimiento general de sectores, tareas y roles para proponer oportunidades. Identificalas como hipotesis razonables, no como problemas internos confirmados.
+- Recomienda hasta tres casos de uso concretos. En fitByProduct.rationale conserva PARA CADA caso: proceso, piloto acotado, metrica observable propia (unidad y que comparar con la linea base) y pregunta para validar. No basta una metrica general al final; no inventes valores actuales, porcentajes de ahorro ni resultados prometidos.
+- Personaliza por cargo y oferta real: Finanzas/CFO debe explorar facturacion, cobranza, cierre o excepciones entre respaldos y datos financieros segun contexto disponible. No lo sustituyas por ingreso de personal o consultas de RRHH: esas areas pueden aportar datos al flujo financiero. Reclutamiento debe centrarse en candidatos, entrevistas y expedientes; TI en integraciones, permisos y soporte. Son hipotesis por validar, no problemas reales ni procesos instalados confirmados.
+- Una pregunta de discovery puede validar un proceso o una hipotesis del rol sin claim: usa validatesClaimId=null. Una objecion hipotetica puede tener derivedFrom=[]. Nunca cites una cifra de empleados para justificar autoridad de compra.
+- El conocimiento previo sobre una empresa es contexto provisional, no prueba de su situacion actual. No inventes cifras ni noticias por memoria.
+- No necesitas noticias recientes, ROI ni un comite nominal para preparar una buena conversacion. Si no hay supuestos configurados, volumeModel=null.
+- ICP ausente significa encaje aun no evaluado por reglas, no aprobacion comercial definitiva. Considera restricciones de los productos y justifica la recomendacion.
+- Nunca traduzcas qualification=qualified a 'cuenta cualificada' si reasons incluye icp_rules_missing. Escribe 'encaje potencial para explorar'. El pais importado utilizable evita gastar la primera pregunta confirmando un dato ya disponible; solo pide aclararlo si hay informacion contradictoria concreta.
+
 PROHIBIDO:
 - Afirmar dolor, necesidad, presupuesto o intencion de compra sin evidencia.
+- Inventar experiencia, traccion, clientes, conversaciones en curso o resultados del vendedor. Sus capacidades declaradas no prueban actividad comercial pasada o actual. En entryAngle.hooks usa una capacidad explicita y una pregunta exploratoria, no 'ya ayudamos a equipos', 'estamos conversando con empresas' ni casos de exito ausentes del perfil del vendedor.
 - Presentar datos de proveedor como hechos investigados.
 - Usar un claim de jurisdiccion distinta a ${input.entity.contactCountry} para construir encaje sin marcarlo como contexto de casa matriz.
 - Producir prosa final; aqui solo produces estructura.`;
@@ -138,10 +163,10 @@ function normalizeAnalysis(input: {
     volumeModel: volume?.model || null,
     signalIds,
     fitByProduct: fits,
-    discoveryQuestions: input.analysis.discoveryQuestions.filter((question) => claimsById.has(question.validatesClaimId)),
+    discoveryQuestions: input.analysis.discoveryQuestions.filter((question) => question.validatesClaimId === null || claimsById.has(question.validatesClaimId)),
     objections: input.analysis.objections.flatMap((objection) => {
       const derivedFrom = objection.derivedFrom.filter((id) => claimsById.has(id));
-      return derivedFrom.length > 0 ? [{ ...objection, derivedFrom }] : [];
+      return [{ ...objection, derivedFrom }];
     }),
     riskClaimIds: input.analysis.riskClaimIds.filter((id) => claimsById.has(id)),
     gapIds: input.analysis.gapIds.filter((id) => gapIds.has(id)),
@@ -161,25 +186,30 @@ export async function reasonAboutReportV2Account(input: {
   gaps: GapV2[];
   committee: CommitteeMemberV2[];
   sellerProfile: SellerProfileContextV2;
+  companyContext?: string | null;
+  signal?: AbortSignal;
 }, dependencies: {
   generate?: typeof generateStructured;
   generateWithTelemetry?: typeof generateStructuredWithTelemetry;
+  specialists?: typeof briefReportV2Specialists;
 } = {}) {
+  const specialists = dependencies.generate ? [] : await (dependencies.specialists || briefReportV2Specialists)(input);
   const options = {
-    provider: 'openai',
-    openAiModels: getOpenAiModelsForTier('critical'),
+    ...reportGenerationOptions('reasoning'),
+    signal: input.signal,
     systemPrompt: REASON_REPORT_V2_SYSTEM_PROMPT,
-    prompt: buildReasonReportV2Prompt(input),
+    prompt: buildReasonReportV2Prompt({ ...input, specialistBriefs: specialists.map(({ specialty, brief }) => ({ specialty, brief })) }),
     schema: AnalysisV2Schema,
     temperature: 0.1,
   } as const;
   if (dependencies.generate) {
     const generated = await dependencies.generate(options);
-    return { ...normalizeAnalysis({ ...input, analysis: AnalysisV2Schema.parse(generated) }), telemetry: null };
+    return { ...normalizeAnalysis({ ...input, analysis: AnalysisV2Schema.parse(generated) }), telemetry: null, specialists };
   }
   const generated = await (dependencies.generateWithTelemetry || generateStructuredWithTelemetry)(options);
   return {
     ...normalizeAnalysis({ ...input, analysis: AnalysisV2Schema.parse(generated.data) }),
     telemetry: generated.telemetry,
+    specialists,
   };
 }

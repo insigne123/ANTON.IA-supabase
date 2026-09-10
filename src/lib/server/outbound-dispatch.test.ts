@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { sendGmail, sendOutlook } from '../server-email-sender';
 
 import {
   createMessagingSendMetadataV1,
@@ -317,6 +318,62 @@ test('a duplicate key makes one provider call and replays the sent dispatch', as
   assert.equal(duplicate.replayed, true);
   assert.ok(duplicate.dispatch);
   assert.equal(duplicate.dispatch.providerMessageId, 'provider-message-1');
+});
+
+test('supported senders preserve durable replay after timeout, acceptance, rejection and pre-send failure', async (t) => {
+  for (const providerName of ['gmail', 'outlook']) {
+  for (const scenario of ['timeout', 'server-error', 'rate-limit', 'accepted-no-id', 'accepted-sent', 'rejected', 'pre-send-failure']) {
+    const repository = new MemoryDispatchRepository();
+    const draft = readyDraft('Re: Hello');
+    const metadata = createMessagingSendMetadataV1(draft, { idempotencyKey: `send:${providerName}:${scenario}`, provider: providerName, requestedAt: now() });
+    let sends = 0;
+    let lookups = 0;
+    const mock = t.mock.method(globalThis, 'fetch', async (url: any, init: any) => {
+      if (init?.method === 'POST') {
+        sends++;
+        assert.equal(url, providerName === 'gmail' ? 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send' : 'https://graph.microsoft.com/v1.0/me/sendMail');
+        if (scenario === 'timeout') throw new Error('socket timeout after provider accepted the message');
+        if (scenario === 'server-error') return new Response('error', { status: 500 });
+        if (scenario === 'rate-limit') return new Response('error', { status: 429 });
+        if (scenario === 'rejected') return new Response('rejected', { status: 400 });
+        if (providerName === 'gmail') return Response.json(scenario === 'accepted-no-id' ? {} : { id: 'sent', threadId: 'thread' });
+        return new Response(null, { status: 202 });
+      }
+      lookups++;
+      if (scenario === 'pre-send-failure') throw new Error('parent lookup timeout');
+      if (providerName === 'gmail') return Response.json({ id: 'parent', threadId: 'thread', labelIds: ['SENT'], payload: { headers: [
+        { name: 'To', value: 'ada@example.com' }, { name: 'Subject', value: 'Hello' }, { name: 'Message-ID', value: '<parent@example.com>' },
+      ] } });
+      assert.match(String(url), /mailFolders\('SentItems'\)/);
+      return Response.json({ value: scenario === 'accepted-sent' ? [{ id: 'sent', subject: 'Re: Hello', conversationId: 'conversation',
+        toRecipients: [{ emailAddress: { address: 'ada@example.com' } }],
+        internetMessageHeaders: [{ name: 'X-ANTON-Dispatch', value: metadata.idempotencyKey }] }] : [] });
+    });
+    const provider: OutboundMessageProvider = { async send() {
+      const send = providerName === 'gmail' ? sendGmail : sendOutlook;
+      const response = await send('fake', 'ada@example.com', draft.content.subject!, '<p>Approved body</p>', {
+        unsubscribeUrl: 'https://example.test/unsubscribe?token=fake', idempotencyKey: metadata.idempotencyKey,
+        ...(providerName === 'gmail' || scenario === 'pre-send-failure' ? {
+          replyTarget: { provider: 'gmail' as const, parentDispatchId: 'previous', messageId: 'parent', threadId: 'thread' },
+        } : {}),
+      });
+      return { outcome: 'accepted', providerMessageId: response.id || '', response };
+    } };
+    const first = await dispatchOutboundMessage({ draft, metadata, provider }, testDependencies(repository));
+    const expectedStatus = scenario === 'accepted-sent' ? 'sent' : ['rejected', 'pre-send-failure'].includes(scenario) ? 'failed' : 'unknown';
+    assert.equal(first.status, expectedStatus);
+    assert.equal(first.dispatch.providerMessageId, scenario === 'accepted-sent' ? 'sent' : null);
+    if (scenario === 'pre-send-failure') assert.equal(first.dispatch.providerResponse?.providerInvoked, false);
+    const lookupCount = lookups;
+    const duplicate = await dispatchOutboundMessage({ draft, metadata, provider }, testDependencies(repository));
+    assert.equal(duplicate.status, expectedStatus);
+    assert.equal(duplicate.replayed, true);
+    assert.equal(sends, scenario === 'pre-send-failure' ? 0 : 1);
+    assert.equal(lookups, lookupCount, 'replay must not resolve a new parent or query the provider');
+    assert.equal(repository.markUnknownCalls, expectedStatus === 'unknown' ? 1 : 0);
+    mock.mock.restore();
+  }
+  }
 });
 
 test('confirmed and replayed sent email dispatches both invoke history finalization', async () => {

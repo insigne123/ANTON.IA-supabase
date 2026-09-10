@@ -73,7 +73,7 @@ function validOutputFor(section: AnalystSection, includeSellerFit = false) {
   } : { paragraphs: [] };
 }
 
-test('defaults every specialized research analyst to Terra', async () => {
+test('defaults every specialized research analyst to Luna', async () => {
   const names = [
     'NATIVE_RESEARCH_REPORT_MODEL',
     'SUPLIA_OPENAI_REASONING_MODEL',
@@ -94,7 +94,7 @@ test('defaults every specialized research analyst to Terra', async () => {
         },
       }), ReportSynthesisFailed);
     assert.equal(selectedModels.length, 5);
-    assert.deepEqual(new Set(selectedModels), new Set(['gpt-5.6-terra']));
+    assert.deepEqual(new Set(selectedModels), new Set(['gpt-5.6-luna']));
   } finally {
     previous.forEach((value, name) => {
       if (value === undefined) delete process.env[name];

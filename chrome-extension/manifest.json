@@ -1,9 +1,11 @@
 {
     "manifest_version": 3,
-    "name": "Anton.IA Automation",
-    "version": "3.1",
-    "description": "Automatización segura de LinkedIn para Anton.IA",
-    "permissions": ["tabs"],
+    "name": "Anton.IA — LinkedIn Workspace",
+    "version": "4.0.2",
+    "minimum_chrome_version": "116",
+    "description": "Guarda e investiga leads y prepara mensajes personalizados desde LinkedIn.",
+    "permissions": ["tabs", "sidePanel", "storage"],
+    "side_panel": { "default_path": "panel.html" },
     "host_permissions": [
         "https://www.linkedin.com/*",
         "http://localhost:3000/*",
@@ -22,7 +24,7 @@
                 "https://www.linkedin.com/*"
             ],
             "js": [
-                "content.js"
+                "content.js", "prospecting-content.js"
             ]
         },
         {
@@ -35,13 +37,12 @@
                 "https://studio--leadflowai-3yjcy.us-central1.hosted.app/*"
             ],
             "js": [
-                "web_injector.js"
+                "web_injector.js", "prospecting-bridge.js"
             ]
         }
     ],
     "action": {
-        "default_popup": "popup.html",
-        "default_title": "Anton.IA Status",
+        "default_title": "Abrir Anton.IA",
         "default_icon": "icon.png"
     },
     "icons": {

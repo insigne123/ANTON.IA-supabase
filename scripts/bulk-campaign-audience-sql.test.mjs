@@ -38,7 +38,7 @@ test('audience search, budgets, profiles and pending revision are scoped and con
     for (const file of ['20260910100000_bulk_campaign_review.sql', '20260910110000_bulk_campaign_dispatch_guard.sql',
       '20260910120000_bulk_campaign_attempts.sql', '20260910130000_bulk_audience_profiles_budgets.sql',
       '20260910140000_bulk_audience_search.sql', '20260910150000_bulk_campaign_revise_pending.sql',
-      '20260910170000_bulk_revision_binding.sql']) {
+      '20260910170000_bulk_revision_binding.sql', '20260910180000_bulk_audience_enriched_only.sql']) {
       try { await db.exec(readFileSync(`supabase/migrations/${file}`, 'utf8')); }
       catch (error) { throw new Error(`${file}: ${error.message}`); }
     }
@@ -61,12 +61,13 @@ test('audience search, budgets, profiles and pending revision are scoped and con
       values($1,$2,$3,'gmail','inflight','${'c'.repeat(64)}','pending',$4,'email')`,
       [randomUUID(), org, user, { recipient: { email: 'diego@example.com' } }]);
 
-    const search = (overrides = {}) => db.query('select public.search_bulk_audience_v1($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) result', [
+    const search = (overrides = {}) => db.query('select public.search_bulk_audience_v1($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) result', [
       org, user, overrides.relationship || 'never_contacted',
       overrides.titles || [], overrides.industries || [], overrides.countries || [],
       overrides.sizes || [], overrides.seniorities || [],
       overrides.minDays || 0, overrides.excludeReplied !== false,
       overrides.search || '', overrides.limit || 100, overrides.offset || 0,
+      overrides.enrichedOnly === true,
     ]);
     const emails = (result) => result.rows[0].result.people.map(person => person.email);
 
@@ -89,6 +90,12 @@ test('audience search, budgets, profiles and pending revision are scoped and con
     result = await search({ limit: 1, offset: 1 });
     assert.deepEqual(emails(result), ['beto@retail.mx']); assert.equal(result.rows[0].result.total, 3);
 
+    result = await search({ enrichedOnly: true });
+    assert.deepEqual(emails(result), ['ana@example.com']);
+    assert.equal(result.rows[0].result.people[0].enriched, true);
+    result = await search({ enrichedOnly: true, relationship: 'previously_contacted', minDays: 90 });
+    assert.deepEqual(emails(result), []);
+
     result = await search({ relationship: 'previously_contacted', minDays: 90 });
     assert.deepEqual(emails(result), ['franco@example.com']);
     result = await search({ relationship: 'previously_contacted', minDays: 90, excludeReplied: true });
@@ -105,8 +112,8 @@ test('audience search, budgets, profiles and pending revision are scoped and con
 
     await assert.rejects(search({ relationship: 'everyone' }), /INVALID_AUDIENCE/);
     await assert.rejects(search({ limit: 101 }), /INVALID_AUDIENCE_PAGE/);
-    await assert.rejects(db.query('select public.search_bulk_audience_v1($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
-      [org, other, 'never_contacted', [], [], [], [], [], 0, true, '', 10, 0]), /not authorized/);
+    await assert.rejects(db.query('select public.search_bulk_audience_v1($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',
+      [org, other, 'never_contacted', [], [], [], [], [], 0, true, '', 10, 0, false]), /not authorized/);
 
     const consume = (limit, owner = user) => db.query('select public.consume_bulk_ai_assist_v1($1,$2,CURRENT_DATE,$3) remaining', [org, owner, limit]);
     assert.equal((await consume(2)).rows[0].remaining, 1);

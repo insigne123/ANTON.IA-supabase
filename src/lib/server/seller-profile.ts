@@ -10,9 +10,11 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 export const REPORT_V2_SELLER_CONFIGURATION_VERSION = 'report-v2/seller-configuration/1';
 
 export type ReportV2Mode = 'off' | 'shadow' | 'visible';
+export type ReportQuestionnaireMode = 'off' | 'shadow' | 'visible';
 
 export type LoadedReportV2SellerConfiguration = {
   mode: ReportV2Mode;
+  questionnaireMode: ReportQuestionnaireMode;
   sellerProfile: SellerProfileContextV2;
   icpRules: IcpRulesV2 | null;
   profileRevision: number | null;
@@ -39,6 +41,11 @@ function list(value: unknown) {
 }
 
 function reportV2Mode(value: unknown): ReportV2Mode {
+  const mode = text(value).toLowerCase();
+  return mode === 'shadow' || mode === 'visible' ? mode : 'off';
+}
+
+function reportQuestionnaireMode(value: unknown): ReportQuestionnaireMode {
   const mode = text(value).toLowerCase();
   return mode === 'shadow' || mode === 'visible' ? mode : 'off';
 }
@@ -147,6 +154,9 @@ export async function loadReportV2SellerConfiguration(input: {
 
   const researchConfig = object(settings?.research_config);
   const mode = reportV2Mode(researchConfig.reportV2Mode ?? researchConfig.report_v2_mode);
+  const questionnaireMode = reportQuestionnaireMode(
+    researchConfig.reportQuestionnaireMode ?? researchConfig.report_questionnaire_mode,
+  );
   const sharedProfile = object(settings?.user_company_profile);
   const sharedProducts = normalizeReportV2Products(sharedProfile.products);
   let sellerProfile: SellerProfileContextV2;
@@ -183,7 +193,7 @@ export async function loadReportV2SellerConfiguration(input: {
     sellerProfile,
     icpRules,
   });
-  return { mode, sellerProfile, icpRules, profileRevision, synthesisContextHash };
+  return { mode, questionnaireMode, sellerProfile, icpRules, profileRevision, synthesisContextHash };
 }
 
 export const sellerProfileInternals = {
@@ -191,5 +201,6 @@ export const sellerProfileInternals = {
   normalizeSellerProfile,
   normalizeReportV2Products,
   reportV2Mode,
+  reportQuestionnaireMode,
   reportV2ProfileFromPersonal,
 };

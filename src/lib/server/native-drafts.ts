@@ -1,6 +1,9 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   MessagingDraftV1Schema,
   canonicalSha256,
+  createChildMessagingDraftV1,
   deterministicMessagingUuid,
   hashMessagingDraftContent,
   type MessagingContentV1,
@@ -27,7 +30,8 @@ import {
   type DraftSellerProfileV2,
   type DraftWritingStyleV2,
 } from '@/lib/server/draft-context-v2';
-import { materializeOutsourcingEmailStylePreset } from '@/lib/server/email-style-profiles';
+import { resolveEmailStyleProfile } from '@/lib/server/email-style-profiles';
+import { getOutsourcingEmailStylePresetFromSelection, styleProfileFromOutsourcingEmailStylePreset } from '@/lib/outsourcing-email-style-presets';
 import {
   createFailedDraftPreflightV2,
   draftContentFingerprintV2,
@@ -39,7 +43,6 @@ import {
   type GeneratedOutreachV2,
 } from '@/lib/server/draft-preflight-v2';
 import {
-  appendMessagingDraftRevisionV1,
   ensureMessagingDraftV1,
   getCurrentMessagingDraftVersionV1,
   getMessagingDraftVersionV1,
@@ -164,7 +167,7 @@ export type NativeDraftGenerationResult =
 export type NativeDraftGenerationDependencies = {
   getSnapshot?: (input: { snapshotId: string; access: NativeDraftAccess }) => Promise<NativeSnapshotRow | null>;
   loadSellerProfile?: (userId: string) => Promise<DraftSellerProfileV2>;
-  loadWritingStyle?: (input: NativeDraftAccess & { styleProfileId?: string | null; styleName?: string | null }) => Promise<DraftWritingStyleV2>;
+  loadWritingStyle?: (input: NativeDraftAccess & { styleProfileId?: string | null; styleName?: string | null; readOnly?: boolean }) => Promise<DraftWritingStyleV2>;
   ensureReportDocument?: (input: {
     snapshot: ResearchSnapshotV1;
     access: NativeDraftAccess;
@@ -191,9 +194,8 @@ export type NativeDraftGenerationDependencies = {
   generate?: (input: GenerateOutreachFromDraftContextV2Input) => Promise<GeneratedOutreachFromDraftContextV2>;
   persistDraft?: (draft: MessagingDraftV1) => Promise<MessagingDraftV1>;
   persistDraftWithMetadata?: (draft: MessagingDraftV1, metadata: NativeDraftGenerationMetadataInput) => Promise<MessagingDraftV1>;
-  appendRevision?: (draft: MessagingDraftV1, changes: { content: MessagingContentV1 }) => Promise<MessagingDraftV1>;
+  appendRevisionWithMetadata?: (draft: MessagingDraftV1, changes: { content: MessagingContentV1 }, metadata: NativeDraftGenerationMetadataInput) => Promise<MessagingDraftV1>;
   persistMetadata?: (input: NativeDraftGenerationMetadataInput) => Promise<void>;
-  replaceMetadata?: (input: NativeDraftGenerationMetadataInput) => Promise<void>;
   loadMetadata?: (input: NativeDraftAccess & { versionId: string }) => Promise<NativeDraftGenerationMetadata | null>;
   now?: () => Date;
 };
@@ -329,48 +331,29 @@ function assertNativeDraftRecipient(snapshot: ResearchSnapshotV1, draft: Messagi
 async function loadServerWritingStyle(input: NativeDraftAccess & {
   styleProfileId?: string | null;
   styleName?: string | null;
+  readOnly?: boolean;
 }): Promise<DraftWritingStyleV2> {
-  const admin = getSupabaseAdminClient();
-  const preset = await materializeOutsourcingEmailStylePreset({
-    selection: input.styleProfileId,
+  const preset = input.readOnly ? getOutsourcingEmailStylePresetFromSelection(input.styleProfileId) : null;
+  // Check membership without materializing virtual presets during previews.
+  const row = await resolveEmailStyleProfile({
     organizationId: input.organizationId,
     userId: input.userId,
-    client: admin,
+    styleProfileId: preset ? null : input.styleProfileId,
+    styleName: preset ? null : input.styleName,
   });
   if (preset) {
     return normalizeDraftWritingStyleV2({
-      id: preset.id,
-      name: preset.name,
-      profile: preset.profile,
-      contentHash: preset.content_hash,
-      revision: preset.revision,
+      name: preset.label,
+      profile: styleProfileFromOutsourcingEmailStylePreset(preset),
     });
   }
-  const fields = 'id,name,profile,content_hash,revision,is_default';
-  const styleProfileId = text(input.styleProfileId);
-  const styleName = text(input.styleName);
-  const base = () => admin
-    .from('email_style_profiles')
-    .select(fields)
-    .eq('organization_id', input.organizationId)
-    .eq('user_id', input.userId);
-
-  const result = styleProfileId
-    ? await base().eq('id', styleProfileId).maybeSingle()
-    : styleName
-      ? await base().eq('name', styleName).maybeSingle()
-      : await base().eq('is_default', true).order('updated_at', { ascending: false }).limit(1).maybeSingle();
-  if (result.error) throw result.error;
-  if (!result.data) {
-    if (styleProfileId || styleName) throw new Error('NATIVE_DRAFT_STYLE_NOT_FOUND');
-    return createDefaultDraftWritingStyleV2();
-  }
+  if (!row) return createDefaultDraftWritingStyleV2();
   return normalizeDraftWritingStyleV2({
-    id: result.data.id,
-    name: result.data.name,
-    profile: result.data.profile,
-    contentHash: result.data.content_hash,
-    revision: result.data.revision,
+    id: row.id,
+    name: row.name,
+    profile: row.profile,
+    contentHash: row.content_hash,
+    revision: row.revision,
   });
 }
 
@@ -378,12 +361,14 @@ async function loadDraftWritingStyle(input: {
   access: NativeDraftAccess;
   styleProfileId?: string | null;
   styleName?: string | null;
+  readOnly?: boolean;
   dependencies?: NativeDraftGenerationDependencies;
 }) {
   const request = {
     ...input.access,
     styleProfileId: input.styleProfileId,
     styleName: input.styleName,
+    readOnly: input.readOnly,
   };
   return input.dependencies?.loadWritingStyle?.(request) || loadServerWritingStyle(request);
 }
@@ -559,30 +544,29 @@ async function persistNativeDraftWithMetadata(
   return persisted;
 }
 
-async function replaceNativeDraftMetadata(input: NativeDraftGenerationMetadataInput) {
-  const { data, error } = await getSupabaseAdminClient()
-    .from('messaging_draft_generation_metadata')
-    .update({
-      research_snapshot_id: input.researchSnapshotId,
-      generation_method: input.generationMethod,
-      provider: input.provider,
-      model: input.model,
-      prompt_version: input.promptVersion,
-      style_profile_id: input.styleProfileId,
-      claim_ids: unique(input.claimIds),
-      report_document_id: input.reportDocumentId || null,
-      report_schema_version: input.reportSchemaVersion || null,
-      report_revision: input.reportRevision || null,
-      report_content_hash: input.reportContentHash || null,
-    })
-    .eq('version_id', input.versionId)
-    .eq('draft_id', input.draftId)
-    .eq('organization_id', input.organizationId)
-    .eq('user_id', input.userId)
-    .select('version_id')
-    .maybeSingle();
+async function appendNativeDraftRevisionWithMetadata(
+  parent: MessagingDraftV1,
+  changes: { content: MessagingContentV1 },
+  metadata: NativeDraftGenerationMetadataInput,
+) {
+  const child = createChildMessagingDraftV1(parent, {
+    ...changes,
+    versionId: randomUUID(),
+    createdAt: new Date().toISOString(),
+  });
+  const { data, error } = await getSupabaseAdminClient().rpc('append_native_messaging_draft_revision_v1', {
+    p_draft_id: parent.draftId,
+    p_expected_parent_version_id: parent.versionId,
+    p_payload: child,
+    p_content_hash: hashMessagingDraftContent(child),
+    p_metadata: { ...metadata, versionId: child.versionId, claimIds: unique(metadata.claimIds) },
+  });
   if (error) throw error;
-  if (!data) throw new Error('NATIVE_DRAFT_METADATA_PERSIST_FAILED');
+  const persisted = MessagingDraftV1Schema.parse(data);
+  if (canonicalSha256(persisted) !== canonicalSha256(child)) {
+    throw new Error('NATIVE_DRAFT_PERSISTENCE_CONFLICT');
+  }
+  return persisted;
 }
 
 async function loadNativeDraftMetadata(input: NativeDraftAccess & {
@@ -1154,9 +1138,14 @@ export async function createNativeDraft(input: NativeDraftAccess & {
 
 export async function reviseNativeDraft(input: NativeDraftAccess & {
   draft: MessagingDraftV1;
+  expectedVersionId?: string;
   subject?: string;
   text?: string;
 }, dependencies?: NativeDraftGenerationDependencies) {
+  if (input.expectedVersionId !== undefined && input.expectedVersionId !== input.draft.versionId) {
+    throw new Error('NATIVE_DRAFT_VERSION_CONFLICT');
+  }
+  if (input.draft.lifecycle === 'archived') throw new Error('NATIVE_DRAFT_ARCHIVED');
   const loadMetadata = dependencies?.loadMetadata || loadNativeDraftMetadata;
   const metadata = assertNativeDraftMetadata({
     metadata: await loadMetadata({
@@ -1179,7 +1168,7 @@ export async function reviseNativeDraft(input: NativeDraftAccess & {
   const content: MessagingContentV1 = {
     subject: text(input.subject) || input.draft.content.subject,
     text: normalizeNativeDraftBody(input.text) || input.draft.content.text,
-    html: input.draft.content.html,
+    html: input.text !== undefined ? null : input.draft.content.html,
     ...(input.draft.content.deliveryOptions ? { deliveryOptions: input.draft.content.deliveryOptions } : {}),
   };
   if (hashMessagingDraftContent({ ...input.draft, content }) === hashMessagingDraftContent(input.draft)) {
@@ -1194,39 +1183,46 @@ export async function reviseNativeDraft(input: NativeDraftAccess & {
   }, dependencies);
   try {
     if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
-    const appendRevision = dependencies?.appendRevision || ((draft, changes) => appendMessagingDraftRevisionV1(draft, changes));
-    const persisted = await appendRevision(input.draft, { content });
-    const copiedMetadata = await loadMetadata({
+    // Content-only PATCH cannot authenticate model provenance; retain source lineage only.
+    return await (dependencies?.appendRevisionWithMetadata || appendNativeDraftRevisionWithMetadata)(input.draft, { content }, {
+      ...metadata,
       organizationId: input.organizationId,
       userId: input.userId,
-      versionId: persisted.versionId,
+      generationMethod: 'human',
+      provider: null,
+      model: null,
+      promptVersion: 'native-draft/manual-revision/v1',
     });
-    if (
-      !copiedMetadata
-      || copiedMetadata.versionId !== persisted.versionId
-      || copiedMetadata.draftId !== persisted.draftId
-      || copiedMetadata.researchSnapshotId !== input.draft.researchSnapshotId
-      || copiedMetadata.styleProfileId !== metadata.styleProfileId
-      || JSON.stringify(copiedMetadata.claimIds.slice().sort()) !== JSON.stringify(metadata.claimIds.slice().sort())
-      || (text(copiedMetadata.reportDocumentId) || null) !== (text(metadata.reportDocumentId) || null)
-      || (text(copiedMetadata.reportSchemaVersion) || null) !== (text(metadata.reportSchemaVersion) || null)
-      || (Number(copiedMetadata.reportRevision) || null) !== (Number(metadata.reportRevision) || null)
-      || (text(copiedMetadata.reportContentHash) || null) !== (text(metadata.reportContentHash) || null)
-    ) {
-      throw new Error('NATIVE_DRAFT_METADATA_PERSIST_FAILED');
-    }
-    return persisted;
   } finally {
     await claim.release();
   }
 }
 
-export async function rewriteNativeDraft(input: NativeDraftAccess & {
+type NativeDraftRewriteInput = NativeDraftAccess & {
   draft: MessagingDraftV1;
   instruction: string;
   styleProfileId?: string | null;
   sequenceContext?: OutreachSequenceContextV2;
-}, dependencies?: NativeDraftGenerationDependencies) {
+  previewOnly?: boolean;
+  expectedVersionId?: string;
+};
+
+type NativeDraftRewriteResult = {
+  preflight: MessagingPreflightV1;
+  generation: { provider: 'openai'; model: string; promptVersion: typeof NATIVE_DRAFT_PROMPT_VERSION };
+};
+type NativeDraftProposalResult = NativeDraftRewriteResult & {
+  proposal: { subject: string; body: string; expectedVersionId: string };
+};
+
+export function rewriteNativeDraft(input: NativeDraftRewriteInput & { previewOnly: true }, dependencies?: NativeDraftGenerationDependencies): Promise<NativeDraftProposalResult>;
+export function rewriteNativeDraft(input: NativeDraftRewriteInput & { previewOnly?: false }, dependencies?: NativeDraftGenerationDependencies): Promise<NativeDraftRewriteResult & { draft: MessagingDraftV1 }>;
+export function rewriteNativeDraft(input: NativeDraftRewriteInput, dependencies?: NativeDraftGenerationDependencies): Promise<NativeDraftProposalResult | (NativeDraftRewriteResult & { draft: MessagingDraftV1 })>;
+export async function rewriteNativeDraft(input: NativeDraftRewriteInput, dependencies?: NativeDraftGenerationDependencies) {
+  if (input.expectedVersionId !== undefined && input.expectedVersionId !== input.draft.versionId) {
+    throw new Error('NATIVE_DRAFT_VERSION_CONFLICT');
+  }
+  if (input.draft.lifecycle === 'archived') throw new Error('NATIVE_DRAFT_ARCHIVED');
   const instruction = text(input.instruction);
   if (!instruction || instruction.length > 1_000) throw new Error('NATIVE_DRAFT_REWRITE_INSTRUCTION_INVALID');
   if (!input.draft.researchSnapshotId) throw new Error('NATIVE_DRAFT_RESEARCH_SNAPSHOT_REQUIRED');
@@ -1237,6 +1233,11 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
     metadata: await loadMetadata({ ...input, versionId: input.draft.versionId }),
     draft: input.draft,
   });
+  // Preview is applied by content-only PATCH, which cannot carry a new style lineage.
+  if (input.previewOnly && text(input.styleProfileId)
+    && text(input.styleProfileId).toLowerCase() !== text(metadata.styleProfileId).toLowerCase()) {
+    throw new Error('NATIVE_DRAFT_PREVIEW_STYLE_CHANGE_UNSUPPORTED');
+  }
   const pinnedReportDocument = requiredPinnedReportMetadata(metadata);
   const snapshotRow = await (dependencies?.getSnapshot?.({
     snapshotId: input.draft.researchSnapshotId,
@@ -1249,7 +1250,7 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
   if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
   const requestedStyleProfileId = text(input.styleProfileId) || metadata.styleProfileId;
   const style = requestedStyleProfileId
-    ? await loadDraftWritingStyle({ access: input, styleProfileId: requestedStyleProfileId, dependencies })
+    ? await loadDraftWritingStyle({ access: input, styleProfileId: requestedStyleProfileId, readOnly: input.previewOnly, dependencies })
     : createDefaultDraftWritingStyleV2();
   const sequenceContext = input.sequenceContext
     ? OutreachSequenceContextV2Schema.parse(input.sequenceContext)
@@ -1266,7 +1267,7 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
   if (preliminary.result.status === 'blocked') {
     throw new NativeDraftPreflightError(contextBlockResult(preliminary.result, now).preflight);
   }
-  const claim = await acquireNativeDraftGenerationClaim({
+  const claim = input.previewOnly ? null : await acquireNativeDraftGenerationClaim({
     organizationId: input.organizationId,
     userId: input.userId,
     draftId: input.draft.draftId,
@@ -1335,18 +1336,23 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
     if (!validation.valid) throw new NativeDraftPreflightError(validation.preflight, validation.issues);
     if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
 
+    if (input.previewOnly) {
+      return {
+        proposal: { subject: text(generatedOutput.subject), body: generatedOutput.body, expectedVersionId: input.draft.versionId },
+        preflight: validation.preflight,
+        generation: { provider: generated.provider, model: generated.model, promptVersion: generated.promptVersion },
+      };
+    }
+
     const content: MessagingContentV1 = {
       subject: text(generatedOutput.subject),
       text: generatedOutput.body,
       html: null,
       ...(input.draft.content.deliveryOptions ? { deliveryOptions: input.draft.content.deliveryOptions } : {}),
     };
-    const appendRevision = dependencies?.appendRevision || ((draft, changes) => appendMessagingDraftRevisionV1(draft, changes));
-    const persisted = await appendRevision(input.draft, { content });
-    const replaceMetadata = dependencies?.replaceMetadata || replaceNativeDraftMetadata;
-    await replaceMetadata({
-      versionId: persisted.versionId,
-      draftId: persisted.draftId,
+    const persisted = await (dependencies?.appendRevisionWithMetadata || appendNativeDraftRevisionWithMetadata)(input.draft, { content }, {
+      versionId: input.draft.versionId,
+      draftId: input.draft.draftId,
       organizationId: input.organizationId,
       userId: input.userId,
       researchSnapshotId: input.draft.researchSnapshotId,
@@ -1371,7 +1377,7 @@ export async function rewriteNativeDraft(input: NativeDraftAccess & {
       },
     };
   } finally {
-    await claim.release();
+    await claim?.release();
   }
 }
 
@@ -1478,5 +1484,7 @@ export function isNativeDraftVersionConflict(error: unknown) {
     || message.includes('stale messaging draft parent')
     || message.includes('is not current')
     || message.includes('native_research_snapshot_conflict')
+    || message.includes('native_draft_version_conflict')
+    || message.includes('native_draft_version_not_current')
     || message.includes('native_draft_metadata_conflict');
 }
