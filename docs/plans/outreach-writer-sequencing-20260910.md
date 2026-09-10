@@ -32,11 +32,19 @@
   de campañas con `auto_send` para el worker, con `SKIP LOCKED` y clave de
   idempotencia determinista `campaign-v2:auto:{paso}:{versión}`.
 
-Aplicar desde el SQL editor del dashboard de Supabase (producción
-`yfdelflsheurzaicwayi`) y verificar: `select * from
-supabase_migrations.schema_migrations order by version desc limit 5;`
-debe incluir `20260911110000`. Sin esta migración, la edición de secuencia
-y el envío automático devuelven un error honesto; el resto sigue igual.
+Aplicada en producción `yfdelflsheurzaicwayi` el 2026-09-10 vía MCP
+(`20260910172522_campaign_v2_sequencing_auto_send`) con autorización
+explícita, previa revisión del historial remoto y de las precondiciones
+(base v2 presente, 54 organizaciones con solo 1 habilitada, 4 campañas v2
+existentes, migración pendiente y puramente aditiva). Verificado tras
+aplicar: ambas funciones existen como `security definer` con las firmas
+esperadas; `EXECUTE` solo para postgres y service_role; 54/54
+organizaciones habilitadas y default `true`; migración registrada en el
+historial. Sin escrituras a datos de usuario.
+
+App `43ed2cf` desplegada desde main limpio con
+`firebase deploy --only apphosting:studio --project leadflowai-3yjcy`.
+Verificado en vivo: `/login` 200 y rutas protegidas con 401 sin sesión.
 
 ## Validación realizada
 
