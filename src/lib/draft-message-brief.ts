@@ -26,11 +26,13 @@ export function buildDraftMessageBrief(context: DraftContextV2, sequence?: Outre
       return { ...item, statement: evidence.statement, subjectScope: evidence.subjectScope };
     }),
     seller: {
+      name: context.seller.name,
+      jobTitle: context.seller.jobTitle,
       companyName: context.seller.companyName,
       capabilities: context.seller.services,
       valueProposition: context.seller.valueProposition,
       proofPoints: context.seller.proofPoints,
-      authority: 'Solo perfil autorizado recibido del servidor; las plantillas no aprueban capacidades ni cifras.',
+      authority: 'Solo perfil autorizado recibido del servidor; las plantillas no aprueban capacidades ni cifras. El remitente trabaja en esta empresa y nunca en otra organización mencionada por el reporte, el workspace o un ejemplo.',
     },
     uncertainties: [
       ...context.warnings,

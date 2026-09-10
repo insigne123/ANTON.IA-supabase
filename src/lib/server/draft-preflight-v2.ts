@@ -311,10 +311,20 @@ export function repairCataloguedDraftPersonalizationV2(
   return GeneratedOutreachV2Schema.parse({ ...output, body });
 }
 
-function commercialOfferParagraph(body: string, approvedCta: string) {
+function contentBlocks(body: string, approvedCta: string) {
   const paragraphs = bodyParagraphs(approvedCta ? body.split(approvedCta).join(' ') : body);
-  // The offer can span prose and bullets; the first two blocks remain greeting and anchor.
-  return paragraphs.slice(2).join('\n\n') || paragraphs[paragraphs.length - 1] || '';
+  // Layout: greeting first, then opening and value blocks (prose or bullets).
+  return paragraphs.slice(1);
+}
+
+function sellerMentionedBlocks(context: DraftContextV2, blocks: string[]) {
+  const sellerName = normalizeForMatch(context.seller.companyName);
+  if (!sellerName || sellerName === normalizeForMatch('Mi empresa')) return blocks;
+  return blocks.filter((block) => {
+    const normalized = normalizeForMatch(block);
+    return normalized.includes(sellerName)
+      || /\b(?:nosotros|nuestro|nuestra|tenemos|contamos|operamos|cubrimos|llevamos|ayudamos|trabajo en)\b/.test(normalized);
+  });
 }
 
 const sellerOfferStopWords = new Set([
@@ -355,16 +365,17 @@ function isGroundedInTargetEvidence(context: DraftContextV2, offerParagraph: str
 }
 
 function hasCommercialRelevance(context: DraftContextV2, body: string, approvedCta: string) {
-  const sellerName = normalizeForMatch(context.seller.companyName);
-  const offerParagraph = commercialOfferParagraph(body, approvedCta);
-  const normalizedOffer = normalizeForMatch(offerParagraph);
-  const sellerMentioned = !sellerName
-    || sellerName === normalizeForMatch('Mi empresa')
-    || normalizedOffer.includes(sellerName);
-  return sellerMentioned
-    && commercialOutcomeCue.test(offerParagraph)
-    && isGroundedInSellerOffer(context, offerParagraph)
-    && isGroundedInTargetEvidence(context, offerParagraph);
+  const blocks = contentBlocks(body, approvedCta);
+  const content = blocks.join('\n\n');
+  // The anchor paragraph legitimately shares evidence terms, so the seller
+  // connection must hold inside the blocks that mention the seller. An
+  // unrelated offer cannot borrow relevance from the anchor.
+  const sellerBlocks = sellerMentionedBlocks(context, blocks);
+  if (sellerBlocks.length === 0) return false;
+  const sellerText = sellerBlocks.join('\n\n');
+  return commercialOutcomeCue.test(content)
+    && isGroundedInSellerOffer(context, sellerText)
+    && isGroundedInTargetEvidence(context, content);
 }
 
 function containsHypothesisHedge(body: string) {

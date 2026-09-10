@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { CheckCircle2, CircleStop, Loader2, Plus, RefreshCw, Save, Sparkles } from 'lucide-react';
+import { CheckCircle2, CircleStop, Loader2, Plus, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
@@ -34,12 +34,15 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import {
   loadFirstContactFollowUpPlan,
   retryFirstContactFollowUpDraft,
   saveFirstContactFollowUpPlan,
+  setFirstContactFollowUpAutoSend,
   stopFirstContactFollowUpPlan,
+  updateFirstContactFollowUpPlan,
   type FirstContactFollowUpPlan,
   type FirstContactFollowUpStep,
 } from '@/lib/campaigns-v2-client';
@@ -78,13 +81,14 @@ type AiNoteTarget =
   | { kind: 'all'; label: 'Toda la secuencia' };
 
 const USE_INITIAL_STYLE = '__initial_email_style__';
-const FOLLOW_UP_OFFSETS = [3, 4, 5, 7] as const;
+// Playbook cadence: business days after the previous send (day 4, 9, 14, 19).
+const FOLLOW_UP_OFFSETS = [4, 5, 5, 5] as const;
 const FOLLOW_UP_NAMES = ['Primer seguimiento', 'Segundo seguimiento', 'Tercer seguimiento', 'Último seguimiento'] as const;
 const FOLLOW_UP_INSTRUCTIONS = [
-  'Continúa desde el correo inicial sin resumirlo. Usa un solo detalle factual y ve directo a una acción concreta.',
-  'Describe una acción concreta del remitente sin repetir la descripción de ninguna empresa.',
-  'Explica con un ejemplo breve qué podría encontrar, responder o actualizar el equipo.',
-  'Mantén el cierre corto y directo. Reconoce que puede no ser prioridad y deja la puerta abierta.',
+  'Aporta una prueba respaldada del brief (años, clientes, cobertura) conectada con esta cuenta y cierra con dos horarios concretos. No repitas el correo inicial.',
+  'Desarrolla otro ángulo del mismo tema sin cambiar de oferta: reformula el disparador desde la perspectiva del cargo y muestra el costo o riesgo que no se ve.',
+  'Responde la objeción frecuente de este servicio en dos líneas, sin tecnicismos y sin atribuirle dudas al destinatario.',
+  'Cierra el ciclo en menos de 80 palabras, sin culpa ni presión: asume que no es prioridad, deja el resultado en pocas palabras y no pidas reunión.',
 ] as const;
 const GLOBAL_COHERENCE_NOTE = 'Mantén coherencia entre todos los seguimientos, usa un tema concreto distinto en cada mensaje y no repitas frases.';
 const AI_EDITABLE_STEP_STATES = new Set(['pending_initial_send', 'not_due', 'ready_to_prepare', 'review_required', 'approved']);
@@ -215,6 +219,13 @@ export function FirstContactFollowUpPlan({
   const [stopError, setStopError] = useState<string | null>(null);
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
 
+  const [structureSteps, setStructureSteps] = useState<{ key: string; name: string; offsetDays: number; instruction: string }[] | null>(null);
+  const [savingStructure, setSavingStructure] = useState(false);
+  const [structureError, setStructureError] = useState<string | null>(null);
+  const [autoSend, setAutoSend] = useState<boolean | null>(null);
+  const [autoSendBusy, setAutoSendBusy] = useState(false);
+  const [autoSendError, setAutoSendError] = useState<string | null>(null);
+
   const [noteTarget, setNoteTarget] = useState<AiNoteTarget | null>(null);
   const [noteInstruction, setNoteInstruction] = useState('');
   const [noteSubjectOnly, setNoteSubjectOnly] = useState(false);
@@ -232,10 +243,24 @@ export function FirstContactFollowUpPlan({
   const focusSequenceAfterGenerationRef = useRef(false);
 
   const selectableStyleProfiles = styleProfiles.filter((profile) => Boolean(profile.id));
-  const hasDirtyEditors = Object.values(editors).some((editor) => isEditorDirty(editor) || Boolean(editor.proposal)) || (setupOpen && Boolean(sequenceInstruction.trim())) || Boolean(noteTarget && noteInstruction.trim() && !noteSuccess);
+  const structureEditable = Boolean(
+    plan && plan.enrollmentState === 'pending_initial_send' && !['completed', 'stopped', 'blocked'].includes(plan.enrollmentState),
+  );
+  const structureDirty = Boolean(
+    structureEditable && structureSteps
+    && (structureSteps.length !== plan?.steps.length
+      || structureSteps.some((item, index) => {
+        const step = plan?.steps[index];
+        return !step || item.name !== step.name || item.offsetDays !== step.offsetDays;
+      })),
+  );
+  const editorsDirty = Object.values(editors).some((editor) => isEditorDirty(editor) || Boolean(editor.proposal));
+  const hasDirtyEditors = editorsDirty || structureDirty || (setupOpen && Boolean(sequenceInstruction.trim())) || Boolean(noteTarget && noteInstruction.trim() && !noteSuccess);
   const isBusy = generating
     || applyingNote
     || stopping
+    || savingStructure
+    || autoSendBusy
     || Object.values(retryingStepIds).some(Boolean)
     || Object.values(editors).some((editor) => editor.saving);
 
@@ -562,6 +587,110 @@ export function FirstContactFollowUpPlan({
     }
   }
 
+  const structureSignatureRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!plan) {
+      setStructureSteps(null);
+      setAutoSend(null);
+      structureSignatureRef.current = null;
+      return;
+    }
+    // Reloads caused by draft text saves reuse the same object identity, but
+    // text edits elsewhere must not discard unsaved cadence changes. Only
+    // resync when the persisted structure itself changed.
+    const signature = JSON.stringify(plan.steps.map((step) => [step.id, step.name, step.offsetDays, step.instruction || null]));
+    if (signature !== structureSignatureRef.current) {
+      structureSignatureRef.current = signature;
+      setStructureSteps(plan.steps.map((step, index) => ({
+        key: step.id,
+        name: step.name,
+        offsetDays: step.offsetDays,
+        instruction: step.instruction || FOLLOW_UP_INSTRUCTIONS[index] || FOLLOW_UP_INSTRUCTIONS[0],
+      })));
+      setStructureError(null);
+    }
+    setAutoSend(plan.autoSend === true);
+  }, [plan]);
+
+  async function saveStructure() {
+    const currentPlan = planRef.current;
+    if (!currentPlan || !structureSteps || operationRef.current || disabled || savingStructure) return;
+    if (editorsDirty) {
+      setStructureError('Guarda los cambios de los correos antes de modificar la secuencia.');
+      return;
+    }
+    if (structureSteps.some((item) => !Number.isInteger(item.offsetDays) || item.offsetDays < 1 || item.offsetDays > 30)) {
+      setStructureError('Cada seguimiento espera entre 1 y 30 días hábiles después del correo anterior.');
+      return;
+    }
+    operationRef.current = true;
+    setSavingStructure(true);
+    setStructureError(null);
+    try {
+      const result = await updateFirstContactFollowUpPlan({
+        draftId,
+        versionId,
+        steps: structureSteps.map((item) => ({ name: item.name, offsetDays: item.offsetDays, instruction: item.instruction })),
+      });
+      commitPlan(result.plan);
+      setPlanFeedback('Secuencia actualizada. Los borradores se generaron de nuevo con la nueva estructura.');
+    } catch (error: any) {
+      setStructureError(error?.message || 'No pudimos actualizar la secuencia.');
+    } finally {
+      operationRef.current = false;
+      setSavingStructure(false);
+    }
+  }
+
+  function addStructureStep() {
+    if (!structureEditable || !structureSteps || structureSteps.length >= 4) return;
+    const position = structureSteps.length;
+    setStructureSteps([
+      ...structureSteps,
+      {
+        key: `new-${position}-${Date.now()}`,
+        name: FOLLOW_UP_NAMES[position] || `Seguimiento ${position + 1}`,
+        offsetDays: FOLLOW_UP_OFFSETS[position] || 5,
+        instruction: FOLLOW_UP_INSTRUCTIONS[position] || FOLLOW_UP_INSTRUCTIONS[FOLLOW_UP_INSTRUCTIONS.length - 1],
+      },
+    ]);
+    setStructureError(null);
+  }
+
+  function removeStructureStep(key: string) {
+    if (!structureEditable || !structureSteps || structureSteps.length <= 1) return;
+    setStructureSteps(structureSteps.filter((item) => item.key !== key));
+    setStructureError(null);
+  }
+
+  function changeStructureOffset(key: string, offsetDays: number) {
+    if (!structureEditable || !structureSteps) return;
+    setStructureSteps(structureSteps.map((item) => item.key === key ? { ...item, offsetDays } : item));
+  }
+
+  async function toggleAutoSend(next: boolean) {
+    if (operationRef.current || disabled || autoSendBusy) return;
+    if (editorsDirty || structureDirty) {
+      setAutoSendError('Guarda los cambios pendientes antes de cambiar el envío automático.');
+      return;
+    }
+    operationRef.current = true;
+    setAutoSendBusy(true);
+    setAutoSendError(null);
+    try {
+      const value = await setFirstContactFollowUpAutoSend({ draftId, autoSend: next });
+      setAutoSend(value);
+      setPlanFeedback(value
+        ? 'Envío automático activado: cada seguimiento aprobado se enviará en su fecha, de lunes a viernes. Se detiene ante respuesta, baja o rebote.'
+        : 'Envío automático desactivado: los seguimientos quedarán preparados para envío manual.');
+    } catch (error: any) {
+      setAutoSendError(error?.message || 'No pudimos cambiar el envío automático.');
+    } finally {
+      operationRef.current = false;
+      setAutoSendBusy(false);
+    }
+  }
+
   if (enabled === null && !loadError) {
     return (
       <div className={cn('flex flex-col items-center', className)} aria-busy="true">
@@ -741,7 +870,11 @@ export function FirstContactFollowUpPlan({
             <div>
               <h2 ref={sequenceHeadingRef} tabIndex={-1} className="text-base font-semibold tracking-[-0.01em] outline-none">Seguimientos</h2>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">{stateLabel(plan.enrollmentState)} · {plan.steps.length} {plan.steps.length === 1 ? 'correo' : 'correos'}</p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">Las fechas indican la cadencia prevista, no confirman envío automático. Revisa y aprueba cada versión en Campañas.</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {autoSend
+                  ? 'Envío automático activado: cada seguimiento aprobado se enviará en su fecha, de lunes a viernes. Se detiene ante respuesta, baja o rebote.'
+                  : 'Revisa y aprueba cada correo. Activa el envío automático para programar la secuencia.'}
+              </p>
             </div>
             <Button
               type="button"
@@ -755,8 +888,56 @@ export function FirstContactFollowUpPlan({
           </div>
           {disabledReason ? <p className="border-b border-border/60 px-4 py-3 text-xs leading-5 text-muted-foreground sm:px-5">{disabledReason}</p> : null}
 
+          <div className="flex flex-col gap-3 border-b border-border/60 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <div className="min-w-0">
+              <Label htmlFor="follow-up-auto-send" className="text-sm font-medium">Envío automático</Label>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Solo envía versiones aprobadas por ti. El correo inicial siempre se envía manualmente.</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {autoSendBusy ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}
+              <Switch
+                id="follow-up-auto-send"
+                checked={autoSend === true}
+                onCheckedChange={(checked) => void toggleAutoSend(checked)}
+                disabled={disabled || autoSendBusy || isBusy || autoSend === null}
+                aria-describedby="follow-up-auto-send-hint"
+              />
+            </div>
+          </div>
+          <p id="follow-up-auto-send-hint" className="sr-only">Al activarlo, los seguimientos aprobados se envían solos en su fecha.</p>
+          {autoSendError ? <p className="border-b border-border/60 px-4 py-3 text-xs leading-5 text-rose-700 dark:text-rose-300 sm:px-5" role="alert">{autoSendError}</p> : null}
+
           <ol className="divide-y divide-border/60">
-            {plan.steps.map((step, index) => {
+            {(structureEditable && structureSteps ? structureSteps.map((item, position) => {
+              const existing = plan.steps.find((step) => step.id === item.key);
+              if (existing) return { step: existing, index: position, pending: null as null | { name: string; offsetDays: number } };
+              return { step: null, index: position, pending: { name: item.name, offsetDays: item.offsetDays } };
+            }) : plan.steps.map((step, index) => ({ step, index, pending: null as null | { name: string; offsetDays: number } }))).map(({ step, index, pending }) => {
+              if (!step && pending) {
+                const key = structureSteps?.[index]?.key || `pending-${index}`;
+                return (
+                  <li key={key} className="px-4 py-6 sm:px-5">
+                    <div className="flex items-start gap-3">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-dashed border-border/70 bg-muted/30 text-sm font-semibold" aria-hidden="true">{index + 1}</span>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-sm font-semibold">{pending.name}</h3>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">{pending.offsetDays} {pending.offsetDays === 1 ? 'día hábil' : 'días hábiles'} después del correo anterior · Se generará con IA al guardar la secuencia</p>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="mt-2 min-h-9 text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                          onClick={() => removeStructureStep(key)}
+                          disabled={disabled || isBusy}
+                        >
+                          <Trash2 aria-hidden="true" /> Quitar
+                        </Button>
+                      </div>
+                    </div>
+                  </li>
+                );
+              }
+              if (!step) return null;
               const editor = editors[step.id];
               const dirty = isEditorDirty(editor);
               const retrying = Boolean(retryingStepIds[step.id]);
@@ -773,8 +954,39 @@ export function FirstContactFollowUpPlan({
                     <span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border/70 bg-muted/30 text-sm font-semibold" aria-hidden="true">{index + 1}</span>
                     <div className="min-w-0 flex-1">
                       <h3 className="text-sm font-semibold">{step.name}</h3>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">Día {day} · {step.offsetDays} {step.offsetDays === 1 ? 'día' : 'días'} después del correo anterior{approvalLabel(step) ? ` · ${approvalLabel(step)}` : ''}</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">Día {day} · {step.offsetDays} {step.offsetDays === 1 ? 'día hábil' : 'días hábiles'} después del correo anterior · {index === 0 ? 'Responde en el mismo hilo' : 'Hilo nuevo'}{approvalLabel(step) ? ` · ${approvalLabel(step)}` : ''}</p>
                       {editor ? <p className="mt-1 break-all text-xs text-muted-foreground">Versión: {editor.versionId}</p> : null}
+                      {structureEditable ? (
+                        <div className="mt-3 flex flex-wrap items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            <Label htmlFor={`follow-up-offset-${step.id}`} className="text-xs text-muted-foreground">Enviar</Label>
+                            <Input
+                              id={`follow-up-offset-${step.id}`}
+                              type="number"
+                              min={1}
+                              max={30}
+                              value={structureSteps?.find((item) => item.key === step.id)?.offsetDays ?? step.offsetDays}
+                              onChange={(event) => changeStructureOffset(step.id, Number(event.target.value))}
+                              className="h-9 w-20 border-slate-400 dark:border-slate-500"
+                              disabled={disabled || isBusy}
+                              aria-label={`Días hábiles después del correo anterior para ${step.name}`}
+                            />
+                            <span className="text-xs text-muted-foreground">días hábiles después</span>
+                          </div>
+                          {(structureSteps?.length || 0) > 1 ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="min-h-9 text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                              onClick={() => removeStructureStep(step.id)}
+                              disabled={disabled || isBusy}
+                            >
+                              <Trash2 aria-hidden="true" /> Quitar
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -851,6 +1063,38 @@ export function FirstContactFollowUpPlan({
               );
             })}
           </ol>
+
+          {structureEditable ? (
+            <div className="flex flex-col items-center gap-3 border-t border-border/60 px-4 py-5 sm:px-5">
+              <div className="h-8 w-px bg-border/70" aria-hidden="true" />
+              {(structureSteps?.length || 0) < 4 ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11 rounded-full border-dashed bg-background px-5 text-muted-foreground hover:text-foreground"
+                  onClick={addStructureStep}
+                  disabled={disabled || isBusy}
+                >
+                  <Plus aria-hidden="true" /> Añadir seguimiento
+                </Button>
+              ) : null}
+              {structureDirty ? (
+                <div className="flex w-full flex-col items-center gap-2">
+                  <p className="text-xs leading-5 text-amber-700 dark:text-amber-300">Cambios en la secuencia sin guardar. Al guardar, los borradores se generan de nuevo.</p>
+                  <Button
+                    type="button"
+                    className="min-h-11"
+                    onClick={() => void saveStructure()}
+                    disabled={disabled || savingStructure || isBusy}
+                  >
+                    {savingStructure ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Save aria-hidden="true" />}
+                    {savingStructure ? 'Guardando…' : 'Guardar secuencia'}
+                  </Button>
+                </div>
+              ) : null}
+              {structureError ? <p className="text-xs leading-5 text-rose-700 dark:text-rose-300" role="alert">{structureError}</p> : null}
+            </div>
+          ) : null}
 
           {planFeedback || canStopPlan ? (
             <div className="border-t border-border/60 px-4 py-4 sm:px-5">

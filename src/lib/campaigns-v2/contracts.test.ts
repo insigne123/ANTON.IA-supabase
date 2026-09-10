@@ -6,8 +6,10 @@ import {
   CampaignV2RecipientStepSendContextResponseSchema,
   CampaignV2StepStateSchema,
   CreateFirstContactPlanBodySchema,
+  FirstContactPlanAutoSendBodySchema,
   FirstContactPlanSchema,
   GetFirstContactPlanResponseSchema,
+  UpdateFirstContactPlanBodySchema,
 } from './contracts';
 
 test('Campaign V2 contracts expose every required recipient step state', () => {
@@ -93,6 +95,33 @@ test('first-contact plan steps expose strict current draft summaries and generat
   assert.equal(FirstContactPlanSchema.safeParse({
     ...base,
     steps: [{ ...readyStep, draft: { ...readyStep.draft, extra: true } }],
+  }).success, false);
+});
+
+test('first-contact plan updates bound structure edits and auto-send toggles', () => {
+  const valid = {
+    draftId: '10000000-0000-4000-8000-000000000001',
+    versionId: '20000000-0000-4000-8000-000000000001',
+    steps: [
+      { name: 'Primer seguimiento', offsetDays: 4, instruction: 'Aporta una prueba respaldada.' },
+      { name: 'Último seguimiento', offsetDays: 5, instruction: 'Cierra el ciclo sin presión.' },
+    ],
+  };
+  assert.equal(UpdateFirstContactPlanBodySchema.safeParse(valid).success, true);
+  assert.equal(UpdateFirstContactPlanBodySchema.safeParse({ ...valid, steps: [] }).success, false);
+  assert.equal(UpdateFirstContactPlanBodySchema.safeParse({ ...valid, steps: Array(5).fill(valid.steps[0]) }).success, false);
+  assert.equal(UpdateFirstContactPlanBodySchema.safeParse({
+    ...valid, steps: [{ ...valid.steps[0], offsetDays: 31 }],
+  }).success, false);
+  assert.equal(UpdateFirstContactPlanBodySchema.safeParse({
+    ...valid, steps: [{ ...valid.steps[0], instruction: '' }],
+  }).success, false);
+  assert.equal(UpdateFirstContactPlanBodySchema.safeParse({ ...valid, extra: true }).success, false);
+  assert.equal(FirstContactPlanAutoSendBodySchema.safeParse({
+    draftId: '10000000-0000-4000-8000-000000000001', autoSend: true,
+  }).success, true);
+  assert.equal(FirstContactPlanAutoSendBodySchema.safeParse({
+    draftId: '10000000-0000-4000-8000-000000000001', autoSend: 'yes',
   }).success, false);
 });
 

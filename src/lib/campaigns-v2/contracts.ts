@@ -34,6 +34,7 @@ export const CampaignV2PlanStepSchema = z.object({
   name: z.string().trim().min(1).max(120),
   kind: z.literal('follow_up'),
   offsetDays: z.number().int().min(1).max(365),
+  instruction: z.string().trim().min(1).max(1_000).optional(),
   state: CampaignV2StepStateSchema,
   dueAt: IsoDateTimeSchema.nullable(),
   nativeDraftId: UuidSchema.nullable(),
@@ -71,6 +72,7 @@ export const FirstContactPlanSchema = z.object({
   enrollmentId: UuidSchema,
   enrollmentState: z.enum(['pending_initial_send', 'active', 'completed', 'stopped', 'blocked']),
   nextDueAt: IsoDateTimeSchema.nullable(),
+  autoSend: z.boolean().optional(),
   steps: z.array(CampaignV2PlanStepSchema).min(1).max(4),
 }).strict();
 export type FirstContactPlan = z.infer<typeof FirstContactPlanSchema>;
@@ -108,6 +110,27 @@ export type RetryFirstContactPlanStepBody = z.infer<typeof RetryFirstContactPlan
 
 export const RetryFirstContactPlanStepResponseSchema = CreateFirstContactPlanResponseSchema;
 export type RetryFirstContactPlanStepResponse = z.infer<typeof RetryFirstContactPlanStepResponseSchema>;
+
+export const UpdateFirstContactPlanBodySchema = z.object({
+  draftId: UuidSchema,
+  versionId: UuidSchema,
+  steps: z.array(z.object({
+    name: z.string().trim().min(1).max(120),
+    offsetDays: z.number().int().min(1).max(30),
+    instruction: z.string().trim().min(1).max(1_000),
+  }).strict()).min(1).max(4),
+  regenerateDrafts: z.boolean().optional(),
+}).strict();
+export type UpdateFirstContactPlanBody = z.infer<typeof UpdateFirstContactPlanBodySchema>;
+
+export const UpdateFirstContactPlanResponseSchema = CreateFirstContactPlanResponseSchema;
+export type UpdateFirstContactPlanResponse = z.infer<typeof UpdateFirstContactPlanResponseSchema>;
+
+export const FirstContactPlanAutoSendBodySchema = z.object({
+  draftId: UuidSchema,
+  autoSend: z.boolean(),
+}).strict();
+export type FirstContactPlanAutoSendBody = z.infer<typeof FirstContactPlanAutoSendBodySchema>;
 
 export const CampaignV2DispatchStatusSchema = z.enum([
   'pending',

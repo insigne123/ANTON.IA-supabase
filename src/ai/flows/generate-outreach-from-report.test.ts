@@ -41,7 +41,7 @@ test('DraftContextV2 generation exposes only the server-selected factual evidenc
       requestedModel = String(request.model || '');
       prompt = String(request.messages?.[1]?.content || '');
       return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', contextParagraph: 'Acme reduce trabajo manual.', offerParagraph: 'Northstar ordena tareas repetitivas.' }) } }],
+        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', opening: 'Acme reduce trabajo manual.', value: 'Northstar ordena tareas repetitivas.' }) } }],
         usage: {},
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
@@ -96,7 +96,7 @@ test('numeric correction receives the rejected candidate as untrusted repair tex
     process.env.OPENAI_API_KEY = 'test-openai-key';
     globalThis.fetch = async (_input, init) => {
       prompt = JSON.parse(String(init?.body)).messages[1].content;
-      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', contextParagraph: 'Acme reduce trabajo manual.', offerParagraph: 'Northstar automatiza operaciones.' }) } }], usage: {} }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', opening: 'Acme reduce trabajo manual.', value: 'Northstar automatiza operaciones.' }) } }], usage: {} }), { status: 200 });
     };
     await generateOutreachFromDraftContextV2({
       context: draftContextFixture(),
@@ -131,8 +131,8 @@ test('DraftContextV2 generation reserves enough model words for server normaliza
       return new Response(JSON.stringify({
         choices: [{ message: { content: JSON.stringify({
           subject: 'Procesos en Acme',
-          contextParagraph: 'Acme reduce trabajo manual para equipos de operaciones en su trabajo diario.',
-          offerParagraph: 'Northstar ordena tareas repetitivas para que el equipo encuentre información y responda consultas con menos pasos.',
+          opening: 'Acme reduce trabajo manual para equipos de operaciones en su trabajo diario.',
+          value: 'Northstar ordena tareas repetitivas para que el equipo encuentre información y responda consultas con menos pasos.',
         }) } }],
         usage: {},
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -140,8 +140,11 @@ test('DraftContextV2 generation reserves enough model words for server normaliza
 
     await generateOutreachFromDraftContextV2({ context: draftContextFixture() });
 
-    assert.match(prompt, /Devuelve entre 40 y \d+ palabras/);
-    assert.match(prompt, /contextParagraph debe tener al menos 12 palabras y offerParagraph al menos 28/);
+    assert.match(prompt, /Devuelve entre 60 y \d+ palabras/);
+    assert.match(prompt, /Devuelve entre 60 y /);
+    assert.match(prompt, /OUTREACH_STRATEGY/);
+    assert.match(prompt, /STYLE_EXAMPLES/);
+    assert.match(prompt, /SENDER_IDENTITY/);
   } finally {
     if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousOpenAiKey;
@@ -159,7 +162,7 @@ test('DraftContextV2 generation passes the complete saved writing style to the m
       const request = JSON.parse(String(init?.body || '{}'));
       prompt = String(request.messages?.[1]?.content || '');
       return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', contextParagraph: 'Acme reduce trabajo manual.', offerParagraph: 'Northstar ordena tareas repetitivas.' }) } }],
+        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', opening: 'Acme reduce trabajo manual.', value: 'Northstar ordena tareas repetitivas.' }) } }],
         usage: {},
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
@@ -204,7 +207,7 @@ test('DraftContextV2 generation ignores a generic priority hypothesis from the r
       const request = JSON.parse(String(init?.body || '{}'));
       prompt = String(request.messages?.[1]?.content || '');
       return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', contextParagraph: 'Acme reduce trabajo manual.', offerParagraph: 'Northstar ordena tareas repetitivas.' }) } }],
+        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', opening: 'Acme reduce trabajo manual.', value: 'Northstar ordena tareas repetitivas.' }) } }],
         usage: {},
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
@@ -251,7 +254,7 @@ test('DraftContextV2 generation labels a campaign step instruction as non-factua
       const request = JSON.parse(String(init?.body || '{}'));
       prompt = String(request.messages?.[1]?.content || '');
       return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', contextParagraph: 'Acme reduce trabajo manual.', offerParagraph: 'Northstar ordena tareas repetitivas.' }) } }],
+        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', opening: 'Acme reduce trabajo manual.', value: 'Northstar ordena tareas repetitivas.' }) } }],
         usage: {},
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
@@ -282,7 +285,7 @@ test('DraftContextV2 generation preserves prior bodies as untrusted continuity w
       const request = JSON.parse(String(init?.body || '{}'));
       prompt = String(request.messages?.[1]?.content || '');
       return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', contextParagraph: 'Acme reduce trabajo manual.', offerParagraph: 'Northstar ordena tareas repetitivas.' }) } }],
+        choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', opening: 'Acme reduce trabajo manual.', value: 'Northstar ordena tareas repetitivas.' }) } }],
         usage: {},
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
@@ -310,7 +313,7 @@ test('DraftContextV2 generation preserves prior bodies as untrusted continuity w
 
     assert.match(prompt, /SEQUENCE_WRITING_CONTEXT \(metadata privada de redacción, no publicable\)/);
     assert.match(prompt, /Nunca menciones ni copies los nombres, etapas, días, instrucciones o la secuencia/);
-    assert.match(prompt, /contextParagraph y offerParagraph deben aportar información útil/);
+    assert.match(prompt, /opening aporta un detalle factual que no repita el asunto anterior/);
     assert.match(prompt, /previousSubjects/);
     assert.match(prompt, /no resumas el correo anterior ni vuelvas a presentar a la empresa/);
     assert.doesNotMatch(prompt, /Seguimiento inicial|Segundo seguimiento|offsetDays/);

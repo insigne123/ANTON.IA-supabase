@@ -12,6 +12,7 @@ export type FirstContactFollowUpStep = {
   name: string;
   kind: 'follow_up';
   offsetDays: number;
+  instruction?: string;
   state: CampaignV2StepState;
   dueAt: string | null;
   nativeDraftId: string | null;
@@ -26,6 +27,7 @@ export type FirstContactFollowUpPlan = {
   enrollmentId: string;
   enrollmentState: string;
   nextDueAt: string | null;
+  autoSend?: boolean;
   steps: FirstContactFollowUpStep[];
 };
 
@@ -197,6 +199,40 @@ export async function saveFirstContactFollowUpPlan(input: {
     throw new Error(apiMessage(payload, 'No pudimos guardar el seguimiento.'));
   }
   return { enabled: true, plan: payload.plan };
+}
+
+export async function updateFirstContactFollowUpPlan(input: {
+  draftId: string;
+  versionId: string;
+  steps: FirstContactFollowUpInput[];
+  regenerateDrafts?: boolean;
+}): Promise<FirstContactPlanResponse> {
+  const response = await fetch('/api/campaigns/v2/first-contact-plans', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.enabled !== true || !payload?.plan) {
+    throw new Error(apiMessage(payload, 'No pudimos actualizar los seguimientos.'));
+  }
+  return { enabled: true, plan: payload.plan };
+}
+
+export async function setFirstContactFollowUpAutoSend(input: {
+  draftId: string;
+  autoSend: boolean;
+}): Promise<boolean> {
+  const response = await fetch('/api/campaigns/v2/first-contact-plans/auto-send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.enabled !== true || typeof payload?.autoSend !== 'boolean') {
+    throw new Error(apiMessage(payload, 'No pudimos cambiar el envío automático.'));
+  }
+  return payload.autoSend;
 }
 
 export async function retryFirstContactFollowUpDraft(input: {

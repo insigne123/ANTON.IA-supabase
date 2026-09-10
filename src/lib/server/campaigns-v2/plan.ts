@@ -2,6 +2,7 @@ import {
   FirstContactPlanSchema,
   type CreateFirstContactPlanBody,
   type FirstContactPlan,
+  type UpdateFirstContactPlanBody,
 } from '@/lib/campaigns-v2/contracts';
 import { AuthError } from '@/lib/server/auth-utils';
 import { materializeOutsourcingEmailStylePreset } from '@/lib/server/email-style-profiles';
@@ -66,7 +67,7 @@ export async function queryFirstContactPlan(input: {
   const client = input.client ?? getSupabaseAdminClient();
   const campaignResult = await client
     .from('campaigns')
-    .select('id,name,user_id,v2_status')
+    .select('id,name,user_id,v2_status,settings')
     .eq('organization_id', input.organizationId)
     .eq('user_id', input.userId)
     .eq('outreach_version', 2)
@@ -161,6 +162,7 @@ export async function queryFirstContactPlan(input: {
         name: sequence.name,
         kind: 'follow_up' as const,
         offsetDays: sequence.offset_days,
+        instruction: text(sequence.instruction) || undefined,
         state: row.state,
         dueAt: row.due_at ?? null,
         nativeDraftId,
@@ -182,6 +184,7 @@ export async function queryFirstContactPlan(input: {
     nextDueAt: followUpSteps.find((step) => (
       !['sent', 'skipped', 'blocked'].includes(step.state) && step.dueAt
     ))?.dueAt ?? null,
+    autoSend: object((campaign as any).settings).auto_send === true,
     steps: followUpSteps,
   });
 }
@@ -293,4 +296,119 @@ export async function retryFirstContactPlanStep(input: {
   });
   if (!plan) throw new Error('CAMPAIGN_V2_PLAN_PERSIST_FAILED');
   return { enabled: true as const, plan };
+}
+
+export async function updateFirstContactPlan(input: {
+  body: UpdateFirstContactPlanBody;
+  organizationId: string;
+  userId: string;
+  client?: SupabaseClientLike;
+}) {
+  const client = input.client ?? getSupabaseAdminClient();
+  const campaignId = await resolveFirstContactPlanCampaignId({
+    draftId: input.body.draftId,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    client,
+  });
+  if (!campaignId) throw new AuthError('Campaign V2 plan not found', 404);
+  const campaignResult = await client
+    .from('campaigns')
+    .select('id,user_id')
+    .eq('id', campaignId)
+    .maybeSingle();
+  if (campaignResult.error) throw campaignResult.error;
+  if (!campaignResult.data) throw new AuthError('Campaign V2 plan not found', 404);
+  const enabled = await isCampaignsV2Enabled(input.organizationId, client);
+  assertCampaignV2CreatorAccess({
+    enabled,
+    creatorId: text(campaignResult.data.user_id),
+    userId: input.userId,
+  });
+  const { error } = await client.rpc('update_first_contact_plan_steps_v2', {
+    p_campaign_id: campaignResult.data.id,
+    p_organization_id: input.organizationId,
+    p_user_id: input.userId,
+    p_draft_id: input.body.draftId,
+    p_version_id: input.body.versionId,
+    p_steps: input.body.steps,
+  });
+  if (error) throw error;
+  if (input.body.regenerateDrafts !== false) {
+    await pregenerateFirstContactPlanDrafts({
+      draftId: input.body.draftId,
+      organizationId: input.organizationId,
+      userId: input.userId,
+      client,
+    });
+  }
+  const plan = await queryFirstContactPlan({
+    draftId: input.body.draftId,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    client,
+  });
+  if (!plan) throw new Error('CAMPAIGN_V2_PLAN_PERSIST_FAILED');
+  return { enabled: true as const, plan };
+}
+
+async function resolveFirstContactPlanCampaignId(input: {
+  draftId: string;
+  organizationId: string;
+  userId: string;
+  client: SupabaseClientLike;
+}) {
+  const result = await input.client
+    .from('campaigns')
+    .select('id')
+    .eq('organization_id', input.organizationId)
+    .eq('user_id', input.userId)
+    .eq('outreach_version', 2)
+    .eq('initial_native_draft_id', input.draftId)
+    .maybeSingle();
+  if (result.error) throw result.error;
+  return text(result.data?.id) || null;
+}
+
+export async function setFirstContactPlanAutoSend(input: {
+  draftId: string;
+  autoSend: boolean;
+  organizationId: string;
+  userId: string;
+  client?: SupabaseClientLike;
+}) {
+  const client = input.client ?? getSupabaseAdminClient();
+  const campaignId = await resolveFirstContactPlanCampaignId({
+    draftId: input.draftId,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    client,
+  });
+  if (!campaignId) throw new AuthError('Campaign V2 plan not found', 404);
+  const campaignResult = await client
+    .from('campaigns')
+    .select('user_id,v2_status,settings')
+    .eq('id', campaignId)
+    .maybeSingle();
+  if (campaignResult.error) throw campaignResult.error;
+  if (!campaignResult.data) throw new AuthError('Campaign V2 plan not found', 404);
+  const enabled = await isCampaignsV2Enabled(input.organizationId, client);
+  assertCampaignV2CreatorAccess({
+    enabled,
+    creatorId: text(campaignResult.data.user_id),
+    userId: input.userId,
+  });
+  if (campaignResult.data.v2_status !== 'draft' && campaignResult.data.v2_status !== 'active') {
+    throw new AuthError('Campaign V2 plan is no longer schedulable', 409);
+  }
+  const settings = object(campaignResult.data.settings);
+  const { error } = await client
+    .from('campaigns')
+    .update({
+      settings: { ...settings, auto_send: input.autoSend },
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', campaignId);
+  if (error) throw error;
+  return { enabled: true as const, autoSend: input.autoSend };
 }

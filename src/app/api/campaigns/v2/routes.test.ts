@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const routes = [
   'src/app/api/campaigns/v2/first-contact-plans/route.ts',
+  'src/app/api/campaigns/v2/first-contact-plans/auto-send/route.ts',
   'src/app/api/campaigns/v2/inbox/route.ts',
   'src/app/api/campaigns/v2/recipient-steps/[stepId]/prepare-draft/route.ts',
   'src/app/api/campaigns/v2/recipient-steps/[stepId]/send-context/route.ts',

@@ -20,7 +20,7 @@ test('empty setup stays inline and generates an automatic progressive cadence', 
   assert.match(composerSource, /Añadir seguimientos/);
   assert.match(composerSource, /¿Cómo deberían sentirse\?/);
   assert.match(composerSource, /\[1, 2, 3, 4\]\.map/);
-  assert.match(composerSource, /const FOLLOW_UP_OFFSETS = \[3, 4, 5, 7\]/);
+  assert.match(composerSource, /const FOLLOW_UP_OFFSETS = \[4, 5, 5, 5\]/);
   assert.match(composerSource, /styleProfileId: styleProfileId \|\| null/);
   assert.match(composerSource, /sequenceInstruction: instruction/);
   assert.match(composerSource, /steps: buildFollowUpSteps\(followUpCount\)/);

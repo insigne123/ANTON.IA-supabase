@@ -8,6 +8,8 @@ import {
   GetFirstContactPlanResponseSchema,
   RetryFirstContactPlanStepBodySchema,
   RetryFirstContactPlanStepResponseSchema,
+  UpdateFirstContactPlanBodySchema,
+  UpdateFirstContactPlanResponseSchema,
 } from '@/lib/campaigns-v2/contracts';
 import { handleAuthError, requireAuth } from '@/lib/server/auth-utils';
 import {
@@ -15,6 +17,7 @@ import {
   getFirstContactPlan,
   retryFirstContactPlanStep,
   resolveFirstContactPlanOrganization,
+  updateFirstContactPlan,
 } from '@/lib/server/campaigns-v2/plan';
 
 export const dynamic = 'force-dynamic';
@@ -71,6 +74,30 @@ export async function POST(request: NextRequest) {
     if (error?.name === 'AuthError') return handleAuthError(error);
     console.error('[campaigns-v2] first-contact plan creation failed', error);
     return NextResponse.json({ error: 'CAMPAIGN_V2_PLAN_CREATE_FAILED' }, { status: 500 });
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const auth = await requireAuth();
+    const body = UpdateFirstContactPlanBodySchema.parse(await request.json());
+    const organizationId = await resolveFirstContactPlanOrganization({
+      draftId: body.draftId,
+      userId: auth.user.id,
+      organizationIds: auth.organizationIds,
+    });
+    if (!organizationId) return NextResponse.json({ error: 'Native draft not found' }, { status: 404 });
+    const response = UpdateFirstContactPlanResponseSchema.parse(await updateFirstContactPlan({
+      body,
+      organizationId,
+      userId: auth.user.id,
+    }));
+    return NextResponse.json(response, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error: any) {
+    if (error instanceof ZodError) return validationError(error);
+    if (error?.name === 'AuthError') return handleAuthError(error);
+    console.error('[campaigns-v2] first-contact plan update failed', error);
+    return NextResponse.json({ error: 'CAMPAIGN_V2_PLAN_UPDATE_FAILED' }, { status: 500 });
   }
 }
 
