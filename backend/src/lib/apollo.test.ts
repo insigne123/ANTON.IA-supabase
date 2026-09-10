@@ -61,9 +61,9 @@ test('people search uses Apollo query filters and strips accidental contact data
 
     assert.equal(requests.length, 1);
     assert.equal(requests[0]?.url.pathname, '/api/v1/mixed_people/api_search');
-    assert.equal(requests[0]?.url.searchParams.get('q_keywords'), 'Human Resources, payroll');
-    assert.deepEqual(requests[0]?.url.searchParams.getAll('organization_industry_tag_ids[]'), []);
-    assert.deepEqual(requests[0]?.url.searchParams.getAll('q_organization_keyword_tags[]'), []);
+    assert.equal(requests[0]?.url.searchParams.get('q_keywords'), null);
+    assert.deepEqual(requests[0]?.url.searchParams.getAll('organization_industry_tag_ids[]'), ['5567e0e37369640e5ac10c00']);
+    assert.deepEqual(requests[0]?.url.searchParams.getAll('q_organization_keyword_tags[]'), ['payroll']);
     assert.deepEqual(requests[0]?.url.searchParams.getAll('organization_locations[]'), ['Chile']);
     assert.deepEqual(requests[0]?.url.searchParams.getAll('person_locations[]'), ['Santiago']);
     assert.deepEqual(requests[0]?.url.searchParams.getAll('person_titles[]'), ['HR Director']);
@@ -112,8 +112,8 @@ test('batch search reproduces the screenshot filters without adding hidden const
     assert.equal(requests[0]?.url.pathname, '/api/v1/mixed_people/api_search');
     assert.equal(requests[0]?.init?.method, 'POST');
     assert.equal(requests[0]?.init?.body, '{}');
-    assert.equal(searchParams?.get('q_keywords'), 'Technology');
-    assert.deepEqual(searchParams?.getAll('organization_industry_tag_ids[]'), []);
+    assert.equal(searchParams?.get('q_keywords'), null);
+    assert.deepEqual(searchParams?.getAll('organization_industry_tag_ids[]'), ['5494458a746564006c840200']);
     assert.deepEqual(searchParams?.getAll('q_organization_keyword_tags[]'), []);
     assert.deepEqual(searchParams?.getAll('organization_locations[]'), ['chile']);
     assert.deepEqual(searchParams?.getAll('person_locations[]'), []);
