@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import Papa from 'papaparse';
+import { buildCoworkLeadCsv } from './lead-export';
+
+const id = '00000000-0000-4000-8000-000000000001';
+test('CSV roundtrips quoted data and neutralizes formula injection', () => {
+  const result = { scope: 'own_saved_contacts', items: [{ id, name: '=HYPERLINK("bad")', company: 'Empresa, "ejemplo"\nChile', email: 'test@example.com' }] };
+  const csv = buildCoworkLeadCsv([{ action: 'leads.search', result }]);
+  assert.ok(csv);
+  const parsed = Papa.parse<Record<string, string>>(csv, { header: true });
+  assert.equal(parsed.errors.length, 0);
+  assert.equal(parsed.data[0].name, '\'=HYPERLINK("bad")');
+  assert.equal(parsed.data[0].company, 'Empresa, "ejemplo"\nChile');
+});
+
+test('exports only validated tool observations and deduplicates IDs', () => {
+  const result = { scope: 'own_saved_contacts', items: [{ id, name: 'Ejemplo', secret: 'hidden' }] };
+  const csv = buildCoworkLeadCsv([{ action: 'leads.search', result }, { action: 'leads.get', result }]);
+  assert.ok(csv);
+  assert.equal(Papa.parse(csv, { header: true }).data.length, 1);
+  assert.equal(csv.includes('hidden'), false);
+  assert.equal(buildCoworkLeadCsv([{ action: 'answer', result }]), null);
+  assert.equal(buildCoworkLeadCsv([{ action: 'leads.search', result: { ...result, scope: 'other' } }]), null);
+});

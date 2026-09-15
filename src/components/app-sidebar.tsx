@@ -28,13 +28,14 @@ import { APP_VERSION } from '@/lib/app-version';
 import { cn } from '@/lib/utils';
 import { isOpportunitiesEnabled } from '@/lib/opportunities/access';
 import { WorkspaceSwitcher } from '@/components/organization/WorkspaceSwitcher';
+import { COWORK_OWNER_EMAIL } from '@/lib/cowork/access';
 
 type NavItem = {
   href: string;
   icon: LucideIcon;
   label: string;
   aliases?: string[];
-  feature?: 'opportunities' | 'admin-dashboard';
+  feature?: 'opportunities' | 'admin-dashboard' | 'cowork';
 };
 
 const navSections: Array<{ label: string; items: NavItem[] }> = [
@@ -43,6 +44,7 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
       { href: '/antonia', icon: Bot, label: 'Agente ANTON.IA' },
+      { href: '/cowork', icon: Bot, label: 'Cowork', feature: 'cowork' },
       { href: '/profile', icon: User, label: 'Perfil' },
     ],
   },
@@ -88,6 +90,17 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
 export function AppSidebar() {
   const pathname = usePathname();
   const { signOut, user, organizationId, organizationRole } = useAuth();
+  const [coworkScope, setCoworkScope] = React.useState<string | null>(null);
+  const currentScope = `${user?.id || ''}:${organizationId || ''}`;
+  React.useEffect(() => {
+    setCoworkScope(null);
+    if (user?.email?.trim().toLowerCase() !== COWORK_OWNER_EMAIL) return;
+    const controller = new AbortController();
+    fetch('/api/cowork/access', { cache: 'no-store', signal: controller.signal })
+      .then(response => { if (response.ok && !controller.signal.aborted) setCoworkScope(currentScope); })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [currentScope, user?.email]);
   const canAccessOpportunities = isOpportunitiesEnabled();
   const adminAllowedEmails = String(process.env.NEXT_PUBLIC_ADMIN_DASHBOARD_ALLOWED_EMAILS || '')
     .split(',')
@@ -104,7 +117,8 @@ export function AppSidebar() {
       ...section,
       items: section.items
         .filter((item) => item.feature !== 'opportunities' || canAccessOpportunities)
-        .filter((item) => item.feature !== 'admin-dashboard' || canAccessAdminDashboard),
+        .filter((item) => item.feature !== 'admin-dashboard' || canAccessAdminDashboard)
+        .filter((item) => item.feature !== 'cowork' || coworkScope === currentScope),
     }))
     .filter((section) => section.items.length > 0);
 
