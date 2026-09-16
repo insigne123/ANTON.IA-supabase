@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ZodError } from 'zod';
 import { requireCoworkAccess } from '@/lib/server/cowork/access';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
-import { cancelCoworkRun, getCoworkRun } from '@/lib/server/cowork/runs';
+import { cancelCoworkRun } from '@/lib/server/cowork/runs';
+import { getCoworkThread } from '@/lib/server/cowork/thread';
 
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ id: string }> };
@@ -11,8 +12,8 @@ const headers = { 'Cache-Control': 'private, no-store' };
 export async function GET(_req: NextRequest, context: Context) {
   try {
     const auth = await requireCoworkAccess();
-    const state = await getCoworkRun(auth, (await context.params).id);
-    return NextResponse.json(state || { error: 'Trabajo no encontrado.' }, { status: state ? 200 : 404, headers });
+    const state = await getCoworkThread(auth, (await context.params).id);
+    return NextResponse.json(state ? { ...state, canResearch: process.env.COWORK_RESEARCH_ENABLED === 'true', canCreateDraft: process.env.COWORK_NATIVE_DRAFTS_ENABLED === 'true' } : { error: 'Trabajo no encontrado.' }, { status: state ? 200 : 404, headers });
   } catch (error) {
     if (error instanceof AuthError) return handleAuthError(error);
     return NextResponse.json({ error: 'No se pudo consultar el trabajo.' }, { status: error instanceof ZodError ? 400 : 503, headers });

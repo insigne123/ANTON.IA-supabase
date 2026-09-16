@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, Download, FileText, History, Loader2, Plus, Square, X } from 'lucide-react';
+import { ArrowUp, Check, FileText, History, Loader2, Plus, Square, X } from 'lucide-react';
+import { ExportMenu } from './ExportMenu';
+import { ContactResults } from './ContactResults';
+import { ResearchSources } from './ResearchSources';
+import { coworkSearchCriteriaSchema } from '@/lib/cowork/search-proposal';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
@@ -12,7 +16,17 @@ const labels: Record<CoworkRun['status'], string> = {
   queued: 'En cola', running: 'Preparando respuesta', waiting_approval: 'Esperando tu aprobación',
   completed: 'Completado', cancelled: 'Cancelado', failed: 'No se pudo completar',
 };
-type State = { run: CoworkRun; events: CoworkEvent[] };
+function activityTitle(event: CoworkEvent) {
+  if (event.kind === 'search.approved') return 'Búsqueda aprobada y guardada en cola';
+  if (event.kind === 'tool.completed') {
+    if (event.payload.action === 'research.get_existing') return 'Consultó la investigación guardada del contacto';
+    if (event.payload.action === 'prospecting.search') return 'Consultó nuevos contactos en el proveedor';
+    return event.payload.action === 'leads.get' ? 'Consultó una ficha de tus contactos guardados' : 'Buscó en tus contactos guardados';
+  }
+  return ({ 'work.created': 'Solicitud guardada', 'run.started': 'Comenzó la preparación', 'run.completed': 'Resultado guardado', 'run.failed': 'La preparación no terminó', 'run.cancelled': 'Trabajo cancelado', 'approval.requested': 'Preparó una propuesta para revisión', 'search.started': 'Comenzó la búsqueda externa', 'draft.requested': 'Solicitó un borrador del informe', 'draft.started': 'Preparando borrador', 'draft.completed': 'Borrador guardado', 'draft.failed': 'No se pudo preparar el borrador' } as Record<string, string>)[event.kind] || 'Actualización del trabajo';
+}
+type Turn = { run: CoworkRun; events: CoworkEvent[] };
+type State = Turn & { ancestors?: Turn[]; olderTurnsOmitted?: boolean; canCreateDraft?: boolean; canResearch?: boolean };
 
 export function CoworkWorkspace() {
   const [runs, setRuns] = useState<CoworkRun[]>([]);
@@ -37,10 +51,12 @@ export function CoworkWorkspace() {
   const output = result.success ? result.data : null;
   const proposal = state?.run.status === 'waiting_approval'
     ? state.events.slice().reverse().find(event => event.kind === 'approval.requested')?.payload : null;
-  const hasContacts = state?.events.some(event => event.kind === 'tool.completed'
-    && event.payload.result && typeof event.payload.result === 'object'
-    && Array.isArray((event.payload.result as { items?: unknown }).items)
-    && ((event.payload.result as { items: unknown[] }).items.length > 0));
+  const searchProposal = proposal?.action === 'prospecting.search' ? coworkSearchCriteriaSchema.safeParse(proposal.criteria) : null;
+  const searchStarted = state?.events.some(event => event.kind === 'search.started');
+  const searchApproved = state?.events.some(event => event.kind === 'search.approved');
+  const failure = state?.events.slice().reverse().find(event => event.kind === 'run.failed')?.payload;
+  const statusLabel = state ? (state.run.status === 'waiting_approval' && searchApproved
+    ? (searchStarted ? 'Buscando nuevos contactos' : 'Búsqueda aprobada · En cola') : labels[state.run.status]) : '';
 
   async function request(url: string, options?: RequestInit) {
     const response = await fetch(url, { ...options, cache: 'no-store' });
@@ -85,7 +101,21 @@ export function CoworkWorkspace() {
 
   useEffect(() => { if (documentOpen) documentHeading.current?.focus(); }, [documentOpen]);
 
+  useEffect(() => {
+    const restore = () => {
+      const id = new URL(window.location.href).searchParams.get('work');
+      setSelected(id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id : null);
+      setState(null); setDocumentOpen(false); setError('');
+    };
+    restore();
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, []);
+
   function choose(id: string | null) {
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set('work', id); else url.searchParams.delete('work');
+    window.history.pushState(null, '', url);
     setState(null); setSelected(id); setDocumentOpen(false); setHistoryOpen(false); setError('');
   }
 
@@ -117,17 +147,14 @@ export function CoworkWorkspace() {
     if (!selected || resolving) return;
     setResolving(true);
     try {
-      await request(`/api/cowork/runs/${selected}/approval`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approve }) });
+      await request(`/api/cowork/runs/${selected}/${proposal?.action === 'prospecting.search' ? 'search-approval' : 'approval'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approve }) });
       setRefresh(value => value + 1);
     } catch (error) { setError(error instanceof Error ? error.message : 'No se pudo resolver el cambio.'); }
     finally { setResolving(false); }
   }
 
-  function download() {
-    if (!output?.document) return;
-    const url = URL.createObjectURL(new Blob([output.document.content], { type: 'text/markdown;charset=utf-8' }));
-    const link = document.createElement('a'); link.href = url; link.download = 'cowork-documento.md'; link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  function clearPrivateResults() {
+    setRuns([]); setState(null); setReady(false); setDocumentOpen(false);
   }
 
   return (
@@ -159,10 +186,26 @@ export function CoworkWorkspace() {
               {loading ? <p role="status" className="text-sm text-muted-foreground">Cargando trabajos…</p> : runs.length === 0 ? <p className="text-sm text-muted-foreground">Aún no hay trabajos. Describe tu primer objetivo arriba.</p> : runs.slice(0, 6).map(run => <button key={run.id} onClick={() => choose(run.id)} className="flex w-full items-center justify-between gap-4 border-b border-border/60 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><span className="min-w-0 truncate">{run.message}</span><span className="shrink-0 text-xs text-muted-foreground">{labels[run.status]}</span></button>)}
             </div>
           </div> : !state ? <p role="status" className="p-6 text-sm text-muted-foreground">Cargando conversación…</p> : <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 py-5">
+            {state.olderTurnsOmitted && <p className="text-xs text-muted-foreground">Se muestran los últimos ocho turnos anteriores.</p>}
+            {state.ancestors?.map(turn => {
+              const payload = turn.events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
+              const previous = coworkDocumentSchema.safeParse(payload ? { reply: payload.reply, document: payload.document } : null);
+              return <section key={turn.run.id} aria-label="Turno anterior" className="space-y-4 border-b border-border/60 pb-6">
+                <p className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-muted px-5 py-4">{turn.run.message}</p>
+                {previous.success && <p className="whitespace-pre-wrap break-words text-base leading-7">{previous.data.reply}</p>}
+                {previous.success && previous.data.document && <Button variant="outline" onClick={() => choose(turn.run.id)}><FileText />Ver resultado anterior</Button>}
+              </section>;
+            })}
             <p className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-muted px-5 py-4">{state.run.message}</p>
-            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">{active ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : state.run.status === 'completed' ? <Check className="h-4 w-4" /> : null}{labels[state.run.status]}</p>
+            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">{active ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : state.run.status === 'completed' ? <Check className="h-4 w-4" /> : null}{statusLabel}</p>
             {output && <p className="whitespace-pre-wrap break-words text-base leading-7">{output.reply}</p>}
-            {proposal && <section aria-label="Revisar cambio de nota" className="space-y-4 rounded-xl border border-border p-5">
+            {searchProposal?.success && <section aria-label="Revisar búsqueda externa" className="space-y-4 rounded-xl border border-border p-5">
+              <h3 className="font-medium">Buscar nuevos contactos</h3>
+              <dl className="space-y-2 text-sm"><div><dt className="font-medium">Cargos</dt><dd>{searchProposal.data.titles.join(', ') || 'Sin filtro'}</dd></div><div><dt className="font-medium">Sectores</dt><dd>{searchProposal.data.industries.join(', ') || 'Sin filtro'}</dd></div><div><dt className="font-medium">Ubicación de la persona</dt><dd>{searchProposal.data.locations.join(', ') || 'Sin filtro'}</dd></div></dl>
+              <p className="text-sm text-muted-foreground">Hasta {searchProposal.data.limit} contactos. Consume una operación de tu cuota de búsqueda. No revela correos ni teléfonos y no guarda contactos ni envía mensajes.</p>
+              {searchApproved || searchStarted ? <p role="status" className="text-sm">{searchStarted ? 'La búsqueda está en curso.' : 'La búsqueda está aprobada y espera su turno.'} Puedes cerrar esta pestaña y volver al trabajo.</p> : <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar búsqueda</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando aprobación…' : 'Buscar contactos'}</Button></div>}
+            </section>}
+            {proposal?.action === 'crm.replace_note' && <section aria-label="Revisar cambio de nota" className="space-y-4 rounded-xl border border-border p-5">
               <h3 className="font-medium">Reemplazar nota comercial</h3>
               <p className="text-sm font-medium">{String(proposal.leadName || proposal.leadId || '')}</p>
               <p className="text-sm text-muted-foreground">Se reemplazará la nota de este contacto en el CRM. Revisa el texto completo antes de guardar.</p>
@@ -170,10 +213,13 @@ export function CoworkWorkspace() {
               <div><h4 className="text-sm font-medium">Nueva nota</h4><p className="mt-1 whitespace-pre-wrap break-words text-sm">{String(proposal.proposedNote || '')}</p></div>
               <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando decisión…' : 'Guardar nueva nota'}</Button></div>
             </section>}
-            {state.run.status === 'failed' && <p className="text-sm text-muted-foreground">Tu solicitud sigue guardada. Puedes crear un nuevo trabajo para intentarlo otra vez.</p>}
-            {hasContacts && <Button asChild variant="outline" className="self-start"><a href={`/api/cowork/runs/${state.run.id}/export`}><Download />Descargar contactos CSV</a></Button>}
+            {state.run.status === 'failed' && <p className="text-sm text-muted-foreground">{typeof failure?.message === 'string' ? failure.message : 'Tu solicitud sigue guardada. No se pudo completar el trabajo.'}</p>}
+            <ContactResults key={state.run.id} runId={state.run.id} events={state.events} onError={setError} onAccessDenied={clearPrivateResults}
+              canResearch={state.run.status === 'completed' && state.canResearch}
+              onUseReport={leadId => { setMessage(`Consulta la ficha del contacto guardado ${leadId} y su investigación disponible. Resume las fuentes y recomendaciones si existen.`); requestAnimationFrame(() => document.getElementById('cowork-followup')?.focus()); }} />
+            <ResearchSources events={state.events} runId={state.run.id} canCreateDraft={state.run.status === 'completed' && state.canCreateDraft} onAccessDenied={clearPrivateResults} />
             {output?.document && <div className="flex items-center gap-3 rounded-xl border border-border p-4"><FileText className="h-5 w-5 shrink-0" /><div className="min-w-0 flex-1"><h3 className="break-words font-medium">{output.document.title}</h3><p className="text-xs text-muted-foreground">Documento · Solo tú</p></div><Button ref={documentButton} variant="secondary" onClick={() => setDocumentOpen(true)}>Abrir</Button></div>}
-            <details className="text-sm"><summary className="cursor-pointer text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring">Actividad del trabajo</summary><ol className="mt-3 space-y-2">{state.events.map(event => <li key={event.sequence}>{event.kind === 'tool.completed' ? (event.payload.action === 'leads.get' ? 'Consultó una ficha de tus contactos guardados' : 'Buscó en tus contactos guardados') : ({ 'work.created': 'Solicitud guardada', 'run.started': 'Comenzó la preparación', 'run.completed': 'Resultado guardado', 'run.failed': 'La preparación no terminó', 'run.cancelled': 'Trabajo cancelado' } as Record<string, string>)[event.kind] || 'Actualización del trabajo'}</li>)}</ol></details>
+            <details className="text-sm"><summary className="cursor-pointer text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring">Actividad del trabajo</summary><ol className="mt-3 space-y-2">{state.events.map(event => <li key={event.sequence}>{activityTitle(event)}</li>)}</ol></details>
             <div className="mt-auto flex justify-end pt-6">{active ? <Button variant="outline" disabled={cancelling} onClick={() => void cancel()}><Square />{cancelling ? 'Cancelando…' : 'Detener trabajo'}</Button> : <Button variant="outline" onClick={() => choose(null)}>Nuevo trabajo</Button>}</div>
             {state.run.status === 'completed' && <form onSubmit={event => { event.preventDefault(); void send(); }} className="rounded-2xl border border-border bg-muted/30 p-4">
               <Label htmlFor="cowork-followup">Continúa este trabajo</Label>
@@ -183,7 +229,7 @@ export function CoworkWorkspace() {
           </div>}
         </div>
         {documentOpen && output?.document ? <aside aria-label="Documento" className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-muted/20 lg:basis-1/2">
-          <div className="flex items-center justify-between gap-3 border-b border-border p-4"><h2 ref={documentHeading} tabIndex={-1} className="min-w-0 truncate font-medium focus-visible:outline-none">{output.document.title}</h2><div className="flex shrink-0"><Button variant="ghost" size="icon" aria-label="Descargar Markdown" onClick={download}><Download /></Button><Button variant="ghost" size="icon" aria-label="Cerrar documento" onClick={() => { setDocumentOpen(false); requestAnimationFrame(() => documentButton.current?.focus()); }}><X /></Button></div></div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4"><h2 ref={documentHeading} tabIndex={-1} className="min-w-0 truncate font-medium focus-visible:outline-none">{output.document.title}</h2><div className="flex shrink-0 gap-1"><ExportMenu key={selected} runId={selected!} kind="document" onError={setError} onAccessDenied={clearPrivateResults} /><Button variant="ghost" size="icon" aria-label="Cerrar documento" onClick={() => { setDocumentOpen(false); requestAnimationFrame(() => documentButton.current?.focus()); }}><X /></Button></div></div>
           <pre className="max-h-[65dvh] overflow-y-auto whitespace-pre-wrap break-words p-5 font-sans text-sm leading-7 md:p-8">{output.document.content}</pre>
         </aside> : state && <aside aria-label="Resumen del trabajo" className="hidden w-64 shrink-0 self-start rounded-2xl border border-border bg-muted/25 p-5 xl:block"><h2 className="font-medium">Progreso</h2><p className="mt-2 text-sm text-muted-foreground">{labels[state.run.status]}</p><h2 className="mt-6 font-medium">Resultados</h2><p className="mt-2 text-sm text-muted-foreground">{output?.document ? output.document.title : 'Los documentos aparecerán aquí.'}</p><h2 className="mt-6 font-medium">Contexto</h2><p className="mt-2 text-sm text-muted-foreground">Tu mensaje</p></aside>}
       </div>

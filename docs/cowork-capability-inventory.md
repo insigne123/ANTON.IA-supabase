@@ -4,6 +4,8 @@ Fecha: 15 de septiembre de 2026. Estado: inventario inicial, todavía no congela
 
 Primeras herramientas implementadas localmente: `leads.search` y `leads.get`, limitadas a contactos propios en la organización activa. No están desplegadas. El registro SUPL.IA contiene schemas descriptivos en texto; una entrada en ese registro no equivale a una integración auditada. El worker inicial usa un bucle de solo lectura acotado; el gateway general de operaciones sigue pendiente de conectar a su almacén durable.
 
+Incremento local: `prospecting.propose_search` y ejecución aprobada `prospecting.search`, hasta 25 resultados sin revelado, con cuota compartida y claim contra duplicados. Requiere nueva migración y flag; falta validación del proveedor real y recuperación durable de interrupciones. Investigación y borradores siguen pendientes de conectar.
+
 | Operación candidata | Evidencia local | Adaptación / verificación pendiente |
 |---|---|---|
 | `app.context.get` | `suplia-tools.ts`, handler `getAppContext` | Minimización, campos autorizados, actualización de conexiones |

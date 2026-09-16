@@ -19,7 +19,7 @@ export async function listCoworkRuns(auth: AuthContext) {
 export async function getCoworkRun(auth: AuthContext, id: string) {
   z.string().uuid().parse(id);
   const { data: run, error } = await auth.supabase.from('cowork_runs')
-    .select('id,message,mode,status,created_at').eq('id', id).eq('user_id', auth.user.id)
+    .select('id,message,mode,status,created_at,parent_run_id').eq('id', id).eq('user_id', auth.user.id)
     .eq('organization_id', auth.organizationId).maybeSingle();
   if (error) throw error;
   if (!run) return null;

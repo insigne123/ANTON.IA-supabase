@@ -1,15 +1,17 @@
 import { z } from 'zod';
 import { coworkDocumentSchema } from './contracts';
+import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
 
 export const coworkDecisionSchema = z.object({
-  action: z.enum(['leads.search', 'leads.get', 'crm.propose_note', 'answer']),
+  action: z.enum(['leads.search', 'leads.get', 'research.get_existing', 'crm.propose_note', 'prospecting.propose_search', 'answer']),
   query: z.string().max(120).nullable(),
   leadId: z.string().uuid().nullable(),
   note: z.string().trim().min(1).max(4000).nullable().optional(),
+  searchCriteria: coworkSearchCriteriaSchema.nullable().optional(),
   answer: coworkDocumentSchema.nullable(),
 }).strict();
 
-export type CoworkReadAction = 'leads.search' | 'leads.get';
+export type CoworkReadAction = 'leads.search' | 'leads.get' | 'research.get_existing';
 export type CoworkObservation = { action: CoworkReadAction; input: string; result: unknown };
 type Decision = z.infer<typeof coworkDecisionSchema>;
 
@@ -22,6 +24,7 @@ export async function runCoworkReadLoop(input: {
   execute: (action: CoworkReadAction, value: string) => Promise<unknown>;
   record: (observation: CoworkObservation) => Promise<void>;
   proposeNote?: (leadId: string, note: string) => Promise<void>;
+  proposeSearch?: (criteria: CoworkSearchCriteria) => Promise<void>;
 }) {
   const observations: CoworkObservation[] = [];
   for (let turn = 0; turn < 4; turn++) {
@@ -32,6 +35,12 @@ export async function runCoworkReadLoop(input: {
     if (decision.action === 'answer') {
       if (!decision.answer) throw new Error('Missing final answer');
       return decision.answer;
+    }
+    if (decision.action === 'prospecting.propose_search') {
+      if (!input.proposeSearch || !decision.searchCriteria) throw new Error('Invalid external search proposal');
+      await input.authorize(); input.signal.throwIfAborted();
+      await input.proposeSearch(coworkSearchCriteriaSchema.parse(decision.searchCriteria));
+      return { reply: 'Revisa los criterios antes de buscar nuevos contactos.', document: null };
     }
     if (decision.action === 'crm.propose_note') {
       if (!input.proposeNote || !decision.leadId || !decision.note) throw new Error('Invalid note proposal');
@@ -46,7 +55,7 @@ export async function runCoworkReadLoop(input: {
       return { reply: 'Revisa el cambio de nota antes de guardarlo.', document: null };
     }
     if (turn === 3) throw new Error('Cowork tool budget exhausted');
-    const value = decision.action === 'leads.get' ? decision.leadId : decision.query;
+    const value = decision.action === 'leads.search' ? decision.query : decision.leadId;
     if (value === null) throw new Error('Missing tool argument');
     await input.authorize();
     input.signal.throwIfAborted();

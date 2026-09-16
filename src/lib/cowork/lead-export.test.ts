@@ -23,3 +23,12 @@ test('exports only validated tool observations and deduplicates IDs', () => {
   assert.equal(buildCoworkLeadCsv([{ action: 'answer', result }]), null);
   assert.equal(buildCoworkLeadCsv([{ action: 'leads.search', result: { ...result, scope: 'other' } }]), null);
 });
+
+test('external results keep provider identity separate from saved contacts', () => {
+  const result = { scope: 'external_search', items: [{ id: 'apollo:external-1', name: 'Nuevo', email: null }] };
+  const csv = buildCoworkLeadCsv([{ action: 'prospecting.search', result }]);
+  assert.ok(csv);
+  assert.match(csv, /apollo:external-1/);
+  assert.equal(buildCoworkLeadCsv([{ action: 'leads.search', result }]), null);
+  assert.equal(buildCoworkLeadCsv([{ action: 'prospecting.search', result: { ...result, items: [{ id }] } }]), null);
+});

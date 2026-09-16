@@ -6,7 +6,7 @@ import type { CoworkReadAction } from '@/lib/cowork/agent-loop';
 export async function queryCoworkLeads(
   client: SupabaseClient,
   scope: { userId: string; organizationId: string },
-  action: CoworkReadAction,
+  action: Exclude<CoworkReadAction, 'research.get_existing'>,
   value: string,
 ) {
   let query = client.from('leads')

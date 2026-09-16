@@ -6,7 +6,7 @@ export async function loadCoworkHistory(
   scope: { userId: string; organizationId: string },
   parentId: string | null,
 ) {
-  const history: Array<{ request: string; reply: string; document: { title: string; content: string } | null }> = [];
+  const history: Array<{ request: string; reply: string; document: { title: string; content: string } | null; observations: unknown[] }> = [];
   const visited = new Set<string>();
   let remaining = 60000;
   let cursor = parentId;
@@ -22,7 +22,11 @@ export async function loadCoworkHistory(
       .eq('kind', 'run.completed').order('sequence', { ascending: false }).limit(1).maybeSingle();
     if (event.error || !event.data) throw new Error('Conversation result unavailable');
     const result = coworkDocumentSchema.parse({ reply: event.data.payload.reply, document: event.data.payload.document });
-    const turn = { request: run.message, ...result };
+    const observed = await client.from('cowork_run_events').select('payload')
+      .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
+      .eq('kind', 'tool.completed').order('sequence', { ascending: true }).limit(3);
+    if (observed.error) throw new Error('Conversation observations unavailable');
+    const turn = { request: run.message, ...result, observations: (observed.data || []).map((row: { payload: unknown }) => row.payload) };
     const size = JSON.stringify(turn).length;
     if (size > remaining) {
       // Preserve the immediate parent rather than silently editing a truncated document.

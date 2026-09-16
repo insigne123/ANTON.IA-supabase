@@ -11,6 +11,7 @@ function fixture(rows: Record<string, { parent: string | null; owner?: string }>
     const chain = {
       select: () => chain, order: () => chain, limit: () => chain,
       eq: (key: string, value: string) => { where[key] = value; return chain; },
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: [{ payload: { action: 'prospecting.search', result: { items: [{ id: 'apollo:1' }] } } }], error: null })),
       maybeSingle: async () => {
         const id = where.id || where.run_id;
         const row = rows[id];
@@ -30,6 +31,7 @@ test('history preserves chronological turns and scopes every query', async () =>
   const history = await loadCoworkHistory(f.client, { userId: 'owner', organizationId: 'org' }, 'b');
   assert.deepEqual(history.turns.map(turn => turn.request), ['request-a', 'request-b']);
   assert.equal(history.olderTurnsOmitted, false);
+  assert.equal(history.turns[0].observations.length, 1);
   assert.ok(f.filters.every(filter => filter.user_id === 'owner' && filter.organization_id === 'org'));
 });
 
