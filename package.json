@@ -8,7 +8,7 @@
   "scripts": {
     "extension:build": "node scripts/build-linkedin-extension.mjs",
     "extension:release": "node scripts/build-linkedin-extension.mjs --release",
-    "extension:test": "node --loader ./scripts/ts-test-loader.mjs --test src/lib/extension-contracts.test.ts src/lib/server/extension-leads.test.ts src/lib/server/extension-campaigns.test.ts src/app/api/extension/workspace/route.test.ts chrome-extension/tests/*.test.mjs",
+    "extension:test": "node --loader ./scripts/ts-test-loader.mjs --test src/lib/extension-contracts.test.ts src/lib/server/extension-leads.test.ts src/lib/server/extension-sends.test.ts src/lib/server/extension-campaigns.test.ts src/lib/server/extension-details.test.ts src/lib/server/extension-research-report.test.ts src/lib/server/extension-recovery.test.ts src/lib/server/linkedin-message-writer.test.ts src/app/api/extension/workspace/route.test.ts chrome-extension/tests/*.test.mjs",
     "dev": "next dev -p 9003",
     "genkit:dev": "genkit start -- tsx src/ai/dev.ts",
     "genkit:watch": "genkit start -- tsx --watch src/ai/dev.ts",

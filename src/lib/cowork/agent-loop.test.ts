@@ -68,3 +68,19 @@ test('note review requires an observed target and persists before returning', as
   assert.match(result.reply, /Revisa/);
   assert.equal(proposals, 1);
 });
+
+test('parallel and sequential queries share one total read budget', async () => {
+  let calls = 0;
+  let decisions = 0;
+  await assert.rejects(runCoworkReadLoop({
+    message: 'Compara', signal: new AbortController().signal, authorize: async () => {},
+    decide: async (_observations, mustAnswer) => {
+      if (decisions++ === 0) return { action: 'reads.parallel', query: null, leadId: null, answer: null,
+        reads: ['uno','dos','tres'].map(input => ({ action: 'leads.search', input })) };
+      assert.equal(mustAnswer, true);
+      return search;
+    },
+    execute: async () => { calls++; return {}; }, record: async () => {},
+  }), /budget exhausted/);
+  assert.equal(calls, 3);
+});

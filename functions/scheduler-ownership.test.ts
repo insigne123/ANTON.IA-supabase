@@ -12,6 +12,7 @@ const vercelConfig = JSON.parse(readFileSync('vercel.json', 'utf8')) as { crons?
 const firebaseBridgeRoutes = [
     'process-campaigns',
     'campaigns-v2',
+    'research-sequences',
     'outbound-reconciliation',
     'apollo-reconciliation',
     'apollo-usage',
@@ -65,6 +66,7 @@ test('Firebase owns all production scheduler bridges and Vercel only schedules S
     assert.deepEqual(scheduledPaths, ['/api/cron/suplia']);
 
     const schedules = [
+        ['researchSequencePreparationTick', 'every 1 minutes', '/api/cron/research-sequences'],
         ['campaignProcessingTick', "every 5 minutes", '/api/cron/process-campaigns'],
         ['outboundReconciliationTick', "every 5 minutes", '/api/cron/outbound-reconciliation'],
         ['apolloReconciliationTick', "every 5 minutes", '/api/cron/apollo-reconciliation'],

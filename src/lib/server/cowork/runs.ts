@@ -2,10 +2,11 @@ import { z } from 'zod';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { coworkRequestSchema } from '@/lib/cowork/contracts';
+import { assertCoworkModeAvailable } from '@/lib/cowork/execution-policy';
+import { resolveCoworkRuntime } from '@/lib/cowork/runtime-config';
 
 export function coworkWorkerConfigured() {
-  return process.env.COWORK_WORKER_ENABLED === 'true'
-    && Boolean(process.env.COWORK_MODEL?.trim() && process.env.COWORK_WORKER_SECRET?.trim());
+  return resolveCoworkRuntime(process.env).ready;
 }
 
 export async function listCoworkRuns(auth: AuthContext) {
@@ -32,6 +33,7 @@ export async function getCoworkRun(auth: AuthContext, id: string) {
 
 export async function admitCoworkRun(auth: AuthContext, body: unknown) {
   const input = coworkRequestSchema.parse(body);
+  assertCoworkModeAvailable(input.mode, process.env.COWORK_AUTONOMY_ENABLED === 'true');
   const { data, error } = await getSupabaseAdminClient().rpc('cowork_admit_followup', {
     p_user_id: auth.user.id, p_organization_id: auth.organizationId,
     p_request_id: input.requestId, p_message: input.message, p_mode: input.mode,

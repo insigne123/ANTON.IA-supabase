@@ -60,6 +60,46 @@ El producto completo continúa pendiente. Existe ahora un recorrido de redacció
 
 ## Verificación local
 
+### Scheduler publicado — 16 de septiembre de 2026
+
+- Firebase CLI autenticado; `firebase deploy --only functions:coworkTick --project leadflowai-3yjcy --non-interactive` terminó correctamente.
+- Function `coworkTick` ACTIVE, Node 22, secreto `COWORK_WORKER_SECRET` versión 1. Job `firebase-schedule-coworkTick-us-central1` ENABLED, cada minuto, identidad OIDC de la cuenta de servicio de Functions.
+- IAM de Cloud Run `coworktick`: invocación únicamente para `1083965020353-compute@developer.gserviceaccount.com`; no binding público. Sin errores en la consulta de logs del servicio durante los 15 minutos revisados.
+- El flag `COWORK_SCHEDULER_ENABLED` no está configurado, por lo que el tick sale sin procesar. App Hosting tampoco tiene las variables Cowork publicadas. No se activó el piloto ni se verificó un trabajo real.
+- Peticiones sin credenciales a `/api/cowork/access`, `/api/cowork/runs` y POST `/api/cron/cowork` del origen App Hosting devolvieron 401.
+- Comprobación local `verify:prod-config`: no aprobada por `AI_PROVIDER=glm` y ausencia de `FIREBASE_SCHEDULER_SECRET`; describe el entorno local, no una comprobación del runtime remoto. Las cinco pruebas de propiedad del scheduler aprobaron.
+- Cowork ahora fija explícitamente el proveedor OpenAI, no hereda las selecciones legacy de SUPL.IA. La admisión exige modelo, flag, secreto y clave del proveedor; configuración desconocida falla cerrada. Prueba de configuración, regresión de autonomía y TypeScript aprobados.
+- La compilación Functions se ejecutó explícitamente antes del despliegue, ya que el hook `cmd /c` del repo no imprime la ejecución esperada de npm en este shell.
+
+### Cierre de integración con editor y contexto de investigación
+
+- Recuperación de borradores ahora consulta `getCurrentNativeDraft` con el usuario/organización del trabajo; no presenta el preview histórico de `draft.completed` como versión actual tras una edición externa.
+- Enlace directo a `/contact/compose?draftId=...` y acción Actualizar versión en el panel. No ejecuta envío ni aprobación del correo. Mensaje corregido para no afirmar que un borrador nunca fue enviado desde otra superficie.
+- Búsqueda externa conserva LinkedIn de persona, sitio y LinkedIn de empresa cuando el proveedor los entrega como URLs HTTP(S) sin credenciales. Guardar contacto persiste esas referencias para que la investigación no pierda la identidad pública observada. No inventa ni revela email.
+- Pruebas de revisión actual, enlace al editor, conservación de URLs, sanitización y scope aprobadas; TypeScript aprobado.
+- `npm run build` completó correctamente en este entorno (16 Sep). Se creó el secreto `COWORK_WORKER_SECRET` en Secret Manager y se concedió acceso a las cuentas de servicio de App Hosting y Functions; el valor no se guardó en el repositorio.
+- Intento de despliegue de `functions:coworkTick` detenido por Firebase CLI: credenciales vencidas, requiere `firebase login --reauth`. Google Cloud sí está autenticado. El scheduler no está desplegado y Cowork permanece deshabilitado. Estos cambios no constituyen el cierre del plan integral.
+
+### Estado vigente — 16 de septiembre, continuidad y paralelismo
+
+- Aplicadas y verificadas en catálogo: búsqueda externa `20260916004748`, cola de búsqueda `20260916004808`, cola de borradores `20260916004858`, fencing de borradores `20260916161140` y documentos versionados `20260916163146`. Los archivos locales ya usan estas versiones para evitar reaplicaciones. Las referencias antiguas de abajo son históricas.
+- La finalización del trabajo persiste documento/versión y resultado en una misma transacción. Las continuaciones cuyo padre tiene documento reutilizan su identidad; trabajos independientes reciben otra. Lectura de historial filtra por ascendencia real, no solo por número de revisión, para excluir ramas hermanas.
+- La UI incorpora selector de versiones, detrás de `COWORK_DOCUMENT_VERSIONS_ENABLED`; activación y revisión renderizada todavía pendientes. No hay backfill de documentos anteriores ni versionado de todos los formatos.
+- `reads.parallel` ejecuta hasta dos consultas internas simultáneas, con máximo tres lecturas totales por ejecución, compartido con consultas individuales. Revalida acceso antes de lectura y publicación; espera todas las tareas activas al fallar y conserva resultados observados. No habilita escrituras ni llamadas externas paralelas.
+- Esto es paralelismo de herramientas conectado al agente, no el sistema completo de especialistas con modelos independientes. Ese frente sigue pendiente.
+- Autonomía inicial, detrás de `COWORK_AUTONOMY_ENABLED`, autoriza una búsqueda externa de hasta 25 contactos por trabajo; conserva aprobación de notas. Admisión y worker aplican política servidor independiente del LLM. No equivale a autonomía general.
+- Google Cloud rechazó renovación de tokens con `Reauthentication failed`; es necesario `gcloud auth login` para completar despliegue de app/Functions y configurar secretos. No hay despliegue confirmado ni grants Cowork habilitados.
+- Pruebas de pool concurrente, presupuesto compartido, revocación y lectura de historial por rama añadidas. Las verificaciones SQL se limitan a esquema/permisos; no se ejecutaron suites ni fixtures contra producción.
+
+### Corrección de recuperación de borradores — 16 de septiembre
+
+- Corregido el sondeo: después del POST de encolado se inicia una nueva consulta de estado, aunque la consulta inicial hubiera devuelto `none`. Reabrir sigue recuperando el resultado.
+- Finalización ligada a `attempts`: el worker entrega su intento a la RPC. Nueva migración forward-only `20260916100000_cowork_draft_attempt_fencing.sql`, preparada y **no aplicada**. El código actualizado requiere esta migración antes de activar borradores.
+- Corrección a las afirmaciones previas: la identidad nativa incluye hashes del perfil y estilo además de la clave; no se puede garantizar una sola generación tras cambios de configuración. La nueva función deja ejecuciones vencidas como resultado incierto, sin reencolado automático.
+- La recuperación procesa exclusivamente solicitudes realmente vencidas, sin reiniciar otros borradores del mismo trabajo. La conversación completada no pasa a fallida por un fallo de un borrador secundario.
+- UI conserva el mensaje del fallo; ante resultado incierto solicita revisar borradores existentes y no ofrece regeneración automática. Falta conciliación con el motor nativo para resolver ese estado.
+- Prueba DOM específica de encolado -> consulta -> borrador recuperado aprobada, prueba del adaptador con número de intento aprobada y TypeScript aprobado. Falta prueba SQL concurrente y aplicar la migración.
+
 ### Consolidación, scheduler y guardado de contactos
 
 - Supabase volvió a estar disponible. Identidad verificada: `nicolas.yarur.g@yago.cl`, UUID `de3a3194-29b1-449a-828a-53608a7ebe47`. No se habilitó un grant ni se cambió una cuenta.
@@ -177,3 +217,10 @@ Este incremento es local, posterior al commit de entrega. No se ha activado Cowo
 - `node scripts/test-cowork-workspace.mjs`: aprobado; prueba aislada de estado sin worker, apertura de documento persistido, contenido como texto seguro, foco y revocación. Sin `.env.local`, credenciales ni proveedores.
 - Se aprobaron seis pruebas de bucle/consultas (observaciones reales, límite de pasos, revocación, cancelación, scope y entrada), tres de continuidad y dos de exportación CSV. También se verificaron nuevamente contratos, TypeScript y ESLint de los archivos afectados.
 - Las pruebas locales usan mocks; no sustituyen pruebas SQL/RLS ni autenticación real.
+
+### Piloto privado desplegado — 16 de septiembre de 2026
+
+- `COWORK_ENABLED=true` y `COWORK_WORKER_ENABLED=true` en `apphosting.yaml`; `COWORK_SCHEDULER_ENABLED=true` en `functions/.env.leadflowai-3yjcy`. Visibilidad restringida por código al email exacto `nicolas.yarur.g@yago.cl` + UUID `de3a3194-29b1-449a-828a-53608a7ebe47` + email verificado + grant `cowork_access_grants(enabled=true)` + membresía de organización. Otros usuarios no ven la entrada ni la ruta.
+- Migraciones Cowork ya aplicadas en producción; archivos locales alineados a las versiones aplicadas y eliminadas las referencias antiguas `2026091522*/2026091523*` nunca aplicadas.
+- `node scripts/verify-cowork.mjs`: 37 pruebas aprobadas; `npm run typecheck` aprobado.
+- Cambios no relacionados (extensión LinkedIn, campañas, Apollo, cron ANTON.IA, secuencias) quedaron fuera de este despliegue y siguen solo en el árbol local.

@@ -8,6 +8,11 @@ import { coworkApolloPayload, coworkSearchCriteriaSchema } from '@/lib/cowork/se
 
 const providerLead = z.object({ id: z.string().min(1).max(200) }).passthrough();
 function text(value: unknown, max = 500) { return typeof value === 'string' ? value.slice(0, max) : null; }
+function webUrl(value: unknown) {
+  if (typeof value !== 'string' || value.length > 2048) return null;
+  try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : null; }
+  catch { return null; }
+}
 export function normalizeCoworkSearchResult(value: unknown, limit: number) {
   const payload = z.object({ leads: z.array(providerLead).max(1000) }).parse(value);
   return {
@@ -18,6 +23,9 @@ export function normalizeCoworkSearchResult(value: unknown, limit: number) {
       return {
         id: `apollo:${lead.id}`, name: text(lead.name || lead.full_name), title: text(lead.title),
         company: text(organization.name || lead.org_name || lead.organization_name),
+        linkedin_url: webUrl(lead.linkedin_url),
+        company_website: webUrl(organization.website_url || lead.organization_website),
+        company_linkedin: webUrl(organization.linkedin_url),
         // Search does not reveal or verify mailbox addresses.
         email: null, status: 'No guardado', industry: text(organization.industry || lead.industry),
         location: [lead.city, lead.country].filter(item => typeof item === 'string').join(', ').slice(0, 500),

@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import { coworkDocumentSchema } from './contracts';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
+import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
 
 export const coworkDecisionSchema = z.object({
-  action: z.enum(['leads.search', 'leads.get', 'research.get_existing', 'crm.propose_note', 'prospecting.propose_search', 'answer']),
+  action: z.enum(['leads.search', 'leads.get', 'research.get_existing', 'reads.parallel', 'crm.propose_note', 'prospecting.propose_search', 'answer']),
+  reads: z.array(coworkReadTaskSchema).min(1).max(3).nullable().optional(),
   query: z.string().max(120).nullable(),
   leadId: z.string().uuid().nullable(),
   note: z.string().trim().min(1).max(4000).nullable().optional(),
@@ -27,10 +29,11 @@ export async function runCoworkReadLoop(input: {
   proposeSearch?: (criteria: CoworkSearchCriteria) => Promise<void>;
 }) {
   const observations: CoworkObservation[] = [];
+  let readsUsed = 0;
   for (let turn = 0; turn < 4; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
-    const decision = coworkDecisionSchema.parse(await input.decide(observations, turn === 3));
+    const decision = coworkDecisionSchema.parse(await input.decide(observations, turn === 3 || readsUsed >= 3));
     input.signal.throwIfAborted();
     if (decision.action === 'answer') {
       if (!decision.answer) throw new Error('Missing final answer');
@@ -55,6 +58,19 @@ export async function runCoworkReadLoop(input: {
       return { reply: 'Revisa el cambio de nota antes de guardarlo.', document: null };
     }
     if (turn === 3) throw new Error('Cowork tool budget exhausted');
+    if (decision.action === 'reads.parallel') {
+      if (!decision.reads || readsUsed + decision.reads.length > 3) throw new Error('Cowork tool budget exhausted');
+      readsUsed += decision.reads.length;
+      const results = await executeCoworkParallelReads(decision.reads, {
+        signal: input.signal, authorize: input.authorize,
+        execute: task => input.execute(task.action, task.input),
+        record: (task, result) => input.record({ action: task.action, input: task.input, result }),
+      });
+      observations.push(...decision.reads.map((task, index) => ({ ...task, result: results[index] })));
+      continue;
+    }
+    if (readsUsed >= 3) throw new Error('Cowork tool budget exhausted');
+    readsUsed++;
     const value = decision.action === 'leads.search' ? decision.query : decision.leadId;
     if (value === null) throw new Error('Missing tool argument');
     await input.authorize();

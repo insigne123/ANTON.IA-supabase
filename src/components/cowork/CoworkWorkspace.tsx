@@ -5,6 +5,9 @@ import { ArrowUp, Check, FileText, History, Loader2, Plus, Square, X } from 'luc
 import { ExportMenu } from './ExportMenu';
 import { ContactResults } from './ContactResults';
 import { ResearchSources } from './ResearchSources';
+import { ExecutionMode } from './ExecutionMode';
+import { DocumentVersions } from './DocumentVersions';
+import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import { coworkSearchCriteriaSchema } from '@/lib/cowork/search-proposal';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -39,10 +42,12 @@ export function CoworkWorkspace() {
   const [cancelling, setCancelling] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [ready, setReady] = useState(false);
+  const [canAutonomous, setCanAutonomous] = useState(false);
+  const [mode, setMode] = useState<CoworkExecutionMode>('approval');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [documentOpen, setDocumentOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
-  const pending = useRef<{ message: string; requestId: string; parentRunId: string | null } | null>(null);
+  const pending = useRef<{ message: string; requestId: string; parentRunId: string | null; mode: CoworkExecutionMode } | null>(null);
   const documentButton = useRef<HTMLButtonElement>(null);
   const documentHeading = useRef<HTMLHeadingElement>(null);
   const active = state && ['queued', 'running', 'waiting_approval'].includes(state.run.status);
@@ -74,6 +79,8 @@ export function CoworkWorkspace() {
     request('/api/cowork/runs').then(data => {
       if (disposed) return;
       setRuns(data.runs); setReady(data.canSubmit); setError('');
+      setCanAutonomous(data.canAutonomous === true);
+      if (!data.canAutonomous) setMode('approval');
     }).catch(error => { if (!disposed) setError(error.message); })
       .finally(() => { if (!disposed) setLoading(false); });
     return () => { disposed = true; };
@@ -123,12 +130,12 @@ export function CoworkWorkspace() {
     const text = message.trim();
     if (!text || sending || !ready) return;
     const parentRunId = state?.run.status === 'completed' ? state.run.id : null;
-    if (pending.current?.message !== text || pending.current?.parentRunId !== parentRunId) pending.current = { message: text, requestId: crypto.randomUUID(), parentRunId };
+    if (pending.current?.message !== text || pending.current?.parentRunId !== parentRunId || pending.current?.mode !== mode) pending.current = { message: text, requestId: crypto.randomUUID(), parentRunId, mode };
     setSending(true); setError('');
     try {
       const data = await request('/api/cowork/runs', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...pending.current, mode: 'approval' }),
+        body: JSON.stringify(pending.current),
       });
       setMessage(''); pending.current = null; choose(data.id); setRefresh(value => value + 1);
     } catch (error) { setError(error instanceof Error ? error.message : 'No se pudo guardar la solicitud.'); }
@@ -179,6 +186,7 @@ export function CoworkWorkspace() {
             <form onSubmit={event => { event.preventDefault(); void send(); }} className="rounded-2xl border border-border bg-muted/30 p-4 shadow-sm">
               <Label htmlFor="cowork-message" className="sr-only">Describe tu trabajo</Label>
               <Textarea id="cowork-message" value={message} maxLength={20000} onChange={event => setMessage(event.target.value)} placeholder="Describe lo que necesitas preparar…" className="min-h-28 resize-y border-0 bg-transparent text-base shadow-none" disabled={sending} />
+              {canAutonomous && <ExecutionMode id="cowork-mode" value={mode} onChange={setMode} disabled={sending} />}
               <div className="mt-3 flex items-center justify-between gap-3"><span className="text-xs text-muted-foreground">Consulta tus contactos guardados o prepara un documento</span><Button type="submit" size="icon" className="rounded-xl" aria-label="Crear trabajo" disabled={!ready || !message.trim() || sending}>{sending ? <Loader2 className="motion-safe:animate-spin" /> : <ArrowUp />}</Button></div>
             </form>
             {!ready && !loading && <p className="mt-3 text-sm text-muted-foreground">El procesamiento todavía no está disponible. Puedes consultar los trabajos guardados.</p>}
@@ -223,6 +231,7 @@ export function CoworkWorkspace() {
             <div className="mt-auto flex justify-end pt-6">{active ? <Button variant="outline" disabled={cancelling} onClick={() => void cancel()}><Square />{cancelling ? 'Cancelando…' : 'Detener trabajo'}</Button> : <Button variant="outline" onClick={() => choose(null)}>Nuevo trabajo</Button>}</div>
             {state.run.status === 'completed' && <form onSubmit={event => { event.preventDefault(); void send(); }} className="rounded-2xl border border-border bg-muted/30 p-4">
               <Label htmlFor="cowork-followup">Continúa este trabajo</Label>
+              {canAutonomous && <ExecutionMode id="cowork-followup-mode" value={mode} onChange={setMode} disabled={sending} />}
               <Textarea id="cowork-followup" value={message} maxLength={20000} onChange={event => setMessage(event.target.value)} placeholder="Pide un ajuste o el siguiente paso…" disabled={sending} className="mt-2 min-h-24" />
               <div className="mt-3 flex justify-end"><Button type="submit" disabled={!ready || !message.trim() || sending}>{sending ? 'Guardando…' : 'Continuar'}<ArrowUp /></Button></div>
             </form>}
@@ -231,6 +240,7 @@ export function CoworkWorkspace() {
         {documentOpen && output?.document ? <aside aria-label="Documento" className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-muted/20 lg:basis-1/2">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4"><h2 ref={documentHeading} tabIndex={-1} className="min-w-0 truncate font-medium focus-visible:outline-none">{output.document.title}</h2><div className="flex shrink-0 gap-1"><ExportMenu key={selected} runId={selected!} kind="document" onError={setError} onAccessDenied={clearPrivateResults} /><Button variant="ghost" size="icon" aria-label="Cerrar documento" onClick={() => { setDocumentOpen(false); requestAnimationFrame(() => documentButton.current?.focus()); }}><X /></Button></div></div>
           <pre className="max-h-[65dvh] overflow-y-auto whitespace-pre-wrap break-words p-5 font-sans text-sm leading-7 md:p-8">{output.document.content}</pre>
+          <DocumentVersions runId={selected!} onSelect={choose} onAccessDenied={clearPrivateResults} />
         </aside> : state && <aside aria-label="Resumen del trabajo" className="hidden w-64 shrink-0 self-start rounded-2xl border border-border bg-muted/25 p-5 xl:block"><h2 className="font-medium">Progreso</h2><p className="mt-2 text-sm text-muted-foreground">{labels[state.run.status]}</p><h2 className="mt-6 font-medium">Resultados</h2><p className="mt-2 text-sm text-muted-foreground">{output?.document ? output.document.title : 'Los documentos aparecerán aquí.'}</p><h2 className="mt-6 font-medium">Contexto</h2><p className="mt-2 text-sm text-muted-foreground">Tu mensaje</p></aside>}
       </div>
     </section>

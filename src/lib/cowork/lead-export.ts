@@ -1,7 +1,10 @@
 import { z } from 'zod';
 
 const cell = z.union([z.string(), z.number(), z.null()]).optional();
-const rowSchema = z.object({ id: z.string().min(1).max(207), name: cell, title: cell, company: cell, email: cell, status: cell, industry: cell, location: cell }).strip();
+const optionalUrl = z.string().url().max(2048).refine(value => /^https?:\/\//i.test(value)).nullable().optional();
+const rowSchema = z.object({ id: z.string().min(1).max(207), name: cell, title: cell, company: cell, email: cell, status: cell, industry: cell, location: cell,
+  linkedin_url: optionalUrl, company_website: optionalUrl, company_linkedin: optionalUrl,
+}).strip();
 const resultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().uuid() })).max(20), scope: z.literal('own_saved_contacts') });
 const externalResultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().startsWith('apollo:').max(207) })).max(25), scope: z.literal('external_search') });
 export const coworkLeadColumns = ['id', 'name', 'title', 'company', 'email', 'status', 'industry', 'location'] as const;

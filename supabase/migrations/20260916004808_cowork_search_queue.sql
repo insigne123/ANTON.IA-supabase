@@ -1,4 +1,4 @@
--- Pending: apply after cowork_external_search. Approved search is background work.
+-- Applied after cowork_external_search; aligned with production ledger.
 alter table public.cowork_search_proposals drop constraint cowork_search_proposals_status_check;
 alter table public.cowork_search_proposals add constraint cowork_search_proposals_status_check
   check(status in ('pending','approved','executing','completed','rejected','failed'));

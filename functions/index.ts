@@ -28,6 +28,7 @@ import { hasUserEnrichmentSearchCreditAccess } from './enrichment-search-access'
 
 // Retain the old endpoint only as an IAM-private deprecation response.
 export { antoniaWorker } from './src/antonia-worker';
+export { coworkTick } from './cowork-scheduler';
 
 // NOTE: Keep defaults for backwards compatibility, but prefer env vars in production.
 const DEFAULT_APP_URL = 'https://studio--leadflowai-3yjcy.us-central1.hosted.app';
@@ -5922,6 +5923,19 @@ export const antoniaTick = functions.scheduler.onSchedule({
 });
 
 // These schedules are the only production owners of their respective Next.js bridges.
+export const researchSequencePreparationTick = functions.scheduler.onSchedule({
+    schedule: 'every 1 minutes',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    secrets: ['FIREBASE_SCHEDULER_SECRET'],
+}, async () => {
+    await invokeFirebaseSchedulerBridge({
+        name: 'research-sequence-preparation',
+        path: '/api/cron/research-sequences',
+        method: 'POST',
+    });
+});
+
 export const campaignProcessingTick = functions.scheduler.onSchedule({
     schedule: 'every 5 minutes',
     timeoutSeconds: 540,

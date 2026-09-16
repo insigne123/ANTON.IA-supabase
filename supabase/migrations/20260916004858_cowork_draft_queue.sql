@@ -1,4 +1,4 @@
--- Pending: apply after the five applied core migrations. Draft generation becomes background work.
+-- Applied in production. Draft generation becomes background work.
 create table public.cowork_draft_requests (
   run_id uuid not null,
   user_id uuid not null,

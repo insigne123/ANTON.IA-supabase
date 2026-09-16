@@ -8,6 +8,25 @@ runConfig:
   memoryMiB: 768
 
 env:
+  # Cowork private pilot: visible solo para nicolas.yarur.g@yago.cl (gate en código + grant DB).
+  - variable: COWORK_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_OWNER_USER_ID
+    value: de3a3194-29b1-449a-828a-53608a7ebe47
+    availability: [RUNTIME]
+  - variable: COWORK_WORKER_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_MODEL
+    value: gpt-5.6-luna
+    availability: [RUNTIME]
+  - variable: COWORK_PROVIDER
+    value: openai
+    availability: [RUNTIME]
+  - variable: COWORK_WORKER_SECRET
+    secret: COWORK_WORKER_SECRET
+    availability: [RUNTIME]
   # === Primary production providers ===
   - variable: OPENAI_API_KEY
     secret: OPENAI_API_KEY
@@ -86,6 +105,12 @@ env:
     availability: [BUILD, RUNTIME]
 
   # === Lead provider ===
+  # Apollo runs in-process in this service: server runtime only, never BUILD,
+  # so the key cannot be emitted into the browser bundle.
+  - variable: APOLLO_API_KEY
+    secret: APOLLO_API_KEY
+    availability: [RUNTIME]
+
   - variable: LEADS_PROVIDER_DEFAULT
     value: apollo
     availability: [RUNTIME]

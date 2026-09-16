@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { getCoworkRun } from './runs';
-import { createNativeDraft } from '@/lib/server/native-drafts';
+import { createNativeDraft, getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireCoworkWorkerAccess } from './access';
 import { ResearchSnapshotV1Schema } from '@/lib/research-contracts';
@@ -55,22 +55,31 @@ export async function getCoworkDraftStatus(auth: AuthContext, runId: string, sna
     .eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).maybeSingle();
   if (row.error) throw row.error;
   if (!row.data) return { status: 'none' as const };
-  if (row.data.status !== 'completed') return { status: row.data.status as 'pending' | 'executing' | 'failed' };
-  const state = await getCoworkRun(auth, runId);
-  const completed = state?.events.slice().reverse().find((event: { kind: string; payload: Record<string, any> }) =>
-    event.kind === 'draft.completed' && event.payload.snapshotId === snapshotId)?.payload;
-  if (!completed) return { status: 'completed' as const, draft: null };
+  if (row.data.status === 'failed') {
+    const state = await getCoworkRun(auth, runId);
+    const event = state?.events.slice().reverse().find((event: { kind: string; payload: Record<string, any> }) =>
+      event.kind === 'draft.failed' && event.payload.snapshotId === snapshotId);
+    return { status: 'failed' as const, message: typeof event?.payload.message === 'string' ? event.payload.message : null,
+      uncertain: event?.payload.reason === 'draft_outcome_unknown' };
+  }
+  if (row.data.status !== 'completed') return { status: row.data.status as 'pending' | 'executing' };
+  if (!row.data.draft_id) return { status: 'completed' as const, draft: null };
+  const current = await getCurrentNativeDraft({
+    organizationId: auth.organizationId, userId: auth.user.id, draftId: row.data.draft_id,
+  });
+  if (!current) return { status: 'completed' as const, draft: null };
   return {
     status: 'completed' as const,
     draft: {
-      id: String(completed.draftId || row.data.draft_id || ''),
-      subject: typeof completed.subject === 'string' ? completed.subject : null,
-      text: typeof completed.text === 'string' ? completed.text : null,
+      id: current.draftId,
+      versionId: current.versionId,
+      subject: current.content.subject,
+      text: current.content.text,
     },
   };
 }
 
-/** Only the scheduled worker generates drafts. Retries reuse the native idempotency key. */
+/** Only the scheduled worker generates drafts. Uncertain outcomes are not replayed automatically. */
 export async function processCoworkDraftQueue() {
   if (process.env.COWORK_ENABLED !== 'true' || process.env.COWORK_NATIVE_DRAFTS_ENABLED !== 'true') {
     return { processed: 0, claimed: false };
@@ -84,6 +93,7 @@ export async function processCoworkDraftQueue() {
   const finish = (success: boolean, fields: { draftId?: string; subject?: string | null; text?: string | null; error?: string }) =>
     client.rpc('cowork_finish_draft', {
       p_run_id: job.run_id, p_snapshot_id: job.snapshot_id,
+      p_attempt: job.attempts,
       p_user_id: scope.userId, p_organization_id: scope.organizationId,
       p_success: success, p_draft_id: fields.draftId || null,
       p_subject: fields.subject ?? null, p_text: fields.text ?? null, p_error: fields.error || null,
@@ -104,6 +114,11 @@ export async function processCoworkDraftQueue() {
     await requireCoworkWorkerAccess(client, scope);
     const current = await client.from('cowork_runs').select('status').eq('id', job.run_id).single();
     if (current.error || current.data.status === 'cancelled') throw new Error('Draft cancelled');
+    const attempt = await client.from('cowork_draft_requests').select('status,attempts')
+      .eq('run_id', job.run_id).eq('snapshot_id', job.snapshot_id).single();
+    if (attempt.error || attempt.data.status !== 'executing' || attempt.data.attempts !== job.attempts) {
+      return { processed: 0, claimed: true };
+    }
     const result = await createNativeDraft({
       ...scope, snapshotId: job.snapshot_id,
       idempotencyKey: coworkDraftIdempotencyKey(job.run_id, job.snapshot_id),
@@ -128,9 +143,8 @@ export async function processCoworkDraftQueue() {
       if (failed.error) throw failed.error;
       return { processed: 0, claimed: true };
     }
-    // Unexpected crash (timeout, provider 500): leave executing so the next tick
-    // requeues it (native generation is idempotent via the stable key).
-    // Only the stale-execution path marks it failed after repeated attempts.
+    // Leave uncertain execution for the stale path; do not automatically generate
+    // again because native identity also depends on mutable seller/style data.
     return { processed: 0, claimed: true };
   }
 }

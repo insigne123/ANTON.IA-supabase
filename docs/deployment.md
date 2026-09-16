@@ -71,6 +71,7 @@ Firebase Scheduled Functions es la única propietaria de los workers, campanas, 
 | --- | --- | --- | --- |
 | ANTON.IA | `antoniaTick` | cada minuto | Worker primario. |
 | Native research | `nativeResearchTick` | cada minuto | No hace trabajo hasta que `NATIVE_RESEARCH_SCHEDULER_ENABLED=true`. |
+| Preparación de secuencias | `researchSequencePreparationTick` | cada minuto | Bridge `/api/cron/research-sequences`; requiere la migración de preparaciones. Genera borradores, no envía. |
 | Campanas | `campaignProcessingTick` | cada 5 minutos | Invoca el bridge privado `/api/cron/process-campaigns`. |
 | Reconciliacion outbound | `outboundReconciliationTick` | cada 5 minutos | Invoca `/api/cron/outbound-reconciliation`. |
 | Reconciliacion Apollo | `apolloReconciliationTick` | cada 5 minutos | Recupera callbacks y polling pendientes mediante `/api/cron/apollo-reconciliation`. |

@@ -1,4 +1,4 @@
--- Forward-only; pending production application.
+-- Applied in production; version aligned with the remote ledger.
 create table public.cowork_search_proposals (
   run_id uuid primary key,
   user_id uuid not null,

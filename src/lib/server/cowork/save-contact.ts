@@ -27,6 +27,8 @@ export async function saveCoworkContact(auth: AuthContext, runId: string, input:
     apollo_id: apolloId, source_provider: 'apollo', source_provider_id: apolloId,
     name: String(observed.name || 'Contacto sin nombre'), company: String(observed.company || ''),
     title: String(observed.title || ''), industry: observed.industry || null, location: observed.location || null,
+    linkedin_url: observed.linkedin_url || null, company_website: observed.company_website || null,
+    company_linkedin: observed.company_linkedin || null,
     email: null,
   }, { onConflict: 'id', ignoreDuplicates: true });
   if (result.error) throw result.error;
