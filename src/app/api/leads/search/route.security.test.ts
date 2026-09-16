@@ -11,11 +11,13 @@ const enrichmentSource = readFileSync(new URL('../../opportunities/enrich-apollo
 const organizationEnrichmentSource = readFileSync(new URL('../../organizations/enrich-apollo/route.ts', import.meta.url), 'utf8');
 const workerSource = readFileSync(new URL('../../cron/antonia/route.ts', import.meta.url), 'utf8');
 
-test('lead-search BFF supplies the backend secret only from server runtime configuration', () => {
-  assert.match(source, /process\.env\.ENRICHMENT_SERVICE_SECRET/);
-  assert.match(source, /"x-api-secret-key": backendSecret/);
-  assert.match(source, /BACKEND_AUTH_NOT_CONFIGURED/);
-  assert.doesNotMatch(source, /NEXT_PUBLIC_ENRICHMENT_SERVICE_SECRET/);
+test('lead-search BFF keeps the Apollo provider key server-only and in-process', () => {
+  assert.match(source, /process\.env\.APOLLO_API_KEY/);
+  assert.match(source, /APOLLO_PROVIDER_NOT_CONFIGURED/);
+  assert.doesNotMatch(source, /NEXT_PUBLIC_APOLLO_API_KEY/);
+  assert.doesNotMatch(source, /x-api-secret-key/);
+  assert.doesNotMatch(source, /fetchWithTimeout\(\s*LEAD_SEARCH_URL/);
+  assert.doesNotMatch(source, /ENRICHMENT_SERVICE_URL/);
 });
 
 test('lead-search BFF keeps firmographic filters distinct and disables batch enrichment', () => {
@@ -30,6 +32,11 @@ test('lead-search BFF keeps firmographic filters distinct and disables batch enr
   assert.doesNotMatch(source, /\(body as any\)\?\.provider|body\?\.\[0\].*provider/);
   assert.doesNotMatch(source, /enrichmentSearchCreditsUnavailablePayload/);
   assert.match(source, /organization_search_credits/);
+});
+
+test('company search BFF forwards an optional company name filter', () => {
+  assert.match(source, /company_name: companyName/);
+  assert.match(source, /companyKeywords\.length === 0 && companyLocation\.length === 0 && employeeRanges\.length === 0 && !companyName/);
 });
 
 test('company search BFF forwards selection identity without untrusted metadata', () => {

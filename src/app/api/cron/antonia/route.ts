@@ -28,8 +28,6 @@ function getSupabaseCredentials() {
         key: process.env.SUPABASE_SERVICE_ROLE_KEY!
     };
 }
-const DEFAULT_LEAD_SEARCH_URL = "https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search";
-const LEAD_SEARCH_URL = process.env.ANTONIA_LEAD_SEARCH_URL || process.env.LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
 
 function withInternalApiSecret(headers: Record<string, string>): Record<string, string> {
     const secret = String(process.env.INTERNAL_API_SECRET || '').trim();
@@ -819,31 +817,9 @@ async function executeSearch(task: any, supabase: any, config: any) {
             || errorText.includes('DAILY_SEARCH_QUOTA_EXCEEDED')) {
             throw internalErr;
         }
-        console.warn('[Search] Internal /api/leads/search failed. Falling back to external URL.', internalErr?.message || internalErr);
-
-        const searchPayload = {
-            user_id: task.payload.userId,
-            titles: jobTitle ? [jobTitle] : [],
-            company_location: location ? [location] : [],
-            industry_keywords: industry ? [industry] : [],
-            seniorities: Array.isArray(task.payload?.seniorities) ? task.payload.seniorities : [],
-            employee_range: String(task.payload.companySize || '').trim() ? [String(task.payload.companySize).trim()] : employeeRanges,
-            employee_ranges: String(task.payload.companySize || '').trim() ? [String(task.payload.companySize).trim()] : employeeRanges,
-            max_results: 100
-        };
-
-        await touchTaskHeartbeat(supabase, task.id);
-        const response = await fetchWithTimeout(LEAD_SEARCH_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(searchPayload)
-        }, SEARCH_FETCH_TIMEOUT_MS, 'external_search');
-
-        if (!response.ok) {
-            throw new Error(`Search API failed: ${response.statusText}`);
-        }
-
-        data = await response.json();
+        // Lead search runs in-process via /api/leads/search: surface the
+        // failure instead of calling the retired external gateway.
+        throw new Error(`internal_search_failed:${errorText.slice(0, 300)}`);
     }
 
     await touchTaskHeartbeat(supabase, task.id);

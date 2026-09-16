@@ -505,6 +505,7 @@ export default function SearchPage() {
     return {
       legacyIndustry,
       companyKeywords,
+      companyNameFilter: String(filters.companyNameFilter || '').trim(),
       companyLocations: splitFilterInput(filters.location),
       sizeRanges: [String(filters.sizeRange || '').trim()].filter(Boolean),
       titles: splitTitlesInput(filters.title),
@@ -515,8 +516,8 @@ export default function SearchPage() {
   };
 
   const handleSearchCompanies = async (page = 1) => {
-    const { legacyIndustry, companyKeywords, companyLocations, sizeRanges } = getCompanyPersonFilters();
-    if (companyKeywords.length === 0 && companyLocations.length === 0 && sizeRanges.length === 0) {
+    const { legacyIndustry, companyKeywords, companyNameFilter, companyLocations, sizeRanges } = getCompanyPersonFilters();
+    if (companyKeywords.length === 0 && !companyNameFilter && companyLocations.length === 0 && sizeRanges.length === 0) {
       const message = 'Agrega al menos un filtro de empresa para iniciar la búsqueda.';
       setError(message);
       toast({ title: 'Revisa los criterios', description: message });
@@ -537,6 +538,7 @@ export default function SearchPage() {
     setHasSearched(true);
     try {
       const result = await searchCompanies({
+        company_name: companyNameFilter || undefined,
         company_keywords: companyKeywords,
         company_location: companyLocations,
         employee_ranges: sizeRanges,
@@ -1878,6 +1880,11 @@ export default function SearchPage() {
                       <Label htmlFor="location">Sede de la empresa</Label>
                       <Input id="location" aria-describedby="companyLocationHelp" placeholder="Ej. Chile, Argentina" value={filters.location} onChange={(event) => handleFilterChange('location', event.target.value)} />
                       <p id="companyLocationHelp" className="text-xs text-muted-foreground">Filtra por la ubicación de la organización, no por la residencia del lead.</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="companyNameFilter">Nombre de empresa</Label>
+                      <Input id="companyNameFilter" aria-describedby="companyNameFilterHelp" placeholder="Ej. Adecco, SONDA" value={filters.companyNameFilter} onChange={(event) => handleFilterChange('companyNameFilter', event.target.value)} />
+                      <p id="companyNameFilterHelp" className="text-xs text-muted-foreground">Filtra por el nombre de la organización. Puedes combinarlo con los demás filtros.</p>
                     </div>
                     <div className="space-y-2 md:col-span-2">
                       <Label htmlFor="sizeRange">Tamaño de empresa</Label>

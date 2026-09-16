@@ -8,29 +8,30 @@ import {
   submitApolloEnrichment,
 } from './apollo-enrichment';
 
+const API_KEY_ENV = { APOLLO_API_KEY: 'test-apollo-key' };
+
 test('Apollo enrichment configuration fails before quota can cross the provider boundary', () => {
   assert.throws(
     () => assertApolloEnrichmentConfigured({}),
     (error: unknown) => error instanceof ApolloEnrichmentError
       && error.status === 503
-      && error.code === 'ENRICHMENT_SERVICE_SECRET_NOT_CONFIGURED',
+      && error.code === 'APOLLO_PROVIDER_NOT_CONFIGURED',
   );
 });
 
-test('Apollo BFF submits match-only requests through the authenticated gateway', async () => {
+test('Apollo BFF submits match-only requests directly to Apollo', async () => {
   const requests: Array<{ url: URL; init?: RequestInit }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     requests.push({ url: new URL(String(input)), init });
     return Response.json({
-      success: true,
-      enrichment_status: 'completed',
-      provider_request_id: '1234567890123456789',
-      extracted_data: {
-        source_provider: 'apollo',
-        source_provider_id: 'apollo-person-1',
-        full_name: 'Ana Perez',
+      person: {
+        id: 'apollo-person-1',
+        first_name: 'Ana',
+        last_name: 'Perez',
+        linkedin_url: 'https://www.linkedin.com/in/ana-perez',
       },
+      request_id: '1234567890123456789',
     });
   };
 
@@ -40,25 +41,23 @@ test('Apollo BFF submits match-only requests through the authenticated gateway',
       revealEmail: false,
       revealPhone: false,
       matchOnly: true,
-      environment: {
-        ENRICHMENT_SERVICE_URL: 'https://gateway.example.test/api/enrich',
-        ENRICHMENT_SERVICE_SECRET: 'internal-secret',
-      },
+      environment: API_KEY_ENV,
     });
     assert.equal(result.success, true);
     assert.equal(result.providerRequestId, '1234567890123456789');
+    assert.equal(requests[0]?.url.origin + requests[0]?.url.pathname, 'https://api.apollo.io/api/v1/people/match');
     const headers = new Headers(requests[0]?.init?.headers);
-    assert.equal(headers.get('x-api-secret-key'), 'internal-secret');
-    assert.equal(headers.has('x-apollo-api-key'), false);
-    const body = JSON.parse(String(requests[0]?.init?.body));
-    assert.equal(body.match_only, true);
-    assert.deepEqual(body.requested_fields, []);
+    assert.equal(headers.get('X-Api-Key'), 'test-apollo-key');
+    assert.equal(headers.has('x-api-secret-key'), false);
+    const query = requests[0]?.url.searchParams;
+    assert.equal(query?.get('linkedin_url'), 'https://www.linkedin.com/in/ana-perez');
+    assert.equal(result.extractedData?.source_provider_id, 'apollo-person-1');
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test('Apollo BFF classifies gateway timeouts as unknown provider outcomes', async () => {
+test('Apollo BFF classifies provider timeouts as unknown provider outcomes', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
     const error = new Error('network details');
@@ -72,14 +71,11 @@ test('Apollo BFF classifies gateway timeouts as unknown provider outcomes', asyn
         lead: { sourceProviderId: 'apollo-person-1' },
         revealEmail: true,
         revealPhone: false,
-        environment: {
-          ENRICHMENT_SERVICE_URL: 'https://gateway.example.test/api/enrich',
-          ENRICHMENT_SERVICE_SECRET: 'internal-secret',
-        },
+        environment: API_KEY_ENV,
       }),
       (error: unknown) => error instanceof ApolloEnrichmentError
         && error.providerOutcomeUnknown
-        && error.code === 'APOLLO_GATEWAY_TIMEOUT'
+        && error.code === 'APOLLO_UPSTREAM_TIMEOUT'
         && !error.message.includes('network details'),
     );
   } finally {
@@ -87,12 +83,9 @@ test('Apollo BFF classifies gateway timeouts as unknown provider outcomes', asyn
   }
 });
 
-test('Apollo BFF treats ambiguous upstream network errors as unknown outcomes', async () => {
+test('Apollo BFF treats ambiguous upstream errors as unknown outcomes', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => Response.json(
-    { error: 'APOLLO_UPSTREAM_ERROR' },
-    { status: 502 },
-  );
+  globalThis.fetch = async () => Response.json({ status: 'error' }, { status: 502 });
 
   try {
     await assert.rejects(
@@ -100,10 +93,7 @@ test('Apollo BFF treats ambiguous upstream network errors as unknown outcomes', 
         lead: { sourceProviderId: 'apollo-person-1' },
         revealEmail: true,
         revealPhone: false,
-        environment: {
-          ENRICHMENT_SERVICE_URL: 'https://gateway.example.test/api/enrich',
-          ENRICHMENT_SERVICE_SECRET: 'internal-secret',
-        },
+        environment: API_KEY_ENV,
       }),
       (error: unknown) => error instanceof ApolloEnrichmentError
         && error.providerOutcomeUnknown
@@ -120,22 +110,18 @@ test('Apollo polling uses the signed provider request ID as an opaque path segme
   globalThis.fetch = async (input) => {
     requestedUrl = String(input);
     return Response.json({
-      provider_request_id: '-9223372036854775807',
+      request_id: '-9223372036854775807',
       status: 'result_pending',
       retry_after_seconds: 30,
-      candidate: null,
     });
   };
 
   try {
     const result = await pollApolloWebhookResult({
       providerRequestId: '-9223372036854775807',
-      environment: {
-        BACKEND_HOSTED_APP_URL: 'https://gateway.example.test',
-        ENRICHMENT_SERVICE_SECRET: 'internal-secret',
-      },
+      environment: API_KEY_ENV,
     });
-    assert.equal(new URL(requestedUrl).pathname, '/api/webhook-result/-9223372036854775807');
+    assert.equal(new URL(requestedUrl).pathname, '/api/v1/webhook_result/-9223372036854775807');
     assert.equal(result.status, 'result_pending');
     assert.equal(result.retryAfterSeconds, 30);
   } finally {

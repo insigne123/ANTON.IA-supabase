@@ -14,6 +14,7 @@ test('saved lead-search criteria round-trip every supported field', () => {
     searchMode: 'company_name' as const,
     industry: 'SaaS',
     companyKeywords: 'payroll, onboarding',
+    companyNameFilter: 'Adecco',
     location: 'Chile, Argentina',
     personLocation: 'Santiago',
     title: 'VP Marketing, CMO',

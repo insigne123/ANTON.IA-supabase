@@ -7,40 +7,45 @@ import {
   submitApolloOrganizationEnrichment,
 } from './apollo-organization-enrichment';
 
+const API_KEY_ENV = { APOLLO_API_KEY: 'test-apollo-key' };
+
 test('organization enrichment configuration fails before any provider request', () => {
   assert.throws(
     () => assertApolloOrganizationEnrichmentConfigured({}),
     (error: unknown) => error instanceof ApolloOrganizationEnrichmentError
-      && error.code === 'BACKEND_AUTH_NOT_CONFIGURED'
+      && error.code === 'APOLLO_PROVIDER_NOT_CONFIGURED'
       && !error.providerOutcomeUnknown,
   );
 });
 
-test('organization enrichment BFF calls the authenticated gateway only', async () => {
+test('organization enrichment calls Apollo directly with the server-only key', async () => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ url: string; init?: RequestInit }> = [];
   globalThis.fetch = async (input, init) => {
     requests.push({ url: String(input), init });
     return Response.json({
-      provider: 'apollo',
-      status: 'completed',
-      organization: { id: 'org-1', name: 'People Co', primary_domain: 'people.co' },
+      organization: {
+        id: 'org-1',
+        name: 'People Co',
+        primary_domain: 'people.co',
+      },
     });
   };
   try {
     const result = await submitApolloOrganizationEnrichment({
       domain: 'people.co',
       requestId: 'operation-1',
-      environment: {
-        APOLLO_ORGANIZATION_ENRICHMENT_URL: 'https://gateway.example.test/api/organization-enrich',
-        ENRICHMENT_SERVICE_SECRET: 'server-only-secret',
-      },
+      environment: API_KEY_ENV,
     });
     assert.equal(result.status, 'completed');
-    assert.equal(requests[0]?.url, 'https://gateway.example.test/api/organization-enrich');
+    assert.equal(
+      new URL(requests[0]?.url || '').origin + new URL(requests[0]?.url || '').pathname,
+      'https://api.apollo.io/api/v1/organizations/enrich',
+    );
     const headers = new Headers(requests[0]?.init?.headers);
-    assert.equal(headers.get('x-api-secret-key'), 'server-only-secret');
-    assert.deepEqual(JSON.parse(String(requests[0]?.init?.body)), { domain: 'people.co' });
+    assert.equal(headers.get('X-Api-Key'), 'test-apollo-key');
+    assert.equal(headers.has('x-api-secret-key'), false);
+    assert.equal(new URL(requests[0]?.url || '').searchParams.get('domain'), 'people.co');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -48,16 +53,13 @@ test('organization enrichment BFF calls the authenticated gateway only', async (
 
 test('organization enrichment preserves ambiguous provider outcomes without retrying', async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => Response.json({ error: 'BACKEND_ERROR' }, { status: 502 });
+  globalThis.fetch = async () => Response.json({ status: 'error' }, { status: 502 });
   try {
     await assert.rejects(
       () => submitApolloOrganizationEnrichment({
         domain: 'people.co',
         requestId: 'operation-1',
-        environment: {
-          APOLLO_ORGANIZATION_ENRICHMENT_URL: 'https://gateway.example.test/api/organization-enrich',
-          ENRICHMENT_SERVICE_SECRET: 'server-only-secret',
-        },
+        environment: API_KEY_ENV,
       }),
       (error: unknown) => error instanceof ApolloOrganizationEnrichmentError
         && error.providerOutcomeUnknown

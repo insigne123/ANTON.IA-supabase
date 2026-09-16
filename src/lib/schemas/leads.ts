@@ -211,6 +211,8 @@ const perPageField = z.number().int().min(1).max(100).optional();
 
 export const CompanyFilterSearchRequestSchema = z.object({
   search_mode: z.enum(['companies', 'organizations', 'organization_search']).optional().default('companies'),
+  company_name: z.string().trim().optional(),
+  companyName: z.string().trim().optional(),
   company_keywords: stringListField,
   companyKeywords: stringListField,
   company_location: stringListField,

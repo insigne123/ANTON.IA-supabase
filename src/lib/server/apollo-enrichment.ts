@@ -1,5 +1,11 @@
-const DEFAULT_ENRICHMENT_SERVICE_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/enrich';
-const DEFAULT_GATEWAY_BASE_URL = 'https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app';
+import {
+  ApolloGatewayError,
+  executeApolloEnrichment,
+  getApolloApiKey,
+  getApolloWebhookResult,
+} from './apollo-provider/apollo';
+import { consumeEndpointRateLimit, getGatewayConfig } from './apollo-provider/gateway';
+import { validateEnrichmentInput } from './apollo-provider/validation';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -32,59 +38,52 @@ function timeoutMs(environment: Record<string, string | undefined>) {
     : 25_000;
 }
 
-function gatewayConfiguration(environment: Record<string, string | undefined>) {
-  const enrichmentUrl = String(environment.ENRICHMENT_SERVICE_URL || DEFAULT_ENRICHMENT_SERVICE_URL).trim();
-  const gatewayBaseUrl = String(environment.BACKEND_HOSTED_APP_URL || DEFAULT_GATEWAY_BASE_URL).trim().replace(/\/$/, '');
-  const secret = String(environment.ENRICHMENT_SERVICE_SECRET || '').trim();
-  if (!secret) throw new ApolloEnrichmentError(503, 'ENRICHMENT_SERVICE_SECRET_NOT_CONFIGURED', false);
-  return { enrichmentUrl, gatewayBaseUrl, secret };
+function getProviderApiKey(environment: Record<string, string | undefined>) {
+  const apiKey = getApolloApiKey(environment);
+  if (!apiKey) throw new ApolloEnrichmentError(503, 'APOLLO_PROVIDER_NOT_CONFIGURED', false);
+  return apiKey;
 }
 
 export function assertApolloEnrichmentConfigured(
   environment: Record<string, string | undefined> = process.env,
 ) {
-  gatewayConfiguration(environment);
+  getProviderApiKey(environment);
 }
 
-async function gatewayRequest(
-  url: string,
-  init: RequestInit,
-  environment: Record<string, string | undefined>,
-) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs(environment));
-  try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
-    let payload: unknown = null;
-    try {
-      payload = await response.json();
-    } catch {
-      if (response.ok) throw new ApolloEnrichmentError(502, 'APOLLO_GATEWAY_INVALID_RESPONSE', true);
+function withTimeout<T>(work: Promise<T>, ms: number, code: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const error = new Error(code);
+      error.name = 'TimeoutError';
+      reject(error);
+    }, ms);
+    if (typeof (timer as unknown as { unref?: unknown })?.unref === 'function') {
+      (timer as unknown as { unref: () => void }).unref();
     }
-    if (!response.ok) {
-      const code = text(object(payload)?.error, 100) || `APOLLO_GATEWAY_HTTP_${response.status}`;
-      const unknown = code === 'APOLLO_UPSTREAM_TIMEOUT'
-        || code === 'APOLLO_UPSTREAM_INVALID_RESPONSE'
-        || code === 'APOLLO_UPSTREAM_ERROR'
-        || code === 'BACKEND_ERROR';
-      const status = response.status === 429 ? 429
-        : response.status === 503 ? 503
-          : response.status === 504 ? 504
-            : 502;
-      throw new ApolloEnrichmentError(status, code, unknown);
-    }
-    const result = object(payload);
-    if (!result) throw new ApolloEnrichmentError(502, 'APOLLO_GATEWAY_INVALID_RESPONSE', true);
-    return result;
-  } catch (error) {
-    if (error instanceof ApolloEnrichmentError) throw error;
-    if (controller.signal.aborted || (error as { name?: string } | null)?.name === 'AbortError') {
-      throw new ApolloEnrichmentError(504, 'APOLLO_GATEWAY_TIMEOUT', true);
-    }
-    throw new ApolloEnrichmentError(502, 'APOLLO_GATEWAY_UNREACHABLE', true);
-  } finally {
-    clearTimeout(timeout);
-  }
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function isUnknownProviderCode(code: string) {
+  return code === 'APOLLO_UPSTREAM_TIMEOUT'
+    || code === 'APOLLO_UPSTREAM_INVALID_RESPONSE'
+    || code === 'APOLLO_UPSTREAM_ERROR';
+}
+
+function providerStatus(error: ApolloGatewayError): 429 | 502 | 503 | 504 {
+  return error.status === 429 ? 429
+    : error.status === 503 ? 503
+      : error.status === 504 ? 504
+        : 502;
 }
 
 export async function submitApolloEnrichment(input: {
@@ -105,46 +104,65 @@ export async function submitApolloEnrichment(input: {
   environment?: Record<string, string | undefined>;
 }) {
   const environment = input.environment || process.env;
-  const config = gatewayConfiguration(environment);
-  const payload = await gatewayRequest(config.enrichmentUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      'x-api-secret-key': config.secret,
-    },
-    body: JSON.stringify({
-      lead: {
-        id: input.lead.id,
-        source_provider_id: input.lead.sourceProviderId,
-        first_name: input.lead.firstName,
-        last_name: input.lead.lastName,
-        full_name: input.lead.fullName,
-        linkedin_url: input.lead.linkedinUrl,
-        organization_name: input.lead.organizationName,
-        organization_domain: input.lead.organizationDomain,
-      },
-      reveal_email: input.revealEmail,
-      reveal_phone: input.revealPhone,
-      enrichment_level: input.revealPhone ? 'deep' : 'basic',
-      requested_data: { email: input.revealEmail, phone: input.revealPhone },
-      requested_fields: [
-        ...(input.revealEmail ? ['email'] : []),
-        ...(input.revealPhone ? ['phone'] : []),
-      ],
-      match_only: Boolean(input.matchOnly),
-      ...(input.webhookUrl ? { webhook_url: input.webhookUrl } : {}),
-    }),
-  }, environment);
+  const config = getGatewayConfig(environment);
+  const apiKey = getProviderApiKey(environment);
 
-  const extractedData = object(payload.extracted_data);
-  return {
-    success: payload.success === true,
-    enrichmentStatus: text(payload.enrichment_status, 64) || 'unknown',
-    providerRequestId: text(payload.provider_request_id, 255),
-    creditsConsumed: typeof payload.credits_consumed === 'number' ? payload.credits_consumed : undefined,
-    extractedData,
+  const gatewayInput = {
+    lead: {
+      id: input.lead.id,
+      source_provider_id: input.lead.sourceProviderId,
+      first_name: input.lead.firstName,
+      last_name: input.lead.lastName,
+      full_name: input.lead.fullName,
+      linkedin_url: input.lead.linkedinUrl,
+      organization_name: input.lead.organizationName,
+      organization_domain: input.lead.organizationDomain,
+    },
+    reveal_email: input.revealEmail,
+    reveal_phone: input.revealPhone,
+    enrichment_level: input.revealPhone ? 'deep' : 'basic',
+    requested_data: { email: input.revealEmail, phone: input.revealPhone },
+    requested_fields: [
+      ...(input.revealEmail ? ['email'] : []),
+      ...(input.revealPhone ? ['phone'] : []),
+    ],
+    match_only: Boolean(input.matchOnly),
+    ...(input.webhookUrl ? { webhook_url: input.webhookUrl } : {}),
   };
+  const validated = validateEnrichmentInput(gatewayInput);
+  if (!validated.ok) {
+    throw new ApolloEnrichmentError(502, 'INVALID_REQUEST', false);
+  }
+
+  const rateLimit = consumeEndpointRateLimit('enrich', config);
+  if (!rateLimit.allowed) {
+    throw new ApolloEnrichmentError(429, 'RATE_LIMITED', false);
+  }
+
+  try {
+    const payload = await withTimeout(
+      executeApolloEnrichment(validated.value, apiKey, config),
+      timeoutMs(environment),
+      'APOLLO_GATEWAY_TIMEOUT',
+    );
+    const extractedData = object(payload.extracted_data);
+    return {
+      success: payload.success === true,
+      enrichmentStatus: text(payload.enrichment_status, 64) || 'unknown',
+      providerRequestId: text(payload.provider_request_id, 255),
+      creditsConsumed: typeof payload.credits_consumed === 'number' ? payload.credits_consumed : undefined,
+      extractedData,
+    };
+  } catch (error) {
+    if (error instanceof ApolloEnrichmentError) throw error;
+    if (error instanceof ApolloGatewayError) {
+      throw new ApolloEnrichmentError(providerStatus(error), error.code, isUnknownProviderCode(error.code));
+    }
+    if ((error as { name?: string } | null)?.name === 'TimeoutError') {
+      throw new ApolloEnrichmentError(504, 'APOLLO_GATEWAY_TIMEOUT', true);
+    }
+    throw new ApolloEnrichmentError(502, 'APOLLO_UPSTREAM_ERROR', true);
+  }
 }
 
 export async function pollApolloWebhookResult(input: {
@@ -152,22 +170,31 @@ export async function pollApolloWebhookResult(input: {
   environment?: Record<string, string | undefined>;
 }) {
   const environment = input.environment || process.env;
-  const config = gatewayConfiguration(environment);
+  const config = getGatewayConfig(environment);
+  const apiKey = getProviderApiKey(environment);
   const providerRequestId = text(input.providerRequestId, 255);
   if (!providerRequestId) throw new ApolloEnrichmentError(502, 'INVALID_APOLLO_PROVIDER_REQUEST_ID', false);
-  const payload = await gatewayRequest(
-    `${config.gatewayBaseUrl}/api/webhook-result/${encodeURIComponent(providerRequestId)}`,
-    {
-      method: 'GET',
-      headers: { Accept: 'application/json', 'x-api-secret-key': config.secret },
-    },
-    environment,
-  );
 
-  return {
-    providerRequestId: text(payload.provider_request_id, 255) || providerRequestId,
-    status: text(payload.status, 64) || 'unknown',
-    retryAfterSeconds: typeof payload.retry_after_seconds === 'number' ? payload.retry_after_seconds : undefined,
-    candidate: object(payload.candidate),
-  };
+  try {
+    const payload = await withTimeout(
+      getApolloWebhookResult(providerRequestId, apiKey, config),
+      timeoutMs(environment),
+      'APOLLO_GATEWAY_TIMEOUT',
+    );
+    return {
+      providerRequestId: text(payload.provider_request_id, 255) || providerRequestId,
+      status: text(payload.status, 64) || 'unknown',
+      retryAfterSeconds: typeof payload.retry_after_seconds === 'number' ? payload.retry_after_seconds : undefined,
+      candidate: object(payload.candidate),
+    };
+  } catch (error) {
+    if (error instanceof ApolloEnrichmentError) throw error;
+    if (error instanceof ApolloGatewayError) {
+      throw new ApolloEnrichmentError(providerStatus(error), error.code, isUnknownProviderCode(error.code));
+    }
+    if ((error as { name?: string } | null)?.name === 'TimeoutError') {
+      throw new ApolloEnrichmentError(504, 'APOLLO_GATEWAY_TIMEOUT', true);
+    }
+    throw new ApolloEnrichmentError(502, 'APOLLO_UPSTREAM_ERROR', true);
+  }
 }

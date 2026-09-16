@@ -44,8 +44,7 @@ test('Apollo reconciliation respects provider retry_after_seconds', async () => 
       now: new Date('2026-09-01T12:01:00.000Z'),
       client,
       environment: {
-        BACKEND_HOSTED_APP_URL: 'https://gateway.example.test',
-        ENRICHMENT_SERVICE_SECRET: 'internal-secret',
+        APOLLO_API_KEY: 'test-apollo-key',
       },
     });
     assert.equal(result.pending, 1);
@@ -78,11 +77,11 @@ test('Apollo reconciliation sends ready candidates through the atomic callback R
   const { calls, client } = clientWithClaim(baseRow);
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json({
-    provider_request_id: '-9223372036854775807',
+    request_id: '-9223372036854775807',
     status: 'completed',
-    candidate: {
-      apollo_person_id: 'apollo-person-1',
-      primary_phone: '+15550100001',
+    person: {
+      id: 'apollo-person-1',
+      phone_number: '+15550100001',
       phone_numbers: [{
         raw_number: '+15550100001',
         sanitized_number: '+15550100001',
@@ -98,8 +97,7 @@ test('Apollo reconciliation sends ready candidates through the atomic callback R
       now: new Date('2026-09-01T12:01:00.000Z'),
       client,
       environment: {
-        BACKEND_HOSTED_APP_URL: 'https://gateway.example.test',
-        ENRICHMENT_SERVICE_SECRET: 'internal-secret',
+        APOLLO_API_KEY: 'test-apollo-key',
       },
     });
     assert.equal(result.processed, 1);

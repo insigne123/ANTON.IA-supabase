@@ -296,8 +296,8 @@ test('enrichment replays before gateway configuration and claims before Apollo s
   assert.match(enrichmentRoute, /input\.tableName === 'people_search_leads'/);
   assert.match(enrichmentRoute, /organization_domain: cleanDomain\(lead\.companyDomain\)/);
   assert.match(post, /status: 403/);
-  assert.match(post, /ENRICHMENT_SERVICE_SECRET_NOT_CONFIGURED' \? 503/);
-  assert.match(enrichmentRoute, /ENRICHMENT_SERVICE_SECRET_NOT_CONFIGURED/);
+  assert.match(post, /APOLLO_PROVIDER_NOT_CONFIGURED' \? 503/);
+  assert.match(enrichmentRoute, /APOLLO_PROVIDER_NOT_CONFIGURED/);
   assert.match(enrichmentRoute, /APOLLO_WEBHOOK_URL_NOT_CONFIGURED/);
   assert.doesNotMatch(enrichmentRoute, /handlePdlEnrichment|enrichPersonWithPDL/);
   assert.doesNotMatch(enrichmentRoute, /getDailyQuotaStatus|useMemQuota|QUOTA_FALLBACK_SECRET|x-quota-ticket/);

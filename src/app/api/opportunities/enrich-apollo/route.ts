@@ -595,6 +595,7 @@ function canonicalTargetResponse(input: {
     companyName: text(input.row.organization_name || input.row.company_name || input.row.company, 200),
     companyDomain: text(input.row.organization_domain || data.companyDomain, 253),
     industry: text(input.row.organization_industry, 160),
+    companySize: input.row.organization_size == null ? undefined : String(input.row.organization_size).slice(0, 100),
     city: text(input.row.city, 160),
     state: text(input.row.state, 160),
     country: text(input.row.country, 160),
@@ -1268,7 +1269,7 @@ export async function POST(request: NextRequest) {
       'APOLLO_CALLBACK_REPLAY_REQUIRES_OPERATION_RESPONSE',
       'APOLLO_ENRICHMENT_TARGET_BUSY',
       'ENRICHMENT_TARGET_SUPPRESSED',
-      'ENRICHMENT_SERVICE_SECRET_NOT_CONFIGURED',
+      'APOLLO_PROVIDER_NOT_CONFIGURED',
     ]);
     const errorCode = exposed.has(code) ? code : providerBoundaryCrossed
       ? 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN'
@@ -1282,7 +1283,7 @@ export async function POST(request: NextRequest) {
       || errorCode === 'ENRICHMENT_TARGET_SUPPRESSED'
       || errorCode === 'APOLLO_CALLBACK_REPLAY_REQUIRES_OPERATION_RESPONSE' ? 409
       : errorCode === 'ENRICHMENT_TARGET_NOT_FOUND' || errorCode === 'INVALID_EXISTING_RECORD_ID' ? 400
-        : errorCode === 'APOLLO_WEBHOOK_URL_NOT_CONFIGURED' || errorCode === 'ENRICHMENT_SERVICE_SECRET_NOT_CONFIGURED' ? 503
+        : errorCode === 'APOLLO_WEBHOOK_URL_NOT_CONFIGURED' || errorCode === 'APOLLO_PROVIDER_NOT_CONFIGURED' ? 503
           : providerBoundaryCrossed ? 409 : 500;
     return NextResponse.json({
       error: errorCode,

@@ -19,6 +19,10 @@ import {
 } from '@/lib/server/request-auth';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { safeAppendAntoniaEvent } from '@/lib/server/antonia-event-ledger';
+import { ApolloGatewayError } from '@/lib/server/apollo-provider/apollo';
+import { consumeEndpointRateLimit, getGatewayConfig } from '@/lib/server/apollo-provider/gateway';
+import { executeProviderLeadSearch } from '@/lib/server/apollo-provider/lead-provider';
+import { validateLeadSearchInput } from '@/lib/server/apollo-provider/validation';
 import { buildBatchLeadSearchPayload } from '@/lib/server/lead-search-payload';
 
 export const dynamic = 'force-dynamic';
@@ -26,10 +30,34 @@ export const revalidate = 0;
 export const fetchCache = 'force-no-store';
 export const runtime = 'nodejs';
 
-const DEFAULT_LEAD_SEARCH_URL = "https://backend-antonia--backend-apollo-leads-prod.us-central1.hosted.app/api/lead-search";
-const LEAD_SEARCH_URL = process.env.ANTONIA_LEAD_SEARCH_URL || process.env.LEAD_SEARCH_URL || DEFAULT_LEAD_SEARCH_URL;
+// Búsqueda in-process: esta ruta nunca llama a un gateway externo.
 const TIMEOUT_MS = Number(process.env.LEADS_N8N_TIMEOUT_MS ?? 60000);
 const MAX_RETRIES = Number(process.env.LEADS_N8N_MAX_RETRIES ?? 0);
+
+// Lead search runs in-process against Apollo: the provider key is read only
+// from server runtime configuration and never leaves this route.
+function getProviderApiKey() {
+  return String(process.env.APOLLO_API_KEY || '').trim();
+}
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('LEAD_SEARCH_TIMEOUT')), ms);
+    if (typeof (timer as unknown as { unref?: unknown })?.unref === 'function') {
+      (timer as unknown as { unref: () => void }).unref();
+    }
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 function splitFullName(fullName?: string | null) {
   const parts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
   return {
@@ -133,18 +161,6 @@ function normalizeLeadSearchResponse(json: unknown) {
       count: Number((payload as any)?.leads_count ?? (payload as any)?.count ?? rawLeads.length ?? 0),
       leads: rawLeads.map((lead: any, index: number) => mapFlexibleLead(lead, index)),
     });
-  }
-}
-
-function buildLeadSearchGetUrl(recordId: string) {
-  const base = String(LEAD_SEARCH_URL || '').trim();
-  if (!base) return '';
-  try {
-    const url = new URL(base);
-    url.searchParams.set('record_id', recordId);
-    return url.toString();
-  } catch {
-    return '';
   }
 }
 
@@ -269,16 +285,6 @@ function looksLikeSingleLeadPayload(payload: any) {
   );
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: ctrl.signal });
-  } finally {
-    clearTimeout(t);
-  }
-}
-
 function asBackendStringList(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((item) => String(item ?? '').trim()).filter(Boolean);
   return String(value ?? '').split(',').map((item) => item.trim()).filter(Boolean);
@@ -301,45 +307,32 @@ function normalizeEmployeeRangeForBackend(value: string): string | null {
   return null;
 }
 
-async function callBackendRaw(payload: any): Promise<{ ok: true; json: any } | { ok: false; error: string }> {
-  const backendSecret = String(process.env.ENRICHMENT_SERVICE_SECRET || '').trim();
-  if (!backendSecret) return { ok: false, error: 'BACKEND_AUTH_NOT_CONFIGURED' };
+async function runLeadSearchInProcess(payload: any): Promise<{ ok: true; json: any } | { ok: false; error: string }> {
+  if (!getProviderApiKey()) return { ok: false, error: 'APOLLO_PROVIDER_NOT_CONFIGURED' };
+  const config = getGatewayConfig();
+  const rateLimit = consumeEndpointRateLimit('lead-search', config);
+  if (!rateLimit.allowed) return { ok: false, error: 'RATE_LIMITED' };
+  const input = validateLeadSearchInput({ ...((payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>), provider: 'apollo' }, config);
+  if (!input.ok) return { ok: false, error: 'INVALID_REQUEST' };
   try {
-    const res = await fetchWithTimeout(
-      LEAD_SEARCH_URL,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "x-api-secret-key": backendSecret,
-        },
-        body: JSON.stringify(payload),
-      },
-      TIMEOUT_MS
-    );
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { ok: false, error: `SERVICE_HTTP_${res.status}:${text}` };
-    }
-    const raw = await res.text();
-    if (!raw || !raw.trim()) return { ok: false, error: 'SERVICE_EMPTY_BODY' };
-    try {
-      return { ok: true, json: JSON.parse(raw) };
-    } catch {
-      return { ok: false, error: `SERVICE_BAD_JSON:${raw.slice(0, 300)}` };
-    }
+    const json = await withTimeout(executeProviderLeadSearch(input.value, config), TIMEOUT_MS);
+    return { ok: true, json };
   } catch (error) {
+    if (error instanceof ApolloGatewayError) return { ok: false, error: error.code };
     return { ok: false, error: error instanceof Error ? error.message : 'Unknown' };
   }
 }
 
+async function callBackendRaw(payload: any): Promise<{ ok: true; json: any } | { ok: false; error: string }> {
+  return runLeadSearchInProcess(payload);
+}
+
 async function callLeadSearchService(payload: any, meta?: Record<string, unknown>) {
-  // This route is the browser-facing BFF. The backend secret is read only at
-  // runtime here and is never returned to, or accepted from, the browser.
-  const backendSecret = String(process.env.ENRICHMENT_SERVICE_SECRET || '').trim();
-  if (!backendSecret) {
-    return NextResponse.json({ error: 'BACKEND_AUTH_NOT_CONFIGURED', ...(meta || {}) }, { status: 503 });
+  // This route is the browser-facing BFF. The Apollo provider key is read
+  // only from server runtime configuration and is never returned to, or
+  // accepted from, the browser.
+  if (!getProviderApiKey()) {
+    return NextResponse.json({ error: 'APOLLO_PROVIDER_NOT_CONFIGURED', ...(meta || {}) }, { status: 503 });
   }
 
   let attempt = 0;
@@ -347,36 +340,12 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
 
   while (attempt <= MAX_RETRIES) {
     try {
-      const res = await fetchWithTimeout(
-        LEAD_SEARCH_URL,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "x-api-secret-key": backendSecret,
-          },
-          body: JSON.stringify(payload),
-        },
-        TIMEOUT_MS
-      );
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`SERVICE_HTTP_${res.status}:${text}`);
-      }
-
-      const raw = await res.text();
-      if (!raw || !raw.trim()) {
-        throw new Error("SERVICE_EMPTY_BODY");
-      }
-
-      let json: unknown;
-      try {
-        json = JSON.parse(raw);
-      } catch {
-        throw new Error(`SERVICE_BAD_JSON:${raw.slice(0, 300)}`);
-      }
+      const config = getGatewayConfig();
+      const rateLimit = consumeEndpointRateLimit('lead-search', config);
+      if (!rateLimit.allowed) throw new Error('RATE_LIMITED');
+      const input = validateLeadSearchInput({ ...((payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>), provider: 'apollo' }, config);
+      if (!input.ok) throw new Error('INVALID_REQUEST');
+      const json = await withTimeout(executeProviderLeadSearch(input.value, config), TIMEOUT_MS);
 
       const normalized = normalizeLeadSearchResponse(json);
       const responseMeta = pickLeadSearchMeta(json);
@@ -400,63 +369,11 @@ async function callLeadSearchService(payload: any, meta?: Record<string, unknown
   );
 }
 
-export async function GET(req: NextRequest) {
-  try {
-    const recordId = String(req.nextUrl.searchParams.get('record_id') || '').trim();
-    if (!recordId) {
-      return NextResponse.json({ error: 'MISSING_RECORD_ID' }, { status: 400 });
-    }
-
-    let ctx: Awaited<ReturnType<typeof requireSessionOrTrustedInternalRequest>>;
-    try {
-      ctx = await requireSessionOrTrustedInternalRequest(req);
-    } catch (error) {
-      const response = requestAuthErrorResponse(error);
-      if (response) return response;
-      throw error;
-    }
-    const url = buildLeadSearchGetUrl(recordId);
-    if (!url) {
-      return NextResponse.json({ error: 'PROFILE_RECORD_FETCH_ERROR', message: 'Lead search backend URL missing' }, { status: 500 });
-    }
-
-    const response = await fetchWithTimeout(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
-    }, TIMEOUT_MS);
-
-    const raw = await response.text();
-    let json: any = null;
-    if (raw?.trim()) {
-      try {
-        json = JSON.parse(raw);
-      } catch {
-        json = null;
-      }
-    }
-
-    if (!response.ok) {
-      return NextResponse.json({ error: 'PROFILE_RECORD_FETCH_ERROR', message: String(json?.message || json?.error || raw || `HTTP_${response.status}`) }, { status: response.status === 200 ? 500 : response.status });
-    }
-
-    const payload = json || { lead: null };
-    if (payload?.lead || payload?.error) {
-      return NextResponse.json(payload, { status: 200, headers: { 'Cache-Control': 'no-store' } });
-    }
-
-    if (looksLikeSingleLeadPayload(payload)) {
-      return NextResponse.json(
-        { lead: mapFlexibleLead(payload, 0) },
-        { status: 200, headers: { 'Cache-Control': 'no-store' } },
-      );
-    }
-
-    return NextResponse.json({ lead: null }, { status: 200, headers: { 'Cache-Control': 'no-store' } });
-  } catch (error: any) {
-    return NextResponse.json({ error: 'PROFILE_RECORD_FETCH_ERROR', message: error?.message || 'Unknown error' }, { status: 500 });
-  }
+export async function GET() {
+  return NextResponse.json(
+    { error: 'PROFILE_RECORD_FETCH_RETIRED', message: 'La lectura directa de registros del gateway fue retirada; usa la búsqueda in-process.' },
+    { status: 410 },
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -549,7 +466,8 @@ export async function POST(req: NextRequest) {
           ...asBackendStringList(companiesReq.employee_ranges), ...asBackendStringList(companiesReq.employeeRanges),
           ...(companiesReq.sizeRange ? [String(companiesReq.sizeRange)] : []),
         ])].map(normalizeEmployeeRangeForBackend).filter((range): range is string => Boolean(range));
-        if (companyKeywords.length === 0 && companyLocation.length === 0 && employeeRanges.length === 0) {
+        const companyName = String(companiesReq.company_name || companiesReq.companyName || '').trim();
+        if (companyKeywords.length === 0 && companyLocation.length === 0 && employeeRanges.length === 0 && !companyName) {
           return NextResponse.json({ error: 'INVALID_REQUEST_BODY', message: 'Agrega al menos un filtro de empresa.' }, { status: 400 });
         }
         const page = Math.min(500, Math.max(1, Number(companiesReq.page ?? 1) || 1));
@@ -559,6 +477,7 @@ export async function POST(req: NextRequest) {
           provider: providerDecision.provider,
           user_id: userId,
           search_mode: 'organization_search',
+          ...(companyName ? { company_name: companyName } : {}),
           company_keywords: companyKeywords,
           company_location: companyLocation,
           employee_ranges: employeeRanges,

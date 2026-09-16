@@ -186,3 +186,38 @@ test('LinkedIn profile search recovers an occupied target and keeps it pollable'
     globalThis.fetch = originalFetch;
   }
 });
+
+test('LinkedIn profile search fails loudly instead of rendering an empty failed row', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({
+    queued: true,
+    operationId: 'profile-match:failed',
+    operationStatus: 'submitted',
+    providerRequested: 'apollo',
+    providerUsed: 'apollo',
+    requestedData: { email: true, phone: true },
+    enriched: [{ id: 'profile-target-1', enrichmentStatus: 'failed' }],
+    phone_enrichment: {
+      requested: true,
+      queued: false,
+      status: 'failed',
+      message: 'El proveedor no pudo completar la busqueda del telefono.',
+      webhook_url: null,
+      provider_status: null,
+      provider_details: null,
+    },
+  });
+  try {
+    await assert.rejects(
+      () => searchLinkedInProfileLead({
+        search_mode: 'linkedin_profile',
+        linkedin_url: 'https://www.linkedin.com/in/example',
+        reveal_email: true,
+        reveal_phone: true,
+      }),
+      /No pudimos consultar este perfil/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

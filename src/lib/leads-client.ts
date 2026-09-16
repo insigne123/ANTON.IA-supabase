@@ -197,9 +197,12 @@ export async function searchLinkedInProfileLead(
     source_provider_id: enriched.sourceProviderId,
     apollo_id: enriched.sourceProviderId,
   };
+  // A profile is only pending while the provider still owns the outcome:
+  // queued phone enrichment or a pending enrichment status. The top-level
+  // `queued` flag alone is not enough, because the API also sets it on
+  // terminal phone failures when phone reveal was requested.
   const pendingProfile = result.phone_enrichment?.status === 'queued'
-    || String(enriched.enrichmentStatus || '').trim().toLowerCase().startsWith('pending')
-    || (result.queued && result.operationStatus === 'submitted');
+    || String(enriched.enrichmentStatus || '').trim().toLowerCase().startsWith('pending');
   if (enriched.errorCode === 'APOLLO_CREDITS_EXHAUSTED') {
     throw new Error('La cuenta de Apollo no tiene créditos disponibles. Recarga créditos o espera al próximo ciclo de facturación.');
   }
