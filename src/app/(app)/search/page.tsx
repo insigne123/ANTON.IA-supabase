@@ -1420,6 +1420,11 @@ export default function SearchPage() {
               const nextEmail = filters.revealEmail ? nextEmailRaw : null;
               const nextLead: UILaed = {
                 ...lead,
+                name: item.name || lead.name,
+                title: item.title || lead.title,
+                company: item.organization_name || item.org_name || lead.company,
+                industry: item.organization_industry || item.industry || lead.industry,
+                avatar: item.photo_url || lead.avatar,
                 email: nextEmail,
                 phoneNumbers: nextPhoneNumbers,
                 primaryPhone: nextPrimaryPhone,

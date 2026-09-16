@@ -337,6 +337,13 @@ export async function getLinkedInProfileStatuses(
   signal?: AbortSignal,
 ): Promise<Array<{
   id: string;
+  name?: string | null;
+  title?: string | null;
+  organization_name?: string | null;
+  org_name?: string | null;
+  industry?: string | null;
+  organization_industry?: string | null;
+  photo_url?: string | null;
   linkedin_url?: string | null;
   email?: string | null;
   email_status?: string | null;

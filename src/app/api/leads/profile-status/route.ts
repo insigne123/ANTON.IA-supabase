@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     const admin = getSupabaseAdminClient();
     const { data, error } = await admin
       .from('people_search_leads')
-      .select('id, linkedin_url, email, email_status, primary_phone, phone_numbers, enrichment_status, updated_at')
+      .select('id, name, title, organization_name, org_name, industry, organization_industry, photo_url, linkedin_url, email, email_status, primary_phone, phone_numbers, enrichment_status, updated_at')
       .in('id', ids)
       .eq('organization_id', ctx.organizationId)
       .eq('user_id', ctx.user.id);
