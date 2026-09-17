@@ -19,7 +19,7 @@ window.fetch = async url => {
     ? { runs: [run], canSubmit: false }
     : { run, events: [
       { sequence: 1, kind: 'tool.completed', payload: { action: 'leads.search', result: { scope: 'own_saved_contacts', truncated: true, items: [{ id: run.id, name: 'Ana Ejemplo', company: 'Logística Sur', email: 'ana@example.com' }] } }, created_at: run.created_at },
-      { sequence: 2, kind: 'run.completed', payload: { reply: 'Resumen listo', document: { title: 'Mi documento', content: '<script>window.compromised=true</script>\nContenido' }, model: 'test', durationMs: 1 }, created_at: run.created_at },
+      { sequence: 2, kind: 'run.completed', payload: { reply: '**Resumen** listo\n\n- Punto uno\n- Punto dos', document: { title: 'Mi documento', content: '<script>window.compromised=true</script>\nContenido' }, model: 'test', durationMs: 1 }, created_at: run.created_at },
       { sequence: 3, kind: 'tool.completed', payload: { action: 'research.get_existing', result: { availability: 'available', research: { capturedAt: run.created_at, status: 'completed', truncated: false, sources: [{ id: 'source', title: 'Fuente oficial', url: 'https://example.com/evidence', retrievedAt: run.created_at }] } } }, created_at: run.created_at }] };
   return { ok: !denied, status: denied ? 403 : 200, json: async () => data };
 };
@@ -35,6 +35,11 @@ try {
   button('Prepara un resumenCompletado').click();
   await waitFor(() => button('Abrir'));
   assert.equal(window.document.querySelector('a[href="https://example.com/evidence"]').rel, 'noopener noreferrer');
+  const replyBlock = [...window.document.querySelectorAll('div')].find(node =>
+    node.textContent.includes('Punto uno') && node.querySelector('strong') && node.querySelector('li'));
+  assert.ok(replyBlock);
+  assert.equal(replyBlock.querySelector('strong').textContent, 'Resumen');
+  assert.equal(replyBlock.textContent.includes('**'), false);
   assert.match(window.document.querySelector('[aria-label="Fuentes de investigación"]').textContent, /No se consultaron nuevamente/);
   assert.equal(new URL(window.location.href).searchParams.get('work'), run.id);
   const contacts = window.document.querySelector('section[aria-label="Contactos consultados"]');
@@ -60,7 +65,7 @@ try {
   button('Prepara un resumenCompletado').click();
   await waitFor(() => window.document.querySelector('[role="alert"]'));
   assert.equal(window.document.querySelector('pre'), null);
-  assert.equal(window.document.body.textContent.includes('Resumen listo'), false);
+  assert.equal(window.document.body.textContent.includes('Punto uno'), false);
   assert.equal(window.document.body.textContent.includes('ana@example.com'), false);
   assert.ok(calls.every(url => url.startsWith('/api/cowork/runs')));
   console.log('PASS: worker-unavailable state, persistent result, metadata-compatible document, safe text rendering, focus restoration, access revocation.');

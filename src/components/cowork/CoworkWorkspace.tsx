@@ -12,6 +12,7 @@ import { coworkSearchCriteriaSchema } from '@/lib/cowork/search-proposal';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { MarkdownText } from '@/components/ui/markdown-text';
 import { cn } from '@/lib/utils';
 import { coworkDocumentSchema, type CoworkEvent, type CoworkRun } from '@/lib/cowork/contracts';
 
@@ -200,13 +201,13 @@ export function CoworkWorkspace() {
               const previous = coworkDocumentSchema.safeParse(payload ? { reply: payload.reply, document: payload.document } : null);
               return <section key={turn.run.id} aria-label="Turno anterior" className="space-y-4 border-b border-border/60 pb-6">
                 <p className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-muted px-5 py-4">{turn.run.message}</p>
-                {previous.success && <p className="whitespace-pre-wrap break-words text-base leading-7">{previous.data.reply}</p>}
+                {previous.success && <MarkdownText text={previous.data.reply} />}
                 {previous.success && previous.data.document && <Button variant="outline" onClick={() => choose(turn.run.id)}><FileText />Ver resultado anterior</Button>}
               </section>;
             })}
             <p className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-muted px-5 py-4">{state.run.message}</p>
             <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">{active ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : state.run.status === 'completed' ? <Check className="h-4 w-4" /> : null}{statusLabel}</p>
-            {output && <p className="whitespace-pre-wrap break-words text-base leading-7">{output.reply}</p>}
+            {output && <MarkdownText text={output.reply} />}
             {searchProposal?.success && <section aria-label="Revisar búsqueda externa" className="space-y-4 rounded-xl border border-border p-5">
               <h3 className="font-medium">Buscar nuevos contactos</h3>
               <dl className="space-y-2 text-sm"><div><dt className="font-medium">Cargos</dt><dd>{searchProposal.data.titles.join(', ') || 'Sin filtro'}</dd></div><div><dt className="font-medium">Sectores</dt><dd>{searchProposal.data.industries.join(', ') || 'Sin filtro'}</dd></div><div><dt className="font-medium">Ubicación de la persona</dt><dd>{searchProposal.data.locations.join(', ') || 'Sin filtro'}</dd></div></dl>
