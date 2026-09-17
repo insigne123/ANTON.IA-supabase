@@ -20,7 +20,7 @@ export async function listCoworkRuns(auth: AuthContext) {
 export async function getCoworkRun(auth: AuthContext, id: string) {
   z.string().uuid().parse(id);
   const { data: run, error } = await auth.supabase.from('cowork_runs')
-    .select('id,message,mode,status,created_at,parent_run_id').eq('id', id).eq('user_id', auth.user.id)
+    .select('id,message,mode,status,created_at,parent_run_id,depth').eq('id', id).eq('user_id', auth.user.id)
     .eq('organization_id', auth.organizationId).maybeSingle();
   if (error) throw error;
   if (!run) return null;
@@ -37,7 +37,7 @@ export async function admitCoworkRun(auth: AuthContext, body: unknown) {
   const { data, error } = await getSupabaseAdminClient().rpc('cowork_admit_followup', {
     p_user_id: auth.user.id, p_organization_id: auth.organizationId,
     p_request_id: input.requestId, p_message: input.message, p_mode: input.mode,
-    p_parent_run_id: input.parentRunId || null,
+    p_parent_run_id: input.parentRunId || null, p_reset_depth: true,
   });
   if (error) throw error;
   return data as string;

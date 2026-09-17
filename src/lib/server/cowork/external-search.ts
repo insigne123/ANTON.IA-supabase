@@ -86,8 +86,10 @@ export async function processCoworkSearchQueue() {
     if (finished.error) throw finished.error;
     if (finished.data === true) await admitSearchContinuation(client, scope, runId);
     return { processed: finished.data === true ? 1 : 0, claimed: true };
-  } catch {
-    const failed = await client.rpc('cowork_finish_search', { ...args, p_success: false, p_payload: {} });
+  } catch (error) {
+    const reason = error instanceof Error && error.message === 'Search quota exhausted'
+      ? 'quota_exhausted' : 'unknown';
+    const failed = await client.rpc('cowork_finish_search', { ...args, p_success: false, p_payload: { reason } });
     if (failed.error) throw failed.error;
     return { processed: 0, claimed: true };
   }

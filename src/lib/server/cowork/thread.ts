@@ -1,4 +1,5 @@
 import type { AuthContext } from '@/lib/server/auth-utils';
+import { coworkThreadBudgets } from '@/lib/cowork/thread-budget';
 import { getCoworkRun } from './runs';
 
 /** Each lookup uses the caller's RLS client plus explicit organization/owner scope. */
@@ -17,5 +18,15 @@ export async function getCoworkThread(auth: AuthContext, id: string) {
     ancestors.unshift(parent);
     cursor = parent.run.parent_run_id;
   }
-  return { ...current, ancestors, olderTurnsOmitted: Boolean(cursor) };
+  // Fase 1 (CW-06): surface the automatic-chain budget so the UI can explain
+  // why a thread stopped chaining on its own.
+  const budgets = coworkThreadBudgets(
+    current.run.mode === 'autonomous' ? 'autonomous' : 'approval',
+    process.env.COWORK_AUTONOMY_ENABLED === 'true');
+  const depth = (current.run.depth as number) || 0;
+  const budget = {
+    depth, maxDepth: budgets.maxDepth,
+    exhausted: current.events.some((event: { kind: string }) => event.kind === 'thread.budget_exhausted'),
+  };
+  return { ...current, ancestors, olderTurnsOmitted: Boolean(cursor), budget };
 }

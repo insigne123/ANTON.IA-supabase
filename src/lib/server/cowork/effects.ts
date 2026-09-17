@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { AuthContext } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireCoworkWorkerAccess } from './access';
+import { coworkThreadBudgets } from '@/lib/cowork/thread-budget';
+import { loadCoworkThreadStats } from './thread-stats';
 import { saveCoworkContact } from './save-contact';
 import { startCoworkResearch } from './start-research';
 import { requestCoworkDraft } from './draft-from-research';
@@ -31,10 +33,38 @@ export async function admitCoworkContinuation(
       .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).single();
     if (parent.error || !parent.data) return null;
     const mode = parent.data.mode === 'autonomous' ? 'autonomous' : 'approval';
+    // Fase 1 (CW-06): automatic chains end gracefully at the thread budget.
+    // The thread simply stops; the last completed reply stands as the result.
+    const budgets = coworkThreadBudgets(mode, process.env.COWORK_AUTONOMY_ENABLED === 'true');
+    let depth = 0;
+    let effects = 0;
+    try {
+      const stats = await loadCoworkThreadStats(client, scope, runId);
+      depth = stats.depth;
+      effects = stats.effects;
+    } catch {
+      return null;
+    }
+    if (depth + 1 > budgets.maxDepth || effects >= budgets.maxEffects) {
+      try {
+        await client.from('cowork_run_events').insert({
+          run_id: runId, user_id: scope.userId, organization_id: scope.organizationId,
+          kind: 'thread.budget_exhausted',
+          payload: { depth, effects, maxDepth: budgets.maxDepth, maxEffects: budgets.maxEffects,
+            notice: 'El hilo alcanzó su tope de pasos automáticos. Lo logrado queda guardado; continúa con un mensaje para seguir.' },
+        });
+      } catch {
+        // Observability only; the completed work is already durable.
+      }
+      return null;
+    }
+    const closing = depth + 1 === budgets.maxDepth
+      ? ' Es el último paso automático del hilo: presenta el resumen final y no propongas más efectos ni búsquedas.'
+      : '';
     const { data, error } = await client.rpc('cowork_admit_followup', {
       p_user_id: scope.userId, p_organization_id: scope.organizationId,
       p_request_id: deterministicCoworkUuid(`cowork:continuation:${runId}`),
-      p_message: message, p_mode: mode, p_parent_run_id: runId,
+      p_message: `${message}${closing}`, p_mode: mode, p_parent_run_id: runId,
     });
     if (error || typeof data !== 'string') return null;
     return data;

@@ -2,6 +2,7 @@
 export function coworkAgentInstructions(configuration: {
   externalSearch: boolean;
   automaticExternalSearch: boolean;
+  threadBudget?: string | null;
 }) {
   return {
     systemPrompt: [
@@ -25,6 +26,8 @@ export function coworkAgentInstructions(configuration: {
           : 'El usuario debe revisar y aprobar los criterios antes de ejecutar. Consume una operación de cuota al ejecutarse.',
       ].join(' '),
     additionalCapability: 'crm.propose_note: solo ante una solicitud explícita, propone el texto COMPLETO de reemplazo en note para leadId. Primero identifica el contacto mediante leads.search/get en esta ejecución. Requiere siempre revisión humana y ficha CRM existente, incluso en modo autónomo. No afirmes que se guardó. Usa null en note para otras acciones.',
+    threadBudgetCapability: configuration.threadBudget
+      || 'Hilo nuevo: dispones del presupuesto completo de pasos automáticos; aun así, cierra cada trabajo con lo esencial y no encadenes trabajo innecesario.',
     effectCapability: [
       'Efectos sobre contactos observados en esta conversación: leads.save_contact con providerId (formato apollo:...), research.start con leadId UUID de un contacto propio, draft.request con snapshotId UUID de un informe disponible. El objetivo debe haberse observado primero en esta ejecución o en el historial; inventar identificadores está prohibido.',
       'Guardar crea el contacto, investigar encola su investigación y pedir borrador encola su preparación. Cada efecto se propone una vez por trabajo y requiere aprobación, salvo modo autónomo autorizado. Tras ejecutarse, el trabajo continúa solo con el resultado.',

@@ -7,14 +7,41 @@ import { loadCoworkHistory } from './conversation-context';
 import { processCoworkSearchQueue } from './external-search';
 import { processCoworkDraftQueue } from './draft-from-research';
 import { coworkExecutionPolicy } from '@/lib/cowork/execution-policy';
+import { coworkThreadBudgets } from '@/lib/cowork/thread-budget';
+import { loadCoworkThreadStats } from './thread-stats';
+import { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 import { coworkOperationHash, createCoworkOperationGateway } from './operations';
 import { coworkReadCapabilities } from './read-capabilities';
 import { processCoworkEffectQueue, resolveCoworkEffect } from './effects';
 import { coworkAgentInstructions } from '@/lib/cowork/agent-instructions';
 
+/** Fase 1 (CW-06): fairness signal. When a queue item was served in the previous
+ * tick, a waiting conversation run goes first so queues can never starve replies.
+ * Fail-open to the historical order when the signal is unreadable. */
+async function servedQueueRecently(
+  client: ReturnType<typeof getSupabaseAdminClient>,
+): Promise<boolean> {
+  try {
+    const since = new Date(Date.now() - 150000).toISOString();
+    const checks = await Promise.all([
+      client.from('cowork_search_proposals').select('run_id').eq('status', 'executing').gt('started_at', since).limit(1),
+      client.from('cowork_effect_proposals').select('run_id').eq('status', 'executing').gt('updated_at', since).limit(1),
+      client.from('cowork_draft_requests').select('run_id').eq('status', 'executing').gt('started_at', since).limit(1),
+    ]);
+    return checks.some(check => !check.error && (check.data || []).length > 0);
+  } catch {
+    return false;
+  }
+}
+
 /** Read-only worker: bounded app queries and drafting; no implicit mutations. */
 export async function processCoworkQueue() {
   if (process.env.COWORK_ENABLED !== 'true' || !coworkWorkerConfigured()) return { processed: 0 };
+  const client = getSupabaseAdminClient();
+  if (await servedQueueRecently(client)) {
+    const conversation = await processCoworkConversationRun();
+    if (conversation.claimed) return { processed: conversation.processed };
+  }
   // Owner-approved effects first: they carry an explicit grant and unblock threads.
   const effect = await processCoworkEffectQueue();
   if (effect.claimed) return { processed: effect.processed };
@@ -22,11 +49,16 @@ export async function processCoworkQueue() {
   if (draft.claimed) return { processed: draft.processed };
   const search = await processCoworkSearchQueue();
   if (search.claimed) return { processed: search.processed };
+  const conversation = await processCoworkConversationRun();
+  return { processed: conversation.processed };
+}
+
+async function processCoworkConversationRun(): Promise<{ claimed: boolean; processed: number }> {
   const client = getSupabaseAdminClient();
   const { data, error } = await client.rpc('cowork_claim_run', { p_user_id: process.env.COWORK_OWNER_USER_ID });
   if (error) throw error;
   const run = data?.[0];
-  if (!run) return { processed: 0 };
+  if (!run) return { claimed: false, processed: 0 };
   const scope = { userId: run.user_id, organizationId: run.organization_id };
   const controller = new AbortController();
   // Leave time for the terminal write before the route's 120-second deadline.
@@ -56,7 +88,17 @@ export async function processCoworkQueue() {
     await authorize();
     const history = await loadCoworkHistory(client, scope, run.parent_run_id || null);
     let waitingApproval = false;
-    const executionPolicy = coworkExecutionPolicy(run.mode, process.env.COWORK_AUTONOMY_ENABLED === 'true');
+    const autonomyEnabled = process.env.COWORK_AUTONOMY_ENABLED === 'true';
+    const executionPolicy = coworkExecutionPolicy(run.mode, autonomyEnabled);
+    // Fase 1 (CW-06): thread budgets bound automatic chains. A single proposal
+    // per run keeps these counts accurate for the whole conversational turn.
+    const budgets = coworkThreadBudgets(run.mode, autonomyEnabled);
+    const stats = await loadCoworkThreadStats(client, scope, run.id);
+    const limits = await getEffectiveDailyQuotaLimits({ userId: scope.userId, organizationId: scope.organizationId });
+    const searchQuota = await getDailyQuotaStatus({
+      userId: scope.userId, organizationId: scope.organizationId, resource: 'search', limit: limits.leadSearch,
+    });
+    const remainingSearches = Math.max(0, (searchQuota.limit || 0) - (searchQuota.count || 0));
     // Reads run through the durable ledger: an identical query replays its
     // stored result instead of hitting the database again after a retry.
     const readGateway = createCoworkOperationGateway(client, coworkReadCapabilities(client, scope));
@@ -64,6 +106,7 @@ export async function processCoworkQueue() {
     const instructions = coworkAgentInstructions({
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
+      threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. Búsquedas disponibles hoy: ${remainingSearches}. Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,
     });
     const result = await runCoworkReadLoop({
       message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize,
@@ -76,7 +119,8 @@ export async function processCoworkQueue() {
             researchCapability: instructions.researchCapability,
             externalSearchCapability: instructions.externalSearchCapability,
             additionalCapability: instructions.additionalCapability,
-            effectCapability: instructions.effectCapability }),
+            effectCapability: instructions.effectCapability,
+            threadBudgetCapability: instructions.threadBudgetCapability }),
           openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
           provider: 'openai',
           maxAttempts: 1, timeoutMs: 30000, maxOutputTokens: 6000,
@@ -104,11 +148,14 @@ export async function processCoworkQueue() {
       },
       proposeSearch: async criteria => {
         if (process.env.COWORK_EXTERNAL_SEARCH_ENABLED !== 'true') throw new Error('External search disabled');
+        if (stats.searches >= budgets.maxSearches) throw new Error('Thread search budget exhausted');
+        if (!searchQuota.allowed) throw new Error('Daily search quota exhausted');
         const proposed = await client.rpc('cowork_propose_search', { p_run_id: run.id, p_token: run.lease_token, p_criteria: criteria });
         if (proposed.error || proposed.data !== true) throw new Error('Could not prepare search review');
         waitingApproval = true;
         // Persisted run.mode is user input accepted by admission, never model output.
         // Database primary key permits at most one search proposal per run.
+        // The flag is re-read here so revoking autonomy mid-flight stops admission.
         if (executionPolicy.automaticExternalSearch && process.env.COWORK_AUTONOMY_ENABLED === 'true') {
           await requireCoworkWorkerAccess(client, scope);
           const admitted = await client.rpc('cowork_claim_search', {
@@ -118,6 +165,7 @@ export async function processCoworkQueue() {
         }
       },
       proposeEffect: async proposal => {
+        if (stats.effects >= budgets.maxEffects) throw new Error('Thread effect budget exhausted');
         const proposed = await client.rpc('cowork_propose_effect', {
           p_run_id: run.id, p_token: run.lease_token, p_kind: proposal.kind,
           p_origin_run_id: proposal.originRunId, p_target_id: proposal.targetId, p_label: proposal.label,
@@ -126,13 +174,14 @@ export async function processCoworkQueue() {
         waitingApproval = true;
         // Autonomous mode carries the user's standing grant: approve the exact
         // proposed effect so the queue executes it without another round-trip.
+        // The flag is re-read here so revoking autonomy mid-flight stops admission.
         if (executionPolicy.automaticExternalSearch && process.env.COWORK_AUTONOMY_ENABLED === 'true') {
           const approved = await resolveCoworkEffect(client, scope, run.id, true);
           if (!approved) throw new Error('Could not approve effect');
         }
       },
     });
-    if (waitingApproval) return { processed: 1 };
+    if (waitingApproval) return { claimed: true, processed: 1 };
     controller.signal.throwIfAborted();
     await requireCoworkWorkerAccess(client, scope);
     const finished = await client.rpc('cowork_finish_run', {
@@ -140,7 +189,7 @@ export async function processCoworkQueue() {
       p_payload: { ...result, telemetry },
     });
     if (finished.error) throw finished.error;
-    return { processed: finished.data === true ? 1 : 0 };
+    return { claimed: true, processed: finished.data === true ? 1 : 0 };
   } catch {
     // Cancellation invalidates the lease; terminal writes cannot revive it.
     const failed = await client.rpc('cowork_finish_run', {
@@ -148,7 +197,7 @@ export async function processCoworkQueue() {
       p_payload: { message: 'No se pudo completar la respuesta. Tu solicitud sigue guardada.' },
     });
     if (failed.error) throw failed.error;
-    return { processed: 0 };
+    return { claimed: true, processed: 0 };
   } finally {
     clearInterval(interval);
     clearTimeout(deadline);

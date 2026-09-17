@@ -3,14 +3,27 @@ import { ZodError } from 'zod';
 import { requireCoworkAccess } from '@/lib/server/cowork/access';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { admitCoworkRun, coworkWorkerConfigured, listCoworkRuns } from '@/lib/server/cowork/runs';
+import { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
 
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store' };
 
+async function coworkSearchQuota(auth: { user: { id: string }; organizationId: string }) {
+  try {
+    const limits = await getEffectiveDailyQuotaLimits({ userId: auth.user.id, organizationId: auth.organizationId });
+    const status = await getDailyQuotaStatus({
+      userId: auth.user.id, organizationId: auth.organizationId, resource: 'search', limit: limits.leadSearch,
+    });
+    return { remaining: Math.max(0, (status.limit || 0) - (status.count || 0)), limit: status.limit || 0 };
+  } catch {
+    return null;
+  }
+}
+
 export async function GET() {
   try {
     const auth = await requireCoworkAccess();
-    return NextResponse.json({ runs: await listCoworkRuns(auth), canSubmit: coworkWorkerConfigured(), canAutonomous: process.env.COWORK_AUTONOMY_ENABLED === 'true' }, { headers });
+    return NextResponse.json({ runs: await listCoworkRuns(auth), canSubmit: coworkWorkerConfigured(), canAutonomous: process.env.COWORK_AUTONOMY_ENABLED === 'true', searchQuota: await coworkSearchQuota(auth) }, { headers });
   } catch (error) {
     if (error instanceof AuthError) return handleAuthError(error);
     return NextResponse.json({ error: 'No se pudieron cargar los trabajos.' }, { status: 503, headers });

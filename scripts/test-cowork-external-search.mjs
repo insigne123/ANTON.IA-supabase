@@ -27,7 +27,11 @@ globalThis.__coworkSearch = {
       state.finishes.push(args);
       return { data: true, error: null };
     },
-    from: () => ({ select: () => { const chain = { eq: () => chain, single: async () => ({ data: { status: state.cancelled ? 'cancelled' : 'waiting_approval', mode: 'approval' }, error: null }) }; return chain; } }),
+    from: () => ({ select: () => { const chain = { eq: () => chain, in: () => chain,
+      single: async () => ({ data: { status: state.cancelled ? 'cancelled' : 'waiting_approval', mode: 'approval' }, error: null }),
+      maybeSingle: async () => ({ data: { id: 'run', parent_run_id: null, depth: 0 }, error: null }),
+      then(resolve) { resolve({ data: [], error: null }); } }; return chain; } }),
+    // Thread-budget event log is observability only in this suite.
   },
   quota: async () => { state.quota++; return { allowed: state.allow }; },
   provider: async payload => {

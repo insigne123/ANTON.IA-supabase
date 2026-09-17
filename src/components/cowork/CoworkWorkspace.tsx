@@ -27,10 +27,10 @@ function activityTitle(event: CoworkEvent) {
     if (event.payload.action === 'prospecting.search') return 'Consultó nuevos contactos en el proveedor';
     return event.payload.action === 'leads.get' ? 'Consultó una ficha de tus contactos guardados' : 'Buscó en tus contactos guardados';
   }
-  return ({ 'work.created': 'Solicitud guardada', 'run.started': 'Comenzó la preparación', 'run.completed': 'Resultado guardado', 'run.failed': 'La preparación no terminó', 'run.cancelled': 'Trabajo cancelado', 'approval.requested': 'Preparó una propuesta para revisión', 'search.started': 'Comenzó la búsqueda externa', 'effect.approved': 'Propuesta aprobada y guardada en cola', 'effect.started': 'Ejecutando la acción aprobada', 'effect.completed': 'Acción ejecutada', 'effect.failed': 'No se pudo ejecutar la acción', 'draft.requested': 'Solicitó un borrador del informe', 'draft.started': 'Preparando borrador', 'draft.completed': 'Borrador guardado', 'draft.failed': 'No se pudo preparar el borrador' } as Record<string, string>)[event.kind] || 'Actualización del trabajo';
+  return ({ 'work.created': 'Solicitud guardada', 'run.started': 'Comenzó la preparación', 'run.completed': 'Resultado guardado', 'run.failed': 'La preparación no terminó', 'run.cancelled': 'Trabajo cancelado', 'approval.requested': 'Preparó una propuesta para revisión', 'search.started': 'Comenzó la búsqueda externa', 'effect.approved': 'Propuesta aprobada y guardada en cola', 'effect.started': 'Ejecutando la acción aprobada', 'effect.completed': 'Acción ejecutada', 'effect.failed': 'No se pudo ejecutar la acción', 'draft.requested': 'Solicitó un borrador del informe', 'draft.started': 'Preparando borrador', 'draft.completed': 'Borrador guardado', 'draft.failed': 'No se pudo preparar el borrador', 'thread.budget_exhausted': 'Alcanzó el tope de pasos automáticos del hilo' } as Record<string, string>)[event.kind] || 'Actualización del trabajo';
 }
 type Turn = { run: CoworkRun; events: CoworkEvent[] };
-type State = Turn & { ancestors?: Turn[]; olderTurnsOmitted?: boolean; canCreateDraft?: boolean; canResearch?: boolean };
+type State = Turn & { ancestors?: Turn[]; olderTurnsOmitted?: boolean; canCreateDraft?: boolean; canResearch?: boolean; budget?: { depth: number; maxDepth: number; exhausted: boolean } };
 
 export function CoworkWorkspace() {
   const [runs, setRuns] = useState<CoworkRun[]>([]);
@@ -43,6 +43,7 @@ export function CoworkWorkspace() {
   const [cancelling, setCancelling] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [ready, setReady] = useState(false);
+  const [searchQuota, setSearchQuota] = useState<{ remaining: number; limit: number } | null>(null);
   const [canAutonomous, setCanAutonomous] = useState(false);
   const [mode, setMode] = useState<CoworkExecutionMode>('approval');
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -80,6 +81,7 @@ export function CoworkWorkspace() {
     request('/api/cowork/runs').then(data => {
       if (disposed) return;
       setRuns(data.runs); setReady(data.canSubmit); setError('');
+      setSearchQuota(data.searchQuota && typeof data.searchQuota.remaining === 'number' ? data.searchQuota : null);
       setCanAutonomous(data.canAutonomous === true);
       if (!data.canAutonomous) setMode('approval');
     }).catch(error => { if (!disposed) setError(error.message); })
@@ -188,7 +190,7 @@ export function CoworkWorkspace() {
               <Label htmlFor="cowork-message" className="sr-only">Describe tu trabajo</Label>
               <Textarea id="cowork-message" value={message} maxLength={20000} onChange={event => setMessage(event.target.value)} placeholder="Describe lo que necesitas preparar…" className="min-h-28 resize-y border-0 bg-transparent text-base shadow-none" disabled={sending} />
               {canAutonomous && <ExecutionMode id="cowork-mode" value={mode} onChange={setMode} disabled={sending} />}
-              <div className="mt-3 flex items-center justify-between gap-3"><span className="text-xs text-muted-foreground">Consulta tus contactos guardados o prepara un documento</span><Button type="submit" size="icon" className="rounded-xl" aria-label="Crear trabajo" disabled={!ready || !message.trim() || sending}>{sending ? <Loader2 className="motion-safe:animate-spin" /> : <ArrowUp />}</Button></div>
+              <div className="mt-3 flex items-center justify-between gap-3"><span className="text-xs text-muted-foreground">Consulta tus contactos guardados o prepara un documento{searchQuota ? ` · Búsquedas externas hoy: ${searchQuota.remaining} de ${searchQuota.limit}` : ''}</span><Button type="submit" size="icon" className="rounded-xl" aria-label="Crear trabajo" disabled={!ready || !message.trim() || sending}>{sending ? <Loader2 className="motion-safe:animate-spin" /> : <ArrowUp />}</Button></div>
             </form>
             {!ready && !loading && <p className="mt-3 text-sm text-muted-foreground">El procesamiento todavía no está disponible. Puedes consultar los trabajos guardados.</p>}
             <div className="mt-10"><h3 className="mb-3 text-sm text-muted-foreground">Recientes</h3>
@@ -229,6 +231,7 @@ export function CoworkWorkspace() {
               {state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started') ? <p role="status" className="text-sm">La acción está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p> : <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando aprobación…' : 'Aprobar y ejecutar'}</Button></div>}
             </section>}
             {state.run.status === 'failed' && <p className="text-sm text-muted-foreground">{typeof failure?.message === 'string' ? failure.message : 'Tu solicitud sigue guardada. No se pudo completar el trabajo.'}</p>}
+            {state.budget?.exhausted && <p className="text-sm text-muted-foreground">Se alcanzó el tope de pasos automáticos de este hilo. Lo logrado quedó guardado; escríbeme abajo para seguir.</p>}
             <ContactResults key={state.run.id} runId={state.run.id} events={state.events} onError={setError} onAccessDenied={clearPrivateResults}
               canResearch={state.run.status === 'completed' && state.canResearch}
               onUseReport={leadId => { setMessage(`Consulta la ficha del contacto guardado ${leadId} y su investigación disponible. Resume las fuentes y recomendaciones si existen.`); requestAnimationFrame(() => document.getElementById('cowork-followup')?.focus()); }} />

@@ -14,7 +14,7 @@ export function ExecutionMode({ id, value, onChange, disabled }: {
       </select>
     </div>
     <p className="text-xs text-muted-foreground">{value === 'autonomous'
-      ? 'Autoriza consultar datos y una búsqueda externa de hasta 25 contactos en este trabajo. Se aplican tus cuotas. Los cambios de notas se revisan antes de guardar.'
+      ? 'Delegación permanente (cuando esté habilitada): aprueba por ti búsquedas y efectos exactos dentro de topes estrictos —máximo 3 pasos automáticos y 1 búsqueda externa por hilo—. Las notas siempre se revisan antes de guardar y los envíos o campañas siempre requieren tu revisión.'
       : 'Antes de consultar un proveedor o cambiar una nota, revisarás la propuesta.'}</p>
   </div>;
 }

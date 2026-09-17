@@ -3,7 +3,7 @@ import { build } from 'esbuild';
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 process.env.COWORK_ENABLED = 'true';
-const state = { proposals: [], takes: 0, finishes: [], admissions: [], executed: [] };
+const state = { proposals: [], takes: 0, finishes: [], admissions: [], executed: [], events: [], depth: 0 };
 const lease = '00000000-0000-4000-8000-000000000010';
 const client = {
   rpc: async (name, args) => {
@@ -29,10 +29,13 @@ const client = {
     throw new Error(`unexpected rpc ${name}`);
   },
   from: table => {
-    const chain = { select: () => chain, eq: () => chain,
+    const chain = { select: () => chain, eq: () => chain, in: () => chain,
       single: async () => table === 'cowork_runs'
         ? { data: { status: 'waiting_approval', mode: 'approval' }, error: null }
-        : { data: null, error: null } };
+        : { data: null, error: null },
+      maybeSingle: async () => ({ data: { id: 'run-effect', parent_run_id: null, depth: state.depth }, error: null }),
+      insert: async row => { state.events.push(row); return { data: null, error: null }; },
+      then(resolve) { resolve({ data: [], error: null }); } };
     return chain;
   },
 };
@@ -69,7 +72,15 @@ try {
   assert.equal(state.admissions[0].p_parent_run_id, 'run-effect');
   const second = await module.exports.processCoworkEffectQueue();
   assert.deepEqual(second, { processed: 0, claimed: false });
-  console.log('PASS: effect propose, approval, single execution, finish and continuation.');
+  // Thread budget: at max depth the chain stops gracefully with an observed event.
+  state.depth = 5;
+  const refused = await module.exports.admitCoworkContinuation(client,
+    { userId: 'owner', organizationId: 'org' }, 'run-effect', 'Continúa');
+  assert.equal(refused, null);
+  assert.equal(state.admissions.length, 1);
+  assert.equal(state.events.length, 1);
+  assert.equal(state.events[0].kind, 'thread.budget_exhausted');
+  console.log('PASS: effect propose, approval, single execution, finish, continuation and thread budget.');
 } finally {
   delete globalThis.__coworkEffects;
   delete process.env.COWORK_ENABLED;
