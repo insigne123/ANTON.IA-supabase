@@ -84,3 +84,57 @@ test('parallel and sequential queries share one total read budget', async () => 
   }), /budget exhausted/);
   assert.equal(calls, 3);
 });
+
+test('effect proposals require an observed target and resolve its origin run', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const parentId = '00000000-0000-4000-8000-000000000011';
+  const save = { action: 'leads.save_contact' as const, query: null, leadId: null,
+    providerId: 'apollo:abc', snapshotId: null, note: null, answer: null };
+  const proposals: unknown[] = [];
+  const base = {
+    message: 'Guarda el contacto', runId, signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: [{ id: 'apollo:abc' }], scope: 'external_search' }), record: async () => {},
+    proposeEffect: async (proposal: unknown) => { proposals.push(proposal); },
+  };
+  await assert.rejects(runCoworkReadLoop({ ...base, decide: async () => save }), /observed/);
+  assert.equal(proposals.length, 0);
+  // External contacts are observed through a previous search recorded in history.
+  const fromHistory = await runCoworkReadLoop({ ...base,
+    history: [{ runId: parentId, observations: [{ action: 'prospecting.search', input: 'x', result: { items: [{ id: 'apollo:abc' }], scope: 'external_search' } }] }],
+    decide: async () => save });
+  assert.match(fromHistory.reply, /Revisa/);
+  assert.deepEqual(proposals, [{ kind: 'save_contact', targetId: 'apollo:abc',
+    label: 'Guardar contacto apollo:abc', originRunId: parentId }]);
+});
+
+test('research and draft effects match their observed evidence', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const leadId = '00000000-0000-4000-8000-000000000021';
+  const snapshotId = '00000000-0000-4000-8000-000000000022';
+  const proposals: Array<{ kind: string; targetId: string; originRunId: string }> = [];
+  const base = {
+    message: 'Investiga y prepara', runId, signal: new AbortController().signal, authorize: async () => {},
+    execute: async (action: string) => action === 'research.get_existing'
+      ? { leadId, availability: 'available', research: { snapshotId } }
+      : { items: [{ id: leadId }], scope: 'own_saved_contacts' },
+    record: async () => {},
+    proposeEffect: async (proposal: { kind: string; targetId: string; originRunId: string }) => { proposals.push(proposal); },
+  };
+  const research = { action: 'research.start' as const, query: null, leadId, providerId: null, snapshotId: null, note: null, answer: null };
+  await runCoworkReadLoop({ ...base, decide: async observations => {
+    if (!observations.length) return search;
+    if (observations.length === 1) return { action: 'leads.get' as const, query: null, leadId, providerId: null, snapshotId: null, note: null, answer: null };
+    return research;
+  } });
+  assert.deepEqual(proposals[0], { kind: 'start_research', targetId: leadId,
+    label: `Investigar contacto ${leadId}`, originRunId: runId });
+  const draft = { action: 'draft.request' as const, query: null, leadId: null, providerId: null, snapshotId, note: null, answer: null };
+  const readResearch = { action: 'research.get_existing' as const, query: null, leadId, providerId: null, snapshotId: null, note: null, answer: null };
+  await runCoworkReadLoop({ ...base, decide: async observations => {
+    if (observations.length === 0) return search;
+    if (observations.length === 1) return readResearch;
+    return draft;
+  } });
+  assert.deepEqual(proposals[1], { kind: 'request_draft', targetId: snapshotId,
+    label: `Preparar borrador del informe ${snapshotId}`, originRunId: runId });
+});

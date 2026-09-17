@@ -13,6 +13,10 @@ const mocks={
   './lead-tools':'export const queryCoworkLeads=async()=>{throw new Error("unexpected read")};',
   './conversation-context':'export const loadCoworkHistory=async()=>({turns:[]});',
   './external-search':'export const processCoworkSearchQueue=async()=>({claimed:false});',
+  './effects':'export const processCoworkEffectQueue=async()=>({claimed:false});export const resolveCoworkEffect=async()=>true;',
+  './operations':'export const coworkOperationHash=()=>"hash";export const createCoworkOperationGateway=()=>({invoke:async()=>{throw new Error("unused gateway")}});',
+  './read-capabilities':'export const coworkReadCapabilities=()=>[];',
+  '@/lib/cowork/agent-instructions':'export const coworkAgentInstructions=()=>({systemPrompt:"fixture",parallelReadCapability:"",researchCapability:"",externalSearchCapability:"",additionalCapability:"",effectCapability:""});',
   './draft-from-research':'export const processCoworkDraftQueue=async()=>({claimed:false});',
   './research-read':'export const readCoworkResearch=async()=>{};',
 };

@@ -5,7 +5,7 @@ import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/s
 import { requestApolloSearch } from '@/lib/server/apollo-search-client';
 import { requireCoworkWorkerAccess } from './access';
 import { coworkApolloPayload, coworkSearchCriteriaSchema } from '@/lib/cowork/search-proposal';
-import { deterministicCoworkUuid } from './operations';
+import { admitCoworkContinuation } from './effects';
 
 const providerLead = z.object({ id: z.string().min(1).max(200) }).passthrough();
 function text(value: unknown, max = 500) { return typeof value === 'string' ? value.slice(0, max) : null; }
@@ -54,23 +54,8 @@ export async function admitSearchContinuation(
   scope: { userId: string; organizationId: string },
   runId: string,
 ): Promise<string | null> {
-  try {
-    await requireCoworkWorkerAccess(client, scope);
-    const parent = await client.from('cowork_runs').select('mode').eq('id', runId)
-      .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).single();
-    if (parent.error || !parent.data) return null;
-    const mode = parent.data.mode === 'autonomous' ? 'autonomous' : 'approval';
-    const { data, error } = await client.rpc('cowork_admit_followup', {
-      p_user_id: scope.userId, p_organization_id: scope.organizationId,
-      p_request_id: deterministicCoworkUuid(`cowork:search-continuation:${runId}`),
-      p_message: 'Continúa a partir del resultado de búsqueda completado del trabajo anterior, dentro del mismo encargo. Presenta los contactos encontrados y propón el siguiente paso concreto, por ejemplo guardar los adecuados. No repitas la búsqueda externa: ya está completada y su resultado está en el historial.',
-      p_mode: mode, p_parent_run_id: runId,
-    });
-    if (error || typeof data !== 'string') return null;
-    return data;
-  } catch {
-    return null;
-  }
+  return admitCoworkContinuation(client, scope, runId,
+    'Continúa a partir del resultado de búsqueda completado del trabajo anterior, dentro del mismo encargo. Presenta los contactos encontrados y propón el siguiente paso concreto, por ejemplo guardar los adecuados. No repitas la búsqueda externa: ya está completada y su resultado está en el historial.');
 }
 /** Only the scheduled worker consumes quota/calls Apollo. Claims are never replayed. */
 export async function processCoworkSearchQueue() {

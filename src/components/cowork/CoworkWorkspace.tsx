@@ -26,7 +26,7 @@ function activityTitle(event: CoworkEvent) {
     if (event.payload.action === 'prospecting.search') return 'Consultó nuevos contactos en el proveedor';
     return event.payload.action === 'leads.get' ? 'Consultó una ficha de tus contactos guardados' : 'Buscó en tus contactos guardados';
   }
-  return ({ 'work.created': 'Solicitud guardada', 'run.started': 'Comenzó la preparación', 'run.completed': 'Resultado guardado', 'run.failed': 'La preparación no terminó', 'run.cancelled': 'Trabajo cancelado', 'approval.requested': 'Preparó una propuesta para revisión', 'search.started': 'Comenzó la búsqueda externa', 'draft.requested': 'Solicitó un borrador del informe', 'draft.started': 'Preparando borrador', 'draft.completed': 'Borrador guardado', 'draft.failed': 'No se pudo preparar el borrador' } as Record<string, string>)[event.kind] || 'Actualización del trabajo';
+  return ({ 'work.created': 'Solicitud guardada', 'run.started': 'Comenzó la preparación', 'run.completed': 'Resultado guardado', 'run.failed': 'La preparación no terminó', 'run.cancelled': 'Trabajo cancelado', 'approval.requested': 'Preparó una propuesta para revisión', 'search.started': 'Comenzó la búsqueda externa', 'effect.approved': 'Propuesta aprobada y guardada en cola', 'effect.started': 'Ejecutando la acción aprobada', 'effect.completed': 'Acción ejecutada', 'effect.failed': 'No se pudo ejecutar la acción', 'draft.requested': 'Solicitó un borrador del informe', 'draft.started': 'Preparando borrador', 'draft.completed': 'Borrador guardado', 'draft.failed': 'No se pudo preparar el borrador' } as Record<string, string>)[event.kind] || 'Actualización del trabajo';
 }
 type Turn = { run: CoworkRun; events: CoworkEvent[] };
 type State = Turn & { ancestors?: Turn[]; olderTurnsOmitted?: boolean; canCreateDraft?: boolean; canResearch?: boolean };
@@ -154,7 +154,7 @@ export function CoworkWorkspace() {
     if (!selected || resolving) return;
     setResolving(true);
     try {
-      await request(`/api/cowork/runs/${selected}/${proposal?.action === 'prospecting.search' ? 'search-approval' : 'approval'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approve }) });
+      await request(`/api/cowork/runs/${selected}/${proposal?.action === 'prospecting.search' ? 'search-approval' : proposal?.action === 'cowork.effect' ? 'effect-approval' : 'approval'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approve }) });
       setRefresh(value => value + 1);
     } catch (error) { setError(error instanceof Error ? error.message : 'No se pudo resolver el cambio.'); }
     finally { setResolving(false); }
@@ -220,6 +220,12 @@ export function CoworkWorkspace() {
               <div><h4 className="text-sm font-medium">Nota actual</h4><p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">{String(proposal.previousNote || 'Sin nota')}</p></div>
               <div><h4 className="text-sm font-medium">Nueva nota</h4><p className="mt-1 whitespace-pre-wrap break-words text-sm">{String(proposal.proposedNote || '')}</p></div>
               <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando decisión…' : 'Guardar nueva nota'}</Button></div>
+            </section>}
+            {proposal?.action === 'cowork.effect' && <section aria-label="Revisar acción propuesta" className="space-y-4 rounded-xl border border-border p-5">
+              <h3 className="font-medium">{proposal?.kind === 'save_contact' ? 'Guardar contacto' : proposal?.kind === 'start_research' ? 'Investigar contacto' : 'Preparar borrador'}</h3>
+              <p className="text-sm">{String(proposal?.label || '')}</p>
+              <p className="text-sm text-muted-foreground">{proposal?.kind === 'save_contact' ? 'Se guardará en tus contactos sin correo verificado. Podrás enriquecerlo después.' : proposal?.kind === 'start_research' ? 'Se encolará la investigación con tu cuota disponible. El resultado se incorporará al retomarse el trabajo.' : 'Se preparará el borrador en segundo plano. Podrás revisarlo cuando esté listo.'}</p>
+              {state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started') ? <p role="status" className="text-sm">La acción está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p> : <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando aprobación…' : 'Aprobar y ejecutar'}</Button></div>}
             </section>}
             {state.run.status === 'failed' && <p className="text-sm text-muted-foreground">{typeof failure?.message === 'string' ? failure.message : 'Tu solicitud sigue guardada. No se pudo completar el trabajo.'}</p>}
             <ContactResults key={state.run.id} runId={state.run.id} events={state.events} onError={setError} onAccessDenied={clearPrivateResults}

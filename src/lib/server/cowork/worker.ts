@@ -9,11 +9,15 @@ import { processCoworkDraftQueue } from './draft-from-research';
 import { coworkExecutionPolicy } from '@/lib/cowork/execution-policy';
 import { coworkOperationHash, createCoworkOperationGateway } from './operations';
 import { coworkReadCapabilities } from './read-capabilities';
+import { processCoworkEffectQueue, resolveCoworkEffect } from './effects';
 import { coworkAgentInstructions } from '@/lib/cowork/agent-instructions';
 
 /** Read-only worker: bounded app queries and drafting; no implicit mutations. */
 export async function processCoworkQueue() {
   if (process.env.COWORK_ENABLED !== 'true' || !coworkWorkerConfigured()) return { processed: 0 };
+  // Owner-approved effects first: they carry an explicit grant and unblock threads.
+  const effect = await processCoworkEffectQueue();
+  if (effect.claimed) return { processed: effect.processed };
   const draft = await processCoworkDraftQueue();
   if (draft.claimed) return { processed: draft.processed };
   const search = await processCoworkSearchQueue();
@@ -62,7 +66,7 @@ export async function processCoworkQueue() {
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
     });
     const result = await runCoworkReadLoop({
-      message: run.message, signal: controller.signal, authorize,
+      message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize,
       decide: async (observations, mustAnswer) => {
         const turn = await generateStructuredWithTelemetry({
           schema: coworkDecisionSchema,
@@ -71,7 +75,8 @@ export async function processCoworkQueue() {
             parallelReadCapability: instructions.parallelReadCapability,
             researchCapability: instructions.researchCapability,
             externalSearchCapability: instructions.externalSearchCapability,
-            additionalCapability: instructions.additionalCapability }),
+            additionalCapability: instructions.additionalCapability,
+            effectCapability: instructions.effectCapability }),
           openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
           provider: 'openai',
           maxAttempts: 1, timeoutMs: 30000, maxOutputTokens: 6000,
@@ -110,6 +115,20 @@ export async function processCoworkQueue() {
             p_run_id: run.id, p_user_id: scope.userId, p_organization_id: scope.organizationId, p_approve: true,
           });
           if (admitted.error) throw admitted.error;
+        }
+      },
+      proposeEffect: async proposal => {
+        const proposed = await client.rpc('cowork_propose_effect', {
+          p_run_id: run.id, p_token: run.lease_token, p_kind: proposal.kind,
+          p_origin_run_id: proposal.originRunId, p_target_id: proposal.targetId, p_label: proposal.label,
+        });
+        if (proposed.error || proposed.data !== true) throw new Error('Could not prepare effect review');
+        waitingApproval = true;
+        // Autonomous mode carries the user's standing grant: approve the exact
+        // proposed effect so the queue executes it without another round-trip.
+        if (executionPolicy.automaticExternalSearch && process.env.COWORK_AUTONOMY_ENABLED === 'true') {
+          const approved = await resolveCoworkEffect(client, scope, run.id, true);
+          if (!approved) throw new Error('Could not approve effect');
         }
       },
     });

@@ -43,6 +43,14 @@ No certifica terminado el plan integral.
 - Al terminar una búsqueda externa, el worker admite un trabajo hijo con identificador determinista que retoma el resultado persistido sin repetir búsqueda ni consumir cuota de nuevo. La admisión es idempotente y su fallo nunca invalida la búsqueda ya terminada.
 - Pruebas de continuación idempotente, UUID determinista y observaciones recientes aprobadas junto a la suite existente.
 
+## Avance: efectos conversacionales guardar/investigar/borrador
+
+- Tabla `cowork_effect_proposals` y RPC `propose/resolve/take/finish_effect` aplicados en producción: una propuesta aprobada se ejecuta exactamente una vez.
+- El agente propone `leads.save_contact`, `research.start` y `draft.request` solo sobre objetivos observados, con origen de ejecución verificado. En modo con aprobaciones se muestra tarjeta de revisión; en autónomo se aprueba el efecto exacto.
+- La ejecución reutiliza los servicios compartidos (guardado, investigación nativa, borradores) y al terminar admite una continuación que retoma el hilo sin repetir el efecto.
+- Validadores de objetivo aceptan el trabajo proponente en espera de aprobación; la comprobación de observación y alcance sigue vigente.
+- Suite `test-cowork-effects.mjs` y pruebas de propuestas en el bucle aprobadas; `verify-cowork.mjs` la incluye.
+
 ## Orden de construcción
 
 1. Resolver CW-05 y CW-02 juntos: operaciones durables antes de exponer efectos al modelo.

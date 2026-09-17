@@ -10,7 +10,9 @@ export const coworkSaveContactSchema = z.object({ providerId: z.string().regex(/
 export async function saveCoworkContact(auth: AuthContext, runId: string, input: unknown) {
   const { providerId } = coworkSaveContactSchema.parse(input);
   const state = await getCoworkRun(auth, runId);
-  if (!state || state.run.status !== 'completed') throw new Error('COWORK_CONTACT_NOT_OBSERVED');
+  // Effects execute while the proposing run waits for approval; the persisted
+  // observation check below remains the real guard against invented targets.
+  if (!state || (state.run.status !== 'completed' && state.run.status !== 'waiting_approval')) throw new Error('COWORK_CONTACT_NOT_OBSERVED');
   const observed = collectCoworkLeadRows(state.events.filter((event: { kind: string }) => event.kind === 'tool.completed')
     .map((event: { payload: unknown }) => event.payload)).find(row => row.id === providerId);
   if (!observed) throw new Error('COWORK_CONTACT_NOT_OBSERVED');

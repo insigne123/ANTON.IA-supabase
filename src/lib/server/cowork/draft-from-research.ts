@@ -14,7 +14,9 @@ export function coworkDraftIdempotencyKey(runId: string, snapshotId: string) {
 
 async function validateObservedDraftTarget(auth: AuthContext, runId: string, snapshotId: string) {
   const state = await getCoworkRun(auth, runId);
-  if (!state || state.run.status !== 'completed') throw new Error('COWORK_RESULT_UNAVAILABLE');
+  // Effects execute while the proposing run waits for approval; snapshot scope
+  // and observation checks below remain the real guards.
+  if (!state || (state.run.status !== 'completed' && state.run.status !== 'waiting_approval')) throw new Error('COWORK_RESULT_UNAVAILABLE');
   const observed = state.events.some((event: { kind: string; payload: Record<string, any> }) =>
     event.kind === 'tool.completed' && event.payload.action === 'research.get_existing'
     && event.payload.result?.availability === 'available' && event.payload.result?.research?.snapshotId === snapshotId);

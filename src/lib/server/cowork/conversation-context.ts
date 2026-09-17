@@ -6,7 +6,7 @@ export async function loadCoworkHistory(
   scope: { userId: string; organizationId: string },
   parentId: string | null,
 ) {
-  const history: Array<{ request: string; reply: string; document: { title: string; content: string } | null; observations: unknown[] }> = [];
+  const history: Array<{ runId: string; request: string; reply: string; document: { title: string; content: string } | null; observations: unknown[] }> = [];
   const visited = new Set<string>();
   let remaining = 60000;
   let cursor = parentId;
@@ -31,7 +31,7 @@ export async function loadCoworkHistory(
     if (observed.error) throw new Error('Conversation observations unavailable');
     const observedPayloads = ((observed.data || []) as Array<{ payload: unknown }>)
       .map((row: { payload: unknown }) => row.payload).reverse();
-    const turn = { request: run.message, ...result, observations: observedPayloads };
+    const turn = { runId: cursor, request: run.message, ...result, observations: observedPayloads };
     const size = JSON.stringify(turn).length;
     if (size > remaining) {
       // Preserve the immediate parent rather than silently editing a truncated document.

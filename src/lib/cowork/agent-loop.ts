@@ -2,24 +2,73 @@ import { z } from 'zod';
 import { coworkDocumentSchema } from './contracts';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
 import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
+import { collectCoworkLeadRows } from './lead-export';
+
+export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 'request_draft']);
+export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 export const coworkDecisionSchema = z.object({
-  action: z.enum(['leads.search', 'leads.get', 'research.get_existing', 'reads.parallel', 'crm.propose_note', 'prospecting.propose_search', 'answer']),
+  action: z.enum(['leads.search', 'leads.get', 'research.get_existing', 'reads.parallel',
+    'crm.propose_note', 'prospecting.propose_search',
+    'leads.save_contact', 'research.start', 'draft.request', 'answer']),
   reads: z.array(coworkReadTaskSchema).min(1).max(3).nullable().optional(),
   query: z.string().max(120).nullable(),
   leadId: z.string().uuid().nullable(),
+  providerId: z.string().regex(/^apollo:[A-Za-z0-9_-]{1,200}$/).nullable().optional(),
+  snapshotId: z.string().uuid().nullable().optional(),
   note: z.string().trim().min(1).max(4000).nullable().optional(),
   searchCriteria: coworkSearchCriteriaSchema.nullable().optional(),
   answer: coworkDocumentSchema.nullable(),
 }).strict();
 
 export type CoworkReadAction = 'leads.search' | 'leads.get' | 'research.get_existing';
+export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draft.request';
 export type CoworkObservation = { action: CoworkReadAction; input: string; result: unknown };
 type Decision = z.infer<typeof coworkDecisionSchema>;
+
+export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; label: string; originRunId: string };
+
+function observationRunId(
+  observations: unknown[], history: CoworkHistoryTurn[], currentRunId: string,
+  matches: (payload: Record<string, unknown>) => boolean,
+): string | null {
+  if (observations.some(item => item && typeof item === 'object' && matches(item as Record<string, unknown>))) {
+    if (currentRunId) return currentRunId;
+  }
+  for (const turn of history) {
+    if (turn.observations.some(item => item && typeof item === 'object' && matches(item as Record<string, unknown>))) return turn.runId;
+  }
+  return null;
+}
+
+function effectTargetRun(
+  action: CoworkEffectAction, targetId: string,
+  observations: CoworkObservation[], history: CoworkHistoryTurn[], currentRunId: string,
+): string | null {
+  if (action === 'draft.request') {
+    return observationRunId(observations, history, currentRunId, payload =>
+      payload.action === 'research.get_existing'
+      && (payload.result as { availability?: string } | null)?.availability === 'available'
+      && (payload.result as { research?: { snapshotId?: string } } | null)?.research?.snapshotId === targetId);
+  }
+  return observationRunId(observations, history, currentRunId, payload =>
+    collectCoworkLeadRows([payload]).some(row => row.id === targetId));
+}
+
+function effectLabel(action: CoworkEffectAction, targetId: string): string {
+  if (action === 'leads.save_contact') return `Guardar contacto ${targetId.slice(0, 120)}`;
+  if (action === 'research.start') return `Investigar contacto ${targetId.slice(0, 120)}`;
+  return `Preparar borrador del informe ${targetId.slice(0, 120)}`;
+}
+
+/** Run a previous completed (or the current paused) work whose events hold observations. */
+export type CoworkHistoryTurn = { runId: string; observations: unknown[] };
 
 /** Bounded read-only loop. Tool outputs are observations, never instructions. */
 export async function runCoworkReadLoop(input: {
   message: string;
+  runId?: string;
+  history?: CoworkHistoryTurn[];
   signal: AbortSignal;
   authorize: () => Promise<void>;
   decide: (observations: CoworkObservation[], mustAnswer: boolean) => Promise<Decision>;
@@ -27,6 +76,7 @@ export async function runCoworkReadLoop(input: {
   record: (observation: CoworkObservation) => Promise<void>;
   proposeNote?: (leadId: string, note: string) => Promise<void>;
   proposeSearch?: (criteria: CoworkSearchCriteria) => Promise<void>;
+  proposeEffect?: (proposal: CoworkEffectProposal) => Promise<void>;
 }) {
   const observations: CoworkObservation[] = [];
   let readsUsed = 0;
@@ -56,6 +106,20 @@ export async function runCoworkReadLoop(input: {
       input.signal.throwIfAborted();
       await input.proposeNote(decision.leadId, decision.note);
       return { reply: 'Revisa el cambio de nota antes de guardarlo.', document: null };
+    }
+    if (decision.action === 'leads.save_contact' || decision.action === 'research.start' || decision.action === 'draft.request') {
+      if (!input.proposeEffect) throw new Error('Effect proposals unavailable');
+      const kind: CoworkEffectKind = decision.action === 'leads.save_contact' ? 'save_contact'
+        : decision.action === 'research.start' ? 'start_research' : 'request_draft';
+      const targetId = decision.action === 'leads.save_contact' ? decision.providerId
+        : decision.action === 'research.start' ? decision.leadId : decision.snapshotId;
+      if (!targetId) throw new Error('Missing effect target');
+      const originRunId = effectTargetRun(decision.action, targetId, observations, input.history || [], input.runId || '');
+      if (!originRunId) throw new Error('Effect target must be observed first');
+      await input.authorize();
+      input.signal.throwIfAborted();
+      await input.proposeEffect({ kind, targetId, label: effectLabel(decision.action, targetId), originRunId });
+      return { reply: 'Revisa la propuesta antes de ejecutar el cambio.', document: null };
     }
     if (turn === 3) throw new Error('Cowork tool budget exhausted');
     if (decision.action === 'reads.parallel') {

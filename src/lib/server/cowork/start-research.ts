@@ -10,7 +10,9 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 export async function coworkResearchTarget(auth: AuthContext, runId: string, leadId: string) {
   z.string().uuid().parse(leadId);
   const state = await getCoworkRun(auth, runId);
-  if (!state || state.run.status !== 'completed') throw new Error('COWORK_RESEARCH_TARGET_UNAVAILABLE');
+  // Effects execute while the proposing run waits for approval; target scope
+  // and observation checks below remain the real guards.
+  if (!state || (state.run.status !== 'completed' && state.run.status !== 'waiting_approval')) throw new Error('COWORK_RESEARCH_TARGET_UNAVAILABLE');
   const rows = collectCoworkLeadRows(state.events.filter((event: { kind: string }) => event.kind === 'tool.completed')
     .map((event: { payload: unknown }) => event.payload));
   if (!rows.some(row => row.id === leadId)) throw new Error('COWORK_RESEARCH_TARGET_UNAVAILABLE');
