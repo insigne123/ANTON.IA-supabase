@@ -27,6 +27,20 @@ env:
   - variable: COWORK_WORKER_SECRET
     secret: COWORK_WORKER_SECRET
     availability: [RUNTIME]
+  # Fase 0 plan Cowork: búsqueda externa, investigación, borradores y versiones.
+  # Autonomía sigue desactivada (COWORK_AUTONOMY_ENABLED ausente = false).
+  - variable: COWORK_EXTERNAL_SEARCH_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_RESEARCH_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_NATIVE_DRAFTS_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_DOCUMENT_VERSIONS_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   # === Primary production providers ===
   - variable: OPENAI_API_KEY
     secret: OPENAI_API_KEY
