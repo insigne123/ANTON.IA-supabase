@@ -58,6 +58,16 @@ No certifica terminado el plan integral.
 - Verificación previa: typecheck, `verify-cowork.mjs`, `test-cowork-effects.mjs` y `test-cowork-external-search.mjs` aprobados.
 - Pendiente de validación privada: recorrido buscar → aprobar → guardar → investigar → borrador, y observación 24–48 h sin `APOLLO_GATEWAY_HTTP_*`.
 
+## Avance: Fase 1, presupuestos y equidad (17 de septiembre de 2026)
+
+- Migraciones `20260918100000_cowork_thread_budgets` (columna `depth`, techo absoluto 10 en `cowork_admit_followup`, `p_reset_depth` para followups humanos) y `20260918110000_cowork_search_quota_message` aplicadas y verificadas en producción.
+- Política `coworkThreadBudgets`: aprobación 5 pasos/6 efectos/2 búsquedas/3 borradores por hilo; autónomo 3/3/1/2. Las continuaciones se detienen con evento `thread.budget_exhausted` y aviso visible; el último paso recibe instrucción de cierre.
+- Equidad: si el tick anterior sirvió una cola, la conversación espera su turno (`servedQueueRecently`, fail-open al orden histórico). Script `test-cowork-queue-fairness.mjs` aprobado.
+- Cuota legible: pre-chequeo antes de proponer, mensaje propio al agotarse el cupo diario y saldo visible en el workspace.
+- Autonomía lista en código (topes estrictos, revocación releída al admitir, copy de delegación) pero **sin activar**: falta tu decisión tras 24 h de observación en modo aprobación.
+- Verificación: typecheck, `verify-cowork` (51 pruebas), efectos, búsqueda externa, autonomía, workspace y equidad aprobados. Commit `4519628`, revisión `studio-build-2026-09-17-007` al 100%.
+- Cierra CW-06. Siguiente: Fase 2, herramientas v1 (envíos y campañas incluidos por tu decisión).
+
 ## Orden de construcción
 
 1. Resolver CW-05 y CW-02 juntos: operaciones durables antes de exponer efectos al modelo.
