@@ -6,7 +6,7 @@ const envBefore = process.env.COWORK_EXTERNAL_SEARCH_ENABLED;
 const enabledBefore = process.env.COWORK_ENABLED;
 process.env.COWORK_ENABLED = 'true';
 process.env.COWORK_EXTERNAL_SEARCH_ENABLED = 'true';
-const state = { claimed: false, approved: false, cancelled: false, quota: 0, provider: 0, allow: true, failProvider: false, finishes: [] };
+const state = { claimed: false, approved: false, cancelled: false, quota: 0, provider: 0, allow: true, failProvider: false, finishes: [], admissions: [] };
 const criteria = { titles: ['Gerente'], industries: [], locations: ['Chile'], limit: 5 };
 globalThis.__coworkSearch = {
   client: {
@@ -20,10 +20,14 @@ globalThis.__coworkSearch = {
         state.claimed = true;
         return { data: [{ criteria, run_id: 'run', user_id: 'owner', organization_id: 'org' }], error: null };
       }
+      if (name === 'cowork_admit_followup') {
+        state.admissions.push(args);
+        return { data: '00000000-0000-4000-8000-000000000099', error: null };
+      }
       state.finishes.push(args);
       return { data: true, error: null };
     },
-    from: () => ({ select: () => ({ eq: () => ({ single: async () => ({ data: { status: state.cancelled ? 'cancelled' : 'waiting_approval' }, error: null }) }) }) }),
+    from: () => ({ select: () => { const chain = { eq: () => chain, single: async () => ({ data: { status: state.cancelled ? 'cancelled' : 'waiting_approval', mode: 'approval' }, error: null }) }; return chain; } }),
   },
   quota: async () => { state.quota++; return { allowed: state.allow }; },
   provider: async payload => {
@@ -31,13 +35,14 @@ globalThis.__coworkSearch = {
     assert.equal(payload.reveal_email, false); assert.equal(payload.reveal_phone, false);
     assert.equal(payload.user_id, 'owner'); assert.equal(payload.max_results, 5);
     if (state.failProvider) throw new Error('timeout');
-    return { leads: [{ id: 'external-1', name: 'Ejemplo', email: 'not-authorized@example.com', organization: { name: 'Empresa' } }] };
+    return { leads: [{ id: 'external-1', name: 'Ejemplo', email: 'not-authorized@example.com', linkedin_url: 'https://www.linkedin.com/in/example', organization: { name: 'Empresa', website_url: 'https://empresa.example', linkedin_url: 'javascript:alert(1)' } }] };
   },
 };
 const sources = {
   '@/lib/server/supabase-admin': 'export const getSupabaseAdminClient=()=>globalThis.__coworkSearch.client;',
   '@/lib/server/daily-quota-store': 'export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:10});export const checkAndConsumeDailyQuota=()=>globalThis.__coworkSearch.quota();',
   '@/lib/server/apollo-search-client': 'export const requestApolloSearch=p=>globalThis.__coworkSearch.provider(p);',
+  '@/lib/cowork/capabilities': 'export const createCoworkGateway=()=>{throw new Error("gateway unused in this suite")};',
   './access': 'export const requireCoworkWorkerAccess=async()=>{};',
 };
 const bundle = await build({ entryPoints: ['src/lib/server/cowork/external-search.ts'], bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external',
@@ -60,6 +65,9 @@ try {
   assert.equal(state.quota, 1); assert.equal(state.provider, 1);
   assert.equal(state.finishes[0].p_payload.result.items[0].id, 'apollo:external-1');
   assert.equal(state.finishes[0].p_payload.result.items[0].email, null);
+  assert.equal(state.finishes[0].p_payload.result.items[0].company_website, 'https://empresa.example/');
+  assert.equal(state.finishes[0].p_payload.result.items[0].linkedin_url, 'https://www.linkedin.com/in/example');
+  assert.equal(state.finishes[0].p_payload.result.items[0].company_linkedin, null);
   state.claimed = false; state.allow = false;
   assert.equal((await tick()).processed, 0);
   assert.equal(state.provider, 1);
@@ -75,6 +83,16 @@ try {
   state.approved = true; state.claimed = false; state.cancelled = true;
   assert.equal((await tick()).processed, 0);
   assert.equal(state.provider, 2);
+  assert.equal(state.admissions.length, 1);
+  assert.equal(state.admissions[0].p_parent_run_id, 'run');
+  assert.equal(state.admissions[0].p_mode, 'approval');
+  assert.ok(String(state.admissions[0].p_message).length > 20);
+  const retryRequestId = state.admissions[0].p_request_id;
+  assert.match(retryRequestId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  state.cancelled = false;
+  assert.equal(await module.exports.admitSearchContinuation(globalThis.__coworkSearch.client, { userId: 'owner', organizationId: 'org' }, 'run'), '00000000-0000-4000-8000-000000000099');
+  assert.equal(state.admissions.length, 2);
+  assert.equal(state.admissions[1].p_request_id, retryRequestId);
   console.log('PASS: approval without provider call, background claim, parallel ticks, quota exhaustion, timeout without replay, no reveal, rejection and cancellation.');
 } finally {
   delete globalThis.__coworkSearch;

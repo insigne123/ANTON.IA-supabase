@@ -22,11 +22,16 @@ export async function loadCoworkHistory(
       .eq('kind', 'run.completed').order('sequence', { ascending: false }).limit(1).maybeSingle();
     if (event.error || !event.data) throw new Error('Conversation result unavailable');
     const result = coworkDocumentSchema.parse({ reply: event.data.payload.reply, document: event.data.payload.document });
+    // Most recent observations first for the query cap, then back to
+    // chronological order: a resumed run must see the latest tool result
+    // (for example a completed external search), not only the oldest reads.
     const observed = await client.from('cowork_run_events').select('payload')
       .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
-      .eq('kind', 'tool.completed').order('sequence', { ascending: true }).limit(3);
+      .eq('kind', 'tool.completed').order('sequence', { ascending: false }).limit(3);
     if (observed.error) throw new Error('Conversation observations unavailable');
-    const turn = { request: run.message, ...result, observations: (observed.data || []).map((row: { payload: unknown }) => row.payload) };
+    const observedPayloads = ((observed.data || []) as Array<{ payload: unknown }>)
+      .map((row: { payload: unknown }) => row.payload).reverse();
+    const turn = { request: run.message, ...result, observations: observedPayloads };
     const size = JSON.stringify(turn).length;
     if (size > remaining) {
       // Preserve the immediate parent rather than silently editing a truncated document.

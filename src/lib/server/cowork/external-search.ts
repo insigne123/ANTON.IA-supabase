@@ -5,6 +5,7 @@ import { checkAndConsumeDailyQuota, getEffectiveDailyQuotaLimits } from '@/lib/s
 import { requestApolloSearch } from '@/lib/server/apollo-search-client';
 import { requireCoworkWorkerAccess } from './access';
 import { coworkApolloPayload, coworkSearchCriteriaSchema } from '@/lib/cowork/search-proposal';
+import { deterministicCoworkUuid } from './operations';
 
 const providerLead = z.object({ id: z.string().min(1).max(200) }).passthrough();
 function text(value: unknown, max = 500) { return typeof value === 'string' ? value.slice(0, max) : null; }
@@ -45,6 +46,32 @@ export async function resolveCoworkSearch(auth: AuthContext, runId: string, appr
   return Boolean(claim.data);
 }
 
+/** Admit one child run resuming from the completed search result.
+ * Best-effort: the search already finished durably, so a continuation failure
+ * must never fail it. The deterministic request id collapses retries. */
+export async function admitSearchContinuation(
+  client: ReturnType<typeof getSupabaseAdminClient>,
+  scope: { userId: string; organizationId: string },
+  runId: string,
+): Promise<string | null> {
+  try {
+    await requireCoworkWorkerAccess(client, scope);
+    const parent = await client.from('cowork_runs').select('mode').eq('id', runId)
+      .eq('user_id', scope.userId).eq('organization_id', scope.organizationId).single();
+    if (parent.error || !parent.data) return null;
+    const mode = parent.data.mode === 'autonomous' ? 'autonomous' : 'approval';
+    const { data, error } = await client.rpc('cowork_admit_followup', {
+      p_user_id: scope.userId, p_organization_id: scope.organizationId,
+      p_request_id: deterministicCoworkUuid(`cowork:search-continuation:${runId}`),
+      p_message: 'Continúa a partir del resultado de búsqueda completado del trabajo anterior, dentro del mismo encargo. Presenta los contactos encontrados y propón el siguiente paso concreto, por ejemplo guardar los adecuados. No repitas la búsqueda externa: ya está completada y su resultado está en el historial.',
+      p_mode: mode, p_parent_run_id: runId,
+    });
+    if (error || typeof data !== 'string') return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
 /** Only the scheduled worker consumes quota/calls Apollo. Claims are never replayed. */
 export async function processCoworkSearchQueue() {
   if (process.env.COWORK_ENABLED !== 'true' || process.env.COWORK_EXTERNAL_SEARCH_ENABLED !== 'true') return { processed: 0, claimed: false };
@@ -72,6 +99,7 @@ export async function processCoworkSearchQueue() {
     const finished = await client.rpc('cowork_finish_search', { ...args, p_success: true,
       p_payload: { action: 'prospecting.search', input: criteria, result } });
     if (finished.error) throw finished.error;
+    if (finished.data === true) await admitSearchContinuation(client, scope, runId);
     return { processed: finished.data === true ? 1 : 0, claimed: true };
   } catch {
     const failed = await client.rpc('cowork_finish_search', { ...args, p_success: false, p_payload: {} });

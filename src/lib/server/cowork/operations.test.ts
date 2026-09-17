@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   coworkOperationHash,
   createCoworkOperationGateway,
+  deterministicCoworkUuid,
   stableStringify,
   type CoworkOperation,
 } from './operations';
@@ -15,6 +16,13 @@ test('identical inputs hash identically regardless of key order', () => {
   );
   assert.notEqual(coworkOperationHash({ a: 1 }), coworkOperationHash({ a: 2 }));
   assert.equal(stableStringify({ b: 1, a: 2 }), '{"a":2,"b":1}');
+});
+
+test('deterministic uuids are stable v4 ids per seed', () => {
+  const first = deterministicCoworkUuid('cowork:search-continuation:run');
+  assert.match(first, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(first, deterministicCoworkUuid('cowork:search-continuation:run'));
+  assert.notEqual(first, deterministicCoworkUuid('cowork:search-continuation:other'));
 });
 
 const baseCapability: CoworkCapability = {

@@ -37,6 +37,12 @@ No certifica terminado el plan integral.
 - Instrucciones del agente unificadas en `agent-instructions.ts` según flags vigentes; TypeScript y pruebas aprobadas (5 nuevas de operaciones).
 - CW-05 y la primera parte de CW-02 quedan implementadas en código; falta la continuación conversacional después de efectos (CW-03/CW-04) y la activación de este incremento en producción.
 
+## Avance: continuación tras búsqueda externa
+
+- El historial del trabajo ahora conserva los 3 resultados de herramienta más recientes en orden cronológico, en lugar de solo los 3 más antiguos.
+- Al terminar una búsqueda externa, el worker admite un trabajo hijo con identificador determinista que retoma el resultado persistido sin repetir búsqueda ni consumir cuota de nuevo. La admisión es idempotente y su fallo nunca invalida la búsqueda ya terminada.
+- Pruebas de continuación idempotente, UUID determinista y observaciones recientes aprobadas junto a la suite existente.
+
 ## Orden de construcción
 
 1. Resolver CW-05 y CW-02 juntos: operaciones durables antes de exponer efectos al modelo.
