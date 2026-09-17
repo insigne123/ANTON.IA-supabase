@@ -9,7 +9,7 @@ No certifica terminado el plan integral.
 
 - Repositorio en `main`, Node 22.23.2. Existen cambios locales concurrentes de extensión, investigación y secuencias que requieren revisión individual antes de publicarse.
 - Runtime de studio: `COWORK_ENABLED=true`, `COWORK_WORKER_ENABLED=true`, propietario `de3a3194-29b1-449a-828a-53608a7ebe47`, proveedor OpenAI y modelo configurado `gpt-5.6-luna`.
-- No aparecen flags activos para búsqueda externa, investigación, borradores, autonomía ni versiones en las variables Cowork inspeccionadas.
+- No aparecían flags activos para búsqueda externa, investigación, borradores, autonomía ni versiones en las variables Cowork inspeccionadas (corte 17 de septiembre, antes de Fase 0).
 - Base de producción: dos trabajos en estado `completed`; el último creado el 17 de septiembre. El conteo no certifica contenido, calidad ni recorridos con efectos.
 - La consulta de errores de `coworktick` de las últimas dos horas no devolvió entradas; no es una medición de disponibilidad.
 - TypeScript y `scripts/verify-cowork.mjs` aprobados después del cambio local de instrucciones: 37 pruebas unitarias y los escenarios aislados del script. No son pruebas contra producción.
@@ -50,6 +50,13 @@ No certifica terminado el plan integral.
 - La ejecución reutiliza los servicios compartidos (guardado, investigación nativa, borradores) y al terminar admite una continuación que retoma el hilo sin repetir el efecto.
 - Validadores de objetivo aceptan el trabajo proponente en espera de aprobación; la comprobación de observación y alcance sigue vigente.
 - Suite `test-cowork-effects.mjs` y pruebas de propuestas en el bucle aprobadas; `verify-cowork.mjs` la incluye.
+
+## Avance: Fase 0, activación en producción (17 de septiembre de 2026)
+
+- `apphosting.yaml` declara `COWORK_EXTERNAL_SEARCH_ENABLED`, `COWORK_RESEARCH_ENABLED`, `COWORK_NATIVE_DRAFTS_ENABLED` y `COWORK_DOCUMENT_VERSIONS_ENABLED` en `true`. Autonomía sigue desactivada (sin `COWORK_AUTONOMY_ENABLED`).
+- Commit `772f0d7`, revisión `studio-build-2026-09-17-006` al 100%: variables verificadas en la revisión viva.
+- Verificación previa: typecheck, `verify-cowork.mjs`, `test-cowork-effects.mjs` y `test-cowork-external-search.mjs` aprobados.
+- Pendiente de validación privada: recorrido buscar → aprobar → guardar → investigar → borrador, y observación 24–48 h sin `APOLLO_GATEWAY_HTTP_*`.
 
 ## Orden de construcción
 
