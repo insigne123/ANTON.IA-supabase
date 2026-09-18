@@ -1,10 +1,10 @@
-# Cowork — Fase 2: terminada en código, pendiente despliegue
+# Cowork — Fase 2: desplegada, pendiente recorrido privado
 
-Fecha de revisión: 18 de septiembre de 2026. Commit `ba7293b` en `main`.
+Fecha de revisión: 18 de septiembre de 2026. Commits `ba7293b` y `5c679e6` en `main`.
 
-Estado: implementación completa y verificada localmente. Migraciones SQL
-aplicadas en producción y registradas en el ledger. Falta el despliegue del
-backend (credenciales Firebase locales expiradas) y el recorrido privado.
+Estado: implementación completa, migraciones aplicadas y backend desplegado con
+`firebase deploy --only apphosting` (Deploy complete, 18-09-2026). Falta el
+recorrido privado de aceptación.
 
 ## Correcciones verificadas en esta revisión
 
@@ -63,16 +63,26 @@ backend (credenciales Firebase locales expiradas) y el recorrido privado.
 7. Revisar tarjetas nuevas en navegador (teclado, revocación, móvil, claro/oscuro).
 8. Desplegar el artefacto exacto verificado y ejecutar el recorrido privado.
 
-## Bloqueo actual: despliegue
+## Bloqueo anterior (resuelto): despliegue
 
-- `firebase deploy --only apphosting` falla con credenciales expiradas
-  (`firebase login --reauth` requerido, interactivo). Sin token CI ni componente
-  beta de gcloud disponibles en este entorno.
-- Acción requerida del operador: ejecutar `firebase login --reauth` en una
-  terminal con navegador y luego `firebase deploy --only apphosting -P
-  leadflowai-3yjcy --non-interactive` sobre `main` en `ba7293b`.
-- Tras el despliegue: verificar revisión 100% de tráfico y ejecutar el recorrido
-  privado (buscar → guardar → enriquecer → investigar → borrador → enviar a un
-  destinatario propio).
+- El primer intento falló por credenciales Firebase expiradas; el operador
+  reautenticó con `firebase login --reauth`.
+- Los reintentos devolvieron 409 sobre `build-2026-09-18-002` (ID ya existente);
+  tras esperar a que se asentara el estado del backend, el despliegue completó.
+- La app responde en producción (ruta protegida devuelve 401 sin sesión, como
+  corresponde). La confirmación final es el recorrido privado.
+
+## Recorrido privado de aceptación (pendiente, sin envíos reales ajenos)
+
+1. Buscar → guardar → enriquecer un contacto propio y comprobar que el email
+   aparece en la ficha guardada.
+2. Investigar y pedir borrador sobre ese contacto.
+3. Revisar el borrador y proponer envío: comprobar remitente real, destinatario,
+   asunto y cuerpo exactos en la tarjeta.
+4. Enviar a un destinatario propio y comprobar registro en Contactados sin
+   duplicados.
+5. Crear una campaña de prueba (1 destinatario propio), comprobar cuerpos
+   completos en la tarjeta, aprobar creación (queda pausada), luego activar y
+   pausar comprobando los mensajes de consecuencia.
 
 No se realizaron envíos reales en esta revisión.
