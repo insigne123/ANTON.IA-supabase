@@ -7,6 +7,8 @@ import { ContactResults } from './ContactResults';
 import { ResearchSources } from './ResearchSources';
 import { ExecutionMode } from './ExecutionMode';
 import { DocumentVersions } from './DocumentVersions';
+import { SendReview } from './SendReview';
+import { CampaignReview } from './CampaignReview';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import { coworkSearchCriteriaSchema } from '@/lib/cowork/search-proposal';
 import { Button } from '@/components/ui/button';
@@ -225,10 +227,20 @@ export function CoworkWorkspace() {
               <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando decisión…' : 'Guardar nueva nota'}</Button></div>
             </section>}
             {proposal?.action === 'cowork.effect' && <section aria-label="Revisar acción propuesta" className="space-y-4 rounded-xl border border-border p-5">
-              <h3 className="font-medium">{proposal?.kind === 'save_contact' ? 'Guardar contacto' : proposal?.kind === 'start_research' ? 'Investigar contacto' : 'Preparar borrador'}</h3>
+              <h3 className="font-medium">{proposal?.kind === 'save_contact' ? 'Guardar contacto' : proposal?.kind === 'start_research' ? 'Investigar contacto' : proposal?.kind === 'enrich_contact' ? 'Enriquecer contacto' : proposal?.kind === 'send_email' ? 'Enviar correo' : proposal?.kind === 'campaign_create' ? 'Crear campaña' : proposal?.kind === 'campaign_activate' ? 'Activar campaña' : proposal?.kind === 'campaign_pause' ? 'Pausar campaña' : 'Preparar borrador'}</h3>
               <p className="text-sm">{String(proposal?.label || '')}</p>
-              <p className="text-sm text-muted-foreground">{proposal?.kind === 'save_contact' ? 'Se guardará en tus contactos sin correo verificado. Podrás enriquecerlo después.' : proposal?.kind === 'start_research' ? 'Se encolará la investigación con tu cuota disponible. El resultado se incorporará al retomarse el trabajo.' : 'Se preparará el borrador en segundo plano. Podrás revisarlo cuando esté listo.'}</p>
+              {proposal?.kind === 'send_email'
+                ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
+                  ? <p role="status" className="text-sm">El envío está aprobado y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
+                  : <SendReview runId={state.run.id} draftId={String(proposal?.targetId || '').split(':')[0]} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
+                : proposal?.kind === 'campaign_create' || proposal?.kind === 'campaign_activate' || proposal?.kind === 'campaign_pause'
+                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
+                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
+                    : <CampaignReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
+                : <>
+              <p className="text-sm text-muted-foreground">{proposal?.kind === 'save_contact' ? 'Se guardará en tus contactos sin correo verificado. Podrás enriquecerlo después.' : proposal?.kind === 'start_research' ? 'Se encolará la investigación con tu cuota disponible. El resultado se incorporará al retomarse el trabajo.' : proposal?.kind === 'enrich_contact' ? 'Se consultará el correo al proveedor (solo email, sin teléfono). Consume 1 crédito de enriquecimiento y no inventa datos.' : 'Se preparará el borrador en segundo plano. Podrás revisarlo cuando esté listo.'}</p>
               {state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started') ? <p role="status" className="text-sm">La acción está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p> : <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando aprobación…' : 'Aprobar y ejecutar'}</Button></div>}
+                </>}
             </section>}
             {state.run.status === 'failed' && <p className="text-sm text-muted-foreground">{typeof failure?.message === 'string' ? failure.message : 'Tu solicitud sigue guardada. No se pudo completar el trabajo.'}</p>}
             {state.budget?.exhausted && <p className="text-sm text-muted-foreground">Se alcanzó el tope de pasos automáticos de este hilo. Lo logrado quedó guardado; escríbeme abajo para seguir.</p>}

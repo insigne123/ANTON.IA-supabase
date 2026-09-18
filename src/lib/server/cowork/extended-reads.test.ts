@@ -1,0 +1,91 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { queryCoworkExtendedReads, readCoworkAppContext } from './extended-reads';
+
+const scope = { userId: 'user-1', organizationId: 'org-1' };
+const LEAD = '00000000-0000-4000-8000-000000000001';
+
+function mockClient(tables: Record<string, { rows?: unknown[]; count?: number; error?: { message: string }; single?: unknown }> = {}) {
+  const calls: Array<{ table: string; method: string; args: unknown[] }> = [];
+  const client = {
+    from: (table: string) => {
+      const state = tables[table] || {};
+      const chain: Record<string, (...args: any[]) => any> = {
+        select: (...args) => { calls.push({ table, method: 'select', args }); return chain; },
+        eq: (...args) => { calls.push({ table, method: 'eq', args }); return chain; },
+        order: () => chain, limit: () => chain, or: () => chain, gte: () => chain, in: () => chain,
+        maybeSingle: async () => state.error
+          ? { data: null, error: state.error }
+          : { data: (state.single ?? null) as unknown, error: null },
+        then: (resolve: (value: unknown) => void) => resolve(state.error
+          ? { data: null, error: state.error }
+          : { data: state.rows ?? [], error: null, count: state.count ?? (state.rows?.length || 0) }),
+      };
+      return chain;
+    },
+  } as never;
+  return { client, calls };
+}
+
+test('crm.search returns team rows with scope label and caps at 20', async () => {
+  const rows = Array.from({ length: 20 }, (_, index) => ({ id: `lead-${index}`, name: 'Ana' }));
+  const { client, calls } = mockClient({ leads: { rows } });
+  const result = await queryCoworkExtendedReads(client, scope, 'crm.search', 'Ana');
+  assert.equal(result.scope, 'organization_crm');
+  assert.equal(result.returned, 20);
+  assert.equal(result.truncated, true);
+  assert.ok(calls.some(call => call.method === 'eq' && call.args[0] === 'organization_id' && call.args[1] === 'org-1'));
+  assert.ok(!calls.some(call => call.method === 'eq' && call.args[0] === 'user_id'), 'team scope must not filter by user');
+});
+
+test('crm.search rejects punctuation-only terms', async () => {
+  const { client } = mockClient();
+  await assert.rejects(queryCoworkExtendedReads(client, scope, 'crm.search', '!!!'), /Invalid search term/);
+});
+
+test('crm.get_lead requires UUID and returns lead plus contacted history', async () => {
+  const { client } = mockClient();
+  await assert.rejects(queryCoworkExtendedReads(client, scope, 'crm.get_lead', 'not-a-uuid'), /uuid/i);
+  const lead = { id: LEAD, name: 'Ana' };
+  const ok = mockClient({ leads: { single: lead }, contacted_leads: { rows: [{ id: 'c1' }] } });
+  const result = await queryCoworkExtendedReads(ok.client, scope, 'crm.get_lead', LEAD) as {
+    lead: unknown; contacted: unknown[];
+  };
+  assert.deepEqual(result.lead, lead);
+  assert.equal(result.contacted.length, 1);
+});
+
+test('contacted.timeline requires UUID and database errors stay generic', async () => {
+  const { client } = mockClient();
+  await assert.rejects(queryCoworkExtendedReads(client, scope, 'contacted.timeline', 'x'), /uuid/i);
+  const failing = mockClient({ contacted_leads: { error: { message: 'db down' } } });
+  await assert.rejects(
+    queryCoworkExtendedReads(failing.client, scope, 'contacted.search', 'Ana'),
+    /No se pudieron consultar los contactados/);
+});
+
+test('metrics.overview reports the last 7 days with explicit scope', async () => {
+  const tables = {
+    leads: { count: 100 }, contacted_leads: { count: 7 },
+  };
+  const { client } = mockClient(tables);
+  const result = await queryCoworkExtendedReads(client, scope, 'metrics.overview', '') as {
+    period: string; scope: string; savedContacts: number;
+  };
+  assert.equal(result.period, 'last_7_days');
+  assert.equal(result.scope, 'organization_metrics');
+  assert.equal(result.savedContacts, 100);
+});
+
+test('app.context exposes connections and offer without tokens or memories', async () => {
+  const builder = async () => ({
+    emailConnections: { google: true, outlook: false },
+    counts: { leads: 3, contacted: 1, campaigns: 0, activeMissions: 0, openExceptions: 0 },
+    performance: null, offer: 'Logística',
+    user: { id: 'user-1' }, organizationId: 'org-1', profile: { secret: 'x' }, memories: [{ key: 'k', text: 't' }],
+  });
+  const result = await readCoworkAppContext(scope, builder as never);
+  assert.equal(result.scope, 'organization_context');
+  assert.deepEqual(result.emailConnections, { google: true, outlook: false });
+  assert.ok(!('profile' in result) && !('memories' in result));
+});

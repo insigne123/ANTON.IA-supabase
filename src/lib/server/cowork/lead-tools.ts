@@ -1,12 +1,11 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { CoworkReadAction } from '@/lib/cowork/agent-loop';
 
 /** Conservative first scope: only records owned by this user in this org. */
 export async function queryCoworkLeads(
   client: SupabaseClient,
   scope: { userId: string; organizationId: string },
-  action: Exclude<CoworkReadAction, 'research.get_existing'>,
+  action: 'leads.search' | 'leads.get',
   value: string,
 ) {
   let query = client.from('leads')

@@ -6,13 +6,16 @@ process.env.COWORK_ENABLED='true'; process.env.COWORK_EXTERNAL_SEARCH_ENABLED='t
 const state={ mode:'approval', calls:[], disableDuringProposal:false };
 globalThis.__coworkAutonomy = state;
 const mocks={
-  '@/ai/openai-json': `export const generateStructuredWithTelemetry=async()=>({data:{action:'prospecting.propose_search',query:null,leadId:null,answer:null,searchCriteria:{titles:['Gerente'],industries:[],locations:[],limit:5}},telemetry:{modelName:'fixture',durationMs:1}});`,
+  './campaign-ops': 'export const stageCoworkCampaignDefinition=async()=>{throw new Error("unexpected campaign")};',
+  '@/lib/server/bulk-campaigns': 'export const getBulkCampaign=async()=>{throw new Error("unexpected campaign")};',
+  '@/lib/server/native-drafts': 'export const getCurrentNativeDraft=async()=>{throw new Error("unexpected draft")};',
+  '@/ai/openai-json': `export const generateStructuredWithTelemetry=async()=>({data:{action:'prospecting.propose_search',query:null,leadId:null,answer:null,searchCriteria:{titles:['Gerente'],industries:[],locations:[],limit:5}},telemetry:{modelName:'fixture',durationMs:1}});export const generateStructured=async()=>{throw new Error("unused")};`,
   '@/lib/server/supabase-admin': `export const getSupabaseAdminClient=()=>{const chain={table:'',select:()=>chain,eq:()=>chain,gt:()=>chain,limit:()=>chain,in:()=>chain,order:()=>chain,
   maybeSingle:async()=>({data:chain.table==='cowork_runs'?{id:'run',parent_run_id:null,depth:0}:null,error:null}),
   single:async()=>({data:{status:'running',lease_token:'token'},error:null}),
   then(resolve){resolve({data:[],error:null});}};
   return{rpc:async(name,args)=>{globalThis.__coworkAutonomy.calls.push({name,args});if(name==='cowork_claim_run')return {data:[{id:'run',user_id:'owner',organization_id:'org',lease_token:'token',mode:globalThis.__coworkAutonomy.mode,message:'Busca gerentes'}]};if(name==='cowork_propose_search'&&globalThis.__coworkAutonomy.disableDuringProposal)process.env.COWORK_AUTONOMY_ENABLED='false';return {data:true};},from:table=>{chain.table=table;return chain;}};}`,
-  '@/lib/server/daily-quota-store': `export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:50});export const getDailyQuotaStatus=async()=>({allowed:true,count:0,limit:50});`,
+  '@/lib/server/daily-quota-store': `export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:50});export const getDailyQuotaStatus=async()=>({allowed:true,count:0,limit:50});export const getEnrichmentQuotaOperation=async()=>null;export const claimEnrichmentQuotaOperation=async()=>{throw new Error("unused")};export const markEnrichmentQuotaOperationSubmitted=async()=>{};export const releaseEnrichmentQuotaOperation=async()=>{};export const completeEnrichmentQuotaOperation=async()=>{};`,
   './access':'export const requireCoworkWorkerAccess=async()=>{};',
   './runs':'export const coworkWorkerConfigured=()=>true;',
   './lead-tools':'export const queryCoworkLeads=async()=>{throw new Error("unexpected read")};',

@@ -1,10 +1,20 @@
 import { z } from 'zod';
 
+const TEXT_ACTIONS = ['leads.search', 'crm.search', 'contacted.search'];
+const UUID_ACTIONS = ['leads.get', 'research.get_existing', 'crm.get_lead', 'contacted.timeline', 'draft.get'];
+const FIXED_ACTIONS = ['metrics.overview', 'app.context', 'campaigns.list'];
+
 export const coworkReadTaskSchema = z.object({
-  action: z.enum(['leads.search', 'leads.get', 'research.get_existing']),
+  action: z.enum(['leads.search', 'leads.get', 'research.get_existing',
+    'crm.search', 'crm.get_lead', 'contacted.search', 'contacted.timeline', 'metrics.overview', 'app.context', 'draft.get', 'campaigns.list']),
   input: z.string().max(120),
 }).strict().superRefine((task, context) => {
-  if (task.action !== 'leads.search' && !z.string().uuid().safeParse(task.input).success) {
+  if (TEXT_ACTIONS.includes(task.action)) return;
+  if (FIXED_ACTIONS.includes(task.action)) {
+    if (task.input !== '') context.addIssue({ code: 'custom', path: ['input'], message: 'This read takes no input' });
+    return;
+  }
+  if (UUID_ACTIONS.includes(task.action) && !z.string().uuid().safeParse(task.input).success) {
     context.addIssue({ code: 'custom', path: ['input'], message: 'A saved contact UUID is required' });
   }
 });

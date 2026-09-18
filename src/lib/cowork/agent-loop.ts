@@ -1,19 +1,25 @@
 import { z } from 'zod';
 import { coworkDocumentSchema } from './contracts';
+import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
 import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
 import { collectCoworkLeadRows } from './lead-export';
 
-export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 'request_draft']);
+export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 export const coworkDecisionSchema = z.object({
   action: z.enum(['leads.search', 'leads.get', 'research.get_existing', 'reads.parallel',
+    'crm.search', 'crm.get_lead', 'contacted.search', 'contacted.timeline', 'metrics.overview', 'app.context', 'draft.get', 'campaigns.list',
     'crm.propose_note', 'prospecting.propose_search',
-    'leads.save_contact', 'research.start', 'draft.request', 'answer']),
+    'leads.save_contact', 'research.start', 'draft.request', 'lead.enrich', 'email.send',
+    'campaign.create', 'campaign.activate', 'campaign.pause', 'answer']),
   reads: z.array(coworkReadTaskSchema).min(1).max(3).nullable().optional(),
   query: z.string().max(120).nullable(),
   leadId: z.string().uuid().nullable(),
+  draftId: z.string().uuid().nullable().optional(),
+  campaignId: z.string().uuid().nullable().optional(),
+  campaign: coworkCampaignDraftSchema.nullable().optional(),
   providerId: z.string().regex(/^apollo:[A-Za-z0-9_-]{1,200}$/).nullable().optional(),
   snapshotId: z.string().uuid().nullable().optional(),
   note: z.string().trim().min(1).max(4000).nullable().optional(),
@@ -21,12 +27,13 @@ export const coworkDecisionSchema = z.object({
   answer: coworkDocumentSchema.nullable(),
 }).strict();
 
-export type CoworkReadAction = 'leads.search' | 'leads.get' | 'research.get_existing';
-export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draft.request';
+export type CoworkReadAction = 'leads.search' | 'leads.get' | 'research.get_existing'
+  | 'crm.search' | 'crm.get_lead' | 'contacted.search' | 'contacted.timeline' | 'metrics.overview' | 'app.context' | 'draft.get' | 'campaigns.list';
+export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draft.request' | 'lead.enrich' | 'email.send' | 'campaign.create' | 'campaign.activate' | 'campaign.pause';
 export type CoworkObservation = { action: CoworkReadAction; input: string; result: unknown };
 type Decision = z.infer<typeof coworkDecisionSchema>;
 
-export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; label: string; originRunId: string };
+export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; label: string; originRunId: string; campaign?: z.infer<typeof coworkCampaignDraftSchema> };
 
 function observationRunId(
   observations: unknown[], history: CoworkHistoryTurn[], currentRunId: string,
@@ -45,6 +52,21 @@ function effectTargetRun(
   action: CoworkEffectAction, targetId: string,
   observations: CoworkObservation[], history: CoworkHistoryTurn[], currentRunId: string,
 ): string | null {
+  if (action === 'email.send') {
+    return observationRunId(observations, history, currentRunId, payload =>
+      payload.action === 'draft.get'
+      && (payload.result as { draftId?: string } | null)?.draftId === targetId);
+  }
+  if (action === 'campaign.activate' || action === 'campaign.pause') {
+    return observationRunId(observations, history, currentRunId, payload =>
+      payload.action === 'campaigns.list'
+      && Array.isArray((payload.result as { campaigns?: Array<{ id?: string }> } | null)?.campaigns)
+      && ((payload.result as { campaigns: Array<{ id?: string }> }).campaigns.some(campaign => campaign.id === targetId)));
+  }
+  if (action === 'campaign.create') {
+    return observationRunId(observations, history, currentRunId, payload =>
+      payload.action === 'campaigns.list');
+  }
   if (action === 'draft.request') {
     return observationRunId(observations, history, currentRunId, payload =>
       payload.action === 'research.get_existing'
@@ -58,6 +80,11 @@ function effectTargetRun(
 function effectLabel(action: CoworkEffectAction, targetId: string): string {
   if (action === 'leads.save_contact') return `Guardar contacto ${targetId.slice(0, 120)}`;
   if (action === 'research.start') return `Investigar contacto ${targetId.slice(0, 120)}`;
+  if (action === 'lead.enrich') return `Enriquecer contacto ${targetId.slice(0, 120)}`;
+  if (action === 'email.send') return `Enviar correo del borrador ${targetId.slice(0, 120)}`;
+  if (action === 'campaign.create') return 'Crear borrador de campaña';
+  if (action === 'campaign.activate') return `Aprobar y activar campaña ${targetId.slice(0, 120)}`;
+  if (action === 'campaign.pause') return `Pausar campaña ${targetId.slice(0, 120)}`;
   return `Preparar borrador del informe ${targetId.slice(0, 120)}`;
 }
 
@@ -107,18 +134,31 @@ export async function runCoworkReadLoop(input: {
       await input.proposeNote(decision.leadId, decision.note);
       return { reply: 'Revisa el cambio de nota antes de guardarlo.', document: null };
     }
-    if (decision.action === 'leads.save_contact' || decision.action === 'research.start' || decision.action === 'draft.request') {
+    if (decision.action === 'leads.save_contact' || decision.action === 'research.start' || decision.action === 'draft.request' || decision.action === 'lead.enrich' || decision.action === 'email.send' || decision.action === 'campaign.create' || decision.action === 'campaign.activate' || decision.action === 'campaign.pause') {
       if (!input.proposeEffect) throw new Error('Effect proposals unavailable');
       const kind: CoworkEffectKind = decision.action === 'leads.save_contact' ? 'save_contact'
-        : decision.action === 'research.start' ? 'start_research' : 'request_draft';
+        : decision.action === 'research.start' ? 'start_research'
+        : decision.action === 'lead.enrich' ? 'enrich_contact'
+        : decision.action === 'email.send' ? 'send_email'
+        : decision.action === 'campaign.create' ? 'campaign_create'
+        : decision.action === 'campaign.activate' ? 'campaign_activate'
+        : decision.action === 'campaign.pause' ? 'campaign_pause' : 'request_draft';
       const targetId = decision.action === 'leads.save_contact' ? decision.providerId
-        : decision.action === 'research.start' ? decision.leadId : decision.snapshotId;
+        : decision.action === 'draft.request' ? decision.snapshotId
+        : decision.action === 'email.send' ? decision.draftId
+        : decision.action === 'campaign.create' ? 'new-campaign'
+        : decision.action === 'campaign.activate' || decision.action === 'campaign.pause' ? decision.campaignId
+        : decision.leadId;
+      const campaign = decision.action === 'campaign.create' ? decision.campaign ?? undefined : undefined;
       if (!targetId) throw new Error('Missing effect target');
+      if (decision.action === 'campaign.create' && !campaign) throw new Error('Missing campaign definition');
       const originRunId = effectTargetRun(decision.action, targetId, observations, input.history || [], input.runId || '');
       if (!originRunId) throw new Error('Effect target must be observed first');
       await input.authorize();
       input.signal.throwIfAborted();
-      await input.proposeEffect({ kind, targetId, label: effectLabel(decision.action, targetId), originRunId });
+      await input.proposeEffect(campaign === undefined
+        ? { kind, targetId, label: effectLabel(decision.action, targetId), originRunId }
+        : { kind, targetId, label: effectLabel(decision.action, targetId), originRunId, campaign });
       return { reply: 'Revisa la propuesta antes de ejecutar el cambio.', document: null };
     }
     if (turn === 3) throw new Error('Cowork tool budget exhausted');
@@ -135,8 +175,14 @@ export async function runCoworkReadLoop(input: {
     }
     if (readsUsed >= 3) throw new Error('Cowork tool budget exhausted');
     readsUsed++;
-    const value = decision.action === 'leads.search' ? decision.query : decision.leadId;
-    if (value === null) throw new Error('Missing tool argument');
+    const value = decision.action === 'leads.search' || decision.action === 'crm.search' || decision.action === 'contacted.search'
+      ? decision.query
+      : decision.action === 'metrics.overview' || decision.action === 'app.context' || decision.action === 'campaigns.list'
+        ? ''
+        : decision.action === 'draft.get'
+          ? decision.draftId
+          : decision.leadId;
+    if (value === null || value === undefined) throw new Error('Missing tool argument');
     await input.authorize();
     input.signal.throwIfAborted();
     const result = await input.execute(decision.action, value);

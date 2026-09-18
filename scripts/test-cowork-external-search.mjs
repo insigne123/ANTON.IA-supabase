@@ -43,6 +43,9 @@ globalThis.__coworkSearch = {
   },
 };
 const sources = {
+  './enrich-contact': 'export const enrichCoworkContact=async()=>{throw new Error("unexpected enrichment")};',
+  './send-email': 'export const sendCoworkEmail=async()=>{throw new Error("unexpected send")};',
+  './campaign-ops': 'export const createCoworkCampaign=async()=>{throw new Error("unexpected campaign")};export const reviewCoworkCampaign=createCoworkCampaign;',
   '@/lib/server/supabase-admin': 'export const getSupabaseAdminClient=()=>globalThis.__coworkSearch.client;',
   '@/lib/server/daily-quota-store': 'export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:10});export const checkAndConsumeDailyQuota=()=>globalThis.__coworkSearch.quota();',
   '@/lib/server/apollo-search-client': 'export const requestApolloSearch=p=>globalThis.__coworkSearch.provider(p);',

@@ -13,6 +13,11 @@ import { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } from '@/lib/server/
 import { coworkOperationHash, createCoworkOperationGateway } from './operations';
 import { coworkReadCapabilities } from './read-capabilities';
 import { processCoworkEffectQueue, resolveCoworkEffect } from './effects';
+import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
+import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
+import { stageCoworkCampaignDefinition } from './campaign-ops';
+import { getBulkCampaign } from '@/lib/server/bulk-campaigns';
+import { resolveCoworkSender } from './sender';
 import { coworkAgentInstructions } from '@/lib/cowork/agent-instructions';
 
 /** Fase 1 (CW-06): fairness signal. When a queue item was served in the previous
@@ -118,6 +123,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
             parallelReadCapability: instructions.parallelReadCapability,
             researchCapability: instructions.researchCapability,
             externalSearchCapability: instructions.externalSearchCapability,
+            extendedReadCapability: instructions.extendedReadCapability,
             additionalCapability: instructions.additionalCapability,
             effectCapability: instructions.effectCapability,
             threadBudgetCapability: instructions.threadBudgetCapability }),
@@ -166,16 +172,42 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       },
       proposeEffect: async proposal => {
         if (stats.effects >= budgets.maxEffects) throw new Error('Thread effect budget exhausted');
+        // Version-bound review: the proposal pins draftId:versionId:contentHash
+        // so execution refuses anything else, even if the draft changed since.
+        let targetId = proposal.targetId;
+        let label = proposal.label;
+        if (proposal.kind === 'send_email') {
+          const draft = await getCurrentNativeDraft({ userId: scope.userId, organizationId: scope.organizationId, draftId: proposal.targetId });
+          if (!draft || draft.channel !== 'email') throw new Error('Send target unavailable');
+          const sender = await resolveCoworkSender(scope);
+          targetId = `${draft.draftId}:${draft.versionId}:${hashMessagingDraftContent(draft)}:${sender.provider}:${sender.identityHash}`;
+          label = `Enviar «${(draft.content.subject || 'sin asunto').slice(0, 60)}» desde ${sender.email} (rev ${draft.revision})`.slice(0, 280);
+        }
+        if (proposal.kind === 'campaign_create') {
+          if (!proposal.campaign) throw new Error('Missing campaign definition');
+          const staged = await stageCoworkCampaignDefinition(scope, run.id, proposal.campaign);
+          targetId = run.id;
+          label = `Crear campaña «${proposal.campaign.name.slice(0, 80)}» · ${staged.recipients} destinatarios · ${proposal.campaign.messages.length} mensajes (pausada)`;
+        }
+        if (proposal.kind === 'campaign_activate' || proposal.kind === 'campaign_pause') {
+          const campaign = await getBulkCampaign(
+            { user: { id: scope.userId }, organizationId: scope.organizationId } as never, proposal.targetId);
+          targetId = `${campaign.id}:${campaign.revision}:${campaign.review_hash}`;
+          label = `${proposal.kind === 'campaign_activate' ? 'Aprobar y activar' : 'Pausar'} campaña «${String(campaign.definition?.name || campaign.id).slice(0, 80)}» (rev ${campaign.revision})`;
+        }
         const proposed = await client.rpc('cowork_propose_effect', {
           p_run_id: run.id, p_token: run.lease_token, p_kind: proposal.kind,
-          p_origin_run_id: proposal.originRunId, p_target_id: proposal.targetId, p_label: proposal.label,
+          p_origin_run_id: proposal.originRunId, p_target_id: targetId, p_label: label,
         });
         if (proposed.error || proposed.data !== true) throw new Error('Could not prepare effect review');
         waitingApproval = true;
         // Autonomous mode carries the user's standing grant: approve the exact
         // proposed effect so the queue executes it without another round-trip.
         // The flag is re-read here so revoking autonomy mid-flight stops admission.
-        if (executionPolicy.automaticExternalSearch && process.env.COWORK_AUTONOMY_ENABLED === 'true') {
+        // Sends and campaign activate/pause never self-approve: they always wait
+        // for a human decision. Creating a paused draft is harmless and may proceed.
+        if (executionPolicy.automaticExternalSearch && process.env.COWORK_AUTONOMY_ENABLED === 'true'
+          && proposal.kind !== 'send_email' && proposal.kind !== 'campaign_activate' && proposal.kind !== 'campaign_pause') {
           const approved = await resolveCoworkEffect(client, scope, run.id, true);
           if (!approved) throw new Error('Could not approve effect');
         }

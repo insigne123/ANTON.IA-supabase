@@ -4,12 +4,15 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireCoworkWorkerAccess } from './access';
 import { coworkThreadBudgets } from '@/lib/cowork/thread-budget';
 import { loadCoworkThreadStats } from './thread-stats';
+import { enrichCoworkContact } from './enrich-contact';
+import { sendCoworkEmail } from './send-email';
+import { createCoworkCampaign, reviewCoworkCampaign } from './campaign-ops';
 import { saveCoworkContact } from './save-contact';
 import { startCoworkResearch } from './start-research';
 import { requestCoworkDraft } from './draft-from-research';
 import { deterministicCoworkUuid } from './operations';
 
-export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 'request_draft']);
+export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 type Scope = { userId: string; organizationId: string };
@@ -101,7 +104,7 @@ export async function resolveCoworkEffect(
 async function executeEffect(
   client: AdminClient,
   scope: Scope,
-  proposal: { kind: string; origin_run_id: string; target_id: string; label: string },
+  proposal: { run_id: string; kind: string; origin_run_id: string; target_id: string; label: string },
 ): Promise<{ reply: string; result: unknown }> {
   const auth = workerAuth(client, scope);
   if (proposal.kind === 'save_contact') {
@@ -116,6 +119,37 @@ async function executeEffect(
       ? 'La investigación ya estaba disponible y quedó vinculada al trabajo.'
       : 'La investigación quedó en curso; el resultado se incorporará al retomarse el trabajo.',
       result: { reportId: started.reportId, status: started.status, reused: started.reused } };
+  }
+  if (proposal.kind === 'enrich_contact') {
+    const enriched = await enrichCoworkContact(auth, proposal.origin_run_id, proposal.target_id);
+    return { reply: enriched.reused
+      ? 'Ese contacto ya estaba enriquecido y se reutilizó el resultado.'
+      : enriched.found
+        ? `Encontramos ${enriched.email} (${enriched.emailStatus || 'estado sin confirmar'}). Quedó guardado en el contacto enriquecido.`
+        : 'El proveedor no devolvió correo para este contacto. No se inventó ningún dato.',
+      result: { email: enriched.email, emailStatus: enriched.emailStatus, found: enriched.found, reused: enriched.reused, enrichedLeadId: enriched.enrichedLeadId } };
+  }
+  if (proposal.kind === 'send_email') {
+    const sent = await sendCoworkEmail(auth, proposal.run_id, proposal.target_id);
+    return { reply: sent.status === 'sent'
+      ? 'El correo salió con la versión aprobada. Quedó registrado en Contactados.'
+      : 'El envío no se confirmó como entregado. Revisa en Contactados antes de reintentar.',
+      result: { status: sent.status, providerMessageId: sent.providerMessageId } };
+  }
+  if (proposal.kind === 'campaign_create') {
+    const created = await createCoworkCampaign(auth, proposal.run_id);
+    return { reply: `La campaña «${created.name}» quedó creada como borrador pausado. Actívala cuando quieras desde Campañas o pídeme revisarla.`,
+      result: { campaignId: created.id, status: created.status } };
+  }
+  if (proposal.kind === 'campaign_activate' || proposal.kind === 'campaign_pause') {
+    const reviewed = await reviewCoworkCampaign(auth, proposal.origin_run_id, proposal.target_id,
+      proposal.kind === 'campaign_activate' ? 'approve' : 'pause');
+    return { reply: proposal.kind === 'campaign_activate'
+      ? (process.env.BULK_CAMPAIGNS_AUTOMATION_ENABLED === 'true'
+        ? 'La campaña quedó aprobada. La automatización procesará los envíos elegibles.'
+        : 'La campaña quedó aprobada. Inicia los envíos desde Campañas; la automatización está desactivada.')
+      : 'La campaña quedó en pausa. Los envíos que ya estaban en curso podrían completarse.',
+      result: { campaignId: reviewed.id, status: reviewed.status } };
   }
   const requested = await requestCoworkDraft(auth, proposal.origin_run_id, { snapshotId: proposal.target_id });
   return { reply: requested.reused ? 'Ese borrador ya estaba solicitado para este informe.'

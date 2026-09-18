@@ -50,9 +50,25 @@ export async function assertCampaignRecipientAllowed(auth: AuthContext, email: s
   if (data?.length) throw new AuthError(`El dominio de ${email} está excluido.`, 409);
 }
 
-export async function saveBulkCampaign(auth: AuthContext, input: unknown, id?: string, revision = 0) {
+export async function saveBulkCampaign(auth: AuthContext, input: unknown, id?: string, revision = 0, creationId?: string) {
   const definition = CampaignInputSchema.parse(input);
-  const campaignId = id ? z.string().uuid().parse(id) : randomUUID();
+  if (id && creationId) throw new Error('Cannot combine update and idempotent creation');
+  const campaignId = id ? z.string().uuid().parse(id) : creationId ? z.string().uuid().parse(creationId) : randomUUID();
+  const recoverCreation = async () => {
+    const result = await auth.supabase.from('bulk_campaigns').select('*')
+      .eq('id', campaignId).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).maybeSingle();
+    if (result.error) throw result.error;
+    if (!result.data) return null;
+    const existing = result.data as BulkCampaign;
+    if (canonicalSha256(existing.definition) !== canonicalSha256(definition)) {
+      throw new AuthError('La solicitud ya corresponde a otra definición de campaña.', 409);
+    }
+    return existing;
+  };
+  if (creationId) {
+    const existing = await recoverCreation();
+    if (existing) return existing;
+  }
   if (id) {
     const current = await getBulkCampaign(auth, id);
     if (!['draft', 'rejected'].includes(current.status) || current.revision !== revision) throw new AuthError('La campaña cambió. Vuelve a abrirla antes de editar.', 409);
@@ -75,7 +91,13 @@ export async function saveBulkCampaign(auth: AuthContext, input: unknown, id?: s
     p_id: campaignId, p_organization_id: auth.organizationId, p_user_id: auth.user.id,
     p_action: 'save', p_expected_revision: revision, p_review_hash: reviewHash, p_definition: definition, p_recipients: recipients,
   });
-  if (error) throw error;
+  if (error) {
+    if (creationId) {
+      const recovered = await recoverCreation();
+      if (recovered) return recovered;
+    }
+    throw error;
+  }
   return data as BulkCampaign;
 }
 
