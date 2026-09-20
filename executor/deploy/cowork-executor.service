@@ -1,0 +1,40 @@
+[Unit]
+Description=ANTON.IA Cowork code executor
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=cowork-exec
+Group=cowork-exec
+WorkingDirectory=/opt/cowork-executor
+ExecStart=/usr/bin/node /opt/cowork-executor/server.mjs
+Environment=EXECUTOR_BIND=127.0.0.1
+Environment=EXECUTOR_PORT=8899
+Environment=EXECUTOR_SECRET_FILE=/etc/cowork-executor/secret
+Environment=EXECUTOR_DATA_DIR=/var/lib/cowork-executor
+Environment=EXECUTOR_JOB_DIR=/var/lib/cowork-executor/jobs
+# Writable HOME keeps the docker CLI from warning into job stderr.
+Environment=HOME=/tmp
+Restart=on-failure
+RestartSec=5
+# Hardening (service itself; jobs are isolated by Docker, not by this unit)
+NoNewPrivileges=true
+# CAP_CHOWN only: hand each job output dir to the unprivileged job uid.
+AmbientCapabilities=CAP_CHOWN
+CapabilityBoundingSet=CAP_CHOWN
+ProtectSystem=strict
+ReadWritePaths=/var/lib/cowork-executor
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

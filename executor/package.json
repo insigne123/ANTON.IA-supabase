@@ -1,0 +1,12 @@
+{
+  "name": "cowork-executor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated Python/Node job executor for ANTON.IA Cowork. stdlib only, no dependencies.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/"
+  }
+}
