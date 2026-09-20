@@ -41,11 +41,14 @@ env:
   - variable: COWORK_DOCUMENT_VERSIONS_ENABLED
     value: "true"
     availability: [RUNTIME]
-  # Fase 3: ejecutor remoto de código. El secreto COWORK_EXECUTOR_SECRET debe
-  # existir en Secret Manager antes de referenciarlo aquí; mientras tanto la
-  # ejecución falla cerrado con mensaje claro. No guardar valores en el repo.
+  # Fase 3: ejecutor remoto de código. Secreto COWORK_EXECUTOR_SECRET en
+  # Secret Manager (versión 3 = bearer exacto de la VM). No guardar valores
+  # en el repo. Sin secreto o sin URL la ejecución falla cerrado.
   - variable: COWORK_EXECUTOR_URL
     value: "https://ocr-test.yago.cl/cowork-exec"
+    availability: [RUNTIME]
+  - variable: COWORK_EXECUTOR_SECRET
+    secret: COWORK_EXECUTOR_SECRET
     availability: [RUNTIME]
   # === Primary production providers ===
   - variable: OPENAI_API_KEY
