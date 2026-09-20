@@ -36,7 +36,7 @@ const state = {
 globalThis.__coworkSend = state;
 
 const sources = {
-  './sender': 'export const coworkMailboxIdentity=async()=>({identityHash:globalThis.__coworkSend.senderHash});',
+  './sender-identity': 'export const coworkMailboxIdentity=async()=>({identityHash:globalThis.__coworkSend.senderHash});',
   '@/lib/server/supabase-admin': `export const getSupabaseAdminClient=()=>({from:table=>{const chain={select:()=>chain,eq:()=>chain,
     maybeSingle:async()=>({data:table==='cowork_runs'?{status:'waiting_approval'}:{status:'executing',kind:'send_email',target_id:globalThis.__coworkSend.target},error:null}),
     then:resolve=>resolve({data:globalThis.__coworkSend.blockedDomains.map(domain=>({domain})),error:null})};return chain;}});`,

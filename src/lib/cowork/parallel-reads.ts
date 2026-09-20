@@ -2,11 +2,11 @@ import { z } from 'zod';
 
 const TEXT_ACTIONS = ['leads.search', 'crm.search', 'contacted.search'];
 const UUID_ACTIONS = ['leads.get', 'research.get_existing', 'crm.get_lead', 'contacted.timeline', 'draft.get'];
-const FIXED_ACTIONS = ['metrics.overview', 'app.context', 'campaigns.list'];
+const FIXED_ACTIONS = ['metrics.overview', 'app.context', 'campaigns.list', 'files.list'];
 
 export const coworkReadTaskSchema = z.object({
   action: z.enum(['leads.search', 'leads.get', 'research.get_existing',
-    'crm.search', 'crm.get_lead', 'contacted.search', 'contacted.timeline', 'metrics.overview', 'app.context', 'draft.get', 'campaigns.list']),
+    'crm.search', 'crm.get_lead', 'contacted.search', 'contacted.timeline', 'metrics.overview', 'app.context', 'draft.get', 'campaigns.list', 'files.list']),
   input: z.string().max(120),
 }).strict().superRefine((task, context) => {
   if (TEXT_ACTIONS.includes(task.action)) return;

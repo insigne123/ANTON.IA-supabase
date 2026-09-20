@@ -31,6 +31,7 @@ function supabaseMock() {
 
 const mocks = {
   './campaign-ops': 'export const stageCoworkCampaignDefinition=async()=>{throw new Error("unexpected campaign")};',
+  './code-runner': 'export const stageCoworkCode=async()=>{throw new Error("unexpected code")};',
   '@/lib/server/bulk-campaigns': 'export const getBulkCampaign=async()=>{throw new Error("unexpected campaign")};',
   '@/lib/server/native-drafts': 'export const getCurrentNativeDraft=async()=>{throw new Error("unexpected draft")};',
   '@/ai/openai-json': `export const generateStructuredWithTelemetry=async()=>({data:{action:'answer',query:null,leadId:null,answer:{reply:'Listo',document:null}},telemetry:{modelName:'fixture',durationMs:1}});`,

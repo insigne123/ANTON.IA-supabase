@@ -16,6 +16,8 @@ import { processCoworkEffectQueue, resolveCoworkEffect } from './effects';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
 import { stageCoworkCampaignDefinition } from './campaign-ops';
+import { stageCoworkCode } from './code-runner';
+import { hashCoworkCodeProposal } from '@/lib/cowork/code-proposal';
 import { getBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { resolveCoworkSender } from './sender';
 import { coworkAgentInstructions } from '@/lib/cowork/agent-instructions';
@@ -195,6 +197,14 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           targetId = `${campaign.id}:${campaign.revision}:${campaign.review_hash}`;
           label = `${proposal.kind === 'campaign_activate' ? 'Aprobar y activar' : 'Pausar'} campaña «${String(campaign.definition?.name || campaign.id).slice(0, 80)}» (rev ${campaign.revision})`;
         }
+        if (proposal.kind === 'code_execute') {
+          if (!proposal.code) throw new Error('Missing code proposal');
+          const staged = await stageCoworkCode(scope, run.id, proposal.code);
+          const hash = hashCoworkCodeProposal(proposal.code);
+          targetId = `code:${hash}`;
+          const fileNote = staged.files > 0 ? ` · ${staged.files} archivo${staged.files === 1 ? '' : 's'}` : ' · sin archivos';
+          label = `Ejecutar ${proposal.code.language} aislado${fileNote} (máx 120 s)`;
+        }
         const proposed = await client.rpc('cowork_propose_effect', {
           p_run_id: run.id, p_token: run.lease_token, p_kind: proposal.kind,
           p_origin_run_id: proposal.originRunId, p_target_id: targetId, p_label: label,
@@ -204,10 +214,12 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         // Autonomous mode carries the user's standing grant: approve the exact
         // proposed effect so the queue executes it without another round-trip.
         // The flag is re-read here so revoking autonomy mid-flight stops admission.
-        // Sends and campaign activate/pause never self-approve: they always wait
-        // for a human decision. Creating a paused draft is harmless and may proceed.
+        // Sends, campaign activate/pause and code execution never self-approve:
+        // they always wait for a human decision. Creating a paused draft is
+        // harmless and may proceed.
         if (executionPolicy.automaticExternalSearch && process.env.COWORK_AUTONOMY_ENABLED === 'true'
-          && proposal.kind !== 'send_email' && proposal.kind !== 'campaign_activate' && proposal.kind !== 'campaign_pause') {
+          && proposal.kind !== 'send_email' && proposal.kind !== 'campaign_activate' && proposal.kind !== 'campaign_pause'
+          && proposal.kind !== 'code_execute') {
           const approved = await resolveCoworkEffect(client, scope, run.id, true);
           if (!approved) throw new Error('Could not approve effect');
         }

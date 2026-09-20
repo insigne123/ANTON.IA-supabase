@@ -17,7 +17,7 @@ function searchTerm(value: string, max = 120) {
 }
 
 export type CoworkExtendedReadAction =
-  'crm.search' | 'crm.get_lead' | 'contacted.search' | 'contacted.timeline' | 'metrics.overview' | 'app.context' | 'draft.get' | 'campaigns.list';
+  'crm.search' | 'crm.get_lead' | 'contacted.search' | 'contacted.timeline' | 'metrics.overview' | 'app.context' | 'draft.get' | 'campaigns.list' | 'files.list';
 
 export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: 'crm.search' | 'contacted.search', value: string,
@@ -41,6 +41,9 @@ export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: 'campaigns.list', value: string,
 ): Promise<{ scope: string; campaigns: Array<{ id: string; name: string; status: string; revision: number; recipients: number; createdAt: string }> }>;
 export async function queryCoworkExtendedReads(
+  client: SupabaseClient, scope: Scope, action: 'files.list', value: string,
+): Promise<{ scope: string; files: Array<{ name: string; runId: string; size: number; updatedAt: string }> }>;
+export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: CoworkExtendedReadAction, value: string,
 ): Promise<unknown>;
 export async function queryCoworkExtendedReads(
@@ -56,11 +59,13 @@ export async function queryCoworkExtendedReads(
   | { scope: string; emailConnections: { google: boolean; outlook: boolean }; counts: Record<string, number>; performance: unknown; offer: string | null }
   | { scope: string; draftId: string; versionId: string; revision: number; channel: string; subject: string | null; contentHash: string; recipientEmail: string | null; recipientName: string | null; lifecycle: string; textLength: number }
   | { scope: string; campaigns: Array<{ id: string; name: string; status: string; revision: number; recipients: number; createdAt: string }> }
+  | { scope: string; files: Array<{ name: string; size: number; updatedAt: string }> }
 > {
   if (action === 'metrics.overview') return readCoworkMetrics(client, scope);
   if (action === 'app.context') return readCoworkAppContext(scope);
   if (action === 'draft.get') return readCoworkDraft(scope, value);
   if (action === 'campaigns.list') return readCoworkCampaigns(client, scope);
+  if (action === 'files.list') return readCoworkFiles(client, scope);
   if (action === 'crm.search') {
     const term = searchTerm(value);
     let query = client.from('leads')
@@ -165,4 +170,27 @@ export async function readCoworkCampaigns(client: SupabaseClient, scope: Scope) 
       recipients: Array.isArray(row.recipients) ? row.recipients.length : 0, createdAt: row.created_at,
     })),
   };
+}
+
+/** Files uploaded for code execution, listed across this user's run prefixes.
+ * Contents stay out of observations; execution downloads exactly the approved
+ * names from the proposing run's prefix. */
+export async function readCoworkFiles(client: SupabaseClient, scope: Scope) {
+  const { data, error } = await client.storage.from('cowork-uploads')
+    .list(`${scope.organizationId}/${scope.userId}`, { limit: 100 });
+  if (error) throw new Error('No se pudieron listar los archivos.');
+  const files: Array<{ name: string; runId: string; size: number; updatedAt: string }> = [];
+  for (const run of data || []) {
+    if (!run.name) continue;
+    const { data: names, error: runError } = await client.storage.from('cowork-uploads')
+      .list(`${scope.organizationId}/${scope.userId}/${run.name}`, { limit: 50 });
+    if (runError) continue;
+    for (const file of names || []) {
+      if (!file.name) continue;
+      files.push({ name: file.name, runId: run.name, size: Number(file.metadata?.size || 0),
+        updatedAt: String(file.updated_at || file.created_at || '') });
+    }
+    if (files.length >= 40) break;
+  }
+  return { scope: 'own_uploads', files: files.slice(0, 40) };
 }

@@ -46,5 +46,6 @@ export function coworkReadCapabilities(
     extended('app.context', 'Conexiones de correo, volúmenes y oferta, sin entrada'),
     extended('draft.get', 'Versión vigente de un borrador propio con su hash de contenido, por UUID'),
     extended('campaigns.list', 'Campañas propias con estado y destinatarios, sin entrada'),
+    extended('files.list', 'Archivos subidos para código (nombre, trabajo, tamaño), sin contenido'),
   ];
 }

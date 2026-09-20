@@ -5,9 +5,19 @@ import { queryCoworkExtendedReads, readCoworkAppContext } from './extended-reads
 const scope = { userId: 'user-1', organizationId: 'org-1' };
 const LEAD = '00000000-0000-4000-8000-000000000001';
 
-function mockClient(tables: Record<string, { rows?: unknown[]; count?: number; error?: { message: string }; single?: unknown }> = {}) {
+function mockClient(tables: Record<string, { rows?: unknown[]; count?: number; error?: { message: string }; single?: unknown }> = {}, storageFiles: Record<string, Array<{ name: string; size?: number }>> = {}) {
   const calls: Array<{ table: string; method: string; args: unknown[] }> = [];
   const client = {
+    storage: {
+      from: (bucket: string) => ({
+        list: async (prefix: string) => {
+          calls.push({ table: `storage:${bucket}`, method: 'list', args: [prefix] });
+          const files = storageFiles[`${bucket}/${prefix}`];
+          if (!files) return { data: [], error: null };
+          return { data: files.map(file => ({ name: file.name, metadata: { size: file.size || 0 } })), error: null };
+        },
+      }),
+    },
     from: (table: string) => {
       const state = tables[table] || {};
       const chain: Record<string, (...args: any[]) => any> = {
@@ -88,4 +98,16 @@ test('app.context exposes connections and offer without tokens or memories', asy
   assert.equal(result.scope, 'organization_context');
   assert.deepEqual(result.emailConnections, { google: true, outlook: false });
   assert.ok(!('profile' in result) && !('memories' in result));
+});
+
+test('files.list scopes to the user prefix and reports names without contents', async () => {
+  const { client, calls } = mockClient({}, {
+    'cowork-uploads/org-1/user-1': [{ name: 'run-a' }, { name: 'run-b' }],
+    'cowork-uploads/org-1/user-1/run-a': [{ name: 'in.csv', size: 12 }],
+  });
+  const result = await queryCoworkExtendedReads(client, scope, 'files.list', '');
+  assert.equal(result.scope, 'own_uploads');
+  assert.deepEqual(result.files, [{ name: 'in.csv', runId: 'run-a', size: 12, updatedAt: '' }]);
+  assert.ok(calls.every(call => String(call.args[0] || '').startsWith('org-1/user-1')));
+  assert.ok(!JSON.stringify(result).includes('a,b'));
 });

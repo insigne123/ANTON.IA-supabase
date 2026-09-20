@@ -138,3 +138,33 @@ test('research and draft effects match their observed evidence', async () => {
   assert.deepEqual(proposals[1], { kind: 'request_draft', targetId: snapshotId,
     label: `Preparar borrador del informe ${snapshotId}`, originRunId: runId });
 });
+
+test('code execution anchors input files to files.list observations', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const parentId = '00000000-0000-4000-8000-000000000011';
+  const proposals: Array<{ kind: string; targetId: string; originRunId: string }> = [];
+  const base = {
+    message: 'Limpia el csv', runId, signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ scope: 'own_uploads', files: [{ name: 'in.csv', runId, size: 3 }] }),
+    record: async () => {},
+    proposeEffect: async (proposal: { kind: string; targetId: string; originRunId: string }) => { proposals.push(proposal); },
+  };
+  const code = { action: 'code.execute' as const, query: null, leadId: null,
+    code: { language: 'python' as const, code: 'print(1)', inputFiles: ['ghost.csv'] }, answer: null };
+  // Unobserved files fail closed.
+  await assert.rejects(runCoworkReadLoop({ ...base, decide: async () => code }), /observed first/);
+  assert.equal(proposals.length, 0);
+  // Observed files anchor to the observing run.
+  const list = { action: 'files.list' as const, query: null, leadId: null, answer: null };
+  const withFiles = { action: 'code.execute' as const, query: null, leadId: null,
+    code: { language: 'python' as const, code: 'print(1)', inputFiles: ['in.csv'] }, answer: null };
+  await runCoworkReadLoop({ ...base, decide: async observations => observations.length ? withFiles : list });
+  assert.deepEqual(proposals[0], { kind: 'code_execute', targetId: 'new-code',
+    label: 'Ejecutar código en entorno aislado', originRunId: runId,
+    code: { language: 'python', code: 'print(1)', inputFiles: ['in.csv'] } });
+  // No inputs anchor to the proposing run itself.
+  const bare = { action: 'code.execute' as const, query: null, leadId: null,
+    code: { language: 'node' as const, code: 'x', inputFiles: [] }, answer: null };
+  await runCoworkReadLoop({ ...base, history: [], decide: async () => bare });
+  assert.equal(proposals[1].originRunId, runId);
+});

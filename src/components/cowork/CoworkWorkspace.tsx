@@ -9,6 +9,8 @@ import { ExecutionMode } from './ExecutionMode';
 import { DocumentVersions } from './DocumentVersions';
 import { SendReview } from './SendReview';
 import { CampaignReview } from './CampaignReview';
+import { CodeReview } from './CodeReview';
+import { FileUpload } from './FileUpload';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import { coworkSearchCriteriaSchema } from '@/lib/cowork/search-proposal';
 import { Button } from '@/components/ui/button';
@@ -212,6 +214,17 @@ export function CoworkWorkspace() {
             <p className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-muted px-5 py-4">{state.run.message}</p>
             <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">{active ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : state.run.status === 'completed' ? <Check className="h-4 w-4" /> : null}{statusLabel}</p>
             {output && <MarkdownText text={output.reply} />}
+            {state.events.some(event => event.kind === 'artifact.created') && <section aria-label="Archivos generados" className="space-y-2 rounded-xl border border-border p-5">
+              <h3 className="font-medium">Archivos generados</h3>
+              <ul className="space-y-1 text-sm">
+                {state.events.filter(event => event.kind === 'artifact.created').map(event => {
+                  const payload = event.payload as { name?: string; size?: number } | null;
+                  const name = String(payload?.name || '');
+                  if (!name) return null;
+                  return <li key={`${event.sequence}-${name}`}><a className="underline underline-offset-2" href={`/api/cowork/runs/${state.run.id}/artifacts?name=${encodeURIComponent(name)}`}>{name}</a>{typeof payload?.size === 'number' ? <span className="text-muted-foreground"> · {(payload.size / 1024).toFixed(1)} KB</span> : null}</li>;
+                })}
+              </ul>
+            </section>}
             {searchProposal?.success && <section aria-label="Revisar búsqueda externa" className="space-y-4 rounded-xl border border-border p-5">
               <h3 className="font-medium">Buscar nuevos contactos</h3>
               <dl className="space-y-2 text-sm"><div><dt className="font-medium">Cargos</dt><dd>{searchProposal.data.titles.join(', ') || 'Sin filtro'}</dd></div><div><dt className="font-medium">Sectores</dt><dd>{searchProposal.data.industries.join(', ') || 'Sin filtro'}</dd></div><div><dt className="font-medium">Ubicación de la persona</dt><dd>{searchProposal.data.locations.join(', ') || 'Sin filtro'}</dd></div></dl>
@@ -227,7 +240,7 @@ export function CoworkWorkspace() {
               <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando decisión…' : 'Guardar nueva nota'}</Button></div>
             </section>}
             {proposal?.action === 'cowork.effect' && <section aria-label="Revisar acción propuesta" className="space-y-4 rounded-xl border border-border p-5">
-              <h3 className="font-medium">{proposal?.kind === 'save_contact' ? 'Guardar contacto' : proposal?.kind === 'start_research' ? 'Investigar contacto' : proposal?.kind === 'enrich_contact' ? 'Enriquecer contacto' : proposal?.kind === 'send_email' ? 'Enviar correo' : proposal?.kind === 'campaign_create' ? 'Crear campaña' : proposal?.kind === 'campaign_activate' ? 'Activar campaña' : proposal?.kind === 'campaign_pause' ? 'Pausar campaña' : 'Preparar borrador'}</h3>
+              <h3 className="font-medium">{proposal?.kind === 'save_contact' ? 'Guardar contacto' : proposal?.kind === 'start_research' ? 'Investigar contacto' : proposal?.kind === 'enrich_contact' ? 'Enriquecer contacto' : proposal?.kind === 'send_email' ? 'Enviar correo' : proposal?.kind === 'campaign_create' ? 'Crear campaña' : proposal?.kind === 'campaign_activate' ? 'Activar campaña' : proposal?.kind === 'campaign_pause' ? 'Pausar campaña' : proposal?.kind === 'code_execute' ? 'Ejecutar código' : 'Preparar borrador'}</h3>
               <p className="text-sm">{String(proposal?.label || '')}</p>
               {proposal?.kind === 'send_email'
                 ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
@@ -237,6 +250,10 @@ export function CoworkWorkspace() {
                   ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
                     ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
                     : <CampaignReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
+                : proposal?.kind === 'code_execute'
+                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
+                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
+                    : <CodeReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
                 : <>
               <p className="text-sm text-muted-foreground">{proposal?.kind === 'save_contact' ? 'Se guardará en tus contactos sin correo verificado. Podrás enriquecerlo después.' : proposal?.kind === 'start_research' ? 'Se encolará la investigación con tu cuota disponible. El resultado se incorporará al retomarse el trabajo.' : proposal?.kind === 'enrich_contact' ? 'Se consultará el correo al proveedor (solo email, sin teléfono). Consume 1 crédito de enriquecimiento y no inventa datos.' : 'Se preparará el borrador en segundo plano. Podrás revisarlo cuando esté listo.'}</p>
               {state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started') ? <p role="status" className="text-sm">La acción está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p> : <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando aprobación…' : 'Aprobar y ejecutar'}</Button></div>}
@@ -244,10 +261,10 @@ export function CoworkWorkspace() {
             </section>}
             {state.run.status === 'failed' && <p className="text-sm text-muted-foreground">{typeof failure?.message === 'string' ? failure.message : 'Tu solicitud sigue guardada. No se pudo completar el trabajo.'}</p>}
             {state.budget?.exhausted && <p className="text-sm text-muted-foreground">Se alcanzó el tope de pasos automáticos de este hilo. Lo logrado quedó guardado; escríbeme abajo para seguir.</p>}
-            <ContactResults key={state.run.id} runId={state.run.id} events={state.events} onError={setError} onAccessDenied={clearPrivateResults}
-              canResearch={state.run.status === 'completed' && state.canResearch}
+            <ContactResults key={state.run.id} runId={state.run.id} events={state.events} onError={setError} onAccessDenied={clearPrivateResults}              canResearch={state.run.status === 'completed' && state.canResearch}
               onUseReport={leadId => { setMessage(`Consulta la ficha del contacto guardado ${leadId} y su investigación disponible. Resume las fuentes y recomendaciones si existen.`); requestAnimationFrame(() => document.getElementById('cowork-followup')?.focus()); }} />
             <ResearchSources events={state.events} runId={state.run.id} canCreateDraft={state.run.status === 'completed' && state.canCreateDraft} onAccessDenied={clearPrivateResults} />
+            <FileUpload key={`files-${state.run.id}`} runId={state.run.id} onError={setError} onAccessDenied={clearPrivateResults} />
             {output?.document && <div className="flex items-center gap-3 rounded-xl border border-border p-4"><FileText className="h-5 w-5 shrink-0" /><div className="min-w-0 flex-1"><h3 className="break-words font-medium">{output.document.title}</h3><p className="text-xs text-muted-foreground">Documento · Solo tú</p></div><Button ref={documentButton} variant="secondary" onClick={() => setDocumentOpen(true)}>Abrir</Button></div>}
             <details className="text-sm"><summary className="cursor-pointer text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring">Actividad del trabajo</summary><ol className="mt-3 space-y-2">{state.events.map(event => <li key={event.sequence}>{activityTitle(event)}</li>)}</ol></details>
             <div className="mt-auto flex justify-end pt-6">{active ? <Button variant="outline" disabled={cancelling} onClick={() => void cancel()}><Square />{cancelling ? 'Cancelando…' : 'Detener trabajo'}</Button> : <Button variant="outline" onClick={() => choose(null)}>Nuevo trabajo</Button>}</div>

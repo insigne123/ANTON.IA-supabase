@@ -13,6 +13,7 @@ const { window } = dom;
 const run = { id: '00000000-0000-4000-8000-000000000001', message: 'Prepara un resumen', mode: 'approval', status: 'completed', created_at: '2026-09-15T00:00:00Z' };
 const sendRun = { id: '00000000-0000-4000-8000-000000000002', message: 'Enviar correo', mode: 'approval', status: 'waiting_approval', created_at: '2026-09-15T00:00:00Z' };
 const campRun = { id: '00000000-0000-4000-8000-000000000003', message: 'Crear campaña', mode: 'approval', status: 'waiting_approval', created_at: '2026-09-15T00:00:00Z' };
+const codeRun = { id: '00000000-0000-4000-8000-000000000006', message: 'Ejecutar código', mode: 'approval', status: 'waiting_approval', created_at: '2026-09-15T00:00:00Z' };
 const sendTarget = '00000000-0000-4000-8000-000000000004:00000000-0000-4000-8000-000000000005:' + 'a'.repeat(64) + ':google:' + 'b'.repeat(64);
 let denied = false;
 const calls = [];
@@ -27,11 +28,16 @@ window.fetch = async url => {
     kind: 'campaign_create', label: 'Crear campaña', name: 'Reactivación', objective: 'Retomar',
     provider: 'google', messages: [{ subject: 'Hola', body: 'Te escribo por…', delayDays: 0 }],
     emails: ['ana@example.com'], matched: 1 }) };
-  if (url.endsWith('/runs')) return { ok: true, status: 200, json: async () => ({ runs: [run, sendRun, campRun], canSubmit: false }) };
+  if (url.includes('/code-preview')) return { ok: true, status: 200, json: async () => ({
+    language: 'python', code: 'print("hola")', inputFiles: ['in.csv'],
+    matches: true, label: 'Ejecutar python aislado' }) };
+  if (url.endsWith('/runs')) return { ok: true, status: 200, json: async () => ({ runs: [run, sendRun, campRun, codeRun], canSubmit: false }) };
   if (url.endsWith(sendRun.id)) return { ok: true, status: 200, json: async () => ({ run: sendRun, events: [
     { sequence: 1, kind: 'approval.requested', payload: { action: 'cowork.effect', kind: 'send_email', targetId: sendTarget, label: 'Enviar «Propuesta»' }, created_at: sendRun.created_at }] }) };
   if (url.endsWith(campRun.id)) return { ok: true, status: 200, json: async () => ({ run: campRun, events: [
     { sequence: 1, kind: 'approval.requested', payload: { action: 'cowork.effect', kind: 'campaign_create', targetId: campRun.id, label: 'Crear campaña' }, created_at: campRun.created_at }] }) };
+  if (url.endsWith(codeRun.id)) return { ok: true, status: 200, json: async () => ({ run: codeRun, events: [
+    { sequence: 1, kind: 'approval.requested', payload: { action: 'cowork.effect', kind: 'code_execute', targetId: 'code:' + 'c'.repeat(64), label: 'Ejecutar python aislado' }, created_at: codeRun.created_at }] }) };
   const data = { run, events: [
       { sequence: 1, kind: 'tool.completed', payload: { action: 'leads.search', result: { scope: 'own_saved_contacts', truncated: true, items: [{ id: run.id, name: 'Ana Ejemplo', company: 'Logística Sur', email: 'ana@example.com' }] } }, created_at: run.created_at },
       { sequence: 2, kind: 'run.completed', payload: { reply: '**Resumen** listo\n\n- Punto uno\n- Punto dos', document: { title: 'Mi documento', content: '<script>window.compromised=true</script>\nContenido' }, model: 'test', durationMs: 1 }, created_at: run.created_at },
@@ -78,6 +84,7 @@ try {
   await waitFor(() => button('Enviar correoEsperando tu aprobación'));
   button('Enviar correoEsperando tu aprobación').click();
   await waitFor(() => window.document.querySelector('section[aria-label="Revisar acción propuesta"]'));
+  await waitFor(() => window.document.querySelector('section[aria-label="Revisar acción propuesta"]').textContent.includes('vendedor@example.com'));
   const sendCard = window.document.querySelector('section[aria-label="Revisar acción propuesta"]');
   assert.match(sendCard.textContent, /vendedor@example\.com/);
   assert.match(sendCard.textContent, /Hola Ana/);
@@ -95,6 +102,19 @@ try {
   assert.ok(campApprove);
   assert.equal(campApprove.disabled, false);
   console.log('PASS: reviews render sender, full bodies and recipients; drift blocks send approval.');
+  button('Nuevo trabajo').click();
+  await waitFor(() => button('Ejecutar códigoEsperando tu aprobación'));
+  button('Ejecutar códigoEsperando tu aprobación').click();
+  await waitFor(() => window.document.querySelector('section[aria-label="Revisar acción propuesta"]'));
+  await waitFor(() => window.document.querySelector('section[aria-label="Revisar acción propuesta"]').textContent.includes('print('));
+  const codeCard = window.document.querySelector('section[aria-label="Revisar acción propuesta"]');
+  assert.match(codeCard.textContent, /Python/);
+  assert.match(codeCard.textContent, /in\.csv/);
+  assert.match(codeCard.textContent, /entorno aislado/);
+  const codeApprove = [...codeCard.querySelectorAll('button')].find(node => node.textContent.trim() === 'Aprobar y ejecutar');
+  assert.ok(codeApprove);
+  assert.equal(codeApprove.disabled, false);
+  console.log('PASS: code review renders pinned code, inputs and isolation limits.');
   button('Nuevo trabajo').click();
   await waitFor(() => button('Prepara un resumenCompletado'));
   denied = true;

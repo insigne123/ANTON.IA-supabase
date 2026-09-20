@@ -7,6 +7,7 @@ import { loadCoworkThreadStats } from './thread-stats';
 import { enrichCoworkContact } from './enrich-contact';
 import { sendCoworkEmail } from './send-email';
 import { createCoworkCampaign, reviewCoworkCampaign } from './campaign-ops';
+import { executeCoworkCode } from './code-runner';
 import { saveCoworkContact } from './save-contact';
 import { startCoworkResearch } from './start-research';
 import { requestCoworkDraft } from './draft-from-research';
@@ -141,8 +142,7 @@ async function executeEffect(
     return { reply: `La campaña «${created.name}» quedó creada como borrador pausado. Actívala cuando quieras desde Campañas o pídeme revisarla.`,
       result: { campaignId: created.id, status: created.status } };
   }
-  if (proposal.kind === 'campaign_activate' || proposal.kind === 'campaign_pause') {
-    const reviewed = await reviewCoworkCampaign(auth, proposal.origin_run_id, proposal.target_id,
+  if (proposal.kind === 'campaign_activate' || proposal.kind === 'campaign_pause') {    const reviewed = await reviewCoworkCampaign(auth, proposal.origin_run_id, proposal.target_id,
       proposal.kind === 'campaign_activate' ? 'approve' : 'pause');
     return { reply: proposal.kind === 'campaign_activate'
       ? (process.env.BULK_CAMPAIGNS_AUTOMATION_ENABLED === 'true'
@@ -150,6 +150,10 @@ async function executeEffect(
         : 'La campaña quedó aprobada. Inicia los envíos desde Campañas; la automatización está desactivada.')
       : 'La campaña quedó en pausa. Los envíos que ya estaban en curso podrían completarse.',
       result: { campaignId: reviewed.id, status: reviewed.status } };
+  }
+  if (proposal.kind === 'code_execute') {
+    const executed = await executeCoworkCode(auth, proposal.run_id, proposal.target_id);
+    return { reply: executed.reply, result: executed.result };
   }
   const requested = await requestCoworkDraft(auth, proposal.origin_run_id, { snapshotId: proposal.target_id });
   return { reply: requested.reused ? 'Ese borrador ya estaba solicitado para este informe.'

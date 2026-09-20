@@ -7,6 +7,7 @@ const state={ mode:'approval', calls:[], disableDuringProposal:false };
 globalThis.__coworkAutonomy = state;
 const mocks={
   './campaign-ops': 'export const stageCoworkCampaignDefinition=async()=>{throw new Error("unexpected campaign")};',
+  './code-runner': 'export const stageCoworkCode=async()=>{throw new Error("unexpected code")};',
   '@/lib/server/bulk-campaigns': 'export const getBulkCampaign=async()=>{throw new Error("unexpected campaign")};',
   '@/lib/server/native-drafts': 'export const getCurrentNativeDraft=async()=>{throw new Error("unexpected draft")};',
   '@/ai/openai-json': `export const generateStructuredWithTelemetry=async()=>({data:{action:'prospecting.propose_search',query:null,leadId:null,answer:null,searchCriteria:{titles:['Gerente'],industries:[],locations:[],limit:5}},telemetry:{modelName:'fixture',durationMs:1}});export const generateStructured=async()=>{throw new Error("unused")};`,
