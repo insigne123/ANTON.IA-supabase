@@ -46,8 +46,9 @@ const sources = {
   './save-contact': 'export const saveCoworkContact=async()=>{globalThis.__coworkEffects.executed.push("save");return {lead:{id:"lead-1",name:"Ana"},reused:false};};',
   './start-research': 'export const startCoworkResearch=async()=>{globalThis.__coworkEffects.executed.push("research");return {reportId:"rep",status:"running",reused:false};};',
   './draft-from-research': 'export const requestCoworkDraft=async()=>{globalThis.__coworkEffects.executed.push("draft");return {status:"pending",reused:false};};',
+  './code-runner': 'export const executeCoworkCode=async()=>{globalThis.__coworkEffects.executed.push("code");if(globalThis.__coworkEffects.failCode)throw new Error("El código terminó con error (salida 1).\\nSalida:\\nTraceback KeyError: monto");return {reply:"ok",result:{}};};',
 };
-globalThis.__coworkEffects = { client, executed: state.executed };
+globalThis.__coworkEffects = { client, executed: state.executed, failCode: false };
 const bundle = await build({ entryPoints: ['src/lib/server/cowork/effects.ts'], bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external',
   plugins: [{ name: 'isolated-services', setup(build) {
     build.onResolve({ filter: /.*/ }, args => sources[args.path] ? { path: args.path, namespace: 'fixture' } : undefined);
@@ -72,12 +73,27 @@ try {
   assert.equal(state.admissions[0].p_parent_run_id, 'run-effect');
   const second = await module.exports.processCoworkEffectQueue();
   assert.deepEqual(second, { processed: 0, claimed: false });
+  // Failed code execution records the failure and resumes the thread with the
+  // observed error so the agent can propose corrected code (new review, no
+  // auto-execution).
+  state.kind = 'code_execute';
+  globalThis.__coworkEffects.failCode = true;
+  state.takes = 0;
+  const failed = await module.exports.processCoworkEffectQueue();
+  assert.deepEqual(failed, { processed: 0, claimed: true });
+  assert.deepEqual(state.executed, ['save', 'code']);
+  assert.equal(state.finishes[state.finishes.length - 1].p_success, false);
+  assert.equal(state.admissions.length, 2);
+  assert.equal(state.admissions[1].p_parent_run_id, 'run-effect');
+  assert.match(state.admissions[1].p_message, /falló/);
+  assert.match(state.admissions[1].p_message, /KeyError/);
+  assert.match(state.admissions[1].p_message, /otra revisión humana/);
   // Thread budget: at max depth the chain stops gracefully with an observed event.
   state.depth = 5;
   const refused = await module.exports.admitCoworkContinuation(client,
     { userId: 'owner', organizationId: 'org' }, 'run-effect', 'Continúa');
   assert.equal(refused, null);
-  assert.equal(state.admissions.length, 1);
+  assert.equal(state.admissions.length, 2);
   assert.equal(state.events.length, 1);
   assert.equal(state.events[0].kind, 'thread.budget_exhausted');
   console.log('PASS: effect propose, approval, single execution, finish, continuation and thread budget.');

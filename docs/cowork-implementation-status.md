@@ -224,3 +224,12 @@ Este incremento es local, posterior al commit de entrega. No se ha activado Cowo
 - Migraciones Cowork ya aplicadas en producción; archivos locales alineados a las versiones aplicadas y eliminadas las referencias antiguas `2026091522*/2026091523*` nunca aplicadas.
 - `node scripts/verify-cowork.mjs`: 37 pruebas aprobadas; `npm run typecheck` aprobado.
 - Cambios no relacionados (extensión LinkedIn, campañas, Apollo, cron ANTON.IA, secuencias) quedaron fuera de este despliegue y siguen solo en el árbol local.
+
+### Fase 3 — Código y archivos — 20 de septiembre de 2026
+
+- Migración `20260920090000_cowork_code_execute.sql` aplicada en producción y verificada: `code_execute` en constraint y RPC, tabla `cowork_code_proposals` con RLS de lectura privada, buckets privados `cowork-uploads`/`cowork-artifacts` con 4 políticas por prefijo `{org}/{user}/{run}`.
+- Ejecutor remoto en la VM Oracle (ADR-004) validado: Python (pandas/openpyxl/matplotlib/python-docx/python-pptx) y Node aislados; CSV→JSON, CSV→PNG+MD, CSV→DOCX+PPTX+ZIP y HTML generados y reabiertos con lector independiente; replay, conflicto, sin red, OOM, timeout, un trabajo a la vez y limpieza comprobados.
+- Integración en `main`: `code.execute` con revisión humana obligatoria, propuesta fijada por hash, entradas observadas, salidas validadas (magia zip + marcador OOXML) y promovidas a almacenamiento privado; uploads (20 MB); tarjeta `CodeReview`; lista de artefactos con `ArtifactPreview` (HTML en iframe sandbox de origen opaco + CSP sin red, imágenes inline, resto solo descarga).
+- Fallo de ejecución reanuda el hilo con el error para corrección conversacional (nueva propuesta, nueva revisión, sin auto-ejecución); presupuestos del hilo acotan la cadena.
+- `npm run typecheck`, `next build` y `verify-cowork` (incluye suites nuevas `code-execution` y `artifact-preview`) en verde.
+- Pendiente para cerrar la fase: crear `COWORK_EXECUTOR_SECRET` en Secret Manager y referenciarlo en `apphosting.yaml`, desplegar studio y ejecutar el recorrido privado (subir CSV → pedir limpieza/gráfico → aprobar → corregir por chat ante un error → descargar y reabrir).

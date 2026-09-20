@@ -10,6 +10,7 @@ import { DocumentVersions } from './DocumentVersions';
 import { SendReview } from './SendReview';
 import { CampaignReview } from './CampaignReview';
 import { CodeReview } from './CodeReview';
+import { ArtifactPreview } from './ArtifactPreview';
 import { FileUpload } from './FileUpload';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import { coworkSearchCriteriaSchema } from '@/lib/cowork/search-proposal';
@@ -221,7 +222,7 @@ export function CoworkWorkspace() {
                   const payload = event.payload as { name?: string; size?: number } | null;
                   const name = String(payload?.name || '');
                   if (!name) return null;
-                  return <li key={`${event.sequence}-${name}`}><a className="underline underline-offset-2" href={`/api/cowork/runs/${state.run.id}/artifacts?name=${encodeURIComponent(name)}`}>{name}</a>{typeof payload?.size === 'number' ? <span className="text-muted-foreground"> · {(payload.size / 1024).toFixed(1)} KB</span> : null}</li>;
+                  return <li key={`${event.sequence}-${name}`}><ArtifactPreview runId={state.run.id} name={name} size={typeof payload?.size === 'number' ? payload.size : undefined} /></li>;
                 })}
               </ul>
             </section>}

@@ -7,7 +7,7 @@ import { join } from 'node:path';
  * ever involved; every argument is passed as an argv array. */
 
 const IMAGES = { python: 'cowork-exec-py:1', node: 'cowork-exec-node:1' };
-const OUTPUT_EXTENSIONS = new Set(['csv', 'json', 'md', 'txt', 'xlsx', 'png', 'svg', 'pdf']);
+const OUTPUT_EXTENSIONS = new Set(['csv', 'json', 'md', 'txt', 'xlsx', 'docx', 'pptx', 'zip', 'html', 'png', 'svg', 'pdf']);
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 const MAX_OUTPUT_FILES = 16;
 const MAX_STREAM_BYTES = 64 * 1024;

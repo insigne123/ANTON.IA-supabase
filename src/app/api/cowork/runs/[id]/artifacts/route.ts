@@ -13,8 +13,19 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   csv: 'text/csv; charset=utf-8', json: 'application/json', md: 'text/markdown; charset=utf-8',
   txt: 'text/plain; charset=utf-8',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  zip: 'application/zip',
+  html: 'text/html; charset=utf-8',
   png: 'image/png', svg: 'image/svg+xml', pdf: 'application/pdf',
 };
+
+// Inline view is only offered for renderable, non-executable surfaces. HTML
+// renders inside a sandboxed frame (see ArtifactPreview): opaque origin, no
+// network, inline scripts/styles only, so a generated dashboard cannot reach
+// the app, its cookies or the network.
+const VIEWABLE = new Set(['html', 'png', 'svg']);
+const SANDBOX_CSP = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src blob: data:";
 
 /** Download an execution artifact. The file must have been recorded in an
  * artifact.created event of this run; anything else 404s. Bytes stream
@@ -41,7 +52,17 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       return NextResponse.json({ error: 'Archivo inválido.' }, { status: 422, headers: privateHeaders });
     }
     const dot = name.lastIndexOf('.');
-    const mime = (dot > 0 && MIME_BY_EXTENSION[name.slice(dot + 1).toLowerCase()]) || 'application/octet-stream';
+    const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+    const mime = (dot > 0 && MIME_BY_EXTENSION[ext]) || 'application/octet-stream';
+    if (req.nextUrl.searchParams.get('view') === '1' && VIEWABLE.has(ext)) {
+      return new Response(bytes, { headers: {
+        'Content-Type': mime,
+        'Content-Security-Policy': ext === 'html' ? SANDBOX_CSP : "sandbox; default-src 'none'; img-src data: blob:;",
+        'Cross-Origin-Resource-Policy': 'same-origin',
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+      } });
+    }
     return new Response(bytes, { headers: {
       'Content-Type': mime,
       'Content-Disposition': `attachment; filename="${name}"`,

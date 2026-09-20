@@ -109,6 +109,22 @@ try {
   await assert.rejects(module.exports.executeCoworkCode(auth, 'run-code', target), /inválido/);
   assert.equal(state.uploads.length, before);
 
+  // Zip-family outputs must be real containers, not renamed text.
+  state.executor = { status: 'completed', exitCode: 0, stdout: '', stderr: '',
+    files: [{ name: 'informe.docx', size: 4, contentBase64: Buffer.from('nope').toString('base64') }], durationMs: 10 };
+  await assert.rejects(module.exports.executeCoworkCode(auth, 'run-code', target), /no es un documento válido/);
+  const minimalZip = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from('[Content_Types].xml')]);
+  state.executor = { status: 'completed', exitCode: 0, stdout: '', stderr: '',
+    files: [{ name: 'informe.docx', size: minimalZip.length, contentBase64: minimalZip.toString('base64') }], durationMs: 10 };
+  const promoted = await module.exports.executeCoworkCode(auth, 'run-code', target);
+  assert.equal(promoted.result.files[0].name, 'informe.docx');
+  // A plain user-built zip (no OOXML marker) is a valid archive, not a fake.
+  const plainZip = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x41, 0x42]);
+  state.executor = { status: 'completed', exitCode: 0, stdout: '', stderr: '',
+    files: [{ name: 'paquete.zip', size: plainZip.length, contentBase64: plainZip.toString('base64') }], durationMs: 10 };
+  const promotedZip = await module.exports.executeCoworkCode(auth, 'run-code', target);
+  assert.equal(promotedZip.result.files[0].name, 'paquete.zip');
+
   // Timeout surfaces as a Spanish error without auto-retry.
   state.executor = { status: 'timeout', exitCode: 0, stdout: 'partial', stderr: '', files: [], durationMs: 120000 };
   await assert.rejects(module.exports.executeCoworkCode(auth, 'run-code', target), /tiempo máximo/);

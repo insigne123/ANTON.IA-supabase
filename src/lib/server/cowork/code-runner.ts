@@ -11,7 +11,12 @@ import { coworkCodeProposalSchema, hashCoworkCodeProposal, type CoworkCodePropos
 
 const UPLOAD_BUCKET = 'cowork-uploads';
 const ARTIFACT_BUCKET = 'cowork-artifacts';
-const OUTPUT_EXTENSIONS = new Set(['csv', 'json', 'md', 'txt', 'xlsx', 'png', 'svg', 'pdf']);
+const OUTPUT_EXTENSIONS = new Set(['csv', 'json', 'md', 'txt', 'xlsx', 'docx', 'pptx', 'zip', 'html', 'png', 'svg', 'pdf']);
+// Zip-family outputs must be real containers, not renamed text: magic bytes
+// always, plus the OOXML content-type marker for office documents (a plain
+// user-built zip legitimately lacks it).
+const ZIP_FAMILY = new Set(['xlsx', 'docx', 'pptx', 'zip']);
+const OFFICE_FAMILY = new Set(['xlsx', 'docx', 'pptx']);
 
 function executorConfig() {
   const url = (process.env.COWORK_EXECUTOR_URL || '').trim().replace(/\/+$/, '');
@@ -35,6 +40,22 @@ function sanitizeOutputName(raw: unknown) {
     throw new Error('El ejecutor devolvió una extensión no permitida.');
   }
   return name;
+}
+
+function validateOutputBytes(name: string, bytes: Buffer) {
+  if (bytes.length === 0 || bytes.length > 10 * 1024 * 1024) {
+    throw new Error('El ejecutor devolvió un archivo inválido.');
+  }
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  if (ZIP_FAMILY.has(ext)) {
+    const magic = bytes.subarray(0, 4);
+    const isZip = magic[0] === 0x50 && magic[1] === 0x4b && magic[2] === 0x03 && magic[3] === 0x04;
+    const head = bytes.subarray(0, Math.min(bytes.length, 65536)).toString('binary');
+    if (!isZip || (OFFICE_FAMILY.has(ext) && !head.includes('[Content_Types].xml'))) {
+      throw new Error(`El archivo ${name} no es un documento válido.`);
+    }
+  }
 }
 
 export async function stageCoworkCode(
@@ -155,7 +176,7 @@ export async function executeCoworkCode(auth: AuthContext, runId: string, target
   for (const file of result.files || []) {
     const name = sanitizeOutputName(file.name);
     const bytes = Buffer.from(String(file.contentBase64 || ''), 'base64');
-    if (bytes.length === 0 || bytes.length > 10 * 1024 * 1024) throw new Error('El ejecutor devolvió un archivo inválido.');
+    validateOutputBytes(name, bytes);
     const path = `${scope.organizationId}/${scope.userId}/${runId}/${name}`;
     const uploaded = await client.storage.from(ARTIFACT_BUCKET).upload(path, bytes, { upsert: true });
     if (uploaded.error) throw new Error('No se pudieron guardar los archivos de salida.');

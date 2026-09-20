@@ -14,7 +14,8 @@ Isolated Python/Node execution for ANTON.IA Cowork, running on the Oracle VM
 - Busy (one job at a time) → `409 { error: Executor busy }`, retry later.
 
 Limits: code ≤ 64 KB, ≤ 8 input files, ≤ 20 MB total, timeout ≤ 120 s,
-outputs ≤ 10 MB / 16 files. Job containers: `--network none`, 2 GB RAM,
+outputs ≤ 10 MB / 16 files (`csv, json, md, txt, xlsx, docx, pptx, zip, html,
+png, svg, pdf`). Job containers: `--network none`, 2 GB RAM,
 1 vCPU, 128 pids, read-only rootfs, `cap-drop ALL`, `no-new-privileges`,
 uid 65534, killed on timeout, workdir wiped. No secrets or network inside jobs.
 
@@ -23,7 +24,7 @@ uid 65534, killed on timeout, workdir wiped. No secrets or network inside jobs.
 - Code: `/opt/cowork-executor` (`server.mjs`, `lib/`, `test/`), user `cowork-exec`.
 - Secret: `/etc/cowork-executor/secret` (root:cowork-exec, 0640). Bearer value.
 - Data: `/var/lib/cowork-executor/{jobs,results}`.
-- Images: `cowork-exec-py:1` (pandas/openpyxl/matplotlib), `cowork-exec-node:1`.
+- Images: `cowork-exec-py:1` (pandas/openpyxl/matplotlib/python-docx/python-pptx), `cowork-exec-node:1`.
 - Service: `cowork-executor.service` (systemd, localhost only).
 - Public path: `https://ocr-test.yago.cl/cowork-exec/` via nginx (TLS +
   10 req/min rate limit). Files: `deploy/nginx-cowork-exec-{zone,location}.conf`.

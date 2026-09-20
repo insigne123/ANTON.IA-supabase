@@ -26,10 +26,13 @@ test('output collection filters types and caps size', async () => {
   try {
     const { writeFile } = await import('node:fs/promises');
     await writeFile(join(dir, 'ok.csv'), 'a');
+    await writeFile(join(dir, 'report.docx'), 'PK\x03\x04fake-docx');
+    await writeFile(join(dir, 'slides.pptx'), 'PK\x03\x04fake-pptx');
+    await writeFile(join(dir, 'bundle.zip'), 'PK\x03\x04fake-zip');
     await writeFile(join(dir, 'evil.sh'), 'x');
     await writeFile(join(dir, '.hidden.csv'), 'x');
     const files = await collectOutputs(dir);
-    assert.deepEqual(files.map(file => file.name), ['ok.csv']);
+    assert.deepEqual(files.map(file => file.name).sort(), ['bundle.zip', 'ok.csv', 'report.docx', 'slides.pptx']);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

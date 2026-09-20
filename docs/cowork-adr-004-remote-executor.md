@@ -1,6 +1,6 @@
 # ADR-004 — Ejecutor remoto de código para Cowork (Fase 3)
 
-Fecha: 2026-09-20. Estado: propuesto, en implementación.
+Fecha: 2026-09-20. Estado: implementado y validado en la VM; pendiente activar en studio (secreto + despliegue).
 Decisión previa relacionada: usar la VM `axis-oci-company` ampliada a 24 GB (opción A).
 
 ## Contexto
@@ -26,14 +26,16 @@ Servicio ejecutor dedicado en la VM, separado de AXIS:
   `/out` temporales, `--cap-drop=ALL`, `--security-opt=no-new-privileges`,
   usuario no root, timeout 120 s con kill, directorio destruido al terminar.
 - **Imágenes fijas** construidas una vez en la VM: `cowork-exec-py:1`
-  (python:3.12-slim + pandas + openpyxl + matplotlib) y
-  `cowork-exec-node:1` (node:22-slim, solo stdlib en v1). Sin `docker pull`
-  en tiempo de ejecución.
+  (python:3.12-slim + pandas + openpyxl + matplotlib + python-docx +
+  python-pptx) y `cowork-exec-node:1` (node:22-slim, solo stdlib en v1). Sin
+  `docker pull` en tiempo de ejecución.
 - **Entradas validadas**: `python|node`, código ≤ 64 KB, ≤ 8 archivos,
   total ≤ 20 MB, nombres saneados (sin rutas, sin traversal), extensiones
-  permitidas `csv, json, md, txt, xlsx`. Sin archivos ZIP en v1 (sin
-  descompresión que limitar). Salidas: ≤ 10 MB totales, mismos tipos más
-  `png/svg/pdf` generados.
+  permitidas `csv, json, md, txt, xlsx`. Sin archivos ZIP de entrada en v1
+  (sin descompresión que limitar). Salidas: ≤ 10 MB totales, mismos tipos
+  más `docx/pptx/zip/html/png/svg/pdf` generados. Studio además valida
+  bytes mágicos y marcador `[Content_Types].xml` en la familia zip
+  (xlsx/docx/pptx; zip plano solo magia) antes de promover artefactos.
 - **Sin secretos en el entorno del trabajo** y sin acceso a PostgreSQL, al
   gateway local ni a la red. El código del agente se trata como no confiable.
 - **Idempotencia**: `idempotencyKey` por trabajo de Cowork; reintentos con la
@@ -59,9 +61,25 @@ Servicio ejecutor dedicado en la VM, separado de AXIS:
 - Riesgo aceptado: el grupo `docker` equivale a root; el servicio es código
   propio mínimo (solo stdlib) y los trabajos nunca tocan el socket.
 
-## Validación requerida (puerta Fase 3)
+## Validación realizada (puerta Fase 3, 2026-09-20)
 
-Trabajo Python que lea un CSV, lo limpie y devuelva XLSX + PNG; reintento con
-la misma clave sin reejecutar; pruebas de fuga (red, lectura fuera de `/work`,
-variables de entorno, binarios setuid) todas bloqueadas; límites de memoria y
-tiempo aplicados; directorio del trabajo eliminado.
+- CSV → limpieza → `clean.csv`/`clean.json`; CSV → matplotlib → PNG + MD.
+- CSV → python-docx/pptx → `informe.docx` + `presentacion.pptx` + `paquete.zip`,
+  reabiertos con lector independiente (stdlib `zipfile` + XML): contenido correcto.
+- HTML generado servido solo vía `?view=1` con CSP `sandbox allow-scripts` sin
+  red y `X-Frame`/iframe `sandbox="allow-scripts"` de origen opaco; descarga
+  por defecto sigue siendo `attachment`.
+- Reintento con la misma clave sin reejecutar; conflicto ante distinto
+  contenido; red/memoria/tiempo/1-trabajo aplicados; directorio eliminado.
+- Fallo de ejecución reanuda el hilo con el error observado para proponer
+  código corregido (nueva revisión humana, sin auto-ejecución).
+
+## Operación y revocación
+
+- Secreto bearer solo en `/etc/cowork-executor/secret` (`root:cowork-exec`,
+  `0640`) y copia en Secret Manager `COWORK_EXECUTOR_SECRET`.
+- Revocar: `sudo systemctl stop cowork-executor` (falla cerrado en studio) o
+  rotar el secreto en ambos lados. Rate-limit nginx `10r/m` como segunda capa.
+- Reconstruir imagen Python tras cambiar `executor/deploy/Dockerfile.py`:
+  `docker build -t cowork-exec-py:1 .` en la VM; sincronizar
+  `executor/lib/*.mjs` a `/opt/cowork-executor/lib/` y reiniciar el servicio.

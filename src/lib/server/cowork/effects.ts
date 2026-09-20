@@ -191,6 +191,14 @@ export async function processCoworkEffectQueue(): Promise<{ processed: number; c
     const message = error instanceof Error ? error.message : 'No se pudo ejecutar la acción.';
     const failed = await finish(false, message, { error: message });
     if (failed.error) throw failed.error;
+    if (job.kind === 'code_execute') {
+      // Fase 3: a failed execution resumes the thread with the observed error
+      // so the agent can explain it and propose corrected code. Correction is
+      // a new proposal and always waits for a fresh human review: nothing
+      // re-executes automatically. Budgets bound the chain.
+      await admitCoworkContinuation(client, scope, job.run_id,
+        `La ejecución de código falló y quedó registrada, sin archivos nuevos. Explica el error en lenguaje claro, corrige el código y, si corresponde, propone una nueva ejecución con code.execute (requiere otra revisión humana; no repitas el mismo código sin cambios). Detalle observado: ${message.slice(0, 600)}`);
+    }
     return { processed: 0, claimed: true };
   }
 }
