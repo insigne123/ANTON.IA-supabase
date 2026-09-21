@@ -26,7 +26,7 @@ export default function ExtensionConnectPage() {
       <div className="mb-6 flex size-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-300"><Puzzle aria-hidden="true" /></div>
       <h1 className="text-2xl font-semibold tracking-tight">Anton.IA, junto a LinkedIn.</h1>
       <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">Conecta la extensión para guardar perfiles, investigar contactos y preparar mensajes con tu cuenta y organización actuales.</p>
-      <p className="mt-4 text-sm leading-6 text-slate-600 dark:text-slate-300">Mantén esta pestaña abierta mientras trabajas. Puedes desconectar desde el panel en cualquier momento.</p>
+      <p className="mt-4 text-sm leading-6 text-slate-600 dark:text-slate-300">Con la extensión 4.0.9 puedes cerrar esta pestaña después de conectar. La conexión usa tu sesión de Anton.IA; puedes desconectar desde el panel en cualquier momento.</p>
       {status === 'connected' ? <p role="status" className="mt-6 flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-300"><CheckCircle2 aria-hidden="true" className="size-5" />Conectada. Vuelve al perfil de LinkedIn.</p>
         : <Button className="mt-6 w-full" disabled={status === 'pending'} onClick={() => {
           setStatus('pending'); setError('');

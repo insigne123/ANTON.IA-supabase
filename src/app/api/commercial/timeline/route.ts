@@ -181,6 +181,17 @@ export async function GET(req: NextRequest) {
     }
 
     if (email || leadId) {
+      if (leadId) {
+        const { data: sends, error: sendError } = await admin.from('extension_linkedin_sends')
+          .select('id,status,message,created_at,updated_at').eq('organization_id', organizationId)
+          .eq('lead_id', leadId).order('created_at', { ascending: false }).limit(25);
+        if (sendError && !isMissingTableError(sendError)) console.warn('[commercial timeline] LinkedIn history unavailable:', sendError.message);
+        for (const send of sends || []) pushEvent(events, {
+          id: `linkedin:${send.id}`, kind: 'note', source: 'LinkedIn',
+          title: send.status === 'confirmed' ? 'Mensaje enviado en LinkedIn' : send.status === 'not_sent' ? 'Mensaje no enviado en LinkedIn' : 'Envío de LinkedIn por comprobar',
+          description: send.message, occurredAt: send.updated_at || send.created_at,
+        });
+      }
       let researchQuery = admin
         .from('lead_research_reports')
         .select('id, lead_ref, email, company_name, company_domain, generated_at, updated_at')

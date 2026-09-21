@@ -15,9 +15,14 @@ export async function findExtensionLead(auth: AuthContext, profile: ExtensionPro
   return result.data;
 }
 
-export async function saveExtensionLead(auth: AuthContext, profile: ExtensionProfile) {
+export async function saveExtensionLead(auth: AuthContext, profile: ExtensionProfile, replaceFields = false) {
   const existing = await findExtensionLead(auth, profile);
   const fields = {
+    ...(replaceFields ? { full_name: profile.fullName, title: profile.title, company_name: profile.companyName,
+      email: profile.email || null, email_status: profile.email ? profile.emailStatus : 'unknown',
+      primary_phone: profile.primaryPhone || null, organization_domain: profile.companyDomain || null } : {}),
+    ...(replaceFields && existing?.data?.companyDomain !== undefined
+      ? { data: { ...existing.data, companyDomain: profile.companyDomain || null } } : {}),
     ...(profile.fullName ? { full_name: profile.fullName } : {}),
     ...(profile.title ? { title: profile.title } : {}),
     ...(profile.companyName ? { company_name: profile.companyName } : {}),
@@ -26,6 +31,8 @@ export async function saveExtensionLead(auth: AuthContext, profile: ExtensionPro
     ...(profile.primaryPhone ? { primary_phone: profile.primaryPhone } : {}),
     ...(profile.companyDomain ? { organization_domain: profile.companyDomain } : {}),
     updated_at: new Date().toISOString(),
+    ...(profile.details ? { data: { ...existing?.data, extensionDetails: profile.details,
+      ...(replaceFields ? { companyDomain: profile.companyDomain || null } : {}) } } : {}),
   };
   if (existing) {
     const { data, error } = await auth.supabase.from('enriched_leads').update(fields)
@@ -55,5 +62,6 @@ export function extensionResearchSubject(row: any) {
     title: row.title || undefined, linkedinUrl: row.linkedin_url,
     companyName: row.company_name || undefined,
     companyDomain: row.organization_domain || row.data?.companyDomain || undefined,
+    organizationIndustry: row.data?.extensionDetails?.industry || undefined,
   };
 }

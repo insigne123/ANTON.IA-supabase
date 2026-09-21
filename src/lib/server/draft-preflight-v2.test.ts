@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   draftEvidencePersonalizationStatementV2,
   draftContentFingerprintV2,
+  personalizationAnchorTerms,
   requiredDraftPersonalizationV2,
   stripUnapprovedDraftCtasV2,
   validateDraftPreflightV2,
@@ -32,6 +33,21 @@ test('personalization preserves a conditional qualifier after a comma', () => {
   assert.equal(draftEvidencePersonalizationStatementV2(statement), statement);
 });
 
+test('anchor terms return readable originals behind the grounding check terms', () => {
+  assert.deepEqual(
+    personalizationAnchorTerms('Acme publica que ayuda a equipos de operaciones a reducir trabajo manual.'),
+    ['Acme', 'equipos', 'operaciones', 'reducir', 'manual'],
+  );
+  assert.deepEqual(
+    personalizationAnchorTerms('Outsourcing de procesos con expertos para mejorar productividad.'),
+    ['Outsourcing', 'procesos', 'expertos', 'mejorar', 'productividad'],
+  );
+  // Single material term stays usable; stopword-only statements anchor nothing.
+  assert.deepEqual(personalizationAnchorTerms('Aseo y limpieza.'), ['Aseo', 'limpieza']);
+  assert.deepEqual(personalizationAnchorTerms('Es una de las.'), []);
+  assert.equal(personalizationAnchorTerms('Acme publica que ayuda a equipos de operaciones a reducir trabajo manual.', 2).length, 2);
+});
+
 function validOutput(): GeneratedOutreachV2 {
   const context = draftContextFixture();
   const evidence = context.evidence.find((item) => item.supportedFactClaimIds.includes('claim-acme-overview'))!;
@@ -53,6 +69,44 @@ ${context.constraints.cta.exactText}`,
   };
 }
 
+test('generated Randstad copy is repaired without treating factual correctness as writing quality', () => {
+  const context = draftContextFixture();
+  context.company.name = 'Randstad Chile';
+  context.seller.companyName = 'Yago';
+  context.seller.services = ['Desarrollo de plataformas web empresariales'];
+  const statement = 'Randstad Chile se hace cargo de todas o parte de las vacantes de talento de una compañía.';
+  context.evidence[0].statement = statement;
+  const output = {
+    ...validOutput(),
+    subject: 'Gestión de vacantes de talento',
+    body: `Hola Claudia,\n\n${statement}\n\nEn Yago desarrollamos plataformas web empresariales para centralizar la información operativa de cada proceso en un solo espacio. Así, los equipos pueden consultar avances y datos relevantes sin depender de intercambios manuales constantes, manteniendo una vista más ordenada del trabajo asociado a las vacantes.\n\n${context.constraints.cta.exactText}`,
+  };
+  const generated = validateDraftPreflightV2(context, output, { checkGeneratedCopy: true });
+  assert.ok(generated.issues.some((issue) => issue.code === 'corporate_copy'));
+  for (const opening of [
+    'Vi que Randstad Chile puede hacerse cargo de todas o parte de las vacantes de talento de una compañía. Por eso te escribo.',
+    'Vi que Randstad Chile puede encargarse de todas o parte de las vacantes de talento de sus clientes.',
+    'Cuando Randstad Chile se hace cargo de todas o parte de las vacantes de talento de una compañía, las aprobaciones pueden involucrar a varias personas.',
+  ]) {
+    assert.ok(validateDraftPreflightV2(context, { ...output, body: output.body.replace(statement, opening) }, { checkGeneratedCopy: true }).issues.some((issue) => issue.code === 'corporate_copy'));
+  }
+  const manual = validateDraftPreflightV2(context, output);
+  assert.ok(!manual.issues.some((issue) => issue.code === 'corporate_copy'));
+
+  const improved = { ...output, body: output.body.replace(statement,
+    'Vi que en Randstad Chile se hacen cargo de vacantes de talento para otras compañías. Te escribo por una aplicación de nuestras plataformas web a ese trabajo.') };
+  assert.ok(!validateDraftPreflightV2(context, improved, { checkGeneratedCopy: true }).issues.some((issue) => issue.code === 'corporate_copy'));
+});
+
+test('generated copy cannot paste a long seller description but may retain service terms', () => {
+  const context = draftContextFixture();
+  context.seller.description = 'Desarrollamos plataformas web empresariales para centralizar la información operativa de cada proceso en un solo espacio y facilitar la consulta de avances.';
+  const output = validOutput();
+  output.body = output.body.replace('En Northstar automatizamos tareas repetitivas para reducir trabajo manual y dejar la información disponible para el equipo.', `En Northstar: ${context.seller.description}`);
+  assert.ok(validateDraftPreflightV2(context, output, { checkGeneratedCopy: true }).issues.some((issue) => issue.code === 'corporate_copy'));
+  assert.ok(!validateDraftPreflightV2(context, validOutput(), { checkGeneratedCopy: true }).issues.some((issue) => issue.code === 'corporate_copy'));
+});
+
 test('draft preflight passes an evidence-backed message with exactly one approved CTA', () => {
   const context = draftContextFixture();
   const output = validOutput();
@@ -61,6 +115,114 @@ test('draft preflight passes an evidence-backed message with exactly one approve
   assert.equal(result.valid, true);
   assert.equal(result.preflight.status, 'passed');
   assert.equal(result.preflight.errors.length, 0);
+});
+
+test('closing step passes without any CTA and fails with questions or meeting asks', () => {
+  const context = draftContextFixture();
+  const evidence = context.evidence.find((item) => item.supportedFactClaimIds.includes('claim-acme-overview'))!;
+  const closeOutput = {
+    subject: 'Cierro el tema en Acme',
+    body: `Hola Ada,
+
+Cierro el seguimiento de los procesos de operaciones en Acme por acá.
+
+Si en algún momento necesitan reducir el trabajo manual de esos procesos, tienen mi correo acá arriba.
+
+Gracias por el tiempo de leer hasta acá.`,
+    personalization: [{
+      evidenceId: evidence.evidenceId,
+      claimId: 'claim-acme-overview',
+      sourceUrl: evidence.source.url,
+    }],
+    hypothesisIds: [],
+  };
+  const passed = validateDraftPreflightV2(context, closeOutput, { expectedCtaCount: 0 });
+  assert.equal(passed.valid, true, JSON.stringify(passed.issues));
+
+  const withQuestion = validateDraftPreflightV2(
+    context,
+    { ...closeOutput, body: `${closeOutput.body}\n\n¿Agendamos 15 minutos?` },
+    { expectedCtaCount: 0 },
+  );
+  assert.ok(withQuestion.issues.some((issue) => issue.code === 'cta_count'));
+
+  const withApprovedCta = validateDraftPreflightV2(
+    context,
+    { ...closeOutput, body: `${closeOutput.body}\n\n${context.constraints.cta.exactText}` },
+    { expectedCtaCount: 0 },
+  );
+  assert.ok(withApprovedCta.issues.some((issue) => issue.code === 'cta_count'));
+
+  const defaultPolicy = validateDraftPreflightV2(context, closeOutput);
+  assert.ok(defaultPolicy.issues.some((issue) => issue.code === 'cta_count'));
+});
+
+test('follow-up steps close with their own single minutes question, never the approved text', () => {
+  const context = draftContextFixture();
+  const evidence = context.evidence.find((item) => item.supportedFactClaimIds.includes('claim-acme-overview'))!;
+  const personalization = [{
+    evidenceId: evidence.evidenceId,
+    claimId: 'claim-acme-overview',
+    sourceUrl: evidence.source.url,
+  }];
+  const base = {
+    subject: 'Avance de procesos en Acme',
+    personalization,
+    hypothesisIds: [],
+  };
+  const varied = validateDraftPreflightV2(context, {
+    ...base,
+    body: `Hola Ada,
+
+Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+
+En Northstar automatizamos operaciones repetitivas para reducir trabajo manual y mantener la información disponible para el equipo.
+
+¿Te sirve que lo revisemos juntos 15 minutos esta semana?`,
+  }, { expectedCtaCount: 'model' });
+  assert.equal(varied.valid, true, JSON.stringify(varied.issues));
+
+  const repeated = validateDraftPreflightV2(context, {
+    ...base,
+    body: `${validOutput().body}\n\n¿Te sirve que lo revisemos juntos 15 minutos esta semana?`,
+  }, { expectedCtaCount: 'model' });
+  assert.ok(repeated.issues.some((issue) => issue.code === 'cta_count'));
+
+  const twoQuestions = validateDraftPreflightV2(context, {
+    ...base,
+    body: `Hola Ada,
+
+Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+
+En Northstar automatizamos operaciones repetitivas para reducir trabajo manual.
+
+¿Te sirve que lo revisemos juntos 15 minutos esta semana? ¿El jueves o el viernes?`,
+  }, { expectedCtaCount: 'model' });
+  assert.ok(twoQuestions.issues.some((issue) => issue.code === 'cta_count'));
+
+  const noMinutes = validateDraftPreflightV2(context, {
+    ...base,
+    body: `Hola Ada,
+
+Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+
+En Northstar automatizamos operaciones repetitivas para reducir trabajo manual.
+
+¿Te sirve que lo revisemos juntos esta semana?`,
+  }, { expectedCtaCount: 'model' });
+  assert.ok(noMinutes.issues.some((issue) => issue.code === 'cta_count'));
+
+  const withLink = validateDraftPreflightV2(context, {
+    ...base,
+    body: `Hola Ada,
+
+Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+
+En Northstar automatizamos operaciones repetitivas para reducir trabajo manual.
+
+¿Agendamos 15 minutos aquí: https://calendly.com/northstar?`,
+  }, { expectedCtaCount: 'model' });
+  assert.ok(withLink.issues.some((issue) => issue.code === 'cta_count'));
 });
 
 test('only safety phrases block; report-derived wording remains editable', () => {

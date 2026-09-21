@@ -4,6 +4,8 @@ import test from 'node:test';
 import type { MessagingDraftV1 } from '@/lib/messaging-contracts';
 import { campaignFollowUpDraftIds } from '@/lib/server/native-drafts';
 import { generateFollowUpDraftBatch } from './follow-up-draft-batch';
+import { buildSharedSequenceBrief } from '@/lib/outreach-sequence-brief';
+import { draftContextFixture } from '@/lib/server/draft-v2-test-fixtures';
 
 const organizationId = '10000000-0000-4000-8000-000000000001';
 const userId = '20000000-0000-4000-8000-000000000001';
@@ -42,6 +44,31 @@ const steps = [1, 2, 3].map((index) => ({
   instruction: `Instrucción ${index}`,
   nativeDraftId: null,
 }));
+
+test('bounded worker batches retain the shared brief and resume the next slot with prior persisted bodies', async () => {
+  const sharedSequenceBrief = buildSharedSequenceBrief(draftContextFixture());
+  const existingDrafts = new Map<string, MessagingDraftV1>();
+  const requests: any[] = [];
+  const input = { organizationId, userId, snapshotId, config: { styleProfileId: null, sequenceInstruction: 'Conserva el tema.' }, initialDraft, steps, existingDrafts, sharedSequenceBrief, maxDrafts: 1 };
+  const deps = {
+    createDraft: async (request: any) => {
+      requests.push(request);
+      const ids = request.reservedCampaignDraftIds;
+      return { status: 'drafted', draft: draft(ids.draftId, ids.versionId, `Aporte ${requests.length}`) } as any;
+    },
+    reserveDraft: async () => undefined, linkDraft: async () => undefined,
+    recordError: async () => assert.fail('bounded generation must succeed'),
+  };
+  for (let turn = 1; turn <= 3; turn++) {
+    await generateFollowUpDraftBatch(input, deps);
+    assert.equal(existingDrafts.size, turn);
+    assert.equal(requests.length, turn);
+    assert.deepEqual(requests.at(-1).sharedSequenceBrief, sharedSequenceBrief);
+    assert.equal(requests.at(-1).sequenceContext.priorMessages.length, turn);
+  }
+  await generateFollowUpDraftBatch(input, deps);
+  assert.equal(requests.length, 3, 'completed slots must not regenerate');
+});
 
 test('pre-generates follow-ups sequentially with style and ordered non-factual sequence context', async () => {
   const requests: any[] = [];

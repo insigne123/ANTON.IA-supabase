@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 const state={ observed:true, saved:null, writes:0, queries:[] }; globalThis.__coworkSave=state;
 const bundle=await build({entryPoints:['src/lib/server/cowork/save-contact.ts'],bundle:true,write:false,platform:'node',format:'cjs',packages:'external',plugins:[{name:'fixture',setup(build){
   build.onResolve({filter:/^\.\/runs$/},()=>({path:'runs',namespace:'fixture'}));
-  build.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:`export const getCoworkRun=async()=>({run:{status:'completed'},events:globalThis.__coworkSave.observed?[{kind:'tool.completed',payload:{action:'prospecting.search',result:{scope:'external_search',items:[{id:'apollo:test-1',name:'Ana',company:'Empresa',email:'unsafe@example.com'}]}}}]:[]});`}));
+  build.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:`export const getCoworkRun=async()=>({run:{status:'completed'},events:globalThis.__coworkSave.observed?[{kind:'tool.completed',payload:{action:'prospecting.search',result:{scope:'external_search',items:[{id:'apollo:test-1',name:'Ana',company:'Empresa',email:'unsafe@example.com',company_website:'https://empresa.example',linkedin_url:'https://www.linkedin.com/in/ana'}]}}}]:[]});`}));
 }}]});
 const module={exports:{}};new Function('require','module','exports',bundle.outputFiles[0].text)(createRequire(import.meta.url),module,module.exports);
 const auth={user:{id:'owner'},organizationId:'org',supabase:{from(table){assert.equal(table,'leads');const filters={};state.queries.push(filters);const q={
@@ -17,6 +17,8 @@ try{
   state.observed=true;
   const first=await module.exports.saveCoworkContact(auth,'run',{providerId:'apollo:test-1'});
   assert.equal(first.lead.email,null);assert.equal(first.lead.source_provider_id,'test-1');
+  assert.equal(first.lead.company_website,'https://empresa.example');
+  assert.equal(first.lead.linkedin_url,'https://www.linkedin.com/in/ana');
   state.saved.name='Edited by user';
   const repeat=await module.exports.saveCoworkContact(auth,'run',{providerId:'apollo:test-1'});
   assert.equal(repeat.lead.id,first.lead.id);assert.equal(repeat.lead.name,'Edited by user');assert.equal(state.writes,1);

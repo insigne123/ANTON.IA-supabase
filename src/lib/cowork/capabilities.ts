@@ -48,7 +48,7 @@ export function createCoworkGateway(capabilities: readonly CoworkCapability[], d
       if (!invocation.operationId.trim()) throw new Error('An operation ID is required');
       const input = capability.input.parse(invocation.input);
       if (!await dependencies.hasGrant(scope, capability, input)) throw new Error('Cowork permission required');
-      return dependencies.withOperation(scope, {
+      const result = await dependencies.withOperation(scope, {
         id: invocation.operationId,
         capability: capability.name,
         version: capability.version,
@@ -59,8 +59,19 @@ export function createCoworkGateway(capabilities: readonly CoworkCapability[], d
         await dependencies.authorize(scope);
         if (!await dependencies.hasGrant(scope, capability, input)) throw new Error('Cowork permission revoked');
         signal.throwIfAborted();
-        return capability.output.parse(await capability.execute(input, scope, signal));
+        const output = capability.output.parse(await capability.execute(input, scope, signal));
+        signal.throwIfAborted();
+        await dependencies.authorize(scope);
+        if (!await dependencies.hasGrant(scope, capability, input)) throw new Error('Cowork permission revoked');
+        signal.throwIfAborted();
+        return output;
       });
+      // A replay bypasses execute(), so it needs the same publication checks.
+      signal.throwIfAborted();
+      await dependencies.authorize(scope);
+      if (!await dependencies.hasGrant(scope, capability, input)) throw new Error('Cowork permission revoked');
+      signal.throwIfAborted();
+      return capability.output.parse(result);
     },
   };
 }

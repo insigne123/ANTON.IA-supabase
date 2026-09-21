@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { buildSharedSequenceBrief, SharedSequenceBriefSchema, type SharedSequenceBrief } from '@/lib/outreach-sequence-brief';
 
 import {
   MessagingDraftV1Schema,
@@ -17,6 +18,7 @@ import {
 } from '@/ai/flows/generate-outreach-from-report';
 import {
   OutreachSequenceContextV2Schema,
+  isCloseOutreachStep,
   type OutreachSequenceContextV2,
 } from '@/lib/campaigns-v2/outreach-sequence-context';
 import {
@@ -196,6 +198,7 @@ export type NativeDraftGenerationDependencies = {
   persistDraftWithMetadata?: (draft: MessagingDraftV1, metadata: NativeDraftGenerationMetadataInput) => Promise<MessagingDraftV1>;
   appendRevisionWithMetadata?: (draft: MessagingDraftV1, changes: { content: MessagingContentV1 }, metadata: NativeDraftGenerationMetadataInput) => Promise<MessagingDraftV1>;
   persistMetadata?: (input: NativeDraftGenerationMetadataInput) => Promise<void>;
+  recordGenerationAttempt?: (input: NativeDraftGenerationAttemptInput) => Promise<void>;
   loadMetadata?: (input: NativeDraftAccess & { versionId: string }) => Promise<NativeDraftGenerationMetadata | null>;
   now?: () => Date;
 };
@@ -687,15 +690,74 @@ function outputForPersistedDraft(input: {
 function outputForPreflight(
   context: DraftContextV2,
   generated: GeneratedOutreachFromDraftContextV2,
+  options: { ctaMode?: 'append-exact' | 'keep-model-cta' | 'omit' } = {},
 ): GeneratedOutreachV2 {
+  const mode = options.ctaMode || 'append-exact';
   const approvedCta = context.constraints.cta.exactText;
-  const modelBody = stripUnapprovedDraftCtasV2(normalizeNativeDraftBody(generated.body), approvedCta);
+  const modelBody = mode === 'append-exact'
+    ? stripUnapprovedDraftCtasV2(normalizeNativeDraftBody(generated.body), approvedCta)
+    : stripUnapprovedDraftCtasV2(normalizeNativeDraftBody(generated.body), approvedCta, { keepQuestions: true });
   return repairCataloguedDraftPersonalizationV2(context, {
     subject: generated.subject,
-    body: normalizeNativeDraftBody(`${modelBody}\n\n${approvedCta}`),
+    body: mode === 'append-exact' ? normalizeNativeDraftBody(`${modelBody}\n\n${approvedCta}`) : normalizeNativeDraftBody(modelBody),
     personalization: requiredReportAwareDraftPersonalizationV2(context),
     hypothesisIds: generated.hypothesisIds,
   });
+}
+
+function ctaPolicyFor(sequenceContext: OutreachSequenceContextV2 | null | undefined) {
+  if (isCloseOutreachStep(sequenceContext)) return { ctaMode: 'omit' as const, expectedCtaCount: 0 as const };
+  if (sequenceContext) return { ctaMode: 'keep-model-cta' as const, expectedCtaCount: 'model' as const };
+  return { ctaMode: 'append-exact' as const, expectedCtaCount: 1 as const };
+}
+
+export type NativeDraftAttemptStep = 'initial' | 'follow_up' | 'close';
+export type NativeDraftAttemptOrigin = 'create' | 'rewrite' | 'rewrite_preview';
+
+export type NativeDraftGenerationAttemptInput = {
+  organizationId: string;
+  userId: string;
+  researchSnapshotId: string | null;
+  draftId: string | null;
+  versionId: string | null;
+  origin: NativeDraftAttemptOrigin;
+  step: NativeDraftAttemptStep;
+  attemptNo: number;
+  model: string | null;
+  promptVersion: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  reasoningTokens: number | null;
+  passed: boolean;
+  issueCodes: string[];
+};
+
+function attemptStepFor(sequenceContext: OutreachSequenceContextV2 | null | undefined): NativeDraftAttemptStep {
+  if (isCloseOutreachStep(sequenceContext)) return 'close';
+  if (sequenceContext) return 'follow_up';
+  return 'initial';
+}
+
+async function persistNativeDraftGenerationAttempt(input: NativeDraftGenerationAttemptInput) {
+  const client = getSupabaseAdminClient();
+  const { error } = await client.from('messaging_draft_generation_attempts').insert({
+    organization_id: input.organizationId,
+    user_id: input.userId,
+    research_snapshot_id: input.researchSnapshotId,
+    draft_id: input.draftId,
+    version_id: input.versionId,
+    origin: input.origin,
+    step: input.step,
+    attempt_no: input.attemptNo,
+    model: input.model,
+    prompt_version: input.promptVersion,
+    input_tokens: input.inputTokens,
+    output_tokens: input.outputTokens,
+    reasoning_tokens: input.reasoningTokens,
+    passed: input.passed,
+    issue_codes: input.issueCodes,
+  });
+  if (error) throw error;
 }
 
 async function createDraftContext(input: {
@@ -829,6 +891,19 @@ export async function getNativeDraftWritingStyle(input: NativeDraftAccess & {
     : createDefaultDraftWritingStyleV2();
 }
 
+export async function prepareNativeSequenceBrief(input: NativeDraftAccess & { snapshotId: string; styleProfileId?: string | null }) {
+  const snapshotRow = await getNativeSnapshot({ snapshotId: input.snapshotId, access: input });
+  if (!snapshotRow) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
+  const snapshot = parseNativeSnapshotRow(snapshotRow, input.snapshotId);
+  const email = text(snapshot.subject.email).toLowerCase();
+  if (!email) throw new Error('La investigación no tiene un email válido para crear los borradores.');
+  if (await isEmailSuppressedForScope(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
+  const style = await loadDraftWritingStyle({ access: input, styleProfileId: input.styleProfileId });
+  const { result } = await createDraftContext({ access: input, snapshotRow, snapshotId: input.snapshotId, style, ensureReportDocument: false, now: new Date() });
+  if (result.status === 'blocked') throw new Error('Completa tu perfil comercial y revisa la investigación antes de preparar la secuencia.');
+  return { brief: buildSharedSequenceBrief(result.context), seller: result.context.seller, writingStyle: style };
+}
+
 export async function createNativeDraft(input: NativeDraftAccess & {
   snapshotId: string;
   styleProfileId?: string | null;
@@ -837,12 +912,14 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   userInstruction?: string | null;
   instruction?: string | null;
   sequenceContext?: OutreachSequenceContextV2;
+  sharedSequenceBrief?: SharedSequenceBrief;
   campaignRecipientStepId?: string | null;
   reservedCampaignDraftIds?: { draftId: string; versionId: string };
   sellerProfile?: DraftSellerProfileV2;
   writingStyle?: DraftWritingStyleV2;
 }, dependencies?: NativeDraftGenerationDependencies): Promise<NativeDraftGenerationResult> {
   const now = dependencies?.now?.() || new Date();
+  const sharedSequenceBrief = input.sharedSequenceBrief ? SharedSequenceBriefSchema.parse(input.sharedSequenceBrief) : undefined;
   const userInstruction = text(input.userInstruction);
   const instruction = text(input.instruction);
   if (userInstruction.length > 1_000 || instruction.length > 1_000) throw new Error('NATIVE_DRAFT_INSTRUCTION_INVALID');
@@ -912,6 +989,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
     ...(userInstruction ? { userInstruction } : {}),
     instruction: instruction || null,
     sequenceContext: sequenceContext || null,
+    ...(sharedSequenceBrief ? { sharedSequenceBrief } : {}),
     snapshotId: parsedSnapshot.id,
     snapshotHash,
     recipientEmail: email,
@@ -1006,16 +1084,53 @@ export async function createNativeDraft(input: NativeDraftAccess & {
     const findExistingContentFingerprints = dependencies?.findExistingContentFingerprints || findExistingNativeDraftContentFingerprints;
     const existingContentFingerprints = await findExistingContentFingerprints({ ...input, email });
     const generate = dependencies?.generate || generateOutreachFromDraftContextV2;
+    const attemptStep = attemptStepFor(sequenceContext);
+    const bufferedAttempts: Array<{
+      generated: GeneratedOutreachFromDraftContextV2 | null;
+      attemptNo: number;
+      passed: boolean;
+      issueCodes: string[];
+    }> = [];
+    const flushAttempts = async (draftId: string | null, versionId: string | null) => {
+      const record = dependencies?.recordGenerationAttempt || persistNativeDraftGenerationAttempt;
+      for (const attempt of bufferedAttempts) {
+        try {
+          await record({
+            organizationId: input.organizationId,
+            userId: input.userId,
+            researchSnapshotId: input.snapshotId,
+            draftId,
+            versionId,
+            origin: 'create',
+            step: attemptStep,
+            attemptNo: attempt.attemptNo,
+            model: attempt.generated?.model || null,
+            promptVersion: attempt.generated?.promptVersion || NATIVE_DRAFT_PROMPT_VERSION,
+            inputTokens: attempt.generated?.usage.inputTokens ?? null,
+            outputTokens: attempt.generated?.usage.outputTokens ?? null,
+            reasoningTokens: attempt.generated?.usage.reasoningTokens ?? null,
+            passed: attempt.passed,
+            issueCodes: attempt.issueCodes,
+          });
+        } catch (error) {
+          console.warn('[native-drafts] generation attempt telemetry failed:', error);
+        }
+      }
+      bufferedAttempts.length = 0;
+    };
     let generated: GeneratedOutreachFromDraftContextV2;
     try {
       generated = await generate({
         context,
+        ...(sharedSequenceBrief ? { sharedSequenceBrief } : {}),
         ...(userInstruction ? { userInstruction } : {}),
         ...(instruction ? { instruction } : {}),
         ...(sequenceContext ? { sequenceContext } : {}),
       });
     } catch (error) {
       console.warn('[native-drafts] OpenAI generation failed:', error);
+      bufferedAttempts.push({ generated: null, attemptNo: 1, passed: false, issueCodes: ['openai_generation_failed'] });
+      await flushAttempts(null, null);
       return failureResult({
         context,
         code: 'openai_generation_failed',
@@ -1024,12 +1139,20 @@ export async function createNativeDraft(input: NativeDraftAccess & {
       });
     }
 
-    let generatedOutput = outputForPreflight(context, generated);
-    let validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now });
+    const ctaPolicy = ctaPolicyFor(sequenceContext);
+    let generatedOutput = outputForPreflight(context, generated, ctaPolicy);
+    let validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+    bufferedAttempts.push({
+      generated,
+      attemptNo: 1,
+      passed: validation.valid,
+      issueCodes: validation.issues.map((issue) => issue.code),
+    });
     if (!validation.valid) {
       try {
         generated = await generate({
           context,
+          ...(sharedSequenceBrief ? { sharedSequenceBrief } : {}),
           ...(userInstruction ? { userInstruction } : {}),
           ...(instruction ? { instruction } : {}),
           ...(sequenceContext ? { sequenceContext } : {}),
@@ -1040,6 +1163,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
         });
       } catch (error) {
         console.warn('[native-drafts] OpenAI rewrite failed:', error);
+        await flushAttempts(null, null);
         return failureResult({
           context,
           code: 'openai_rewrite_failed',
@@ -1048,10 +1172,17 @@ export async function createNativeDraft(input: NativeDraftAccess & {
           now,
         });
       }
-      generatedOutput = outputForPreflight(context, generated);
-      validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now });
+      generatedOutput = outputForPreflight(context, generated, ctaPolicy);
+      validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+      bufferedAttempts.push({
+        generated,
+        attemptNo: 2,
+        passed: validation.valid,
+        issueCodes: validation.issues.map((issue) => issue.code),
+      });
     }
     if (!validation.valid) {
+      await flushAttempts(null, null);
       return blockedResult({
         context,
         code: 'draft_preflight_failed',
@@ -1116,6 +1247,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
         await persistMetadata({ ...metadata, versionId: persisted.versionId, draftId: persisted.draftId });
       } catch (error) {
         console.error('[native-drafts] metadata persistence failed:', error);
+        await flushAttempts(null, null);
         return failureResult({
           context,
           code: 'generation_metadata_persist_failed',
@@ -1124,6 +1256,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
         });
       }
     }
+    await flushAttempts(persisted.draftId, persisted.versionId);
     return {
       status: 'drafted',
       draft: persisted,
@@ -1306,6 +1439,41 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
     });
     existingContentFingerprints.push(draftContentFingerprintV2(previous.subject, previous.body));
     const generate = dependencies?.generate || generateOutreachFromDraftContextV2;
+    const attemptStep = attemptStepFor(sequenceContext);
+    const attemptOrigin = input.previewOnly ? 'rewrite_preview' : 'rewrite';
+    const bufferedAttempts: Array<{
+      generated: GeneratedOutreachFromDraftContextV2 | null;
+      attemptNo: number;
+      passed: boolean;
+      issueCodes: string[];
+    }> = [];
+    const flushAttempts = async (versionId: string | null) => {
+      const record = dependencies?.recordGenerationAttempt || persistNativeDraftGenerationAttempt;
+      for (const attempt of bufferedAttempts) {
+        try {
+          await record({
+            organizationId: input.organizationId,
+            userId: input.userId,
+            researchSnapshotId: input.draft.researchSnapshotId,
+            draftId: input.draft.draftId,
+            versionId,
+            origin: attemptOrigin,
+            step: attemptStep,
+            attemptNo: attempt.attemptNo,
+            model: attempt.generated?.model || null,
+            promptVersion: attempt.generated?.promptVersion || NATIVE_DRAFT_PROMPT_VERSION,
+            inputTokens: attempt.generated?.usage.inputTokens ?? null,
+            outputTokens: attempt.generated?.usage.outputTokens ?? null,
+            reasoningTokens: attempt.generated?.usage.reasoningTokens ?? null,
+            passed: attempt.passed,
+            issueCodes: attempt.issueCodes,
+          });
+        } catch (error) {
+          console.warn('[native-drafts] generation attempt telemetry failed:', error);
+        }
+      }
+      bufferedAttempts.length = 0;
+    };
 
     let generated: GeneratedOutreachFromDraftContextV2;
     try {
@@ -1316,10 +1484,19 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
       });
     } catch (error) {
       console.warn('[native-drafts] OpenAI requested rewrite failed:', error);
+      bufferedAttempts.push({ generated: null, attemptNo: 1, passed: false, issueCodes: ['openai_rewrite_failed'] });
+      await flushAttempts(null);
       throw new Error('NATIVE_DRAFT_OPENAI_REWRITE_FAILED');
     }
-    let generatedOutput = outputForPreflight(context, generated);
-    let validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now });
+    const ctaPolicy = ctaPolicyFor(sequenceContext);
+    let generatedOutput = outputForPreflight(context, generated, ctaPolicy);
+    let validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+    bufferedAttempts.push({
+      generated,
+      attemptNo: 1,
+      passed: validation.valid,
+      issueCodes: validation.issues.map((issue) => issue.code),
+    });
     if (!validation.valid) {
       try {
         generated = await generate({
@@ -1333,15 +1510,26 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
         });
       } catch (error) {
         console.warn('[native-drafts] OpenAI corrective rewrite failed:', error);
+        await flushAttempts(null);
         throw new Error('NATIVE_DRAFT_OPENAI_REWRITE_FAILED');
       }
-      generatedOutput = outputForPreflight(context, generated);
-      validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now });
+      generatedOutput = outputForPreflight(context, generated, ctaPolicy);
+      validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+      bufferedAttempts.push({
+        generated,
+        attemptNo: 2,
+        passed: validation.valid,
+        issueCodes: validation.issues.map((issue) => issue.code),
+      });
     }
-    if (!validation.valid) throw new NativeDraftPreflightError(validation.preflight, validation.issues);
+    if (!validation.valid) {
+      await flushAttempts(null);
+      throw new NativeDraftPreflightError(validation.preflight, validation.issues);
+    }
     if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
 
     if (input.previewOnly) {
+      await flushAttempts(input.draft.versionId);
       return {
         proposal: { subject: text(generatedOutput.subject), body: generatedOutput.body, expectedVersionId: input.draft.versionId },
         preflight: validation.preflight,
@@ -1372,6 +1560,7 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
       ]),
       ...reportMetadataForContext(context),
     });
+    await flushAttempts(persisted.versionId);
     return {
       draft: persisted,
       preflight: validation.preflight,

@@ -221,3 +221,20 @@ test('LinkedIn profile search fails loudly instead of rendering an empty failed 
     globalThis.fetch = originalFetch;
   }
 });
+test('profile URL search never displays a different LinkedIn person returned by the API', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = mockEnrichmentResponse({ id:'wrong-profile',fullName:'Marco Psenda',
+    linkedinUrl:'https://www.linkedin.com/in/marco-psenda',email:'other@example.com',enrichmentStatus:'completed' });
+  try {
+    await assert.rejects(() => searchLinkedInProfileLead({search_mode:'linkedin_profile',
+      linkedin_url:'https://www.linkedin.com/in/it-recruiter-janet-montero/'}), /perfil distinto/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+test('profile identity refusal is shown explicitly instead of an unrelated or empty profile', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = mockEnrichmentResponse({ id: 'tracking', enrichmentStatus: 'failed', errorCode: 'APOLLO_PERSON_IDENTITY_MISMATCH' });
+  try {
+    await assert.rejects(() => searchLinkedInProfileLead({search_mode: 'linkedin_profile',
+      linkedin_url: 'https://www.linkedin.com/in/it-recruiter-janet-montero/'}), /No pudimos confirmar/);
+  } finally { globalThis.fetch = originalFetch; }
+});

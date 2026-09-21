@@ -41,6 +41,27 @@ env:
   - variable: COWORK_DOCUMENT_VERSIONS_ENABLED
     value: "true"
     availability: [RUNTIME]
+  # Fase 4: coordinación (planes/cola/especialistas) y presupuestos agregados.
+  # La autonomía general sigue desactivada (COWORK_AUTONOMY_ENABLED ausente).
+  # Todos los efectos nuevos requieren revisión humana explícita.
+  - variable: COWORK_OPERATION_LEASES_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_SPECIALISTS_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_SPECIALIST_QUEUE_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_MODEL_BUDGET_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_SPECIALIST_TOOLS_ENABLED
+    value: "true"
+    availability: [RUNTIME]
+  - variable: COWORK_MODEL_USAGE_ENABLED
+    value: "true"
+    availability: [RUNTIME]
   # Fase 3: ejecutor remoto de código. Secreto COWORK_EXECUTOR_SECRET en
   # Secret Manager (versión 3 = bearer exacto de la VM). No guardar valores
   # en el repo. Sin secreto o sin URL la ejecución falla cerrado.

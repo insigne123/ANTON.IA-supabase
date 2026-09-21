@@ -11,9 +11,20 @@ import { executeCoworkCode } from './code-runner';
 import { saveCoworkContact } from './save-contact';
 import { startCoworkResearch } from './start-research';
 import { requestCoworkDraft } from './draft-from-research';
+import { executeCoworkProfileUpdate } from './profile-update';
+import { executeCoworkSavedSearchCreate, executeCoworkSavedSearchDelete, executeCoworkSavedSearchUpdate } from './saved-search-ops';
+import { executeCoworkCampaignStop } from './campaign-stop';
+import { executeCoworkCrmRecordUpdate } from './crm-record-update';
+import { executeCoworkCampaignPrepare } from './campaign-prepare';
+import { executeCoworkCrmAssign } from './crm-assign';
+import { executeCoworkExceptionResolve } from './exception-resolve';
+import { executeCoworkMissionControl } from './mission-control';
 import { deterministicCoworkUuid } from './operations';
 
-export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause']);
+export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
+  'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2',
+  'crm_update_record', 'campaign_prepare_draft_v2',
+  'crm_assign_lead', 'exception_resolve', 'mission_control']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 type Scope = { userId: string; organizationId: string };
@@ -154,6 +165,46 @@ async function executeEffect(
   if (proposal.kind === 'code_execute') {
     const executed = await executeCoworkCode(auth, proposal.run_id, proposal.target_id);
     return { reply: executed.reply, result: executed.result };
+  }
+  if (proposal.kind === 'profile_update') {
+    const updated = await executeCoworkProfileUpdate(auth, proposal.run_id, proposal.target_id);
+    return { reply: updated.reply, result: updated.result };
+  }
+  if (proposal.kind === 'saved_search_create') {
+    const created = await executeCoworkSavedSearchCreate(auth, proposal.run_id, proposal.target_id);
+    return { reply: created.reply, result: created.result };
+  }
+  if (proposal.kind === 'saved_search_update') {
+    const updated = await executeCoworkSavedSearchUpdate(auth, proposal.run_id, proposal.target_id);
+    return { reply: updated.reply, result: updated.result };
+  }
+  if (proposal.kind === 'saved_search_delete') {
+    const deleted = await executeCoworkSavedSearchDelete(auth, proposal.run_id, proposal.target_id);
+    return { reply: deleted.reply, result: deleted.result };
+  }
+  if (proposal.kind === 'campaign_stop_v2') {
+    const stopped = await executeCoworkCampaignStop(auth, proposal.run_id, proposal.target_id);
+    return { reply: stopped.reply, result: stopped.result };
+  }
+  if (proposal.kind === 'crm_update_record') {
+    const updated = await executeCoworkCrmRecordUpdate(auth, proposal.run_id, proposal.target_id);
+    return { reply: updated.reply, result: updated.result };
+  }
+  if (proposal.kind === 'campaign_prepare_draft_v2') {
+    const prepared = await executeCoworkCampaignPrepare(auth, proposal.run_id, proposal.target_id);
+    return { reply: prepared.reply, result: prepared.result };
+  }
+  if (proposal.kind === 'crm_assign_lead') {
+    const assigned = await executeCoworkCrmAssign(auth, proposal.run_id, proposal.target_id);
+    return { reply: assigned.reply, result: assigned.result };
+  }
+  if (proposal.kind === 'exception_resolve') {
+    const resolved = await executeCoworkExceptionResolve(auth, proposal.run_id, proposal.target_id);
+    return { reply: resolved.reply, result: resolved.result };
+  }
+  if (proposal.kind === 'mission_control') {
+    const controlled = await executeCoworkMissionControl(auth, proposal.run_id, proposal.target_id);
+    return { reply: controlled.reply, result: controlled.result };
   }
   const requested = await requestCoworkDraft(auth, proposal.origin_run_id, { snapshotId: proposal.target_id });
   return { reply: requested.reused ? 'Ese borrador ya estaba solicitado para este informe.'

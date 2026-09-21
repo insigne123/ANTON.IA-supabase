@@ -74,6 +74,37 @@ test('contacted.timeline requires UUID and database errors stay generic', async 
     /No se pudieron consultar los contactados/);
 });
 
+test('contacted.timeline derives whose turn it is without trusting prose', async () => {
+  const sent = new Date(Date.now() - 3600000).toISOString();
+  const replied = new Date(Date.now() - 1800000).toISOString();
+  const answered = mockClient({ contacted_leads: { rows: [
+    { id: 'c1', sent_at: sent, replied_at: replied, reply_intent: 'positive' },
+  ] } });
+  const ours = await queryCoworkExtendedReads(answered.client, scope, 'contacted.timeline', LEAD) as {
+    turn: { status: string }; truncated: boolean;
+  };
+  assert.equal(ours.turn.status, 'our_turn');
+  assert.equal(ours.truncated, false);
+  const waiting = mockClient({ contacted_leads: { rows: [{ id: 'c1', sent_at: sent, replied_at: null }] } });
+  const theirs = await queryCoworkExtendedReads(waiting.client, scope, 'contacted.timeline', LEAD) as {
+    turn: { status: string };
+  };
+  assert.equal(theirs.turn.status, 'their_turn');
+  const auto = mockClient({ contacted_leads: { rows: [
+    { id: 'c1', sent_at: sent, replied_at: replied, reply_intent: 'auto_reply' },
+  ] } });
+  const stillTheirs = await queryCoworkExtendedReads(auto.client, scope, 'contacted.timeline', LEAD) as {
+    turn: { status: string };
+  };
+  assert.equal(stillTheirs.turn.status, 'their_turn');
+  const partial = mockClient({ contacted_leads: { rows: Array.from({ length: 15 }, (_, i) => ({ id: `c${i}`, sent_at: sent })) } });
+  const unknown = await queryCoworkExtendedReads(partial.client, scope, 'contacted.timeline', LEAD) as {
+    turn: { status: string }; truncated: boolean;
+  };
+  assert.equal(unknown.turn.status, 'unknown');
+  assert.equal(unknown.truncated, true);
+});
+
 test('metrics.overview reports the last 7 days with explicit scope', async () => {
   const tables = {
     leads: { count: 100 }, contacted_leads: { count: 7 },

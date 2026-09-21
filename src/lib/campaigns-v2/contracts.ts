@@ -22,6 +22,7 @@ export type CampaignV2DraftSummary = z.infer<typeof CampaignV2DraftSummarySchema
 
 export const CampaignV2DraftGenerationSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('ready'), error: z.null() }).strict(),
+  z.object({ status: z.literal('queued'), error: z.null() }).strict(),
   z.object({
     status: z.literal('error'),
     error: z.string().trim().min(1).max(2_000),

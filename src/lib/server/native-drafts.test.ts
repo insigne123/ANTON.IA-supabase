@@ -50,12 +50,14 @@ En Northstar automatizamos tareas repetitivas para reducir trabajo manual y deja
     provider: 'openai',
     model: 'test-model',
     promptVersion: NATIVE_DRAFT_PROMPT_VERSION,
+    usage: { inputTokens: 100, outputTokens: 20, reasoningTokens: 5 },
   };
 }
 
 function dependencies(snapshot = draftSnapshotFixture()) {
   const persisted: MessagingDraftV1[] = [];
   const metadata: any[] = [];
+  const attempts: any[] = [];
   let claims = 0;
   let releases = 0;
   const value: NativeDraftGenerationDependencies = {
@@ -101,12 +103,14 @@ function dependencies(snapshot = draftSnapshotFixture()) {
       return draft;
     },
     persistMetadata: async (input) => { metadata.push(input); },
+    recordGenerationAttempt: async (input) => { attempts.push(input); },
     now: () => DRAFT_FIXTURE_NOW,
   };
   return {
     value,
     persisted,
     metadata,
+    attempts,
     claimCount: () => claims,
     releaseCount: () => releases,
   };
@@ -408,6 +412,147 @@ test('native drafting permits one corrective generation pass, then persists a tr
   assert.ok(result.draft.content.text?.endsWith(result.context.constraints.cta.exactText));
   assert.equal(fixture.persisted.length, 1);
   assert.deepEqual(fixture.metadata[0].claimIds, ['claim-acme-overview']);
+});
+
+test('generated company-definition opening triggers the bounded editorial rewrite before persistence', async () => {
+  for (const repairSucceeds of [true, false]) {
+    const fixture = dependencies(draftSnapshotFixture());
+    let calls = 0;
+    fixture.value.generate = async ({ context, rewrite }) => {
+      calls += 1;
+      const output = generated(context);
+      if (rewrite) assert.ok(rewrite.errors.some((error) => error.includes('ficha')));
+      if (repairSucceeds && rewrite) return output;
+      return { ...output, body: output.body.replace('Acme comunica que ayuda', 'Acme es una empresa que ayuda') };
+    };
+    const result = await createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, fixture.value);
+    assert.equal(calls, 2);
+    assert.equal(result.status, repairSucceeds ? 'drafted' : 'blocked');
+    assert.equal(fixture.persisted.length, repairSucceeds ? 1 : 0);
+  }
+});
+
+test('follow-up sequence step persists its own varied CTA without the approved text', async () => {
+  const fixture = dependencies(draftSnapshotFixture());
+  fixture.value.generate = async ({ context, sequenceContext }) => {
+    assert.equal(sequenceContext?.currentStep.index, 1);
+    return {
+      ...generated(context),
+      subject: 'Avance de procesos en Acme',
+      body: `Hola Ada,
+
+Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+
+En Northstar automatizamos operaciones repetitivas para reducir trabajo manual y mantener la información disponible para el equipo.
+
+¿Te sirve que lo revisemos juntos 15 minutos esta semana?`,
+    };
+  };
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+    sequenceContext: {
+      sequenceInstruction: 'Aportar valor nuevo sin repetir mensajes anteriores.',
+      priorMessages: [{
+        kind: 'initial',
+        index: 0,
+        name: 'Contacto inicial',
+        subject: 'Procesos en Acme',
+        body: 'Acme reduce trabajo manual.',
+      }],
+      currentStep: { index: 1, total: 3, name: 'Respaldo', offsetDays: 3, instruction: 'Aportar prueba.' },
+    },
+  }, fixture.value);
+  assert.equal(result.status, 'drafted');
+  if (result.status !== 'drafted') return;
+  assert.ok(!result.draft.content.text?.includes(result.context.constraints.cta.exactText));
+  assert.match(result.draft.content.text || '', /¿Te sirve que lo revisemos juntos 15 minutos esta semana\?/);
+  assert.equal(result.draft.preflight.status, 'passed');
+});
+
+test('closing sequence step persists without any meeting CTA appended', async () => {
+  const fixture = dependencies(draftSnapshotFixture());
+  fixture.value.generate = async ({ context, sequenceContext }) => {
+    assert.equal(sequenceContext?.currentStep.index, 3);
+    return {
+      ...generated(context),
+      subject: 'Cierro el tema en Acme',
+      body: `Hola Ada,
+
+Cierro el seguimiento de los procesos de operaciones en Acme por acá.
+
+Si en algún momento necesitan reducir el trabajo manual de esos procesos, tienen mi correo acá arriba.
+
+Gracias por el tiempo de leer hasta acá.`,
+    };
+  };
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+    sequenceContext: {
+      sequenceInstruction: 'Cerrar sin presión.',
+      priorMessages: [{
+        kind: 'initial',
+        index: 0,
+        name: 'Contacto inicial',
+        subject: 'Procesos en Acme',
+        body: 'Acme reduce trabajo manual.',
+      }],
+      currentStep: { index: 3, total: 3, name: 'Cierre', offsetDays: 10, instruction: 'Cerrar.' },
+    },
+  }, fixture.value);
+  assert.equal(result.status, 'drafted');
+  if (result.status !== 'drafted') return;
+  assert.ok(!result.draft.content.text?.includes(result.context.constraints.cta.exactText));
+  assert.ok(!/[¿?]/.test(result.draft.content.text || ''));
+  assert.match(result.draft.content.text || '', /Gracias por el tiempo de leer hasta acá\./);
+  assert.equal(result.draft.preflight.status, 'passed');
+});
+
+test('model attempts record tokens, pass state and issue codes without blocking drafts', async () => {
+  const fixture = dependencies(draftSnapshotFixture());
+  let calls = 0;
+  fixture.value.generate = async ({ context }) => {
+    calls += 1;
+    const output = generated(context);
+    return {
+      ...output,
+      subject: calls === 1 ? '{{company.name}} y una idea' : output.subject,
+      usage: { inputTokens: 100 * calls, outputTokens: 20 * calls, reasoningTokens: 5 * calls },
+    };
+  };
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+  assert.equal(result.status, 'drafted');
+  if (result.status !== 'drafted') return;
+  assert.equal(calls, 2);
+  assert.equal(fixture.attempts.length, 2);
+  assert.deepEqual(fixture.attempts.map((attempt) => [attempt.attemptNo, attempt.passed, attempt.origin, attempt.step]), [
+    [1, false, 'create', 'initial'],
+    [2, true, 'create', 'initial'],
+  ]);
+  assert.deepEqual(fixture.attempts.map((attempt) => [attempt.inputTokens, attempt.outputTokens, attempt.reasoningTokens]), [
+    [100, 20, 5],
+    [200, 40, 10],
+  ]);
+  assert.equal(fixture.attempts[0].issueCodes.length > 0, true);
+  assert.deepEqual(fixture.attempts[1].issueCodes, []);
+  assert.equal(fixture.attempts[0].model, 'test-model');
+  assert.equal(fixture.attempts[1].draftId, result.draft.draftId);
+  assert.equal(fixture.attempts[1].versionId, result.draft.versionId);
+});
+
+test('telemetry failures never block an otherwise valid draft', async () => {
+  const fixture = dependencies(draftSnapshotFixture());
+  fixture.value.generate = async ({ context }) => generated(context);
+  fixture.value.recordGenerationAttempt = async () => { throw new Error('telemetry unavailable'); };
+  const result = await createNativeDraft({
+    ...access,
+    snapshotId: DRAFT_FIXTURE_IDS.snapshot,
+  }, fixture.value);
+  assert.equal(result.status, 'drafted');
 });
 
 test('synthetic Oscar-like agro-export HR draft stays editable with warnings; invented numbers still block', async () => {
@@ -881,7 +1026,9 @@ test('requested AI rewrites create a canonical revision and replace its generati
 
 Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
 
-En Northstar automatizamos operaciones repetitivas para reducir tareas manuales y mantener la información disponible para el equipo.`,
+En Northstar automatizamos operaciones repetitivas para reducir tareas manuales y mantener la información disponible para el equipo.
+
+¿Te sirve que lo revisemos juntos 15 minutos esta semana?`,
       };
     },
     appendRevisionWithMetadata: async (parent, changes, metadata) => {

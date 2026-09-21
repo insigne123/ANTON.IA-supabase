@@ -1,4 +1,52 @@
-# Inventario Cowork — revisión inicial
+# Inventario Cowork — revisión de Fase 4 (v1 congelado 21-09-2026)
+
+## Estado contrastado con código — 21 de septiembre de 2026
+
+Inventario v1 congelado sobre el código desplegado en `studio-build-2026-09-21-001` con flags Fase 4 activos
+(`COWORK_OPERATION_LEASES_ENABLED`, `COWORK_SPECIALISTS_ENABLED`, `COWORK_SPECIALIST_QUEUE_ENABLED`,
+`COWORK_MODEL_BUDGET_ENABLED`). `COWORK_AUTONOMY_ENABLED` ausente: ningún efecto se auto-aprueba.
+Implementación local y despliegue verificados (smoke 401, revisión Cloud Run, logs sin errores);
+el recorrido privado del propietario sigue pendiente y no se cuenta como evidencia.
+
+| Operaciones conectadas al agente | Alcance / reglas | Evidencia principal |
+|---|---|---|
+| `leads.search`, `leads.get` | Usuario y organización; lecturas acotadas | `leads.test.ts`, `agent-loop.test.ts` |
+| `crm.search`, `crm.get_lead` | Contactos de organización; no equivale a toda la ficha comercial unificada | `extended-reads.test.ts` |
+| `contacted.search`, `contacted.timeline` | Historial de organización acotado | `extended-reads.test.ts` |
+| `metrics.overview`, `app.context` | Métricas con alcance; conexiones sin tokens | `extended-reads.test.ts` |
+| `research.get_existing` | Informe propio persistido con evidencia | `research.test.ts` |
+| `draft.get`, `campaigns.list` | Versiones de borrador y campañas propias | `extended-reads.ts`, suites de envío/campañas |
+| `files.list` | Nombres de uploads propios; lectura de contenido separada | `extended-reads.test.ts` |
+| `saved_searches.list` | Nuevo local: búsquedas propias y compartidas de la organización, hasta 20; solo consulta, sin Apollo ni cuotas | `saved-searches.test.ts` |
+| `missions.list`, `exceptions.list` | Misiones propias e incidencias abiertas del equipo, sin edición | `scripts/test-cowork-domains.mjs` |
+| `campaigns.inbox`, `campaigns.plan`, `campaigns.step_context` | Servicio nativo de campañas-v2, usuario/organización actual, respeta flag; plan y contexto minimizados | `scripts/test-cowork-domains.mjs`, `campaigns-v2/inbox.test.ts` |
+| `crm.collaboration`, `crm.record`, `privacy.contactability`, `privacy.contactability_batch` | Responsabilidad/reserva, ficha comercial y restricciones de contacto por UUID; lote de hasta 5 en una operación | `scripts/test-cowork-domains.mjs` |
+| `profile.update` | Revisión humana; deriva rechazada; solo identidad comercial | `scripts/test-cowork-domain-effects.mjs` |
+| `saved_search.create/update/delete` | Revisión humana; solo propias; duplicados y deriva rechazados; nunca ejecuta búsquedas | `scripts/test-cowork-domain-effects.mjs` |
+| `campaign.stop_v2` | Revisión humana; inscripción observada; servicio nativo idempotente | `scripts/test-cowork-domain-effects.mjs` |
+| `reads.parallel` | Máximo dos lecturas concurrentes y tres totales por turno | `parallel-reads.test.ts` |
+| `reads.plan` | Nuevo local: IDs, dependencias acíclicas, mismo límite y gateway; metadatos de tarea en observaciones persistidas | `read-plan.test.ts` |
+| `specialists.review` | Nuevo local, deshabilitado por flag: hasta dos roles de síntesis de evidencia, sin herramientas; plan y resultados persistidos | `specialists.test.ts`, `specialist-review.test.ts` |
+| `prospecting.propose_search`, `leads.save_contact` | Búsqueda con cuota; guardado de resultado observado | `test-cowork-external-search.mjs`, `test-cowork-save-contact.mjs` |
+| `research.start`, `draft.request` | Colas nativas y destinos observados | `test-cowork-start-research.mjs`, `test-cowork-native-draft.mjs` |
+| `crm.propose_note` | Reemplazo de nota propia sujeto a revisión | `agent-loop.test.ts`, migración de notas |
+| `lead.enrich`, `email.send` | Email, cuota y envío ligado a versión/remitente | `test-cowork-enrich-contact.mjs`, `test-cowork-send-email.mjs` |
+| `campaign.create`, `campaign.activate`, `campaign.pause` | Campañas bulk; revisión y flags propios; no cubre todos los modelos de campañas | `test-cowork-campaigns.mjs` |
+| `code.execute` | Sandbox y revisión humana | `test-cowork-code-execution.mjs` |
+
+Tests TypeScript bajo `src/lib/cowork/` y `src/lib/server/cowork/`; scripts bajo `scripts/`.
+Las pruebas aisladas no sustituyen SQL concurrente ni recorridos autenticados.
+
+## Diferido explícito (no implementado en v1)
+
+- Asignación de responsable y cambios de etapa/próxima acción CRM (las RPC nativas exigen `auth.uid()`; el worker usa `service_role`).
+- Importación/Sheet y operaciones por lote con escritura; respuesta de correo en hilo; resolución/control de misiones;
+  crear/editar planes v2 y preparar borradores desde Cowork; modo autónomo.
+- Estos frentes requieren envoltorios dedicados o decisiones de producto; quedan como seguimiento, no como cobertura.
+
+Pendientes de Fase 4, dependencias y aceptación: [cowork-phase4-status.md](cowork-phase4-status.md).
+
+## Historial: revisión inicial
 
 Fecha: 15 de septiembre de 2026. Estado: inventario inicial, todavía no congelado ni cobertura certificada.
 

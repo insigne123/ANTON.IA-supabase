@@ -990,7 +990,9 @@ export function FirstContactFollowUpPlan({
                     </div>
                   </div>
 
-                  {step.draftGeneration.status === 'error' || !step.draft || !editor ? (
+                  {step.draftGeneration.status === 'queued' ? (
+                    <p role="status" className="mt-5 rounded-xl border border-border bg-muted/40 p-4 text-sm text-muted-foreground">Este correo está pendiente de preparación. Puedes consultar el progreso desde la secuencia.</p>
+                  ) : step.draftGeneration.status === 'error' || !step.draft || !editor ? (
                     <div className="mt-5 rounded-xl border border-rose-400/60 bg-rose-50/70 px-4 py-4 dark:border-rose-500/50 dark:bg-rose-500/10" role="alert">
                       <p className="text-sm font-medium text-rose-800 dark:text-rose-200">No pudimos generar este correo</p>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">{retryErrors[step.id] || step.draftGeneration.error || 'El borrador no está disponible.'}</p>

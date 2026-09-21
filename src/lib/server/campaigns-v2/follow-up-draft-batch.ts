@@ -3,6 +3,7 @@ import {
   type OutreachSequenceContextV2,
 } from '@/lib/campaigns-v2/outreach-sequence-context';
 import type { MessagingDraftV1 } from '@/lib/messaging-contracts';
+import type { SharedSequenceBrief } from '@/lib/outreach-sequence-brief';
 import {
   hasUsableDraftSellerOfferV2,
   type DraftSellerProfileV2,
@@ -62,13 +63,17 @@ export async function generateFollowUpDraftBatch(input: {
   sellerProfile?: DraftSellerProfileV2;
   writingStyle?: DraftWritingStyleV2;
   targetStepId?: string;
+  sharedSequenceBrief?: SharedSequenceBrief;
+  maxDrafts?: number;
 }, dependencies: FollowUpDraftBatchDependencies) {
   const steps = [...input.steps].sort((left, right) => left.index - right.index);
   const total = steps.length;
+  let generatedCount = 0;
 
   for (const step of steps) {
     if (input.targetStepId && step.id !== input.targetStepId) continue;
     if (step.nativeDraftId || input.existingDrafts.has(step.id)) continue;
+    if (generatedCount >= (input.maxDrafts ?? total)) break;
     if (input.sellerProfile && !hasUsableDraftSellerOfferV2(input.sellerProfile)) {
       await dependencies.recordError({
         stepId: step.id,
@@ -132,6 +137,7 @@ export async function generateFollowUpDraftBatch(input: {
         styleProfileId: input.config.styleProfileId,
         instruction: step.instruction,
         sequenceContext,
+        ...(input.sharedSequenceBrief ? { sharedSequenceBrief: input.sharedSequenceBrief } : {}),
         idempotencyKey: `campaign-recipient-step:${step.id}`,
         campaignRecipientStepId: step.id,
         reservedCampaignDraftIds: reserved,
@@ -147,6 +153,7 @@ export async function generateFollowUpDraftBatch(input: {
       }
       await dependencies.linkDraft({ stepId: step.id, draft: result.draft });
       input.existingDrafts.set(step.id, result.draft);
+      generatedCount += 1;
     } catch (error) {
       await dependencies.recordError({ stepId: step.id, error: generationError(error) });
       break;

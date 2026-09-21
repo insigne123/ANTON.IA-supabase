@@ -1,5 +1,6 @@
 // Style examples adapted from the user's own GrupoExpro playbook
-// (plantillas-correo-grupoexpro_1.md). They teach STRUCTURE and TONE only:
+// (plantillas-correo-grupoexpro_2.md, all six lines, role variants and annexes).
+// They teach STRUCTURE and TONE only:
 // subjects, openings tied to a trigger, one central idea, concrete offer,
 // single next step. Facts, figures, clients and coverage claims inside them
 // are NEVER evidence and must never be imported into a draft.
@@ -180,6 +181,7 @@ export function selectOutreachExamples(input: {
   role?: string | null;
   count?: number;
   avoidIds?: string[];
+  offering?: string | null;
 }): OutreachExample[] {
   const avoid = new Set(input.avoidIds || []);
   const normalizedRole = String(input.role || '').toLocaleLowerCase('es');
@@ -192,6 +194,29 @@ export function selectOutreachExamples(input: {
         : /gerente general|general manager|ceo|director general|socio|founder|dueño/.test(normalizedRole)
           ? 'executive'
           : 'any';
+  // Select the seller's offering first; the prospect's industry never authorizes
+  // selling a different service. Unrelated sellers get neutral scaffolding.
+  if (input.offering !== undefined) {
+    const offering = String(input.offering || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const lines = [
+      { id: 'est', match: /servicios transitorios|\best\b|dotacion|personal temporal/, theme: 'dotación por período acotado', mechanism: 'alcance de selección y administración laboral autorizado; nunca exención total de responsabilidad legal' },
+      { id: 'bpo', match: /outsourcing|\bbpo\b|externaliza|picking|packing|back office/, theme: 'un proceso con responsable e indicadores', mechanism: 'distinguir servicio completo de suministro de personal, solo si lo declara el vendedor' },
+      { id: 'hunting', match: /seleccion|hunting|reclutamiento|recruit/, theme: 'una búsqueda y su evaluación', mechanism: 'distinguir volumen de búsquedas de vacante estancada solo con evidencia; no prometer plazos ni garantía' },
+      { id: 'facility', match: /facility|aseo|mantencion|servicios generales/, theme: 'estándar del servicio por sede', mechanism: 'control y coordinación del servicio autorizado, sin inventar cantidad de sedes ni proveedores' },
+      { id: 'security', match: /seguridad privada|vigilancia|guardias|security/, theme: 'cobertura y trazabilidad de turnos', mechanism: 'alcance autorizado de vigilancia; no trasladar un ranking a retención ni garantizar cobertura' },
+      { id: 'technology', match: /tecnolog|software|plataforma|digital|automatiza/, theme: 'trazabilidad de un proceso concreto', mechanism: 'solo funcionalidades declaradas; nunca asumir Workges, implementación sin TI ni capacidades del ejemplo' },
+    ].filter((line) => line.match.test(offering));
+    const line = lines[0] || { id: 'neutral', theme: 'una aplicación de la oferta autorizada', mechanism: 'usar exclusivamente capacidades del vendedor, sin convertir su oferta en servicios de RRHH' };
+    const roleAngle = { executive: 'resultado de negocio, menos de 90 palabras y sin bullets', operations: 'capacidad, continuidad y tiempos; no inventar fallas', people: 'liberar carga del equipo y trazabilidad, no reemplazarlo', finance: 'estructura y previsibilidad del costo, sin prometer ahorro', any: 'una aplicación pertinente sin inferir autoridad de compra' }[role];
+    const stage = { initial: 'hecho verificable → aplicación → capacidad autorizada', proof: 'una prueba autorizada distinta o un detalle de aplicación cuando no hay prueba', angle: 'otro aspecto del mismo servicio para la misma persona; sin inventar otro interlocutor ni conversaciones', close: 'cierre breve y sin presión, menos de 80 palabras; no afirmar silencio ni envíos previos' }[input.goal];
+    const bodies = {
+      initial: `Hola [Nombre],\n\n[Disparador verificado vinculado con ${line.theme}; si solo hay actividad conocida, plantear una aplicación sin atribuir necesidad].\n\nEn [empresa vendedora] [acción concreta autorizada]. [Consecuencia práctica conectada con la cuenta, no promesa].\n\n[Único CTA aprobado].`,
+      proof: `Hola [Nombre],\n\n[Una prueba autorizada aplicada a ${line.theme}; si no hay prueba, explicar un alcance concreto del servicio].\n\n[Una distinción útil que no repita la apertura ni presente de nuevo al vendedor].\n\n[Único CTA aprobado].`,
+      angle: `Hola [Nombre],\n\n[Una segunda aplicación de ${line.theme}, pertinente al mismo cargo y respaldada por el brief].\n\n[Qué cambia en esta aplicación, sin sumar otra línea de servicio ni atribuir problemas].\n\n[Único CTA aprobado].`,
+      close: `Hola [Nombre],\n\n[Cierre breve del tema de ${line.theme}, dejando una salida sin presión]. [Resultado autorizado en pocas palabras, sin nuevo pitch ni afirmar falta de respuesta].\n\n[Único CTA aprobado; sin agregar otro pedido].`,
+    };
+    return [{ id: `v2-${line.id}-${role}-${input.goal}`, goals: [input.goal], roles: [role], subject: input.goal === 'close' ? 'Cerrando el ciclo — [Empresa]' : '[Empresa] · [tema concreto]', body: bodies[input.goal], imitate: `${stage}. ${line.mechanism}. Adaptación por cargo: ${roleAngle}. No importar cifras, marcas, clientes, cobertura, garantías ni condiciones legales del documento.` }].filter((example) => !avoid.has(example.id));
+  }
   const pool = EXAMPLES.filter((example) => example.goals.includes(input.goal) && !avoid.has(example.id));
   const ranked = [...pool].sort((left, right) => {
     const leftRole = left.roles.includes(role) || left.roles.includes('any') ? 0 : 1;

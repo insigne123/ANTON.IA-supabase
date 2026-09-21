@@ -44,3 +44,13 @@ test('reuses preexisting slash URL and preserves unrelated enriched data', async
   assert.deepEqual(result.lead.data, { important: true });
   assert.equal(extensionResearchSubject({ ...result.lead, email: 'not found' }).email, undefined);
 });
+test('explicit editor replacement clears stale contact fields while preserving unrelated data', async () => {
+  const db = database();
+  db.rows.set('old', { id: 'old', linkedin_url: profile.linkedinUrl, organization_id: org, email: 'old@example.com', primary_phone: '123', organization_domain: 'old.test', data: { retained: true } });
+  const result = await saveExtensionLead({ supabase: db, organizationId: org, user: { id: 'member' } } as any, profile, true);
+  assert.equal(result.lead.email, null);
+  assert.equal(result.lead.primary_phone, null);
+  assert.equal(result.lead.organization_domain, null);
+  assert.equal(result.lead.email_status, 'unknown');
+  assert.deepEqual(result.lead.data, { retained: true });
+});

@@ -1,5 +1,12 @@
 export type CoworkExecutionMode = 'approval' | 'autonomous';
 
+/** New capabilities require an explicit policy decision, never implicit opt-in. */
+const AUTOMATIC_EFFECTS = new Set(['save_contact', 'start_research', 'request_draft', 'enrich_contact', 'campaign_create']);
+
+export function coworkEffectCanAutoApprove(mode: CoworkExecutionMode, enabled: boolean, kind: string) {
+  return mode === 'autonomous' && enabled && AUTOMATIC_EFFECTS.has(kind);
+}
+
 /** Versioned policy for capabilities that actually exist, enforced outside the model. */
 export function coworkExecutionPolicy(mode: CoworkExecutionMode, autonomousEnabled: boolean) {
   const autonomous = mode === 'autonomous' && autonomousEnabled;
@@ -10,6 +17,7 @@ export function coworkExecutionPolicy(mode: CoworkExecutionMode, autonomousEnabl
     maxExternalSearchesPerRun: 1,
     maxExternalResults: 25,
     noteRequiresApproval: true,
+    automaticEffects: autonomous ? [...AUTOMATIC_EFFECTS] : [],
   };
 }
 

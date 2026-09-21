@@ -1,511 +1,123 @@
-console.log('Anton.IA LinkedIn Script Active');
-
-const MESSAGE_BUTTON_TEXTS = ['message', 'mensaje', 'send message', 'enviar mensaje'];
-const SEND_BUTTON_TEXTS = ['send', 'enviar'];
-const DISMISS_BUTTON_TEXTS = ['dismiss', 'cerrar', 'close', 'cancel', 'cancelar', 'no thanks', 'no, gracias', 'got it'];
-const FLOW_POLL_MS = 350;
-
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'PING') {
-        sendResponse({ status: 'ready' });
-        return false;
-    }
-
-    if (request.action === 'EXECUTE_DM_FLOW') {
-        const requestId = request.requestId;
-
-        console.log('[Anton.IA Content] Acknowledging receipt for request:', requestId);
-        sendResponse({ received: true, requestId });
-
-        runDMFlow(request.profileUrl, request.message)
-            .then((result) => {
-                console.log('[Anton.IA Content] Sending success result back to background:', result);
-                chrome.runtime.sendMessage({
-                    action: 'DM_RESULT',
-                    requestId,
-                    result,
-                });
-            })
-            .catch((error) => {
-                console.error('[Anton.IA Content] Sending error result back to background:', error);
-                chrome.runtime.sendMessage({
-                    action: 'DM_RESULT',
-                    requestId,
-                    result: { success: false, error: error.message },
-                });
-            });
-
-        return false;
-    }
-
-    return false;
-});
-
-async function runDMFlow(profileUrl, message) {
-    if (!isOnRequestedProfile(profileUrl)) {
-        return { success: false, error: 'LinkedIn no abrió el perfil solicitado. Reintenta desde el lead.' };
-    }
-
-    await delay(1500);
-    await closeBlockingDialog();
-
-    const directMessageResult = await tryDirectMessage(message);
-    if (directMessageResult) {
-        return directMessageResult;
-    }
-
-    // Never turn a requested DM into a connection request without a separate user action.
-    return { success: false, error: 'No se pudo abrir el mensaje directo. No enviamos una solicitud de conexión automáticamente.' };
-}
-
-async function tryDirectMessage(message) {
-    const profileRoot = getPrimaryProfileRoot();
-    const msgBtn = findMessageButton(profileRoot);
-    if (!msgBtn) {
-        console.log('[Anton.IA Content] No Message button found.');
-        return null;
-    }
-
-    console.log('[Anton.IA Content] Clicking Message button:', describeElement(msgBtn));
-    safeClick(msgBtn);
-
-    const state = await waitForState(() => {
-        const editor = getMessageEditor();
-        if (editor) return { kind: 'editor', editor };
-
-        const dialog = getDialogRoot();
-        if (dialog) {
-            const text = normalizeText(dialog.innerText || '');
-            if (isUpsellText(text)) return { kind: 'upsell', dialog, text };
-            return { kind: 'dialog', dialog, text };
-        }
-
-        return { kind: 'idle' };
-    }, 14000, FLOW_POLL_MS);
-
-    if (state.kind === 'editor') {
-        console.log('[Anton.IA Content] Message editor detected.');
-        return sendMessageInEditor(state.editor, message);
-    }
-
-    if (state.kind === 'upsell' || state.kind === 'dialog') {
-        console.warn('[Anton.IA Content] Message flow opened a blocking dialog.', {
-            kind: state.kind,
-            text: (state.text || '').slice(0, 160),
-        });
-        await closeBlockingDialog();
-        return null;
-    }
-
-    console.warn('[Anton.IA Content] Message flow did not produce an editor.');
-    return null;
-}
-
-async function sendMessageInEditor(editor, message) {
-    const outgoingCountBefore = getOutgoingMessageCount();
-    setElementText(editor, message);
-    await delay(900);
-
-    if (!textLooksApplied(editor, message)) {
-        console.warn('[Anton.IA Content] Message text did not stick on first attempt. Retrying insertion.');
-        setElementText(editor, message);
-        await delay(700);
-    }
-
-    if (!textLooksApplied(editor, message)) {
-        throw new Error('Message editor did not accept the text');
-    }
-
-    const sendBtn = findSendButton(editor.closest('form') || editor.closest('.msg-overlay-conversation-bubble') || document);
-    if (!sendBtn) {
-        console.error('[Anton.IA Content] Send button not found in DM editor.');
-        throw new Error('Send button not found in DM editor');
-    }
-
-    if (isElementDisabled(sendBtn)) {
-        console.error('[Anton.IA Content] Send button is disabled.', describeElement(sendBtn));
-        throw new Error('Send button is disabled after writing the message');
-    }
-
-    safeClick(sendBtn);
-    const confirmed = await waitForOutgoingMessage(message, outgoingCountBefore);
-    if (!confirmed) {
-        return { success: false, error: 'LinkedIn no confirmó el mensaje enviado. Revisa la conversación antes de reintentar.' };
-    }
-
-    return { success: true, status: 'confirmed_dm', linkedinThreadUrl: location.href };
-}
-
-function isOnRequestedProfile(profileUrl) {
-    try {
-        const current = new URL(window.location.href);
-        const target = new URL(profileUrl);
-        return current.hostname.replace(/^www\./i, '').toLowerCase() === 'linkedin.com'
-            && target.hostname.replace(/^www\./i, '').toLowerCase() === 'linkedin.com'
-            && normalizePath(current.href) === normalizePath(target.href);
-    } catch {
-        return false;
-    }
-}
-
-function getOutgoingMessageCount() {
-    return document.querySelectorAll('.msg-s-message-group--is-mine, .msg-s-event-listitem .msg-s-message-group--is-mine').length;
-}
-
-async function waitForOutgoingMessage(message, countBefore) {
-    const expected = normalizeText(message);
-    const startedAt = Date.now();
-
-    while (Date.now() - startedAt < 8000) {
-        const outgoing = Array.from(document.querySelectorAll('.msg-s-message-group--is-mine, .msg-s-event-listitem'))
-            .filter((node) => node.classList.contains('msg-s-message-group--is-mine') || node.querySelector('.msg-s-message-group--is-mine'));
-        const hasNewMessage = outgoing.length > countBefore;
-        const hasExpectedText = outgoing.some((node) => normalizeText(node.innerText || '').includes(expected));
-        if (hasNewMessage && hasExpectedText) return true;
-        await delay(350);
-    }
-
-    return false;
-}
-
-function normalizePath(urlStr) {
-    try {
-        const value = String(urlStr || '').startsWith('http') ? String(urlStr || '') : `https://${String(urlStr || '')}`;
-        const url = new URL(value);
-        return url.pathname.toLowerCase().replace(/\/$/, '');
-    } catch {
-        return String(urlStr || '').toLowerCase().split('?')[0].replace(/\/$/, '');
-    }
-}
-
+// Shared DOM helpers. This file does not send messages or listen to legacy DM commands.
 function normalizeText(value) {
-    return String(value || '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase();
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
-
-function delay(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForState(reader, timeoutMs, intervalMs) {
-    const startedAt = Date.now();
-    let lastState = { kind: 'idle' };
-
-    while (Date.now() - startedAt < timeoutMs) {
-        lastState = reader() || { kind: 'idle' };
-        if (lastState.kind !== 'idle') {
-            return lastState;
-        }
-        await delay(intervalMs);
-    }
-
-    return lastState;
-}
-
-function getProfileActionRoots() {
-    const selectors = [
-        '.pv-top-card-v2-ctas',
-        '.pv-top-card-profile-actions',
-        '.top-card-layout__actions',
-        '.profile-topcard-person-entity__actions',
-        '.pv-top-card',
-    ];
-
-    const roots = [];
-    for (const selector of selectors) {
-        const matches = Array.from(document.querySelectorAll(selector)).filter(isElementVisible);
-        for (const match of matches) {
-            if (!roots.includes(match)) roots.push(match);
-        }
-    }
-
-    if (!roots.length) {
-        const messageBtn = findActionElement(MESSAGE_BUTTON_TEXTS, {
-            root: document,
-            excludeTexts: ['message ads', 'messaging'],
-        });
-        for (const button of [messageBtn]) {
-            const container = getActionContainerForButton(button);
-            if (container && !roots.includes(container)) roots.push(container);
-        }
-    }
-
-    return roots;
-}
-
-function getPrimaryProfileRoot() {
-    return getProfileActionRoots()[0] || null;
-}
-
-function getActionContainerForButton(button) {
-    if (!(button instanceof HTMLElement)) return null;
-    return button.closest('.pv-top-card-v2-ctas, .pv-top-card-profile-actions, .top-card-layout__actions, .profile-topcard-person-entity__actions, .artdeco-card')
-        || button.parentElement
-        || null;
-}
-
-function getActionCandidates(root, options) {
-    const scope = root || document;
-    const selectors = options && options.selectors
-        ? options.selectors
-        : ['button', 'a[role="button"]', 'a.artdeco-button', 'div[role="button"]', 'li[role="menuitem"]'];
-
-    const nodes = Array.from(scope.querySelectorAll(selectors.join(',')))
-        .map((node) => resolveClickableTarget(node))
-        .filter(Boolean);
-
-    return nodes
-        .filter((node, index) => nodes.indexOf(node) === index)
-        .filter((node) => isElementVisible(node))
-        .filter((node) => (options && options.includeDisabled) || !isElementDisabled(node));
-}
-
-function findActionElement(texts, options) {
-    const normalizedTexts = texts.map(normalizeText).filter(Boolean);
-    const excluded = (options && options.excludeTexts ? options.excludeTexts : []).map(normalizeText);
-    const candidates = getActionCandidates(options && options.root, options);
-    let best = null;
-    let bestScore = 0;
-
-    for (const node of candidates) {
-        const label = normalizeText(getElementLabel(node));
-        if (!label) continue;
-        if (excluded.some((token) => token && label.includes(token))) continue;
-
-        let score = 0;
-        for (const token of normalizedTexts) {
-            const currentScore = scoreActionLabel(label, token);
-            if (currentScore > score) score = currentScore;
-        }
-
-        if (!score) continue;
-        if (String(node.className || '').includes('artdeco-button--primary')) score += 10;
-        if (node.closest('.pv-top-card-v2-ctas, .pv-top-card-profile-actions, .top-card-layout__actions')) score += 20;
-        if (node.closest('.artdeco-dropdown__content-inner')) score += 4;
-        if (node.closest('main')) score += 6;
-        if (node.closest('aside')) score -= 60;
-
-        const rect = node.getBoundingClientRect();
-        if (rect.top < window.innerHeight * 0.55) score += 8;
-        if (rect.left < window.innerWidth * 0.75) score += 6;
-
-        if (score > bestScore) {
-            best = node;
-            bestScore = score;
-        }
-    }
-
-    return best;
-}
-
-function scoreActionLabel(label, token) {
-    if (!label || !token) return 0;
-    if (label === token) return 150;
-
-    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const wordMatch = new RegExp(`(^|\\b)${escaped}(\\b|$)`).test(label);
-    if (wordMatch) return 120;
-    if (label.includes(token)) return 90;
-    return 0;
-}
-
-function getElementLabel(node) {
-    return node.innerText || node.getAttribute('aria-label') || node.textContent || '';
-}
-
-function resolveClickableTarget(node) {
-    if (!(node instanceof Element)) return null;
-    return node.closest('button, a[role="button"], a.artdeco-button, div[role="button"], li[role="menuitem"]') || node;
-}
-
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function isElementVisible(node) {
-    if (!(node instanceof HTMLElement)) return false;
-    const style = window.getComputedStyle(node);
-    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
-    const rect = node.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+  if (!(node instanceof HTMLElement)) return false;
+  const style = window.getComputedStyle(node);
+  const rect = node.getBoundingClientRect();
+  return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0 && rect.width > 0 && rect.height > 0;
 }
-
 function isElementDisabled(node) {
-    if (!(node instanceof HTMLElement)) return true;
-    if (node.hasAttribute('disabled')) return true;
-    if (node.getAttribute('aria-disabled') === 'true') return true;
-    return false;
+  return !(node instanceof HTMLElement) || node.hasAttribute('disabled') || node.getAttribute('aria-disabled') === 'true';
 }
-
 function safeClick(node) {
-    if (!(node instanceof HTMLElement)) return false;
-    node.scrollIntoView({ block: 'center', inline: 'center' });
-    node.focus({ preventScroll: true });
-    try {
-        node.click();
-    } catch {
-        node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-    }
-    return true;
+  if (!(node instanceof HTMLElement)) return false;
+  node.scrollIntoView({ block: 'center', inline: 'center' });
+  node.focus({ preventScroll: true });
+  node.click();
+  return true;
 }
-
-function describeElement(node) {
-    if (!(node instanceof HTMLElement)) return 'unknown-element';
-    return {
-        tag: node.tagName.toLowerCase(),
-        text: getElementLabel(node).trim().slice(0, 80),
-        ariaLabel: (node.getAttribute('aria-label') || '').trim().slice(0, 80),
-        className: String(node.className || '').trim().slice(0, 120),
-    };
-}
-
-function getMessageEditor() {
-    const selectors = [
-        'textarea[name="message"]',
-        'textarea[aria-label*="message" i]',
-        'textarea[placeholder*="message" i]',
-        'div.msg-form__contenteditable[contenteditable="true"]',
-        'div[role="textbox"][contenteditable="true"]',
-        '[contenteditable="true"][aria-label*="message" i]',
-        '[contenteditable="true"][data-placeholder*="message" i]',
-        '.msg-form__msg-content-container [contenteditable="true"]',
-        '.msg-overlay-conversation-bubble [contenteditable="true"]',
-    ];
-
-    for (const selector of selectors) {
-        const element = Array.from(document.querySelectorAll(selector)).find(isElementVisible);
-        if (element) return element;
-    }
-
-    return null;
-}
-
-function getDialogRoot() {
-    const selectors = ['.artdeco-modal', '.artdeco-modal__content', '[role="dialog"]'];
-    for (const selector of selectors) {
-        const element = Array.from(document.querySelectorAll(selector)).find(isElementVisible);
-        if (element) return element;
-    }
-    return null;
-}
-
 function findMessageButton(root) {
-    return findActionElement(MESSAGE_BUTTON_TEXTS, {
-        root: root || getPrimaryProfileRoot() || document,
-        excludeTexts: ['message ads', 'messaging'],
-    }) || (!root ? findActionElement(MESSAGE_BUTTON_TEXTS, {
-        excludeTexts: ['message ads', 'messaging'],
-    }) : null);
+  if (!root) return null;
+  const labels = ['message', 'mensaje', 'send message', 'enviar mensaje', 'inmail', 'enviar inmail', 'send inmail'];
+  return Array.from(root.querySelectorAll('button, a, [role="button"]'))
+    .find(node => isElementVisible(node) && !isElementDisabled(node)
+      && [node.textContent, node.getAttribute('aria-label'), ...Array.from(node.querySelectorAll('span[aria-hidden="true"], .artdeco-button__text')).map(span => span.textContent)].some(value => labels.includes(normalizeText(value)) || /^(?:send message|enviar mensaje|message|mensaje|send inmail|enviar inmail) (?:to|a) .+$/.test(normalizeText(value)))) || null;
 }
-
-function findSendButton(root) {
-    return findActionElement(SEND_BUTTON_TEXTS, {
-        root,
-        excludeTexts: DISMISS_BUTTON_TEXTS,
-        selectors: [
-            'button.msg-form__send-button',
-            'button[type="submit"]',
-            '.msg-form__footer button',
-            '.artdeco-modal button',
-            '[role="dialog"] button',
-            'button',
-        ],
-    });
+function linkedinProfileHeader(expectedName = '') {
+  const roots = [...document.querySelectorAll('main, [role="main"]')];
+  if (!roots.length) roots.push(document.body);
+  const headings = roots.flatMap(root => [...root.querySelectorAll('h1, h2, [role="heading"]')])
+    .filter(node => isElementVisible(node) && !node.closest('aside, [role="dialog"], .msg-overlay-conversation-bubble'));
+  const titleName = document.title.replace(/^\(\d+\)\s*/, '').split(/\s[|–]\s/)[0];
+  const expected = normalizeText(expectedName || titleName);
+  // Some profile headers render the name as a paragraph/span rather than a heading.
+  if (expected) {
+    const names = roots.flatMap(root => [...root.querySelectorAll('p, span')]).filter(node =>
+      isElementVisible(node) && normalizeText(node.textContent) === expected
+      && !node.closest('aside, [role="dialog"], .msg-overlay-conversation-bubble')
+      && ![...node.children].some(child => normalizeText(child.textContent) === expected));
+    if (names.length === 1 && !headings.includes(names[0])) headings.push(names[0]);
+  }
+  const named = expected && headings.filter(node => normalizeText(node.textContent) === expected);
+  const h1s = [...new Set(headings.filter(node => node.tagName === 'H1' || node.getAttribute('aria-level') === '1'))];
+  const heading = named?.length === 1 ? named[0] : h1s.length === 1 ? h1s[0] : null;
+  if (!heading) return null;
+  // Ascend the actual layout rather than depending on section/artdeco class names.
+  // Stop before unrelated profile sections, recommendations or the entire page.
+  let card = heading.parentElement;
+  let actionCard = card;
+  for (let depth = 0; card && depth < 16; depth++, card = card.parentElement) {
+    if (card.matches('body, html') || card.querySelector('aside')) break;
+    const unrelated = [...card.querySelectorAll('h1, h2, [role="heading"]')]
+      .some(node => node !== heading && isElementVisible(node) && normalizeText(node.textContent) !== normalizeText(heading.textContent));
+    if (unrelated) break;
+    actionCard = card;
+    const button = findMessageButton(card);
+    if (button) return { heading, card, button };
+    if (card.matches('main, [role="main"]')) break;
+  }
+  return { heading, card: actionCard, button: null };
 }
-
-function findDismissButton() {
-    const dialog = getDialogRoot();
-    const scopedDismiss = findActionElement(DISMISS_BUTTON_TEXTS, {
-        root: dialog || document,
-        selectors: ['button', '[role="button"]', 'a[role="button"]'],
-        includeDisabled: true,
-    });
-    if (scopedDismiss) return scopedDismiss;
-
-    const hardSelectors = [
-        'button[aria-label="Dismiss"]',
-        'button[aria-label="Close"]',
-        'button[aria-label="Cerrar"]',
-        '.artdeco-modal__dismiss',
-    ];
-
-    for (const selector of hardSelectors) {
-        const element = Array.from(document.querySelectorAll(selector)).find(isElementVisible);
-        if (element) return element;
-    }
-
-    return null;
+function linkedinContactRequirement(header) {
+  const actions = [...(header?.card?.querySelectorAll('button, a, [role="button"]') || [])].filter(isElementVisible);
+  const has = pattern => actions.some(node => pattern.test(normalizeText(node.textContent)) || pattern.test(normalizeText(node.getAttribute('aria-label'))));
+  if (has(/^(conectar|connect)(\b|$)/)) return 'Este perfil no ofrece un mensaje directo. En LinkedIn gratuito, solicita Conectar y espera la aceptación. Seguir no equivale a conectar. Si tienes Premium, abre InMail cuando LinkedIn lo ofrezca.';
+  if (has(/^(seguir|follow)(\b|$)/)) return 'Este perfil ofrece Seguir, pero no encontramos un mensaje disponible. Puedes pulsar Seguir en LinkedIn; seguirlo no garantiza poder escribirle. Para una cuenta gratuita, busca Conectar en Más; con Premium, utiliza InMail si está disponible.';
+  return 'No pudimos localizar una acción de mensaje en la cabecera. Abre Enviar mensaje o InMail manualmente y vuelve a Preparar. Si LinkedIn pide conectar o contratar Premium, conserva el borrador hasta tener acceso.';
 }
-
-async function closeBlockingDialog() {
-    const dismissBtn = findDismissButton();
-    if (!dismissBtn) return false;
-
-    console.log('[Anton.IA Content] Closing blocking dialog:', describeElement(dismissBtn));
-    safeClick(dismissBtn);
-    await delay(700);
-    return true;
+function linkedinMessagingGate() {
+  const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(isElementVisible);
+  return dialogs.some(node => /(?:prueba|probar|reactivar|try|reactivate|upgrade|suscrib|abonate).{0,50}premium|(?:creditos|credits).{0,30}inmail|(?:sin|no|0) creditos/i.test(normalizeText(node.textContent)))
+    ? 'LinkedIn está pidiendo Premium o créditos de InMail. Con una cuenta gratuita, solicita conectar y espera la aceptación, salvo que el perfil permita mensajes abiertos. Con Premium, revisa tu acceso y créditos en LinkedIn. Conservamos el mensaje; seguir al perfil no elimina este requisito.' : '';
 }
-
-function isUpsellText(text) {
-    return ['premium', 'inmail', 'sales navigator', 'try premium', 'prueba premium', 'unlock'].some((token) => text.includes(token));
+function linkedinIsInMail(bubble) {
+  return Boolean(bubble.querySelector('.msg-form__subject, input[name="subject"], input[placeholder*="Asunto"], input[placeholder*="Subject"]'))
+    || /\binmail\b/i.test(bubble.querySelector('.msg-overlay-bubble-header, [data-view-name="message-recipient"]')?.textContent || '');
 }
-
+async function waitLinkedinProfileHeader(profileUrl, expectedName) {
+  const path = value => { try { return decodeURIComponent(new URL(value).pathname).normalize('NFC').replace(/\/+$/, '').toLowerCase(); } catch { return ''; } };
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (path(location.href) !== path(profileUrl)) throw new Error('El perfil cambió. Vuelve al destinatario para continuar.');
+    const header = linkedinProfileHeader(expectedName);
+    if (header?.button) return header;
+    await delay(250);
+  }
+  throw new Error(linkedinContactRequirement(linkedinProfileHeader(expectedName)));
+}
+function linkedinConversationRecipient(bubble, target, canonical) {
+  const links = [...bubble.querySelectorAll('.msg-overlay-bubble-header a[href*="/in/"], .msg-entity-lockup a[href*="/in/"], [data-view-name="message-recipient"] a[href*="/in/"]')];
+  return links.length > 0 && links.every(link => canonical(link.href) === target);
+}
+function linkedinMessageEditor(bubble) {
+  const editors = [...bubble.querySelectorAll('.msg-form__contenteditable[contenteditable="true"], [role="textbox"][contenteditable="true"], textarea[name="message"]')].filter(isElementVisible);
+  return editors.length === 1 ? editors[0] : null;
+}
+function linkedinEditorText(editor) { return editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent || ''; }
 function setElementText(node, value) {
-    const text = String(value || '').trim();
-    if (!(node instanceof HTMLElement) || !text) return;
-
-    node.focus({ preventScroll: true });
-
-    if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement) {
-        const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(node), 'value');
-        const nativeSetter = descriptor && descriptor.set ? descriptor.set.bind(node) : null;
-
-        if (nativeSetter) {
-            nativeSetter('');
-        } else {
-            node.value = '';
-        }
-        node.dispatchEvent(new Event('input', { bubbles: true }));
-
-        if (nativeSetter) {
-            nativeSetter(text);
-        } else {
-            node.value = text;
-        }
-        node.dispatchEvent(new Event('input', { bubbles: true }));
-        node.dispatchEvent(new Event('change', { bubbles: true }));
-        node.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
-        return;
-    }
-
-    const selection = window.getSelection();
-    if (selection) {
-        const range = document.createRange();
-        range.selectNodeContents(node);
-        selection.removeAllRanges();
-        selection.addRange(range);
-    }
-
-    document.execCommand('selectAll', false, null);
-    document.execCommand('delete', false, null);
-    node.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, data: text, inputType: 'insertText' }));
-    const inserted = document.execCommand('insertText', false, text);
-
-    if (!inserted || !textLooksApplied(node, text)) {
-        node.textContent = '';
-        node.appendChild(document.createTextNode(text));
-    }
-
+  const text = String(value || '').trim();
+  if (!(node instanceof HTMLElement) || !text) return;
+  node.focus({ preventScroll: true });
+  if (node instanceof HTMLTextAreaElement) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+    setter?.call(node, text);
     node.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
     node.dispatchEvent(new Event('change', { bubbles: true }));
-    node.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+    return;
+  }
+  const selection = window.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  selection?.removeAllRanges(); selection?.addRange(range);
+  // Insert in the scoped contenteditable. Never select or delete the entire page.
+  const inserted = document.execCommand?.('insertText', false, text);
+  if (!inserted) node.textContent = text;
+  node.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
+  node.dispatchEvent(new Event('change', { bubbles: true }));
 }
-
-function textLooksApplied(node, text) {
-    const current = node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement
-        ? node.value
-        : (node.innerText || node.textContent || '');
-    const expected = normalizeText(String(text || '').slice(0, 18));
-    return !!expected && normalizeText(current).includes(expected);
+function textLooksApplied(node, value) {
+  const normalized = text => String(text || '').replace(/\s+/g, ' ').trim();
+  return normalized(linkedinEditorText(node)) === normalized(value);
 }

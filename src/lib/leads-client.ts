@@ -160,6 +160,12 @@ export async function searchLinkedInProfileLead(
     linkedinUrl,
   }, signal);
   const enriched = result.enriched?.[0] as any;
+  if (enriched?.errorCode === 'APOLLO_PERSON_IDENTITY_MISMATCH') {
+    throw new Error('No pudimos confirmar que el perfil devuelto corresponda a la URL solicitada. No mostraremos datos de otra persona.');
+  }
+  if (enriched?.linkedinUrl && normalizeLinkedinProfileUrl(enriched.linkedinUrl).toLowerCase() !== linkedinUrl.toLowerCase()) {
+    throw new Error('El proveedor devolvió un perfil distinto al solicitado. No mostraremos datos de otra persona.');
+  }
   if (!enriched) {
     return {
       count: 0,

@@ -169,7 +169,7 @@ export async function queryFirstContactPlan(input: {
         draft,
         draftGeneration: draft
           ? { status: 'ready' as const, error: null }
-          : {
+          : !text(row.last_error) ? { status: 'queued' as const, error: null } : {
             status: 'error' as const,
             error: text(row.last_error) || 'El borrador de seguimiento aún no pudo generarse.',
           },
@@ -208,6 +208,7 @@ export async function createFirstContactPlan(input: {
   organizationId: string;
   userId: string;
   client?: SupabaseClientLike;
+  deferGeneration?: boolean;
 }) {
   const client = input.client ?? getSupabaseAdminClient();
   const draftResult = await client
@@ -257,7 +258,7 @@ export async function createFirstContactPlan(input: {
     if (error) throw error;
   }
 
-  await pregenerateFirstContactPlanDrafts({
+  if (!input.deferGeneration) await pregenerateFirstContactPlanDrafts({
     draftId: input.body.draftId,
     organizationId: input.organizationId,
     userId: input.userId,

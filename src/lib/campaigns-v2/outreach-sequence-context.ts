@@ -48,3 +48,10 @@ export const OutreachSequenceContextV2Schema = z.object({
 });
 
 export type OutreachSequenceContextV2 = z.infer<typeof OutreachSequenceContextV2Schema>;
+
+// The final step closes the loop instead of pitching again: it must not
+// carry the meeting CTA that the server appends to every other step.
+export function isCloseOutreachStep(context: OutreachSequenceContextV2 | null | undefined) {
+  const step = context?.currentStep;
+  return Boolean(step) && step!.index >= 3 && step!.index === step!.total;
+}

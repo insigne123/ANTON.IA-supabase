@@ -226,3 +226,46 @@ test('rejects a stored V2 row when its canonical content hash does not match', (
   };
   assert.equal(researchReportV2DocumentInternals.mapStoredDocumentV2(row), null);
 });
+
+test('synthesis model telemetry is recorded as cost telemetry without blocking persistence', async () => {
+  const value = fixture();
+  const recorded: any[] = [];
+  const result = await tryEnsureResearchReportDocumentV2({
+    snapshot: value.snapshot,
+    access: { organizationId: value.snapshot.scope.organizationId!, userId: value.snapshot.scope.ownerUserId },
+    sellerProfile: value.sellerProfile,
+    icpRules: null,
+    synthesisContextHash: 'a'.repeat(64),
+    deliveryState: 'visible',
+    generatedAt: DRAFT_FIXTURE_NOW.toISOString(),
+  }, {
+    loadForUpdate: async () => null,
+    loadState: async () => null,
+    claim: async () => ({ state: { id: 'state-id' }, claimToken: 'claim-token' }) as any,
+    project: () => value.projection,
+    research: async () => ({ ...value.projection, researchWarnings: [], researchMetrics: { queries: 0, pages: 0, elapsedMs: 0 } }),
+    synthesize: async () => ({
+      document: value.document,
+      metrics: {
+        sectionAcceptRate: 0.8, claimsPerSource: {}, ownDomainSourceRatio: 1, signalsWithDateCount: 0, committeeMembersFound: 0,
+        modelTelemetry: [
+          { phase: 'analysis', section: null, attempt: 1, model: 'gpt-5.6-terra', durationMs: 1000, usage: { prompt_tokens: 20000, completion_tokens: 3000 } },
+          { phase: 'section', section: null, attempt: 1, model: 'gpt-5.6-luna', durationMs: 500, usage: { prompt_tokens: 8000, completion_tokens: 1200 } },
+        ],
+      },
+      metadata: { retryable: true, errorCode: 'report_v2_sections_incomplete', errorMessage: 'Incomplete.' },
+    }),
+    persist: async () => ({ document: value.stored, synthesis: { status: 'partial', retryable: true } as any }),
+    recordResearchAttempts: async (input) => {
+      recorded.push(input);
+      assert.equal(input.organizationId, value.snapshot.scope.organizationId);
+      assert.equal(input.userId, value.snapshot.scope.ownerUserId);
+      assert.equal(input.researchSnapshotId, value.snapshot.id);
+    },
+  });
+
+  assert.equal(result.document, value.stored);
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].modelTelemetry.length, 2);
+  assert.equal(recorded[0].promptVersion, RESEARCH_REPORT_V2_RUNTIME_VERSION);
+});

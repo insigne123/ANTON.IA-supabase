@@ -15,6 +15,7 @@ import {
   resolveSynthesisRetryPolicy,
   SYNTHESIS_EDITORIAL_RETRY_LIMIT,
 } from '@/lib/research-synthesis-retry-policy';
+import { readResearchQueue } from '@/lib/server/research-queue-read';
 
 export {
   buildSynthesisActionableTask,
@@ -98,16 +99,18 @@ export async function processResearchReportSynthesisQueue(input: {
   const limit = Math.max(1, Math.min(25, Math.trunc(Number(input.limit) || 5)));
   const dueAt = now.toISOString();
   const staleAt = new Date(now.getTime() - 15 * 60_000).toISOString();
-  let query = admin
-    .from('research_report_synthesis_states')
-    .select('id,research_snapshot_id,organization_id,user_id,schema_version,attempt_count')
-    .or(`and(status.in.(queued,retry_scheduled,partial),retryable.eq.true,attempt_count.lt.4,next_retry_at.lte.${dueAt}),and(status.eq.running,attempt_count.lt.4,claimed_at.lt.${staleAt})`)
-    .order('next_retry_at', { ascending: true })
-    .limit(limit);
-  if (input.organizationId) query = query.eq('organization_id', input.organizationId);
-  if (input.userId) query = query.eq('user_id', input.userId);
-  const { data, error } = await query;
-  if (error) throw error;
+  const readCandidates = () => {
+    let query = admin
+      .from('research_report_synthesis_states')
+      .select('id,research_snapshot_id,organization_id,user_id,schema_version,attempt_count')
+      .or(`and(status.in.(queued,retry_scheduled,partial),retryable.eq.true,attempt_count.lt.4,next_retry_at.lte.${dueAt}),and(status.eq.running,attempt_count.lt.4,claimed_at.lt.${staleAt})`)
+      .order('next_retry_at', { ascending: true })
+      .limit(limit);
+    if (input.organizationId) query = query.eq('organization_id', input.organizationId);
+    if (input.userId) query = query.eq('user_id', input.userId);
+    return query;
+  };
+  const { data } = await readResearchQueue<any[]>('synthesis-candidates', readCandidates);
 
   let completed = 0;
   let failed = 0;

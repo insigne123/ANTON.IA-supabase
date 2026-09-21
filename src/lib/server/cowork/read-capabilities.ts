@@ -4,6 +4,10 @@ import type { CoworkCapability } from '@/lib/cowork/capabilities';
 import { queryCoworkLeads } from './lead-tools';
 import { queryCoworkExtendedReads, type CoworkExtendedReadAction } from './extended-reads';
 import { readCoworkResearch } from './research-read';
+import { readCoworkSavedSearches } from './saved-searches';
+import { readCoworkProfile } from './profile-read';
+import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS } from '@/lib/cowork/domain-reads';
+import { queryCoworkContactabilityBatch, queryCoworkDomainRead } from './domain-reads';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -20,6 +24,27 @@ export function coworkReadCapabilities(
     execute: input => queryCoworkExtendedReads(client, scope, name, input as string),
   });
   return [
+    ...[...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS].map((name): CoworkCapability => ({
+      name, version: 1, effect: 'read', description: `Consulta de dominio ${name} con alcance vigente`,
+      input: COWORK_DOMAIN_FIXED_READS.some(action => action === name) ? z.literal('') : z.string().uuid(),
+      output: z.unknown(), execute: input => queryCoworkDomainRead(client, scope, name, input as string),
+    })),
+    {
+      name: 'privacy.contactability_batch', version: 1, effect: 'read',
+      description: 'Restricciones de hasta 5 contactos observados, una sola operación; informativa',
+      input: z.string().max(400), output: z.unknown(),
+      execute: input => queryCoworkContactabilityBatch(client, scope, JSON.parse(input as string)),
+    },
+    {
+      name: 'profile.get', version: 1, effect: 'read', description: 'Identidad comercial propia, no verifica mailbox',
+      input: z.literal(''), output: z.unknown(), execute: input => readCoworkProfile(client, scope, input as string),
+    },
+    {
+      name: 'saved_searches.list', version: 1, effect: 'read',
+      description: 'Búsquedas guardadas propias y compartidas de la organización, sin ejecutarlas',
+      input: z.literal(''), output: z.unknown(),
+      execute: input => readCoworkSavedSearches(client, scope, input as string),
+    },
     {
       name: 'leads.search', version: 1, effect: 'read',
       description: 'Contactos guardados propios que coinciden con un texto',

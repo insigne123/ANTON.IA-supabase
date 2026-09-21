@@ -10,6 +10,14 @@ import { DocumentVersions } from './DocumentVersions';
 import { SendReview } from './SendReview';
 import { CampaignReview } from './CampaignReview';
 import { CodeReview } from './CodeReview';
+import { ProfileReview } from './ProfileReview';
+import { SavedSearchReview } from './SavedSearchReview';
+import { CampaignStopReview } from './CampaignStopReview';
+import { CrmRecordReview } from './CrmRecordReview';
+import { CampaignPrepareReview } from './CampaignPrepareReview';
+import { CrmAssignReview } from './CrmAssignReview';
+import { ExceptionReview } from './ExceptionReview';
+import { MissionReview } from './MissionReview';
 import { ArtifactPreview } from './ArtifactPreview';
 import { FileUpload } from './FileUpload';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
@@ -22,7 +30,7 @@ import { cn } from '@/lib/utils';
 import { coworkDocumentSchema, type CoworkEvent, type CoworkRun } from '@/lib/cowork/contracts';
 
 const labels: Record<CoworkRun['status'], string> = {
-  queued: 'En cola', running: 'Preparando respuesta', waiting_approval: 'Esperando tu aprobación',
+  queued: 'En cola', running: 'Preparando respuesta', waiting_approval: 'Esperando tu aprobación', waiting_workers: 'Revisando los resultados. Puedes volver más tarde.',
   completed: 'Completado', cancelled: 'Cancelado', failed: 'No se pudo completar',
 };
 function activityTitle(event: CoworkEvent) {
@@ -57,7 +65,7 @@ export function CoworkWorkspace() {
   const pending = useRef<{ message: string; requestId: string; parentRunId: string | null; mode: CoworkExecutionMode } | null>(null);
   const documentButton = useRef<HTMLButtonElement>(null);
   const documentHeading = useRef<HTMLHeadingElement>(null);
-  const active = state && ['queued', 'running', 'waiting_approval'].includes(state.run.status);
+  const active = state && ['queued', 'running', 'waiting_approval', 'waiting_workers'].includes(state.run.status);
   const completed = state?.events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
   const result = coworkDocumentSchema.safeParse(completed ? { reply: completed.reply, document: completed.document } : null);
   const output = result.success ? result.data : null;
@@ -105,7 +113,7 @@ export function CoworkWorkspace() {
         if (disposed) return;
         setState(data);
         setRuns(previous => previous.map(run => run.id === data.run.id ? data.run : run));
-        if (['queued', 'running', 'waiting_approval'].includes(data.run.status)) timer = setTimeout(poll, 3000);
+        if (['queued', 'running', 'waiting_approval', 'waiting_workers'].includes(data.run.status)) timer = setTimeout(poll, 3000);
       } catch (error) {
         if (!disposed) setError(error instanceof Error ? error.message : 'No se pudo actualizar el trabajo.');
       }
@@ -241,7 +249,7 @@ export function CoworkWorkspace() {
               <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando decisión…' : 'Guardar nueva nota'}</Button></div>
             </section>}
             {proposal?.action === 'cowork.effect' && <section aria-label="Revisar acción propuesta" className="space-y-4 rounded-xl border border-border p-5">
-              <h3 className="font-medium">{proposal?.kind === 'save_contact' ? 'Guardar contacto' : proposal?.kind === 'start_research' ? 'Investigar contacto' : proposal?.kind === 'enrich_contact' ? 'Enriquecer contacto' : proposal?.kind === 'send_email' ? 'Enviar correo' : proposal?.kind === 'campaign_create' ? 'Crear campaña' : proposal?.kind === 'campaign_activate' ? 'Activar campaña' : proposal?.kind === 'campaign_pause' ? 'Pausar campaña' : proposal?.kind === 'code_execute' ? 'Ejecutar código' : 'Preparar borrador'}</h3>
+              <h3 className="font-medium">{proposal?.kind === 'save_contact' ? 'Guardar contacto' : proposal?.kind === 'start_research' ? 'Investigar contacto' : proposal?.kind === 'enrich_contact' ? 'Enriquecer contacto' : proposal?.kind === 'send_email' ? 'Enviar correo' : proposal?.kind === 'campaign_create' ? 'Crear campaña' : proposal?.kind === 'campaign_activate' ? 'Activar campaña' : proposal?.kind === 'campaign_pause' ? 'Pausar campaña' : proposal?.kind === 'code_execute' ? 'Ejecutar código' : proposal?.kind === 'profile_update' ? 'Actualizar perfil' : proposal?.kind === 'saved_search_create' ? 'Guardar búsqueda' : proposal?.kind === 'saved_search_update' ? 'Actualizar búsqueda' : proposal?.kind === 'saved_search_delete' ? 'Eliminar búsqueda' : proposal?.kind === 'campaign_stop_v2' ? 'Detener seguimiento' : proposal?.kind === 'crm_update_record' ? 'Actualizar ficha comercial' : proposal?.kind === 'campaign_prepare_draft_v2' ? 'Preparar borrador del paso' : proposal?.kind === 'crm_assign_lead' ? 'Asignar o reservar contacto' : proposal?.kind === 'exception_resolve' ? 'Resolver incidencia' : proposal?.kind === 'mission_control' ? 'Controlar misión' : 'Preparar borrador'}</h3>
               <p className="text-sm">{String(proposal?.label || '')}</p>
               {proposal?.kind === 'send_email'
                 ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
@@ -255,8 +263,40 @@ export function CoworkWorkspace() {
                   ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
                     ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
                     : <CodeReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
+                : proposal?.kind === 'profile_update'
+                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
+                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
+                    : <ProfileReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
+                : proposal?.kind === 'saved_search_create' || proposal?.kind === 'saved_search_update' || proposal?.kind === 'saved_search_delete'
+                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
+                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
+                    : <SavedSearchReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
+                : proposal?.kind === 'campaign_stop_v2'
+                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
+                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
+                    : <CampaignStopReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
+                : proposal?.kind === 'crm_update_record'
+                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
+                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
+                    : <CrmRecordReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
+                : proposal?.kind === 'campaign_prepare_draft_v2'
+                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
+                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
+                    : <CampaignPrepareReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
+                : proposal?.kind === 'crm_assign_lead'
+                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
+                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
+                    : <CrmAssignReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
+                : proposal?.kind === 'exception_resolve'
+                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
+                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
+                    : <ExceptionReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
+                : proposal?.kind === 'mission_control'
+                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
+                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
+                    : <MissionReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
                 : <>
-              <p className="text-sm text-muted-foreground">{proposal?.kind === 'save_contact' ? 'Se guardará en tus contactos sin correo verificado. Podrás enriquecerlo después.' : proposal?.kind === 'start_research' ? 'Se encolará la investigación con tu cuota disponible. El resultado se incorporará al retomarse el trabajo.' : proposal?.kind === 'enrich_contact' ? 'Se consultará el correo al proveedor (solo email, sin teléfono). Consume 1 crédito de enriquecimiento y no inventa datos.' : 'Se preparará el borrador en segundo plano. Podrás revisarlo cuando esté listo.'}</p>
+              <p className="text-sm text-muted-foreground">{proposal?.kind === 'save_contact' ? 'Se guardará en tus contactos sin correo verificado. Podrás enriquecerlo después.' : proposal?.kind === 'start_research' ? 'Se encolará la investigación con tu cuota disponible. El resultado se incorporará al retomarse el trabajo.' : proposal?.kind === 'enrich_contact' ? 'Se consultará el correo al proveedor (solo email, sin teléfono). Consume 1 crédito de enriquecimiento y no inventa datos.' : proposal?.kind === 'profile_update' ? 'Se actualizará solo tu perfil comercial con los valores mostrados.' : proposal?.kind === 'saved_search_create' || proposal?.kind === 'saved_search_update' ? 'Solo se guardará la búsqueda; no se ejecutará ni consumirá créditos.' : proposal?.kind === 'saved_search_delete' ? 'Solo se eliminará tu búsqueda; no afecta contactos ni campañas.' : proposal?.kind === 'campaign_stop_v2' ? 'Se omitirán los pasos pendientes de ese destinatario; lo enviado no se revierte.' : proposal?.kind === 'crm_update_record' ? 'Solo cambiará la ficha comercial mostrada; no reasigna responsables del equipo.' : proposal?.kind === 'campaign_prepare_draft_v2' ? 'Solo se preparará el borrador del paso; no se enviará nada.' : proposal?.kind === 'crm_assign_lead' ? 'Se aplicará la misma regla de asignación que usa la pantalla de colaboración.' : proposal?.kind === 'exception_resolve' ? 'Solo se registrará el resultado revisado con su motivo.' : proposal?.kind === 'mission_control' ? 'Pausar omite tareas pendientes; reactivar retoma el ciclo.' : 'Se preparará el borrador en segundo plano. Podrás revisarlo cuando esté listo.'}</p>
               {state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started') ? <p role="status" className="text-sm">La acción está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p> : <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando aprobación…' : 'Aprobar y ejecutar'}</Button></div>}
                 </>}
             </section>}

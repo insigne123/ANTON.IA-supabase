@@ -42,9 +42,13 @@ test('provider connection checks use the authenticated server boundary', () => {
   }
 });
 
-test('App Hosting keeps Apollo credentials behind the authenticated gateway', () => {
+test('App Hosting keeps Apollo credentials server-only behind the BFF', () => {
   assert.doesNotMatch(appHosting, /^build:/m);
-  assert.doesNotMatch(appHosting, /- variable: APOLLO_API_KEY/);
+  // Apollo runs in-process: the key is a RUNTIME secret of this service, so
+  // it is only available to server code and never lands in the browser bundle.
+  assert.match(appHosting, /- variable: APOLLO_API_KEY\s+secret: APOLLO_API_KEY\s+availability: \[RUNTIME\]/);
+  assert.doesNotMatch(appHosting, /APOLLO_API_KEY\s+availability: \[BUILD/);
+  assert.doesNotMatch(appHosting, /NEXT_PUBLIC_APOLLO_API_KEY/);
   assert.match(appHosting, /- variable: ENRICHMENT_SERVICE_SECRET\s+secret: ENRICHMENT_SERVICE_SECRET\s+availability: \[RUNTIME\]/);
   assert.match(backendAppHosting, /- variable: APOLLO_API_KEY\s+secret: APOLLO_API_KEY\s+availability: \[RUNTIME\]/);
   assert.match(appHosting, /- variable: OPENAI_API_KEY\s+secret: OPENAI_API_KEY\s+availability: \[RUNTIME\]/);

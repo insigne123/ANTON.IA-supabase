@@ -807,13 +807,13 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     setProfileRequiredItemId((current) => current === item.id ? null : current);
     setCreatingDraftId(item.id);
     try {
-      const response = await fetch('/api/native-drafts', {
+      const response = await fetch('/api/research-sequences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `native-draft:${item.researchSnapshotId}` },
         body: JSON.stringify({ researchSnapshotId: item.researchSnapshotId, styleProfileId, ...(instruction ? { instruction } : {}) }),
       });
       const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.draft?.draftId) {
+      if (!response.ok || !payload?.id) {
         const description = researchDraftErrorMessage(payload, 'Inténtalo nuevamente.');
         const sellerProfileIncomplete = isSellerProfileIncompleteDraftError(payload)
           && description === 'Completa tu perfil comercial para crear un borrador alineado con tu propuesta.';
@@ -830,10 +830,8 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
         });
         return;
       }
-      const draftId = encodeURIComponent(payload.draft.draftId);
       setProfileRequiredItemId(null);
-      const versionId = payload.draft.versionId ? `&versionId=${encodeURIComponent(payload.draft.versionId)}` : '';
-      router.push(`/contact/compose?draftId=${draftId}${versionId}`);
+      router.push(`/contact/sequence?jobId=${encodeURIComponent(payload.id)}`);
     } catch (error) {
       toast({
         variant: 'destructive',
@@ -1316,7 +1314,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                             profileCompletionRequired={profileRequiredItemId === activeItem.id}
                             creatingDraft={creatingDraftId === activeItem.id}
                             createDraftDisabled={draftRequestPending || activeReportDetailLoading || Boolean(activeReportDetailError) || activeReportSynthesisPending || activeReportSynthesisFailed}
-                            createDraftLabel="Crear borrador y revisar"
+                            createDraftLabel="Preparar inicial y 3 seguimientos"
                             creatingDraftLabel="Preparando borrador…"
                             onCreateDraft={(styleProfileId, instruction) => void createDraft(activeItem, styleProfileId, instruction)}
                             onCompleteProfile={() => router.push('/profile')}

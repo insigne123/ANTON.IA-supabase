@@ -26,7 +26,7 @@ globalThis.__coworkDraftFixture = state;
 
 const mocks = {
   './runs': `export const getCoworkRun=async()=>({run:{status:'completed'},events:globalThis.__coworkDraftFixture.observed?[{kind:'tool.completed',payload:{action:'research.get_existing',result:{availability:'available',research:{snapshotId:'${id}'}}}},{kind:'draft.completed',payload:{snapshotId:'${id}',draftId:'draft-id',subject:'Asunto',text:'Texto'}}]:[]});`,
-  '@/lib/server/native-drafts': `export async function createNativeDraft(input){globalThis.__coworkDraftFixture.nativeCalls.push(input);const mode=globalThis.__coworkDraftFixture.draftResult;if(mode==='crash')throw new Error('provider timeout');if(mode==='blocked')return {status:'blocked',code:'MISSING_EMAIL',message:'Falta correo'};return {status:'drafted',draft:{draftId:'draft-id',content:{subject:'Asunto',text:'Texto'},recipient:{email:'test@example.com'}}};}`,
+  '@/lib/server/native-drafts': `export async function createNativeDraft(input){globalThis.__coworkDraftFixture.nativeCalls.push(input);const mode=globalThis.__coworkDraftFixture.draftResult;if(mode==='crash')throw new Error('provider timeout');if(mode==='blocked')return {status:'blocked',code:'MISSING_EMAIL',message:'Falta correo'};return {status:'drafted',draft:{draftId:'draft-id',content:{subject:'Asunto',text:'Texto'},recipient:{email:'test@example.com'}}};} export async function getCurrentNativeDraft(input){globalThis.__coworkDraftFixture.readScope=input;return {draftId:input.draftId,versionId:'revision-2',content:{subject:'Asunto editado',text:'Texto actual'}};}`,
   '@/lib/server/supabase-admin': `export const getSupabaseAdminClient=()=>globalThis.__coworkDraftFixture.admin;`,
   './access': 'export const requireCoworkWorkerAccess=async()=>{if(globalThis.__coworkDraftFixture.revoked)throw new Error("revoked")};',
   '@/lib/research-contracts': 'export const ResearchSnapshotV1Schema={parse:value=>value};',
@@ -116,11 +116,12 @@ try {
   assert.deepEqual(await processCoworkDraftQueue(), { processed: 0, claimed: false });
 
   // Worker: happy path generates with the stable key and finishes exactly once.
-  state.take = { run_id: 'work', snapshot_id: id, user_id: 'owner', organization_id: 'org' };
+  state.take = { run_id: 'work', snapshot_id: id, user_id: 'owner', organization_id: 'org', attempts: 2 };
   state.admin = makeAdmin({
     research_snapshots: { payload: snapshotPayload },
     leads: { id },
     cowork_runs: { status: 'completed' },
+    cowork_draft_requests: { status: 'executing', attempts: 2 },
   });
   const done = await processCoworkDraftQueue();
   assert.equal(done.claimed, true);
@@ -129,6 +130,7 @@ try {
   assert.equal(state.nativeCalls[0].idempotencyKey, coworkDraftIdempotencyKey('work', id));
   assert.equal(state.finishes.length, 1);
   assert.equal(state.finishes[0].p_success, true);
+  assert.equal(state.finishes[0].p_attempt, 2);
   assert.equal(state.finishes[0].p_draft_id, 'draft-id');
 
   // Worker: blocked generation finishes as failed without a draft.
@@ -146,14 +148,16 @@ try {
   assert.equal(state.finishes.length, 0);
   state.draftResult = 'drafted';
 
-  // Status recovery reads the persisted completion event.
+  // Status recovery loads the latest native revision, not the stale event preview.
   const status = await getCoworkDraftStatus(
     { ...auth, supabase: { from(table) {
       const q = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: { status: 'completed', draft_id: 'draft-id' }, error: null }) };
       return q;
     } } }, 'work', id);
   assert.equal(status.status, 'completed');
-  assert.equal(status.draft.subject, 'Asunto');
+  assert.equal(status.draft.subject, 'Asunto editado');
+  assert.equal(status.draft.versionId, 'revision-2');
+  assert.deepEqual(state.readScope, { organizationId: 'org', userId: 'owner', draftId: 'draft-id' });
 
   console.log('PASS: observed enqueue, stable key, background generation, blocked/crash handling and status recovery.');
 } finally {

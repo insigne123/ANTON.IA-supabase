@@ -56,11 +56,14 @@ export async function reserveCoworkOperation(
   capability: Pick<CoworkCapability, 'name' | 'version'>,
   input: unknown,
   lease = randomUUID(),
+  runLease?: string,
 ): Promise<CoworkOperation> {
-  const { data, error } = await serviceClient(client).rpc('cowork_reserve_operation', {
+  const { data, error } = await serviceClient(client).rpc(runLease ? 'cowork_reserve_operation_v2' : 'cowork_reserve_operation', {
     p_user_id: scope.userId, p_organization_id: scope.organizationId, p_run_id: scope.runId,
     p_capability: capability.name, p_version: capability.version,
-    p_input: JSON.parse(stableStringify(input)) as unknown, p_input_hash: coworkOperationHash(input), p_lease: lease,
+    p_input: JSON.parse(stableStringify(input)) as unknown,
+    p_input_hash: coworkOperationHash({ runId: scope.runId, input }), p_lease: lease,
+    ...(runLease ? { p_run_lease: runLease } : {}),
   });
   if (error) throw error;
   return coworkOperationSchema.parse(data);
@@ -94,6 +97,7 @@ export async function failCoworkOperation(
 export function createCoworkOperationDependencies(
   client: SupabaseClient,
   options: {
+    runLease?: string;
     isApproved?: (scope: CoworkScope, capability: CoworkCapability, input: unknown) => Promise<boolean>;
     authorize?: (scope: CoworkScope) => Promise<void>;
   } = {},
@@ -113,19 +117,30 @@ export function createCoworkOperationDependencies(
     operation: { id: string; capability: string; version: number; input: unknown },
     execute: () => Promise<unknown>,
   ) => {
+    const lease = randomUUID();
     const reserved = await reserveCoworkOperation(client, scope,
-      { name: operation.capability, version: operation.version }, operation.input);
+      { name: operation.capability, version: operation.version }, operation.input, lease, options.runLease);
+    if (reserved.run_id !== scope.runId || reserved.user_id !== scope.userId
+      || reserved.organization_id !== scope.organizationId) throw new Error('Cowork operation scope mismatch');
     if (reserved.status === 'completed') return reserved.result ?? null;
     if (reserved.status === 'failed' || reserved.status === 'cancelled') {
+      if (reserved.error_code === 'outcome_unknown') {
+        throw new Error('La llamada al especialista se interrumpió sin resultado confirmado. No se repetirá automáticamente.');
+      }
       throw new Error(reserved.status === 'failed' ? 'Cowork operation failed before' : 'Cowork operation cancelled');
     }
+    if (reserved.lease_token !== lease) throw new Error('Cowork operation is already reserved');
     try {
       const result = await execute();
-      await completeCoworkOperation(client, reserved.id, reserved.lease_token, result);
+      const completed = options.runLease
+        ? await finishCoworkOperationAttempt(client, reserved.id, lease, options.runLease, true, result)
+        : await completeCoworkOperation(client, reserved.id, lease, result);
+      if (!completed) throw new Error('Cowork operation completion rejected');
       return result;
     } catch (error) {
-      await failCoworkOperation(client, reserved.id, reserved.lease_token,
-        error instanceof Error ? error.message : 'operation_failed');
+      const message = error instanceof Error ? error.message : 'operation_failed';
+      if (options.runLease) await finishCoworkOperationAttempt(client, reserved.id, lease, options.runLease, false, null, message);
+      else await failCoworkOperation(client, reserved.id, lease, message);
       throw error;
     }
   };
@@ -136,9 +151,22 @@ export function createCoworkOperationGateway(
   client: SupabaseClient,
   capabilities: readonly CoworkCapability[],
   options?: {
+    runLease?: string;
     isApproved?: (scope: CoworkScope, capability: CoworkCapability, input: unknown) => Promise<boolean>;
     authorize?: (scope: CoworkScope) => Promise<void>;
   },
 ) {
   return createCoworkGateway(capabilities, createCoworkOperationDependencies(client, options));
+}
+
+async function finishCoworkOperationAttempt(
+  client: SupabaseClient, id: string, lease: string, runLease: string,
+  success: boolean, result: unknown, errorCode: string | null = null,
+) {
+  const { data, error } = await client.rpc('cowork_finish_operation_v2', {
+    p_id: id, p_lease: lease, p_run_lease: runLease, p_success: success,
+    p_result: JSON.parse(stableStringify(result)), p_error_code: errorCode,
+  });
+  if (error) throw error;
+  return data === true;
 }

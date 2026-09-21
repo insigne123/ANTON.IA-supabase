@@ -26,7 +26,8 @@ export class ApolloGatewayError extends Error {
       | 'APOLLO_RATE_LIMITED'
       | 'APOLLO_UPSTREAM_ERROR'
       | 'APOLLO_UPSTREAM_TIMEOUT'
-      | 'APOLLO_UPSTREAM_INVALID_RESPONSE',
+      | 'APOLLO_UPSTREAM_INVALID_RESPONSE'
+      | 'APOLLO_PERSON_IDENTITY_MISMATCH',
   ) {
     super(code);
   }
@@ -664,6 +665,15 @@ export async function executeApolloEnrichment(input: EnrichmentInput, apiKey: st
   }
 
   const phoneNumbers = lead.phone_numbers || [];
+  // A provider match is a candidate, not proof that it is the requested person.
+  // Reject before the caller can persist contact data or bind its callback.
+  if (input.lead.linkedinUrl) {
+    const requested = normalizeLinkedinProfileUrl(input.lead.linkedinUrl).toLowerCase();
+    const returned = normalizeLinkedinProfileUrl(lead.linkedin_url).toLowerCase();
+    if (!requested || !returned || requested !== returned) {
+      throw new ApolloGatewayError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH');
+    }
+  }
   const pendingPhone = input.revealPhone && phoneNumbers.length === 0 && !lead.primary_phone && Boolean(providerRequestId);
   return {
     success: true,
@@ -793,3 +803,4 @@ export async function executeApolloOrganizationEnrichment(
     organization,
   };
 }
+import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';

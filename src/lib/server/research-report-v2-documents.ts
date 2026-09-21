@@ -24,6 +24,7 @@ import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import type { IcpRulesV2 } from '@/qualification/icp-gate';
 import type { ResearchReportDocumentAccess } from './research-report-documents';
 import { buildSynthesisActionableTask, resolveSynthesisRetryPolicy } from '@/lib/research-synthesis-retry-policy';
+import { recordReportV2ModelTelemetry } from '@/lib/server/research-generation-attempts';
 import type { ResearchDepth } from '@/lib/research-depth-budgets';
 
 export const RESEARCH_REPORT_V2_RUNTIME_VERSION = `report-v2/runtime/1:${canonicalSha256({
@@ -77,6 +78,7 @@ export type EnsureResearchReportDocumentV2Dependencies = {
   synthesize?: typeof synthesizeReportV2;
   persist?: typeof persistResearchReportSynthesisResultV2;
   fail?: typeof failResearchReportSynthesis;
+  recordResearchAttempts?: typeof recordReportV2ModelTelemetry;
 };
 
 function text(value: unknown) {
@@ -380,6 +382,15 @@ export async function tryEnsureResearchReportDocumentV2(input: {
        synthesisContextHash: input.synthesisContextHash,
        depth,
      });
+    // Cost telemetry only: tokens are spent whether persistence succeeds or
+    // not, and recording never blocks the pipeline (best-effort inside).
+    await (dependencies.recordResearchAttempts || recordReportV2ModelTelemetry)({
+      organizationId: snapshot.scope.organizationId,
+      userId: snapshot.scope.ownerUserId,
+      researchSnapshotId: snapshot.id,
+      promptVersion: RESEARCH_REPORT_V2_RUNTIME_VERSION,
+      modelTelemetry: synthesis.metrics?.modelTelemetry || null,
+    });
     const persist = dependencies.persist || persistResearchReportSynthesisResultV2;
     const persisted = await persist({
       snapshot,

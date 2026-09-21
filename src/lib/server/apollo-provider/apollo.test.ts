@@ -596,3 +596,21 @@ test('organization search forwards an optional company name filter to Apollo', a
     globalThis.fetch = originalFetch;
   }
 });
+test('LinkedIn match refuses another person or unverified URL before exposing contact data', async () => {
+  const originalFetch = globalThis.fetch;
+  const parsed = validateEnrichmentInput({ lead: { linkedin_url: 'https://www.linkedin.com/in/it-recruiter-janet-montero/' },
+    reveal_email: true, reveal_phone: false, enrichment_level: 'basic' });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  try {
+    for (const linkedin_url of ['https://www.linkedin.com/in/marco-psenda', undefined]) {
+      globalThis.fetch = async () => Response.json({ person: { id: 'other-person', name: 'Otra persona', linkedin_url, email: 'other@example.com' } });
+      await assert.rejects(() => executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig()),
+        (error: unknown) => error instanceof ApolloGatewayError && error.code === 'APOLLO_PERSON_IDENTITY_MISMATCH');
+    }
+    globalThis.fetch = async () => Response.json({ person: { id: 'correct-person', name: 'Janet',
+      linkedin_url: 'https://cl.linkedin.com/in/it-recruiter-janet-montero?trk=search' } });
+    const result = await executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig());
+    assert.equal(result.success, true);
+  } finally { globalThis.fetch = originalFetch; }
+});

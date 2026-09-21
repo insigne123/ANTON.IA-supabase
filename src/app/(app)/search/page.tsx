@@ -855,6 +855,15 @@ export default function SearchPage() {
       setAdvancedFiltersOpen(value === 'linkedin_profile');
     }
     if (field === 'searchMode' || field === 'linkedinUrl' || field === 'revealEmail' || field === 'revealPhone') {
+      profileStatusAbortRef.current?.abort();
+      if (field === 'linkedinUrl' || field === 'searchMode') {
+        searchRunIdRef.current += 1;
+        abortRef.current?.abort();
+        submittingRef.current = false;
+        setIsLoading(false);
+        setLeads([]);
+        setSelectedLeads(new Set());
+      }
       setProfileSearchNotice(null);
       setLastProfilePhoneStatus(null);
       setProfilePhonePollingIds([]);
@@ -1390,6 +1399,10 @@ export default function SearchPage() {
         const items = await getLinkedInProfileStatuses(profilePhonePollingIds, controller.signal);
         if (cancelled) return;
 
+        const requestedProfile = normalizeLinkedinProfileUrl(filters.linkedinUrl).toLowerCase();
+        if (items.some(item => item.linkedin_url && normalizeLinkedinProfileUrl(item.linkedin_url).toLowerCase() !== requestedProfile)) {
+          throw new Error('El proveedor devolvió un perfil distinto. No se actualizarán los datos de otra persona.');
+        }
         if (items.length > 0) {
           const byId = new Map(items.map((item) => [String(item.id || '').trim(), item]));
           const resolvedWithRequestedData = items.filter((item) => {
@@ -1500,7 +1513,7 @@ export default function SearchPage() {
       profileStatusAbortRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.searchMode, filters.revealEmail, filters.revealPhone, profilePhonePollingIds, toast]);
+  }, [filters.searchMode, filters.linkedinUrl, filters.revealEmail, filters.revealPhone, profilePhonePollingIds, toast]);
 
   const isPageAllSelected = useMemo(() => {
     if (pagedLeads.length === 0) return false;

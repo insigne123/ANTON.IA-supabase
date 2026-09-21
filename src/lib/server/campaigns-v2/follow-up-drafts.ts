@@ -10,6 +10,8 @@ import {
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { loadSellerProfile } from '@/lib/server/seller-profile';
 import type { MessagingDraftV1 } from '@/lib/messaging-contracts';
+import type { SharedSequenceBrief } from '@/lib/outreach-sequence-brief';
+import type { DraftSellerProfileV2, DraftWritingStyleV2 } from '@/lib/server/draft-context-v2';
 import { assertCampaignV2CreatorAccess, isCampaignsV2Enabled } from './feature-access';
 import { generateFollowUpDraftBatch } from './follow-up-draft-batch';
 
@@ -53,6 +55,10 @@ export async function pregenerateFirstContactPlanDrafts(input: {
   organizationId: string;
   userId: string;
   targetStepId?: string;
+  sharedSequenceBrief?: SharedSequenceBrief;
+  sellerProfile?: DraftSellerProfileV2;
+  writingStyle?: DraftWritingStyleV2;
+  maxDrafts?: number;
   client?: SupabaseClientLike;
 }) {
   const client = input.client ?? getSupabaseAdminClient();
@@ -145,15 +151,15 @@ export async function pregenerateFirstContactPlanDrafts(input: {
     if (!draft) throw new Error('CAMPAIGN_V2_NATIVE_DRAFT_MISSING');
     existingDrafts.set(step.id, draft);
   }
-  const sellerProfile = await loadSellerProfile(input.userId);
+  const sellerProfile = input.sellerProfile || await loadSellerProfile(input.userId);
   const config = draftingConfig(campaign.settings);
-  const writingStyle = config.styleProfileId
+  const writingStyle = input.writingStyle || (config.styleProfileId
     ? undefined
     : await getNativeDraftWritingStyle({
         organizationId: input.organizationId,
         userId: input.userId,
         draft: initialDraft,
-      });
+      }));
 
   await generateFollowUpDraftBatch({
     organizationId: input.organizationId,
@@ -166,6 +172,8 @@ export async function pregenerateFirstContactPlanDrafts(input: {
     sellerProfile,
     writingStyle,
     targetStepId: input.targetStepId,
+    sharedSequenceBrief: input.sharedSequenceBrief,
+    maxDrafts: input.maxDrafts,
   }, {
     createDraft: (request) => createNativeDraft(request),
     reserveDraft: async ({ stepId, draftId, versionId }) => {

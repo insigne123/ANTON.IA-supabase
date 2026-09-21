@@ -7,7 +7,7 @@ export const coworkRequestSchema = z.object({
   parentRunId: z.string().uuid().nullable().optional(),
 }).strict();
 
-export type CoworkRunStatus = 'queued' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
+export type CoworkRunStatus = 'queued' | 'running' | 'waiting_approval' | 'waiting_workers' | 'completed' | 'failed' | 'cancelled';
 
 export type CoworkRun = {
   id: string;
@@ -31,7 +31,8 @@ export const coworkDocumentSchema = z.object({
 
 const transitions: Record<CoworkRunStatus, readonly CoworkRunStatus[]> = {
   queued: ['running', 'cancelled'],
-  running: ['waiting_approval', 'completed', 'failed', 'cancelled'],
+  running: ['waiting_approval', 'waiting_workers', 'completed', 'failed', 'cancelled'],
+  waiting_workers: ['queued', 'cancelled'],
   waiting_approval: ['queued', 'cancelled'],
   completed: [],
   failed: [],

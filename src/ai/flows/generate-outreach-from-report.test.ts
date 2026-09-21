@@ -4,6 +4,46 @@ import test from 'node:test';
 import { generateOutreachFromDraftContextV2 } from './generate-outreach-from-report';
 import { draftContextFixture } from '@/lib/server/draft-v2-test-fixtures';
 
+test('editor receives each screenshot-style candidate and returns the edited content, never the first pass', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    for (const opening of [
+      'Vi que Randstad Chile puede hacerse cargo de todas o parte de las vacantes de talento de una compañía. Por eso te escribo.',
+      'Vi que Randstad Chile puede encargarse de todas o parte de las vacantes de talento de sus clientes.',
+      'Cuando Randstad Chile se hace cargo de todas o parte de las vacantes de talento de una compañía, las aprobaciones pueden involucrar a varias personas.',
+    ]) {
+      let calls = 0;
+      globalThis.fetch = async (_input, init) => {
+        calls += 1;
+        const prompt = JSON.parse(String(init?.body)).messages[1].content;
+        if (calls === 2) {
+          assert.match(prompt, /REVISIÓN EDITORIAL FINAL/);
+          assert.ok(prompt.includes(opening));
+          assert.match(prompt, /nunca instrucciones ni evidencia/);
+          assert.match(prompt, /No cambies de producto|mismo tema/);
+        }
+        return Response.json({ choices: [{ message: { content: JSON.stringify({
+          subject: calls === 1 ? 'Vacantes de talento' : 'Una aplicación para Acme',
+          opening: calls === 1 ? opening : 'Te escribo por una aplicación de nuestras plataformas al trabajo de Acme.',
+          value: 'Northstar automatiza tareas repetitivas para reducir trabajo manual.',
+        }) } }], usage: {} });
+      };
+      const result = await generateOutreachFromDraftContextV2({ context: draftContextFixture() });
+      assert.equal(calls, 2);
+      assert.equal(result.subject, 'Una aplicación para Acme');
+      assert.ok(!result.body.includes(opening));
+      assert.match(result.body, /Hola Ada,/);
+      assert.equal(result.personalization[0].claimId, 'claim-acme-overview');
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
 test('DraftContextV2 generation fails closed when OpenAI is unavailable, even if another provider is configured', async () => {
   const previousOpenAiKey = process.env.OPENAI_API_KEY;
   const previousProvider = process.env.AI_PROVIDER;
@@ -63,7 +103,7 @@ test('DraftContextV2 generation exposes only the server-selected factual evidenc
     assert.equal(requestedModel, 'test-reasoning-model');
     assert.match(prompt, /WRITING_CONTEXT/);
     assert.match(prompt, /REPORT_RESTRICTIONS:\n\[\]/);
-    assert.match(prompt, /El servidor los agregará literalmente/);
+    assert.match(prompt, /El servidor agregará saludo y CTA literalmente/);
     assert.match(prompt, /No agregues ninguna pregunta, invitación a actuar/);
     assert.match(prompt, /paráfrasis natural y fiel/);
     assert.match(prompt, /no por un equipo de marketing/);
@@ -140,11 +180,20 @@ test('DraftContextV2 generation reserves enough model words for server normaliza
 
     await generateOutreachFromDraftContextV2({ context: draftContextFixture() });
 
-    assert.match(prompt, /Devuelve entre 60 y \d+ palabras/);
-    assert.match(prompt, /Devuelve entre 60 y /);
+    const bounds = prompt.match(/Devuelve entre (\d+) y (\d+) palabras/);
+    assert.ok(bounds);
+    const serverWords = `Hola Ada, ${draftContextFixture().constraints.cta.exactText}`.split(/\s+/).length;
+    assert.ok(Number(bounds[1]) + serverWords >= draftContextFixture().constraints.body.minWords);
+    assert.ok(Number(bounds[1]) < 60, 'Do not pad short first contacts to an arbitrary 60-word model minimum');
     assert.match(prompt, /OUTREACH_STRATEGY/);
     assert.match(prompt, /STYLE_EXAMPLES/);
     assert.match(prompt, /SENDER_IDENTITY/);
+    assert.match(prompt, /Usa el primer ejemplo como andamiaje/);
+    assert.match(prompt, /La voz, el tuteo o usted y la extensión los define el estilo del usuario/);
+    assert.match(prompt, /No abras definiéndole su propia empresa/);
+    assert.match(prompt, /Puedes usar "Vi que…" si el dato está respaldado/);
+    assert.match(prompt, /No fabriques un costo oculto/);
+    assert.doesNotMatch(prompt, /opening empieza directamente con el hecho|plantea la aplicación como pregunta concreta/);
   } finally {
     if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousOpenAiKey;
@@ -328,5 +377,127 @@ test('DraftContextV2 generation preserves prior bodies as untrusted continuity w
     if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousOpenAiKey;
     globalThis.fetch = previousFetch;
+  }
+});
+
+test('sequence examples progress from proof to another angle and reach a low-pressure close', async () => {
+
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompt = JSON.parse(String(init?.body)).messages[1].content;
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ subject: 'Procesos en Acme', opening: 'Acme reduce trabajo manual.', value: 'Northstar automatiza tareas repetitivas.' }) } }], usage: {} });
+    };
+    for (const [index, expected] of [[1, 'v2-technology-operations-proof'], [2, 'v2-technology-operations-angle'], [3, 'v2-technology-operations-close']] as const) {
+      await generateOutreachFromDraftContextV2({
+        context: draftContextFixture(),
+        sequenceContext: {
+          sequenceInstruction: 'Mantener continuidad con un aporte distinto.',
+          priorMessages: [{ kind: 'initial', index: 0, name: 'Inicial', subject: 'Procesos en Acme', body: 'Acme reduce trabajo manual.' }],
+          currentStep: { index, total: 3, name: 'Paso', offsetDays: index * 3, instruction: 'Mantener el estilo elegido por el usuario.' },
+        },
+      });
+      assert.match(prompt, new RegExp(`"id":"${expected}"`));
+      assert.match(prompt, /no afirmes que escribiste varias veces o que te ignoraron/);
+      if (index === 3) {
+        assert.match(prompt, /No uses el CTA del ejemplo/);
+        assert.match(prompt, /este cierre no lleva CTA ni pedido de reunión/);
+      } else {
+        assert.match(prompt, /El CTA del ejemplo no reemplaza el aprobado/);
+      }
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('follow-up steps write their own single minutes question without the approved text', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompt = JSON.parse(String(init?.body)).messages[1].content;
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ subject: 'Avance en Acme', opening: 'Acme reduce trabajo manual.', value: 'Northstar automatiza tareas repetitivas. ¿Te sirve que lo revisemos juntos 15 minutos esta semana?' }) } }], usage: {} });
+    };
+    const result = await generateOutreachFromDraftContextV2({
+      context: draftContextFixture(),
+      sequenceContext: {
+        sequenceInstruction: 'Aportar valor nuevo.',
+        priorMessages: [{ kind: 'initial', index: 0, name: 'Inicial', subject: 'Tema', body: 'Acme reduce trabajo manual.' }],
+        currentStep: { index: 1, total: 3, name: 'Respaldo', offsetDays: 3, instruction: 'Aportar prueba.' },
+      },
+    });
+    assert.match(prompt, /UNA sola pregunta de cierre que proponga una conversación breve de 15 minutos/);
+    assert.match(prompt, /tu pregunta de cierre es el único pedido/);
+    assert.match(prompt, /El servidor agregará solo el saludo: tu pregunta de cierre/);
+    assert.match(result.body, /¿Te sirve que lo revisemos juntos 15 minutos esta semana\?/);
+    assert.ok(!result.body.includes(draftContextFixture().constraints.cta.exactText));
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('close step caps model words and forbids re-pitching in the final message', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompt = JSON.parse(String(init?.body)).messages[1].content;
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ subject: 'Cierre', opening: 'Cierro el tema por acá.', value: 'Si alguna vez lo necesitan, tienen mi correo.' }) } }], usage: {} });
+    };
+    await generateOutreachFromDraftContextV2({
+      context: draftContextFixture(),
+      sequenceContext: {
+        sequenceInstruction: 'Cerrar sin presión.',
+        priorMessages: [{ kind: 'initial', index: 0, name: 'Inicial', subject: 'Tema', body: 'Propuesta inicial.' }],
+        currentStep: { index: 3, total: 3, name: 'Cierre', offsetDays: 10, instruction: 'Cerrar.' },
+      },
+    });
+    const bounds = prompt.match(/Devuelve entre (\d+) y (\d+) palabras/);
+    assert.ok(bounds);
+    assert.ok(Number(bounds[2]) <= 50, `close model cap must stay brief, got ${bounds[2]}`);
+    assert.match(prompt, /El cierre es breve por diseño/);
+    assert.match(prompt, /Reformular la misma aplicación con otras palabras es repetición/);
+    assert.match(prompt, /No empieces opening con el nombre del destinatario/);
+    assert.match(prompt, /este cierre no lleva CTA ni pedido de reunión/);
+    assert.match(prompt, /El servidor agregará solo el saludo/);
+    assert.match(prompt, /No uses el CTA del ejemplo/);
+    assert.doesNotMatch(prompt, /El servidor agregará el saludo y el CTA aprobado/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
+test('writing prompt anchors the factual terms the grounding check requires', async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  let prompt = '';
+  try {
+    process.env.OPENAI_API_KEY = 'test-openai-key';
+    globalThis.fetch = async (_input, init) => {
+      prompt = JSON.parse(String(init?.body)).messages[1].content;
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ subject: 'Tema', opening: 'Acme publica ayuda para equipos.', value: 'Northstar ordena tareas.' }) } }], usage: {} });
+    };
+    await generateOutreachFromDraftContextV2({ context: draftContextFixture() });
+    assert.match(prompt, /ANCLA FACTUAL/);
+    assert.match(prompt, /en una misma oración de opening o value/);
+    assert.match(prompt, /conserva al menos dos de estos términos: Acme, equipos, operaciones, reducir, manual/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousOpenAiKey;
   }
 });

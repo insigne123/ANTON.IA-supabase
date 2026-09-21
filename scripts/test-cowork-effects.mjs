@@ -47,6 +47,9 @@ const sources = {
   './start-research': 'export const startCoworkResearch=async()=>{globalThis.__coworkEffects.executed.push("research");return {reportId:"rep",status:"running",reused:false};};',
   './draft-from-research': 'export const requestCoworkDraft=async()=>{globalThis.__coworkEffects.executed.push("draft");return {status:"pending",reused:false};};',
   './code-runner': 'export const executeCoworkCode=async()=>{globalThis.__coworkEffects.executed.push("code");if(globalThis.__coworkEffects.failCode)throw new Error("El código terminó con error (salida 1).\\nSalida:\\nTraceback KeyError: monto");return {reply:"ok",result:{}};};',
+  './profile-update': 'export const executeCoworkProfileUpdate=async()=>{globalThis.__coworkEffects.executed.push("profile");return {reply:"ok",result:{}};};',
+  './saved-search-ops': 'export const executeCoworkSavedSearchCreate=async()=>{globalThis.__coworkEffects.executed.push("saved-search");return {reply:"ok",result:{}};};export const executeCoworkSavedSearchUpdate=async()=>{globalThis.__coworkEffects.executed.push("saved-search");return {reply:"ok",result:{}};};export const executeCoworkSavedSearchDelete=async()=>{globalThis.__coworkEffects.executed.push("saved-search");return {reply:"ok",result:{}};};',
+  './campaign-stop': 'export const executeCoworkCampaignStop=async()=>{globalThis.__coworkEffects.executed.push("campaign-stop");return {reply:"ok",result:{}};};',
 };
 globalThis.__coworkEffects = { client, executed: state.executed, failCode: false };
 const bundle = await build({ entryPoints: ['src/lib/server/cowork/effects.ts'], bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external',

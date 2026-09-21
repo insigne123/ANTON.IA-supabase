@@ -12,7 +12,7 @@ npm run extension:build
 2. Pulsa **Cargar descomprimida** y selecciona `chrome-extension/`.
 3. Fija Anton.IA en la barra de herramientas. El icono abre el panel lateral.
 4. Pulsa **Conectar Anton.IA**. Inicia sesión en la app si hace falta y confirma **Conectar mi cuenta**.
-5. Mantén abierta la pestaña `/extension/connect`. Vuelve a LinkedIn y abre un perfil `/in/…`.
+5. Tras conectar con 4.0.9 puedes cerrar `/extension/connect`. Vuelve a LinkedIn y abre un perfil `/in/…`.
 
 La aplicación elegida debe incluir `/extension/connect` y `/api/extension/workspace` de esta versión. Instalar solo la extensión contra una app anterior no habilita los nuevos flujos. Para probar localmente, inicia `npm run dev` y elige **Local · puerto 9003** en «Dirección de la app».
 
@@ -42,14 +42,14 @@ Después de actualizar la extensión, recarga las pestañas de LinkedIn y conexi
 
 ## Autenticación y datos
 
-El panel no almacena JWT, refresh tokens ni claves de proveedor. Una pestaña de la app autorizada explícitamente ejecuta operaciones contra un único endpoint del mismo origen usando su sesión existente.
+El panel no almacena JWT, refresh tokens ni claves de proveedor. La pestaña de la app autoriza explícitamente el vínculo. Desde 4.0.9 el worker consulta el endpoint con las cookies de sesión del navegador, sin requerir una pestaña abierta; el servidor sigue comprobando autenticación, usuario y organización.
 
 - Consentimiento vinculado a pestaña, nonce temporal, origen permitido y frame principal.
 - Solo el panel propio puede pedir operaciones al worker.
 - El servidor verifica sesión, usuario y organización en cada operación; un cambio exige reconexión.
 - Las consultas y escrituras de leads usan el cliente autenticado con RLS y filtro de organización.
 - La URL canónica determina un UUID por organización para que guardados concurrentes de la extensión converjan. Se reutilizan también registros previos con las variantes habituales de URL (www y barra final). No sustituye una futura restricción global de URL que cubra todos los importadores de la app.
-- Desconectar borra la conexión y los borradores de sesión de la extensión. Cerrar la pestaña de conexión invalida el enlace.
+- Desconectar borra la conexión persistente y los borradores de sesión. Cerrar la pestaña no invalida el vínculo. Una respuesta 401 elimina el vínculo y requiere autenticar de nuevo.
 
 ## Distribución
 

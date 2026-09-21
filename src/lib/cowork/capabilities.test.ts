@@ -64,3 +64,37 @@ test('gateway validates output and passes exact scoped identity to operation sto
   f.capability.execute = async () => ({ fabricated: 'success' });
   await assert.rejects(gateway.invoke(scope, invocation, new AbortController().signal));
 });
+
+test('replayed results are validated and never bypass revocation or cancellation', async () => {
+  for (const mode of ['revoked', 'cancelled', 'invalid', 'grant']) {
+    const f = fixture();
+    const controller = new AbortController();
+    let replayed = false;
+    f.dependencies.authorize = async () => {
+      if (replayed && mode === 'revoked') throw new Error('revoked');
+    };
+    f.dependencies.hasGrant = async () => !(replayed && mode === 'grant');
+    f.dependencies.withOperation = async () => {
+      replayed = true;
+      if (mode === 'cancelled') controller.abort();
+      return mode === 'invalid' ? { fabricated: true } : { saved: true };
+    };
+    await assert.rejects(createCoworkGateway([f.capability], f.dependencies)
+      .invoke(scope, invocation, controller.signal));
+    assert.equal(f.calls(), 0);
+  }
+});
+
+test('revocation after executing prevents passing output to durable completion', async () => {
+  const f = fixture();
+  let allowed = true;
+  let completed = false;
+  f.capability.execute = async () => { allowed = false; return { saved: true }; };
+  f.dependencies.authorize = async () => { if (!allowed) throw new Error('revoked'); };
+  f.dependencies.withOperation = async (_scope, _operation, execute) => {
+    const result = await execute(); completed = true; return result;
+  };
+  await assert.rejects(createCoworkGateway([f.capability], f.dependencies)
+    .invoke(scope, invocation, new AbortController().signal), /revoked/);
+  assert.equal(completed, false);
+});

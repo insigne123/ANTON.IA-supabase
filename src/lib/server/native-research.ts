@@ -79,6 +79,7 @@ import {
 import { RESEARCH_REPORT_V2_RUNTIME_VERSION } from '@/lib/server/research-report-v2-documents';
 import { loadReportV2SellerConfiguration, loadSellerProfile } from '@/lib/server/seller-profile';
 import { processResearchReportSynthesisQueue } from '@/lib/server/research-report-worker';
+import { readResearchQueue } from '@/lib/server/research-queue-read';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import {
   researchBrand,
@@ -2559,7 +2560,7 @@ export async function processNativeResearchQueue(input: {
     if (input.userId) query = query.eq('user_id', input.userId);
     return query;
   };
-  const readyQuery = scopedQueue(
+  const readyQuery = () => scopedQueue(
     admin
       .from('lead_research_jobs')
       .select('*')
@@ -2571,7 +2572,7 @@ export async function processNativeResearchQueue(input: {
       .order('created_at', { ascending: true })
       .limit(limit),
   );
-  const stalePreProviderQuery = scopedQueue(
+  const stalePreProviderQuery = () => scopedQueue(
     admin
       .from('lead_research_jobs')
       .select('*')
@@ -2583,7 +2584,7 @@ export async function processNativeResearchQueue(input: {
       .order('request_claimed_at', { ascending: true })
       .limit(limit),
   );
-  const staleSubmittingQuery = scopedQueue(
+  const staleSubmittingQuery = () => scopedQueue(
     admin
       .from('lead_research_jobs')
       .select('*')
@@ -2596,17 +2597,14 @@ export async function processNativeResearchQueue(input: {
       .limit(limit),
   );
   const [
-    { data: ready, error: readyError },
-    { data: stalePreProvider, error: stalePreProviderError },
-    { data: staleSubmitting, error: staleSubmittingError },
+    { data: ready },
+    { data: stalePreProvider },
+    { data: staleSubmitting },
   ] = await Promise.all([
-    readyQuery,
-    stalePreProviderQuery,
-    staleSubmittingQuery,
+    readResearchQueue<any[]>('collection-ready', readyQuery),
+    readResearchQueue<any[]>('collection-stale-pre-provider', stalePreProviderQuery),
+    readResearchQueue<any[]>('collection-stale-submitting', staleSubmittingQuery),
   ]);
-  if (readyError) throw readyError;
-  if (stalePreProviderError) throw stalePreProviderError;
-  if (staleSubmittingError) throw staleSubmittingError;
   const seen = new Set<string>();
   const jobs = [...(staleSubmitting || []), ...(stalePreProvider || []), ...(ready || [])]
     .map(mapJob)

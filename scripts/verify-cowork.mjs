@@ -5,7 +5,7 @@ const suites = ['src/lib/cowork', 'src/lib/server/cowork'].flatMap(directory =>
   readdirSync(directory).filter(name => name.endsWith('.test.ts')).map(name => `${directory}/${name}`));
 const checks = [
   ['--loader', './scripts/ts-test-loader.mjs', '--test', ...suites],
-  ...['scheduler','save-contact','external-search','autonomy','native-draft','draft-polling','start-research','thread','export-route','search-queue-ui','workspace','effects','enrich-contact','campaigns','queue-fairness','code-execution','artifact-preview']
+  ...['scheduler','save-contact','external-search','autonomy','native-draft','draft-polling','start-research','thread','export-route','search-queue-ui','workspace','effects','enrich-contact','campaigns','queue-fairness','code-execution','artifact-preview','specialist-queue','domains','domain-effects','domain-effects-2','domain-effects-3']
     .map(name => [`scripts/test-cowork-${name}.mjs`]),
   ['--loader', './scripts/ts-test-loader.mjs', 'scripts/test-cowork-send-email.mjs'],
 ];

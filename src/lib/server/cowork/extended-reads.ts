@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { conversationTurn } from '@/lib/cowork/commercial-facts';
 import { buildSupliaContext } from '@/lib/server/suplia-context';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
@@ -27,7 +28,7 @@ export async function queryCoworkExtendedReads(
 ): Promise<{ lead: unknown; contacted: unknown[]; scope: string }>;
 export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: 'contacted.timeline', value: string,
-): Promise<{ contacted: unknown[]; scope: string }>;
+): Promise<{ contacted: unknown[]; scope: string; truncated: boolean; turn: unknown }>;
 export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: 'metrics.overview', value: string,
 ): Promise<{ scope: string; period: string; savedContacts: number; contactedTotal: number; contactedThisWeek: number; repliesThisWeek: number }>;
@@ -54,7 +55,7 @@ export async function queryCoworkExtendedReads(
 ): Promise<
   | { items: unknown[]; returned: number; limit: number; scope: string; truncated: boolean }
   | { lead: unknown; contacted: unknown[]; scope: string }
-  | { contacted: unknown[]; scope: string }
+  | { contacted: unknown[]; scope: string; truncated: boolean; turn: unknown }
   | { scope: string; period: string; savedContacts: number; contactedTotal: number; contactedThisWeek: number; repliesThisWeek: number }
   | { scope: string; emailConnections: { google: boolean; outlook: boolean }; counts: Record<string, number>; performance: unknown; offer: string | null }
   | { scope: string; draftId: string; versionId: string; revision: number; channel: string; subject: string | null; contentHash: string; recipientEmail: string | null; recipientName: string | null; lifecycle: string; textLength: number }
@@ -108,7 +109,16 @@ export async function queryCoworkExtendedReads(
     .eq('organization_id', scope.organizationId).eq('lead_id', leadId)
     .order('sent_at', { ascending: false }).limit(15);
   if (error) throw new Error('No se pudo leer el historial de envíos.');
-  return { contacted: contacted || [], scope: 'organization_contacted' };
+  const rows = (contacted || []) as Array<{ id: string; sent_at?: string | null; replied_at?: string | null; reply_intent?: string | null }>;
+  const now = new Date().toISOString();
+  const messages: Array<{ id: string; direction: 'inbound' | 'outbound'; at: string; kind: 'human' | 'auto_reply' | 'bounce'; confirmed: boolean }> = [];
+  for (const row of rows) {
+    if (row.sent_at) messages.push({ id: `${row.id}:out`, direction: 'outbound', at: String(row.sent_at), kind: 'human', confirmed: true });
+    if (row.replied_at) messages.push({ id: `${row.id}:in`, direction: 'inbound', at: String(row.replied_at),
+      kind: row.reply_intent === 'auto_reply' ? 'auto_reply' : row.reply_intent === 'delivery_failure' ? 'bounce' : 'human', confirmed: true });
+  }
+  const turn = conversationTurn(messages, { coverageComplete: rows.length < 15, observedAt: now, now, maxAgeMs: 300000 });
+  return { contacted: rows, scope: 'organization_contacted', truncated: rows.length >= 15, turn };
 }
 
 async function readCoworkMetrics(client: SupabaseClient, scope: Scope) {

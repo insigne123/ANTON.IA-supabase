@@ -16,8 +16,12 @@ function content({ wrongRecipient = false, existingText = '', changeProfile = fa
   const context = vm.createContext({ document: dom.window.document, location: dom.window.location, URL,
     chrome: { runtime: { id: 'extension', onMessage: { addListener: fn => { handler = fn; } } } },
     normalizeText: text => String(text || '').trim().toLowerCase(),
+    linkedinMessagingGate: () => '', linkedinIsInMail: () => false,
+    waitLinkedinProfileHeader: async () => ({ button: dom.window.document.querySelector('#message') }),
+    linkedinConversationRecipient: (bubble, value, canonical) => [...bubble.querySelectorAll('a')].every(link => canonical(link.href) === value),
+    linkedinMessageEditor: bubble => changeProfile ? null : bubble.querySelector('[contenteditable]'), linkedinEditorText: editor => editor.textContent,
     isElementVisible: () => true, findMessageButton: card => card.querySelector('button'), safeClick: button => { button.click(); if (changeProfile) dom.reconfigure({ url: 'https://www.linkedin.com/in/other' }); },
-    setElementText: (node, text) => { node.textContent = text; }, textLooksApplied: (node, text) => node.textContent === text,
+    setElementText: (node, text) => { node.textContent = text; if (changeProfile) dom.reconfigure({ url: 'https://www.linkedin.com/in/other' }); }, textLooksApplied: (node, text) => node.textContent === text,
     delay: async () => { time += 1000; }, Date: { now: () => time },
   });
   vm.runInContext(contentSource, context);
@@ -45,10 +49,11 @@ test('worker rejects web callers and binds consent to tab, nonce, origin and mai
   let handler;
   const session = { prospectPending: { tabId: 4, origin: 'https://app.antonia.ai', nonce: 'expected', expires: Date.now() + 10000 } };
   const calls = [];
+  const local = {};
   const context = vm.createContext({ URL, crypto: { randomUUID: () => 'nonce' }, Date, console,
     isAllowedAppUrl: url => new URL(url).origin === 'https://app.antonia.ai',
     chrome: { runtime: { id: 'extension', getURL: path => `chrome-extension://extension/${path}`, onMessage: { addListener: fn => { handler = fn; } } },
-      storage: { session: { get: async key => ({ [key]: session[key] }), set: async data => Object.assign(session, data), remove: async key => { delete session[key]; } } },
+      storage: { local: { set: async data => Object.assign(local, data) }, session: { get: async key => ({ [key]: session[key] }), set: async data => Object.assign(session, data), remove: async key => { delete session[key]; } } },
       tabs: { onRemoved: { addListener() {} }, sendMessage: async (...args) => { calls.push(args); return { ok: true, result: { organizationId: 'org', userId: 'user' } }; } },
       sidePanel: { setPanelBehavior: async () => {} },
     },
@@ -63,5 +68,5 @@ test('worker rejects web callers and binds consent to tab, nonce, origin and mai
   assert.equal(calls.length, 0);
   assert.equal((await request({ action: 'PROSPECT_APPROVE', nonce: 'expected' }, web)).ok, true);
   assert.equal(calls.length, 1);
-  assert.equal(session.prospectConnection.session.organizationId, 'org');
+  assert.equal(local.prospectConnection.session.organizationId, 'org');
 });

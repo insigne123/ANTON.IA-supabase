@@ -6,7 +6,7 @@ import { coworkWorkerConfigured } from './runs';
 import { loadCoworkHistory } from './conversation-context';
 import { processCoworkSearchQueue } from './external-search';
 import { processCoworkDraftQueue } from './draft-from-research';
-import { coworkExecutionPolicy } from '@/lib/cowork/execution-policy';
+import { coworkExecutionPolicy, coworkEffectCanAutoApprove } from '@/lib/cowork/execution-policy';
 import { coworkThreadBudgets } from '@/lib/cowork/thread-budget';
 import { loadCoworkThreadStats } from './thread-stats';
 import { getDailyQuotaStatus, getEffectiveDailyQuotaLimits } from '@/lib/server/daily-quota-store';
@@ -21,6 +21,18 @@ import { hashCoworkCodeProposal } from '@/lib/cowork/code-proposal';
 import { getBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { resolveCoworkSender } from './sender';
 import { coworkAgentInstructions } from '@/lib/cowork/agent-instructions';
+import { reserveCoworkModelCall } from './model-budget';
+import { recordCoworkModelUsage } from './model-usage';
+import { stageCoworkProfileUpdate } from './profile-update';
+import { stageCoworkSavedSearchCreate, stageCoworkSavedSearchUpdate, stageCoworkSavedSearchDelete } from './saved-search-ops';
+import { parseCoworkCampaignStopTarget } from './campaign-stop';
+import { stageCoworkCrmRecordUpdate } from './crm-record-update';
+import { stageCoworkCampaignPrepare } from './campaign-prepare';
+import { stageCoworkCrmAssign } from './crm-assign';
+import { stageCoworkExceptionResolve } from './exception-resolve';
+import { stageCoworkMissionControl } from './mission-control';
+import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
+  loadCoworkSpecialistResume, processCoworkSpecialistQueue } from './specialist-queue';
 
 /** Fase 1 (CW-06): fairness signal. When a queue item was served in the previous
  * tick, a waiting conversation run goes first so queues can never starve replies.
@@ -56,6 +68,8 @@ export async function processCoworkQueue() {
   if (draft.claimed) return { processed: draft.processed };
   const search = await processCoworkSearchQueue();
   if (search.claimed) return { processed: search.processed };
+  const specialist = await processCoworkSpecialistQueue();
+  if (specialist.claimed) return { processed: specialist.processed };
   const conversation = await processCoworkConversationRun();
   return { processed: conversation.processed };
 }
@@ -108,7 +122,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const remainingSearches = Math.max(0, (searchQuota.limit || 0) - (searchQuota.count || 0));
     // Reads run through the durable ledger: an identical query replays its
     // stored result instead of hitting the database again after a retry.
-    const readGateway = createCoworkOperationGateway(client, coworkReadCapabilities(client, scope));
+    const runLease = process.env.COWORK_OPERATION_LEASES_ENABLED === 'true' ? run.lease_token : undefined;
+    const readGateway = createCoworkOperationGateway(client, coworkReadCapabilities(client, scope), { authorize, runLease });
     const operationScope = { userId: scope.userId, organizationId: scope.organizationId, runId: run.id };
     const instructions = coworkAgentInstructions({
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
@@ -117,10 +132,20 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     });
     const result = await runCoworkReadLoop({
       message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize,
+      resumedObservations: coworkSpecialistQueueEnabled() ? await loadCoworkSpecialistResume(client, scope, run.id) : undefined,
+      review: coworkSpecialistQueueEnabled() ? async (tasks, observations) => {
+        await authorize();
+        return enqueueCoworkSpecialists(client, run.id, run.lease_token, tasks, observations);
+      } : undefined,
       decide: async (observations, mustAnswer) => {
+        const reservationId = await reserveCoworkModelCall(client, run.id, run.lease_token, 'coordinator');
         const turn = await generateStructuredWithTelemetry({
           schema: coworkDecisionSchema,
-          systemPrompt: instructions.systemPrompt,
+          systemPrompt: `${instructions.systemPrompt}\n${coworkSpecialistQueueEnabled()
+            ? 'specialists.review: una vez por turno, specialists [{role: analyst|researcher|verifier, objective, evidence: índices de observaciones actuales}]. Máximo dos roles distintos. Si necesitas esta revisión, reserva una decisión antes del último turno; mustAnswer exige responder.' + (process.env.COWORK_SPECIALIST_TOOLS_ENABLED === 'true'
+              ? ' Cada tarea puede incluir read {action,input}: analyst permite metrics.overview/crm.record; researcher research.get_existing/leads.get; verifier privacy.contactability/crm.collaboration. Solo IDs observados en su evidencia. Cada read consume una de las tres lecturas totales del turno, junto con las ya ejecutadas. No permite escrituras ni proveedores externos.'
+              : ' Solo analizan datos observados; no asignes read porque las herramientas están deshabilitadas.')
+            : 'specialists.review está deshabilitado.'}`,
           prompt: JSON.stringify({ history, request: run.message, observations, mustAnswer, executionPolicy,
             parallelReadCapability: instructions.parallelReadCapability,
             researchCapability: instructions.researchCapability,
@@ -134,6 +159,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           maxAttempts: 1, timeoutMs: 30000, maxOutputTokens: 6000,
           signal: controller.signal,
         });
+        await recordCoworkModelUsage(client, reservationId, run.lease_token, turn.telemetry);
         telemetry.push({ model: turn.telemetry.modelName, durationMs: turn.telemetry.durationMs });
         return turn.data;
       },
@@ -205,6 +231,68 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           const fileNote = staged.files > 0 ? ` · ${staged.files} archivo${staged.files === 1 ? '' : 's'}` : ' · sin archivos';
           label = `Ejecutar ${proposal.code.language} aislado${fileNote} (máx 120 s)`;
         }
+        if (proposal.kind === 'profile_update') {
+          if (!proposal.profile) throw new Error('Missing profile patch');
+          const staged = await stageCoworkProfileUpdate(scope, run.id, proposal.profile);
+          targetId = `profile:${staged.hash}`;
+          const names = { full_name: 'nombre', job_title: 'cargo', company_name: 'empresa', company_domain: 'dominio', signatures: 'datos extendidos' } as Record<string, string>;
+          label = `Actualizar tu perfil (${staged.changed.map(key => names[key] || key).join(', ')})`.slice(0, 280);
+        }
+        if (proposal.kind === 'saved_search_create') {
+          if (!proposal.savedSearch || !('name' in proposal.savedSearch)) throw new Error('Missing saved-search proposal');
+          const staged = await stageCoworkSavedSearchCreate(scope, run.id, proposal.savedSearch);
+          targetId = `savedsearch:create:${staged.hash}`;
+          label = `Guardar búsqueda «${String((proposal.savedSearch as { name?: string }).name || '').slice(0, 80)}»`;
+        }
+        if (proposal.kind === 'saved_search_update') {
+          if (!proposal.savedSearch || !('id' in proposal.savedSearch)) throw new Error('Missing saved-search proposal');
+          const staged = await stageCoworkSavedSearchUpdate(scope, run.id, proposal.savedSearch);
+          targetId = `savedsearch:update:${staged.hash}`;
+          label = 'Actualizar búsqueda guardada';
+        }
+        if (proposal.kind === 'saved_search_delete') {
+          const id = (proposal.savedSearch as { id?: string } | undefined)?.id;
+          if (!id) throw new Error('Missing saved-search proposal');
+          const staged = await stageCoworkSavedSearchDelete(scope, run.id, { id });
+          targetId = `savedsearch:delete:${staged.hash}`;
+          label = 'Eliminar búsqueda guardada';
+        }
+        if (proposal.kind === 'campaign_stop_v2') {
+          if (!proposal.campaignId || !proposal.enrollmentId) throw new Error('Missing campaign stop target');
+          parseCoworkCampaignStopTarget(`campaign-stop:${proposal.campaignId}:${proposal.enrollmentId}`);
+          targetId = `campaign-stop:${proposal.campaignId}:${proposal.enrollmentId}`;
+          label = 'Detener seguimiento de campaña (lo enviado no se revierte)';
+        }
+        if (proposal.kind === 'crm_update_record') {
+          if (!proposal.crmRecord) throw new Error('Missing CRM record patch');
+          const staged = await stageCoworkCrmRecordUpdate(scope, run.id, proposal.crmRecord);
+          targetId = `crmrecord:${staged.hash}`;
+          label = `Actualizar ficha comercial (${staged.changed.join(', ')})`.slice(0, 280);
+        }
+        if (proposal.kind === 'campaign_prepare_draft_v2') {
+          if (!proposal.stepId) throw new Error('Missing campaign step target');
+          const staged = await stageCoworkCampaignPrepare(scope, run.id, proposal.stepId);
+          targetId = `campaignprep:${staged.hash}`;
+          label = 'Preparar borrador del paso para revisión (no envía nada)';
+        }
+        if (proposal.kind === 'crm_assign_lead') {
+          if (!proposal.crmAssign) throw new Error('Missing collaboration assignment');
+          const staged = await stageCoworkCrmAssign(scope, run.id, proposal.crmAssign);
+          targetId = `crmassign:${staged.hash}`;
+          label = `Colaboración: ${proposal.crmAssign.op === 'assign' ? 'asignar' : proposal.crmAssign.op === 'claim' ? 'reservar' : 'liberar'} contacto`;
+        }
+        if (proposal.kind === 'exception_resolve') {
+          if (!proposal.exceptionResolve) throw new Error('Missing exception triage');
+          const staged = await stageCoworkExceptionResolve(scope, run.id, proposal.exceptionResolve);
+          targetId = `exception:${staged.hash}`;
+          label = `Incidencia: marcar como ${proposal.exceptionResolve.action}`;
+        }
+        if (proposal.kind === 'mission_control') {
+          if (!proposal.missionControl) throw new Error('Missing mission control');
+          const staged = await stageCoworkMissionControl(scope, run.id, proposal.missionControl);
+          targetId = `mission:${staged.hash}`;
+          label = proposal.missionControl.targetStatus === 'paused' ? 'Pausar misión (omite tareas pendientes)' : 'Reactivar misión';
+        }
         const proposed = await client.rpc('cowork_propose_effect', {
           p_run_id: run.id, p_token: run.lease_token, p_kind: proposal.kind,
           p_origin_run_id: proposal.originRunId, p_target_id: targetId, p_label: label,
@@ -214,12 +302,10 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         // Autonomous mode carries the user's standing grant: approve the exact
         // proposed effect so the queue executes it without another round-trip.
         // The flag is re-read here so revoking autonomy mid-flight stops admission.
-        // Sends, campaign activate/pause and code execution never self-approve:
-        // they always wait for a human decision. Creating a paused draft is
-        // harmless and may proceed.
-        if (executionPolicy.automaticExternalSearch && process.env.COWORK_AUTONOMY_ENABLED === 'true'
-          && proposal.kind !== 'send_email' && proposal.kind !== 'campaign_activate' && proposal.kind !== 'campaign_pause'
-          && proposal.kind !== 'code_execute') {
+        // Sends, campaign changes, code execution, profile, saved-search and
+        // campaign-stop effects never self-approve: they always wait for a
+        // human decision. Creating a paused draft is harmless and may proceed.
+        if (coworkEffectCanAutoApprove(run.mode, process.env.COWORK_AUTONOMY_ENABLED === 'true', proposal.kind)) {
           const approved = await resolveCoworkEffect(client, scope, run.id, true);
           if (!approved) throw new Error('Could not approve effect');
         }
@@ -234,7 +320,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     });
     if (finished.error) throw finished.error;
     return { claimed: true, processed: finished.data === true ? 1 : 0 };
-  } catch {
+  } catch (error) {
+    if (error instanceof CoworkSpecialistsDeferred) return { claimed: true, processed: 1 };
     // Cancellation invalidates the lease; terminal writes cannot revive it.
     const failed = await client.rpc('cowork_finish_run', {
       p_run_id: run.id, p_token: run.lease_token, p_status: 'failed',

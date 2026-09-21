@@ -31,6 +31,7 @@ export type DraftPreflightIssueV2 = {
     | 'body_structure'
     | 'commercial_relevance'
     | 'abstract_language'
+    | 'corporate_copy'
     | 'unresolved_placeholder'
     | 'prohibited_phrase'
     | 'cta_count'
@@ -54,8 +55,15 @@ export type DraftPreflightV2Result = {
 };
 
 export type ValidateDraftPreflightV2Options = {
+  // Editorial repair applies to model output, not to user-authored edits or approval.
+  checkGeneratedCopy?: boolean;
   existingContentFingerprints?: Iterable<string>;
   now?: Date;
+  // The closing step ends the sequence without asking for a meeting, so the
+  // server appends no CTA and the model must not write one either. Follow-up
+  // steps ('model') write their own single closing question with the
+  // configured minutes instead of repeating the approved text verbatim.
+  expectedCtaCount?: 0 | 1 | 'model';
 };
 
 export function requiredDraftPersonalizationV2(context: DraftContextV2): DraftPersonalizationProvenanceV2[] {
@@ -182,6 +190,15 @@ function sentenceParts(value: string) {
 
 const draftCtaCue = /\b(?:agenda(?:mos|r)?|agend(?:amos|ar)?|coordina(?:mos|r)?\s+(?:una\s+)?(?:reunion|reunión|llamada|call|cita)|conversemos|conversar|hablemos|hablar|reunion|reunión|llamada|call|calendly|calendar|te parece|te sirve|podemos (?:hablar|conversar|coordinar)|responde|disponibilidad)\b/i;
 const commercialOutcomeCue = /\b(?:para\s+\p{L}|podr[ií]a|quiz[aá]s|si\b|cuando\b|as[ií]|sin\s+\p{L})/iu;
+const meetingLinkCue = /\b(?:https?:\/\/|www\.|calendly|calendar|cal\.com|meet\.|zoom\.|teams\.)/i;
+
+// Meeting length configured by the user in their approved CTA (e.g. "15 minutos").
+// Follow-up steps restate it in their own words instead of repeating the exact text.
+export function draftCtaMinutes(approvedCta: string) {
+  const nearMinutes = String(approvedCta || '').match(/(\d{1,3})\s*min/i);
+  if (nearMinutes) return nearMinutes[1];
+  return null;
+}
 const abstractCommercialLanguage = /\b(?:no\s+(?:quiero|quisiera|busco)\s+asumir|sin\s+asumir|explorar\s+si|prioridades?\s+(?:actuales|comerciales)|(?:ese|este|un)\s+relato|relato\s+comercial|narrativa\s+comercial|mensajes?\s+comerciales?)\b/i;
 
 // Reviewed commercial wording is advisory only. It can appear in a report-backed draft
@@ -192,12 +209,14 @@ function isUnapprovedDraftCtaSentence(sentence: string) {
   return draftCtaCue.test(sentence) || /[¿?]/.test(sentence);
 }
 
-export function stripUnapprovedDraftCtasV2(body: string, approvedCta: string) {
+export function stripUnapprovedDraftCtasV2(body: string, approvedCta: string, options: { keepQuestions?: boolean } = {}) {
   const withoutApprovedCta = approvedCta ? body.split(approvedCta).join(' ') : body;
   return withoutApprovedCta
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.split('\n').map((line) => sentenceParts(line)
-      .filter((sentence) => !isUnapprovedDraftCtaSentence(sentence))
+      .filter((sentence) => options.keepQuestions
+        ? !(draftCtaCue.test(sentence) && !/[¿?]/.test(sentence))
+        : !isUnapprovedDraftCtaSentence(sentence))
       .join(' ')).filter(Boolean).join('\n'))
     .filter(Boolean)
     .join('\n\n');
@@ -218,6 +237,23 @@ function materialPersonalizationTerms(value: string) {
     .split(' ')
     .map((term) => term.replace(/(?:es|os|as|s)$/u, ''))
     .filter((term) => term.length >= 4 && !personalizationStopWords.has(term));
+}
+
+// Anchor terms for the writing prompt: the readable original words behind the
+// material terms the grounding check requires. Showing them lets the model hit
+// the check on the first attempt instead of paraphrasing them away and paying
+// for a full corrective regeneration.
+export function personalizationAnchorTerms(statement: string, max = 5): string[] {
+  const wanted = new Set(materialPersonalizationTerms(statement));
+  const anchors: string[] = [];
+  for (const word of String(statement || '').match(/[\p{L}\p{N}]{4,}/gu) || []) {
+    const term = normalizeForMatch(word).replace(/(?:es|os|as|s)$/u, '');
+    if (!wanted.has(term)) continue;
+    wanted.delete(term);
+    anchors.push(word);
+    if (anchors.length >= max) break;
+  }
+  return anchors;
 }
 
 function hasEnumerationCue(value: string) {
@@ -500,10 +536,34 @@ export function validateDraftPreflightV2(
   }
 
   const requiredCta = text(context.constraints.cta.exactText);
+  if (options.checkGeneratedCopy) {
+    const blocks = contentBlocks(rawBody, requiredCta);
+    const opening = normalizeForMatch(blocks[0] || '')
+      .replace(/^(?:vi que|note que|cuando)\s+/, '');
+    const company = normalizeForMatch(context.company.name);
+    const definition = company && opening.startsWith(`${company} `)
+      ? opening.slice(company.length).trim()
+      : '';
+    if (/^(?:se dedica a|es una empresa|se hace cargo de|puede (?:hacerse cargo de|encargarse de)|is a company|specializes in)\b/.test(definition)) {
+      add('corporate_copy', 'La apertura define la empresa del destinatario como una ficha. Integra el hecho en un motivo concreto para escribir; conserva la evidencia sin recitar la descripción corporativa.', 'body');
+    }
+    const description = normalizeForMatch(context.seller.description);
+    if (description.split(' ').length >= 18 && blocks.slice(1).some((block) => normalizeForMatch(block).includes(description))) {
+      add('corporate_copy', 'La propuesta copia la descripción del vendedor. Reescribe con una capacidad autorizada aplicada al contexto del contacto, en frases breves; no pegues la presentación corporativa.', 'body');
+    }
+  }
   const requiredCtaCount = countOccurrences(body, requiredCta);
   const bodyOutsideRequiredCta = requiredCta
     ? body.split(requiredCta).join(' ')
     : body;
+  // The model-written closing question is the follow-up CTA: like the approved
+  // text, its proposed duration is not a factual claim about the world.
+  const modelClosingQuestion = options.expectedCtaCount === 'model'
+    ? sentenceParts(bodyOutsideRequiredCta).find((item) => /[¿?]/.test(item)) || ''
+    : '';
+  const claimCheckBody = modelClosingQuestion
+    ? bodyOutsideRequiredCta.split(modelClosingQuestion).join(' ')
+    : bodyOutsideRequiredCta;
   // Numbers are checked per sentence and subject, not against a global bag of digits.
   // This is a conservative lexical guard, not a semantic entailment model.
   const citedEvidence = output.personalization.flatMap((item) => context.evidence.filter((evidence) => (
@@ -512,8 +572,9 @@ export function validateDraftPreflightV2(
   const sellerStatements = [context.seller.valueProposition, ...context.seller.services, ...context.seller.proofPoints]
     .filter((statement): statement is string => Boolean(statement));
   const materialContent = `${subject}\n\n${requiredCta ? rawBody.split(context.constraints.cta.exactText).join(' ') : rawBody}`;
+  const claimCheckContent = modelClosingQuestion ? materialContent.split(modelClosingQuestion).join(' ') : materialContent;
   // Only line-leading ordinal punctuation is formatting. Remaining digits still get checked.
-  const materialSentences = materialContent.replace(/^[ \t]*\d+[.)][ \t]+(?=\S)/gm, '').split(/\r?\n/).flatMap(sentenceParts);
+  const materialSentences = claimCheckContent.replace(/^[ \t]*\d+[.)][ \t]+(?=\S)/gm, '').split(/\r?\n/).flatMap(sentenceParts);
   for (const sentence of materialSentences) {
     const normalized = normalizeForMatch(sentence);
     const sellerScoped = normalized.includes(normalizeForMatch(context.seller.companyName))
@@ -546,12 +607,34 @@ export function validateDraftPreflightV2(
     }
   }
   const hasExtraQuestion = /[¿?]/.test(bodyOutsideRequiredCta);
-  if (
-    requiredCtaCount !== context.constraints.cta.maximumCount
-    || ctaSentenceCount(bodyOutsideRequiredCta) > 0
-    || hasExtraQuestion
-  ) {
-    add('cta_count', 'El correo debe incluir exactamente un CTA y usar el CTA aprobado para este estilo.', 'body');
+  const expectedCtaCount = options.expectedCtaCount ?? 1;
+  if (expectedCtaCount === 'model') {
+    const minutes = draftCtaMinutes(context.constraints.cta.exactText);
+    const questionCount = (bodyOutsideRequiredCta.match(/\?/g) || []).length;
+    const question = sentenceParts(bodyOutsideRequiredCta).find((item) => /[¿?]/.test(item)) || '';
+    const modelCtaOk = questionCount === 1
+      && requiredCtaCount === 0
+      && ctaSentenceCount(bodyOutsideRequiredCta) <= 1
+      && !meetingLinkCue.test(bodyOutsideRequiredCta)
+      && (!minutes || normalizeForMatch(question).split(' ').includes(minutes));
+    if (!modelCtaOk) {
+      add('cta_count', minutes
+        ? `El seguimiento cierra con una sola pregunta que proponga una conversación breve de ${minutes} minutos, con tus palabras y sin enlaces. No repitas el CTA aprobado literalmente.`
+        : 'El seguimiento cierra con una sola pregunta que proponga una conversación breve, con tus palabras y sin enlaces.', 'body');
+    }
+  } else {
+    const ctaCountOk = expectedCtaCount === 0
+      ? requiredCtaCount === 0
+      : requiredCtaCount === context.constraints.cta.maximumCount;
+    if (
+      !ctaCountOk
+      || ctaSentenceCount(bodyOutsideRequiredCta) > 0
+      || hasExtraQuestion
+    ) {
+      add('cta_count', expectedCtaCount === 0
+        ? 'El cierre termina la secuencia sin pedir reunión: no lleva CTA ni preguntas y el servidor no agrega ningún pedido.'
+        : 'El correo debe incluir exactamente un CTA y usar el CTA aprobado para este estilo.', 'body');
+    }
   }
 
   if (!hasCommercialRelevance(context, rawBody, requiredCta)) {
