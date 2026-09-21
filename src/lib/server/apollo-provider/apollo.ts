@@ -667,10 +667,15 @@ export async function executeApolloEnrichment(input: EnrichmentInput, apiKey: st
   const phoneNumbers = lead.phone_numbers || [];
   // A provider match is a candidate, not proof that it is the requested person.
   // Reject before the caller can persist contact data or bind its callback.
+  // The URL comparison alone is not enough: Apollo may echo the requested URL
+  // on a stale record, so a name-disjoint personal slug also refuses the match.
   if (input.lead.linkedinUrl) {
     const requested = normalizeLinkedinProfileUrl(input.lead.linkedinUrl).toLowerCase();
     const returned = normalizeLinkedinProfileUrl(lead.linkedin_url).toLowerCase();
     if (!requested || !returned || requested !== returned) {
+      throw new ApolloGatewayError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH');
+    }
+    if (linkedinSlugConflictsWithName(input.lead.linkedinUrl, lead.name)) {
       throw new ApolloGatewayError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH');
     }
   }
@@ -803,4 +808,4 @@ export async function executeApolloOrganizationEnrichment(
     organization,
   };
 }
-import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { linkedinSlugConflictsWithName, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getLinkedinProfileDisplayName, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { getLinkedinProfileDisplayName, linkedinSlugConflictsWithName, normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 
 test('normalizes public LinkedIn person profiles from trusted LinkedIn hosts', () => {
   assert.equal(
@@ -32,6 +32,19 @@ test('decodes and normalizes percent-encoded profile slugs', () => {
     'https://www.linkedin.com/in/sally-tatiana-bard%C3%A1lez-chota-0693a875',
   );
   assert.equal(getLinkedinProfileDisplayName(encoded), 'Sally Tatiana Bardález Chota');
+});
+
+test('flags a personal slug that shares nothing with the returned name', () => {
+  assert.equal(
+    linkedinSlugConflictsWithName('https://www.linkedin.com/in/it-recruiter-janet-montero/', 'Marco Psenda'),
+    true,
+  );
+  assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/it-recruiter-janet-montero/', 'Janet Montero'), false);
+  assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/it-recruiter-janet-montero/', 'Janet M.'), false);
+  assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/jdoe2024/', 'Marco Psenda'), false);
+  assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/ana-perez/', 'Ana'), false);
+  assert.equal(linkedinSlugConflictsWithName('not a url', 'Marco Psenda'), false);
+  assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/it-recruiter-janet-montero/', ''), false);
 });
 
 test('preserves the exact UTF-8 identity of accented LinkedIn slugs', () => {

@@ -87,6 +87,7 @@ type PreparedTarget = {
   id: string;
   clientRef?: string;
   sourceProviderId?: string;
+  boundPersonId?: string;
   lead: EnrichmentLead;
 };
 
@@ -354,6 +355,7 @@ async function prepareTargets(input: {
     let id = existingRecordId || (input.tableName === 'people_search_leads' && linkedinUrl
       ? profileTargetId(input.userId, input.organizationId, linkedinUrl)
       : randomUUID());
+    let boundPersonId: string | undefined;
     const providerId = sourceProviderId(lead) || undefined;
     const inputEmail = text(lead.email, 320).toLowerCase() || undefined;
     const name = splitFullName(lead.fullName);
@@ -363,7 +365,7 @@ async function prepareTargets(input: {
     if (input.tableName === 'people_search_leads') {
       let query = admin
         .from('people_search_leads')
-        .select('id,enrichment_status')
+        .select('id,enrichment_status,apollo_person_id,source_provider_id')
         .eq('user_id', input.userId)
         .eq('organization_id', input.organizationId);
       query = existingRecordId ? query.eq('id', existingRecordId)
@@ -374,6 +376,10 @@ async function prepareTargets(input: {
       if (existingRecordId && !existing) throw new Error('ENRICHMENT_TARGET_NOT_FOUND');
       if (text(existing?.enrichment_status, 64) === 'suppressed') throw new Error('ENRICHMENT_TARGET_SUPPRESSED');
       if (existing?.id) id = String(existing.id);
+      // First-seen person binding: a URL already linked to a known Apollo
+      // person must keep resolving to that same person. A different person id
+      // means the provider flipped its mapping and must not overwrite the row.
+      boundPersonId = text((existing as any)?.apollo_person_id || (existing as any)?.source_provider_id, 255) || undefined;
 
       const values = {
         name: name.fullName || null,
@@ -470,6 +476,7 @@ async function prepareTargets(input: {
       id,
       lead,
       sourceProviderId: providerId,
+      boundPersonId: input.tableName === 'people_search_leads' ? boundPersonId : undefined,
       clientRef: text(lead.clientRef, 200) || undefined,
     });
   }
@@ -1010,6 +1017,9 @@ export async function POST(request: NextRequest) {
         );
         if (target.sourceProviderId && resultPersonId && target.sourceProviderId !== resultPersonId) {
           throw new Error('APOLLO_PERSON_IDENTITY_MISMATCH');
+        }
+        if (target.boundPersonId && resultPersonId && target.boundPersonId !== resultPersonId) {
+          throw new ApolloEnrichmentError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH', false);
         }
 
         if (callback && result.providerRequestId) {

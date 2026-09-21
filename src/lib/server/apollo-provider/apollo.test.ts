@@ -612,5 +612,9 @@ test('LinkedIn match refuses another person or unverified URL before exposing co
       linkedin_url: 'https://cl.linkedin.com/in/it-recruiter-janet-montero?trk=search' } });
     const result = await executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig());
     assert.equal(result.success, true);
+    globalThis.fetch = async () => Response.json({ person: { id: 'stale-person', name: 'Marco Psenda',
+      linkedin_url: 'https://www.linkedin.com/in/it-recruiter-janet-montero/' } });
+    await assert.rejects(() => executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig()),
+      (error: unknown) => error instanceof ApolloGatewayError && error.code === 'APOLLO_PERSON_IDENTITY_MISMATCH');
   } finally { globalThis.fetch = originalFetch; }
 });
