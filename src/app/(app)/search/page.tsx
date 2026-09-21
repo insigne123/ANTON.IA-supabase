@@ -123,6 +123,10 @@ function getFriendlySearchErrorMessage(message?: string) {
     return 'No pudimos completar la busqueda. Revisa los filtros y vuelve a intentarlo.';
   }
 
+  if (lower.includes('perfil distinto') || lower.includes('otra persona') || lower.includes('corresponda a la url')) {
+    return 'El proveedor devolvió datos de otra persona para esa URL y no los mostramos para protegerte. Prueba buscar por cargo y empresa en la pestaña Filtros.';
+  }
+
   if (lower.includes('linkedin') || lower.includes('url')) {
     return 'Revisa la URL de LinkedIn e intenta nuevamente.';
   }

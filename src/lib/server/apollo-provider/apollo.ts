@@ -673,9 +673,14 @@ export async function executeApolloEnrichment(input: EnrichmentInput, apiKey: st
     const requested = normalizeLinkedinProfileUrl(input.lead.linkedinUrl).toLowerCase();
     const returned = normalizeLinkedinProfileUrl(lead.linkedin_url).toLowerCase();
     if (!requested || !returned || requested !== returned) {
+      console.warn('[apollo] person identity mismatch: url', { requested: requested || null });
       throw new ApolloGatewayError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH');
     }
     if (linkedinSlugConflictsWithName(input.lead.linkedinUrl, lead.name)) {
+      console.warn('[apollo] person identity mismatch: slug-name', {
+        slug: input.lead.linkedinUrl,
+        returnedName: lead.name || null,
+      });
       throw new ApolloGatewayError(502, 'APOLLO_PERSON_IDENTITY_MISMATCH');
     }
   }
