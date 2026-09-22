@@ -8,7 +8,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const extension = resolve(root, 'chrome-extension');
 const release = process.argv.includes('--release');
 const output = release ? resolve(extension, 'dist') : extension;
-const releaseFiles = ['panel.html', 'background.js', 'prospecting-background.js', 'content.js', 'prospecting-content.js', 'prospecting-send.js', 'prospecting-bridge.js', 'icon.png'];
+const releaseFiles = ['panel.html', 'background.js', 'prospecting-background.js', 'content.js', 'prospecting-content.js', 'prospecting-send.js', 'prospecting-invite.js', 'prospecting-bridge.js', 'icon.png'];
 await mkdir(output, { recursive: true });
 await build({ entryPoints: [resolve(extension, 'ui/panel.tsx')], bundle: true, outfile: resolve(output, 'panel.js'),
   platform: 'browser', format: 'iife', target: 'chrome116', minify: true, legalComments: 'none',

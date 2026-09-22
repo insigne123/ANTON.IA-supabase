@@ -26,8 +26,43 @@ test('rejects too many recipients, messages and bad delays', () => {
   }));
 });
 
+test('coerces model nulls to documented defaults', () => {
+  const parsed = coworkCampaignDraftSchema.parse({
+    ...base, objective: null,
+    criteria: { relationship: 'never_contacted', titles: null, industries: null, countries: null,
+      sizes: null, seniorities: null, minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: null },
+  });
+  assert.equal(parsed.objective, '');
+  assert.deepEqual(parsed.criteria.titles, []);
+  assert.equal(parsed.criteria.enrichedOnly, true);
+});
+
+test('accepts the seven-touch cadence', () => {
+  const parsed = coworkCampaignDraftSchema.parse({
+    ...base,
+    messages: [0, 2, 4, 4, 5, 7, 15].map(delayDays => ({ subject: 'Hola', body: 'Te escribo', delayDays })),
+  });
+  assert.equal(parsed.messages.length, 7);
+});
+
 test('rejects duplicate recipients', () => {
   assert.throws(() => coworkCampaignDraftSchema.parse({
     ...base, emails: ['ana@example.com', 'ANA@example.com'],
   }), /duplicados/);
+});
+
+test('rejects an explicit closing promise before a later scheduled touch', () => {
+  for (const body of ['Cierro el hilo.', 'No volveré a escribir.', 'Último seguimiento']) {
+    assert.equal(coworkCampaignDraftSchema.safeParse({ ...base, messages: [
+      { subject: 'Hola', body, delayDays: 0 },
+      { subject: 'Continuación', body: 'Una pregunta.', delayDays: 2 },
+    ] }).success, false);
+  }
+});
+
+test('permits a closing promise at the actual end only', () => {
+  assert.equal(coworkCampaignDraftSchema.safeParse({ ...base, messages: [
+    { subject: 'Hola', body: '¿Quién revisa este tema?', delayDays: 0 },
+    { subject: 'Cierre', body: 'Cierro el hilo.', delayDays: 2 },
+  ] }).success, true);
 });

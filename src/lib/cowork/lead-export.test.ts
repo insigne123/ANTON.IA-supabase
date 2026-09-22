@@ -4,6 +4,15 @@ import Papa from 'papaparse';
 import { buildCoworkLeadCsv } from './lead-export';
 
 const id = '00000000-0000-4000-8000-000000000001';
+test('observed company results export domains and remain distinct from people', () => {
+  const result = { scope: 'external_company_search', items: [{ id: 'apollo-company:org-1', name: 'Empresa', domain: 'example.com', employees: 80, website: 'https://example.com' }] };
+  const csv = buildCoworkLeadCsv([{ action: 'prospecting.search', result }]);
+  assert.ok(csv);
+  const row = Papa.parse<Record<string, string>>(csv, { header: true }).data[0];
+  assert.equal(row.domain, 'example.com'); assert.equal(row.employees, '80');
+  assert.equal(row.company_website, 'https://example.com');
+  assert.equal(buildCoworkLeadCsv([{ action: 'leads.search', result }]), null);
+});
 test('CSV roundtrips quoted data and neutralizes formula injection', () => {
   const result = { scope: 'own_saved_contacts', items: [{ id, name: '=HYPERLINK("bad")', company: 'Empresa, "ejemplo"\nChile', email: 'test@example.com' }] };
   const csv = buildCoworkLeadCsv([{ action: 'leads.search', result }]);

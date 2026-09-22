@@ -22,7 +22,29 @@ export const ExtensionProfileSchema = z.object({
 export type ExtensionProfile = z.infer<typeof ExtensionProfileSchema>;
 
 export const ExtensionRequestSchema = z.object({
-  action: z.enum(['session', 'lookup', 'save', 'enrich', 'research', 'research-status', 'research-retry', 'phone-status', 'message', 'email-draft', 'sequence', 'campaigns', 'campaign-add', 'send-claim', 'send-result']),
+  action: z.enum(['session', 'lookup', 'save', 'enrich', 'research', 'research-status', 'research-retry', 'phone-status', 'message', 'email-draft', 'sequence', 'campaigns', 'campaign-add', 'send-claim', 'send-result',
+    'linkedin-jobs-pending', 'linkedin-job-claim', 'linkedin-job-result', 'network-report', 'inbox-report']),
+  jobId: z.string().uuid().optional(),
+  jobResult: z.object({
+    jobId: z.string().uuid(), claimToken: z.string().uuid(),
+    status: z.enum(['confirmed', 'uncertain', 'failed']),
+    eventId: z.string().trim().min(1).max(1000).optional(),
+    threadUrl: z.string().trim().max(2048).optional(),
+    error: z.string().trim().max(1000).optional(),
+  }).strict().optional(),
+  networkEntries: z.array(z.object({
+    url: z.string().trim().min(1).max(2048), name: z.string().trim().max(300).default(''),
+  }).strict()).max(200).optional(),
+  networkCursor: z.string().trim().max(500).optional(),
+  networkHasMore: z.boolean().default(false),
+  inboxThreads: z.array(z.object({
+    key: z.string().trim().min(1).max(500), url: z.string().trim().max(2048).default(''),
+    name: z.string().trim().max(300).default(''), direction: z.enum(['in', 'out']),
+    at: z.string().datetime({ offset: true }).nullable().default(null),
+    snippet: z.string().trim().max(500).default(''), replyNeeded: z.boolean().default(false),
+  }).strict()).max(50).optional(),
+  inboxCursor: z.string().trim().max(500).optional(),
+  inboxHasMore: z.boolean().default(false),
   enrichmentId: z.string().trim().min(1).max(500).optional(),
   sendMessage: z.string().trim().min(1).max(1200).optional(),
   sendResult: z.object({
@@ -54,8 +76,20 @@ export const ExtensionRequestSchema = z.object({
   if (body.action === 'campaign-add' && (!body.campaignId || !body.campaignRevision)) {
     ctx.addIssue({ code: 'custom', message: 'Selecciona una campaña y actualiza su estado.' });
   }
-  if (body.action !== 'session' && (!body.organizationId || !body.userId || !body.profile)) {
+  const profileless = body.action === 'session' || body.action === 'linkedin-jobs-pending'
+    || body.action === 'linkedin-job-claim' || body.action === 'linkedin-job-result'
+    || body.action === 'network-report' || body.action === 'inbox-report';
+  if (!profileless && (!body.organizationId || !body.userId || !body.profile)) {
     ctx.addIssue({ code: 'custom', message: 'Conecta tu cuenta y selecciona un perfil.' });
+  }
+  if (profileless && (!body.organizationId || !body.userId)) {
+    ctx.addIssue({ code: 'custom', message: 'Conecta tu cuenta antes de continuar.' });
+  }
+  if ((body.action === 'linkedin-job-claim' || body.action === 'linkedin-job-result') && !body.jobId && !body.jobResult) {
+    ctx.addIssue({ code: 'custom', message: 'Selecciona el trabajo de LinkedIn.' });
+  }
+  if (body.action === 'linkedin-job-result' && !body.jobResult) {
+    ctx.addIssue({ code: 'custom', message: 'Informa el resultado del trabajo.' });
   }
   if (new Set(body.offsets).size !== body.offsets.length || body.offsets.some((n, i) => i > 0 && n <= body.offsets[i - 1])) {
     ctx.addIssue({ code: 'custom', path: ['offsets'], message: 'Los días deben ser distintos y estar en orden creciente.' });

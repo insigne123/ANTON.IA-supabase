@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { conversationTurn } from '@/lib/cowork/commercial-facts';
+import { contactRecordEvidence } from '@/lib/cowork/contact-evidence';
 import { buildSupliaContext } from '@/lib/server/suplia-context';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
@@ -28,7 +28,7 @@ export async function queryCoworkExtendedReads(
 ): Promise<{ lead: unknown; contacted: unknown[]; scope: string }>;
 export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: 'contacted.timeline', value: string,
-): Promise<{ contacted: unknown[]; scope: string; truncated: boolean; turn: unknown }>;
+): Promise<{ contacted: unknown[]; scope: string; truncated: boolean } & ReturnType<typeof contactRecordEvidence>>;
 export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: 'metrics.overview', value: string,
 ): Promise<{ scope: string; period: string; savedContacts: number; contactedTotal: number; contactedThisWeek: number; repliesThisWeek: number }>;
@@ -53,7 +53,7 @@ export async function queryCoworkExtendedReads(
   action: CoworkExtendedReadAction,
   value: string,
 ): Promise<
-  | { items: unknown[]; returned: number; limit: number; scope: string; truncated: boolean }
+  | { items: unknown[]; returned: number; limit: number; scope: string; truncated: boolean; evidence?: unknown }
   | { lead: unknown; contacted: unknown[]; scope: string }
   | { contacted: unknown[]; scope: string; truncated: boolean; turn: unknown }
   | { scope: string; period: string; savedContacts: number; contactedTotal: number; contactedThisWeek: number; repliesThisWeek: number }
@@ -101,7 +101,10 @@ export async function queryCoworkExtendedReads(
     if (term) query = query.or(`name.ilike.%${term}%,email.ilike.%${term}%,company.ilike.%${term}%,subject.ilike.%${term}%`);
     const { data, error } = await query;
     if (error) throw new Error('No se pudieron consultar los contactados.');
-    return { items: data || [], returned: data?.length || 0, limit: 20, scope: 'organization_contacted', truncated: (data?.length || 0) >= 20 };
+    return { items: data || [], returned: data?.length || 0, limit: 20, scope: 'organization_contacted', truncated: (data?.length || 0) >= 20,
+      evidence: { source: 'application_contact_records', queriedAt: new Date().toISOString(),
+        mailboxSyncedAt: null, mailboxCoverageComplete: false, pendingStatus: 'needs_verification',
+        nextRead: 'contacted.timeline', limitation: 'Lista de registros, no cola de respuestas pendientes confirmadas.' } };
   }
   const leadId = z.string().uuid().parse(value);
   const { data: contacted, error } = await client.from('contacted_leads')
@@ -111,14 +114,8 @@ export async function queryCoworkExtendedReads(
   if (error) throw new Error('No se pudo leer el historial de envíos.');
   const rows = (contacted || []) as Array<{ id: string; sent_at?: string | null; replied_at?: string | null; reply_intent?: string | null }>;
   const now = new Date().toISOString();
-  const messages: Array<{ id: string; direction: 'inbound' | 'outbound'; at: string; kind: 'human' | 'auto_reply' | 'bounce'; confirmed: boolean }> = [];
-  for (const row of rows) {
-    if (row.sent_at) messages.push({ id: `${row.id}:out`, direction: 'outbound', at: String(row.sent_at), kind: 'human', confirmed: true });
-    if (row.replied_at) messages.push({ id: `${row.id}:in`, direction: 'inbound', at: String(row.replied_at),
-      kind: row.reply_intent === 'auto_reply' ? 'auto_reply' : row.reply_intent === 'delivery_failure' ? 'bounce' : 'human', confirmed: true });
-  }
-  const turn = conversationTurn(messages, { coverageComplete: rows.length < 15, observedAt: now, now, maxAgeMs: 300000 });
-  return { contacted: rows, scope: 'organization_contacted', truncated: rows.length >= 15, turn };
+  const evidence = contactRecordEvidence(rows, rows.length >= 15, now);
+  return { contacted: rows, scope: 'organization_contacted', truncated: rows.length >= 15, ...evidence };
 }
 
 async function readCoworkMetrics(client: SupabaseClient, scope: Scope) {

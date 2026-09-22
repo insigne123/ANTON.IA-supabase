@@ -7,7 +7,7 @@ const enabledBefore = process.env.COWORK_ENABLED;
 process.env.COWORK_ENABLED = 'true';
 process.env.COWORK_EXTERNAL_SEARCH_ENABLED = 'true';
 const state = { claimed: false, approved: false, cancelled: false, quota: 0, provider: 0, allow: true, failProvider: false, finishes: [], admissions: [] };
-const criteria = { titles: ['Gerente'], industries: [], locations: ['Chile'], limit: 5 };
+let criteria = { titles: ['Gerente'], industries: [], locations: ['Chile'], limit: 5 };
 globalThis.__coworkSearch = {
   client: {
     rpc: async (name, args) => {
@@ -39,6 +39,10 @@ globalThis.__coworkSearch = {
     assert.equal(payload.reveal_email, false); assert.equal(payload.reveal_phone, false);
     assert.equal(payload.user_id, 'owner'); assert.equal(payload.max_results, 5);
     if (state.failProvider) throw new Error('timeout');
+    if (payload.search_mode === 'organization_search') {
+      assert.deepEqual(payload.company_location, ['Chile']);
+      return { organizations: [{ id: 'company-1', name: 'Empresa', primary_domain: 'example.com', estimated_num_employees: 80 }] };
+    }
     return { leads: [{ id: 'external-1', name: 'Ejemplo', email: 'not-authorized@example.com', linkedin_url: 'https://www.linkedin.com/in/example', organization: { name: 'Empresa', website_url: 'https://empresa.example', linkedin_url: 'javascript:alert(1)' } }] };
   },
 };
@@ -100,6 +104,16 @@ try {
   assert.equal(await module.exports.admitSearchContinuation(globalThis.__coworkSearch.client, { userId: 'owner', organizationId: 'org' }, 'run'), '00000000-0000-4000-8000-000000000099');
   assert.equal(state.admissions.length, 2);
   assert.equal(state.admissions[1].p_request_id, retryRequestId);
+  criteria = { target: 'companies', titles: [], industries: ['outsourcing'], locations: [], companyLocations: ['Chile'], employeeRanges: ['51-200'], limit: 5 };
+  state.claimed = false; state.approved = true; state.failProvider = false;
+  assert.equal((await tick()).processed, 1);
+  const companyResult = state.finishes.at(-1).p_payload.result;
+  assert.equal(companyResult.scope, 'external_company_search');
+  assert.equal(companyResult.items[0].id, 'apollo-company:company-1');
+  assert.equal(companyResult.items[0].domain, 'example.com');
+  assert.equal(companyResult.items[0].employees, 80);
+  assert.equal(state.admissions.length, 3);
+  assert.equal((await tick()).claimed, false);
   console.log('PASS: approval without provider call, background claim, parallel ticks, quota exhaustion, timeout without replay, no reveal, rejection and cancellation.');
 } finally {
   delete globalThis.__coworkSearch;

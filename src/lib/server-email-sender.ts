@@ -1,15 +1,18 @@
 
 import { encodeHeaderRFC2047, sanitizeHeaderText } from '@/lib/email-header-utils';
 import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
+import { addMessageTracking } from '@/lib/email-tracking';
 import { ConfirmedProviderRejectionError } from '@/lib/server/outbound-dispatch';
-import type { GmailReplyTarget } from '@/lib/server/reply-target';
+import type { EmailReplyTarget } from '@/lib/server/reply-target';
 
 type ServerEmailSendOptions = {
     unsubscribeUrl?: string | null;
+    oneClickUnsubscribeUrl?: string | null;
     textBody?: string;
     idempotencyKey?: string;
+    trackingDispatchId?: string;
     requestReceipts?: boolean;
-    replyTarget?: GmailReplyTarget;
+    replyTarget?: EmailReplyTarget;
 };
 
 function escapeODataLiteral(s: string) {
@@ -18,6 +21,13 @@ function escapeODataLiteral(s: string) {
 
 function toGraphIso(dt: Date) {
     return dt.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function oneClickUrl(options: ServerEmailSendOptions) {
+    if (options.oneClickUnsubscribeUrl) return options.oneClickUnsubscribeUrl;
+    if (!options.unsubscribeUrl) return null;
+    try { const url = new URL(options.unsubscribeUrl); url.pathname = '/api/tracking/unsubscribe'; return url.toString(); }
+    catch { return null; }
 }
 
 async function findRecentlySentOutlookMessage(token: string, params: { to: string; subject: string; idempotencyKey?: string; sentAfter: Date }) {
@@ -41,7 +51,9 @@ async function findRecentlySentOutlookMessage(token: string, params: { to: strin
     const wantedTo = to.trim().toLowerCase();
     const wantedSubject = subject.trim();
     const matches = list.filter((message: any) => {
-        const subjectMatches = String(message.subject || '').trim() === wantedSubject;
+        const stripReplyPrefix = (value: string) => value.replace(/^(?:(?:re|rv|aw):\s*)+/i, '').trim().toLowerCase();
+        const subjectMatches = String(message.subject || '').trim() === wantedSubject
+            || stripReplyPrefix(String(message.subject || '')) === stripReplyPrefix(wantedSubject);
         const recipientMatches = (message.toRecipients || []).some((recipient: any) => String(recipient?.emailAddress?.address || '').trim().toLowerCase() === wantedTo);
         const dispatchMatches = !idempotencyKey || (message.internetMessageHeaders || []).some((header: any) => (
             String(header?.name || '').trim().toLowerCase() === 'x-anton-dispatch'
@@ -75,7 +87,10 @@ export async function sendGmail(accessToken: string, to: string, subject: string
     if (!preflight.ok) {
         rejectBeforeSend(preflight.errors.join(' '));
     }
+    const tracking = addMessageTracking({ html: prepared.html, baseUrl: process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai', trackingKey: options.trackingDispatchId });
     let replyHeaders: string[] = [];
+    const listUnsubscribeUrl = oneClickUrl(options);
+    if (listUnsubscribeUrl) replyHeaders.push(`List-Unsubscribe: <${sanitizeHeaderText(listUnsubscribeUrl)}>`, 'List-Unsubscribe-Post: List-Unsubscribe=One-Click');
     if (options.replyTarget) {
         try {
             const target = options.replyTarget;
@@ -100,7 +115,7 @@ export async function sendGmail(accessToken: string, to: string, subject: string
             }
             const references = header('References');
             if (references && !/^(?:<[^<>\s]+@[^<>\s]+>\s*)+$/.test(references)) throw new Error('Invalid Gmail parent References');
-            replyHeaders = [`In-Reply-To: ${messageId}`, `References: ${references ? `${references} ` : ''}${messageId}`];
+            replyHeaders.push(`In-Reply-To: ${messageId}`, `References: ${references ? `${references} ` : ''}${messageId}`);
         } catch (error) {
             rejectBeforeSend(error);
         }
@@ -115,7 +130,7 @@ export async function sendGmail(accessToken: string, to: string, subject: string
         ...replyHeaders,
         ...(options.idempotencyKey ? [`X-ANTON-Dispatch: ${sanitizeHeaderText(options.idempotencyKey)}`] : []),
         '',
-        prepared.html,
+        tracking.html,
     ];
     const message = messageParts.join('\r\n');
     const encodedMessage = Buffer.from(message, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -135,49 +150,78 @@ export async function sendGmail(accessToken: string, to: string, subject: string
     if (!res.ok) {
         await confirmedProviderRejection('Gmail', res);
     }
-    return res.json();
+    const receipt = await res.json();
+    return { ...receipt, outboundSnapshot: { subject, to, html: tracking.html, text: prepared.text, capturedAt: new Date().toISOString(), source: 'submitted_to_provider', tracking: { pixelEnabled: tracking.pixelEnabled, trackedLinks: tracking.trackedLinks } } };
 }
 
 export async function sendOutlook(accessToken: string, to: string, subject: string, htmlBody: string, options: ServerEmailSendOptions = {}) {
-    if (options.replyTarget) rejectBeforeSend('OUTLOOK_NATIVE_REPLY_UNSUPPORTED');
+    if (options.replyTarget && options.replyTarget.provider !== 'outlook') rejectBeforeSend('OUTLOOK_REPLY_PROVIDER_MISMATCH');
     const prepared = prepareOutboundEmail({ html: htmlBody, text: options.textBody, unsubscribeUrl: options.unsubscribeUrl });
     const preflight = validateOutboundEmail({ to, subject, html: prepared.html, text: prepared.text, requireUnsubscribe: true, unsubscribeUrl: options.unsubscribeUrl });
     if (!preflight.ok) {
         rejectBeforeSend(preflight.errors.join(' '));
     }
+    const tracking = addMessageTracking({ html: prepared.html, baseUrl: process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://app.antonia.ai', trackingKey: options.trackingDispatchId });
     const safeSubject = sanitizeHeaderText(subject);
     const sentAfter = new Date();
-    const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+    const dispatchHeader = options.idempotencyKey ? [{ name: 'X-ANTON-Dispatch', value: sanitizeHeaderText(options.idempotencyKey) }] : [];
+    let sendUrl = 'https://graph.microsoft.com/v1.0/me/sendMail';
+    let sendBody: Record<string, unknown>;
+    if (options.replyTarget?.provider === 'outlook') {
+        const target = options.replyTarget;
+        const [parentResponse, profileResponse] = await Promise.all([
+            fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(target.messageId)}?$select=id,conversationId,subject,from,toRecipients,isDraft`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' }),
+            fetch('https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName', { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' }),
+        ]);
+        if (!parentResponse.ok || !profileResponse.ok) rejectBeforeSend('Outlook reply parent could not be verified; no message was sent');
+        const [parent, profile] = await Promise.all([parentResponse.json(), profileResponse.json()]);
+        const own = [profile.mail, profile.userPrincipalName].filter(Boolean).map((value: string) => value.toLowerCase());
+        const parentRecipient = (parent.toRecipients || []).some((recipient: any) => String(recipient.emailAddress?.address || '').toLowerCase() === to.trim().toLowerCase());
+        const stripRe = (value: string) => value.replace(/^(?:(?:re|rv|aw):\s*)+/i, '').trim().toLowerCase();
+        if (parent.id !== target.messageId || parent.conversationId !== target.conversationId || parent.isDraft
+            || !own.includes(String(parent.from?.emailAddress?.address || '').toLowerCase()) || !parentRecipient
+            || !parent.subject || stripRe(parent.subject) !== stripRe(subject)) rejectBeforeSend('Outlook reply parent does not match this recipient and conversation');
+        const create = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(target.messageId)}/createReply`, {
+            method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comment: '' }),
+        });
+        if (!create.ok) await confirmedProviderRejection('Outlook createReply', create);
+        const replyDraft = await create.json();
+        if (!replyDraft?.id || replyDraft.conversationId !== target.conversationId) rejectBeforeSend('Outlook reply draft could not be verified');
+        const patched = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(replyDraft.id)}`, {
+            method: 'PATCH', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subject: safeSubject, toRecipients: [{ emailAddress: { address: to } }], ccRecipients: [], bccRecipients: [], body: { contentType: 'HTML', content: tracking.html }, ...(dispatchHeader.length ? { internetMessageHeaders: dispatchHeader } : {}) }),
+        });
+        if (!patched.ok) await confirmedProviderRejection('Outlook reply draft update', patched);
+        const verification = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(replyDraft.id)}?$select=id,isDraft,conversationId,subject,toRecipients,ccRecipients,bccRecipients,body,internetMessageHeaders`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' });
+        if (!verification.ok) rejectBeforeSend('Outlook reply draft verification failed');
+        const finalDraft = await verification.json();
+        if (finalDraft.id !== replyDraft.id || finalDraft.isDraft !== true || finalDraft.conversationId !== target.conversationId
+            || finalDraft.toRecipients?.length !== 1 || String(finalDraft.toRecipients[0]?.emailAddress?.address || '').trim().toLowerCase() !== to.trim().toLowerCase()
+            || finalDraft.ccRecipients?.length || finalDraft.bccRecipients?.length
+            || finalDraft.subject !== safeSubject || finalDraft.body?.content !== tracking.html
+            || !options.idempotencyKey || !finalDraft.internetMessageHeaders?.some((header: any) => String(header.name).toLowerCase() === 'x-anton-dispatch' && header.value === options.idempotencyKey)) {
+            rejectBeforeSend('Outlook reply recipient, content or correlation could not be verified');
+        }
+        sendUrl = `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(replyDraft.id)}/send`;
+        sendBody = {};
+    } else {
+        sendBody = { message: {
+            subject: safeSubject,
+            body: { contentType: 'HTML', content: tracking.html },
+            isDeliveryReceiptRequested: Boolean(options.requestReceipts),
+            isReadReceiptRequested: Boolean(options.requestReceipts),
+            toRecipients: [{ emailAddress: { address: to } }],
+            ...(dispatchHeader.length ? { internetMessageHeaders: dispatchHeader } : {}),
+        }, saveToSentItems: true };
+    }
+    const res = await fetch(sendUrl, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-            message: {
-                subject: safeSubject,
-                body: {
-                    contentType: 'HTML',
-                    content: prepared.html,
-                },
-                isDeliveryReceiptRequested: Boolean(options.requestReceipts),
-                isReadReceiptRequested: Boolean(options.requestReceipts),
-                toRecipients: [
-                    {
-                        emailAddress: {
-                            address: to,
-                        },
-                    },
-                ],
-                ...(options.idempotencyKey ? {
-                    internetMessageHeaders: [{
-                        name: 'X-ANTON-Dispatch',
-                        value: sanitizeHeaderText(options.idempotencyKey),
-                    }],
-                } : {}),
-            },
-            saveToSentItems: true,
-        }),
+        body: JSON.stringify(sendBody),
     });
 
     if (!res.ok) {
@@ -197,5 +241,6 @@ export async function sendOutlook(accessToken: string, to: string, subject: stri
         messageId: sentMeta?.id || null,
         conversationId: sentMeta?.conversationId || null,
         internetMessageId: sentMeta?.internetMessageId || null,
+        outboundSnapshot: { subject: safeSubject, to, html: tracking.html, text: prepared.text, capturedAt: new Date().toISOString(), source: 'submitted_to_provider', tracking: { pixelEnabled: tracking.pixelEnabled, trackedLinks: tracking.trackedLinks } },
     };
 }

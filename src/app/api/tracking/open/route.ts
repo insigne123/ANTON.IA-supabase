@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { recordDispatchTrackingEvent } from '@/lib/server/email-tracking-events';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -7,6 +8,7 @@ export const runtime = 'nodejs';
 export async function GET(req: NextRequest) {
     const searchParams = req.nextUrl.searchParams;
     const leadId = searchParams.get('id');
+    const dispatchKey = searchParams.get('dispatch');
 
     // 1x1 Transparent GIF
     const transparentGif = Buffer.from(
@@ -14,7 +16,7 @@ export async function GET(req: NextRequest) {
         'base64'
     );
 
-    if (!leadId) {
+    if (!leadId && !dispatchKey) {
         return new NextResponse(transparentGif, {
             headers: {
                 'Content-Type': 'image/gif',
@@ -35,6 +37,11 @@ export async function GET(req: NextRequest) {
                 }
             }
         );
+
+        if (dispatchKey) {
+            await recordDispatchTrackingEvent(supabase, { dispatchKey, kind: 'email_opened' });
+            return new NextResponse(transparentGif, { headers: { 'Content-Type': 'image/gif', 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' } });
+        }
 
         // Record first open + bump engagement score for the latest contact row.
         const nowIso = new Date().toISOString();

@@ -9,6 +9,12 @@ import { normalizeConnectedEmailProvider } from '@/lib/email-provider';
 import { getEffectiveDailyQuotaLimits, reserveOutboundContactQuota } from '@/lib/server/daily-quota-store';
 import { prepareOutboundEmail, stripHtmlToText, validateOutboundEmail } from '@/lib/email-outbound';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
+
+function toOneClickUnsubscribeUrl(value: string) {
+    const parsed = new URL(value);
+    parsed.pathname = '/api/tracking/unsubscribe';
+    return parsed.toString();
+}
 import {
     assertCanonicalEmailSendCompatibilityV1,
     createLegacyReadyEmailDraftV1,
@@ -22,7 +28,7 @@ import {
     OutboundPreProviderDeferredError,
 } from '@/lib/server/outbound-dispatch';
 import { ensureMessagingDraftV1, getCurrentMessagingDraftVersionV1 } from '@/lib/server/messaging-drafts';
-import { resolveCampaignReplyTarget, ReplyTargetError } from '@/lib/server/reply-target';
+import { resolveCampaignReplyTarget, resolveContactedReplyTarget, ReplyTargetError } from '@/lib/server/reply-target';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 
 export const dynamic = 'force-dynamic';
@@ -41,8 +47,8 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Reply targets must be derived from canonical campaign history' }, { status: 400 });
         }
         const deliveryMode = body.deliveryMode === undefined ? 'new_message' : body.deliveryMode;
-        if (!['new_message', 'reply_first', 'reply_previous'].includes(deliveryMode)) {
-            return NextResponse.json({ error: 'deliveryMode must be new_message, reply_first or reply_previous' }, { status: 400 });
+        if (!['new_message', 'reply_first', 'reply_previous', 'reply_contact'].includes(deliveryMode)) {
+            return NextResponse.json({ error: 'deliveryMode must be new_message, reply_first, reply_previous or reply_contact' }, { status: 400 });
         }
         const {
             provider: rawProvider,
@@ -58,7 +64,9 @@ export async function POST(req: NextRequest) {
             idempotencyKey: rawIdempotencyKey,
             requestReceipts,
             tracking,
+            contactedId: rawContactedId,
         } = body;
+        const contactedId = String(rawContactedId || '').trim();
         const provider = normalizeConnectedEmailProvider(rawProvider);
         const nativeDraftId = String(requestedDraftId || '').trim();
         const nativeVersionId = String(requestedVersionId || '').trim();
@@ -77,7 +85,7 @@ export async function POST(req: NextRequest) {
         // branch below remains only for isolated test fixtures, not runtime.
         const allowLegacyFixtureSend = process.env.NODE_ENV === 'test'
             && req.headers.get('x-anton-legacy-fixture') === '1';
-        if (!isCanonicalDraftSend && !allowLegacyFixtureSend) {
+        if (!isCanonicalDraftSend && deliveryMode !== 'reply_contact' && !allowLegacyFixtureSend) {
             return NextResponse.json({
                 error: 'APPROVED_DRAFT_REQUIRED',
                 message: 'Selecciona un borrador aprobado antes de enviar. El contenido del navegador no se puede enviar directamente.',
@@ -92,6 +100,9 @@ export async function POST(req: NextRequest) {
         }
         if (!isCanonicalDraftSend && (!to || !subject || !htmlBody)) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+        }
+        if (deliveryMode === 'reply_contact' && (!contactedId || contactedId.length > 200 || !to || !subject || !htmlBody)) {
+            return NextResponse.json({ error: 'contactedId and reviewed reply content are required' }, { status: 400 });
         }
 
         if (!provider) {
@@ -118,6 +129,38 @@ export async function POST(req: NextRequest) {
         }
         const orgId = member.organization_id;
         console.log('[providers/send] User:', user.id, 'OrgId:', orgId);
+
+        if (deliveryMode === 'reply_contact') {
+            if (isCanonicalDraftSend || typeof textBody !== 'string' || !textBody.trim() || textBody.length > 12000
+                || typeof subject !== 'string' || subject.length > 998 || /[\r\n]/.test(subject)
+                || typeof rawIdempotencyKey !== 'string' || !/^[\w-]{16,100}$/.test(rawIdempotencyKey)) {
+                return NextResponse.json({ error: 'Revisa el texto y la identidad de la respuesta.' }, { status: 400 });
+            }
+            // Reading the existing receipt precedes pending-response checks and
+            // token refresh. A lost HTTP response must never create a second send.
+            const replay = await getSupabaseAdminClient().from('outbound_dispatches').select('id,status,idempotency_key,provider_message_id,metadata,error_code,error_message')
+                .eq('organization_id', orgId).eq('user_id', user.id).eq('idempotency_key', rawIdempotencyKey).maybeSingle();
+            if (replay.error) return NextResponse.json({ error: 'No pudimos comprobar el envío anterior.' }, { status: 503 });
+            if (replay.data) {
+                if (replay.data.metadata?.recipient?.leadRef !== `contacted:${contactedId}`) return NextResponse.json({ error: 'La clave pertenece a otra conversación.' }, { status: 409 });
+                return NextResponse.json({ success: replay.data.status === 'sent', status: replay.data.status, receipt: { dispatchId: replay.data.id, status: replay.data.status, replayed: true, providerMessageId: replay.data.provider_message_id }, message: replay.data.error_message }, { headers: { 'Cache-Control': 'no-store' } });
+            }
+            const { data: contacted, error: contactedError } = await getSupabaseAdminClient().from('contacted_leads')
+                .select('id,user_id,organization_id,email,provider,status,message_id,thread_id,conversation_id,sent_at,replied_at,reply_intent,conversation_resolved_at,conversation_outbound_at')
+                .eq('id', contactedId).eq('organization_id', orgId).eq('user_id', user.id).maybeSingle();
+            if (contactedError) return NextResponse.json({ error: 'Could not verify this conversation before sending.' }, { status: 503 });
+            const expectedProvider = provider === 'google' ? 'gmail' : 'outlook';
+            const replyTime = Date.parse(contacted?.replied_at || '');
+            const lastHandled = Math.max(Date.parse(contacted?.conversation_resolved_at || '') || 0, Date.parse(contacted?.conversation_outbound_at || '') || 0);
+            if (!contacted || !contacted.sent_at || ['failed', 'scheduled'].includes(String(contacted.status || ''))
+                || !Number.isFinite(replyTime) || replyTime <= lastHandled
+                || ['negative', 'unsubscribe', 'delivery_failure', 'auto_reply'].includes(String(contacted.reply_intent || ''))
+                || String(contacted.email || '').trim().toLowerCase() !== String(to || '').trim().toLowerCase()
+                || contacted.provider !== expectedProvider || !contacted.message_id
+                || (expectedProvider === 'gmail' ? !contacted.thread_id : !contacted.conversation_id)) {
+                return NextResponse.json({ error: 'No pudimos verificar el mensaje original de esta conversación.' }, { status: 409 });
+            }
+        }
 
         const requestedIdempotencyKey = String(rawIdempotencyKey || '').trim();
         if (!requestedIdempotencyKey) {
@@ -190,10 +233,10 @@ export async function POST(req: NextRequest) {
                 to: String(to).trim(),
                 subject: String(subject).trim(),
                 text: textBody === undefined || textBody === null ? null : String(textBody),
-                html: htmlBody === undefined || htmlBody === null ? null : String(htmlBody),
+                html: deliveryMode === 'reply_contact' ? null : htmlBody === undefined || htmlBody === null ? null : String(htmlBody),
             };
             canonicalResearchSnapshotId = requestedResearchSnapshotId;
-            recipientLeadRef = String(leadId || '').trim() || null;
+            recipientLeadRef = deliveryMode === 'reply_contact' ? `contacted:${contactedId}` : String(leadId || '').trim() || null;
         }
 
         if (!delivery) {
@@ -202,6 +245,11 @@ export async function POST(req: NextRequest) {
         if (provider === 'google' && shouldRequestReceipts) {
             return NextResponse.json({ error: 'Receipt requests are not supported for Gmail' }, { status: 400 });
         }
+        const trackingOpen = tracking && typeof tracking === 'object' ? tracking.open : undefined;
+        const trackingClicks = tracking && typeof tracking === 'object' ? tracking.clicks : undefined;
+        if (trackingOpen !== undefined && typeof trackingOpen !== 'boolean') return NextResponse.json({ error: 'tracking.open must be a boolean' }, { status: 400 });
+        if (trackingClicks !== undefined && typeof trackingClicks !== 'boolean') return NextResponse.json({ error: 'tracking.clicks must be a boolean' }, { status: 400 });
+        const trackEngagement = trackingOpen === true || trackingClicks === true;
         if (
             provider === 'google'
             && delivery.text !== null
@@ -255,6 +303,7 @@ export async function POST(req: NextRequest) {
                 .maybeSingle();
 
             console.log('[providers/send] Domain check result:', { blockedDomain, domainError });
+            if (domainError) return NextResponse.json({ error: 'No pudimos verificar las restricciones del dominio.' }, { status: 503 });
 
             if (blockedDomain) {
                 console.warn(`Blocked domain attempt to ${delivery.to} (Domain: ${domain}, User: ${user.id}, Org: ${orgId})`);
@@ -295,8 +344,8 @@ export async function POST(req: NextRequest) {
                 leadRef: recipientLeadRef,
                 to: delivery.to,
                 subject: delivery.subject,
-                text: String(prepared.text || '').trim() || null,
-                html: String(prepared.html).trim(),
+                text: deliveryMode === 'reply_contact' ? delivery.text : String(prepared.text || '').trim() || null,
+                html: deliveryMode === 'reply_contact' ? null : String(prepared.html).trim(),
                 ...(shouldRequestReceipts ? { deliveryOptions: { requestReceipts: true } } : {}),
             });
             await ensureMessagingDraftV1(draft);
@@ -353,7 +402,9 @@ export async function POST(req: NextRequest) {
                     let replyTarget;
                     try {
                         replyTarget = deliveryMode === 'new_message' ? null
-                            : await resolveCampaignReplyTarget(getSupabaseAdminClient(), sendDraft, dispatchProvider, deliveryMode);
+                            : deliveryMode === 'reply_contact'
+                                ? await resolveContactedReplyTarget(getSupabaseAdminClient(), { contactedId, organizationId: orgId, userId: user.id, provider: dispatchProvider, recipient: delivery.to })
+                                : await resolveCampaignReplyTarget(getSupabaseAdminClient(), sendDraft, dispatchProvider, deliveryMode);
                     } catch (error) {
                         if (error instanceof ReplyTargetError) {
                             return { outcome: 'rejected' as const, code: 'reply_target_unavailable', message: error.message, response: { providerInvoked: false } };
@@ -384,12 +435,16 @@ export async function POST(req: NextRequest) {
                         };
                     }
 
+                    if (await isEmailSuppressedForScope(delivery.to, { userId: user.id, organizationId: orgId })) {
+                        return { outcome: 'rejected' as const, code: 'recipient_unsubscribed', message: 'El destinatario solicitó la baja.', response: { providerInvoked: false } };
+                    }
                     const providerReceipt = provider === 'google'
-                        ? await sendGmail(accessToken, delivery.to, delivery.subject, prepared.html, { textBody: prepared.text, unsubscribeUrl, idempotencyKey, ...(replyTarget ? { replyTarget } : {}) })
+                        ? await sendGmail(accessToken, delivery.to, delivery.subject, prepared.html, { textBody: prepared.text, unsubscribeUrl, oneClickUnsubscribeUrl: toOneClickUnsubscribeUrl(unsubscribeUrl), idempotencyKey, ...(trackEngagement ? { trackingDispatchId: dispatchId } : {}), ...(replyTarget ? { replyTarget } : {}) })
                         : await sendOutlook(accessToken, delivery.to, delivery.subject, prepared.html, {
                             textBody: prepared.text,
                             unsubscribeUrl,
                             idempotencyKey,
+                            ...(trackEngagement ? { trackingDispatchId: dispatchId } : {}),
                             requestReceipts: sendDraft.content.deliveryOptions?.requestReceipts === true,
                             ...(replyTarget ? { replyTarget } : {}),
                         });
@@ -420,6 +475,11 @@ export async function POST(req: NextRequest) {
             retry: dispatchResult.retry,
         };
         const success = dispatchResult.status === 'sent';
+        if (success && deliveryMode === 'reply_contact') {
+            const update = await getSupabaseAdminClient().from('contacted_leads').update({ conversation_outbound_at: dispatch.completedAt || new Date().toISOString(), last_update_at: new Date().toISOString() })
+                .eq('id', contactedId).eq('organization_id', orgId).eq('user_id', user.id);
+            if (update.error) console.error('[providers/send] replied conversation projection failed', update.error);
+        }
         const status = dispatchResult.status === 'sent'
             ? 200
             : dispatchResult.status === 'pending' || dispatchResult.status === 'sending'

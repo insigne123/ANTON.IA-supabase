@@ -21,6 +21,7 @@ import { hashCoworkCodeProposal } from '@/lib/cowork/code-proposal';
 import { getBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { resolveCoworkSender } from './sender';
 import { coworkAgentInstructions } from '@/lib/cowork/agent-instructions';
+import { coworkDecisionContext } from '@/lib/cowork/decision-context';
 import { reserveCoworkModelCall } from './model-budget';
 import { recordCoworkModelUsage } from './model-usage';
 import { stageCoworkProfileUpdate } from './profile-update';
@@ -31,6 +32,10 @@ import { stageCoworkCampaignPrepare } from './campaign-prepare';
 import { stageCoworkCrmAssign } from './crm-assign';
 import { stageCoworkExceptionResolve } from './exception-resolve';
 import { stageCoworkMissionControl } from './mission-control';
+import { stageCoworkMessageContextUpdate } from './message-context';
+import { stageCoworkEnrichBatch } from './enrich-batch';
+import { stageCoworkSendBatch } from './send-batch';
+import { stageCoworkLinkedinInvite, stageCoworkLinkedinMessage } from './linkedin-jobs';
 import { coworkSpecialistQueueEnabled, CoworkSpecialistsDeferred, enqueueCoworkSpecialists,
   loadCoworkSpecialistResume, processCoworkSpecialistQueue } from './specialist-queue';
 
@@ -146,14 +151,9 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
               ? ' Cada tarea puede incluir read {action,input}: analyst permite metrics.overview/crm.record; researcher research.get_existing/leads.get; verifier privacy.contactability/crm.collaboration. Solo IDs observados en su evidencia. Cada read consume una de las tres lecturas totales del turno, junto con las ya ejecutadas. No permite escrituras ni proveedores externos.'
               : ' Solo analizan datos observados; no asignes read porque las herramientas están deshabilitadas.')
             : 'specialists.review está deshabilitado.'}`,
-          prompt: JSON.stringify({ history, request: run.message, observations, mustAnswer, executionPolicy,
-            parallelReadCapability: instructions.parallelReadCapability,
-            researchCapability: instructions.researchCapability,
-            externalSearchCapability: instructions.externalSearchCapability,
-            extendedReadCapability: instructions.extendedReadCapability,
-            additionalCapability: instructions.additionalCapability,
-            effectCapability: instructions.effectCapability,
-            threadBudgetCapability: instructions.threadBudgetCapability }),
+          prompt: JSON.stringify(coworkDecisionContext(instructions, {
+            history, request: run.message, observations, mustAnswer, executionPolicy,
+          })),
           openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
           provider: 'openai',
           maxAttempts: 1, timeoutMs: 30000, maxOutputTokens: 6000,
@@ -292,6 +292,40 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
           const staged = await stageCoworkMissionControl(scope, run.id, proposal.missionControl);
           targetId = `mission:${staged.hash}`;
           label = proposal.missionControl.targetStatus === 'paused' ? 'Pausar misión (omite tareas pendientes)' : 'Reactivar misión';
+        }
+        if (proposal.kind === 'message_context_update') {
+          if (!proposal.messageContext) throw new Error('Missing message context patch');
+          const staged = await stageCoworkMessageContextUpdate(scope, run.id, proposal.messageContext);
+          targetId = `msgctx:${staged.hash}`;
+          const names: Record<string, string> = { voice_examples: 'ejemplos de voz', prohibited_terms: 'términos prohibidos',
+            required_terms: 'términos obligatorios', approved_claims: 'afirmaciones aprobadas', trial_offer: 'oferta de prueba',
+            default_style_profile_id: 'estilo por defecto', role_cta: 'pedidos por rol', vertical_notes: 'notas por sector' };
+          label = `Actualizar contexto de redacción (${staged.changed.map(key => names[key] || key).join(', ')})`.slice(0, 280);
+        }
+        if (proposal.kind === 'enrich_batch') {
+          if (!proposal.enrichBatch) throw new Error('Missing batch targets');
+          const staged = await stageCoworkEnrichBatch(scope, run.id, proposal.enrichBatch);
+          targetId = `enrichbatch:${staged.hash}`;
+          label = `Enriquecer ${proposal.enrichBatch.length} contactos (máx. ${staged.costEstimate} crédito${staged.costEstimate === 1 ? '' : 's'})`;
+        }
+        if (proposal.kind === 'campaign_schedule_batch') {
+          if (!proposal.scheduleBatch) throw new Error('Missing batch schedule');
+          const staged = await stageCoworkSendBatch(scope, run.id, proposal.scheduleBatch);
+          targetId = `sendbatch:${staged.hash}`;
+          label = `Programar lote · ${staged.recipients} destinatarios · ${staged.touches} toques · ${staged.spacingMinutes} min entre envíos · desde ${staged.startDay}`;
+        }
+        if (proposal.kind === 'linkedin_invite') {
+          if (!proposal.linkedinJob) throw new Error('Missing invite target');
+          const staged = await stageCoworkLinkedinInvite(scope, run.id, { leadId: proposal.linkedinJob.leadId });
+          targetId = `linkedinjob:${staged.hash}`;
+          label = `Invitar en LinkedIn (sin nota) · ${staged.canonicalUrl}`;
+        }
+        if (proposal.kind === 'linkedin_message') {
+          if (!proposal.linkedinJob?.message) throw new Error('Missing message target and text');
+          const staged = await stageCoworkLinkedinMessage(scope, run.id,
+            { leadId: proposal.linkedinJob.leadId, message: proposal.linkedinJob.message });
+          targetId = `linkedinjob:${staged.hash}`;
+          label = `Mensaje LinkedIn en cola · ${staged.canonicalUrl} · se ejecuta en tu navegador`;
         }
         const proposed = await client.rpc('cowork_propose_effect', {
           p_run_id: run.id, p_token: run.lease_token, p_kind: proposal.kind,

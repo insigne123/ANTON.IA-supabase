@@ -41,12 +41,12 @@ export function buildUnsubscribeFooterHtml(url: string) {
   return `
 <br/><br/>
 <div style="font-family:sans-serif;font-size:12px;color:#6b7280;border-top:1px solid #e5e7eb;padding-top:10px;margin-top:20px;display:block;line-height:1.5;">
-  <p style="margin:0;">Si no deseas recibir más correos de nosotros, puedes <a href="${url}" target="_blank" style="color:#2563eb;text-decoration:underline;">darte de baja aquí</a>.</p>
+  <p style="margin:0;">Si prefieres no recibir más correos comerciales de nosotros, responde a este mensaje indicándolo y dejaremos de contactarte por esta vía. También puedes <a href="${escapeHtml(url)}" target="_blank" style="color:#2563eb;text-decoration:underline;">darte de baja aquí</a>.</p>
 </div>`;
 }
 
 export function buildUnsubscribeFooterText(url: string) {
-  return `\n\n---\nSi no deseas recibir más correos de nosotros, puedes darte de baja aquí: ${url}`;
+  return `\n\n---\nSi prefieres no recibir más correos comerciales de nosotros, responde a este mensaje indicándolo y dejaremos de contactarte por esta vía. También puedes darte de baja aquí: ${url}`;
 }
 
 function normalizeOutboundText(value: string) {
@@ -89,13 +89,17 @@ export function prepareOutboundEmail(input: {
   }
 
   if (unsubscribeUrl) {
-    if (!hasUnsubscribeContent(html)) {
+    if (!html.includes(escapeHtml(unsubscribeUrl))) {
       const footer = buildUnsubscribeFooterHtml(unsubscribeUrl);
       if (/<\/body>/i.test(html)) html = html.replace(/<\/body>/i, `${footer}</body>`);
       else html += footer;
+    } else if (!html.includes('responde a este mensaje indicándolo')) {
+      html += '<p style="font-family:sans-serif;font-size:12px;color:#6b7280;">Si prefieres no recibir más correos comerciales de nosotros, responde a este mensaje indicándolo y dejaremos de contactarte por esta vía.</p>';
     }
-    if (!hasUnsubscribeContent(text)) {
+    if (!text.includes(unsubscribeUrl)) {
       text += buildUnsubscribeFooterText(unsubscribeUrl);
+    } else if (!text.includes('responde a este mensaje indicándolo')) {
+      text += '\n\nSi prefieres no recibir más correos comerciales de nosotros, responde a este mensaje indicándolo y dejaremos de contactarte por esta vía.';
     }
   } else {
     warnings.push('No unsubscribe URL provided.');

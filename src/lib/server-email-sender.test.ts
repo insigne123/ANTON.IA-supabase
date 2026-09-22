@@ -6,7 +6,7 @@ import { prepareOutboundEmail } from './email-outbound';
 import { encodeHeaderRFC2047 } from './email-header-utils';
 
 const target = { provider: 'gmail' as const, parentDispatchId: 'dispatch', messageId: 'parent', threadId: 'thread' };
-const options = { unsubscribeUrl: 'https://example.test/unsubscribe?token=test', idempotencyKey: 'dispatch-key', replyTarget: target };
+const options = { unsubscribeUrl: 'https://example.test/unsubscribe?token=test', idempotencyKey: 'dispatch-key', trackingDispatchId: 'dispatch-key', replyTarget: target };
 const parent = () => ({ id: 'parent', threadId: 'thread', labelIds: ['SENT'], payload: { headers: [
   { name: 'To', value: 'Ada <ada@example.com>' }, { name: 'Subject', value: 'Hello' },
   { name: 'Message-ID', value: '<parent@example.com>' }, { name: 'References', value: '<root@example.com>' },
@@ -18,7 +18,7 @@ test('Gmail verified reply sends MIME reply headers, approved subject and body w
     requests.push({ url, init });
     return Response.json(init?.method === 'POST' ? { id: 'sent', threadId: 'thread' } : parent());
   });
-  const html = '<p>Following up.</p>';
+  const html = '<p>Following up.</p><a href="https://example.test/destination">Destino</a>';
   await sendGmail('fake-token', 'ada@example.com', 'Re: Hello', html, options);
   assert.equal(requests.length, 2);
   const body = JSON.parse(requests[1].init.body);
@@ -27,8 +27,11 @@ test('Gmail verified reply sends MIME reply headers, approved subject and body w
   assert.match(mime, /In-Reply-To: <parent@example.com>\r\n/);
   assert.match(mime, /References: <root@example.com> <parent@example.com>\r\n/);
   assert.match(mime, /X-ANTON-Dispatch: dispatch-key/);
+  assert.match(mime, /List-Unsubscribe-Post: List-Unsubscribe=One-Click/);
+  assert.match(mime, /\/api\/tracking\/open\?dispatch=dispatch-key/);
+  assert.match(mime, /\/api\/tracking\/click\?dispatch=dispatch-key&amp;url=https%3A%2F%2Fexample\.test%2Fdestination/);
   assert.ok(mime.includes(`Subject: ${encodeHeaderRFC2047('Re: Hello')}\r\n`));
-  assert.equal(mime.split('\r\n\r\n')[1], prepareOutboundEmail({ html, unsubscribeUrl: options.unsubscribeUrl }).html);
+  assert.match(mime.split('\r\n\r\n')[1], /Following up/);
 });
 
 test('Gmail unverified parents and mismatched subjects fail definitively without a new-mail fallback', async (t) => {
@@ -78,7 +81,36 @@ test('Outlook explicitly requested replies fail before any provider call or draf
   t.mock.method(globalThis, 'fetch', async () => { assert.fail('No provider call allowed'); });
   await assert.rejects(sendOutlook('fake', 'ada@example.com', 'Hello', '<p>Follow up</p>', options),
     (error: any) => error instanceof ConfirmedProviderRejectionError
-      && error.message === 'OUTLOOK_NATIVE_REPLY_UNSUPPORTED' && error.response?.providerInvoked === false);
+      && error.message === 'OUTLOOK_REPLY_PROVIDER_MISMATCH' && error.response?.providerInvoked === false);
+});
+
+test('Outlook reply is built from the verified sent parent, sent in its conversation and correlated', async (t) => {
+  const calls: Array<{ url: string; method: string }> = [];
+  let patchedBody: any;
+  t.mock.method(globalThis, 'fetch', async (rawUrl: any, init: any) => {
+    const url = String(rawUrl); const method = init?.method || 'GET'; calls.push({ url, method });
+    if (url.includes('/me/messages/parent?')) return Response.json({ id: 'parent', conversationId: 'conversation', subject: 'Hello', from: { emailAddress: { address: 'owner@example.com' } }, toRecipients: [{ emailAddress: { address: 'ada@example.com' } }], isDraft: false });
+    if (url.endsWith('/me?$select=mail,userPrincipalName')) return Response.json({ mail: 'owner@example.com' });
+    if (url.endsWith('/parent/createReply')) return Response.json({ id: 'reply-draft', conversationId: 'conversation' });
+    if (url.endsWith('/messages/reply-draft') && method === 'PATCH') {
+      const body = JSON.parse(init.body);
+      patchedBody = body;
+      assert.deepEqual(body.toRecipients, [{ emailAddress: { address: 'ada@example.com' } }]);
+      assert.deepEqual(body.ccRecipients, []);
+      assert.deepEqual(body.bccRecipients, []);
+      assert.match(body.body.content, /responde a este mensaje indicándolo/i);
+      assert.ok(body.internetMessageHeaders.some((header: any) => header.name === 'X-ANTON-Dispatch' && header.value === 'dispatch-key'));
+      return Response.json({ id: 'reply-draft' });
+    }
+    if (url.includes('/messages/reply-draft?$select=')) return Response.json({ id: 'reply-draft', isDraft: true, conversationId: 'conversation', ...patchedBody });
+    if (url.endsWith('/messages/reply-draft/send')) return new Response(null, { status: 202 });
+    if (url.includes("mailFolders('SentItems')/messages?")) return Response.json({ value: [{ id: 'sent-reply', subject: 'RE: Hello', conversationId: 'conversation', toRecipients: [{ emailAddress: { address: 'ada@example.com' } }], internetMessageHeaders: [{ name: 'X-ANTON-Dispatch', value: 'dispatch-key' }] }] });
+    throw new Error(`Unexpected Graph request ${method} ${url}`);
+  });
+  const result = await sendOutlook('fake', 'ada@example.com', 'Re: Hello', '<p>Gracias por responder</p>', { unsubscribeUrl: options.unsubscribeUrl, idempotencyKey: 'dispatch-key', replyTarget: { provider: 'outlook', contactedId: 'contact', messageId: 'parent', conversationId: 'conversation' } });
+  assert.equal(result.id, 'sent-reply');
+  assert.ok(calls.some(call => call.url.endsWith('/parent/createReply')));
+  assert.ok(calls.some(call => call.url.endsWith('/messages/reply-draft/send')));
 });
 
 test('Outlook new-message mode preserves approved content, receipts and sent correlation', async (t) => {
@@ -91,7 +123,7 @@ test('Outlook new-message mode preserves approved content, receipts and sent cor
       const payload = JSON.parse(init.body);
       assert.equal(payload.saveToSentItems, true);
       assert.equal(payload.message.subject, 'A different approved subject');
-      assert.equal(payload.message.body.content, prepareOutboundEmail({ html, unsubscribeUrl: options.unsubscribeUrl }).html);
+      assert.ok(payload.message.body.content.startsWith(prepareOutboundEmail({ html, unsubscribeUrl: options.unsubscribeUrl }).html));
       assert.deepEqual(payload.message.toRecipients, [{ emailAddress: { address: 'ada@example.com' } }]);
       assert.equal(payload.message.isDeliveryReceiptRequested, true);
       assert.equal(payload.message.isReadReceiptRequested, true);
@@ -107,15 +139,40 @@ test('Outlook new-message mode preserves approved content, receipts and sent cor
   assert.equal(posts, 1);
 });
 
+test('Outlook refuses a reply draft addressed to the sender or containing extra recipients', async (t) => {
+  for (const recipients of [
+    { toRecipients: [{ emailAddress: { address: 'owner@example.com' } }], ccRecipients: [], bccRecipients: [] },
+    { toRecipients: [{ emailAddress: { address: 'ada@example.com' } }], ccRecipients: [{ emailAddress: { address: 'other@example.com' } }], bccRecipients: [] },
+  ]) {
+    let patched: any;
+    const mock = t.mock.method(globalThis, 'fetch', async (input: any, init: any) => {
+      const url = String(input);
+      assert.ok(!url.endsWith('/send'), 'Never send an unverified draft');
+      if (url.includes('/messages/parent?')) return Response.json({ id: 'parent', conversationId: 'thread', subject: 'Hello', from: { emailAddress: { address: 'owner@example.com' } }, toRecipients: [{ emailAddress: { address: 'ada@example.com' } }] });
+      if (url.includes('/me?$select=')) return Response.json({ mail: 'owner@example.com' });
+      if (url.endsWith('/createReply')) return Response.json({ id: 'draft', conversationId: 'thread' });
+      if (init?.method === 'PATCH') { patched = JSON.parse(init.body); return Response.json({ id: 'draft' }); }
+      return Response.json({ ...patched, id: 'draft', isDraft: true, conversationId: 'thread', ...recipients });
+    });
+    await assert.rejects(sendOutlook('fake', 'ada@example.com', 'Re: Hello', '<p>Respuesta</p>', { unsubscribeUrl: options.unsubscribeUrl, idempotencyKey: 'key', replyTarget: { provider: 'outlook', contactedId: 'contact', messageId: 'parent', conversationId: 'thread' } }), /recipient, content or correlation/);
+    mock.mock.restore();
+  }
+});
+
 test('Gmail first contact keeps its single-call new-message path', async (t) => {
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async (_url: any, init: any) => {
     calls++;
     const body = JSON.parse(init.body);
     assert.equal(body.threadId, undefined);
-    assert.doesNotMatch(Buffer.from(body.raw, 'base64url').toString(), /In-Reply-To:|References:/);
+    const raw = Buffer.from(body.raw, 'base64url').toString();
+    assert.doesNotMatch(raw, /In-Reply-To:|References:/);
+    assert.match(raw, /List-Unsubscribe: <https:\/\/example\.test\/api\/tracking\/unsubscribe\?token=test>/i);
+    assert.match(raw, /List-Unsubscribe-Post: List-Unsubscribe=One-Click/i);
+    assert.match(raw, /responde a este mensaje indicándolo/i);
+    assert.match(raw, /\/api\/tracking\/open\?dispatch=tracked-dispatch-01/);
     return Response.json({ id: 'sent', threadId: 'new-thread' });
   });
-  await sendGmail('fake', 'ada@example.com', 'Hello', '<p>First contact</p>', { unsubscribeUrl: options.unsubscribeUrl });
+  await sendGmail('fake', 'ada@example.com', 'Hello', '<p><a href="https://example.test/offer">Ver propuesta</a></p>', { unsubscribeUrl: options.unsubscribeUrl, idempotencyKey: 'tracked-dispatch-01', trackingDispatchId: 'tracked-dispatch-01' });
   assert.equal(calls, 1);
 });

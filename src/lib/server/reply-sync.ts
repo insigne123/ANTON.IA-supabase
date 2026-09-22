@@ -9,6 +9,8 @@ import { createAntoniaException } from '@/lib/server/antonia-exceptions';
 import { syncLeadAutopilotToCrm } from '@/lib/server/crm-autopilot';
 import { stripHtmlToText } from '@/lib/email-outbound';
 import { ingestInboundReply } from '@/lib/server/inbound-reply-ingestion';
+import { isExplicitOptOut } from '@/lib/reply-text';
+import { conversationAdvice } from '@/lib/conversation-advice';
 
 export { ingestInboundReply } from '@/lib/server/inbound-reply-ingestion';
 export type { InboundReplyIngestionResult } from '@/lib/server/inbound-reply-ingestion';
@@ -33,6 +35,7 @@ type ContactedRow = {
   internet_message_id?: string | null;
   lifecycle_state?: string | null;
   reply_intent?: string | null;
+  replied_at?: string | null;
 };
 
 type InboundReply = {
@@ -124,7 +127,7 @@ function gmailMessageToReply(message: any): InboundReply {
   };
 }
 
-function pickInboundCandidate(messages: InboundReply[], row: ContactedRow, myEmail?: string | null) {
+export function inboundCandidates(messages: InboundReply[], row: ContactedRow, myEmail?: string | null) {
   const leadEmail = normalizeEmail(row.email);
   const senderEmail = normalizeEmail(myEmail);
   const sentAtMs = row.sent_at ? Date.parse(row.sent_at) : 0;
@@ -144,7 +147,69 @@ function pickInboundCandidate(messages: InboundReply[], row: ContactedRow, myEma
       if (fromEmail !== leadEmail && !(isSystemSender(fromEmail) && detectDeliveryFailure({ subject: message.subject, from: message.from, text: message.text, html: message.html }))) return false;
       return true;
     })
-    .sort((a, b) => Date.parse(b.receivedAt) - Date.parse(a.receivedAt))[0] || null;
+    .sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt));
+}
+
+function pickInboundCandidate(messages: InboundReply[], row: ContactedRow, myEmail?: string | null) {
+  return inboundCandidates(messages, row, myEmail).at(-1) || null;
+}
+
+export type MailboxMessage = InboundReply & { to: string[]; direction: 'inbound' | 'outbound'; source: 'provider' };
+
+export async function mailboxAccessToken(supabase: any, userId: string, provider: string): Promise<string | null> {
+  const token = await tokenService.getToken(supabase, userId, provider === 'gmail' ? 'google' : 'outlook');
+  if (!token?.refresh_token) return null;
+  const refreshed = provider === 'gmail'
+    ? await refreshGoogleToken(token.refresh_token, process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!, process.env.GOOGLE_CLIENT_SECRET!)
+    : await refreshMicrosoftToken(token.refresh_token, process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID!, process.env.AZURE_AD_CLIENT_SECRET!, process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'common');
+  return refreshed.access_token || null;
+}
+
+/** Read only the verified thread. Bounded Graph pagination never claims full coverage. */
+export async function readMailboxConversation(accessToken: string, row: ContactedRow): Promise<{ messages: MailboxMessage[]; complete: boolean }> {
+  let messages: MailboxMessage[] = [];
+  let complete = true;
+  if (row.provider === 'gmail') {
+    let threadId = row.thread_id;
+    if (!threadId && row.message_id) threadId = (await fetchGmailMessage(accessToken, row.message_id)).threadId;
+    const raw = threadId ? await fetchGmailThread(accessToken, threadId) : await searchGmailReplies(accessToken, row);
+    complete = Boolean(threadId);
+    messages = raw.filter((message: any) => !message.labelIds?.includes('DRAFT')).map((message: any) => ({ ...gmailMessageToReply(message), to: getHeader(message.payload?.headers, 'To').split(',').map(extractEmailAddress), direction: message.labelIds?.includes('SENT') ? 'outbound' : 'inbound', source: 'provider' }));
+    if (!threadId) {
+      const verified = new Set(inboundCandidates(messages, row).map(m => m.id));
+      messages = messages.filter(m => verified.has(m.id));
+    }
+  } else if (row.provider === 'outlook') {
+    let conversationId = row.conversation_id;
+    if (!conversationId && row.message_id) {
+      const response = await graphFetch(accessToken, `/me/messages/${encodeURIComponent(row.message_id)}?$select=conversationId`);
+      if (!response.ok) throw new Error('No se pudo consultar el mensaje original.');
+      conversationId = (await response.json()).conversationId;
+    }
+    if (!conversationId) return { messages: [], complete: false };
+    const profileResponse = await graphFetch(accessToken, '/me?$select=mail,userPrincipalName');
+    if (!profileResponse.ok) throw new Error('No se pudo verificar el remitente.');
+    const profile = await profileResponse.json();
+    const ownEmails = [profile.mail, profile.userPrincipalName].filter(Boolean).map(normalizeEmail);
+    const params = new URLSearchParams({ '$filter': `conversationId eq '${escapeODataLiteral(conversationId)}'`, '$top': '100', '$select': 'id,subject,conversationId,internetMessageId,internetMessageHeaders,from,toRecipients,receivedDateTime,sentDateTime,bodyPreview,body,isDraft' });
+    let next: string | null = `/me/messages?${params}`;
+    for (let page = 0; next && page < 10; page++) {
+      const response = await graphFetch(accessToken, next);
+      if (!response.ok) throw new Error(`Outlook conversation lookup failed (${response.status})`);
+      const data = await response.json();
+      messages.push(...(data.value || []).filter((message: any) => !message.isDraft).map((message: any): MailboxMessage => {
+        const direction = ownEmails.includes(extractEmailAddress(message.from?.emailAddress?.address)) ? 'outbound' : 'inbound';
+        return { ...outlookMessageToReply(message), receivedAt: direction === 'outbound' ? message.sentDateTime || message.receivedDateTime : message.receivedDateTime, text: message.body?.contentType === 'text' ? message.body.content : stripHtmlToText(message.body?.content || message.bodyPreview || ''), to: (message.toRecipients || []).map((to: any) => extractEmailAddress(to.emailAddress?.address)), direction, source: 'provider' };
+      }));
+      const link = data['@odata.nextLink'];
+      if (link && !String(link).startsWith('https://graph.microsoft.com/v1.0/')) throw new Error('Invalid Graph pagination URL');
+      next = link ? String(link).slice('https://graph.microsoft.com/v1.0'.length) : null;
+    }
+    complete = !next;
+  }
+  // Never expose unrelated participants simply because a provider grouped a thread.
+  const email = normalizeEmail(row.email);
+  return { complete, messages: messages.filter(message => Number.isFinite(Date.parse(message.receivedAt)) && (extractEmailAddress(message.from) === email || (message.direction === 'outbound' && message.to.includes(email)) || (isSystemSender(message.from) && detectDeliveryFailure({ subject: message.subject, from: message.from, text: message.text, html: message.html })))).sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt)) };
 }
 
 async function fetchGmailMessage(accessToken: string, id: string) {
@@ -336,6 +401,10 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
   });
 
   if (!ingestion.inserted) return false;
+  if (row.organization_id && row.user_id) {
+    const advice = await supabase.rpc('update_contacted_work', { p_org: row.organization_id, p_user: row.user_id, p_contact: row.id, p_kind: 'advice', p_value: conversationAdvice(classification, reply.id) });
+    if (advice.error) console.warn('[reply-sync] next action persistence failed', advice.error.code);
+  }
 
   if (!failure && row.organization_id && (classification.intent === 'meeting_request' || classification.intent === 'positive')) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.antonia.ai';
@@ -367,7 +436,7 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
       await syncLeadAutopilotToCrm(supabase, {
         organizationId: row.organization_id,
         leadId: row.lead_id,
-        stage: classification.intent === 'meeting_request' ? 'meeting' : 'engaged',
+        stage: 'engaged',
         notes: summary,
         nextAction: classification.intent === 'meeting_request' ? 'Confirmar reunion y preparar contexto comercial' : 'Responder rapido y proponer siguiente paso',
         nextActionType: classification.intent === 'meeting_request' ? 'meeting_handoff' : 'hot_reply_followup',
@@ -392,7 +461,7 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
   return true;
 }
 
-export async function syncRepliesForOrganization(supabase: any, input: { organizationId: string; userId?: string | null; limit?: number; cursor?: string | null }): Promise<ReplySyncResult> {
+export async function syncRepliesForOrganization(supabase: any, input: { organizationId: string; userId?: string | null; limit?: number; cursor?: string | null; fairQueue?: boolean; contactedIds?: string[] }): Promise<ReplySyncResult> {
   const limit = Number.isFinite(input.limit) ? Math.min(Math.max(Math.trunc(input.limit!), 1), 500) : 200;
   const result: ReplySyncResult = { scanned: 0, synced: 0, skippedNoToken: 0, errors: [], nextCursor: null };
 
@@ -401,10 +470,11 @@ export async function syncRepliesForOrganization(supabase: any, input: { organiz
     .select('id, user_id, organization_id, mission_id, lead_id, name, email, company, role, subject, sent_at, status, provider, message_id, thread_id, conversation_id, internet_message_id, lifecycle_state, reply_intent, replied_at')
     .eq('organization_id', input.organizationId)
     .in('provider', ['gmail', 'outlook'])
-    .is('replied_at', null)
-    .or('status.is.null,status.not.in.(replied,failed)')
-    .order('id', { ascending: true })
-    .limit(limit + 1);
+    .not('sent_at', 'is', null)
+    .or('status.is.null,status.not.in.(scheduled,failed)');
+  if (input.fairQueue) query = query.order('reply_sync_attempted_at', { ascending: true, nullsFirst: true });
+  query = query.order('id', { ascending: true }).limit(limit + 1);
+  if (input.contactedIds) query = query.in('id', input.contactedIds);
 
   if (input.userId) query = query.eq('user_id', input.userId);
   if (input.cursor) query = query.gt('id', input.cursor);
@@ -413,7 +483,7 @@ export async function syncRepliesForOrganization(supabase: any, input: { organiz
   if (error) throw error;
 
   const rows = (data || []).slice(0, limit) as ContactedRow[];
-  result.nextCursor = (data || []).length > limit ? rows[rows.length - 1].id : null;
+  result.nextCursor = !input.fairQueue && (data || []).length > limit ? rows[rows.length - 1].id : null;
   result.scanned = rows.length;
 
   const tokenCache = new Map<string, string | null>();
@@ -422,38 +492,50 @@ export async function syncRepliesForOrganization(supabase: any, input: { organiz
     const provider = row.provider === 'gmail' ? 'google' : 'outlook';
     const tokenKey = `${row.user_id || ''}:${provider}`;
     try {
+      const attempt = await supabase.from('contacted_leads').update({ reply_sync_attempted_at: new Date().toISOString() }).eq('id', row.id).eq('organization_id', input.organizationId);
+      if (attempt.error) throw attempt.error;
       if (!row.user_id) {
         result.skippedNoToken += 1;
         continue;
       }
 
       if (!tokenCache.has(tokenKey)) {
-        const token = await tokenService.getToken(supabase, row.user_id, provider as 'google' | 'outlook');
-        if (!token?.refresh_token) {
-          tokenCache.set(tokenKey, null);
-        } else if (provider === 'google') {
-          const refreshed = await refreshGoogleToken(token.refresh_token, process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!, process.env.GOOGLE_CLIENT_SECRET!);
-          tokenCache.set(tokenKey, refreshed.access_token || null);
-        } else {
-          const refreshed = await refreshMicrosoftToken(token.refresh_token, process.env.NEXT_PUBLIC_AZURE_AD_CLIENT_ID!, process.env.AZURE_AD_CLIENT_SECRET!, process.env.NEXT_PUBLIC_AZURE_AD_TENANT_ID || 'common');
-          tokenCache.set(tokenKey, refreshed.access_token || null);
-        }
+        tokenCache.set(tokenKey, await mailboxAccessToken(supabase, row.user_id, row.provider || ''));
       }
 
       const accessToken = tokenCache.get(tokenKey);
       if (!accessToken) {
         result.skippedNoToken += 1;
+        await supabase.from('contacted_leads').update({ reply_sync_error: 'connection_required' }).eq('id', row.id).eq('organization_id', input.organizationId);
         continue;
       }
 
-      const reply = row.provider === 'gmail'
-        ? await findGmailReply(accessToken, row)
-        : await findOutlookReply(accessToken, row);
-
-      if (!reply) continue;
-      const inserted = await recordInboundReply(supabase, row, reply);
-      if (inserted) result.synced += 1;
+      const conversation = await readMailboxConversation(accessToken, row);
+      const boundRow = { ...row, thread_id: row.thread_id || conversation.messages.find(m => m.threadId)?.threadId, conversation_id: row.conversation_id || conversation.messages.find(m => m.conversationId)?.conversationId };
+      for (const reply of inboundCandidates(conversation.messages, boundRow)) {
+        if (row.replied_at && Date.parse(reply.receivedAt) <= Date.parse(row.replied_at)) {
+          // Backfill must not replace the latest conversation state. An older
+          // explicit opt-out still needs suppression even if first polling missed it.
+          if (isExplicitOptOut(reply.text || reply.html || '')) {
+            const stop = await supabase.rpc('record_scoped_unsubscribe_v2', { p_email: normalizeEmail(row.email), p_user_id: row.user_id, p_organization_id: input.organizationId, p_reason: 'reply_opt_out_backfill' });
+            if (stop.error) throw stop.error;
+          }
+          continue;
+        }
+        // The ingestion RPC owns idempotency through provider message aliases.
+        const inserted = await recordInboundReply(supabase, row, reply);
+        if (inserted) result.synced += 1;
+      }
+      const outboundAt = conversation.messages.filter(m => m.direction === 'outbound').at(-1)?.receivedAt;
+      const saved = await supabase.from('contacted_leads').update({
+        ...(conversation.complete ? { reply_sync_succeeded_at: new Date().toISOString() } : {}),
+        reply_sync_error: conversation.complete ? null : 'incomplete_thread',
+        ...(outboundAt ? { conversation_outbound_at: outboundAt } : {}),
+      }).eq('id', row.id).eq('organization_id', input.organizationId);
+      if (saved.error) throw saved.error;
+      if (!conversation.complete) result.errors.push({ contactedId: row.id, error: 'incomplete_thread' });
     } catch (err: any) {
+      await supabase.from('contacted_leads').update({ reply_sync_error: 'sync_failed' }).eq('id', row.id).eq('organization_id', input.organizationId);
       result.errors.push({ contactedId: row.id, email: row.email, provider: row.provider, error: err?.message || String(err) });
     }
   }

@@ -46,7 +46,7 @@ async function ensureLinkedinScripts(tabId) {
     const response = await chrome.tabs.sendMessage(tabId, { action: 'PROSPECT_PING' });
     if (response?.ready) return;
   } catch { /* Tabs opened before installation/update have no receiver. */ }
-  await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js', 'prospecting-content.js', 'prospecting-send.js'] });
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js', 'prospecting-content.js', 'prospecting-send.js', 'prospecting-invite.js'] });
   const response = await chrome.tabs.sendMessage(tabId, { action: 'PROSPECT_PING' });
   if (!response?.ready) throw new Error('Recarga LinkedIn para activar la extensión y vuelve a preparar el mensaje.');
 }
@@ -137,6 +137,42 @@ async function prospectHandle(request, sender) {
       await chrome.storage.local.set({ [key]: record });
       try { await syncSend(connection, key, record); return { ...result, synced: true }; }
       catch { return { ...result, synced: false }; }
+    } finally { sendTabs.delete(tab.id); }
+  }
+  // Cowork bridge: claim a queued LinkedIn job, execute it against the verified
+  // profile tab, then report the destination-confirmed result. Uncertain
+  // results are never retried automatically; expiry is enforced server-side.
+  if (request.action === 'PROSPECT_EXECUTE_JOB') {
+    const session = await prospectRequest(connection, { action: 'session' });
+    if (session.userId !== connection.session.userId || session.organizationId !== connection.session.organizationId) throw new Error('La cuenta cambió. Vuelve a conectar.');
+    if (typeof request.jobId !== 'string' || !request.jobId) throw new Error('Selecciona el trabajo de LinkedIn.');
+    const tab = await chrome.tabs.get(request.tabId);
+    if (!tab.url?.startsWith('https://www.linkedin.com/in/')) throw new Error('Abre el perfil en LinkedIn.');
+    if (sendTabs.has(tab.id)) throw new Error('Ya hay una acción en curso en esta pestaña.');
+    const claim = await prospectRequest(connection, { action: 'linkedin-job-claim', organizationId: session.organizationId,
+      userId: session.userId, jobId: request.jobId });
+    if (!claim.job || claim.job.status !== 'claimed' || !claim.job.claim_token) throw new Error('No se pudo reclamar el trabajo. Recarga la lista.');
+    const job = claim.job;
+    const canonical = String(job.canonical_url || '').replace(/\/+$/, '').toLowerCase();
+    if (canonical !== String(tab.url.split(/[?#]/)[0]).replace(/\/+$/, '').toLowerCase()) {
+      throw new Error('La pestaña no muestra el perfil del trabajo. Abre el perfil verificado.');
+    }
+    sendTabs.add(tab.id);
+    try {
+      await ensureLinkedinScripts(tab.id);
+      let result;
+      if (job.kind === 'invite') {
+        result = await chrome.tabs.sendMessage(tab.id, { action: 'PROSPECT_EXECUTE_INVITE', operationId: job.id, profileUrl: job.profile_url, fullName: job.display_name });
+      } else if (job.kind === 'message' && typeof job.message === 'string' && job.message.trim()) {
+        result = await chrome.tabs.sendMessage(tab.id, { action: 'PROSPECT_EXECUTE_SEND', operationId: job.id, profileUrl: job.profile_url, fullName: job.display_name, message: job.message });
+      } else throw new Error('El trabajo no trae contenido ejecutable.');
+      if (!['confirmed', 'uncertain', 'not_sent', 'failed'].includes(result?.status)) throw new Error('Respuesta no confirmada.');
+      const finalStatus = result.status === 'not_sent' || result.status === 'failed' ? 'failed' : result.status;
+      try {
+        return await prospectRequest(connection, { action: 'linkedin-job-result', organizationId: session.organizationId,
+          userId: session.userId, jobResult: { jobId: job.id, claimToken: job.claim_token, status: finalStatus,
+            eventId: result.eventId, threadUrl: result.threadUrl, error: result.error } });
+      } catch { return { ...result, synced: false }; }
     } finally { sendTabs.delete(tab.id); }
   }
   if (request.action === 'PROSPECT_OPEN') {

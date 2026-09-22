@@ -6,6 +6,7 @@ import { requestApolloSearch } from '@/lib/server/apollo-search-client';
 import { requireCoworkWorkerAccess } from './access';
 import { coworkApolloPayload, coworkSearchCriteriaSchema } from '@/lib/cowork/search-proposal';
 import { admitCoworkContinuation } from './effects';
+import { classifyAudienceRole, type AudienceRolePolicy } from '@/lib/cowork/audience-analysis';
 
 const providerLead = z.object({ id: z.string().min(1).max(200) }).passthrough();
 function text(value: unknown, max = 500) { return typeof value === 'string' ? value.slice(0, max) : null; }
@@ -14,7 +15,18 @@ function webUrl(value: unknown) {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : null; }
   catch { return null; }
 }
-export function normalizeCoworkSearchResult(value: unknown, limit: number) {
+export function normalizeCoworkSearchResult(value: unknown, limit: number, target: 'people' | 'companies' = 'people', rolePolicy?: AudienceRolePolicy | null) {
+  if (target === 'companies') {
+    const payload = z.object({ organizations: z.array(providerLead).max(1000) }).parse(value);
+    return { scope: 'external_company_search', provider: 'apollo', limit,
+      returned: Math.min(payload.organizations.length, limit), truncated: payload.organizations.length >= limit,
+      items: payload.organizations.slice(0, limit).map(org => ({
+        id: `apollo-company:${org.id}`, name: text(org.name), domain: text(org.primary_domain),
+        website: webUrl(org.website_url), linkedin_url: webUrl(org.linkedin_url),
+        industry: text(org.industry), employees: typeof org.estimated_num_employees === 'number' ? org.estimated_num_employees : null,
+        location: [org.city, org.country].filter(item => typeof item === 'string').join(', ').slice(0, 500),
+      })), notice: 'Resultados del proveedor por palabras clave; confirma el encaje del sector. Son empresas, no contactos guardables como personas.' };
+  }
   const payload = z.object({ leads: z.array(providerLead).max(1000) }).parse(value);
   return {
     scope: 'external_search', provider: 'apollo', limit,
@@ -23,6 +35,7 @@ export function normalizeCoworkSearchResult(value: unknown, limit: number) {
       const organization = lead.organization && typeof lead.organization === 'object' ? lead.organization as Record<string, unknown> : {};
       return {
         id: `apollo:${lead.id}`, name: text(lead.name || lead.full_name), title: text(lead.title),
+        classification: classifyAudienceRole(text(lead.title), rolePolicy),
         company: text(organization.name || lead.org_name || lead.organization_name),
         linkedin_url: webUrl(lead.linkedin_url),
         company_website: webUrl(organization.website_url || lead.organization_website),
@@ -79,7 +92,7 @@ export async function processCoworkSearchQueue() {
     await requireCoworkWorkerAccess(client, scope);
     const current = await client.from('cowork_runs').select('status').eq('id', runId).single();
     if (current.error || current.data.status !== 'waiting_approval') throw new Error('Search cancelled');
-    const result = normalizeCoworkSearchResult(await requestApolloSearch(coworkApolloPayload(criteria, scope.userId)), criteria.limit);
+    const result = normalizeCoworkSearchResult(await requestApolloSearch(coworkApolloPayload(criteria, scope.userId)), criteria.limit, criteria.target || 'people', criteria.rolePolicy);
     await requireCoworkWorkerAccess(client, scope);
     const finished = await client.rpc('cowork_finish_search', { ...args, p_success: true,
       p_payload: { action: 'prospecting.search', input: criteria, result } });

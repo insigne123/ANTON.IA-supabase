@@ -81,22 +81,25 @@ test('contacted.timeline derives whose turn it is without trusting prose', async
     { id: 'c1', sent_at: sent, replied_at: replied, reply_intent: 'positive' },
   ] } });
   const ours = await queryCoworkExtendedReads(answered.client, scope, 'contacted.timeline', LEAD) as {
-    turn: { status: string }; truncated: boolean;
+    turn: { status: string }; observedTurn: { status: string }; truncated: boolean;
   };
-  assert.equal(ours.turn.status, 'our_turn');
+  assert.equal(ours.turn.status, 'unknown');
+  assert.equal(ours.observedTurn.status, 'our_turn');
   assert.equal(ours.truncated, false);
   const waiting = mockClient({ contacted_leads: { rows: [{ id: 'c1', sent_at: sent, replied_at: null }] } });
   const theirs = await queryCoworkExtendedReads(waiting.client, scope, 'contacted.timeline', LEAD) as {
-    turn: { status: string };
+    turn: { status: string }; observedTurn: { status: string };
   };
-  assert.equal(theirs.turn.status, 'their_turn');
+  assert.equal(theirs.turn.status, 'unknown');
+  assert.equal(theirs.observedTurn.status, 'their_turn');
   const auto = mockClient({ contacted_leads: { rows: [
     { id: 'c1', sent_at: sent, replied_at: replied, reply_intent: 'auto_reply' },
   ] } });
   const stillTheirs = await queryCoworkExtendedReads(auto.client, scope, 'contacted.timeline', LEAD) as {
-    turn: { status: string };
+    turn: { status: string }; observedTurn: { status: string };
   };
-  assert.equal(stillTheirs.turn.status, 'their_turn');
+  assert.equal(stillTheirs.turn.status, 'unknown');
+  assert.equal(stillTheirs.observedTurn.status, 'their_turn');
   const partial = mockClient({ contacted_leads: { rows: Array.from({ length: 15 }, (_, i) => ({ id: `c${i}`, sent_at: sent })) } });
   const unknown = await queryCoworkExtendedReads(partial.client, scope, 'contacted.timeline', LEAD) as {
     turn: { status: string }; truncated: boolean;

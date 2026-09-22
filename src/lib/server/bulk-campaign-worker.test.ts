@@ -60,3 +60,16 @@ test('a sent marker completes the sequence when retention removed the dispatch r
   assert.deepEqual(sent.sort(), ['a-two', 'b-one', 'b-two']);
   assert.equal(result.sent, 3);
 });
+
+test('spaced batches attempt only one recipient per pass and fail closed on spacing read errors', async () => {
+  const spaced = fixture({ batchSpacing: async () => 30 });
+  assert.equal((await runBulkCampaignWorker(spaced.deps)).sent, 2);
+  assert.deepEqual(spaced.sent, ['a-one', 'b-one']);
+  const unavailable = fixture({ batchSpacing: async () => { throw new Error('offline'); } });
+  assert.equal((await runBulkCampaignWorker(unavailable.deps)).sent, 0);
+  assert.deepEqual(unavailable.sent, []);
+  const recent = fixture({ batchSpacing: async () => 30, deliveries: async value => [{
+    draft_id: `${value.id}-one`, status: 'sent', completed_at: '2026-09-09T23:45:00Z', error_message: null,
+  }] });
+  assert.equal((await runBulkCampaignWorker(recent.deps)).sent, 0);
+});

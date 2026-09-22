@@ -21,6 +21,8 @@
       "chrome-extension.pem",
       "antonia-extension-v1.1.zip",
       "firebase-debug.log",
+      "docs/*results*.json",
+      "docs/*audit-*.json",
       "firebase-debug.*.log"
     ]
   },

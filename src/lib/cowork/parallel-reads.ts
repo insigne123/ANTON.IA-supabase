@@ -2,12 +2,16 @@ import { z } from 'zod';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS } from './domain-reads';
 
 const TEXT_ACTIONS = ['leads.search', 'crm.search', 'contacted.search'];
-const UUID_ACTIONS = ['leads.get', 'research.get_existing', 'crm.get_lead', 'contacted.timeline', 'draft.get', ...COWORK_DOMAIN_ENTITY_READS];
-const FIXED_ACTIONS = ['metrics.overview', 'app.context', 'campaigns.list', 'files.list', 'saved_searches.list', 'profile.get', ...COWORK_DOMAIN_FIXED_READS];
+const UUID_ACTIONS = ['leads.get', 'research.get_existing', 'crm.get_lead', 'contacted.timeline', 'draft.get',
+  'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan', ...COWORK_DOMAIN_ENTITY_READS];
+const FIXED_ACTIONS = ['metrics.overview', 'app.context', 'campaigns.list', 'files.list', 'saved_searches.list', 'profile.get',
+  'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', ...COWORK_DOMAIN_FIXED_READS];
 
 export const coworkReadTaskSchema = z.object({
   action: z.enum(['leads.search', 'leads.get', 'research.get_existing',
-    'crm.search', 'crm.get_lead', 'contacted.search', 'contacted.timeline', 'metrics.overview', 'app.context', 'draft.get', 'campaigns.list', 'files.list', 'saved_searches.list', 'profile.get', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
+    'crm.search', 'crm.get_lead', 'contacted.search', 'contacted.timeline', 'metrics.overview', 'app.context', 'draft.get', 'campaigns.list', 'files.list', 'saved_searches.list', 'profile.get',
+    'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
+    'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
   input: z.string().max(120),
 }).strict().superRefine((task, context) => {
   if (TEXT_ACTIONS.includes(task.action)) return;

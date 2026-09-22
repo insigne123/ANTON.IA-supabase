@@ -68,6 +68,14 @@ try {
   const backfill = state.updates.find(([table]) => table === 'leads');
   assert.equal(backfill[1].email, 'ana@logisticasur.cl', 'missing saved email is backfilled for research/drafts/sends');
   assert.equal(state.completes.length, 0, 'shared callback owns quota completion');
+  assert.equal(ok.verifiedForList, true);
+  state.updates = [];
+  state.submit = async () => ({ success: true, providerRequestId: 'unverified', extractedData: {
+    email: 'candidate@example.com', email_status: 'likely to engage', source_provider_id: 'apollo-1' } });
+  const uncertain = await module.exports.enrichCoworkContact(auth, 'run-unverified', LEAD);
+  assert.equal(uncertain.found, true);
+  assert.equal(uncertain.verifiedForList, false);
+  assert.equal(state.updates.some(([table]) => table === 'leads'), false, 'unverified candidate must not backfill saved lead');
 
   // 2. Replay reuses the stored summary without touching the provider.
   state.quotaOp = { status: 'completed', responsePayload: { email: 'ana@logisticasur.cl', emailStatus: 'verified', found: true, creditsConsumed: 1, enrichedLeadId: 'enriched-1' } };

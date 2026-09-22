@@ -22,6 +22,13 @@ function fixture(withLead = false) {
     '@/lib/server/auth-utils': { AuthError, requireAuth: async () => ({ organizationId: org, user: { id: user } }), handleAuthError: (error: any) => NextResponse.json({ error: error.message }, { status: error.status }) },
     '@/lib/server/extension-leads': { findExtensionLead: async (...args: any[]) => { calls.push(args); return withLead ? { id: 'lead', email: 'ana@example.test', linkedin_url: profile.linkedinUrl } : null; }, saveExtensionLead: async (...args: any[]) => { calls.push(args); return { lead: { id: 'saved' } }; } },
     '@/lib/server/extension-sends': { claimExtensionSend: async (...args: any[]) => { calls.push({ claim: args }); return { id: org, claimed: true }; }, finishExtensionSend: async (...args: any[]) => { calls.push({ finish: args }); return { id: org, status: 'confirmed' }; } },
+    '@/lib/server/linkedin-bridge-ops': {
+      listPendingLinkedinJobs: async (...args: any[]) => { calls.push({ jobs: args }); return []; },
+      claimLinkedinJob: async (...args: any[]) => { calls.push({ jobClaim: args }); if (args[1] === user) return { id: 'job', status: 'claimed' }; throw new Error('Otro navegador reclamó este trabajo.'); },
+      finishLinkedinJob: async (...args: any[]) => { calls.push({ jobFinish: args }); return { id: 'job', status: 'confirmed' }; },
+      reportLinkedinNetwork: async (...args: any[]) => { calls.push({ network: args }); return { observed: 1, hasMore: false }; },
+      reportLinkedinInbox: async (...args: any[]) => { calls.push({ inbox: args }); return { observed: 1, hasMore: false }; },
+    },
     '@/lib/server/native-research': { listNativeResearchLeadStatuses: async () => [{ researchSnapshotId: 'snapshot', reportId: 'report' }] },
     '@/app/api/native-research/[reportId]/route': { POST: async (_req: any, context: any) => { calls.push({ retry: await context.params }); return NextResponse.json({ ok: true }); } },
     '@/lib/extension-profile-url': { canonicalExtensionProfileUrl: (value: string) => value },
@@ -125,6 +132,35 @@ test('send authorization requires saved lead and authenticated scope; confirmed 
   const result = { action: 'send-result', profile, organizationId: org, userId: user, sendResult: { id: org, claimToken: user, status: 'confirmed' } };
   assert.equal((await env.POST(request(result))).status, 400);
   assert.equal((await env.POST(request({ ...result, sendResult: { ...result.sendResult, eventId: 'urn:event' } }))).status, 200);
+});
+test('linkedin bridge lists, claims and finishes jobs without a profile open', async () => {
+  const env = fixture(true);
+  const base = { organizationId: org, userId: user };
+  const pending = await env.POST(request({ ...base, action: 'linkedin-jobs-pending' }));
+  assert.equal(pending.status, 200);
+  assert.deepEqual((await pending.json()).jobs, []);
+  assert.equal((await env.POST(request({ ...base, action: 'linkedin-job-claim', jobId: user }))).status, 200);
+  assert.equal((await env.POST(request({ ...base, action: 'linkedin-job-claim', jobId: org }))).status, 409);
+  const done = await env.POST(request({ ...base, action: 'linkedin-job-result',
+    jobResult: { jobId: user, claimToken: org, status: 'uncertain', error: 'Revisar' } }));
+  assert.equal(done.status, 200);
+  assert.equal((await env.POST(request({ ...base, action: 'linkedin-job-result' }))).status, 400);
+});
+
+test('linkedin sweeps accept bounded reports and refuse oversized pages', async () => {
+  const env = fixture(true);
+  const base = { organizationId: org, userId: user };
+  const network = await env.POST(request({ ...base, action: 'network-report',
+    networkEntries: [{ url: 'https://www.linkedin.com/in/ana', name: 'Ana' }], networkHasMore: false }));
+  assert.equal(network.status, 200);
+  assert.deepEqual(await network.json(), { observed: 1, hasMore: false });
+  const inbox = await env.POST(request({ ...base, action: 'inbox-report',
+    inboxThreads: [{ key: 't1', name: 'Ana', direction: 'in', replyNeeded: true }], inboxHasMore: true, inboxCursor: 'p2' }));
+  assert.equal(inbox.status, 200);
+  const oversized = await env.POST(request({ ...base, action: 'network-report',
+    networkEntries: Array.from({ length: 201 }, () => ({ url: 'https://www.linkedin.com/in/a' })) }));
+  assert.equal(oversized.status, 400);
+  assert.equal(env.calls.filter(item => item.network || item.inbox).length, 2);
 });
 test('first email receives the visible instruction and different instructions have different idempotency keys', async () => {
   const env = fixture(true);

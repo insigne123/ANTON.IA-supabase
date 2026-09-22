@@ -69,6 +69,48 @@ test('note review requires an observed target and persists before returning', as
   assert.equal(proposals, 1);
 });
 
+test('message context update requires observed context and carries the patch', async () => {
+  const patch = { prohibitedTerms: ['antecedentes penales'] };
+  const proposal = { action: 'message_context.update' as const, query: null, leadId: null, answer: null, messageContext: patch };
+  const proposals: unknown[] = [];
+  const base = {
+    message: 'Actualiza el contexto', runId: '00000000-0000-4000-8000-000000000099',
+    signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ configured: true, context: {} }), record: async () => {},
+    proposeEffect: async (value: unknown) => { proposals.push(value); },
+  };
+  await assert.rejects(runCoworkReadLoop({ ...base, decide: async () => proposal }), /observed first/);
+  assert.equal(proposals.length, 0);
+  const result = await runCoworkReadLoop({ ...base,
+    decide: async observations => observations.length ? proposal
+      : { action: 'message.context' as const, query: null, leadId: null, answer: null } });
+  assert.match(result.reply, /Revisa/);
+  assert.equal(proposals.length, 1);
+  assert.deepEqual((proposals[0] as { kind: string; messageContext: unknown }).kind, 'message_context_update');
+  assert.deepEqual((proposals[0] as { kind: string; messageContext: unknown }).messageContext, patch);
+});
+
+test('enrich batch requires observed review and carries targets', async () => {
+  const ids = ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'];
+  const proposal = { action: 'lead.enrich_batch' as const, query: null, leadId: null, leadIds: ids, answer: null };
+  const batches: unknown[] = [];
+  const base = {
+    message: 'Enriquece el lote', runId: '00000000-0000-4000-8000-000000000099',
+    signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: ids.map(leadId => ({ leadId })) }), record: async () => {},
+    proposeEffect: async (value: unknown) => { batches.push(value); },
+  };
+  await assert.rejects(runCoworkReadLoop({ ...base, decide: async () => proposal }), /observed first/);
+  assert.equal(batches.length, 0);
+  const result = await runCoworkReadLoop({ ...base,
+    decide: async observations => observations.length ? proposal
+      : { action: 'lists.review_batch' as const, query: null, leadId: null, leadIds: ids, answer: null } });
+  assert.match(result.reply, /Revisa/);
+  assert.equal(batches.length, 1);
+  assert.deepEqual((batches[0] as { kind: string; enrichBatch: unknown }).kind, 'enrich_batch');
+  assert.deepEqual((batches[0] as { kind: string; enrichBatch: unknown }).enrichBatch, ids);
+});
+
 test('parallel and sequential queries share one total read budget', async () => {
   let calls = 0;
   let decisions = 0;

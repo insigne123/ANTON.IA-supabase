@@ -67,7 +67,9 @@ export async function requestApolloSearch(
       executeProviderLeadSearch(input.value, config, environment),
       timeoutMs(environment),
     );
-    if (!body || !Array.isArray((body as { leads?: unknown }).leads)) {
+    if (!body || !(input.value.searchMode === 'organization_search'
+      ? Array.isArray((body as { organizations?: unknown }).organizations)
+      : Array.isArray((body as { leads?: unknown }).leads))) {
       throw new ApolloSearchClientError(502, 'APOLLO_SEARCH_INVALID_RESPONSE');
     }
     return body;

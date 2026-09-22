@@ -104,6 +104,24 @@ export async function sendCoworkEmail(
       throw new Error(`El dominio ${domain} está bloqueado. No se envió el correo.`);
     }
   }
+  // Mandatory language gate on the exact approved version: consulting the
+  // check tool is not enough, because skipping it would skip the control.
+  try {
+    const { readCoworkMessageContext } = await import('./message-context');
+    const { checkMessageTerms } = await import('@/lib/cowork/message-checks');
+    const messaging = await readCoworkMessageContext(client, scope);
+    const context = messaging.context as { prohibitedTerms?: string[]; requiredTerms?: string[] } | null;
+    const gate = checkMessageTerms(`${canonical.subject || ''}\n${canonical.text || ''}`,
+      { prohibitedTerms: context?.prohibitedTerms || [], requiredTerms: context?.requiredTerms || [] });
+    if (gate.verdict === 'blocked' || gate.verdict === 'fail') {
+      const detail = gate.prohibitedFound.length ? `Término prohibido: ${gate.prohibitedFound.join(', ')}`
+        : `Falta término obligatorio: ${gate.requiredMissing.join(', ')}`;
+      throw new Error(`El borrador incumple las reglas de lenguaje aprobadas (${detail}). No se envió el correo.`);
+    }
+  } catch (error) {
+    if (error instanceof Error && /incumple las reglas de lenguaje/.test(error.message)) throw error;
+    throw new Error('No se pudo verificar las reglas de lenguaje. No se envió el correo.');
+  }
   const unsubscribeUrl = generateUnsubscribeLink(canonical.to, userId, organizationId);
   const prepared = prepareOutboundEmail({ text: canonical.text || undefined, html: canonical.html || undefined, unsubscribeUrl });
   const check = validateOutboundEmail({ to: canonical.to, subject: canonical.subject, ...prepared, requireUnsubscribe: true, unsubscribeUrl });

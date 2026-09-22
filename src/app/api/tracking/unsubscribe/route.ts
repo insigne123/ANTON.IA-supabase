@@ -6,7 +6,14 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
     try {
-        const body = await req.json();
+        const contentType = req.headers.get('content-type') || '';
+        const postedBody = contentType.includes('application/x-www-form-urlencoded')
+            ? Object.fromEntries(new URLSearchParams(await req.text()))
+            : await req.json();
+        const body = { ...Object.fromEntries(req.nextUrl.searchParams), ...(postedBody || {}) };
+        if (body?.['List-Unsubscribe'] && body['List-Unsubscribe'] !== 'One-Click') {
+            return NextResponse.json({ error: 'Invalid one-click request' }, { status: 400 });
+        }
         const resolved = resolveUnsubscribeRequest(body || {});
 
         if (!resolved) {
@@ -25,7 +32,7 @@ export async function POST(req: NextRequest) {
             p_email: email,
             p_user_id: userId,
             p_organization_id: orgId,
-            p_reason: 'User clicked unsubscribe (manual confirmation)',
+            p_reason: body?.['List-Unsubscribe'] ? 'RFC 8058 one-click unsubscribe' : 'User clicked unsubscribe (manual confirmation)',
         });
 
         if (error) {

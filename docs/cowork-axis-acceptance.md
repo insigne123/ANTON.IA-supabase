@@ -1,5 +1,30 @@
 # Aceptación AXIS — ejecución iniciada
 
+## Incremento de confianza posterior
+
+Se implementó distinción de cobertura del buzón frente a registros consultados, guía de IDs y presupuesto por decisión, y correcciones comerciales. 14 llamadas adicionales autorizadas, acumulado 53 (una sin telemetría tras error de schema). Tres regresiones de respuesta mejoraron; replay de Rafael completó ambos turnos en v4 con límite de cobertura explícito, pero encabezado todavía demasiado categórico. No certifica cierre del recorrido completo. Ver `cowork-marketing-implementation.md` para evidencia, comparación y matriz de 51 funciones. Verificación local: 121 pruebas más scripts aislados de Cowork aprobados; typecheck y diff-check aprobados. Sin despliegue.
+
+## Evaluación real posterior (21 septiembre 2026)
+
+Acceso al modelo resuelto mediante Secret Manager, sin claves en archivos. Se ejecutaron 18 llamadas nuevas: 12 escenarios con observaciones suministradas, dos diagnósticos del replay y un replay multitur­no completo (4 llamadas). **Acumulado: 39/40**. Evidencia y comparación: `cowork-axis-comparison-2026-09-21.md` y cuatro JSON `cowork-axis-*-results/diagnostic/comparison.json` indicados en ese informe. Revisión semántica: 9/12 respuestas cumplen criterios principales, 01/05/06 fallan o son incompletas; no certifica ejecución. Replay 03 corrige tras intervención, pero falla la verificación inicial de pendientes. El estado anterior de falta de credenciales queda superado. Sin despliegue ni pruebas autenticadas.
+
+## Incremento local: replay del coordinador (21 septiembre 2026)
+
+- Nuevo `scripts/evaluate-cowork-axis-replay.ts`: recorre `runCoworkReadLoop` con el esquema real de decisiones, historial entre turnos y herramientas sintéticas. Selección de herramientas por modelo real disponible mediante opt-in; sin Supabase, Apollo ni envíos.
+- Cuatro adaptaciones de los turnos del corpus: 01 (prioridad/fecha faltante), 03 (estado que cambia tras «ya le respondí»), 08 (dos solicitudes de reunión) y 12 (19 días desde el último mensaje). No son reproducciones completas: 01 no incluye cadencia, 08 no incluye todas las métricas históricas y 12 aún no simula el desfase previo de 13 días.
+- El worker y replay comparten `coworkDecisionContext`: capacidades y reloj UTC generado por servidor. Las instrucciones distinguen hora de consulta de sincronización del buzón y exigen releer estados cambiantes. No se presume zona horaria del usuario.
+- Pruebas offline con **decisiones programadas**, incluidas en `verify-cowork.mjs`: historial conservado, nueva lectura tras corrección, ambas solicitudes consultadas, rechazo de efectos/IDs desconocidos y rechazo de respuestas sin consultas aunque coincidan las palabras. Esto prueba el arnés, no la selección autónoma del modelo ni la calidad semántica.
+- Verificado: `node scripts/verify-cowork.mjs`, 114 tests y verificaciones aisladas adicionales aprobadas. `npm run typecheck` aprobado.
+- **No se ejecutó el replay con modelo real**: esta sesión no dispone de `OPENAI_API_KEY` ni `COWORK_MODEL` en entorno. Cero llamadas nuevas; el contador histórico sigue en 21. Cambios locales, sin despliegue.
+
+Comando para una primera evaluación acotada, una vez configurado explícitamente el entorno:
+
+```powershell
+node --loader ./scripts/ts-test-loader.mjs scripts/evaluate-cowork-axis-replay.ts --live --cases=03-ya-respondi --max-calls=8
+```
+
+El límite es por invocación (máximo 19), sin reintentos, hasta 1800 tokens de salida por llamada. Actualizar el contador de campaña antes de otra ejecución: no hay ledger global en este script. Resultados incluyen consultas, respuestas y uso; requieren revisión humana de veracidad y prioridades. Las herramientas no simuladas producen error explícito, no resultados inventados. Sigue pendiente evaluar modelo real, ampliar a los 12 casos y hacer recorrido autenticado.
+
 Fuentes leídas: `CAPACIDADES_AGENTE_COMERCIAL.md` y
 `CONVERSACIONES_REPRESENTATIVAS.md`, entregados por el usuario desde Asistente AXIS.
 El segundo contiene 12 intercambios condensados, no exportaciones completas de herramientas.

@@ -2,14 +2,41 @@ import type { MessagingDraftV1 } from '@/lib/messaging-contracts';
 
 export type GmailReplyTarget = {
   provider: 'gmail';
-  parentDispatchId: string;
+  parentDispatchId?: string;
   messageId: string;
   threadId: string;
 };
 
+export type OutlookReplyTarget = {
+  provider: 'outlook';
+  contactedId: string;
+  messageId: string;
+  conversationId: string;
+};
+export type EmailReplyTarget = GmailReplyTarget | OutlookReplyTarget;
+
 export type EmailDeliveryMode = 'new_message' | 'reply_first' | 'reply_previous';
 
 export class ReplyTargetError extends Error {}
+
+/** Derive a reply parent only from a sent row owned by this user and recipient. */
+export async function resolveContactedReplyTarget(client: any, input: {
+  contactedId: string; organizationId: string; userId: string; provider: 'gmail' | 'outlook'; recipient: string;
+}): Promise<EmailReplyTarget> {
+  const { data: row, error } = await client.from('contacted_leads')
+    .select('id,user_id,organization_id,email,provider,status,message_id,thread_id,conversation_id,sent_at')
+    .eq('id', input.contactedId).eq('organization_id', input.organizationId).eq('user_id', input.userId).maybeSingle();
+  if (error) throw error;
+  if (!row || !row.sent_at || ['scheduled', 'failed'].includes(String(row.status || ''))) throw new ReplyTargetError('CONTACTED_REPLY_PARENT_UNAVAILABLE');
+  if (String(row.email || '').trim().toLowerCase() !== input.recipient.trim().toLowerCase()) throw new ReplyTargetError('CONTACTED_REPLY_RECIPIENT_CONFLICT');
+  if ((row.provider === 'gmail' ? 'gmail' : row.provider) !== input.provider || !row.message_id) throw new ReplyTargetError('CONTACTED_REPLY_PROVIDER_OR_MESSAGE_MISSING');
+  if (input.provider === 'gmail') {
+    if (!row.thread_id) throw new ReplyTargetError('CONTACTED_REPLY_THREAD_MISSING');
+    return { provider: 'gmail', messageId: row.message_id, threadId: row.thread_id };
+  }
+  if (!row.conversation_id) throw new ReplyTargetError('CONTACTED_REPLY_CONVERSATION_MISSING');
+  return { provider: 'outlook', contactedId: row.id, messageId: row.message_id, conversationId: row.conversation_id };
+}
 
 // Only canonical enrollment links and confirmed dispatch receipts may select a parent.
 export async function resolveCampaignReplyTarget(client: any, draft: MessagingDraftV1, provider: 'gmail' | 'outlook', mode: EmailDeliveryMode = 'new_message'): Promise<GmailReplyTarget | null> {

@@ -26,7 +26,7 @@ const mocks={
   return{rpc:async(name,args)=>{globalThis.__coworkAutonomy.calls.push({name,args});if(name==='cowork_claim_run')return {data:[{id:'run',user_id:'owner',organization_id:'org',lease_token:'token',mode:globalThis.__coworkAutonomy.mode,message:'Busca gerentes'}]};if(name==='cowork_propose_search'&&globalThis.__coworkAutonomy.disableDuringProposal)process.env.COWORK_AUTONOMY_ENABLED='false';return {data:true};},from:table=>{chain.table=table;return chain;}};}`,
   '@/lib/server/daily-quota-store': `export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:50});export const getDailyQuotaStatus=async()=>({allowed:true,count:0,limit:50});export const getEnrichmentQuotaOperation=async()=>null;export const claimEnrichmentQuotaOperation=async()=>{throw new Error("unused")};export const markEnrichmentQuotaOperationSubmitted=async()=>{};export const releaseEnrichmentQuotaOperation=async()=>{};export const completeEnrichmentQuotaOperation=async()=>{};`,
   './access':'export const requireCoworkWorkerAccess=async()=>{};',
-  './runs':'export const coworkWorkerConfigured=()=>true;',
+  './runs':'export const coworkWorkerConfigured=()=>true;export const getCoworkRun=async()=>null;',
   './lead-tools':'export const queryCoworkLeads=async()=>{throw new Error("unexpected read")};',
   './conversation-context':'export const loadCoworkHistory=async()=>({turns:[]});',
   './external-search':'export const processCoworkSearchQueue=async()=>({claimed:false});',

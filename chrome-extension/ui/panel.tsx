@@ -55,6 +55,7 @@ function App() {
   const sendTriggerRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { if (confirmSend) sendConfirmRef.current?.focus(); }, [confirmSend]);
   const [composeUrl, setComposeUrl] = useState('');
+  const [jobs, setJobs] = useState<any[] | null>(null);
   const [campaigns, setCampaigns] = useState<any[] | null>(null);
   const [campaignId, setCampaignId] = useState('');
   const [origin, setOrigin] = useState('https://studio--leadflowai-3yjcy.us-central1.hosted.app');
@@ -70,7 +71,7 @@ function App() {
   const reset = () => {
     dirty.current = false; setCachedEdits(null); setPhoneJob(null);
     setEnrichedReady(false); setConfirmSend(false); setSendState('');
-    setCampaigns(null); setCampaignId('');
+    setCampaigns(null); setCampaignId(''); setJobs(null);
     epoch.current++; setProfile(empty); setUrl(''); setSaved(null); setResearch(null); setMessage(''); setMessageOptions([]); setSources([]); setComposeUrl(''); setNotice(''); setError('');
   };
   useEffect(() => {
@@ -295,6 +296,19 @@ function App() {
     ['Titular', profile.details?.headline], ['Nivel de responsabilidad', profile.details?.seniority],
     ['Departamentos', profile.details?.departments?.join(', ')], ['Industria', profile.details?.industry], ['Tamaño de empresa', profile.details?.companySize],
   ].filter(([, value]) => value?.trim());
+  const loadJobs = () => run('Consultando trabajos…', async valid => {
+    const result = await api('linkedin-jobs-pending', {}, profileRef.current);
+    if (valid()) setJobs(result.jobs || []);
+  });
+  const executeJob = (job: any) => run(job.kind === 'invite' ? 'Enviando invitación…' : 'Enviando mensaje…', async valid => {
+    if (!candidate || normalizeLinkedinProfileUrl(candidate.linkedinUrl).toLowerCase() !== normalizeLinkedinProfileUrl(profile.linkedinUrl).toLowerCase()) throw new Error('Abre el perfil del trabajo en LinkedIn antes de ejecutarlo.');
+    const result = await rpc('PROSPECT_EXECUTE_JOB', { jobId: job.id, tabId: candidate.tabId });
+    if (valid()) {
+      setJobs(items => (items || []).filter(item => item.id !== job.id));
+      setNotice(result?.status === 'confirmed' ? 'Trabajo confirmado en LinkedIn.' : 'Resultado por comprobar en LinkedIn; no se reintentará solo.');
+    }
+    if (result?.status !== 'confirmed') throw new Error(result?.error || 'Revisa LinkedIn antes de continuar.');
+  });
   const loadCampaigns = () => run('Consultando campañas…', async valid => {
     const result = await api('campaigns');
     if (valid()) { setCampaigns(result.campaigns); setCampaignId(''); }
@@ -389,6 +403,16 @@ function App() {
                 const result = await rpc('PROSPECT_SYNC_SENDS', { organizationId: connection.session.organizationId, userId: connection.session.userId });
                 if (valid()) setNotice(result.count ? 'Historial actualizado. Los envíos interrumpidos quedan por comprobar; no se reenvían.' : 'No hay resultados pendientes de sincronizar.');
               })}>Sincronizar historial de LinkedIn</button>
+              <div className="email-section"><div className="section-heading"><h2>Trabajos de Cowork</h2><ChevronRight size={16} /></div>
+                <p>Invitaciones y mensajes aprobados en el chat para este perfil. Se ejecutan aquí, ante el perfil verificado.</p>
+                <button className="secondary full" disabled={!saved} onClick={loadJobs}>{jobs ? 'Actualizar trabajos' : 'Ver trabajos pendientes'}</button>
+                {!saved && <p className="helper">Guarda el lead para ver sus trabajos.</p>}
+                {!!jobs?.length && jobs.filter(item => !item.expired).map(item => <div key={item.id} className="helper">
+                  <p><strong>{item.kind === 'invite' ? 'Invitación sin nota' : 'Mensaje'}</strong> · en cola desde {String(item.created_at || '').slice(0, 10)}</p>
+                  <button className="secondary full" disabled={!candidate} onClick={() => void executeJob(item)}>Ejecutar ante este perfil</button>
+                </div>)}
+                {jobs && !jobs.filter(item => !item.expired).length && <p className="helper">Sin trabajos pendientes para este perfil.</p>}
+              </div>
               <div className="email-section"><div className="section-heading"><h2>Seguimiento por email</h2><Mail size={16} /></div><p>Prepara el primer correo y una secuencia personalizada en Anton.IA.</p>
                 <details><summary>Añadir a una campaña existente</summary>
                   <button className="secondary full" disabled={!saved?.email} onClick={loadCampaigns}>{campaigns ? 'Actualizar campañas' : 'Buscar mis campañas'}</button>

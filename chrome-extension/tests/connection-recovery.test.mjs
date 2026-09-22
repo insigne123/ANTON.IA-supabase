@@ -25,7 +25,7 @@ function fixture({ lostPrepare = false, unauthorized = false } = {}) {
         }
         throw new Error('Unexpected tab request');
       } },
-    scripting: { executeScript: async ({ target, files }) => { assert.equal(target.tabId, 2); assert.equal(files.length, 3); injections++; ready = true; } },
+    scripting: { executeScript: async ({ target, files }) => { assert.equal(target.tabId, 2); assert.equal(files.length, 4); for (const name of ['content.js', 'prospecting-content.js', 'prospecting-send.js', 'prospecting-invite.js']) assert.ok(files.includes(name)); injections++; ready = true; } },
     sidePanel: { setPanelBehavior: async () => {} },
   };
   const fetch = async (url, options) => {

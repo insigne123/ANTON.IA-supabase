@@ -26,11 +26,11 @@ export const CampaignInputSchema = z.object({
   objective: z.string().trim().max(2000),
   criteria: AudienceCriteriaSchema,
   emails: z.array(z.string().trim().email().transform(v => v.toLowerCase())).min(1).max(100),
-  messages: z.array(CampaignMessageSchema).min(1).max(5),
+  messages: z.array(CampaignMessageSchema).min(1).max(7),
   provider: z.enum(['google', 'outlook']),
   overrides: z.array(z.object({
     email: z.string().trim().email().transform(value => value.toLowerCase()),
-    messageIndex: z.number().int().min(0).max(4),
+    messageIndex: z.number().int().min(0).max(6),
     subject: z.string().trim().min(1).max(300), body: z.string().trim().min(1).max(12000),
   }).strict()).max(500).default([]),
 }).strict().superRefine((value, ctx) => {

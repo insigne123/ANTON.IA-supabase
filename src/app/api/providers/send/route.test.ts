@@ -96,6 +96,17 @@ test('send route continues to reject unapproved browser content', async () => {
   assert.equal(response.status, 409);
   assert.equal((await response.json()).error, 'APPROVED_DRAFT_REQUIRED');
 });
+test('contact reply send requires an owned original contact before tokens or provider access', async () => {
+  const query = { select() { return this; }, eq() { return this; }, order() { return this; }, limit() { return this; }, maybeSingle: async () => ({ data: { organization_id: 'org' }, error: null }) };
+  const post = load({
+    '@supabase/auth-helpers-nextjs': { createRouteHandlerClient: () => ({ auth: { getUser: async () => ({ data: { user: { id: 'owner' } } }) }, from: () => query }) },
+    '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ from: () => ({ select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data: null, error: null }) }) }) },
+    '@/lib/services/token-service': { tokenService: { getToken: async () => { assert.fail('No token lookup before the contact row is verified'); } } },
+  });
+  const response = await post({ json: async () => ({ provider: 'google', deliveryMode: 'reply_contact', contactedId: 'contact', organizationId: 'org', idempotencyKey: 'reply-key-00000001', to: 'ada@example.com', subject: 'Re: Hello', htmlBody: 'Reviewed', textBody: 'Reviewed' }), headers: new Headers() });
+  assert.equal(response.status, 409);
+  assert.match((await response.json()).error, /mensaje original/i);
+});
 test('reply resolution stays inside durable dispatch and before quota and provider send', () => {
   const claim = source.indexOf('await dispatchOutboundMessage');
   const resolve = source.indexOf('await resolveCampaignReplyTarget');
@@ -105,4 +116,21 @@ test('reply resolution stays inside durable dispatch and before quota and provid
   assert.match(source, /replyTarget \? \{ replyTarget \} : \{\}/);
   assert.match(source, /resolveApprovedEmailSendV1\(current\)/);
   assert.match(source, /OutboundPreProviderDeferredError\('Reply history/);
+});
+
+test('contact reply replay reads durable receipt without accessing tokens or rechecking pending status', async () => {
+  const query: any = { select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data: { organization_id: 'org' }, error: null }) };
+  const post = load({
+    '@supabase/auth-helpers-nextjs': { createRouteHandlerClient: () => ({ auth: { getUser: async () => ({ data: { user: { id: 'owner' } } }) }, from: () => query }) },
+    '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ from: (table: string) => {
+      assert.equal(table, 'outbound_dispatches');
+      return { ...query, maybeSingle: async () => ({ data: { id: 'receipt', status: 'sent', metadata: { recipient: { leadRef: 'contacted:contact' } } }, error: null }) };
+    } }) },
+    '@/lib/services/token-service': { tokenService: { getToken() { assert.fail('Replay must not refresh tokens'); } } },
+  });
+  const response = await post({ json: async () => ({ provider: 'gmail', deliveryMode: 'reply_contact', contactedId: 'contact', organizationId: 'org', idempotencyKey: 'reply-key-00000001', to: 'ada@example.com', subject: 'Re: Hello', htmlBody: 'Reviewed', textBody: 'Reviewed' }), headers: new Headers() });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.success, true);
+  assert.equal(result.receipt.replayed, true);
 });

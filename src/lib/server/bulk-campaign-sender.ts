@@ -11,6 +11,8 @@ import { sendGmail, sendOutlook } from '@/lib/server-email-sender';
 import { encryptStoredToken } from '@/lib/server/token-crypto';
 import { getEffectiveDailyQuotaLimits, reserveOutboundContactQuota } from '@/lib/server/daily-quota-store';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
+import { coworkBatchForCampaign, findCompanyReply, findCompanySendToday, findNegotiationHold } from '@/lib/server/campaign-send-guards';
+import { companyKeysFor, msUntilNextSantiagoDay, santiagoDayBounds } from '@/lib/cowork/send-cadence';
 
 /** Only trusted server callers supply the persisted campaign. SQL enforces its frozen review on every claim. */
 export async function sendBulkCampaignMessage(campaign: BulkCampaign, message: CampaignRecipient['messages'][number]) {
@@ -33,13 +35,6 @@ export async function sendBulkCampaignMessage(campaign: BulkCampaign, message: C
     async send({ dispatchId }) {
       const admin = getSupabaseAdminClient();
       // This callback runs only for a durable claim; replays cannot refresh tokens or contact a provider.
-      const { data: latest, error } = await admin.from('bulk_campaigns').select('status,review_hash').eq('id', campaign.id).single();
-      if (error) throw new OutboundPreProviderDeferredError('No se pudo verificar la campaña.', { code: 'campaign_read_unavailable' });
-      if (latest.status !== 'approved' || latest.review_hash !== campaign.review_hash) return { outcome: 'deferred', code: 'campaign_paused', message: 'La campaña está en pausa o cambió.' };
-      let suppressed;
-      try { suppressed = await isEmailSuppressedForScope(canonical.to, scope); }
-      catch (cause) { throw new OutboundPreProviderDeferredError('No se pudo verificar el estado del contacto.', { code: 'recipient_check_unavailable', cause }); }
-      if (suppressed) return { outcome: 'rejected', code: 'recipient_suppressed', message: 'El contacto se dio de baja.' };
       let accessToken: string;
       try {
         const token = await tokenService.getToken(admin, scope.userId, provider);
@@ -64,6 +59,65 @@ export async function sendBulkCampaignMessage(campaign: BulkCampaign, message: C
         quota = await reserveOutboundContactQuota({ ...scope, dispatchId, limit: limits.contact });
       } catch (cause) { throw new OutboundPreProviderDeferredError('No se pudo reservar la cuota.', { code: 'quota_reservation_unavailable', cause }); }
       if (!quota.allowed) return { outcome: 'deferred', code: 'daily_quota_exceeded', message: 'Se alcanzó el límite diario de contactos.', retryAfterMs: 3600000 };
+      const { data: latest, error } = await admin.from('bulk_campaigns').select('status,review_hash').eq('id', campaign.id).single();
+      if (error) throw new OutboundPreProviderDeferredError('No se pudo verificar la campaña.', { code: 'campaign_read_unavailable' });
+      if (latest.status !== 'approved' || latest.review_hash !== campaign.review_hash) return { outcome: 'deferred' as const, code: 'campaign_paused', message: 'La campaña está en pausa o cambió.' };
+      let suppressed;
+      try { suppressed = await isEmailSuppressedForScope(canonical.to, scope); }
+      catch (cause) { throw new OutboundPreProviderDeferredError('No se pudo verificar el estado del contacto.', { code: 'recipient_check_unavailable', cause }); }
+      if (suppressed) return { outcome: 'rejected' as const, code: 'recipient_suppressed', message: 'El contacto se dio de baja.' };
+      // Fase 4: preflight compartido por cuenta inmediatamente antes del
+      // proveedor. Falla cerrado: una respuesta de la empresa o una
+      // negociacion activa retienen el toque aunque el lote siga aprobado.
+      // Rechecks after token refresh. Inbox synchronization can still lag.
+      const recipientCompany = campaign.recipients
+        .find(person => person.messages.some(item => item.draftId === message.draftId))?.company ?? null;
+      try {
+        const reply = await findCompanyReply(admin, scope, canonical.to, recipientCompany);
+        if (reply.stopped) {
+          return { outcome: 'rejected' as const, code: 'BULK_CAMPAIGN_COMPANY_REPLIED',
+            message: `Esta empresa ya respondió (${reply.email || 'otra dirección'}). El toque queda retenido.` };
+        }
+      } catch (cause) {
+        throw new OutboundPreProviderDeferredError('No se pudo verificar respuestas de la empresa.', { code: 'recipient_check_unavailable', cause });
+      }
+      try {
+        const hold = await findNegotiationHold(admin, scope, canonical.to, recipientCompany);
+        if (hold.held) {
+          return { outcome: 'deferred' as const, code: 'BULK_CAMPAIGN_ACCOUNT_NEGOTIATION',
+            message: `La cuenta está en etapa ${hold.stages.join(', ')}. Se reintentará en 24 horas.`,
+            retryAfterMs: 24 * 3600000 };
+        }
+      } catch (cause) {
+        throw new OutboundPreProviderDeferredError('No se pudo verificar la etapa comercial.', { code: 'recipient_check_unavailable', cause });
+      }
+      // Escalonado por empresa solo para lotes Cowork programados: nunca dos
+      // correos a la misma empresa el mismo dia. Las campanas heredadas
+      // conservan su comportamiento.
+      try {
+        const batch = await coworkBatchForCampaign(admin, scope, campaign.id);
+        if (batch) {
+          const dayStart = santiagoDayBounds(new Date()).start;
+          const collision = await findCompanySendToday(admin, scope, canonical.to, recipientCompany, dayStart);
+          if (collision.collided) {
+            return { outcome: 'deferred' as const, code: 'BULK_CAMPAIGN_COMPANY_DAY_COLLISION',
+              message: 'Ya salió un correo a esta empresa hoy. Se reintentará mañana.',
+              retryAfterMs: msUntilNextSantiagoDay(new Date()) + 60000 };
+          }
+          const claim = await admin.rpc('cowork_claim_send_slot', {
+            p_org: scope.organizationId, p_user: scope.userId, p_campaign: campaign.id,
+            p_dispatch: dispatchId, p_email: canonical.to,
+            p_company_keys: companyKeysFor(canonical.to, recipientCompany).keys,
+          });
+          if (claim.error) throw claim.error;
+          if (claim.data !== true) return { outcome: 'deferred' as const, code: 'BULK_CAMPAIGN_BUSY',
+            message: 'El lote espera su turno, su día reservado o la conciliación del envío anterior.', retryAfterMs: 300000 };
+        }
+      } catch (error) {
+        if (error instanceof OutboundPreProviderDeferredError) throw error;
+        if (error instanceof Error && /BULK_CAMPAIGN_COMPANY_DAY_COLLISION|reintentar/.test(error.message)) throw error;
+        throw new OutboundPreProviderDeferredError('No se pudo verificar el escalonado por empresa.', { code: 'recipient_check_unavailable', cause: error });
+      }
       const receipt = provider === 'google'
         ? await sendGmail(accessToken, canonical.to, canonical.subject, prepared.html, { textBody: prepared.text, unsubscribeUrl, idempotencyKey: metadata.idempotencyKey })
         : await sendOutlook(accessToken, canonical.to, canonical.subject, prepared.html, { textBody: prepared.text, unsubscribeUrl, idempotencyKey: metadata.idempotencyKey });

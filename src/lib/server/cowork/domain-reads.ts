@@ -20,6 +20,31 @@ const text = (value: unknown, max = 500) => typeof value === 'string' ? value.sl
 export async function queryCoworkDomainRead(client: SupabaseClient, scope: Scope,
   action: CoworkDomainRead, value: string, dependencies: Dependencies = defaults): Promise<unknown> {
   z.string().uuid().parse(scope.userId); z.string().uuid().parse(scope.organizationId);
+  if (action === 'lists.review_contact') {
+    const { reviewCoworkListContact } = await import('./list-review');
+    return reviewCoworkListContact(client, scope, value, async () =>
+      await queryCoworkDomainRead(client, scope, 'privacy.contactability', value, dependencies) as { status?: string; reasons?: string[] });
+  }
+  if (action === 'audience.analyze') {
+    z.literal('').parse(value);
+    const { readCoworkAudience } = await import('./audience-read');
+    return readCoworkAudience(client, scope.organizationId);
+  }
+  if (action === 'gmail.contact_history') {
+    const { readCoworkGmailContact } = await import('./gmail-contact');
+    return readCoworkGmailContact(client, scope, value);
+  }
+  if (action === 'message.context') {
+    z.literal('').parse(value);
+    const { readCoworkMessageContext } = await import('./message-context');
+    return readCoworkMessageContext(client, scope);
+  }
+  if (action === 'message.check_terms' || action === 'message.check_evidence') {
+    const { checkCoworkDraftTerms, checkCoworkDraftEvidence } = await import('./message-checks');
+    return action === 'message.check_terms'
+      ? checkCoworkDraftTerms(client, scope, value)
+      : checkCoworkDraftEvidence(client, scope, value);
+  }
   if (action === 'campaigns.plan') {
     return queryCoworkCampaignPlan(client, scope, z.string().uuid().parse(value));
   }

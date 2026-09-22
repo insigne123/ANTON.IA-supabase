@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { recordDispatchTrackingEvent } from '@/lib/server/email-tracking-events';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -27,7 +28,17 @@ function resolveRedirectDestination(req: NextRequest, rawUrl: string | null): st
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
+    const dispatchKey = searchParams.get('dispatch');
     const url = searchParams.get("url");
+
+    if (dispatchKey) {
+        const destination = resolveRedirectDestination(req, url);
+        try {
+            const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+            await recordDispatchTrackingEvent(supabaseAdmin, { dispatchKey, kind: 'email_clicked', destination });
+        } catch (err) { console.error('[tracking/click] dispatch tracking failed', err); }
+        return NextResponse.redirect(destination, 307);
+    }
 
     if (id && url) {
         // Use Service Role to bypass RLS for tracking updates

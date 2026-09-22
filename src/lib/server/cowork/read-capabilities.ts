@@ -8,6 +8,8 @@ import { readCoworkSavedSearches } from './saved-searches';
 import { readCoworkProfile } from './profile-read';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS } from '@/lib/cowork/domain-reads';
 import { queryCoworkContactabilityBatch, queryCoworkDomainRead } from './domain-reads';
+import { readCoworkBatchReport, readCoworkCompanyPlan, readCoworkNextTouch, readCoworkRetryReview } from './batch-reads';
+import { readCoworkLinkedinFollowups, readCoworkLinkedinInbox, readCoworkLinkedinJobs, readCoworkLinkedinNetwork, readCoworkLinkedinQuota } from './linkedin-reads';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -24,6 +26,20 @@ export function coworkReadCapabilities(
     execute: input => queryCoworkExtendedReads(client, scope, name, input as string),
   });
   return [
+    {
+      name: 'lists.review_batch', version: 1, effect: 'read', description: 'Revisar hasta cinco contactos sin enriquecer ni enviar',
+      input: z.string().max(400), output: z.unknown(),
+      execute: async input => {
+        const ids = z.array(z.string().uuid()).min(1).max(5).parse(JSON.parse(input as string));
+        if (new Set(ids).size !== ids.length) throw new Error('Hay contactos duplicados en la selección.');
+        const { reviewCoworkListContact } = await import('./list-review');
+        const items = [];
+        for (const id of ids) items.push(await reviewCoworkListContact(client, scope, id, async () =>
+          await queryCoworkDomainRead(client, scope, 'privacy.contactability', id) as { status?: string; reasons?: string[] }));
+        items.sort((a, b) => Number(a.disposition === 'blocked') - Number(b.disposition === 'blocked') || a.priority.rank - b.priority.rank || a.leadId.localeCompare(b.leadId));
+        return { scope: 'organization_list_review', items, returned: items.length, sendAuthorized: false };
+      },
+    },
     ...[...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS].map((name): CoworkCapability => ({
       name, version: 1, effect: 'read', description: `Consulta de dominio ${name} con alcance vigente`,
       input: COWORK_DOMAIN_FIXED_READS.some(action => action === name) ? z.literal('') : z.string().uuid(),
@@ -62,6 +78,51 @@ export function coworkReadCapabilities(
       description: 'Investigación guardada de un contacto propio por UUID',
       input: textInput, output: z.unknown(),
       execute: input => readCoworkResearch(client, scope, input as string),
+    },
+    {
+      name: 'campaigns.batch_report', version: 1, effect: 'read', description: 'Cada envío y toque de tu campaña con estado y frenos',
+      input: z.string().uuid(), output: z.unknown(),
+      execute: input => readCoworkBatchReport(client, scope, input as string),
+    },
+    {
+      name: 'campaigns.next_touch', version: 1, effect: 'read', description: 'Siguiente toque elegible por destinatario en hora de Santiago',
+      input: z.string().uuid(), output: z.unknown(),
+      execute: input => readCoworkNextTouch(client, scope, input as string),
+    },
+    {
+      name: 'campaigns.retry_review', version: 1, effect: 'read', description: 'Qué se puede reintentar, qué es terminal y qué debe conciliarse',
+      input: z.string().uuid(), output: z.unknown(),
+      execute: input => readCoworkRetryReview(client, scope, input as string),
+    },
+    {
+      name: 'campaigns.company_plan', version: 1, effect: 'read', description: 'Día asignado por destinatario, una empresa por día',
+      input: z.string().uuid(), output: z.unknown(),
+      execute: input => readCoworkCompanyPlan(client, scope, input as string),
+    },
+    {
+      name: 'linkedin.network', version: 1, effect: 'read', description: 'Red LinkedIn observada con cobertura de barrido',
+      input: z.literal(''), output: z.unknown(),
+      execute: () => readCoworkLinkedinNetwork(client, scope),
+    },
+    {
+      name: 'linkedin.inbox', version: 1, effect: 'read', description: 'Bandeja LinkedIn observada; pendientes solo con barrido completo',
+      input: z.literal(''), output: z.unknown(),
+      execute: input => readCoworkLinkedinInbox(client, scope, input as string),
+    },
+    {
+      name: 'linkedin.quota', version: 1, effect: 'read', description: 'Cupo semanal de invitaciones contando pendientes',
+      input: z.literal(''), output: z.unknown(),
+      execute: () => readCoworkLinkedinQuota(client, scope),
+    },
+    {
+      name: 'linkedin.followups', version: 1, effect: 'read', description: 'Candidatos a segundo contacto con exclusiones',
+      input: z.literal(''), output: z.unknown(),
+      execute: () => readCoworkLinkedinFollowups(client, scope),
+    },
+    {
+      name: 'linkedin.jobs', version: 1, effect: 'read', description: 'Trabajos LinkedIn en cola y resultados confirmados',
+      input: z.literal(''), output: z.unknown(),
+      execute: () => readCoworkLinkedinJobs(client, scope),
     },
     extended('crm.search', 'CRM del equipo (toda la organización) que coincide con un texto'),
     extended('crm.get_lead', 'Ficha CRM con historial de contactados, por UUID'),

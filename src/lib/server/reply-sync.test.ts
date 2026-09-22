@@ -81,19 +81,19 @@ test('Gmail search fallback requires an exact parent reference, not sender alone
 });
 test('bounded scan filters before limit and cursor advances beyond repeatedly unresponsive rows', async () => {
   const records = [
-    { id: 'a', provider: 'gmail', status: 'replied', replied_at: 'date' },
-    { id: 'b', provider: 'other', status: 'sent', replied_at: null },
-    { id: 'c', provider: 'gmail', status: 'sent', replied_at: null },
-    { id: 'd', provider: 'gmail', status: 'sent', replied_at: null },
-    { id: 'e', provider: 'gmail', status: 'failed', replied_at: null },
+    { id: 'a', provider: 'gmail', status: 'replied', replied_at: 'date', sent_at: 'date' },
+    { id: 'b', provider: 'other', status: 'sent', replied_at: null, sent_at: 'date' },
+    { id: 'c', provider: 'gmail', status: 'sent', replied_at: null, sent_at: 'date' },
+    { id: 'd', provider: 'gmail', status: 'sent', replied_at: null, sent_at: 'date' },
+    { id: 'e', provider: 'gmail', status: 'failed', replied_at: null, sent_at: 'date' },
   ];
   const client = { from() {
     let rows = records.slice();
     return {
-      select() { return this; }, eq() { return this; },
+      select() { return this; }, update() { return this; }, eq() { return this; }, not() { return this; },
       in(key: string, values: any[]) { rows = rows.filter((r: any) => values.includes(r[key])); return this; },
       is(key: string, value: any) { rows = rows.filter((r: any) => r[key] === value); return this; },
-      or(filter: string) { assert.equal(filter, 'status.is.null,status.not.in.(replied,failed)'); rows = rows.filter((r) => !['replied', 'failed'].includes(r.status)); return this; },
+      or(filter: string) { assert.equal(filter, 'status.is.null,status.not.in.(scheduled,failed)'); rows = rows.filter((r) => !['failed'].includes(r.status)); return this; },
       order(key: string) { assert.equal(key, 'id'); return this; },
       limit(value: number) { assert.equal(value, 2); return this; },
       gt(_key: string, cursor: string) { rows = rows.filter((r) => r.id > cursor); return this; },
@@ -102,8 +102,10 @@ test('bounded scan filters before limit and cursor advances beyond repeatedly un
   } };
   const sync = load().syncRepliesForOrganization;
   const first = await sync(client, { organizationId: 'org', limit: 1 });
-  assert.equal(first.scanned, 1); assert.equal(first.nextCursor, 'c');
+  assert.equal(first.scanned, 1); assert.equal(first.nextCursor, 'a');
   const second = await sync(client, { organizationId: 'org', limit: 1, cursor: first.nextCursor });
-  assert.equal(second.scanned, 1); assert.equal(second.nextCursor, null);
+  assert.equal(second.scanned, 1); assert.equal(second.nextCursor, 'c');
   assert.equal(second.skippedNoToken, 1);
+  const third = await sync(client, { organizationId: 'org', limit: 1, cursor: second.nextCursor });
+  assert.equal(third.scanned, 1); assert.equal(third.nextCursor, null);
 });

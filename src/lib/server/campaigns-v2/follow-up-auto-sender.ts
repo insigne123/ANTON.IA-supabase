@@ -229,6 +229,11 @@ async function defaultSendStep(client: SupabaseClientLike, step: AutoSendClaimed
           if (!quota.allowed) {
             return { outcome: 'deferred' as const, code: 'daily_quota_exceeded', message: 'Se alcanzó el límite diario.', retryAfterMs: 3600000 };
           }
+          const latest = await client.from('campaigns').select('settings,v2_status').eq('id', step.campaign_id).eq('organization_id', step.organization_id).eq('user_id', step.user_id).maybeSingle();
+          if (latest.error || latest.data?.v2_status !== 'active' || (latest.data.settings as any)?.auto_send !== true) {
+            return { outcome: 'deferred' as const, code: 'automation_paused', message: 'El envío automático está pausado.', retryAfterMs: 3600000 };
+          }
+          if (await isEmailSuppressedForScope(canonical.to, scope)) return { outcome: 'rejected' as const, code: 'recipient_suppressed', message: 'El destinatario solicitó no recibir más correos.' };
           const receipt = provider === 'gmail'
             ? await sendGmail(accessToken, canonical.to, canonical.subject, prepared.html, {
               textBody: prepared.text, unsubscribeUrl, idempotencyKey: metadata.idempotencyKey,

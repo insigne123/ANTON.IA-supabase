@@ -1,5 +1,6 @@
 import { classifyReplyFlow } from '@/ai/flows/classify-reply';
 import { isHardNegativeReply } from '@/lib/reply-intent-rules';
+import { isExplicitOptOut, newReplyText } from '@/lib/reply-text';
 
 export type ReplyClassification = {
   intent: 'meeting_request' | 'positive' | 'negative' | 'unsubscribe' | 'auto_reply' | 'neutral' | 'unknown' | 'delivery_failure';
@@ -22,7 +23,7 @@ function stripHtml(input: string) {
 function heuristicClassify(text: string): ReplyClassification {
   const t = text.toLowerCase();
 
-  const isUnsub = /unsubscribe|darse de baja|darte de baja|remove me|no me contacten|no me escriban|stop emailing|stop sending/i.test(t);
+  const isUnsub = isExplicitOptOut(text);
   if (isUnsub) {
     return { intent: 'unsubscribe', sentiment: 'negative', shouldContinue: false, confidence: 0.8, summary: 'Requested to unsubscribe', reason: 'unsubscribe' };
   }
@@ -51,7 +52,10 @@ function heuristicClassify(text: string): ReplyClassification {
 }
 
 export async function classifyReply(raw: string): Promise<ReplyClassification> {
-  const cleaned = stripHtml(String(raw || '')).slice(0, 3000);
+  const cleaned = newReplyText(raw).slice(0, 3000);
+  if (isExplicitOptOut(cleaned)) {
+    return { intent: 'unsubscribe', sentiment: 'negative', shouldContinue: false, confidence: 1, summary: 'Solicitó no recibir más correos comerciales', reason: 'explicit_opt_out' };
+  }
   if (!cleaned) {
     return { intent: 'unknown', sentiment: 'neutral', shouldContinue: false, confidence: 0.2, summary: 'Empty reply', reason: 'empty' };
   }

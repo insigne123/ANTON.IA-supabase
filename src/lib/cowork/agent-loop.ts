@@ -14,24 +14,29 @@ import { coworkSavedSearchCreateSchema, coworkSavedSearchUpdateSchema, coworkSav
 import { coworkCrmRecordPatchSchema, type CoworkCrmRecordPatch } from './crm-record-proposal';
 import { coworkCrmAssignSchema, coworkExceptionResolveSchema, coworkMissionControlSchema,
   type CoworkCrmAssign, type CoworkExceptionResolve, type CoworkMissionControl } from './team-proposals';
+import { coworkMessageContextPatchSchema, type CoworkMessageContextPatch } from './message-context-proposal';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
   'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2',
   'crm_update_record', 'campaign_prepare_draft_v2',
-  'crm_assign_lead', 'exception_resolve', 'mission_control']);
+  'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch',
+  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 export const coworkDecisionSchema = z.object({
   action: z.enum(['leads.search', 'leads.get', 'research.get_existing', 'reads.parallel', 'reads.plan', 'specialists.review',
     'crm.search', 'crm.get_lead', 'contacted.search', 'contacted.timeline', 'metrics.overview', 'app.context', 'draft.get', 'campaigns.list', 'files.list', 'saved_searches.list', 'profile.get',
-    'privacy.contactability_batch',
+    'privacy.contactability_batch', 'lists.review_batch',
     'crm.propose_note', 'prospecting.propose_search',
     'leads.save_contact', 'research.start', 'draft.request', 'lead.enrich', 'email.send',
     'campaign.create', 'campaign.activate', 'campaign.pause', 'code.execute',
     'profile.update', 'saved_search.create', 'saved_search.update', 'saved_search.delete', 'campaign.stop_v2',
     'crm.update_record', 'campaign.prepare_draft_v2',
-    'crm.assign_lead', 'exception.resolve', 'mission.control',
+    'crm.assign_lead', 'exception.resolve', 'mission.control', 'message_context.update',
+    'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message',
+    'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
+    'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs',
     'answer', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
   reads: z.array(coworkReadTaskSchema).min(1).max(3).nullable().optional(),
   plan: coworkReadPlanSchema.nullable().optional(),
@@ -47,8 +52,11 @@ export const coworkDecisionSchema = z.object({
   crmAssign: coworkCrmAssignSchema.nullable().optional(),
   exceptionResolve: coworkExceptionResolveSchema.nullable().optional(),
   missionControl: coworkMissionControlSchema.nullable().optional(),
+  messageContext: coworkMessageContextPatchSchema.nullable().optional(),
   draftId: z.string().uuid().nullable().optional(),
   campaignId: z.string().uuid().nullable().optional(),
+  spacingMinutes: z.number().int().min(5).max(480).nullable().optional(),
+  linkedinMessage: z.string().trim().min(1).max(1200).nullable().optional(),
   campaign: coworkCampaignDraftSchema.nullable().optional(),
   code: coworkCodeProposalSchema.nullable().optional(),
   providerId: z.string().regex(/^apollo:[A-Za-z0-9_-]{1,200}$/).nullable().optional(),
@@ -58,12 +66,15 @@ export const coworkDecisionSchema = z.object({
   answer: coworkDocumentSchema.nullable(),
 }).strict();
 
-export type CoworkReadAction = CoworkDomainRead | 'privacy.contactability_batch' | 'leads.search' | 'leads.get' | 'research.get_existing'
-  | 'crm.search' | 'crm.get_lead' | 'contacted.search' | 'contacted.timeline' | 'metrics.overview' | 'app.context' | 'draft.get' | 'campaigns.list' | 'files.list' | 'saved_searches.list' | 'profile.get';
+export type CoworkReadAction = CoworkDomainRead | 'privacy.contactability_batch' | 'lists.review_batch' | 'leads.search' | 'leads.get' | 'research.get_existing'
+  | 'crm.search' | 'crm.get_lead' | 'contacted.search' | 'contacted.timeline' | 'metrics.overview' | 'app.context' | 'draft.get' | 'campaigns.list' | 'files.list' | 'saved_searches.list' | 'profile.get'
+  | 'campaigns.batch_report' | 'campaigns.next_touch' | 'campaigns.retry_review' | 'campaigns.company_plan'
+  | 'linkedin.network' | 'linkedin.inbox' | 'linkedin.quota' | 'linkedin.followups' | 'linkedin.jobs';
 export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draft.request' | 'lead.enrich' | 'email.send' | 'campaign.create' | 'campaign.activate' | 'campaign.pause' | 'code.execute'
   | 'profile.update' | 'saved_search.create' | 'saved_search.update' | 'saved_search.delete' | 'campaign.stop_v2'
   | 'crm.update_record' | 'campaign.prepare_draft_v2'
-  | 'crm.assign_lead' | 'exception.resolve' | 'mission.control';
+  | 'crm.assign_lead' | 'exception.resolve' | 'mission.control' | 'message_context.update' | 'lead.enrich_batch'
+  | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message';
 export type CoworkObservation = { action: CoworkReadAction | 'specialists.review'; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
 type Decision = z.infer<typeof coworkDecisionSchema>;
 
@@ -73,6 +84,10 @@ export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; l
   savedSearch?: CoworkSavedSearchCreate | CoworkSavedSearchUpdate | CoworkSavedSearchDelete;
   crmRecord?: CoworkCrmRecordPatch;
   crmAssign?: CoworkCrmAssign; exceptionResolve?: CoworkExceptionResolve; missionControl?: CoworkMissionControl;
+  messageContext?: CoworkMessageContextPatch;
+  enrichBatch?: string[];
+  scheduleBatch?: { campaignId: string; spacingMinutes?: number };
+  linkedinJob?: { leadId: string; message?: string };
   campaignId?: string; enrollmentId?: string; stepId?: string };
 
 function observationRunId(
@@ -159,6 +174,25 @@ function effectTargetRun(
       && Array.isArray((payload.result as { items?: Array<{ id?: string }> } | null)?.items)
       && ((payload.result as { items: Array<{ id?: string }> }).items.some(item => item.id === targetId)));
   }
+  if (action === 'message_context.update') {
+    return observationRunId(observations, history, currentRunId, payload => payload.action === 'message.context');
+  }
+  if (action === 'lead.enrich_batch') {
+    return observationRunId(observations, history, currentRunId, payload =>
+      (payload.action === 'lists.review_batch' || payload.action === 'lists.review_contact'
+        || payload.action === 'leads.search' || payload.action === 'leads.get'));
+  }
+  if (action === 'campaign.schedule_batch') {
+    return observationRunId(observations, history, currentRunId, payload =>
+      payload.action === 'campaigns.batch_report'
+      && (payload.result as { campaign?: { id?: string } } | null)?.campaign?.id === targetId);
+  }
+  if (action === 'linkedin.invite' || action === 'linkedin.message') {
+    return observationRunId(observations, history, currentRunId, payload =>
+      (payload.action === 'lists.review_batch' || payload.action === 'lists.review_contact'
+        || payload.action === 'leads.search' || payload.action === 'leads.get'
+        || payload.action === 'linkedin.followups'));
+  }
   return observationRunId(observations, history, currentRunId, payload =>
     collectCoworkLeadRows([payload]).some(row => row.id === targetId));
 }
@@ -209,6 +243,11 @@ function effectLabel(action: CoworkEffectAction, targetId: string): string {  if
   if (action === 'crm.assign_lead') return 'Asignar o reservar contacto';
   if (action === 'exception.resolve') return 'Resolver incidencia';
   if (action === 'mission.control') return 'Pausar o reactivar misión';
+  if (action === 'message_context.update') return 'Actualizar contexto de redacción';
+  if (action === 'lead.enrich_batch') return 'Enriquecer lote de contactos';
+  if (action === 'campaign.schedule_batch') return 'Programar lote de envíos';
+  if (action === 'linkedin.invite') return 'Proponer invitación LinkedIn';
+  if (action === 'linkedin.message') return 'Proponer mensaje LinkedIn';
   return `Preparar borrador del informe ${targetId.slice(0, 120)}`;
 }
 
@@ -269,7 +308,8 @@ export async function runCoworkReadLoop(input: {
       if (!input.proposeSearch || !decision.searchCriteria) throw new Error('Invalid external search proposal');
       await input.authorize(); input.signal.throwIfAborted();
       await input.proposeSearch(coworkSearchCriteriaSchema.parse(decision.searchCriteria));
-      return { reply: 'Revisa los criterios antes de buscar nuevos contactos.', document: null };
+      return { reply: decision.searchCriteria.target === 'companies'
+        ? 'Revisa los criterios antes de buscar empresas.' : 'Revisa los criterios antes de buscar nuevos contactos.', document: null };
     }
     if (decision.action === 'crm.propose_note') {
       if (!input.proposeNote || !decision.leadId || !decision.note) throw new Error('Invalid note proposal');
@@ -286,7 +326,10 @@ export async function runCoworkReadLoop(input: {
     if (decision.action === 'leads.save_contact' || decision.action === 'research.start' || decision.action === 'draft.request' || decision.action === 'lead.enrich' || decision.action === 'email.send' || decision.action === 'campaign.create' || decision.action === 'campaign.activate' || decision.action === 'campaign.pause' || decision.action === 'code.execute'
       || decision.action === 'profile.update' || decision.action === 'saved_search.create' || decision.action === 'saved_search.update' || decision.action === 'saved_search.delete' || decision.action === 'campaign.stop_v2'
       || decision.action === 'crm.update_record' || decision.action === 'campaign.prepare_draft_v2'
-      || decision.action === 'crm.assign_lead' || decision.action === 'exception.resolve' || decision.action === 'mission.control') {
+      || decision.action === 'crm.assign_lead' || decision.action === 'exception.resolve' || decision.action === 'mission.control'
+      || decision.action === 'message_context.update' || decision.action === 'lead.enrich_batch'
+      || decision.action === 'campaign.schedule_batch'
+      || decision.action === 'linkedin.invite' || decision.action === 'linkedin.message') {
       if (!input.proposeEffect) throw new Error('Effect proposals unavailable');
       const kind: CoworkEffectKind = decision.action === 'leads.save_contact' ? 'save_contact'
         : decision.action === 'research.start' ? 'start_research'
@@ -305,7 +348,12 @@ export async function runCoworkReadLoop(input: {
         : decision.action === 'campaign.prepare_draft_v2' ? 'campaign_prepare_draft_v2'
         : decision.action === 'crm.assign_lead' ? 'crm_assign_lead'
         : decision.action === 'exception.resolve' ? 'exception_resolve'
-        : decision.action === 'mission.control' ? 'mission_control' : 'request_draft';
+        : decision.action === 'mission.control' ? 'mission_control'
+        : decision.action === 'message_context.update' ? 'message_context_update'
+        : decision.action === 'lead.enrich_batch' ? 'enrich_batch'
+        : decision.action === 'campaign.schedule_batch' ? 'campaign_schedule_batch'
+        : decision.action === 'linkedin.invite' ? 'linkedin_invite'
+        : decision.action === 'linkedin.message' ? 'linkedin_message' : 'request_draft';
       const targetId = decision.action === 'leads.save_contact' ? decision.providerId
         : decision.action === 'draft.request' ? decision.snapshotId
         : decision.action === 'email.send' ? decision.draftId
@@ -322,6 +370,10 @@ export async function runCoworkReadLoop(input: {
         : decision.action === 'crm.assign_lead' ? decision.crmAssign?.leadId ?? null
         : decision.action === 'exception.resolve' ? decision.exceptionResolve?.exceptionId ?? null
         : decision.action === 'mission.control' ? decision.missionControl?.missionId ?? null
+        : decision.action === 'message_context.update' ? 'own-message-context'
+        : decision.action === 'lead.enrich_batch' ? 'new-enrich-batch'
+        : decision.action === 'campaign.schedule_batch' ? decision.campaignId
+        : decision.action === 'linkedin.invite' || decision.action === 'linkedin.message' ? 'new-linkedin-job'
         : decision.leadId;
       const campaign = decision.action === 'campaign.create' ? decision.campaign ?? undefined : undefined;
       const code = decision.action === 'code.execute' ? decision.code ?? undefined : undefined;
@@ -335,6 +387,7 @@ export async function runCoworkReadLoop(input: {
       const crmAssign = decision.action === 'crm.assign_lead' ? decision.crmAssign ?? undefined : undefined;
       const exceptionResolve = decision.action === 'exception.resolve' ? decision.exceptionResolve ?? undefined : undefined;
       const missionControl = decision.action === 'mission.control' ? decision.missionControl ?? undefined : undefined;
+      const messageContext = decision.action === 'message_context.update' ? decision.messageContext ?? undefined : undefined;
       if (!targetId) throw new Error('Missing effect target');
       if (decision.action === 'campaign.create' && !campaign) throw new Error('Missing campaign definition');
       if (decision.action === 'code.execute' && !code) throw new Error('Missing code proposal');
@@ -348,6 +401,18 @@ export async function runCoworkReadLoop(input: {
       if (decision.action === 'crm.assign_lead' && !crmAssign) throw new Error('Missing collaboration assignment');
       if (decision.action === 'exception.resolve' && !exceptionResolve) throw new Error('Missing exception triage');
       if (decision.action === 'mission.control' && !missionControl) throw new Error('Missing mission control');
+      if (decision.action === 'message_context.update' && !messageContext) throw new Error('Missing message context patch');
+      const enrichBatch = decision.action === 'lead.enrich_batch' ? decision.leadIds ?? undefined : undefined;
+      if (decision.action === 'lead.enrich_batch' && (!enrichBatch || !enrichBatch.length)) throw new Error('Missing batch targets');
+      const linkedinJob = decision.action === 'linkedin.invite' && decision.leadId ? { leadId: decision.leadId }
+        : decision.action === 'linkedin.message' && decision.leadId && decision.linkedinMessage
+          ? { leadId: decision.leadId, message: decision.linkedinMessage } : undefined;
+      if (decision.action === 'linkedin.invite' && !linkedinJob) throw new Error('Missing invite target');
+      if (decision.action === 'linkedin.message' && !linkedinJob) throw new Error('Missing message target and text');
+      const scheduleBatch = decision.action === 'campaign.schedule_batch' && decision.campaignId
+        ? { campaignId: decision.campaignId, ...(decision.spacingMinutes == null ? {} : { spacingMinutes: decision.spacingMinutes }) }
+        : undefined;
+      if (decision.action === 'campaign.schedule_batch' && !scheduleBatch) throw new Error('Missing batch schedule');
       const originRunId = decision.action === 'code.execute'
         ? codeOriginRunId(code?.inputFiles || [], observations, input.history || [], input.runId || '')
         : effectTargetRun(decision.action, targetId, observations, input.history || [], input.runId || '');
@@ -361,7 +426,11 @@ export async function runCoworkReadLoop(input: {
         ...(crmRecord === undefined ? {} : { crmRecord }), ...(stepId === undefined ? {} : { stepId }),
         ...(crmAssign === undefined ? {} : { crmAssign }),
         ...(exceptionResolve === undefined ? {} : { exceptionResolve }),
-        ...(missionControl === undefined ? {} : { missionControl }) });
+        ...(missionControl === undefined ? {} : { missionControl }),
+        ...(messageContext === undefined ? {} : { messageContext }),
+        ...(enrichBatch === undefined ? {} : { enrichBatch }),
+        ...(scheduleBatch === undefined ? {} : { scheduleBatch }),
+        ...(linkedinJob === undefined ? {} : { linkedinJob }) });
       return { reply: 'Revisa la propuesta antes de ejecutar el cambio.', document: null };
     }
     if (turn === 3) throw new Error('Cowork tool budget exhausted');
@@ -390,7 +459,7 @@ export async function runCoworkReadLoop(input: {
       observations.push(...decision.reads.map((task, index) => ({ ...task, result: results[index] })));
       continue;
     }
-    if (decision.action === 'privacy.contactability_batch') {
+    if (decision.action === 'privacy.contactability_batch' || decision.action === 'lists.review_batch') {
       // One batch consumes the turn's read budget: at most 5 minimized checks.
       if (!decision.leadIds || readsUsed > 0) throw new Error('Cowork tool budget exhausted');
       readsUsed = 3;
@@ -408,11 +477,17 @@ export async function runCoworkReadLoop(input: {
     readsUsed++;
     const value = COWORK_DOMAIN_FIXED_READS.some(action => action === decision.action) ? ''
       : decision.action === 'leads.search' || decision.action === 'crm.search' || decision.action === 'contacted.search'
-      ? decision.query
-      : decision.action === 'metrics.overview' || decision.action === 'app.context' || decision.action === 'campaigns.list' || decision.action === 'files.list' || decision.action === 'saved_searches.list' || decision.action === 'profile.get'
-        ? ''
-        : decision.action === 'draft.get'
+      ? (decision.query ?? (decision.reads?.length === 1 && decision.reads[0].action === decision.action
+          ? decision.reads[0].input : null))
+        : decision.action === 'metrics.overview' || decision.action === 'app.context' || decision.action === 'campaigns.list' || decision.action === 'files.list' || decision.action === 'saved_searches.list' || decision.action === 'profile.get'
+        || decision.action === 'linkedin.network' || decision.action === 'linkedin.inbox' || decision.action === 'linkedin.quota'
+        || decision.action === 'linkedin.followups' || decision.action === 'linkedin.jobs'
+          ? ''
+        : decision.action === 'draft.get' || decision.action === 'message.check_terms' || decision.action === 'message.check_evidence'
           ? decision.draftId
+        : decision.action === 'campaigns.batch_report' || decision.action === 'campaigns.next_touch'
+        || decision.action === 'campaigns.retry_review' || decision.action === 'campaigns.company_plan'
+          ? decision.campaignId
         : decision.action === 'campaigns.plan'
           ? decision.draftId
         : decision.action === 'campaigns.step_context'

@@ -45,14 +45,14 @@ const mocks = {
   '@/ai/openai-json': `export const generateStructuredWithTelemetry=async()=>({data:{action:'answer',query:null,leadId:null,answer:{reply:'Listo',document:null}},telemetry:{modelName:'fixture',durationMs:1}});`,
   '@/lib/server/supabase-admin': supabaseMock(),
   './access': 'export const requireCoworkWorkerAccess=async()=>{};',
-  './runs': 'export const coworkWorkerConfigured=()=>true;',
+  './runs': 'export const coworkWorkerConfigured=()=>true;export const getCoworkRun=async()=>null;',
   './conversation-context': 'export const loadCoworkHistory=async()=>({turns:[]});',
   './operations': 'export const coworkOperationHash=()=>"hash";export const createCoworkOperationGateway=()=>({invoke:async()=>({})});export const createCoworkOperationDependencies=()=>{throw new Error("specialists disabled")};',
   './read-capabilities': 'export const coworkReadCapabilities=()=>[];',
   './effects': `export const processCoworkEffectQueue=async()=>{globalThis.__coworkFairness.calls.push('queue:effect');return{claimed:false};};export const resolveCoworkEffect=async()=>true;`,
   './external-search': `export const processCoworkSearchQueue=async()=>{globalThis.__coworkFairness.calls.push('queue:search');return{claimed:false};};`,
   './draft-from-research': `export const processCoworkDraftQueue=async()=>{globalThis.__coworkFairness.calls.push('queue:draft');return{claimed:false};};`,
-  '@/lib/server/daily-quota-store': `export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:50});export const getDailyQuotaStatus=async()=>({allowed:true,count:0,limit:50});`,
+  '@/lib/server/daily-quota-store': `export const getEffectiveDailyQuotaLimits=async()=>({leadSearch:50});export const getDailyQuotaStatus=async()=>({allowed:true,count:0,limit:50});export const getEnrichmentQuotaOperation=async()=>null;export const claimEnrichmentQuotaOperation=async()=>{throw new Error("unused")};export const releaseEnrichmentQuotaOperation=async()=>{};`,
 };
 
 const bundle = await build({ entryPoints: ['src/lib/server/cowork/worker.ts'], bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', plugins: [{ name: 'fixture', setup(b) {

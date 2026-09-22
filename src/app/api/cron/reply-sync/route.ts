@@ -41,21 +41,22 @@ async function runReplySync(req: NextRequest) {
   // cannot permanently occupy the owner batch.
   const defaultBatch = Math.floor(Date.now() / (5 * 60 * 1000)) % 24;
   const ownerBatch = batchInRange(req.nextUrl.searchParams.get('batch'), defaultBatch, 23);
-  const ownerOffset = ownerBatch * candidateLimit;
+  const ownerOffset = 0;
   const supabase = getSupabaseAdminClient();
 
   try {
     const owners = new Map<string, ReplySyncOwner>();
     const { data: contactOwners, error: contactOwnersError } = await supabase
       .from('contacted_leads')
-      .select('organization_id, user_id')
+      .select('id, organization_id, user_id')
       .in('provider', ['gmail', 'outlook'])
-      .is('replied_at', null)
+      .not('sent_at', 'is', null)
+      .or('status.is.null,status.not.in.(scheduled,failed)')
       .not('organization_id', 'is', null)
       .not('user_id', 'is', null)
-      .order('sent_at', { ascending: false })
-      .order('id', { ascending: false })
-      .range(ownerOffset, ownerOffset + candidateLimit - 1);
+      .order('reply_sync_attempted_at', { ascending: true, nullsFirst: true })
+      .order('id', { ascending: true })
+      .limit(perOwnerLimit);
     if (contactOwnersError) throw contactOwnersError;
     for (const row of contactOwners || []) {
       if (owners.size >= ownerLimit) break;
@@ -69,6 +70,8 @@ async function runReplySync(req: NextRequest) {
           organizationId: owner.organizationId,
           userId: owner.userId,
           limit: perOwnerLimit,
+          fairQueue: true,
+          contactedIds: (contactOwners || []).filter(row => row.organization_id === owner.organizationId && row.user_id === owner.userId).map(row => row.id),
         });
         summary.scanned += result.scanned;
         summary.synced += result.synced;

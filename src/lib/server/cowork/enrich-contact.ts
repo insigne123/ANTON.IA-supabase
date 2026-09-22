@@ -20,6 +20,7 @@ import {
   settleApolloEnrichmentCallback,
 } from '@/lib/server/apollo-enrichment-callbacks';
 import { submitApolloEnrichment } from '@/lib/server/apollo-enrichment';
+import { verifiedEmailEvidence } from '@/lib/cowork/list-quality';
 
 /** Fase 2B: enrich one own saved lead (email-basic only) through the same shared
  * primitives as the app's enrich flow: quota claim lifecycle, callback row for
@@ -56,6 +57,7 @@ function normalizeLinkedin(value: unknown) {
 
 export type CoworkEnrichResult = {
   email: string | null; emailStatus: string | null; found: boolean;
+  verifiedForList: boolean;
   creditsConsumed?: number; reused: boolean; enrichedLeadId: string;
 };
 
@@ -68,9 +70,16 @@ export async function enrichCoworkContact(
   if (!state || (state.run.status !== 'completed' && state.run.status !== 'waiting_approval')) {
     throw new Error('El contacto a enriquecer ya no está disponible en este trabajo.');
   }
-  const observed = collectCoworkLeadRows(state.events
+  const completed = state.events
     .filter((event: { kind: string }) => event.kind === 'tool.completed')
-    .map((event: { payload: unknown }) => event.payload)).some(row => row.id === leadId);
+    .map((event: { payload: unknown }) => event.payload);
+  const observed = collectCoworkLeadRows(completed).some(row => row.id === leadId)
+    || completed.some((payload: unknown) => payload && typeof payload === 'object'
+      && ((payload as { action?: string }).action === 'lists.review_batch'
+        || (payload as { action?: string }).action === 'lists.review_contact')
+      && Array.isArray((payload as { result?: { items?: Array<{ leadId?: string }> } }).result?.items)
+      && ((payload as { result: { items: Array<{ leadId?: string }> } }).result.items
+        .some(item => item.leadId === leadId)));
   if (!observed) throw new Error('El contacto a enriquecer debe haberse observado primero en esta conversación.');
   const leadRow = await auth.supabase.from('leads')
     .select('id,name,title,company,company_website,linkedin_url,email,source_provider,source_provider_id')
@@ -106,6 +115,7 @@ export async function enrichCoworkContact(
       email: persisted.data.email || null,
       emailStatus: persisted.data.email_status || null,
       found: Boolean(persisted.data.email),
+      verifiedForList: verifiedEmailEvidence(persisted.data.email, persisted.data.email_status),
       reused: true, enrichedLeadId: persisted.data.id,
     };
   }
@@ -195,13 +205,13 @@ export async function enrichCoworkContact(
     } else {
       await settleApolloEnrichmentCallback({ callbackId: callback.callbackId, terminalState: 'no_data', errorCode: 'apollo_no_email_data' });
     }
-    if (found && email && !text(saved.email, 320)) {
+    if (found && email && verifiedEmailEvidence(email, emailStatus) && !text(saved.email, 320)) {
       // Continuity: research, drafts and sends read the saved lead. Fill its
       // missing email with the provider-verified address; never overwrite one.
       await client.from('leads').update({ email, last_enriched_at: new Date().toISOString() })
         .eq('id', leadId).eq('user_id', userId).eq('organization_id', organizationId);
     }
-    const summary = { email: email || null, emailStatus: emailStatus || null, found, creditsConsumed: result.creditsConsumed, enrichedLeadId: targetId };
+    const summary = { email: email || null, emailStatus: emailStatus || null, found, verifiedForList: found && verifiedEmailEvidence(email, emailStatus), creditsConsumed: result.creditsConsumed, enrichedLeadId: targetId };
     // Callback settlement owns quota completion; do not complete the same claim twice.
     return { ...summary, reused: false };
   } catch (error) {

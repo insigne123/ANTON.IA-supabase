@@ -121,9 +121,46 @@ export async function processCoworkDraftQueue() {
     if (attempt.error || attempt.data.status !== 'executing' || attempt.data.attempts !== job.attempts) {
       return { processed: 0, claimed: true };
     }
+    const messaging = await client.from('organization_messaging_context').select('*')
+      .eq('organization_id', scope.organizationId).maybeSingle();
+    const configuredStyle = typeof messaging.data?.default_style_profile_id === 'string'
+      && messaging.data.default_style_profile_id ? messaging.data.default_style_profile_id : null;
+    let styleProfileId: string | undefined;
+    if (configuredStyle) {
+      try {
+        const { resolveEmailStyleProfile } = await import('@/lib/server/email-style-profiles');
+        await resolveEmailStyleProfile({ organizationId: scope.organizationId, userId: scope.userId,
+          styleProfileId: configuredStyle, client: client as never });
+        styleProfileId = configuredStyle;
+      } catch (error) {
+        const code = error instanceof Error ? error.message : '';
+        if (code === 'EMAIL_STYLE_FORBIDDEN') {
+          throw new Error('El estilo aprobado ya no es accesible para esta cuenta. Actualiza el contexto de redacción.');
+        }
+        if (code === 'NATIVE_DRAFT_STYLE_NOT_FOUND') {
+          // Deleted style: fall back to the organization default and record
+          // the substitution so the run shows it explicitly.
+          try {
+            await client.from('cowork_run_events').insert({ run_id: job.run_id, user_id: scope.userId,
+              organization_id: scope.organizationId, kind: 'draft.style_substituted',
+              payload: { requestedStyleProfileId: configuredStyle, reason: 'style_not_found' } });
+          } catch {
+            // Observability only; generation continues with the org default.
+          }
+          styleProfileId = undefined;
+        } else {
+          throw new Error('No se pudo comprobar el estilo aprobado. Reintenta más tarde.');
+        }
+      }
+    }
+    const { buildMessagingGenerationInstruction } = await import('./message-context');
     const result = await createNativeDraft({
       ...scope, snapshotId: job.snapshot_id,
       idempotencyKey: coworkDraftIdempotencyKey(job.run_id, job.snapshot_id),
+      ...(styleProfileId ? { styleProfileId } : {}),
+      // Only approved, configured context steers generation. Unconfigured
+      // orgs keep the previous default behavior unchanged.
+      ...(messaging.data ? { instruction: buildMessagingGenerationInstruction(messaging.data) } : {}),
     });
     await requireCoworkWorkerAccess(client, scope);
     if (result.status !== 'drafted') {

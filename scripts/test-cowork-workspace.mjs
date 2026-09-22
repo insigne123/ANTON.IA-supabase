@@ -71,7 +71,7 @@ try {
   Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(filter, 'No coincide');
   filter.dispatchEvent(new window.Event('input', { bubbles: true }));
   await waitFor(() => contacts.textContent.includes('No hay coincidencias'));
-  assert.match(contacts.textContent, /descarga incluye los 1 contactos/);
+  assert.match(contacts.textContent, /descarga incluye 1 contactos/);
   button('Abrir').click();
   await waitFor(() => window.document.querySelector('aside[aria-label="Documento"]'));
   assert.match(window.document.querySelector('pre').textContent, /<script>/);

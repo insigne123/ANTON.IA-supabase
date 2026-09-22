@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveCampaignReplyTarget } from './reply-target';
+import { resolveCampaignReplyTarget, resolveContactedReplyTarget } from './reply-target';
 
 const draft: any = { organizationId: 'org', userId: 'owner', draftId: 'draft', versionId: 'version', recipient: { email: 'ada@example.com' } };
 function fixture() {
@@ -80,4 +80,11 @@ test('only explicitly requested Outlook replies are unsupported, before history 
   for (const mode of ['reply_first', 'reply_previous'] as const) {
     await assert.rejects(resolveCampaignReplyTarget(noLookup, draft, 'outlook', mode), /OUTLOOK_NATIVE_REPLY_UNSUPPORTED/);
   }
+});
+
+test('contact reply target is derived from the owned recipient and provider thread', async () => {
+  const row = { id: 'contact', user_id: 'owner', organization_id: 'org', email: 'ada@example.com', provider: 'gmail', status: 'replied', sent_at: '2026-09-22T10:00:00Z', message_id: 'parent', thread_id: 'thread', conversation_id: null };
+  const scopedClient = { from(table: string) { const filters: any[] = []; return { select() { return this; }, eq(key: string, value: any) { filters.push([key, value]); return this; }, maybeSingle: async () => ({ data: table === 'contacted_leads' && filters.every(([key, value]) => row[key as keyof typeof row] === value) ? row : null, error: null }) }; } };
+  assert.deepEqual(await resolveContactedReplyTarget(scopedClient, { contactedId: 'contact', organizationId: 'org', userId: 'owner', provider: 'gmail', recipient: 'ada@example.com' }), { provider: 'gmail', messageId: 'parent', threadId: 'thread' });
+  await assert.rejects(resolveContactedReplyTarget(scopedClient, { contactedId: 'contact', organizationId: 'org', userId: 'foreign', provider: 'gmail', recipient: 'ada@example.com' }), /CONTACTED_REPLY/);
 });

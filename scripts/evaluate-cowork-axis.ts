@@ -1,5 +1,6 @@
 // No env-file loading. Live calls require explicit opt-in; no external effects.
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
 import { z } from 'zod';
 import { axisConversations } from './fixtures/cowork-axis-conversations';
 import { coworkCommercialBehavior } from '../src/lib/cowork/commercial-behavior';
@@ -68,8 +69,11 @@ for (const c of cases) {
     break;
   }
 }
-console.log(JSON.stringify({corpus:'axis-conversations-v1',mode:live?'live_with_fixed_observations':'fixture_validation',
+const report = JSON.stringify({corpus:'axis-conversations-v1',mode:live?'live_with_fixed_observations':'fixture_validation',
   completed:results.length,selected:cases.length,passed:!failed,
   budget:{maxCalls:cases.length,reservedInput,reservedOutput},results,
-  limitation:'Lexical checks are screening, not semantic certification. No tool selection, complete history replay, database, browser actions or authenticated end-to-end flow is certified.'},null,2));
+  limitation:'Lexical checks are screening, not semantic certification. No tool selection, complete history replay, database, browser actions or authenticated end-to-end flow is certified.'},null,2);
+const output = process.argv.find(arg => arg.startsWith('--output='))?.slice(9);
+if (output) writeFileSync(output, report + '\n', 'utf8');
+console.log(report);
 if(failed) process.exitCode=1;

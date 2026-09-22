@@ -12,20 +12,20 @@ export const BulkAssistInputSchema = z.discriminatedUnion('mode', [
     mode: z.literal('message'), instruction: z.string().trim().min(5).max(2000),
     objective: z.string().trim().max(2000), current: DraftMessageSchema,
     relationship: z.enum(['never_contacted', 'previously_contacted']),
-    sequenceContext: z.array(DraftMessageSchema).min(1).max(5).optional(),
-    messageIndex: z.number().int().min(0).max(4).optional(),
+    sequenceContext: z.array(DraftMessageSchema).min(1).max(7).optional(),
+    messageIndex: z.number().int().min(0).max(6).optional(),
     audience: z.string().trim().max(2000).optional(),
   }).strict(),
   z.object({
     mode: z.literal('sequence'), objective: z.string().trim().min(5, 'Describe el objetivo de la campaña.').max(2000),
     audience: z.string().trim().max(2000),
     relationship: z.enum(['never_contacted', 'previously_contacted']),
-    followUpDelays: z.array(z.number().int().min(1).max(90)).max(4),
+    followUpDelays: z.array(z.number().int().min(1).max(90)).max(6),
   }).strict(),
 ]);
 
 export const CampaignSequenceProposalSchema = z.object({
-  messages: z.array(CampaignMessageSchema).min(1).max(5),
+  messages: z.array(CampaignMessageSchema).min(1).max(7),
 }).strict();
 
 /** The requested schedule, not model output, determines sequence length and delays. */

@@ -371,7 +371,7 @@ async function legacyPost(req: NextRequest) {
                         ? await sendGmail(accessToken, to, subject, finalBody, effectiveIsHtml, idempotencyKey)
                         : await sendOutlook(accessToken, to, subject, finalBody, effectiveIsHtml, idempotencyKey);
                     const providerMessageId = String((result as any).messageId || (result as any).internetMessageId || '').trim();
-                    return { outcome: 'accepted' as const, providerMessageId, response: result };
+                    return { outcome: 'accepted' as const, providerMessageId, response: { ...result, outboundSnapshot: { subject, to, html: prepared.html, text: prepared.text, capturedAt: new Date().toISOString(), source: 'submitted_to_provider' } } };
                 },
             },
         });

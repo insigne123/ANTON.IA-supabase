@@ -36,6 +36,40 @@ export async function POST(req: NextRequest) {
         sequencesEnabled: await isCampaignsV2Enabled(auth.organizationId) });
     }
     try { assertExtensionScope(body, auth); } catch { return json({ error: 'EXTENSION_SESSION_CHANGED', message: 'La cuenta o la organización cambió. Vuelve a conectar la extensión.' }, 409); }
+    const bridge = { organizationId: auth.organizationId, userId: auth.user.id };
+    if (body.action === 'linkedin-jobs-pending') {
+      const { listPendingLinkedinJobs } = await import('@/lib/server/linkedin-bridge-ops');
+      const { canonicalExtensionProfileUrl } = await import('@/lib/extension-profile-url');
+      const filter = body.profile?.linkedinUrl ? canonicalExtensionProfileUrl(body.profile.linkedinUrl) : null;
+      return json({ jobs: await listPendingLinkedinJobs(bridge, filter || null) });
+    }
+    if (body.action === 'linkedin-job-claim') {
+      const { claimLinkedinJob } = await import('@/lib/server/linkedin-bridge-ops');
+      try {
+        return json({ job: await claimLinkedinJob(bridge, body.jobId || body.jobResult!.jobId) });
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : 'No se pudo reclamar el trabajo.' }, 409);
+      }
+    }
+    if (body.action === 'linkedin-job-result') {
+      const { finishLinkedinJob } = await import('@/lib/server/linkedin-bridge-ops');
+      try {
+        return json(await finishLinkedinJob(bridge, body.jobResult!));
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : 'No se pudo registrar el resultado.' }, 409);
+      }
+    }
+    if (body.action === 'network-report') {
+      const { reportLinkedinNetwork } = await import('@/lib/server/linkedin-bridge-ops');
+      return json(await reportLinkedinNetwork(bridge, {
+        entries: body.networkEntries || [], cursor: body.networkCursor, hasMore: body.networkHasMore }));
+    }
+    if (body.action === 'inbox-report') {
+      const { reportLinkedinInbox } = await import('@/lib/server/linkedin-bridge-ops');
+      return json(await reportLinkedinInbox(bridge, {
+        threads: (body.inboxThreads || []) as Array<{ key: string; url: string; name: string; direction: 'in' | 'out'; at: string | null; snippet: string; replyNeeded: boolean }>,
+        cursor: body.inboxCursor, hasMore: body.inboxHasMore }));
+    }
     const profile = body.profile!;
     if (body.action === 'phone-status') {
       if (!body.enrichmentId) return json({ error: 'Selecciona la consulta de teléfono pendiente.' }, 400);

@@ -1,5 +1,6 @@
 import { extensionLeadId, type ExtensionProfile } from '@/lib/extension-contracts';
 import type { AuthContext } from '@/lib/server/auth-utils';
+import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
 
 export async function findExtensionLead(auth: AuthContext, profile: ExtensionProfile) {
   const url = profile.linkedinUrl;
@@ -34,10 +35,29 @@ export async function saveExtensionLead(auth: AuthContext, profile: ExtensionPro
     ...(profile.details ? { data: { ...existing?.data, extensionDetails: profile.details,
       ...(replaceFields ? { companyDomain: profile.companyDomain || null } : {}) } } : {}),
   };
+  // Immutable observation record: later edits to the lead row must not
+  // rewrite what the extension actually captured on this date. Recorded for
+  // both new and updated leads; a capture failure never breaks the save.
+  const recordCapture = async () => {
+    try {
+      const canonical = normalizeLinkedinProfileUrl(profile.linkedinUrl);
+      if (!canonical) return;
+      const { getSupabaseAdminClient } = await import('@/lib/server/supabase-admin');
+      await getSupabaseAdminClient().from('extension_profile_captures').insert({
+        organization_id: auth.organizationId, user_id: auth.user.id,
+        linkedin_url: profile.linkedinUrl, canonical_url: canonical,
+        full_name: profile.fullName || null, title: profile.title || null,
+        company_name: profile.companyName || null,
+      });
+    } catch {
+      // Evidence only.
+    }
+  };
   if (existing) {
     const { data, error } = await auth.supabase.from('enriched_leads').update(fields)
       .eq('organization_id', auth.organizationId).eq('id', existing.id).select('*').single();
     if (error) throw error;
+    await recordCapture();
     return { lead: data, disposition: 'updated' };
   }
   const id = extensionLeadId(auth.organizationId, profile.linkedinUrl);
@@ -52,6 +72,7 @@ export async function saveExtensionLead(auth: AuthContext, profile: ExtensionPro
   if (error) throw error;
   const lead = await findExtensionLead(auth, profile);
   if (!lead) throw new Error('EXTENSION_SAVE_NOT_CONFIRMED');
+  await recordCapture();
   return { lead, disposition: 'saved' };
 }
 

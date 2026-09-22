@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Anton.IA — LinkedIn Workspace",
-  "version": "4.0.13",
+  "version": "4.0.14",
   "minimum_chrome_version": "116",
   "description": "Guarda e investiga leads y prepara mensajes personalizados desde LinkedIn.",
   "permissions": ["tabs", "sidePanel", "storage", "scripting"],
@@ -15,7 +15,7 @@
   "content_scripts": [
     {
       "matches": ["https://www.linkedin.com/*"],
-      "js": ["content.js", "prospecting-content.js", "prospecting-send.js"]
+      "js": ["content.js", "prospecting-content.js", "prospecting-send.js", "prospecting-invite.js"]
     },
     {
       "matches": ["https://app.antonia.ai/*", "https://studio--leadflowai-3yjcy.us-central1.hosted.app/*"],

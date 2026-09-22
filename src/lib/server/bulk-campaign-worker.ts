@@ -10,6 +10,9 @@ export type BulkWorkerDependencies = {
   attempts: (campaign: BulkCampaign) => Promise<CampaignAttempt[]>;
   touch: (campaign: BulkCampaign) => Promise<void>;
   now: () => number;
+  /** 4.1: espaciado minimo entre envios del mismo lote Cowork, en minutos.
+   * Ausente en dependencias heredadas: sin fila de lote no hay espaciado. */
+  batchSpacing?: (campaign: BulkCampaign) => Promise<number>;
 };
 function dependencies(): BulkWorkerDependencies {
   const admin = getSupabaseAdminClient();
@@ -33,6 +36,14 @@ function dependencies(): BulkWorkerDependencies {
       const { error } = await admin.from('bulk_campaigns').update({ updated_at: new Date().toISOString() }).eq('id', campaign.id).eq('status', 'approved');
       if (error) throw error;
     },
+    async batchSpacing(campaign) {
+      const { data, error } = await admin.from('cowork_send_batches')
+        .select('spacing_minutes').eq('organization_id', campaign.organization_id).eq('campaign_id', campaign.id).maybeSingle();
+      if (error) throw error;
+      if (!data) return 0;
+      const minutes = Number((data as { spacing_minutes?: unknown }).spacing_minutes || 0);
+      return Number.isFinite(minutes) && minutes > 0 ? Math.min(minutes, 24 * 60) : 0;
+    },
   };
 }
 
@@ -46,6 +57,16 @@ export async function runBulkCampaignWorker(deps: BulkWorkerDependencies = depen
     try {
       const attempts = await deps.attempts(campaign);
       const deliveries = withSentAttemptsAsDeliveries(await deps.deliveries(campaign), attempts);
+      const spacingMinutes = deps.batchSpacing ? await deps.batchSpacing(campaign) : 0;
+      {
+        if (spacingMinutes > 0) {
+          const lastSent = deliveries
+            .filter(delivery => delivery.status === 'sent' && delivery.completed_at)
+            .map(delivery => Date.parse(String(delivery.completed_at)))
+            .filter(timestamp => Number.isFinite(timestamp));
+          if (lastSent.length && deps.now() - Math.max(...lastSent) < spacingMinutes * 60000) continue;
+        }
+      }
       for (const person of campaign.recipients) {
         if (deps.now() - started >= budgetMs || summary.attempted >= 20) break;
         const next = nextCampaignMessage(person, deliveries, campaign.approved_at, deps.now());
@@ -54,10 +75,13 @@ export async function runBulkCampaignWorker(deps: BulkWorkerDependencies = depen
         summary.attempted++;
         try {
           const result = await deps.send(campaign, next.message);
-          if (result.status === 'sent') summary.sent++;
+          if (result.status === 'sent') {
+            summary.sent++;
+            if (spacingMinutes > 0) break;
+          }
           else if (result.status === 'deferred') { summary.deferred++; break; }
-          else summary.attention++;
-        } catch { summary.attention++; }
+          else { summary.attention++; if (spacingMinutes > 0) break; }
+        } catch { summary.attention++; if (spacingMinutes > 0) break; }
       }
     } catch { summary.attention++; }
     finally {

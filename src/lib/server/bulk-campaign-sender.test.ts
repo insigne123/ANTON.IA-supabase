@@ -7,13 +7,20 @@ const compiled = ts.transpileModule(readFileSync('src/lib/server/bulk-campaign-s
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 class Deferred extends Error { constructor(message: string, public options: any) { super(message); } }
-function harness(options: { replay?: boolean; paused?: boolean; suppressed?: boolean; suppressionError?: boolean; tokenMissing?: boolean; quota?: boolean; changed?: boolean; provider?: string } = {}) {
+function harness(options: { replay?: boolean; paused?: boolean; suppressed?: boolean; suppressionError?: boolean; tokenMissing?: boolean; quota?: boolean; changed?: boolean; provider?: string; repliedAfterRefresh?: boolean; batch?: boolean; slot?: boolean; slotError?: boolean } = {}) {
   const calls: string[] = [];
   const message = { draftId: 'draft', versionId: 'version', subject: 'Aprobado', body: 'Contenido aprobado', delayDays: 0 };
-  const campaign = { id: 'campaign', organization_id: 'org', user_id: 'owner', review_hash: 'hash', definition: { provider: options.provider || 'google' } };
+  const campaign = { id: 'campaign', organization_id: 'org', user_id: 'owner', review_hash: 'hash', definition: { provider: options.provider || 'google' }, recipients: [{ company: 'Acme', messages: [message] }] };
   const query: any = { select() { return this; }, eq() { return this; }, single: async () => ({ data: { status: options.paused ? 'paused' : 'approved', review_hash: 'hash' } }) };
   const modules: Record<string, any> = {
-    '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ from: () => query }) },
+    '@/lib/server/supabase-admin': { getSupabaseAdminClient: () => ({ from: () => query, rpc: async () => { calls.push('slot'); return { data: options.slot !== false, error: options.slotError ? new Error('offline') : null }; } }) },
+    '@/lib/server/campaign-send-guards': {
+      findCompanyReply: async () => { calls.push('reply'); return { stopped: options.repliedAfterRefresh && calls.includes('refresh') }; },
+      findNegotiationHold: async () => ({ held: false }),
+      coworkBatchForCampaign: async () => options.batch ? { company_stagger: true } : null,
+      findCompanySendToday: async () => ({ collided: false }),
+    },
+    '@/lib/cowork/send-cadence': { companyKeysFor: () => ({ keys: ['domain:example.com'] }), santiagoDayBounds: () => ({ start: '2026-09-22T03:00:00Z' }), msUntilNextSantiagoDay: () => 86400000 },
     '@/lib/server/messaging-drafts': { getCurrentMessagingDraftVersionV1: async () => ({ versionId: options.changed ? 'changed' : 'version' }) },
     '@/lib/messaging-contracts': {
       resolveApprovedEmailSendV1: () => ({ to: 'ana@example.com', subject: message.subject, text: message.body, html: null }),
@@ -46,7 +53,7 @@ test('background sender uses approved content and reserves quota after durable c
   for (const provider of ['google', 'outlook']) {
     const { calls, send } = harness({ provider });
     assert.equal((await send()).outcome, 'accepted');
-    assert.deepEqual(calls, ['claim', 'privacy', 'token', 'refresh', 'quota', provider === 'google' ? 'sendGmail' : 'sendOutlook']);
+    assert.deepEqual(calls, ['claim', 'token', 'refresh', 'quota', 'privacy', 'reply', provider === 'google' ? 'sendGmail' : 'sendOutlook']);
   }
 });
 test('replay, pause, changed version, suppression and quota never invoke an email provider', async t => {
@@ -60,6 +67,19 @@ test('pre-provider privacy and connection failures defer instead of reporting am
   for (const options of [{ suppressionError: true }, { tokenMissing: true }]) {
     const { calls, send } = harness(options);
     await assert.rejects(send(), error => error instanceof Deferred);
-    assert.equal(calls.includes('quota'), false); assert.equal(calls.some(value => value.startsWith('send')), false);
+    if (options.tokenMissing) assert.equal(calls.includes('quota'), false);
+    assert.equal(calls.some(value => value.startsWith('send')), false);
   }
+});
+
+test('reply arriving during refresh blocks the provider; unavailable or denied slot fails closed', async () => {
+  for (const options of [{ repliedAfterRefresh: true }, { batch: true, slot: false }, { batch: true, slotError: true }]) {
+    const fixture = harness(options);
+    if (options.slotError) await assert.rejects(fixture.send(), error => error instanceof Deferred);
+    else assert.notEqual((await fixture.send()).outcome, 'accepted');
+    assert.equal(fixture.calls.some(call => call.startsWith('send')), false);
+  }
+  const allowed = harness({ batch: true });
+  assert.equal((await allowed.send()).outcome, 'accepted');
+  assert.deepEqual(allowed.calls.slice(-2), ['slot', 'sendGmail']);
 });

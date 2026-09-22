@@ -19,12 +19,17 @@ import { executeCoworkCampaignPrepare } from './campaign-prepare';
 import { executeCoworkCrmAssign } from './crm-assign';
 import { executeCoworkExceptionResolve } from './exception-resolve';
 import { executeCoworkMissionControl } from './mission-control';
+import { executeCoworkMessageContextUpdate } from './message-context';
+import { executeCoworkEnrichBatch } from './enrich-batch';
+import { executeCoworkSendBatch } from './send-batch';
+import { executeCoworkLinkedinInvite, executeCoworkLinkedinMessage } from './linkedin-jobs';
 import { deterministicCoworkUuid } from './operations';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research', 'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
   'profile_update', 'saved_search_create', 'saved_search_update', 'saved_search_delete', 'campaign_stop_v2',
   'crm_update_record', 'campaign_prepare_draft_v2',
-  'crm_assign_lead', 'exception_resolve', 'mission_control']);
+  'crm_assign_lead', 'exception_resolve', 'mission_control', 'message_context_update', 'enrich_batch',
+  'campaign_schedule_batch', 'linkedin_invite', 'linkedin_message']);
 export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 type Scope = { userId: string; organizationId: string };
@@ -205,6 +210,26 @@ async function executeEffect(
   if (proposal.kind === 'mission_control') {
     const controlled = await executeCoworkMissionControl(auth, proposal.run_id, proposal.target_id);
     return { reply: controlled.reply, result: controlled.result };
+  }
+  if (proposal.kind === 'message_context_update') {
+    const updated = await executeCoworkMessageContextUpdate(auth, proposal.run_id, proposal.target_id);
+    return { reply: updated.reply, result: updated.result };
+  }
+  if (proposal.kind === 'enrich_batch') {
+    const batch = await executeCoworkEnrichBatch(auth, proposal.run_id, proposal.target_id);
+    return { reply: batch.reply, result: batch.result };
+  }
+  if (proposal.kind === 'campaign_schedule_batch') {
+    const scheduled = await executeCoworkSendBatch(auth, proposal.run_id, proposal.target_id);
+    return { reply: scheduled.reply, result: scheduled.result };
+  }
+  if (proposal.kind === 'linkedin_invite') {
+    const invited = await executeCoworkLinkedinInvite(auth, proposal.run_id, proposal.target_id);
+    return { reply: invited.reply, result: invited.result };
+  }
+  if (proposal.kind === 'linkedin_message') {
+    const messaged = await executeCoworkLinkedinMessage(auth, proposal.run_id, proposal.target_id);
+    return { reply: messaged.reply, result: messaged.result };
   }
   const requested = await requestCoworkDraft(auth, proposal.origin_run_id, { snapshotId: proposal.target_id });
   return { reply: requested.reused ? 'Ese borrador ya estaba solicitado para este informe.'

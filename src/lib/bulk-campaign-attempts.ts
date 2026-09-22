@@ -35,8 +35,14 @@ export function describeCampaignFailure(code: string): { retryable: boolean; mes
     BULK_CAMPAIGN_REVIEW_CHANGED: 'El borrador cambió después de la aprobación. Revisa la campaña.',
     BULK_CAMPAIGN_NOT_FOUND: 'La campaña ya no está disponible.',
     recipient_suppressed: 'El contacto se dio de baja.',
+    BULK_CAMPAIGN_COMPANY_REPLIED: 'Esta empresa ya respondió por otra dirección. Los seguimientos quedan retenidos.',
   };
   if (fixed[code]) return { retryable: false, message: fixed[code], delayMs: 0 };
+  const temporaryWithDelay: Record<string, { message: string; delayMs: number }> = {
+    BULK_CAMPAIGN_ACCOUNT_NEGOTIATION: { message: 'La cuenta está en negociación. Se volverá a comprobar en 24 horas.', delayMs: 24 * 3600000 },
+    BULK_CAMPAIGN_COMPANY_DAY_COLLISION: { message: 'Ya salió un correo a esta empresa hoy. Se reintentará pasado mañana a más tardar.', delayMs: 25 * 3600000 },
+  };
+  if (temporaryWithDelay[code]) return { retryable: true, ...temporaryWithDelay[code] };
   const temporary: Record<string, string> = {
     provider_connection_unavailable: 'Reconecta tu cuenta de correo. Volveremos a comprobar la conexión.',
     daily_quota_exceeded: 'Se alcanzó el límite diario. Se volverá a comprobar la cuota.',

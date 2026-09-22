@@ -16,6 +16,7 @@ export async function POST(req: NextRequest) {
       organizationId,
       userId: user.id,
       limit,
+      cursor: typeof body.cursor === 'string' && /^[a-zA-Z0-9_-]{1,200}$/.test(body.cursor) ? body.cursor : null,
     });
 
     return NextResponse.json({ ok: true, ...result });
