@@ -213,31 +213,6 @@ function SequencePreparation() {
           {composeId && view && ['completed', 'review_required', 'failed'].includes(view.status) && <Button asChild><Link href={`/contact/compose?draftId=${encodeURIComponent(composeId)}`}>Revisar y editar correos</Link></Button>}
           {view && ['failed', 'review_required', 'completed'].includes(view.status) && <Button variant={composeId ? 'outline' : 'default'} onClick={() => void retry()} disabled={retrying}>{retrying ? 'Reanudando…' : view.status === 'failed' ? 'Reintentar pendientes' : 'Revisar secuencia nuevamente'}</Button>}
         </div>
-        {view && view.offsets.length > 0 && (
-          <div className="space-y-2 border-t border-border pt-3">
-            <Label>Días de envío <span className="font-normal text-muted-foreground">(después del inicial)</span></Label>
-            {view.slots.slice(1).map((slot, position) => (
-              <div key={slot.index} className="flex items-center justify-between gap-3">
-                <span className="text-sm text-muted-foreground">{slot.index}. {slot.name}</span>
-                <span className="flex items-center gap-1.5">
-                  <Input id={`sequence-day-${slot.index}`} className="h-10 w-20 text-right" inputMode="numeric" type="number" min={1} max={30}
-                    value={Number.isFinite(effectiveDays[position]) ? effectiveDays[position] : ''} disabled={savingDays}
-                    onChange={(event) => setDays((current) => {
-                      const base = current ?? view.offsets;
-                      return base.map((day, dayIndex) => dayIndex === position ? Number(event.target.value) : day);
-                    })}
-                    aria-label={`Día de envío del correo ${slot.index}, ${slot.name}`} />
-                  <span className="text-xs text-muted-foreground">días</span>
-                </span>
-              </div>
-            ))}
-            {daysError ? <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">{daysError}</p> : null}
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" onClick={() => void saveDays()} disabled={savingDays || Boolean(daysError) || !daysDirty}>{savingDays ? 'Guardando…' : 'Guardar días'}</Button>
-              {daysFeedback ? <p role="status" className="text-xs text-muted-foreground">{daysFeedback}</p> : <p className="text-xs text-muted-foreground">Solo mueve la fecha; los correos ya escritos se conservan.</p>}
-            </div>
-          </div>
-        )}
         {view?.researchSnapshotId && (
           <div className="space-y-2 border-t border-border pt-3">
             <Label htmlFor="sequence-steer">Pedir otra versión a la IA</Label>
@@ -258,9 +233,22 @@ function SequencePreparation() {
         )}
       </section>
       {error && <div role="alert" className="space-y-3 rounded-xl border border-border bg-card p-4 text-sm text-foreground"><p>{error}</p><Button variant="outline" onClick={() => setRefreshKey((key) => key + 1)}>Actualizar progreso</Button></div>}
+      {(daysError || daysFeedback || savingDays) ? <p role={daysError ? 'alert' : 'status'} className={`text-sm ${daysError ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>{daysError || (savingDays ? 'Guardando días…' : daysFeedback)}</p> : null}
       <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
         {slots.map((slot) => <li key={slot.index} className="space-y-3 p-4 sm:p-5">
-          <div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className="font-medium text-foreground">{slot.index + 1}. {slot.name}{slot.index > 0 && view?.offsets[slot.index - 1] ? <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground">Día {view.offsets[slot.index - 1]}</span> : null}</h2><span className="text-sm text-muted-foreground">{labels[slot.status]}</span></div>
+          <div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className="font-medium text-foreground">{slot.index + 1}. {slot.name}{slot.index > 0 && (
+            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-muted py-0.5 pl-2.5 pr-1 text-xs font-normal text-muted-foreground" title="Día de envío después del inicial. Cambia el número y sal del campo para guardar; los correos ya escritos se conservan.">
+              Día
+              <Input id={`sequence-day-${slot.index}`} className="h-6 w-14 border-transparent bg-transparent p-0 text-center text-xs shadow-none" inputMode="numeric" type="number" min={1} max={30}
+                value={Number.isFinite(effectiveDays[slot.index - 1]) ? effectiveDays[slot.index - 1] : ''} disabled={savingDays}
+                onChange={(event) => setDays((current) => {
+                  const base = current ?? view?.offsets ?? [];
+                  return base.map((day, dayIndex) => dayIndex === slot.index - 1 ? Number(event.target.value) : day);
+                })}
+                onBlur={() => void saveDays()}
+                onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                aria-label={`Día de envío del correo ${slot.index}, ${slot.name}`} />
+            </span>)}</h2><span className="text-sm text-muted-foreground">{labels[slot.status]}</span></div>
           {slot.draftId && slot.versionId ? <SequenceEmailEditor key={slot.draftId} slot={slot} onSaved={() => load()} /> : <p className="text-sm text-muted-foreground">{slot.status === 'running' ? 'Estamos redactando este correo.' : 'El correo aparecerá aquí cuando esté guardado.'}</p>}
         </li>)}
       </ol>

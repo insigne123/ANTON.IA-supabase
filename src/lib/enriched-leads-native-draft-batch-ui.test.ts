@@ -8,11 +8,13 @@ const sequence = readFileSync('src/app/(app)/contact/sequence/page.tsx', 'utf8')
 const report = readFileSync('src/components/research/NativeResearchReport.tsx', 'utf8');
 
 test('the prepared sequence lets the user change follow-up days without rewriting emails', () => {
-  assert.match(sequence, /Días de envío/);
-  assert.match(sequence, /Guardar días/);
+  assert.match(sequence, /sequence-day-/);
+  assert.match(sequence, /Día de envío del correo/);
   assert.match(sequence, /offsets: days/);
-  assert.match(sequence, /Solo mueve la fecha; los correos ya escritos se conservan/);
+  assert.match(sequence, /los correos ya escritos se conservan/);
   assert.match(sequence, /Los días deben aumentar de un correo al siguiente/);
+  assert.match(sequence, /Guardando días/);
+  assert.doesNotMatch(sequence, /Guardar días/);
 });
 
 test('enriched leads opens the research workspace rather than starting its own drafting flow', () => {
