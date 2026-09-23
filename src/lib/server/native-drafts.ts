@@ -891,7 +891,7 @@ export async function getNativeDraftWritingStyle(input: NativeDraftAccess & {
     : createDefaultDraftWritingStyleV2();
 }
 
-export async function prepareNativeSequenceBrief(input: NativeDraftAccess & { snapshotId: string; styleProfileId?: string | null }) {
+export async function prepareNativeSequenceBrief(input: NativeDraftAccess & { snapshotId: string; styleProfileId?: string | null; followUpCount?: number }) {
   const snapshotRow = await getNativeSnapshot({ snapshotId: input.snapshotId, access: input });
   if (!snapshotRow) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
   const snapshot = parseNativeSnapshotRow(snapshotRow, input.snapshotId);
@@ -901,7 +901,7 @@ export async function prepareNativeSequenceBrief(input: NativeDraftAccess & { sn
   const style = await loadDraftWritingStyle({ access: input, styleProfileId: input.styleProfileId });
   const { result } = await createDraftContext({ access: input, snapshotRow, snapshotId: input.snapshotId, style, ensureReportDocument: false, now: new Date() });
   if (result.status === 'blocked') throw new Error('Completa tu perfil comercial y revisa la investigación antes de preparar la secuencia.');
-  return { brief: buildSharedSequenceBrief(result.context), seller: result.context.seller, writingStyle: style };
+  return { brief: buildSharedSequenceBrief(result.context, input.followUpCount), seller: result.context.seller, writingStyle: style };
 }
 
 export async function createNativeDraft(input: NativeDraftAccess & {

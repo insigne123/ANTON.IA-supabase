@@ -441,11 +441,15 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     const selectedWorkspaceLeads = (selectedSourceLeads as ResearchableLead[]).map(workspaceLead);
     setHandoffLeads(selectedWorkspaceLeads);
     setHandoffSelectionKeys(selectedWorkspaceLeads.map((lead) => lead.key));
-    if (selectedWorkspaceLeads.length === 1) setActiveLeadKey(selectedWorkspaceLeads[0].key);
-    setHandoffNotice(`Trajimos ${pluralize(selectedWorkspaceLeads.length, 'lead')} a esta selección. Revísala y comienza cuando estés listo.`);
+    if (selectedWorkspaceLeads.length === 1) {
+      setActiveLeadKey(selectedWorkspaceLeads[0].key);
+      setMobilePane('report');
+    }
+    setHandoffNotice('Abriendo el contacto en Investigación…');
     setHandoffError('');
     setHandoffResolved(true);
     resolvedHandoffRef.current = id;
+    clearResearchWorkspaceHandoff();
   }, []);
 
   useEffect(() => {
@@ -675,20 +679,21 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
   }, [selectableQueueLeads]);
 
   useEffect(() => {
-    if (handoffSelectionKeys.length === 0) return;
+    if (handoffSelectionKeys.length === 0 || persistedItemsLoading || loadingLeads) return;
 
     const availableKeys = new Set(selectableQueueLeads.map((lead) => lead.key));
-    if (!handoffSelectionKeys.every((key) => availableKeys.has(key))) {
-      if (activeRunBlocksNewBatch) return;
-      setHandoffSelectionKeys([]);
-      setHandoffNotice('');
-      setHandoffError('Parte de la selección ya tiene una investigación activa o lista. Revisa los leads disponibles antes de iniciar otro lote.');
-      return;
-    }
-
-    setSelectedKeys((current) => Array.from(new Set([...current, ...handoffSelectionKeys])));
+    const pending = handoffSelectionKeys.filter((key) => availableKeys.has(key));
+    const alreadyResearching = handoffSelectionKeys.length - pending.length;
+    if (activeRunBlocksNewBatch && pending.length > 0) return;
+    if (pending.length > 0) setSelectedKeys((current) => Array.from(new Set([...current, ...pending])));
     setHandoffSelectionKeys([]);
-  }, [activeRunBlocksNewBatch, handoffSelectionKeys, selectableQueueLeads]);
+    setHandoffError('');
+    setHandoffNotice(pending.length === 0
+      ? 'Este contacto ya tiene una investigación. Puedes leerla y preparar tu correo aquí.'
+      : alreadyResearching > 0
+        ? `${pending.length} por investigar; ${alreadyResearching} con investigación disponible en la lista.`
+        : `${pending.length} seleccionados para investigar. Revisa la selección antes de comenzar.`);
+  }, [activeRunBlocksNewBatch, handoffSelectionKeys, loadingLeads, persistedItemsLoading, selectableQueueLeads]);
 
   useEffect(() => {
     const availableKeys = new Set([
@@ -802,7 +807,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     await startResearchFor([activeLead], true);
   }
 
-  async function createDraft(item: ResearchWorkspaceRunItem, styleProfileId: string | null = null, instruction?: string) {
+  async function createDraft(item: ResearchWorkspaceRunItem, styleProfileId: string | null = null, instruction?: string, followUpCount = 3) {
     if (!item.canCreateDraft || !item.researchSnapshotId || draftRequestRef.current) return;
     draftRequestRef.current = item.id;
     setProfileRequiredItemId((current) => current === item.id ? null : current);
@@ -811,7 +816,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
       const response = await fetch('/api/research-sequences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `native-draft:${item.researchSnapshotId}` },
-        body: JSON.stringify({ researchSnapshotId: item.researchSnapshotId, styleProfileId, ...(instruction ? { instruction } : {}) }),
+        body: JSON.stringify({ researchSnapshotId: item.researchSnapshotId, styleProfileId, followUpCount, ...(instruction ? { instruction } : {}) }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.id) {
@@ -1315,9 +1320,9 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                             profileCompletionRequired={profileRequiredItemId === activeItem.id}
                             creatingDraft={creatingDraftId === activeItem.id}
                             createDraftDisabled={draftRequestPending || activeReportDetailLoading || Boolean(activeReportDetailError) || activeReportSynthesisPending || activeReportSynthesisFailed}
-                            createDraftLabel="Preparar inicial y 3 seguimientos"
+                             createDraftLabel="Preparar correos"
                             creatingDraftLabel="Preparando borrador…"
-                            onCreateDraft={(styleProfileId, instruction) => void createDraft(activeItem, styleProfileId, instruction)}
+                             onCreateDraft={(styleProfileId, instruction, followUpCount) => void createDraft(activeItem, styleProfileId, instruction, followUpCount)}
                             onCompleteProfile={() => router.push('/profile')}
                             refreshing={creatingBatch}
                             onRefresh={selectionLocked || researchUnavailable ? undefined : () => void refreshActiveResearch()}

@@ -5,6 +5,7 @@ export const ResearchSequenceRequestSchema = z.object({
   researchSnapshotId: z.string().uuid(),
   styleProfileId: EmailStyleSelectionSchema.nullable().default(null),
   instruction: z.string().trim().max(1_000).default(''),
+  followUpCount: z.number().int().min(0).max(3).default(3),
 }).strict();
 
 export const ResearchSequenceViewSchema = z.object({
@@ -16,12 +17,13 @@ export const ResearchSequenceViewSchema = z.object({
   // Echo of the preparation request so the UI can offer a new steered version.
   researchSnapshotId: z.string().uuid().nullable(),
   styleProfileId: z.string().nullable(),
+  followUpCount: z.number().int().min(0).max(3),
   editorial: z.object({ passed: z.boolean(), issues: z.array(z.string()), versionIds: z.array(z.string()) }).nullable(),
   slots: z.array(z.object({
     index: z.number().int(), name: z.string(),
     status: z.enum(['queued', 'running', 'ready', 'error']),
     draftId: z.string().nullable(), versionId: z.string().nullable(),
     subject: z.string().nullable(), body: z.string().nullable(),
-  })).length(4),
+  })).min(1).max(4),
 });
 export type ResearchSequenceView = z.infer<typeof ResearchSequenceViewSchema>;

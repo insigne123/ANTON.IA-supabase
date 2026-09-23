@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -77,7 +78,7 @@ export type NativeResearchReportProps = {
   createDraftDisabled?: boolean;
   createDraftLabel?: string;
   creatingDraftLabel?: string;
-  onCreateDraft?: (styleProfileId: string | null, instruction?: string) => void;
+  onCreateDraft?: (styleProfileId: string | null, instruction: string | undefined, followUpCount: number) => void;
   onCompleteProfile?: () => void;
   refreshing?: boolean;
   refreshLabel?: string;
@@ -509,9 +510,12 @@ export function NativeResearchReport({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [draftStyles, setDraftStyles] = useState<DraftStyleOption[]>([]);
   const [draftStyleId, setDraftStyleId] = useState(DEFAULT_DRAFT_STYLE);
+  const [draftConfigOpen, setDraftConfigOpen] = useState(false);
+  const [followUpCount, setFollowUpCount] = useState(3);
+  const [instructionMode, setInstructionMode] = useState<'ai' | 'custom'>('ai');
   const [draftInstruction, setDraftInstruction] = useState({ reportIdentity, value: '' });
   const currentDraftInstruction = draftInstruction.reportIdentity === reportIdentity ? draftInstruction.value : '';
-  useEffect(() => { setDraftInstruction({ reportIdentity, value: '' }); }, [reportIdentity]);
+  useEffect(() => { setDraftInstruction({ reportIdentity, value: '' }); setDraftConfigOpen(false); setFollowUpCount(3); setInstructionMode('ai'); }, [reportIdentity]);
   const showActionFooter = (profileCompletionRequired && Boolean(onCompleteProfile))
     || (actionAvailable && Boolean(onCreateDraft))
     || refreshAvailable
@@ -995,34 +999,21 @@ export function NativeResearchReport({
         </section>
       </Collapsible>
 
-      {actionAvailable && onCreateDraft ? (
-        <div className="space-y-2">
-          <Label htmlFor={`${id}-draft-instruction`}>Indicaciones para el borrador <span className="font-normal text-muted-foreground">(opcional)</span></Label>
-          <Textarea id={`${id}-draft-instruction`} rows={3} maxLength={1_000}
-            className="min-h-24 resize-y" value={currentDraftInstruction}
-            onChange={(event) => setDraftInstruction({ reportIdentity, value: event.target.value })}
-            disabled={creatingDraft || createDraftDisabled}
-            placeholder="Ej. usa un tono más directo y enfócate en una consecuencia práctica." />
-        </div>
-      ) : null}
-
-      {showActionFooter ? <footer aria-label="Acciones del informe" className={cn('flex flex-col gap-3 border-t border-border/70 pt-5 sm:flex-row sm:items-center sm:justify-between', !isPreview && 'sticky bottom-0 z-10 -mx-1 bg-background/90 px-1 pb-1 pt-4 backdrop-blur supports-[backdrop-filter]:bg-background/75')}>
-        <div className="min-w-0">
+      {showActionFooter ? <footer aria-label="Acciones del informe" className="flex flex-col gap-3 border-t border-border/70 pt-5 sm:flex-row sm:items-center sm:justify-between">
+        {!actionAvailable || profileCompletionRequired ? <div className="min-w-0">
           <p className="text-sm font-medium">
-            {profileCompletionRequired ? 'Completa tu perfil comercial' : actionAvailable ? 'Borrador disponible para revisión' : showCompanyContextGuidance ? 'Hace falta contexto de empresa' : 'Borrador no disponible'}
+            {profileCompletionRequired ? 'Completa tu perfil comercial' : showCompanyContextGuidance ? 'Hace falta contexto de empresa' : 'Correo no disponible todavía'}
           </p>
           <p id={`${id}-action-help`} className="mt-1 text-xs leading-5 text-muted-foreground">
             {profileCompletionRequired
               ? 'Agrega Productos y servicios o Propuesta de valor para crear un correo alineado con tu oferta.'
-              : actionAvailable
-              ? 'Se abrirá como borrador para que puedas revisarlo. No se enviará automáticamente.'
-               : showCompanyContextGuidance
+              : showCompanyContextGuidance
                 ? 'Actualiza la investigación para buscar una fuente corporativa verificable.'
                 : refreshAvailable
                   ? 'Actualiza la investigación para revisar fuentes y señales más recientes.'
                   : blockReason}
           </p>
-        </div>
+        </div> : <p id={`${id}-action-help`} className="text-sm text-muted-foreground">Prepara y revisa los correos antes de contactar.</p>}
         {profileCompletionRequired && onCompleteProfile ? (
           <Button
             type="button"
@@ -1034,34 +1025,43 @@ export function NativeResearchReport({
             Completar perfil
           </Button>
         ) : onCreateDraft && actionAvailable ? (
-          <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:min-w-64">
-            <Label htmlFor={`${id}-draft-style`} className="text-xs text-muted-foreground">Estilo del correo</Label>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Select value={draftStyleId} onValueChange={setDraftStyleId} disabled={creatingDraft || createDraftDisabled}>
-                <SelectTrigger id={`${id}-draft-style`} className="h-11 w-full sm:w-56">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={DEFAULT_DRAFT_STYLE}>Estilo predeterminado</SelectItem>
-                  {draftStyles.map((style) => (
-                    <SelectItem key={style.id} value={style.id}>
-                      {style.name}{style.isDefault ? ' · Predeterminado' : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                type="button"
-                className="min-h-11 w-full shrink-0 rounded-full sm:w-auto"
-                onClick={() => onCreateDraft(draftStyleId === DEFAULT_DRAFT_STYLE ? null : draftStyleId, currentDraftInstruction.trim() || undefined)}
-                disabled={creatingDraft || createDraftDisabled}
-                aria-describedby={`${id}-action-help`}
-              >
-                {creatingDraft ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <FileText aria-hidden="true" />}
-                {creatingDraft ? creatingDraftLabel : createDraftLabel}
+          <Popover open={draftConfigOpen} onOpenChange={(open) => { if (!creatingDraft) setDraftConfigOpen(open); }}>
+            <PopoverTrigger asChild>
+              <Button type="button" className="min-h-11 w-full shrink-0 rounded-full sm:w-auto" disabled={creatingDraft || createDraftDisabled}>
+                <FileText aria-hidden="true" /> {creatingDraft ? creatingDraftLabel : createDraftLabel}
               </Button>
-            </div>
-          </div>
+            </PopoverTrigger>
+            <PopoverContent align="end" side="top" className="z-50 w-[min(26rem,calc(100vw-2rem))] space-y-4 rounded-2xl border-border bg-popover p-5 shadow-xl" aria-label="Configurar correos para este contacto">
+              <div><h3 className="font-semibold">Preparar correos</h3><p className="mt-1 text-sm text-muted-foreground">Solo crea borradores; nada se envía ahora.</p></div>
+              <div className="space-y-1.5"><Label htmlFor={`${id}-followups`}>Seguimientos</Label>
+                <Select value={String(followUpCount)} onValueChange={(value) => setFollowUpCount(Number(value))} disabled={creatingDraft}>
+                  <SelectTrigger id={`${id}-followups`} className="h-11 w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>{[0, 1, 2, 3].map((count) => <SelectItem key={count} value={String(count)}>{count === 0 ? 'Sin seguimientos' : `${count} ${count === 1 ? 'seguimiento' : 'seguimientos'}`}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5"><Label htmlFor={`${id}-draft-style`}>Plantilla o estilo</Label>
+                <Select value={draftStyleId} onValueChange={setDraftStyleId} disabled={creatingDraft}>
+                  <SelectTrigger id={`${id}-draft-style`} className="h-11 w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value={DEFAULT_DRAFT_STYLE}>Estilo predeterminado</SelectItem>{draftStyles.map((style) => <SelectItem key={style.id} value={style.id}>{style.name}{style.isDefault ? ' · Predeterminado' : ''}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5"><Label htmlFor={`${id}-instruction-mode`}>Contenido</Label>
+                <Select value={instructionMode} onValueChange={(value) => setInstructionMode(value as 'ai' | 'custom')} disabled={creatingDraft}>
+                  <SelectTrigger id={`${id}-instruction-mode`} className="h-11 w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="ai">Que la IA elija según la investigación</SelectItem><SelectItem value="custom">Dar mis indicaciones</SelectItem></SelectContent>
+                </Select>
+              </div>
+              {instructionMode === 'custom' ? <div className="space-y-1.5"><Label htmlFor={`${id}-draft-instruction`}>Qué quieres que traten los correos</Label>
+                <Textarea id={`${id}-draft-instruction`} rows={3} maxLength={1_000} className="min-h-24 resize-y" value={currentDraftInstruction} onChange={(event) => setDraftInstruction({ reportIdentity, value: event.target.value })} disabled={creatingDraft} placeholder="Ej. enfócate en reclutamiento para operaciones; evita hablar de precios." />
+                <p className="text-xs text-muted-foreground">Se aplicará a la secuencia completa; no se usarán datos que la investigación no respalde.</p>
+              </div> : null}
+              <Button type="button" className="min-h-11 w-full" disabled={creatingDraft || createDraftDisabled || (instructionMode === 'custom' && !currentDraftInstruction.trim())}
+                onClick={() => onCreateDraft(draftStyleId === DEFAULT_DRAFT_STYLE ? null : draftStyleId, instructionMode === 'custom' ? currentDraftInstruction.trim() : undefined, followUpCount)}>
+                {creatingDraft ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <FileText aria-hidden="true" />}
+                {creatingDraft ? creatingDraftLabel : 'Preparar borradores'}
+              </Button>
+            </PopoverContent>
+          </Popover>
         ) : refreshAvailable ? (
           <Button
             type="button"

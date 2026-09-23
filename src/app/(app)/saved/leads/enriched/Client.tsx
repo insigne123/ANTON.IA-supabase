@@ -43,13 +43,10 @@ import type { NativeResearchLeadStatus } from '@/lib/native-research-contracts';
 import NativeResearchReport, { NativeResearchReportSkeleton } from '@/components/research/NativeResearchReport';
 import { researchDetailLoadingState } from '@/lib/research-report-loading';
 import ResearchWorkspace from '@/components/research/ResearchWorkspace';
+import { hasActivePhoneLookup } from '@/lib/enriched-phone-status';
 
 const extractDomainFromEmail = (email?: string | null) =>
   email && email.includes('@') ? email.split('@')[1].toLowerCase() : undefined;
-
-function isPendingEnrichmentStatus(status?: string | null) {
-  return String(status || '').trim().toLowerCase().startsWith('pending');
-}
 
 function isNativeResearchReport(status: NativeResearchLeadStatus | null | undefined) {
   const review = nativeResearchReview(status);
@@ -427,7 +424,7 @@ export default function EnrichedLeadsClient() {
   }, [loadNativeResearchStatuses]);
 
   const syncPendingPhoneLeads = useCallback(async (ids?: string[]) => {
-    const targetIds = (ids || enriched.filter((lead) => isPendingEnrichmentStatus(lead.enrichmentStatus)).map((lead) => lead.id))
+    const targetIds = (ids || enriched.filter((lead) => hasActivePhoneLookup(lead)).map((lead) => lead.id))
       .filter(Boolean)
       .slice(0, 50);
 
@@ -476,7 +473,7 @@ export default function EnrichedLeadsClient() {
             const phoneFound = Boolean(newData.primary_phone) || newPhones.length > 0;
 
             // Detect Status Change: Pending -> Completed
-            if (newData.enrichment_status === 'completed' && isPendingEnrichmentStatus(oldData.enrichment_status)) {
+            if (newData.enrichment_status === 'completed' && oldData.enrichment_status === 'pending_phone') {
               if (phoneFound) {
                 toast({
                   title: '¡Teléfono encontrado!',
@@ -506,7 +503,7 @@ export default function EnrichedLeadsClient() {
   // Listen for Auth Changes to reload data if session restores late
   useEffect(() => {
     const pendingIds = enriched
-      .filter((lead) => isPendingEnrichmentStatus(lead.enrichmentStatus))
+      .filter((lead) => hasActivePhoneLookup(lead))
       .map((lead) => lead.id)
       .filter(Boolean);
 
@@ -629,7 +626,7 @@ export default function EnrichedLeadsClient() {
     const fallbackPhone = lead.phoneNumbers?.length ? lead.phoneNumbers[0].sanitized_number : undefined;
     const shownPhone = lead.primaryPhone || fallbackPhone;
     if (shownPhone && shownPhone !== 'Not Found') return 'ready';
-    if (isPendingEnrichmentStatus(lead.enrichmentStatus)) return 'pending';
+    if (hasActivePhoneLookup(lead)) return 'pending';
     return 'missing';
   }, []);
 
@@ -717,7 +714,7 @@ export default function EnrichedLeadsClient() {
     [filtered, hasReportStrict, nativeResearchStatusKnown]
   );
   const pendingPhoneCount = useMemo(
-    () => enriched.filter((lead) => isPendingEnrichmentStatus(lead.enrichmentStatus)).length,
+    () => enriched.filter((lead) => hasActivePhoneLookup(lead)).length,
     [enriched],
   );
 
@@ -1167,22 +1164,22 @@ export default function EnrichedLeadsClient() {
           </div>
           <p className="mt-1 text-sm text-muted-foreground">Investiga contactos, revisa su contexto y prepara el siguiente contacto.</p>
         </div>
-        {contactCount > 0 ? <Button className="w-full rounded-full sm:w-auto" onClick={() => openResearchWorkspace(selectedToContact)} disabled={!nativeResearchStatusKnown}>Abrir en Investigación ({contactCount})</Button> : null}
+        {contactCount > 0 ? <Button className="w-full rounded-full sm:w-auto" onClick={() => openResearchWorkspace(selectedToContact)} disabled={!nativeResearchStatusKnown}>Contactar seleccionados ({contactCount})</Button> : null}
       </header>
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-border/60 bg-card/70 px-4 py-3 text-sm shadow-[0_14px_35px_-32px_rgba(15,23,42,0.28)]">
         <span><strong className="font-semibold tabular-nums">{phoneReadyCount}</strong> <span className="text-muted-foreground">con teléfono</span></span>
         <span><strong className="font-semibold tabular-nums">{nativeResearchStatusKnown ? researchEligible : '—'}</strong> <span className="text-muted-foreground">por investigar</span></span>
-        {pendingPhoneCount > 0 ? <span><strong className="font-semibold tabular-nums">{pendingPhoneCount}</strong> <span className="text-muted-foreground">actualizando teléfono</span></span> : null}
+        {pendingPhoneCount > 0 ? <span><strong className="font-semibold tabular-nums">{pendingPhoneCount}</strong> <span className="text-muted-foreground">teléfono en curso</span></span> : null}
         <span className="ml-auto text-xs text-muted-foreground">{filtered.length} visibles</span>
       </div>
 
       {pendingPhoneCount > 0 ? (
         <Alert className="border-sky-500/25 bg-sky-500/5 text-foreground dark:border-sky-400/25">
           <RotateCw className={`h-4 w-4 ${syncingPendingPhones ? 'animate-spin' : 'animate-pulse'}`} />
-          <AlertTitle>Actualizando teléfonos</AlertTitle>
+          <AlertTitle>Búsqueda de teléfono en curso</AlertTitle>
           <AlertDescription className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <span className="text-muted-foreground">{pendingPhoneCount} {pendingPhoneCount === 1 ? 'contacto sigue' : 'contactos siguen'} en proceso. La lista se actualizará automáticamente.</span>
+              <span className="text-muted-foreground">{pendingPhoneCount} {pendingPhoneCount === 1 ? 'teléfono solicitado recientemente' : 'teléfonos solicitados recientemente'}; comprobaremos si el proveedor entregó un resultado. Puedes seguir trabajando.</span>
             <Button
               variant="outline"
               size="sm"
@@ -1191,7 +1188,7 @@ export default function EnrichedLeadsClient() {
               disabled={syncingPendingPhones}
             >
               <RotateCw className={`mr-2 h-4 w-4 ${syncingPendingPhones ? 'animate-spin' : ''}`} />
-              {syncingPendingPhones ? 'Actualizando...' : 'Actualizar ahora'}
+              {syncingPendingPhones ? 'Comprobando...' : 'Comprobar ahora'}
             </Button>
           </AlertDescription>
         </Alert>
@@ -1344,12 +1341,12 @@ export default function EnrichedLeadsClient() {
               <div className="text-sm font-medium" aria-live="polite">
                 {researchCount > 0 ? `${researchCount} para investigar · máximo ${MAX_RESEARCH_BATCH_SIZE}` : ''}
                 {researchCount > 0 && contactCount > 0 ? ' · ' : ''}
-                {contactCount > 0 ? `${contactCount} seleccionados para gestionar` : ''}
+                {contactCount > 0 ? `${contactCount} seleccionados para contactar` : ''}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Button variant="ghost" size="sm" onClick={() => { setSel({}); setSelectedToContact(new Set()); }}>Cancelar</Button>
                 {researchCount > 0 ? <Button variant="secondary" size="sm" onClick={() => openResearchWorkspace()} disabled={!nativeResearchStatusKnown}>Investigar selección ({researchCount})</Button> : null}
-                {contactCount > 0 ? <Button size="sm" onClick={() => openResearchWorkspace(selectedToContact)} disabled={!nativeResearchStatusKnown}>Abrir en Investigación ({contactCount})</Button> : null}
+                {contactCount > 0 ? <Button size="sm" onClick={() => openResearchWorkspace(selectedToContact)} disabled={!nativeResearchStatusKnown}>Contactar ({contactCount})</Button> : null}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Más acciones para la selección"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-64">
@@ -1420,16 +1417,16 @@ export default function EnrichedLeadsClient() {
                           toggleContactLead(e.id, Boolean(value));
                         }}
                         disabled={!nativeResearchStatusKnown || !draftable}
-                        aria-label={`Seleccionar ${e.fullName || 'lead'} para gestionar`}
+                        aria-label={`Seleccionar ${e.fullName || 'lead'} para contactar`}
                       />
-                      <span className="truncate">Gestionar</span>
+                      <span>Contacto</span>
                     </label>
                   </div>
 
                   <div className="mt-4 flex flex-wrap items-center gap-2">
-                    {viewable ? <Button size="sm" variant="outline" className="rounded-full" onClick={() => openReportFor(e)}>Ver investigación</Button> : null}
+                    {viewable ? <Button size="sm" variant="outline" className="rounded-full" onClick={() => openResearchWorkspace([e.id])}>Ver investigación</Button> : null}
                     {draftable ? (
-                      <Button size="sm" className="rounded-full" onClick={() => openResearchWorkspace([e.id])}>Preparar en Investigación</Button>
+                      <Button size="sm" className="rounded-full" onClick={() => openResearchWorkspace([e.id])}>Contactar</Button>
                     ) : !viewable ? (
                       <Button size="sm" className="rounded-full" onClick={() => openResearchWorkspace([e.id])} disabled={!nativeResearchStatusKnown || !e.email}>Investigar</Button>
                     ) : null}
@@ -1447,10 +1444,10 @@ export default function EnrichedLeadsClient() {
             })}
           </div>
           <div className="hidden overflow-x-auto rounded-2xl border border-border/60 bg-background/60 lg:block">
-            <Table className="min-w-[960px]">
+            <Table className="min-w-[1040px]">
               <TableHeader>
                 <TableRow className="bg-muted/20 hover:bg-muted/20">
-                  <TableHead className="sticky left-0 z-20 w-12 bg-muted/95 text-center backdrop-blur" title="Marcar para investigar">
+                  <TableHead className="w-24 bg-muted/20 text-center" title="Marcar para investigar">
                     <div className="flex flex-col items-center gap-1">
                       <span className="text-[10px] uppercase text-muted-foreground">Invest.</span>
                       <Checkbox
@@ -1461,14 +1458,14 @@ export default function EnrichedLeadsClient() {
                       />
                     </div>
                   </TableHead>
-                  <TableHead className="sticky left-12 z-20 w-12 bg-muted/95 text-center backdrop-blur" title="Marcar para gestionar contactos investigados">
+                  <TableHead className="w-24 bg-muted/20 text-center" title="Marcar para contactar contactos investigados">
                     <div className="flex flex-col items-center gap-1">
-                      <span className="text-[10px] uppercase text-muted-foreground">Gest.</span>
+                      <span className="text-[10px] uppercase text-muted-foreground">Contacto</span>
                       <Checkbox
                         checked={contactEligiblePage > 0 ? allContactChecked : false}
                         disabled={!nativeResearchStatusKnown || contactEligiblePage === 0}
                         onCheckedChange={(v) => toggleAllContact(Boolean(v))}
-                        aria-label="Seleccionar todos para gestionar"
+                        aria-label="Seleccionar todos para contactar"
                       />
                     </div>
                   </TableHead>
@@ -1482,7 +1479,7 @@ export default function EnrichedLeadsClient() {
               <TableBody>
                 {pageLeads.map(e => (
                   <TableRow key={e.id} className="group align-middle">
-                    <TableCell className="sticky left-0 z-10 bg-background py-3 text-center group-hover:bg-muted/50">
+                    <TableCell className="py-3 text-center">
                       <Checkbox
                         checked={!!sel[e.id]}
                         onCheckedChange={(v) => toggleResearchLead(e.id, Boolean(v))}
@@ -1501,14 +1498,14 @@ export default function EnrichedLeadsClient() {
                         aria-label={`Seleccionar ${e.fullName || 'lead'} para investigar`}
                       />
                     </TableCell>
-                    <TableCell className="sticky left-12 z-10 bg-background py-3 text-center group-hover:bg-muted/50">
+                    <TableCell className="py-3 text-center">
                       <Checkbox
                         disabled={!nativeResearchStatusKnown || !canContact(e)}
                         checked={selectedToContact.has(e.id)}
                         onCheckedChange={(v) => {
                           toggleContactLead(e.id, Boolean(v));
                         }}
-                        aria-label={`Seleccionar ${e.fullName || 'lead'} para gestionar`}
+                        aria-label={`Seleccionar ${e.fullName || 'lead'} para contactar`}
                       />
                     </TableCell>
                     <TableCell className="py-3">
@@ -1529,7 +1526,7 @@ export default function EnrichedLeadsClient() {
                         const fallbackPhone = e.phoneNumbers?.length ? e.phoneNumbers[0].sanitized_number : undefined;
                         const shownPhone = e.primaryPhone || fallbackPhone;
 
-                        if (e.primaryPhone === 'Not Found' || (!shownPhone && !isPendingEnrichmentStatus(e.enrichmentStatus))) {
+                        if (e.primaryPhone === 'Not Found' || (!shownPhone && !hasActivePhoneLookup(e))) {
                           return <div className="mt-1 text-xs text-muted-foreground">Sin teléfono</div>;
                         }
 
@@ -1555,7 +1552,7 @@ export default function EnrichedLeadsClient() {
                           );
                         }
 
-                        if (isPendingEnrichmentStatus(e.enrichmentStatus)) {
+                        if (hasActivePhoneLookup(e)) {
                           return (
                             <div className="mt-1 inline-flex items-center gap-1.5 text-xs text-sky-700 dark:text-sky-300" title="Actualizando teléfono">
                               <RotateCw className="h-3 w-3 animate-spin" />
@@ -1583,14 +1580,14 @@ export default function EnrichedLeadsClient() {
                     </TableCell>
                     <TableCell className="py-3">
                       <div className="flex min-w-[180px] items-center justify-end gap-1">
-                          {hasViewableReport(e) ? <Button size="sm" variant="outline" className="h-8 rounded-full px-3" onClick={() => openReportFor(e)}>Ver investigación</Button> : null}
+                          {hasViewableReport(e) ? <Button size="sm" variant="outline" className="h-8 rounded-full px-3" onClick={() => openResearchWorkspace([e.id])}>Ver investigación</Button> : null}
                           {canContact(e) ? (
                             <Button
                               size="sm"
                               className="h-8 rounded-full px-3 shadow-none"
                               onClick={() => openResearchWorkspace([e.id])}
                             >
-                              Preparar en Investigación
+                              Contactar
                             </Button>
                           ) : !hasViewableReport(e) ? (
                             <Button
@@ -1696,7 +1693,7 @@ export default function EnrichedLeadsClient() {
                   Revisa el estado, la calidad y la evidencia antes de crear el email.
                 </DialogDescription>
               </div>
-              {reportLead && canContact(reportLead) ? <Button size="sm" onClick={() => { setOpenReport(false); openResearchWorkspace([reportLead.id]); }}>Preparar en Investigación</Button> : null}
+              {reportLead && canContact(reportLead) ? <Button size="sm" onClick={() => { setOpenReport(false); openResearchWorkspace([reportLead.id]); }}>Contactar</Button> : null}
             </div>
           </DialogHeader>
           {reportToView?.cross && reportLead && !hasNativeResearchResult(nativeReportToView) && (

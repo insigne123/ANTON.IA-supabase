@@ -38,14 +38,11 @@ import { adaptLeadResearchResponseToReport, isLeadResearchReadyForAutoContact } 
 import { MAX_RESEARCH_BATCH_SIZE } from '@/lib/research-workspace';
 import { saveResearchWorkspaceHandoff } from '@/lib/research-workspace-handoff';
 import ResearchWorkspace from '@/components/research/ResearchWorkspace';
+import { hasActivePhoneLookup } from '@/lib/enriched-phone-status';
 
 
 const displayDomain = (url: string) => { try { const u = new URL(url.startsWith('http') ? url : `https://${url}`); return u.hostname.replace(/^www\./, ''); } catch { return url.replace(/^https?:\/\//, '').replace(/^www\./, ''); } };
 const asHttp = (url: string) => url.startsWith('http') ? url : `https://${url}`;
-
-function isPendingEnrichmentStatus(status?: string | null) {
-  return String(status || '').trim().toLowerCase().startsWith('pending');
-}
 
 export default function EnrichedOpportunitiesPage() {
   const { toast } = useToast();
@@ -596,7 +593,7 @@ export default function EnrichedOpportunitiesPage() {
                     const hasEmail = !!emailData.email;
                     const researched = isResearchedLead(e);
                     const report = normalizedReportFor(e);
-                    const pendingPhone = isPendingEnrichmentStatus(e.enrichmentStatus);
+                    const pendingPhone = hasActivePhoneLookup(e);
 
                     return (
                       <TableRow key={e.id}>
@@ -617,8 +614,8 @@ export default function EnrichedOpportunitiesPage() {
                               if (v) next.add(e.id); else next.delete(e.id);
                               setSelectedToContact(next);
                             }}
-                            title={!canContact(e) ? 'Debes investigar el lead antes de continuar' : 'Marcar para revisar en Investigación'}
-                            aria-label={`Seleccionar ${e.fullName || 'lead'} para revisar en Investigación`}
+                            title={!canContact(e) ? 'Debes investigar el lead antes de continuar' : 'Marcar para contactar en Investigación'}
+                            aria-label={`Seleccionar ${e.fullName || 'lead'} para contactar en Investigación`}
                           />
                         </TableCell>
                         <TableCell>
@@ -646,7 +643,7 @@ export default function EnrichedOpportunitiesPage() {
                               </div>
                             </div>
                           ) : pendingPhone ? (
-                            <span className="text-xs animate-pulse text-orange-500">Buscando...</span>
+                            <span className="text-xs animate-pulse text-orange-500">En proceso</span>
                           ) : (
                             <span className="text-muted-foreground text-xs italic">—</span>
                           )}
@@ -665,7 +662,7 @@ export default function EnrichedOpportunitiesPage() {
                               disabled={!hasEmail}
                               onClick={() => openResearchWorkspace([e.id])}
                            >
-                              {researched ? 'Preparar en Investigación' : 'Investigar'}
+                              {researched ? 'Contactar' : 'Investigar'}
                            </Button>
                           <Button size="icon" variant="ghost" disabled={!e.linkedinUrl} onClick={() => e.linkedinUrl && window.open(e.linkedinUrl, '_blank')}>
                             <Linkedin className="h-4 w-4" />

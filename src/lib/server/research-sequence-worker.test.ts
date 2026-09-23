@@ -41,12 +41,12 @@ function database() {
   return { rows, writes, client, failInitialCheckpoint: () => { failInitialCheckpoint = true; } };
 }
 
-async function harness() {
+async function harness(followUpCount = 3) {
   const db = database();
-  const id = await enqueueResearchSequence(access, { researchSnapshotId: uuid(3) }, db.client, async () => true);
+  const id = await enqueueResearchSequence(access, { researchSnapshotId: uuid(3), followUpCount }, db.client, async () => true);
   const drafts = new Map<string, any>();
   let draftCalls = 0, reviews = 0;
-  const steps: any[] = [1, 2, 3].map((index) => ({ id: uuid(20 + index), draft: null, nativeDraftId: null, draftGeneration: { status: 'queued', error: null } }));
+  const steps: any[] = Array.from({ length: followUpCount }, (_, index) => ({ id: uuid(21 + index), draft: null, nativeDraftId: null, draftGeneration: { status: 'queued', error: null } }));
   const plan = () => ({ steps: structuredClone(steps), autoSend: false, lifecycleState: 'draft' }) as any;
   const makeDraft = (index: number) => ({ draftId: uuid(30 + index), versionId: uuid(40 + index), recipient: { email: 'ada@example.com' }, content: { subject: `Correo ${index}`, text: `Aplicación ${index}` }, approval: { status: 'pending' } });
   const deps: SequenceWorkerDependencies = {
@@ -63,7 +63,7 @@ async function harness() {
     getDraft: async ({ draftId }) => drafts.get(draftId) || null,
     createPlan: async (input) => {
       assert.equal(input.deferGeneration, true);
-      assert.equal(input.body.steps.length, 3);
+      assert.equal(input.body.steps.length, followUpCount);
       return { enabled: true, plan: plan() };
     },
     queryPlan: async () => plan(),
@@ -78,7 +78,7 @@ async function harness() {
     review: async (brief, messages) => {
       reviews++;
       assert.deepEqual(brief, prepared.brief);
-      assert.equal(messages.length, 4);
+      assert.equal(messages.length, followUpCount + 1);
       assert.ok(messages.every((message) => message.approval.status === 'pending'));
       return { passed: true, issues: [], versionIds: messages.map((message) => message.versionId), model: null, usage: null };
     },
@@ -101,6 +101,21 @@ test('scheduled worker finishes four persisted slots across independent ticks, w
   assert.ok(view.slots.every((slot) => slot.status === 'ready'));
   assert.equal(view.researchSnapshotId, h.db.rows[0].request.researchSnapshotId);
   assert.equal(view.styleProfileId, h.db.rows[0].request.styleProfileId);
+});
+
+test('zero, one and two follow-ups persist only the selected drafts and never create an empty campaign', async () => {
+  for (const count of [0, 1, 2]) {
+    const h = await harness(count);
+    if (count === 0) h.deps.createPlan = async () => { throw new Error('no plan should be created'); };
+    for (let turn = 0; turn < count + 3; turn++) await h.tick();
+    assert.equal(h.db.rows[0].status, 'completed');
+    assert.equal(h.drafts.size, count + 1);
+    const view = await researchSequenceView(h.db.rows[0], h.deps);
+    assert.equal(view.followUpCount, count);
+    assert.equal(view.slots.length, count + 1);
+    assert.equal(view.slots.at(-1)?.name, count ? 'Cierre' : 'Contacto inicial');
+    assert.ok(view.slots.every((slot) => slot.status === 'ready'));
+  }
 });
 
 test('concurrent workers have only one CAS winner and recover an expired lease', async () => {

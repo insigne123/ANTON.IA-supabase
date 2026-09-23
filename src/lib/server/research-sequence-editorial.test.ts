@@ -31,7 +31,7 @@ test('editor reads all four complete messages and returns actionable issues boun
 
 test('editorial cannot pass an incomplete or mixed-recipient sequence', async () => {
   const brief = buildSharedSequenceBrief(draftContextFixture());
-  await assert.rejects(() => validateResearchSequence(brief, []), /FOUR_DRAFTS/);
+  await assert.rejects(() => validateResearchSequence(brief, []), /DRAFT_COUNT_INVALID/);
   const drafts = [0, 1, 2, 3].map((index) => ({ draftId: `${index}`, recipient: { email: index === 3 ? 'other@example.com' : 'ada@example.com' } })) as any;
   await assert.rejects(() => validateResearchSequence(brief, drafts), /RECIPIENT_MISMATCH/);
 });

@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ResearchSequenceViewSchema, type ResearchSequenceView } from '@/lib/research-sequence-contracts';
 
 const labels = { queued: 'En espera', running: 'Preparando', ready: 'Guardado', error: 'Pendiente de reintento' };
-const stages = { brief: 'Definiendo el tema de los cuatro correos', initial: 'Preparando el contacto inicial', follow_ups: 'Preparando los seguimientos', editorial: 'Revisando la secuencia completa', done: 'Preparación terminada' };
+const stages = { brief: 'Definiendo el tema de los correos', initial: 'Preparando el contacto inicial', follow_ups: 'Preparando los seguimientos', editorial: 'Revisando la secuencia completa', done: 'Preparación terminada' };
 
 type SequenceSlot = ResearchSequenceView['slots'][number];
 
@@ -153,7 +153,7 @@ function SequencePreparation() {
       const response = await fetch('/api/research-sequences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ researchSnapshotId: view.researchSnapshotId, styleProfileId: view.styleProfileId, instruction }),
+        body: JSON.stringify({ researchSnapshotId: view.researchSnapshotId, styleProfileId: view.styleProfileId, followUpCount: view.followUpCount, instruction }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.id) throw new Error(payload?.error || 'No pudimos preparar otra versión.');
@@ -163,21 +163,22 @@ function SequencePreparation() {
   }
 
   const ready = view?.slots.filter((slot) => slot.status === 'ready').length || 0;
-  const slots = view?.slots || ['Contacto inicial', 'Respaldo', 'Segundo ángulo', 'Cierre'].map((name, index) => ({ index, name, status: 'queued' as const, subject: null, body: null, draftId: null, versionId: null }));
+  const slots = view?.slots || [{ index: 0, name: 'Contacto inicial', status: 'queued' as const, subject: null, body: null, draftId: null, versionId: null }];
+  const total = view?.slots.length || 1;
   const composeId = view?.slots[0].draftId;
   return (
     <main className="mx-auto w-full max-w-4xl space-y-6 px-4 py-6 sm:px-6">
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Tu secuencia de contacto</h1>
-        <p className="text-sm text-muted-foreground">Un correo inicial y tres seguimientos. Se guardan como borradores; preparar no envía ningún correo.</p>
+        <p className="text-sm text-muted-foreground">Un correo inicial{view?.followUpCount ? ` y ${view.followUpCount} ${view.followUpCount === 1 ? 'seguimiento' : 'seguimientos'}` : ''}. Se guardan como borradores; preparar no envía ningún correo.</p>
       </header>
       <section aria-label="Progreso de preparación" className="space-y-3 rounded-2xl border border-border bg-card p-4 sm:p-5">
         <p role="status" aria-live="polite" className="text-sm text-foreground">
-          {ready} de 4 correos guardados · {view ? view.status === 'review_required' ? 'Hay ajustes para revisar' : view.status === 'failed' ? 'Preparación interrumpida' : view.status === 'retry_scheduled' ? 'Reintentaremos automáticamente' : stages[view.stage] : 'Cargando preparación'}
+          {ready} de {total} {total === 1 ? 'correo guardado' : 'correos guardados'} · {view ? view.status === 'review_required' ? 'Hay ajustes para revisar' : view.status === 'failed' ? 'Preparación interrumpida' : view.status === 'retry_scheduled' ? 'Reintentaremos automáticamente' : stages[view.stage] : 'Cargando preparación'}
         </p>
-        <Progress value={ready * 25} aria-label={`${ready} de 4 correos guardados`} />
+        <Progress value={ready / total * 100} aria-label={`${ready} de ${total} correos guardados`} />
         <p className="text-sm text-muted-foreground">Puedes cerrar esta página y volver a esta dirección. El progreso queda guardado.</p>
-        {view?.editorial?.passed && <p className="text-sm text-foreground">Revisión editorial completa. Los cuatro correos siguen pendientes de tu aprobación.</p>}
+        {view?.editorial?.passed && <p className="text-sm text-foreground">Revisión editorial completa. Los correos siguen pendientes de tu aprobación.</p>}
         {view?.editorial && view.editorial.issues.length > 0 && <ul className="list-disc space-y-2 pl-5 text-sm text-foreground">{view.editorial.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}
         {view?.error && <p className="text-sm text-foreground">{view.error}</p>}
         <div className="flex flex-wrap gap-2">
