@@ -85,6 +85,7 @@ Causa: los contactos con hilo no verificable (`incomplete_thread`, 598 en produc
 
 - `src/lib/server/reply-sync-policy.ts`: filtro de vencimiento por estado (hilos sanos cada 5 min, errores transitorios 60 min, conexión 6 h, hilos incompletos 24 h), aplicado antes del límite para no desplazar hilos sanos.
 - Una sola escritura de intento por página y errores agrupados por estado en `syncRepliesForOrganization`; los tokens con fallo se reutilizan dentro de la pasada sin reintentar.
+- Las escrituras de sincronización devuelven solo `select('id')` en vez de la fila completa, para no multiplicar el egress en cada tick.
 - El cron y la sincronización manual usan el mismo filtro.
 - Esta corrección detiene la ráfaga actual; no demuestra por sí sola los 5,92 GB acumulados del ciclo, cuyo consumo diario elevado precede al despliegue reciente.
 - Verificación en producción tras desplegar `d03bc11`: reintentos de hilos incompletos en 10 min bajaron de ~362 a 0; los hilos sanos siguen confirmándose (~87 en 10 min). Commit `d03bc11`, desplegado en App Hosting `studio`.

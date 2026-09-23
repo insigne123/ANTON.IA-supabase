@@ -491,9 +491,10 @@ export async function syncRepliesForOrganization(supabase: any, input: { organiz
   const tokenCache = new Map<string, string | null>();
   const tokenErrors = new Map<string, unknown>();
   // One scoped attempt write for the entire page instead of one per contact.
+  // Returning only ids: full rows would multiply PostgREST egress every tick.
   if (rows.length) {
     const attempt = await supabase.from('contacted_leads').update({ reply_sync_attempted_at: new Date().toISOString() })
-      .eq('organization_id', input.organizationId).in('id', rows.map(row => row.id));
+      .eq('organization_id', input.organizationId).in('id', rows.map(row => row.id)).select('id');
     if (attempt.error) throw attempt.error;
   }
   const errorsByState = new Map<string, string[]>();
@@ -548,7 +549,7 @@ export async function syncRepliesForOrganization(supabase: any, input: { organiz
         ...(conversation.complete ? { reply_sync_succeeded_at: new Date().toISOString() } : {}),
         reply_sync_error: conversation.complete ? null : 'incomplete_thread',
         ...(outboundAt ? { conversation_outbound_at: outboundAt } : {}),
-      }).eq('id', row.id).eq('organization_id', input.organizationId);
+      }).eq('id', row.id).eq('organization_id', input.organizationId).select('id');
       if (saved.error) throw saved.error;
       if (!conversation.complete) result.errors.push({ contactedId: row.id, error: 'incomplete_thread' });
     } catch (err: any) {
@@ -559,7 +560,7 @@ export async function syncRepliesForOrganization(supabase: any, input: { organiz
 
   for (const [state, ids] of errorsByState) {
     const saved = await supabase.from('contacted_leads').update({ reply_sync_error: state })
-      .eq('organization_id', input.organizationId).in('id', ids);
+      .eq('organization_id', input.organizationId).in('id', ids).select('id');
     if (saved.error) throw saved.error;
   }
 
