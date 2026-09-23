@@ -11,7 +11,7 @@ import { sendGmail, sendOutlook } from '@/lib/server-email-sender';
 import { encryptStoredToken } from '@/lib/server/token-crypto';
 import { getEffectiveDailyQuotaLimits, reserveOutboundContactQuota } from '@/lib/server/daily-quota-store';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
-import { coworkBatchForCampaign, findCompanyReply, findCompanySendToday, findNegotiationHold } from '@/lib/server/campaign-send-guards';
+import { coworkBatchForCampaign, findCompanyReply, findCompanySendToday, findExcludedDomain, findNegotiationHold, findPersonFrequencyHold } from '@/lib/server/campaign-send-guards';
 import { companyKeysFor, msUntilNextSantiagoDay, santiagoDayBounds } from '@/lib/cowork/send-cadence';
 
 /** Only trusted server callers supply the persisted campaign. SQL enforces its frozen review on every claim. */
@@ -90,6 +90,28 @@ export async function sendBulkCampaignMessage(campaign: BulkCampaign, message: C
         }
       } catch (cause) {
         throw new OutboundPreProviderDeferredError('No se pudo verificar la etapa comercial.', { code: 'recipient_check_unavailable', cause });
+      }
+      // 9.3/2.4: política transversal por persona y dominio, también en lotes.
+      let excluded;
+      try {
+        excluded = await findExcludedDomain(admin, scope, canonical.to);
+      } catch (cause) {
+        throw new OutboundPreProviderDeferredError('No se pudo verificar la política de dominios.', { code: 'recipient_check_unavailable', cause });
+      }
+      if (excluded.blocked) {
+        return { outcome: 'rejected' as const, code: 'BULK_CAMPAIGN_DOMAIN_EXCLUDED',
+          message: `El dominio ${excluded.domain} está bloqueado.` };
+      }
+      let frequency;
+      try {
+        frequency = await findPersonFrequencyHold(admin, scope, canonical.to);
+      } catch (cause) {
+        throw new OutboundPreProviderDeferredError('No se pudo verificar la frecuencia por persona.', { code: 'recipient_check_unavailable', cause });
+      }
+      if (frequency.held) {
+        return { outcome: 'deferred' as const, code: 'BULK_CAMPAIGN_PERSON_FREQUENCY',
+          message: `Esta persona ya recibió ${frequency.count} correos en el período. Se reintentará en 24 horas.`,
+          retryAfterMs: 24 * 3600000 };
       }
       // Escalonado por empresa solo para lotes Cowork programados: nunca dos
       // correos a la misma empresa el mismo dia. Las campanas heredadas

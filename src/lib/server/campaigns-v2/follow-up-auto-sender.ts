@@ -8,6 +8,7 @@ import {
 } from '@/lib/server/outbound-dispatch';
 import { getEffectiveDailyQuotaLimits, reserveOutboundContactQuota } from '@/lib/server/daily-quota-store';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
+import { findCompanyReply, findExcludedDomain, findNegotiationHold, findPersonFrequencyHold } from '@/lib/server/campaign-send-guards';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
 import { refreshGoogleToken, refreshMicrosoftToken } from '@/lib/server-auth-helpers';
@@ -147,6 +148,44 @@ async function defaultSendStep(client: SupabaseClientLike, step: AutoSendClaimed
     return 'blocked';
   }
 
+  // 9.3: la misma política transversal de los lotes. La empresa se resuelve
+  // del historial; sin empresa conocida rige la coincidencia por dirección.
+  let company: string | null = null;
+  let checks;
+  try {
+    const known = await client.from('contacted_leads').select('company')
+      .eq('organization_id', step.organization_id).ilike('email', step.recipient_email.trim())
+      .order('sent_at', { ascending: false }).limit(1);
+    if (known.error) throw known.error;
+    company = ((known.data as Array<{ company?: string | null }>) || [])[0]?.company || null;
+    const [excluded, reply, hold, frequency] = await Promise.all([
+      findExcludedDomain(client as never, scope, canonical.to),
+      findCompanyReply(client as never, scope, canonical.to, company),
+      findNegotiationHold(client as never, scope, canonical.to, company),
+      findPersonFrequencyHold(client as never, scope, canonical.to),
+    ]);
+    checks = { excluded, reply, hold, frequency };
+  } catch {
+    await defaultNoteStepError(client, step.step_id, 'recipient_check_unavailable');
+    return 'deferred';
+  }
+  if (checks.excluded.blocked) {
+    await defaultBlockEnrollment(client, step, 'domain_excluded');
+    return 'blocked';
+  }
+  if (checks.reply.stopped) {
+    await defaultBlockEnrollment(client, step, 'company_replied');
+    return 'blocked';
+  }
+  if (checks.hold.held) {
+    await defaultNoteStepError(client, step.step_id, 'account_negotiation');
+    return 'deferred';
+  }
+  if (checks.frequency.held) {
+    await defaultNoteStepError(client, step.step_id, 'person_frequency_hold');
+    return 'deferred';
+  }
+
   const provider = await resolveAutoSendProvider(client, step);
   if (!provider) {
     await defaultNoteStepError(client, step.step_id, 'provider_not_connected');
@@ -234,6 +273,14 @@ async function defaultSendStep(client: SupabaseClientLike, step: AutoSendClaimed
             return { outcome: 'deferred' as const, code: 'automation_paused', message: 'El envío automático está pausado.', retryAfterMs: 3600000 };
           }
           if (await isEmailSuppressedForScope(canonical.to, scope)) return { outcome: 'rejected' as const, code: 'recipient_suppressed', message: 'El destinatario solicitó no recibir más correos.' };
+          try {
+            const recheck = await findCompanyReply(client as never, scope, canonical.to, company);
+            if (recheck.stopped) return { outcome: 'rejected' as const, code: 'company_replied', message: 'Esta empresa ya respondió. El toque queda retenido.' };
+            const refrequency = await findPersonFrequencyHold(client as never, scope, canonical.to);
+            if (refrequency.held) return { outcome: 'deferred' as const, code: 'person_frequency_hold', message: 'Esta persona ya recibió correos en el período.', retryAfterMs: 24 * 3600000 };
+          } catch (cause) {
+            throw new OutboundPreProviderDeferredError('No se pudo verificar el estado del destinatario.', { code: 'recipient_check_unavailable', cause });
+          }
           const receipt = provider === 'gmail'
             ? await sendGmail(accessToken, canonical.to, canonical.subject, prepared.html, {
               textBody: prepared.text, unsubscribeUrl, idempotencyKey: metadata.idempotencyKey,

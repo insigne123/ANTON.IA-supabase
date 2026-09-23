@@ -22,6 +22,7 @@ import {
   dispatchOutboundMessage,
   OutboundPreProviderDeferredError,
 } from '@/lib/server/outbound-dispatch';
+import { findCompanyReply, findNegotiationHold, findPersonFrequencyHold } from '@/lib/server/campaign-send-guards';
 
 /** Fase 2C: send exactly the approved native draft version. The proposal target
  * carries draftId:versionId:contentHash; any drift refuses before approving.
@@ -183,6 +184,31 @@ export async function sendCoworkEmail(
       }
       if (await isEmailSuppressedForScope(canonical.to, scope)) {
         return { outcome: 'rejected', code: 'recipient_suppressed', message: 'El destinatario se dio de baja.' };
+      }
+      // 9.3: la misma política transversal de los motores de campaña.
+      let company: string | null = null;
+      try {
+        const known = await admin.from('contacted_leads').select('company')
+          .eq('organization_id', organizationId).ilike('email', canonical.to.trim())
+          .order('sent_at', { ascending: false }).limit(1);
+        if (known.error) throw known.error;
+        company = ((known.data as Array<{ company?: string | null }>) || [])[0]?.company || null;
+        const reply = await findCompanyReply(admin, scope, canonical.to, company);
+        if (reply.stopped) throw new Error(`Esta empresa ya respondió (${reply.email || 'otra dirección'}). No se envió el correo.`);
+        const hold = await findNegotiationHold(admin, scope, canonical.to, company);
+        if (hold.held) {
+          throw new OutboundPreProviderDeferredError(`La cuenta está en etapa ${hold.stages.join(', ')}.`,
+            { code: 'account_negotiation', retryAfterMs: 24 * 3600000 });
+        }
+        const frequency = await findPersonFrequencyHold(admin, scope, canonical.to);
+        if (frequency.held) {
+          throw new OutboundPreProviderDeferredError(`Esta persona ya recibió ${frequency.count} correos en el período.`,
+            { code: 'person_frequency_hold', retryAfterMs: 24 * 3600000 });
+        }
+      } catch (cause) {
+        if (cause instanceof OutboundPreProviderDeferredError) throw cause;
+        if (cause instanceof Error && /ya respondió/.test(cause.message)) throw cause;
+        throw new OutboundPreProviderDeferredError('No se pudo verificar el estado del destinatario.', { code: 'recipient_check_unavailable', cause });
       }
       const receipt = provider === 'google'
         ? await sendGmail(accessToken, canonical.to, canonical.subject, prepared.html, { textBody: prepared.text, unsubscribeUrl, idempotencyKey: metadata.idempotencyKey })

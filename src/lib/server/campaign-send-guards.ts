@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   NEGOTIATION_HOLD_STAGES, companyKeysFor,
 } from '@/lib/cowork/send-cadence';
+import { evaluateFrequency, type FrequencyHold } from '@/lib/compliance';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -110,6 +111,43 @@ export async function findCompanySendToday(
     }
   }
   return { collided: false, email: null, sentAt: null, source: null };
+}
+
+export type PersonFrequencyHold = FrequencyHold & { email: string; checked: number };
+
+/** 9.3: tope transversal por persona (1/día, 3/7 días, 8/40 días). La cadencia
+ * canónica nunca lo activa sola; dos motores sobre la misma persona, sí.
+ * Falla cerrado ante historial incompleto. */
+export async function findPersonFrequencyHold(
+  client: SupabaseClient, scope: Scope, email: string, now = Date.now(),
+): Promise<PersonFrequencyHold> {
+  const normalized = String(email || '').trim().toLowerCase();
+  const { data, error } = await client.from('contacted_leads')
+    .select('sent_at').eq('organization_id', scope.organizationId)
+    .ilike('email', normalized.replace(/[\\%_]/g, '\\$&'))
+    .not('sent_at', 'is', null).order('sent_at', { ascending: false }).limit(100);
+  if (error) throw new Error('No se pudo comprobar la frecuencia por persona.');
+  const rows = (data || []) as Array<{ sent_at?: string | null }>;
+  if (rows.length >= 100) throw new Error('Historial de envíos incompleto; no se autoriza el envío.');
+  const hold = evaluateFrequency(rows.map((row) => row.sent_at), now);
+  return { ...hold, email: normalized, checked: rows.length };
+}
+
+/** 2.4/9.3: dominios bloqueados por la organización, compartidos por todos
+ * los motores de envío. Comparación normalizada exacta, sin subdominios
+ * implícitos: bloquear example.com no bloquea sub.example.com. */
+export async function findExcludedDomain(
+  client: SupabaseClient, scope: Scope, email: string,
+): Promise<{ blocked: boolean; domain: string | null }> {
+  const domain = String(email || '').trim().toLowerCase().split('@')[1] || '';
+  if (!domain) return { blocked: false, domain: null };
+  const { data, error } = await client.from('excluded_domains')
+    .select('domain').eq('organization_id', scope.organizationId).limit(200);
+  if (error) throw new Error('No se pudo verificar la política de dominios.');
+  if ((data || []).length >= 200) throw new Error('Lista de dominios incompleta; no se autoriza el envío.');
+  const blocked = ((data || []) as Array<{ domain?: string | null }>)
+    .some((row) => String(row.domain || '').trim().toLowerCase().replace(/^@/, '') === domain);
+  return { blocked, domain };
 }
 
 export type BatchRow = {

@@ -86,8 +86,9 @@ El resultado v4 contiene `passed:false`: su rúbrica histórica esperaba turno d
 | 8.1 | DNS entregabilidad | Hecha 23-09-2026: lectura `deliverability.check` con MX/SPF/DMARC/DKIM y caché 24 h; detalle en `docs/cowork-stage8-acceptance.md`. |
 | 8.2 | Causa de rebote | Hecha 23-09-2026: lectura `deliverability.bounces` contra umbral 2% con causas y acciones; detalle en `docs/cowork-stage8-acceptance.md`. |
 | 8.3 | Remitente real | Hecha 23-09-2026: lectura `deliverability.sender` con contraste contra envíos reales; detalle en `docs/cowork-stage8-acceptance.md`. |
-| 9.1 | Legalidad vigente | D: fuentes, jurisdicción, fecha y certeza; no hardcodear documento histórico |
-| 9.2 | Regulación comprador | P: investigación; industria desambiguada y evidencia |
+| 9.1 | Legalidad vigente | Hecha 23-09-2026: lectura `compliance.law` con CL, fechas verificadas y fuentes; detalle en `docs/cowork-stage9-acceptance.md`. |
+| 9.2 | Regulación comprador | Hecha 23-09-2026: lectura `compliance.obligation` con KB desambiguada y evidencia; detalle en `docs/cowork-stage9-acceptance.md`. |
+| 9.3 | Límites transversales | Hecha 23-09-2026: tope por persona en guards + 3 motores y lectura `compliance.check`; detalle en `docs/cowork-stage9-acceptance.md`. |
 | 9.3 | Límites de contacto | P: supresión; política transversal persona/cuenta/canal |
 
 ## Correcciones de auditoría (22 septiembre 2026, locales + 2 migraciones aplicadas)

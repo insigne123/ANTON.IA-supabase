@@ -17,6 +17,8 @@ function harness(options: { replay?: boolean; paused?: boolean; suppressed?: boo
     '@/lib/server/campaign-send-guards': {
       findCompanyReply: async () => { calls.push('reply'); return { stopped: options.repliedAfterRefresh && calls.includes('refresh') }; },
       findNegotiationHold: async () => ({ held: false }),
+      findExcludedDomain: async () => { calls.push('excluded'); return { blocked: false }; },
+      findPersonFrequencyHold: async () => { calls.push('frequency'); return { held: false }; },
       coworkBatchForCampaign: async () => options.batch ? { company_stagger: true } : null,
       findCompanySendToday: async () => ({ collided: false }),
     },
@@ -53,7 +55,7 @@ test('background sender uses approved content and reserves quota after durable c
   for (const provider of ['google', 'outlook']) {
     const { calls, send } = harness({ provider });
     assert.equal((await send()).outcome, 'accepted');
-    assert.deepEqual(calls, ['claim', 'token', 'refresh', 'quota', 'privacy', 'reply', provider === 'google' ? 'sendGmail' : 'sendOutlook']);
+    assert.deepEqual(calls, ['claim', 'token', 'refresh', 'quota', 'privacy', 'reply', 'excluded', 'frequency', provider === 'google' ? 'sendGmail' : 'sendOutlook']);
   }
 });
 test('replay, pause, changed version, suppression and quota never invoke an email provider', async t => {

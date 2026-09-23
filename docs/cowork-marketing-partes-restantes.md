@@ -6,7 +6,7 @@ Documento de referencia permanente. Fuente de funciones: `C:\Users\nicol\Desktop
 
 **Leyenda:** 🟢 Hecha (conectada al agente, con pruebas y migración aplicada; puede faltar recorrido autenticado). 🟡 Parcial (hay base reutilizable, falta integración o verificación). 🔴 Pendiente (falta una parte esencial).
 
-**Contexto:** la parte 1 (Definición de audiencia, funciones 1.1–1.5) está implementada en local y parcialmente probada con modelo real y Apollo; faltan despliegue, recorrido autenticado y cierre visual. Detalle en `docs/cowork-audience-acceptance.md`.
+**Contexto:** la parte 1 (Definición de audiencia, funciones 1.1–1.5) está implementada y parcialmente probada con modelo real y Apollo. **Despliegue al día (23 sep 2026):** todo lo de las partes 1–9 está en `main` y en producción (rollouts `studio--90260`, `studio--96464`, `studio--21860`); los "sin desplegar" de avances anteriores quedaron obsoletos. Lo pendiente de las partes 1–5 es recorrido autenticado con datos reales, detallado casilla por casilla en `docs/cowork-authenticated-acceptance-checklist.md`. Detalle de la parte 1 en `docs/cowork-audience-acceptance.md`.
 
 ---
 
@@ -19,7 +19,7 @@ Documento de referencia permanente. Fuente de funciones: `C:\Users\nicol\Desktop
 | 2.1 | Enriquecer contactos para obtener correo verificado | 🟡 | Implementado individual con `verifiedForList`; solo `verified` completa el contacto guardado. Faltan: lotes, política por organización y aceptación desde chat desplegado. |
 | 2.2 | Obtener perfiles de LinkedIn sin gastar créditos | 🟡 | La búsqueda no revela ni promete gratuidad; falta verificar recorrido real y costo. |
 | 2.3 | Deduplicar contra historial completo | 🟡 | `lists.review_contact`/`lists.review_batch` cruzan email exacto + empresa normalizada exacta, con cobertura declarada. Falta aceptación con datos reales. |
-| 2.4 | Excluir empresas prohibidas | 🟡 | Revisión integra contactabilidad/supresión y bloquea sin borrar. Falta lista de dominios normalizada compartida en ejecución. |
+| 2.4 | Excluir empresas prohibidas | 🟢 | `excluded_domains` con coincidencia exacta rige en los tres motores de envío (lotes, V2 automática, Cowork) desde el 23 sep 2026; la revisión bloquea sin borrar. Falta aceptación con datos reales (checklist A1). |
 | 2.5 | Verificar el perfil real antes de contactar | 🟡 | Captura reciente de la extensión (≤90 días) corrobora o marca `mismatch`; sin captura queda `needs_current_source`. Falta verificación en sesión real. |
 | 2.6 | Priorizar la lista por valor esperado | 🟡 | Prioridad por etapa CRM con conflictos explícitos; negociación ≠ contrato. Falta cola con cronología comprobable completa. |
 
@@ -150,11 +150,13 @@ Documento de referencia permanente. Fuente de funciones: `C:\Users\nicol\Desktop
 
 | ID | Función | Estado | Qué falta para cerrarla |
 |---|---|---|---|
-| 9.1 | Consultar legalidad vigente | 🔴 | Investigación con jurisdicción, fecha y fuentes (Ley 19.628 excepción fuente pública; Ley 21.719 restringe hacia fines de 2026). No hardcodear el caso histórico. |
-| 9.2 | Explicar regulación que presiona al comprador | 🟡 | Identificar la ley que obliga a ese cargo en esa industria, con industria desambiguada y evidencia. |
-| 9.3 | Respetar límites y exclusiones | 🟡 | Máximos por persona, una persona por empresa por día, exclusión de quien declinó; política transversal persona/cuenta/canal en todos los motores. |
+| 9.1 | Consultar legalidad vigente | 🟢 | Lectura `compliance.law`: Ley 19.628 (vigente hasta el 30-11-2026) y Ley 21.719 (vigencia 01-12-2026) con jurisdicción CL, fechas verificadas en sep 2026 y fuentes oficiales. |
+| 9.2 | Explicar regulación que presiona al comprador | 🟢 | Lectura `compliance.obligation`: base patronal + KB por industria (salud, minería, banca, retail, sector público, manufactura) con ley, fechas y fuente; sin industria desambiguada no inventa. |
+| 9.3 | Respetar límites y exclusiones | 🟢 | Tope por persona 1/día·3/7d·8/40d + empresa-día + dominios excluidos en los tres motores de envío (lotes, V2 automática, Cowork) y lectura `compliance.check` con veredicto allow/defer/block. Topes por defecto, ajustables por la jefatura. |
 
-**Dependencias:** investigación con fuentes y fecha; decisiones de producto sobre supresiones.
+**Avance verificado (23 sep 2026, local + build):** 3 lecturas Cowork registradas (`compliance.check`, `compliance.law`, `compliance.obligation`), frenos cableados en los tres motores antes del proveedor, sin migración (solo lectura + guards), typecheck/build en verde, 28 pruebas en verde. Detalle en `docs/cowork-stage9-acceptance.md`. Cambios de app por desplegar; la decisión de producto sobre los topes sigue abierta.
+
+**Dependencias restantes:** decisión de producto sobre los topes; recorrido autenticado (checklist D3).
 
 ---
 

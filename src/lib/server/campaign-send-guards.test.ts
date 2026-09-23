@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findCompanyReply, findNegotiationHold, findCompanySendToday, reserveCompanySendDays } from './campaign-send-guards';
+import { findCompanyReply, findNegotiationHold, findCompanySendToday, reserveCompanySendDays, findPersonFrequencyHold, findExcludedDomain } from './campaign-send-guards';
 
 function mockClient(rows: Record<string, unknown[]>, conflict = false) {
   const tables: string[] = [];
@@ -135,4 +135,25 @@ test('company aliases and mixed-case CRM peers stop the account', async () => {
 test('dispatch alone collides even with a named company and the same recipient', async () => {
   const fixture = mockClient({ outbound_dispatches: [{ metadata: { recipient: { email: 'ana@acme.cl' } }, completed_at: '2026-09-22T12:00:00Z' }] });
   assert.equal((await findCompanySendToday(fixture.client as never, scope, 'ana@acme.cl', 'Acme', '2026-09-22T03:00:00Z')).collided, true);
+});
+
+test('person frequency holds on daily cap and clears old history', async () => {
+  const now = Date.parse('2026-09-23T12:00:00.000Z');
+  const recent = mockClient({ contacted_leads: [{ sent_at: '2026-09-23T10:00:00.000Z' }] });
+  const hold = await findPersonFrequencyHold(recent.client as never, scope, 'ANA@acme.cl', now);
+  assert.equal(hold.held, true);
+  assert.equal(hold.window, 'day');
+  assert.equal(hold.email, 'ana@acme.cl');
+  const old = mockClient({ contacted_leads: [{ sent_at: '2026-08-01T10:00:00.000Z' }] });
+  assert.equal((await findPersonFrequencyHold(old.client as never, scope, 'ana@acme.cl', now)).held, false);
+  const many = mockClient({ contacted_leads: Array.from({ length: 100 }, () => ({ sent_at: '2026-09-20T10:00:00.000Z' })) });
+  await assert.rejects(findPersonFrequencyHold(many.client as never, scope, 'ana@acme.cl', now), /incompleto/);
+});
+
+test('excluded domains match exactly, never by subdomain', async () => {
+  const fixture = mockClient({ excluded_domains: [{ domain: '@acme.cl' }] });
+  assert.equal((await findExcludedDomain(fixture.client as never, scope, 'ana@acme.cl')).blocked, true);
+  assert.equal((await findExcludedDomain(fixture.client as never, scope, 'ana@sub.acme.cl')).blocked, false);
+  assert.equal((await findExcludedDomain(fixture.client as never, scope, 'ana@other.cl')).blocked, false);
+  assert.equal((await findExcludedDomain(fixture.client as never, scope, 'invalid')).blocked, false);
 });

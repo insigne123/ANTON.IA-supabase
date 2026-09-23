@@ -37,6 +37,7 @@ export function coworkDecisionContext(
     replyDetectionCapability: instructions.replyDetectionCapability,
     metricsCapability: instructions.metricsCapability,
     deliverabilityCapability: instructions.deliverabilityCapability,
+    complianceCapability: instructions.complianceCapability,
     additionalCapability: instructions.additionalCapability,
     effectCapability: instructions.effectCapability,
     threadBudgetCapability: instructions.threadBudgetCapability,

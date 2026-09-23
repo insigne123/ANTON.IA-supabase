@@ -13,6 +13,7 @@ import { readCoworkLinkedinFollowups, readCoworkLinkedinInbox, readCoworkLinkedi
 import { readContactedAccount, readMeetingChain, readRepliesAttention, readRepliesStalled } from './reply-reads';
 import { readMetricsChannels, readMetricsDiagnose, readMetricsIncidents, readMetricsRates } from './metric-reads';
 import { readDeliverabilityBounces, readDeliverabilityCheck, readDeliverabilitySender } from './deliverability-reads';
+import { readComplianceCheck, readComplianceLaw, readComplianceObligation } from './compliance-reads';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -129,6 +130,18 @@ export function coworkReadCapabilities(
     },
     extended('crm.search', 'CRM del equipo (toda la organización) que coincide con un texto'),
     extended('crm.get_lead', 'Ficha CRM con historial de contactados, por UUID'),
+    {
+      name: 'compliance.check', version: 1, effect: 'read', description: 'Política transversal persona/cuenta antes de contactar, por UUID',
+      input: z.string().uuid(), output: z.unknown(), execute: input => readComplianceCheck(client, scope, input as string),
+    },
+    {
+      name: 'compliance.law', version: 1, effect: 'read', description: 'Marco chileno de contacto comercial con fechas y fuentes',
+      input: z.literal(''), output: z.unknown(), execute: () => readComplianceLaw(),
+    },
+    {
+      name: 'compliance.obligation', version: 1, effect: 'read', description: 'Obligaciones que presionan al comprador por industria',
+      input: z.string().max(120), output: z.unknown(), execute: input => readComplianceObligation(input as string),
+    },
     {
       name: 'deliverability.check', version: 1, effect: 'read', description: 'SPF, DKIM, DMARC y MX de un dominio remitente',
       input: z.string().max(120), output: z.unknown(), execute: input => readDeliverabilityCheck(client, scope, input as string),
