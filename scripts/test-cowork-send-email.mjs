@@ -38,6 +38,7 @@ globalThis.__coworkSend = state;
 const sources = {
   './sender-identity': 'export const coworkMailboxIdentity=async()=>({identityHash:globalThis.__coworkSend.senderHash});',
   '@/lib/server/supabase-admin': `export const getSupabaseAdminClient=()=>({from:table=>{const chain={select:()=>chain,eq:()=>chain,
+    ilike:()=>chain,order:()=>chain,limit:()=>chain,
     maybeSingle:async()=>({data:table==='cowork_runs'?{status:'waiting_approval'}:{status:'executing',kind:'send_email',target_id:globalThis.__coworkSend.target},error:null}),
     then:resolve=>resolve({data:globalThis.__coworkSend.blockedDomains.map(domain=>({domain})),error:null})};return chain;}});`,
   './runs': `export const getCoworkRun=async()=>({run:{status:'completed'},events:[]});`,
@@ -45,6 +46,11 @@ const sources = {
   '@/lib/server/native-drafts': `export const getCurrentNativeDraft=async()=>globalThis.__coworkSend.current;
     export const approveNativeDraft=async()=>{globalThis.__coworkSend.approveCalls++;return globalThis.__coworkSend.approved;};`,
   '@/lib/server/privacy-subject-data': 'export const isEmailSuppressedForScope=async()=>globalThis.__coworkSend.suppressed;',
+  '@/lib/server/campaign-send-guards': `export const findCompanyReply=async()=>({stopped:globalThis.__coworkSend.companyReplied});
+    export const findNegotiationHold=async()=>({held:false});
+    export const findPersonFrequencyHold=async()=>({held:globalThis.__coworkSend.frequencyHeld,count:1});
+    export const findCompanySendToday=async()=>({collided:globalThis.__coworkSend.companyDayHeld});`,
+  '@/lib/cowork/send-cadence': 'export const santiagoDayBounds=()=>({start:new Date().toISOString()});',
   '@/lib/services/token-service': 'export const tokenService={getToken:async()=>globalThis.__coworkSend.token};',
   '@/lib/unsubscribe-helpers': 'export const generateUnsubscribeLink=()=>"https://example.com/unsubscribe";',
   '@/lib/server-auth-helpers': 'export const refreshGoogleToken=async()=>{if(globalThis.__coworkSend.revokeOnRefresh)globalThis.__coworkSend.authorized=false;return{access_token:"at"};};export const refreshMicrosoftToken=async()=>({access_token:"at"});',
@@ -114,6 +120,19 @@ try {
   await assert.rejects(module.exports.sendCoworkEmail(auth, 'run-1', target), /Reconecta tu cuenta/);
   assert.equal(state.dispatches.length, 0);
   state.token = { refresh_token: 'rt' };
+
+  state.companyReplied = true;
+  await assert.rejects(module.exports.sendCoworkEmail(auth, 'run-1', target), /ya respondió/);
+  assert.equal(state.sends, 0);
+  state.companyReplied = false;
+  state.frequencyHeld = true;
+  await assert.rejects(module.exports.sendCoworkEmail(auth, 'run-1', target), /diferido/);
+  assert.equal(state.sends, 0);
+  state.frequencyHeld = false;
+  state.companyDayHeld = true;
+  await assert.rejects(module.exports.sendCoworkEmail(auth, 'run-1', target), /diferido/);
+  assert.equal(state.sends, 0);
+  state.companyDayHeld = false;
 
   state.senderHash = 'b'.repeat(64);
   await assert.rejects(module.exports.sendCoworkEmail(auth, 'run-1', target), /diferido/);

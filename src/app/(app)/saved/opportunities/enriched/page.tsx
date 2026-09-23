@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
 import { BackBar } from '@/components/back-bar';
 import { Button } from '@/components/ui/button';
@@ -49,7 +48,6 @@ function isPendingEnrichmentStatus(status?: string | null) {
 }
 
 export default function EnrichedOpportunitiesPage() {
-  const router = useRouter();
   const { toast } = useToast();
 
   const [enriched, setEnriched] = useState<EnrichedOppLead[]>([]);
@@ -58,7 +56,6 @@ export default function EnrichedOpportunitiesPage() {
   const [reportLead, setReportLead] = useState<EnrichedOppLead | null>(null);
   const [openReport, setOpenReport] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
-  const [creatingDraftId, setCreatingDraftId] = useState<string | null>(null);
 
   // Details Modal
   const [detailsLead, setDetailsLead] = useState<EnrichedOppLead | null>(null);
@@ -438,36 +435,6 @@ export default function EnrichedOpportunitiesPage() {
     openResearchWorkspace(selectedToContact);
   };
 
-  const createEmailFromReportFor = async (lead: EnrichedOppLead) => {
-    const report = normalizedReportFor(lead);
-    const researchSnapshotId = String(report?.raw?.research_snapshot_id || report?.raw?.researchSnapshotId || '').trim();
-    if (!researchSnapshotId) {
-      toast({ title: 'Necesitamos actualizar la investigación', description: 'Este reporte no tiene un snapshot listo para crear el email.' });
-      openResearchWorkspace([lead.id]);
-      return;
-    }
-
-    setCreatingDraftId(lead.id);
-    try {
-      const response = await fetch('/api/native-drafts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `native-draft:${researchSnapshotId}` },
-        body: JSON.stringify({ researchSnapshotId }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.draft?.draftId) {
-        throw new Error(payload?.error || 'No pudimos preparar el email.');
-      }
-      const draftId = encodeURIComponent(payload.draft.draftId);
-      const versionId = payload.draft.versionId ? `&versionId=${encodeURIComponent(payload.draft.versionId)}` : '';
-      router.push(`/contact/compose?draftId=${draftId}${versionId}`);
-    } catch (error) {
-      toast({ variant: 'destructive', title: 'No se pudo crear el email', description: error instanceof Error ? error.message : 'Inténtalo nuevamente.' });
-    } finally {
-      setCreatingDraftId(null);
-    }
-  };
-
 
   // Contadores
   const researchEligible = filtered.filter(e => !!e.email && !isResearchedLead(e)).length;
@@ -695,10 +662,10 @@ export default function EnrichedOpportunitiesPage() {
                           </Button>
                            <Button
                              size="sm"
-                             disabled={!hasEmail || (researched && creatingDraftId === e.id)}
-                             onClick={() => researched ? void createEmailFromReportFor(e) : openResearchWorkspace([e.id])}
+                              disabled={!hasEmail}
+                              onClick={() => openResearchWorkspace([e.id])}
                            >
-                             {researched ? (creatingDraftId === e.id ? 'Creando…' : 'Crear email') : 'Investigar'}
+                              {researched ? 'Preparar en Investigación' : 'Investigar'}
                            </Button>
                           <Button size="icon" variant="ghost" disabled={!e.linkedinUrl} onClick={() => e.linkedinUrl && window.open(e.linkedinUrl, '_blank')}>
                             <Linkedin className="h-4 w-4" />

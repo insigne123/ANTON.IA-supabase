@@ -15,28 +15,32 @@ const SENDER_SAMPLE_LIMIT = 5;
 
 function timeout<T>(promise: Promise<T>, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return Promise.race([promise, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(label)), DNS_TIMEOUT_MS);
-    })]) as Promise<T>;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+  return Promise.race([promise, new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(label)), DNS_TIMEOUT_MS);
+  })]).finally(() => { if (timer) clearTimeout(timer); });
 }
 
-/** Live DNS with injectable resolver for tests. Errors become empty records;
- * callers decide whether everything failed. */
+/** An absent DNS record is evidence; a resolver failure is not. Never cache a
+ * timeout or SERVFAIL as "no SPF/DMARC/MX". */
+function emptyOnMissing<T>(promise: Promise<T>, empty: T): Promise<T> {
+  return promise.catch((error: { code?: string }) => {
+    if (error?.code === 'ENODATA' || error?.code === 'ENOTFOUND' || error?.code === 'ENODOMAIN') return empty;
+    throw error;
+  });
+}
+
+/** Live DNS with injectable resolver for tests. */
 export async function lookupDomainDns(domain: string, resolver: {
   mx: (domain: string) => Promise<Array<{ exchange: string }>>;
   txt: (name: string) => Promise<string[][]>;
 } = { mx: (name) => dns.resolveMx(name), txt: (name) => dns.resolveTxt(name) }) {
   const settled = await Promise.all([
-    timeout(resolver.mx(domain).catch(() => []), 'dns_mx').catch(() => [] as Array<{ exchange: string }>),
-    timeout(resolver.txt(domain).catch(() => []), 'dns_spf').catch(() => [] as string[][]),
-    timeout(resolver.txt(`_dmarc.${domain}`).catch(() => []), 'dns_dmarc').catch(() => [] as string[][]),
+    timeout(emptyOnMissing(resolver.mx(domain), [] as Array<{ exchange: string }>), 'dns_mx'),
+    timeout(emptyOnMissing(resolver.txt(domain), [] as string[][]), 'dns_spf'),
+    timeout(emptyOnMissing(resolver.txt(`_dmarc.${domain}`), [] as string[][]), 'dns_dmarc'),
     Promise.all(DKIM_SELECTORS.map((selector) =>
-      timeout(resolver.txt(`${selector}._domainkey.${domain}`).catch(() => [] as string[][]), 'dns_dkim')
-        .catch(() => [] as string[][]).then((records) => ({ selector, records })))),
+      timeout(emptyOnMissing(resolver.txt(`${selector}._domainkey.${domain}`), [] as string[][]), 'dns_dkim')
+        .then((records) => ({ selector, records })))),
   ]);
   return { mx: settled[0], spf: settled[1], dmarc: settled[2], dkim: settled[3] };
 }
@@ -54,7 +58,9 @@ export async function readDeliverabilityCheck(client: SupabaseClient, scope: Sco
     }
   }
   const found = await live(domain);
-  const dkimHit = found.dkim.find((entry) => entry.records.length > 0)?.selector || null;
+  // An arbitrary TXT at selector._domainkey is not a DKIM public key.
+  const dkimHit = found.dkim.find((entry) => entry.records.some((record) =>
+    /(?:^|;)\s*p\s*=\s*[A-Za-z0-9+/=]+(?:;|$)/i.test(record.join(''))))?.selector || null;
   const report = summarizeDomain({
     domain, checkedAt: new Date().toISOString(), source: 'live' as const,
     mx: evaluateMx(found.mx.length),

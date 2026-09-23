@@ -71,3 +71,26 @@ test('check blocks suppression and defers frequency', async () => {
   assert.equal(freq.verdict, 'defer');
   assert.ok(freq.reasons.some((reason) => reason.startsWith('person_frequency')));
 });
+
+test('check sees same-day activity from another person at the same company', async () => {
+  const client = {
+    from(table: string) {
+      let sameDay = false;
+      const query = {
+        select() { return this; }, eq() { return this; }, ilike() { return this; }, order() { return this; },
+        gte() { sameDay = true; return this; },
+        limit() { return this; },
+        maybeSingle: async () => ({ data: { id: LEAD, email: 'ana@acme.cl', company: 'Acme' }, error: null }),
+        then(resolve: (value: unknown) => void) {
+          resolve({ data: table === 'contacted_leads' && sameDay
+            ? [{ email: 'jefa@acme.cl', company: 'Acme', sent_at: new Date().toISOString() }]
+            : [], error: null });
+        },
+      };
+      return query;
+    },
+  } as never;
+  const result = await readComplianceCheck(client, scope, LEAD);
+  assert.equal(result.verdict, 'defer');
+  assert.ok(result.reasons.includes('company_day_collision'));
+});

@@ -245,9 +245,10 @@ function redactPromptTitles(value: unknown, context: DraftContextV2) {
 function sequenceWritingContext(input: OutreachSequenceContextV2, context: DraftContextV2) {
   return {
     sequenceInstruction: privateWritingInstruction(input.sequenceInstruction),
-    previousSubjects: input.priorMessages.map((message) => ({
+    previousMessages: input.priorMessages.map((message) => ({
       index: message.index,
       subject: redactPromptTitles(message.subject, context),
+      body: draftPriorMessageReference(message.body),
     })),
     currentStep: {
       index: input.currentStep.index,
@@ -511,7 +512,7 @@ Es una instrucción privada de redacción: aplícala sin inventar hechos y sin r
 SEQUENCE_WRITING_CONTEXT (metadata privada de redacción, no publicable):
 ${JSON.stringify(sequenceWritingContext(input.sequenceContext, input.context))}
 
-Usa esta metadata solo para mantener continuidad y evitar repetir asuntos. Nunca menciones ni copies los nombres, etapas, días, instrucciones o la secuencia. Los asuntos previos no autorizan hechos: WRITING_CONTEXT y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales.
+ Usa los cuerpos anteriores solo para evitar repetir ideas, ejemplos, mecanismos y asuntos: identifica qué aporte concreto ya hizo cada correo y elige un aporte distinto y autorizado para este. Si no hay una prueba o aplicación nueva, escribe un seguimiento más breve que precise el alcance sin volver a vender lo mismo. Nunca menciones ni copies los nombres, etapas, días, instrucciones o la secuencia. Los correos previos no autorizan hechos: WRITING_CONTEXT y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales.
 `
     : '';
   const structureRules = input.sequenceContext

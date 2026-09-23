@@ -27,13 +27,13 @@ const fakeDns: typeof lookupDomainDns = async (domain: string) => ({
   mx: [{ exchange: `mail.${domain}` }],
   spf: [['v=spf1 include:_spf.google.com -all']],
   dmarc: domain === 'yago.cl' ? [['v=DMARC1; p=reject;']] : [],
-  dkim: [{ selector: 'google', records: domain === 'yago.cl' ? [['v=DKIM1']] : [] }],
+  dkim: [{ selector: 'google', records: domain === 'yago.cl' ? [['v=DKIM1; p=abc123']] : [] }],
 });
 
 test('lookup resolves mx, spf, dmarc and dkim selectors', async () => {
   const found = await lookupDomainDns('yago.cl', {
     mx: async () => [{ exchange: 'mail.yago.cl' }],
-    txt: async (name: string) => name === 'yago.cl' ? [['v=spf1 -all']] : name.startsWith('_dmarc.') ? [['v=DMARC1; p=reject']] : name.startsWith('google.') ? [['v=DKIM1']] : [],
+    txt: async (name: string) => name === 'yago.cl' ? [['v=spf1 -all']] : name.startsWith('_dmarc.') ? [['v=DMARC1; p=reject']] : name.startsWith('google.') ? [['v=DKIM1; p=abc123']] : [],
   });
   assert.equal(found.mx.length, 1);
   assert.equal(found.dkim.find((entry) => entry.records.length > 0)?.selector, 'google');
@@ -62,6 +62,27 @@ test('check queries live dns on stale cache and grades strictly', async () => {
 test('check rejects non-domains before any lookup', async () => {
   const client = mockClient();
   await assert.rejects(readDeliverabilityCheck(client, scope, 'https://yago.cl/x', fakeDns), /dominio válido/);
+});
+
+test('DNS outage does not get cached as absent SPF or DMARC', async () => {
+  const client = mockClient();
+  await assert.rejects(readDeliverabilityCheck(client, scope, 'yago.cl',
+    () => lookupDomainDns('yago.cl', {
+      mx: async () => [{ exchange: 'mail.yago.cl' }],
+      txt: async (name) => {
+        if (name === '_dmarc.yago.cl') throw Object.assign(new Error('resolver down'), { code: 'ESERVFAIL' });
+        return [];
+      },
+    })), /resolver down/);
+});
+
+test('unrelated TXT at a DKIM selector does not prove DKIM', async () => {
+  const client = mockClient();
+  const result = await readDeliverabilityCheck(client, scope, 'yago.cl', async () => ({
+    mx: [{ exchange: 'mail.yago.cl' }], spf: [['v=spf1 -all']],
+    dmarc: [['v=DMARC1; p=reject']], dkim: [{ selector: 'google', records: [['unrelated TXT']] }],
+  }));
+  assert.equal(result.report.dkim.status, 'unknown');
 });
 
 test('bounces diagnose causes against the threshold', async () => {

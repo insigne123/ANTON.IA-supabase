@@ -71,8 +71,10 @@ function deterministicSequenceIssues(brief: SharedSequenceBrief, bodies: string[
   const openings = contents.map(firstSentenceTokens);
   for (let index = 1; index < bodies.length; index += 1) {
     const overlap = Math.max(...openings.slice(0, index).map((opening) => sentenceOverlap(openings[index]!, opening)));
-    if (overlap >= 0.5) {
-      issues.push(`Correo ${index + 1}: repite la apertura de un correo anterior con otras palabras. Reescribe desde un detalle nuevo del mismo tema en vez de reformular la misma aplicación.`);
+    const priorParagraphs = new Set(contents.slice(0, index).flat().map(normalizeTokenText).filter((paragraph) => paragraph.split(' ').length >= 8));
+    const repeatedParagraph = contents[index]!.some((paragraph) => priorParagraphs.has(normalizeTokenText(paragraph)));
+    if (overlap >= 0.5 || repeatedParagraph) {
+      issues.push(`Correo ${index + 1}: repite contenido de un correo anterior. Aporta un detalle nuevo del mismo tema o acorta el seguimiento en vez de reformular la misma aplicación.`);
     }
   }
   const closeWords = (contents[3]?.join(' ') || '').split(/\s+/).filter(Boolean).length;

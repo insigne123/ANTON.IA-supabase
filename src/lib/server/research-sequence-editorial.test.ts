@@ -73,6 +73,18 @@ test('deterministic checks fail paraphrased repetition without calling the model
   }
 });
 
+test('editorial blocks reused body paragraphs even with a different opening', async () => {
+  const previousFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => { throw new Error('model must not be called'); };
+    const bodies = [...DISTINCT_SEQUENCE_BODIES];
+    bodies[2] = 'Hola Claudia,\n\nDesde otra perspectiva podemos revisar este tema.\n\nReúne la información de cada proceso en un mismo lugar.';
+    const review = await validateResearchSequence(buildSharedSequenceBrief(draftContextFixture()), sequenceDrafts(bodies));
+    assert.equal(review.passed, false);
+    assert.ok(review.issues.some((issue) => issue.startsWith('Correo 3:')));
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test('deterministic checks fail an overlong re-pitching close without calling the model', async () => {
   const bodies = [...DISTINCT_SEQUENCE_BODIES];
   bodies[3] = `Hola Claudia,\n\nPara las vacantes que Randstad Chile gestiona, una plataforma web podría reunir la información de cada proceso para su consulta durante el avance, con tableros y reportes. ${'En Yago desarrollamos plataformas web empresariales con muchas capacidades. '.repeat(8)}`;

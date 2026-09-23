@@ -39,7 +39,7 @@ async function saveState(supabase: any, keys: { organizationId: string; userId: 
     organization_id: keys.organizationId, user_id: keys.userId, provider: keys.provider,
     updated_at: new Date().toISOString(), ...patch,
   }, { onConflict: 'organization_id,user_id,provider' });
-  if (error) console.warn('[mailbox-sweep] state persistence failed', error.code || error.message);
+  if (error) throw new Error(`sweep_state_persistence_failed:${error.code || 'unknown'}`);
 }
 
 async function gmailListPage(accessToken: string, windowDays: number, pageToken: string | null) {
@@ -128,6 +128,7 @@ export async function sweepMailboxForOwner(supabase: any, input: { organizationI
       .gte('sent_at', new Date(Date.parse(windowStartIso) - SENT_LOOKBACK_MS).toISOString())
       .order('sent_at', { ascending: false }).limit(1000);
     if (contactsError) throw contactsError;
+    if ((contacts || []).length >= 1000) throw new Error('contact_history_truncated');
     const byEmail = new Map<string, any[]>();
     for (const row of contacts || []) {
       const email = normalizeEmail(row.email);
@@ -177,21 +178,25 @@ export async function sweepMailboxForOwner(supabase: any, input: { organizationI
         }
         next = listed.nextLink;
       }
+      // Do not advance past a page that contains more candidates than the
+      // processing budget. Otherwise a "complete" sweep silently loses them.
+      if (matchedIds.length > SWEEP_MATCH_BUDGET) throw new Error('sweep_match_budget_exceeded');
+      const rowById = new Map<string, any>((contacts || []).map((row: any) => [row.id, row] as [string, any]));
+      for (const id of matchedIds) {
+        const row = rowById.get(id);
+        if (!row) continue;
+        matched += 1;
+        const single = await syncSingleContactRow(supabase, organizationId, row, accessToken);
+        synced += single.synced;
+        if (single.state !== 'ok') throw new Error(single.state);
+      }
+      matchedIds.length = 0;
       pages += 1;
       cursor = next;
       await saveState(supabase, { organizationId, userId, provider }, {
         window_days: windowDays, page_token: cursor, window_started_at: startedAt, last_error: null,
       });
       if (!cursor) break;
-    }
-
-    const rowById = new Map<string, any>((contacts || []).map((row: any) => [row.id, row] as [string, any]));
-    for (const id of matchedIds.slice(0, SWEEP_MATCH_BUDGET)) {
-      const row = rowById.get(id);
-      if (!row) continue;
-      matched += 1;
-      const single = await syncSingleContactRow(supabase, organizationId, row, accessToken);
-      synced += single.synced;
     }
 
     const completedWindow = cursor === null;
@@ -203,7 +208,14 @@ export async function sweepMailboxForOwner(supabase: any, input: { organizationI
     }
     return { provider, due: true, reason: resuming ? 'resume_window' : 'sweep_window', pages, matched, synced, completedWindow };
   } catch (err: any) {
-    const message = String(err?.message || err || 'sweep_failed').slice(0, 500);
+    // Refresh failures can contain upstream OAuth details. Persist only a
+    // stable code, never tokens, provider bodies or recipient data.
+    const raw = String(err?.message || err || 'sweep_failed');
+    const message = /refresh|invalid_grant|unauthoriz|AADSTS/i.test(raw) ? 'connection_required'
+      : /Gmail sweep list failed|Outlook sweep list failed/.test(raw) ? 'mailbox_provider_unavailable'
+      : /sweep_match_budget_exceeded|contact_history_truncated|sync_failed|incomplete_thread/.test(raw)
+        ? raw.match(/sweep_match_budget_exceeded|contact_history_truncated|sync_failed|incomplete_thread/)![0]
+        : 'sweep_failed';
     await saveState(supabase, { organizationId, userId, provider }, { last_error: message }).catch(() => null);
     return { ...idle, due: true, reason: 'sweep_failed', error: message };
   }

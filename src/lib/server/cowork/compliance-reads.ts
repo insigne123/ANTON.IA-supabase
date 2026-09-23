@@ -34,13 +34,16 @@ export async function readComplianceCheck(client: SupabaseClient, scope: Scope, 
   const email = normalizeEmail(row.email);
   if (!email) return { scope: 'organization_compliance', lead: { id: row.id }, verdict: 'block' as const, reasons: ['missing_email'], nextEligibleAt: null };
 
-  const [unsub, contacted, excluded] = await Promise.all([
+  const dayStart = santiagoDayBounds(new Date()).start;
+  const [unsub, contacted, excluded, companyToday] = await Promise.all([
     client.from('unsubscribed_emails').select('user_id,organization_id').ilike('email', email),
     client.from('contacted_leads').select('sent_at,replied_at,evaluation_status,company')
       .eq('organization_id', scope.organizationId).ilike('email', email).order('sent_at', { ascending: false }).limit(100),
     client.from('excluded_domains').select('domain').eq('organization_id', scope.organizationId).limit(200),
+    client.from('contacted_leads').select('email,company,sent_at')
+      .eq('organization_id', scope.organizationId).gte('sent_at', dayStart).limit(500),
   ]);
-  const failed = [unsub, contacted, excluded].find((result) => result.error)?.error;
+  const failed = [unsub, contacted, excluded, companyToday].find((result) => result.error)?.error;
   if (failed) throw new Error('No se pudo evaluar la política de contacto.');
   const suppressed = ((unsub.data as Array<{ user_id?: string | null; organization_id?: string | null }>) || [])
     .some((item) => (!item.user_id && !item.organization_id)
@@ -48,17 +51,18 @@ export async function readComplianceCheck(client: SupabaseClient, scope: Scope, 
       || (scope.organizationId && item.organization_id === scope.organizationId));
   const touches = ((contacted.data as Array<{ sent_at?: string | null; replied_at?: string | null; evaluation_status?: string | null; company?: string | null }>) || []);
   if (touches.length >= 100) throw new Error('Historial de la persona incompleto; no se autoriza el contacto.');
+  const today = (companyToday.data as Array<{ email?: string | null; company?: string | null; sent_at?: string | null }>) || [];
+  if (today.length >= 500) throw new Error('Historial diario de la cuenta incompleto; no se autoriza el contacto.');
   const frequency = evaluateFrequency(touches.map((touch) => touch.sent_at));
   const doNotContact = touches.some((touch) => touch.evaluation_status === 'do_not_contact');
   const replied = touches.some((touch) => touch.replied_at);
   const domain = email.split('@')[1] || '';
   const excludedDomain = ((excluded.data as Array<{ domain?: string | null }>) || [])
     .some((item) => String(item.domain || '').trim().toLowerCase().replace(/^@/, '') === domain);
-  const dayStart = santiagoDayBounds(new Date()).start;
   const keys = new Set(companyKeysFor(email, row.company).keys);
-  const companyDayCollision = touches.some((touch) =>
+  const companyDayCollision = today.some((touch) =>
     (touch.sent_at || '') >= dayStart
-    && companyKeysFor(email, touch.company).keys.some((key) => keys.has(key)));
+    && companyKeysFor(touch.email || '', touch.company).keys.some((key) => keys.has(key)));
   const policy = evaluateContactPolicy({ suppressed, doNotContact, excludedDomain, frequency, companyDayCollision, replied });
   return {
     scope: 'organization_compliance',

@@ -8,7 +8,8 @@ import {
 } from '@/lib/server/outbound-dispatch';
 import { getEffectiveDailyQuotaLimits, reserveOutboundContactQuota } from '@/lib/server/daily-quota-store';
 import { isEmailSuppressedForScope } from '@/lib/server/privacy-subject-data';
-import { findCompanyReply, findExcludedDomain, findNegotiationHold, findPersonFrequencyHold } from '@/lib/server/campaign-send-guards';
+import { findCompanyReply, findCompanySendToday, findExcludedDomain, findNegotiationHold, findPersonFrequencyHold } from '@/lib/server/campaign-send-guards';
+import { santiagoDayBounds } from '@/lib/cowork/send-cadence';
 import { generateUnsubscribeLink } from '@/lib/unsubscribe-helpers';
 import { prepareOutboundEmail, validateOutboundEmail } from '@/lib/email-outbound';
 import { refreshGoogleToken, refreshMicrosoftToken } from '@/lib/server-auth-helpers';
@@ -158,13 +159,14 @@ async function defaultSendStep(client: SupabaseClientLike, step: AutoSendClaimed
       .order('sent_at', { ascending: false }).limit(1);
     if (known.error) throw known.error;
     company = ((known.data as Array<{ company?: string | null }>) || [])[0]?.company || null;
-    const [excluded, reply, hold, frequency] = await Promise.all([
+    const [excluded, reply, hold, frequency, companyToday] = await Promise.all([
       findExcludedDomain(client as never, scope, canonical.to),
       findCompanyReply(client as never, scope, canonical.to, company),
       findNegotiationHold(client as never, scope, canonical.to, company),
       findPersonFrequencyHold(client as never, scope, canonical.to),
+      findCompanySendToday(client as never, scope, canonical.to, company, santiagoDayBounds(now).start),
     ]);
-    checks = { excluded, reply, hold, frequency };
+    checks = { excluded, reply, hold, frequency, companyToday };
   } catch {
     await defaultNoteStepError(client, step.step_id, 'recipient_check_unavailable');
     return 'deferred';
@@ -183,6 +185,10 @@ async function defaultSendStep(client: SupabaseClientLike, step: AutoSendClaimed
   }
   if (checks.frequency.held) {
     await defaultNoteStepError(client, step.step_id, 'person_frequency_hold');
+    return 'deferred';
+  }
+  if (checks.companyToday.collided) {
+    await defaultNoteStepError(client, step.step_id, 'company_day_collision');
     return 'deferred';
   }
 
@@ -278,6 +284,8 @@ async function defaultSendStep(client: SupabaseClientLike, step: AutoSendClaimed
             if (recheck.stopped) return { outcome: 'rejected' as const, code: 'company_replied', message: 'Esta empresa ya respondió. El toque queda retenido.' };
             const refrequency = await findPersonFrequencyHold(client as never, scope, canonical.to);
             if (refrequency.held) return { outcome: 'deferred' as const, code: 'person_frequency_hold', message: 'Esta persona ya recibió correos en el período.', retryAfterMs: 24 * 3600000 };
+            const sameDay = await findCompanySendToday(client as never, scope, canonical.to, company, santiagoDayBounds(new Date()).start);
+            if (sameDay.collided) return { outcome: 'deferred' as const, code: 'company_day_collision', message: 'Ya salió un correo a esta empresa hoy.', retryAfterMs: 24 * 3600000 };
           } catch (cause) {
             throw new OutboundPreProviderDeferredError('No se pudo verificar el estado del destinatario.', { code: 'recipient_check_unavailable', cause });
           }

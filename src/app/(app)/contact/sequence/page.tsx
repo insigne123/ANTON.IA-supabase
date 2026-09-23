@@ -5,12 +5,95 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
 import { ResearchSequenceViewSchema, type ResearchSequenceView } from '@/lib/research-sequence-contracts';
 
 const labels = { queued: 'En espera', running: 'Preparando', ready: 'Guardado', error: 'Pendiente de reintento' };
 const stages = { brief: 'Definiendo el tema de los cuatro correos', initial: 'Preparando el contacto inicial', follow_ups: 'Preparando los seguimientos', editorial: 'Revisando la secuencia completa', done: 'Preparación terminada' };
+
+type SequenceSlot = ResearchSequenceView['slots'][number];
+
+function SequenceEmailEditor({ slot, onSaved }: { slot: SequenceSlot; onSaved: () => Promise<unknown> }) {
+  const [saved, setSaved] = useState({ versionId: slot.versionId, subject: slot.subject || '', body: slot.body || '' });
+  const [subject, setSubject] = useState(slot.subject || '');
+  const [body, setBody] = useState(slot.body || '');
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  const [conflict, setConflict] = useState(false);
+  const dirty = subject !== saved.subject || body !== saved.body;
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+
+  useEffect(() => {
+    if (dirty || slot.versionId === saved.versionId) return;
+    const next = { versionId: slot.versionId, subject: slot.subject || '', body: slot.body || '' };
+    setSaved(next);
+    setSubject(next.subject);
+    setBody(next.body);
+  }, [dirty, saved.versionId, slot.versionId, slot.subject, slot.body]);
+
+  async function save() {
+    if (!slot.draftId || !saved.versionId || saving || !dirty) return;
+    if (!subject.trim() || !body.trim()) { setFeedback('Completa el asunto y el mensaje antes de guardar.'); return; }
+    setSaving(true);
+    setFeedback('');
+    try {
+      const response = await fetch(`/api/native-drafts/${encodeURIComponent(slot.draftId)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expectedVersionId: saved.versionId, subject: subject.trim(), text: body.trim() }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (response.status === 409 && payload?.error === 'NATIVE_DRAFT_VERSION_CONFLICT') {
+        setConflict(true);
+        setFeedback('Este correo cambió en otra pantalla. Copia tus cambios antes de cargar la versión actual.');
+        return;
+      }
+      if (!response.ok || !payload?.draft?.versionId) throw new Error(
+        payload?.error === 'NATIVE_DRAFT_PRIVACY_SUPPRESSED' ? 'Este contacto ya no admite mensajes.'
+          : payload?.error === 'NATIVE_DRAFT_ARCHIVED' ? 'Este correo está archivado y no se puede editar.'
+            : payload?.message || 'No pudimos guardar este correo.',
+      );
+      setSaved({ versionId: payload.draft.versionId, subject: subject.trim(), body: body.trim() });
+      setSubject(subject.trim());
+      setBody(body.trim());
+      setFeedback('Cambios guardados. La secuencia requiere una nueva revisión.');
+      try { await onSaved(); } catch { setFeedback('Guardado, pero no pudimos actualizar el progreso. Usa «Actualizar progreso».'); }
+    } catch (failure) { setFeedback(failure instanceof Error ? failure.message : 'No pudimos guardar este correo.'); }
+    finally { setSaving(false); }
+  }
+
+  async function reload() {
+    if (!slot.draftId) return;
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/native-drafts/${encodeURIComponent(slot.draftId)}`, { cache: 'no-store' });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.draft?.versionId) throw new Error('No pudimos cargar la versión actual.');
+      const next = { versionId: payload.draft.versionId, subject: payload.draft.content.subject || '', body: payload.draft.content.text || payload.draft.content.html || '' };
+      setSaved(next); setSubject(next.subject); setBody(next.body); setConflict(false); setFeedback('Versión actual cargada.');
+      await onSaved();
+    } catch (failure) { setFeedback(failure instanceof Error ? failure.message : 'No pudimos cargar la versión actual.'); }
+    finally { setSaving(false); }
+  }
+
+  return <div className="space-y-3">
+    <div className="space-y-1.5"><Label htmlFor={`sequence-subject-${slot.index}`}>Asunto</Label><Input id={`sequence-subject-${slot.index}`} value={subject} onChange={(event) => { setSubject(event.target.value); setFeedback(''); }} disabled={saving || conflict} maxLength={255} /></div>
+    <div className="space-y-1.5"><Label htmlFor={`sequence-body-${slot.index}`}>Mensaje</Label><Textarea id={`sequence-body-${slot.index}`} className="min-h-40 resize-y" value={body} onChange={(event) => { setBody(event.target.value); setFeedback(''); }} disabled={saving || conflict} maxLength={20_000} /></div>
+    <div className="flex flex-wrap items-center gap-3">
+      <Button size="sm" onClick={() => void save()} disabled={saving || conflict || !dirty || !subject.trim() || !body.trim()}>{saving ? 'Guardando…' : 'Guardar cambios'}</Button>
+      {dirty && !conflict && <Button size="sm" variant="ghost" disabled={saving} onClick={() => { setSubject(saved.subject); setBody(saved.body); setFeedback(''); }}>Descartar cambios</Button>}
+      {conflict && <Button size="sm" variant="outline" disabled={saving} onClick={() => void reload()}>Cargar versión actual</Button>}
+      <span role={conflict ? 'alert' : 'status'} className={`text-xs ${conflict || dirty ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>{feedback || (dirty ? 'Cambios sin guardar' : '')}</span>
+    </div>
+  </div>;
+}
 
 function SequencePreparation() {
   const jobId = useSearchParams().get('jobId');
@@ -124,7 +207,7 @@ function SequencePreparation() {
       <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
         {slots.map((slot) => <li key={slot.index} className="space-y-3 p-4 sm:p-5">
           <div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className="font-medium text-foreground">{slot.index + 1}. {slot.name}</h2><span className="text-sm text-muted-foreground">{labels[slot.status]}</span></div>
-          {slot.subject ? <><h3 className="break-words text-sm font-medium text-foreground">{slot.subject}</h3><p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">{slot.body}</p></> : <p className="text-sm text-muted-foreground">{slot.status === 'running' ? 'Estamos redactando este correo.' : 'El correo aparecerá aquí cuando esté guardado.'}</p>}
+          {slot.draftId && slot.versionId ? <SequenceEmailEditor key={slot.draftId} slot={slot} onSaved={() => load()} /> : <p className="text-sm text-muted-foreground">{slot.status === 'running' ? 'Estamos redactando este correo.' : 'El correo aparecerá aquí cuando esté guardado.'}</p>}
         </li>)}
       </ol>
     </main>

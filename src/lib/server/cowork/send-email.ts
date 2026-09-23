@@ -22,7 +22,8 @@ import {
   dispatchOutboundMessage,
   OutboundPreProviderDeferredError,
 } from '@/lib/server/outbound-dispatch';
-import { findCompanyReply, findNegotiationHold, findPersonFrequencyHold } from '@/lib/server/campaign-send-guards';
+import { findCompanyReply, findCompanySendToday, findNegotiationHold, findPersonFrequencyHold } from '@/lib/server/campaign-send-guards';
+import { santiagoDayBounds } from '@/lib/cowork/send-cadence';
 
 /** Fase 2C: send exactly the approved native draft version. The proposal target
  * carries draftId:versionId:contentHash; any drift refuses before approving.
@@ -204,6 +205,11 @@ export async function sendCoworkEmail(
         if (frequency.held) {
           throw new OutboundPreProviderDeferredError(`Esta persona ya recibió ${frequency.count} correos en el período.`,
             { code: 'person_frequency_hold', retryAfterMs: 24 * 3600000 });
+        }
+        const today = await findCompanySendToday(admin, scope, canonical.to, company, santiagoDayBounds(new Date()).start);
+        if (today.collided) {
+          throw new OutboundPreProviderDeferredError('Ya salió un correo a esta empresa hoy.',
+            { code: 'company_day_collision', retryAfterMs: 24 * 3600000 });
         }
       } catch (cause) {
         if (cause instanceof OutboundPreProviderDeferredError) throw cause;

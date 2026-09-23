@@ -50,7 +50,7 @@ export async function researchSequenceView(job: any, dependencies: Pick<Sequence
   const changed = job.editorial?.versionIds?.some((id: string, index: number) => id !== summaries[index]?.versionId);
   const request = ResearchSequenceRequestSchema.safeParse(job.request);
   return ResearchSequenceViewSchema.parse({
-    id: job.id, status: changed && job.status === 'completed' ? 'review_required' : job.status,
+    id: job.id, status: changed && ['completed', 'review_required'].includes(job.status) ? 'review_required' : job.status,
     stage: job.stage, error: job.last_error || null,
     retryAt: job.status === 'retry_scheduled' ? job.next_retry_at : null,
     researchSnapshotId: request.success ? request.data.researchSnapshotId : null,

@@ -441,6 +441,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     const selectedWorkspaceLeads = (selectedSourceLeads as ResearchableLead[]).map(workspaceLead);
     setHandoffLeads(selectedWorkspaceLeads);
     setHandoffSelectionKeys(selectedWorkspaceLeads.map((lead) => lead.key));
+    if (selectedWorkspaceLeads.length === 1) setActiveLeadKey(selectedWorkspaceLeads[0].key);
     setHandoffNotice(`Trajimos ${pluralize(selectedWorkspaceLeads.length, 'lead')} a esta selección. Revísala y comienza cuando estés listo.`);
     setHandoffError('');
     setHandoffResolved(true);

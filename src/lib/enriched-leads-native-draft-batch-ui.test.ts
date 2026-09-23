@@ -3,18 +3,23 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const source = readFileSync('src/app/(app)/saved/leads/enriched/Client.tsx', 'utf8');
+const opportunities = readFileSync('src/app/(app)/saved/opportunities/enriched/page.tsx', 'utf8');
+const sequence = readFileSync('src/app/(app)/contact/sequence/page.tsx', 'utf8');
 
-test('enriched leads exposes native multi-draft selection on desktop and mobile', () => {
-  assert.match(source, /Seleccionar todos para crear borradores/);
-  assert.match(source, /Seleccionar \$\{e\.fullName \|\| 'lead'\} para crear un borrador/);
-  assert.match(source, />Borrador<\/span>/);
-  assert.match(source, /Crear borradores \(\$\{contactCount\}\)/);
-  assert.match(source, /createNativeDraftBatch\(\{/);
+test('enriched leads opens the research workspace rather than starting its own drafting flow', () => {
+  assert.match(source, /openResearchWorkspace\(\[e\.id\]\)/);
+  assert.match(source, /Preparar en Investigación/);
+  assert.match(source, /openResearchWorkspace\(selectedToContact\)/);
+  assert.doesNotMatch(source, /fetch\('\/api\/native-drafts'/);
+  assert.doesNotMatch(source, /createNativeDraftBatch\(/);
+  assert.match(opportunities, /researched \? 'Preparar en Investigación' : 'Investigar'/);
+  assert.doesNotMatch(opportunities, /fetch\('\/api\/native-drafts'/);
 });
 
-test('bulk native drafting keeps review and approval before sending', () => {
-  assert.match(source, /Nada se envía automáticamente/);
-  assert.match(source, /Revisar y contactar/);
-  assert.match(source, /Cada borrador requiere revisión y aprobación antes del envío/);
-  assert.doesNotMatch(source, /function sendBulk\(/);
+test('the research sequence edits each existing email with optimistic version checks', () => {
+  assert.match(sequence, /key=\{slot\.draftId\}/);
+  assert.match(sequence, /method: 'PATCH'/);
+  assert.match(sequence, /expectedVersionId: saved\.versionId/);
+  assert.match(sequence, /response\.status === 409/);
+  assert.match(sequence, /Guardar cambios/);
 });

@@ -4,7 +4,7 @@ Documento de referencia permanente. Fuente de funciones: `C:\Users\nicol\Desktop
 
 **Regla de cierre:** una función solo queda terminada cuando está conectada al agente, respeta el alcance del usuario, supera sus casos de fallo y produce un resultado comprobable. Código existente o prueba simulada no cuentan como aceptación.
 
-**Leyenda:** 🟢 Hecha (conectada al agente, con pruebas y migración aplicada; puede faltar recorrido autenticado). 🟡 Parcial (hay base reutilizable, falta integración o verificación). 🔴 Pendiente (falta una parte esencial).
+**Leyenda:** 🟢 Implementada y probada en aislamiento (no equivale a aceptación autenticada). 🟡 Parcial (falta integración o verificación). 🔴 Pendiente (falta una parte esencial). Para cierre según la regla de la línea 5, ver `docs/cowork-authenticated-acceptance-checklist.md` y `docs/cowork-audit-2026-09-23.md`.
 
 **Contexto:** la parte 1 (Definición de audiencia, funciones 1.1–1.5) está implementada y parcialmente probada con modelo real y Apollo. **Despliegue al día (23 sep 2026):** todo lo de las partes 1–9 está en `main` y en producción (rollouts `studio--90260`, `studio--96464`, `studio--21860`); los "sin desplegar" de avances anteriores quedaron obsoletos. Lo pendiente de las partes 1–5 es recorrido autenticado con datos reales, detallado casilla por casilla en `docs/cowork-authenticated-acceptance-checklist.md`. Detalle de la parte 1 en `docs/cowork-audience-acceptance.md`.
 

@@ -35,8 +35,6 @@ import {
   buildResearchReport,
   canShowResearchDraftAction,
   parseResearchReportDetail,
-  researchDraftBlockReasonLabel,
-  researchDraftErrorMessage,
   researchReadinessFor,
   type ResearchReportDetail,
 } from '@/lib/research-workspace';
@@ -45,27 +43,9 @@ import type { NativeResearchLeadStatus } from '@/lib/native-research-contracts';
 import NativeResearchReport, { NativeResearchReportSkeleton } from '@/components/research/NativeResearchReport';
 import { researchDetailLoadingState } from '@/lib/research-report-loading';
 import ResearchWorkspace from '@/components/research/ResearchWorkspace';
-import {
-  MAX_NATIVE_DRAFT_BATCH_SIZE,
-  createNativeDraftBatch,
-} from '@/lib/native-draft-batch';
-
 
 const extractDomainFromEmail = (email?: string | null) =>
   email && email.includes('@') ? email.split('@')[1].toLowerCase() : undefined;
-
-type PreparedNativeDraft = {
-  lead: EnrichedLead;
-  draftId: string;
-  versionId: string | null;
-  subject: string;
-  body: string;
-};
-
-type FailedNativeDraft = {
-  lead: EnrichedLead;
-  message: string;
-};
 
 function isPendingEnrichmentStatus(status?: string | null) {
   return String(status || '').trim().toLowerCase().startsWith('pending');
@@ -136,9 +116,6 @@ export default function EnrichedLeadsClient() {
   const [nativeResearchStatusError, setNativeResearchStatusError] = useState('');
   const [openReport, setOpenReport] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
-  const [creatingDraftId, setCreatingDraftId] = useState<string | null>(null);
-  const [creatingDraftBatch, setCreatingDraftBatch] = useState(false);
-  const [draftBatchProgress, setDraftBatchProgress] = useState({ done: 0, total: 0 });
   const [nativeReportDetails, setNativeReportDetails] = useState<Record<string, ResearchReportDetail>>({});
   const [nativeReportDetailLoading, setNativeReportDetailLoading] = useState<Record<string, boolean>>({});
   const [nativeReportDetailErrors, setNativeReportDetailErrors] = useState<Record<string, string>>({});
@@ -149,11 +126,9 @@ export default function EnrichedLeadsClient() {
     nativeReportControllersRef.current.clear();
     nativeReportDetailRequestsRef.current.clear();
   }, []);
-  const nativeDraftRequestRef = useRef<string | null>(null);
   const nativeResearchStatusRequestIdRef = useRef(0);
   const loadDataRequestIdRef = useRef(0);
   const nativeResearchStatusKnown = nativeResearchStatusState === 'ready';
-  const draftRequestPending = creatingDraftId !== null || creatingDraftBatch;
   // Estados para Modal de llamada
   const [callModalOpen, setCallModalOpen] = useState(false);
   const [leadToCall, setLeadToCall] = useState<EnrichedLead | null>(null);
@@ -162,9 +137,6 @@ export default function EnrichedLeadsClient() {
   const [reportLead, setReportLead] = useState<EnrichedLead | null>(null);
 
   const [selectedToContact, setSelectedToContact] = useState<Set<string>>(new Set());
-  const [openCompose, setOpenCompose] = useState(false);
-  const [composeList, setComposeList] = useState<PreparedNativeDraft[]>([]);
-  const [failedComposeList, setFailedComposeList] = useState<FailedNativeDraft[]>([]);
 
   // --- Enrichment Options ---
   const [openEnrichOptions, setOpenEnrichOptions] = useState(false);
@@ -844,13 +816,13 @@ export default function EnrichedLeadsClient() {
 
     const next = new Set<string>(selectedToContact);
     const candidates = pageLeads.filter((lead) => canContact(lead) && !next.has(lead.id));
-    const remainingCapacity = Math.max(0, MAX_NATIVE_DRAFT_BATCH_SIZE - next.size);
+    const remainingCapacity = Math.max(0, MAX_RESEARCH_BATCH_SIZE - next.size);
     candidates.slice(0, remainingCapacity).forEach((lead) => next.add(lead.id));
     setSelectedToContact(next);
     if (candidates.length > remainingCapacity) {
       toast({
-        title: `Puedes preparar hasta ${MAX_NATIVE_DRAFT_BATCH_SIZE} borradores a la vez`,
-        description: 'Prepara esta selección antes de agregar más leads.',
+        title: `Puedes seleccionar hasta ${MAX_RESEARCH_BATCH_SIZE} leads`,
+        description: 'Desmarca algunos leads antes de agregar más.',
       });
     }
   };
@@ -865,10 +837,10 @@ export default function EnrichedLeadsClient() {
       return;
     }
     if (selectedToContact.has(leadId)) return;
-    if (selectedToContact.size >= MAX_NATIVE_DRAFT_BATCH_SIZE) {
+    if (selectedToContact.size >= MAX_RESEARCH_BATCH_SIZE) {
       toast({
-        title: `Puedes preparar hasta ${MAX_NATIVE_DRAFT_BATCH_SIZE} borradores a la vez`,
-        description: 'Prepara esta selección o desmarca un lead antes de agregar otro.',
+        title: `Puedes seleccionar hasta ${MAX_RESEARCH_BATCH_SIZE} leads`,
+        description: 'Desmarca un lead antes de agregar otro.',
       });
       return;
     }
@@ -1008,151 +980,6 @@ export default function EnrichedLeadsClient() {
       title: 'Investigación borrada',
       description: removedCount > 0 ? 'Se eliminó el reporte. Ya puedes reinvestigar.' : 'No se encontró reporte para borrar.',
     });
-  }
-
-  async function openBulkCompose() {
-    if (nativeDraftRequestRef.current || !nativeResearchStatusKnown) return;
-    const selectedLeads = enriched
-      .filter((lead) => selectedToContact.has(lead.id) && canContact(lead))
-      .slice(0, MAX_NATIVE_DRAFT_BATCH_SIZE);
-    if (selectedLeads.length === 0) {
-      toast({ title: 'Selecciona leads listos', description: 'Elige al menos un lead investigado con email válido.' });
-      return;
-    }
-
-    const leadById = new Map(selectedLeads.map((lead) => [lead.id, lead]));
-    const missingSnapshot: FailedNativeDraft[] = [];
-    const targets = selectedLeads.flatMap((lead) => {
-      const nativeStatus = nativeResearchForLead(lead);
-      const report = reportForLead(lead);
-      const researchSnapshotId = String(
-        nativeStatus?.researchSnapshotId
-        || report?.raw?.research_snapshot_id
-        || report?.raw?.researchSnapshotId
-        || '',
-      ).trim();
-      if (!researchSnapshotId) {
-        missingSnapshot.push({ lead, message: 'La investigación necesita actualizarse antes de crear el borrador.' });
-        return [];
-      }
-      return [{ leadId: lead.id, researchSnapshotId }];
-    });
-
-    setComposeList([]);
-    setFailedComposeList(missingSnapshot);
-    setDraftBatchProgress({ done: missingSnapshot.length, total: selectedLeads.length });
-    setOpenCompose(true);
-    if (targets.length === 0) return;
-
-    nativeDraftRequestRef.current = 'batch';
-    setCreatingDraftBatch(true);
-    try {
-      const results = await createNativeDraftBatch({
-        targets,
-        concurrency: 3,
-        onProgress: (done) => setDraftBatchProgress({ done: done + missingSnapshot.length, total: selectedLeads.length }),
-        createDraft: async (target) => {
-          const response = await fetch('/api/native-drafts', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Idempotency-Key': `native-draft:${target.researchSnapshotId}`,
-            },
-            body: JSON.stringify({ researchSnapshotId: target.researchSnapshotId }),
-          });
-          const payload = await response.json().catch(() => null);
-          if (!response.ok || !payload?.draft?.draftId) {
-            throw new Error(researchDraftErrorMessage(payload, 'No pudimos preparar este borrador.'));
-          }
-          return payload.draft;
-        },
-      });
-
-      const prepared = results.flatMap((result): PreparedNativeDraft[] => {
-        if (result.status !== 'drafted') return [];
-        const lead = leadById.get(result.target.leadId);
-        if (!lead) return [];
-        return [{
-          lead,
-          draftId: String(result.draft.draftId),
-          versionId: String(result.draft.versionId || '').trim() || null,
-          subject: String(result.draft.content?.subject || ''),
-          body: String(result.draft.content?.text || ''),
-        }];
-      });
-      const failed = results.flatMap((result): FailedNativeDraft[] => {
-        if (result.status !== 'failed') return [];
-        const lead = leadById.get(result.target.leadId);
-        return lead ? [{ lead, message: result.error }] : [];
-      });
-      const preparedIds = new Set(prepared.map((item) => item.lead.id));
-      setComposeList(prepared);
-      setFailedComposeList([...missingSnapshot, ...failed]);
-      setSelectedToContact((current) => new Set([...current].filter((leadId) => !preparedIds.has(leadId))));
-      toast({
-        title: prepared.length === 1 ? 'Borrador preparado' : `${prepared.length} borradores preparados`,
-        description: failed.length || missingSnapshot.length
-          ? 'Algunos leads necesitan revisión antes de volver a intentarlo.'
-          : 'Revísalos uno por uno antes de contactar. Nada se envió automáticamente.',
-      });
-    } finally {
-      if (nativeDraftRequestRef.current === 'batch') nativeDraftRequestRef.current = null;
-      setCreatingDraftBatch(false);
-    }
-  }
-
-  async function generateEmailFromReportFor(lead: EnrichedLead, styleProfileId: string | null = null, instruction?: string) {
-    if (nativeDraftRequestRef.current) return;
-    if (!nativeResearchStatusKnown) return;
-    if (!canContact(lead)) {
-      toast({
-        title: 'El borrador aún no está disponible',
-        description: 'Necesitamos un email válido y evidencia suficiente antes de prepararlo.',
-      });
-      return;
-    }
-    const nativeStatus = nativeResearchForLead(lead);
-    if (nativeStatus?.result && nativeStatus.result.draftEligibility.eligible !== true) {
-      toast({
-        title: 'El borrador aún no está disponible',
-        description: researchDraftBlockReasonLabel(nativeStatus.result.draftEligibility.blockReason),
-      });
-      return;
-    }
-    const report = reportForLead(lead);
-    const researchSnapshotId = String(
-      nativeStatus?.researchSnapshotId
-      || report?.raw?.research_snapshot_id
-      || report?.raw?.researchSnapshotId
-      || '',
-    ).trim();
-    if (!researchSnapshotId) {
-      toast({ title: 'Necesitamos actualizar la investigación', description: 'Este reporte no tiene un snapshot listo para crear el email.' });
-      openResearchWorkspace([lead.id]);
-      return;
-    }
-
-    nativeDraftRequestRef.current = lead.id;
-    setCreatingDraftId(lead.id);
-    try {
-      const response = await fetch('/api/native-drafts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `native-draft:${researchSnapshotId}` },
-        body: JSON.stringify({ researchSnapshotId, styleProfileId, ...(instruction ? { instruction } : {}) }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.draft?.draftId) {
-        throw new Error(researchDraftErrorMessage(payload, 'No pudimos preparar el borrador.'));
-      }
-      const draftId = encodeURIComponent(payload.draft.draftId);
-      const versionId = payload.draft.versionId ? `&versionId=${encodeURIComponent(payload.draft.versionId)}` : '';
-      router.push(`/contact/compose?draftId=${draftId}${versionId}`);
-    } catch (error) {
-      toast({ variant: 'destructive', title: 'No se pudo preparar el borrador', description: error instanceof Error ? error.message : 'Inténtalo nuevamente.' });
-    } finally {
-      if (nativeDraftRequestRef.current === lead.id) nativeDraftRequestRef.current = null;
-      setCreatingDraftId(null);
-    }
   }
 
   function openReportFor(e: EnrichedLead) {
@@ -1340,23 +1167,7 @@ export default function EnrichedLeadsClient() {
           </div>
           <p className="mt-1 text-sm text-muted-foreground">Investiga contactos, revisa su contexto y prepara el siguiente contacto.</p>
         </div>
-        <Button
-          className="w-full rounded-full sm:w-auto"
-          onClick={() => {
-            if (contactCount > 0) void openBulkCompose();
-            else setOpenCompose(true);
-          }}
-          disabled={(contactCount === 0 && composeList.length === 0 && failedComposeList.length === 0) || loadingLeads || !nativeResearchStatusKnown || draftRequestPending}
-          title={contactCount > 0 ? 'Crear borradores para revisar antes de contactar' : composeList.length > 0 ? 'Volver a los borradores preparados' : 'Selecciona leads investigados con email'}
-        >
-          {creatingDraftBatch
-            ? `Preparando ${draftBatchProgress.done}/${draftBatchProgress.total}`
-            : contactCount > 0
-              ? `Crear borradores (${contactCount})`
-              : composeList.length > 0
-                ? `Ver borradores (${composeList.length})`
-                : 'Crear borradores'}
-        </Button>
+        {contactCount > 0 ? <Button className="w-full rounded-full sm:w-auto" onClick={() => openResearchWorkspace(selectedToContact)} disabled={!nativeResearchStatusKnown}>Abrir en Investigación ({contactCount})</Button> : null}
       </header>
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-border/60 bg-card/70 px-4 py-3 text-sm shadow-[0_14px_35px_-32px_rgba(15,23,42,0.28)]">
@@ -1533,16 +1344,12 @@ export default function EnrichedLeadsClient() {
               <div className="text-sm font-medium" aria-live="polite">
                 {researchCount > 0 ? `${researchCount} para investigar · máximo ${MAX_RESEARCH_BATCH_SIZE}` : ''}
                 {researchCount > 0 && contactCount > 0 ? ' · ' : ''}
-                {contactCount > 0 ? `${contactCount} borrador${contactCount === 1 ? '' : 'es'} · máximo ${MAX_NATIVE_DRAFT_BATCH_SIZE}` : ''}
+                {contactCount > 0 ? `${contactCount} seleccionados para gestionar` : ''}
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Button variant="ghost" size="sm" onClick={() => { setSel({}); setSelectedToContact(new Set()); }}>Cancelar</Button>
-                 {researchCount > 0 ? <Button variant="secondary" size="sm" onClick={() => openResearchWorkspace()} disabled={!nativeResearchStatusKnown || draftRequestPending}>Investigar selección ({researchCount})</Button> : null}
-                 {contactCount > 0 ? (
-                   <Button size="sm" onClick={() => void openBulkCompose()} disabled={!nativeResearchStatusKnown || draftRequestPending}>
-                     {creatingDraftBatch ? `Preparando ${draftBatchProgress.done}/${draftBatchProgress.total}` : `Crear borradores (${contactCount})`}
-                   </Button>
-                 ) : null}
+                {researchCount > 0 ? <Button variant="secondary" size="sm" onClick={() => openResearchWorkspace()} disabled={!nativeResearchStatusKnown}>Investigar selección ({researchCount})</Button> : null}
+                {contactCount > 0 ? <Button size="sm" onClick={() => openResearchWorkspace(selectedToContact)} disabled={!nativeResearchStatusKnown}>Abrir en Investigación ({contactCount})</Button> : null}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Más acciones para la selección"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-64">
@@ -1613,20 +1420,18 @@ export default function EnrichedLeadsClient() {
                           toggleContactLead(e.id, Boolean(value));
                         }}
                         disabled={!nativeResearchStatusKnown || !draftable}
-                        aria-label={`Seleccionar ${e.fullName || 'lead'} para crear un borrador`}
+                        aria-label={`Seleccionar ${e.fullName || 'lead'} para gestionar`}
                       />
-                      <span className="truncate">Borrador</span>
+                      <span className="truncate">Gestionar</span>
                     </label>
                   </div>
 
                   <div className="mt-4 flex flex-wrap items-center gap-2">
-                    {viewable ? <Button size="sm" variant="outline" className="rounded-full" onClick={() => openReportFor(e)} disabled={draftRequestPending}>Ver investigación</Button> : null}
+                    {viewable ? <Button size="sm" variant="outline" className="rounded-full" onClick={() => openReportFor(e)}>Ver investigación</Button> : null}
                     {draftable ? (
-                      <Button size="sm" className="rounded-full" onClick={() => void generateEmailFromReportFor(e)} disabled={draftRequestPending}>
-                        {creatingDraftId === e.id ? 'Preparando borrador…' : 'Crear borrador y revisar'}
-                      </Button>
+                      <Button size="sm" className="rounded-full" onClick={() => openResearchWorkspace([e.id])}>Preparar en Investigación</Button>
                     ) : !viewable ? (
-                      <Button size="sm" className="rounded-full" onClick={() => openResearchWorkspace([e.id])} disabled={!nativeResearchStatusKnown || !e.email || draftRequestPending}>Investigar</Button>
+                      <Button size="sm" className="rounded-full" onClick={() => openResearchWorkspace([e.id])} disabled={!nativeResearchStatusKnown || !e.email}>Investigar</Button>
                     ) : null}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild><Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" aria-label={`Más acciones para ${e.fullName}`}><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
@@ -1656,14 +1461,14 @@ export default function EnrichedLeadsClient() {
                       />
                     </div>
                   </TableHead>
-                  <TableHead className="sticky left-12 z-20 w-12 bg-muted/95 text-center backdrop-blur" title="Marcar para crear un borrador">
+                  <TableHead className="sticky left-12 z-20 w-12 bg-muted/95 text-center backdrop-blur" title="Marcar para gestionar contactos investigados">
                     <div className="flex flex-col items-center gap-1">
-                      <span className="text-[10px] uppercase text-muted-foreground">Borr.</span>
+                      <span className="text-[10px] uppercase text-muted-foreground">Gest.</span>
                       <Checkbox
                         checked={contactEligiblePage > 0 ? allContactChecked : false}
                         disabled={!nativeResearchStatusKnown || contactEligiblePage === 0}
                         onCheckedChange={(v) => toggleAllContact(Boolean(v))}
-                        aria-label="Seleccionar todos para crear borradores"
+                        aria-label="Seleccionar todos para gestionar"
                       />
                     </div>
                   </TableHead>
@@ -1703,7 +1508,7 @@ export default function EnrichedLeadsClient() {
                         onCheckedChange={(v) => {
                           toggleContactLead(e.id, Boolean(v));
                         }}
-                        aria-label={`Seleccionar ${e.fullName || 'lead'} para crear un borrador`}
+                        aria-label={`Seleccionar ${e.fullName || 'lead'} para gestionar`}
                       />
                     </TableCell>
                     <TableCell className="py-3">
@@ -1778,22 +1583,21 @@ export default function EnrichedLeadsClient() {
                     </TableCell>
                     <TableCell className="py-3">
                       <div className="flex min-w-[180px] items-center justify-end gap-1">
-                          {hasViewableReport(e) ? <Button size="sm" variant="outline" className="h-8 rounded-full px-3" onClick={() => openReportFor(e)} disabled={draftRequestPending}>Ver investigación</Button> : null}
+                          {hasViewableReport(e) ? <Button size="sm" variant="outline" className="h-8 rounded-full px-3" onClick={() => openReportFor(e)}>Ver investigación</Button> : null}
                           {canContact(e) ? (
                             <Button
                               size="sm"
                               className="h-8 rounded-full px-3 shadow-none"
-                              onClick={() => void generateEmailFromReportFor(e)}
-                              disabled={draftRequestPending}
+                              onClick={() => openResearchWorkspace([e.id])}
                             >
-                              {creatingDraftId === e.id ? 'Preparando borrador…' : 'Crear borrador y revisar'}
+                              Preparar en Investigación
                             </Button>
                           ) : !hasViewableReport(e) ? (
                             <Button
                               size="sm"
                               className="h-8 rounded-full px-3 shadow-none"
                               onClick={() => openResearchWorkspace([e.id])}
-                              disabled={!nativeResearchStatusKnown || !e.email || draftRequestPending}
+                              disabled={!nativeResearchStatusKnown || !e.email}
                             >
                               Investigar
                             </Button>
@@ -1892,7 +1696,7 @@ export default function EnrichedLeadsClient() {
                   Revisa el estado, la calidad y la evidencia antes de crear el email.
                 </DialogDescription>
               </div>
-              {reportLead && !hasNativeResearchResult(nativeReportToView) && canContact(reportLead) ? <Button size="sm" onClick={() => { void generateEmailFromReportFor(reportLead); setOpenReport(false); }} disabled={draftRequestPending}>Crear borrador y revisar</Button> : null}
+              {reportLead && canContact(reportLead) ? <Button size="sm" onClick={() => { setOpenReport(false); openResearchWorkspace([reportLead.id]); }}>Preparar en Investigación</Button> : null}
             </div>
           </DialogHeader>
           {reportToView?.cross && reportLead && !hasNativeResearchResult(nativeReportToView) && (
@@ -1947,10 +1751,6 @@ export default function EnrichedLeadsClient() {
                     reportSynthesis={nativeReportSynthesisToView}
                     status={nativeReportToView.status}
                     researchSnapshotId={nativeReportToView.researchSnapshotId}
-                    canCreateDraft={canContact(reportLead)}
-                    creatingDraft={creatingDraftId === reportLead.id}
-                    createDraftDisabled={draftRequestPending}
-                    onCreateDraft={(styleProfileId, instruction) => void generateEmailFromReportFor(reportLead, styleProfileId, instruction)}
                     onRefresh={() => {
                       setOpenReport(false);
                       openResearchWorkspace([reportLead.id], { refresh: true });
@@ -2222,95 +2022,6 @@ export default function EnrichedLeadsClient() {
               </div>
             </div>
           ) : null}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={openCompose} onOpenChange={setOpenCompose}>
-        <DialogContent className="flex max-h-[92dvh] max-w-3xl flex-col gap-0 overflow-hidden rounded-[28px] p-0" onEscapeKeyDown={() => setOpenCompose(false)}>
-          <DialogHeader className="shrink-0 border-b border-border/60 px-5 py-5 pr-12 sm:px-6 sm:pr-12">
-            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">Borradores para revisión</div>
-            <DialogTitle className="mt-1 text-xl">
-              {creatingDraftBatch
-                ? `Preparando ${draftBatchProgress.done} de ${draftBatchProgress.total}`
-                : `${composeList.length} borrador${composeList.length === 1 ? '' : 'es'} preparado${composeList.length === 1 ? '' : 's'}`}
-            </DialogTitle>
-            <DialogDescription className="mt-1 leading-5">
-              Nada se envía automáticamente. Abre cada correo para editarlo, aprobarlo y elegir el proveedor.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4 sm:px-6" aria-busy={creatingDraftBatch}>
-            {creatingDraftBatch ? (
-              <div className="flex min-h-36 flex-col items-center justify-center rounded-2xl border border-border/60 bg-muted/20 px-6 text-center" role="status" aria-live="polite">
-                <RotateCw className="h-5 w-5 animate-spin text-primary motion-reduce:animate-none" aria-hidden="true" />
-                <p className="mt-3 text-sm font-medium">Creando borradores con la investigación disponible</p>
-                <p className="mt-1 text-xs text-muted-foreground">Puedes cerrar esta ventana; la selección seguirá en esta página.</p>
-              </div>
-            ) : null}
-
-            {failedComposeList.length > 0 ? (
-              <Alert className="border-amber-200 bg-amber-50/70 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertTitle>{failedComposeList.length} sin preparar</AlertTitle>
-                <AlertDescription>
-                  <ul className="mt-2 space-y-2">
-                    {failedComposeList.map(({ lead, message }) => (
-                      <li key={lead.id}><span className="font-medium">{lead.fullName || lead.email}</span>: {message}</li>
-                    ))}
-                  </ul>
-                </AlertDescription>
-              </Alert>
-            ) : null}
-
-            {!creatingDraftBatch && composeList.length === 0 && failedComposeList.length === 0 ? (
-              <div className="flex min-h-36 flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 px-6 text-center">
-                <p className="text-sm font-medium">No hay borradores en esta revisión</p>
-                <p className="mt-1 text-xs text-muted-foreground">Selecciona leads investigados desde la tabla para preparar sus correos.</p>
-              </div>
-            ) : null}
-
-            {composeList.map(({ lead, draftId, versionId, subject, body }) => (
-              <article key={draftId} className="rounded-2xl border border-border/60 bg-card p-4 shadow-sm shadow-black/[0.02]">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-sm font-semibold">{lead.fullName || 'Contacto'}</h3>
-                    <p className="truncate text-xs text-muted-foreground">{lead.email} · {lead.companyName || 'Sin empresa'}</p>
-                  </div>
-                  <Button
-                    size="sm"
-                    className="shrink-0 rounded-full"
-                    onClick={() => {
-                      const version = versionId ? `&versionId=${encodeURIComponent(versionId)}` : '';
-                      router.push(`/contact/compose?draftId=${encodeURIComponent(draftId)}${version}`);
-                    }}
-                  >
-                    Revisar y contactar
-                  </Button>
-                </div>
-                <div className="mt-4 rounded-xl border border-border/50 bg-muted/20 p-3">
-                  <p className="text-xs font-medium text-muted-foreground">Asunto</p>
-                  <p className="mt-1 text-sm font-medium">{subject}</p>
-                  <p className="mt-3 line-clamp-3 whitespace-pre-line text-sm leading-6 text-muted-foreground">{body}</p>
-                </div>
-              </article>
-            ))}
-          </div>
-
-          <div className="flex shrink-0 flex-col gap-3 border-t border-border/60 bg-background/95 px-5 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            <p className="text-xs text-muted-foreground">Cada borrador requiere revisión y aprobación antes del envío.</p>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setOpenCompose(false)}>Cerrar</Button>
-              {composeList.length > 0 ? (
-                <Button onClick={() => {
-                  const first = composeList[0];
-                  const version = first.versionId ? `&versionId=${encodeURIComponent(first.versionId)}` : '';
-                  router.push(`/contact/compose?draftId=${encodeURIComponent(first.draftId)}${version}`);
-                }}>
-                  Revisar primero
-                </Button>
-              ) : null}
-            </div>
-          </div>
         </DialogContent>
       </Dialog>
 

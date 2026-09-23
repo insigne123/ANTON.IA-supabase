@@ -16,6 +16,7 @@ async function fetchMetricsContacts(client: SupabaseClient, scope: Scope, extra 
     .or(`sent_at.gte.${since},replied_at.gte.${since},bounced_at.gte.${since}`)
     .order('sent_at', { ascending: false }).limit(2000);
   if (error) throw new Error('No se pudieron calcular las métricas.');
+  if ((data || []).length >= 2000) throw new Error('Historial truncado: no se pueden calcular tasas completas.');
   return (data as unknown as Array<Record<string, unknown>>) || [];
 }
 
@@ -25,6 +26,7 @@ async function fetchCommitmentDates(client: SupabaseClient, scope: Scope) {
     .eq('organization_id', scope.organizationId)
     .not('replied_at', 'is', null).limit(500);
   if (error) throw new Error('No se pudieron calcular las métricas.');
+  if ((data || []).length >= 500) throw new Error('Historial de compromisos truncado.');
   const rows = (data as Array<{ commitment?: { kind?: string; completedAt?: string | null }; 'data->commitment'?: { kind?: string; completedAt?: string | null } | null }>) || [];
   return extractMeetingCompletions(rows.map((row) => ({ data: { commitment: row.commitment ?? row['data->commitment'] ?? null } })));
 }
@@ -34,6 +36,7 @@ async function fetchUnsubDates(client: SupabaseClient, scope: Scope) {
     .select('created_at').eq('organization_id', scope.organizationId)
     .gte('created_at', WINDOW_30_ISO()).limit(500);
   if (error) throw new Error('No se pudieron calcular las métricas.');
+  if ((data || []).length >= 500) throw new Error('Historial de bajas truncado.');
   return ((data as Array<{ created_at?: string | null }>) || []).map((row) => row.created_at);
 }
 
@@ -53,10 +56,10 @@ export async function readMetricsRates(client: SupabaseClient, scope: Scope) {
 export async function readMetricsDiagnose(client: SupabaseClient, scope: Scope) {
   const [contacts, stalled] = await Promise.all([
     fetchMetricsContacts(client, scope, ',conversation_outbound_at'),
-    readRepliesStalled(client, scope).catch(() => null),
+    readRepliesStalled(client, scope),
   ]);
   return { scope: 'organization_metrics', period: 'last_30_days',
-    hypotheses: diagnoseHypotheses({ contacts: contacts as never, stalledPositives: stalled?.total ?? 0 }),
+    hypotheses: diagnoseHypotheses({ contacts: contacts as never, stalledPositives: stalled.total }),
     coverage: await readMailboxCoverage(client, scope) };
 }
 
