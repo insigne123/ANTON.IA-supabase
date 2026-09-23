@@ -83,9 +83,9 @@ El resultado v4 contiene `passed:false`: su rúbrica histórica esperaba turno d
 | 7.2 | Diagnóstico | Hecha 23-09-2026: lectura `metrics.diagnose` con 5 hipótesis y veredictos honestos; detalle en `docs/cowork-stage7-acceptance.md`. |
 | 7.3 | Canales | Hecha 23-09-2026: lectura `metrics.channels` que se niega a generalizar sin denominadores; detalle en `docs/cowork-stage7-acceptance.md`. |
 | 7.4 | Incidentes sistémicos | Hecha 23-09-2026: lectura `metrics.incidents` con 6 chequeos y acción; detalle en `docs/cowork-stage7-acceptance.md`. |
-| 8.1 | DNS entregabilidad | D: MX/SPF/DMARC/DKIM con selector y límites claros |
-| 8.2 | Causa de rebote | P: detector; métrica temporal y umbral configurable |
-| 8.3 | Remitente real | P: cuenta verificada; contraste con cabeceras entregadas |
+| 8.1 | DNS entregabilidad | Hecha 23-09-2026: lectura `deliverability.check` con MX/SPF/DMARC/DKIM y caché 24 h; detalle en `docs/cowork-stage8-acceptance.md`. |
+| 8.2 | Causa de rebote | Hecha 23-09-2026: lectura `deliverability.bounces` contra umbral 2% con causas y acciones; detalle en `docs/cowork-stage8-acceptance.md`. |
+| 8.3 | Remitente real | Hecha 23-09-2026: lectura `deliverability.sender` con contraste contra envíos reales; detalle en `docs/cowork-stage8-acceptance.md`. |
 | 9.1 | Legalidad vigente | D: fuentes, jurisdicción, fecha y certeza; no hardcodear documento histórico |
 | 9.2 | Regulación comprador | P: investigación; industria desambiguada y evidencia |
 | 9.3 | Límites de contacto | P: supresión; política transversal persona/cuenta/canal |

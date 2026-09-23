@@ -134,9 +134,11 @@ Documento de referencia permanente. Fuente de funciones: `C:\Users\nicol\Desktop
 
 | ID | Función | Estado | Qué falta para cerrarla |
 |---|---|---|---|
-| 8.1 | Verificar SPF, DKIM, DMARC y MX | 🔴 | Herramienta conectada a Cowork; DKIM requiere selector o evidencia suficiente (su ausencia conocida ≠ ausencia de DKIM). |
-| 8.2 | Diagnosticar causas de rebote | 🟡 | Tasa por período vs umbral configurable (referencia: 2%; operación llegó a 5,1%). |
-| 8.3 | Detectar remitente mal configurado | 🟡 | Identidad de Gmail ya verificada; falta contraste con cabeceras del correo enviado (caso real: dominio sin SPF/DKIM sobrescrito por el proveedor). |
+| 8.1 | Verificar SPF, DKIM, DMARC y MX | 🟢 | Lectura `deliverability.check` conectada a Cowork con caché de 24 h; DKIM prueba 10 selectores y su ausencia queda `unknown`, nunca pass. |
+| 8.2 | Diagnosticar causas de rebote | 🟢 | Lectura `deliverability.bounces`: tasa de 30 días vs umbral 2% con causas, acciones y dominios agregados. |
+| 8.3 | Detectar remitente mal configurado | 🟢 | Lectura `deliverability.sender`: identidad declarada contra From y Authentication-Results de los últimos envíos reales. |
+
+**Avance verificado (23 sep 2026, local + PGlite + build):** 3 lecturas Cowork registradas (`deliverability.check`, `deliverability.bounces`, `deliverability.sender`), migración `20260923030000` aplicada y verificada en prod (tabla con RLS), typecheck/build en verde, 14 pruebas en verde. Detalle en `docs/cowork-stage8-acceptance.md`. Cambios de app por desplegar; la verificación contra el dominio y los envíos reales del usuario sigue pendiente de sesión (es la dependencia que pedía el plan).
 
 **Dependencias:** envío real de prueba a `nicogun123@gmail.com` para contrastar cabeceras.
 

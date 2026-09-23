@@ -12,6 +12,7 @@ import { readCoworkBatchReport, readCoworkCompanyPlan, readCoworkNextTouch, read
 import { readCoworkLinkedinFollowups, readCoworkLinkedinInbox, readCoworkLinkedinJobs, readCoworkLinkedinNetwork, readCoworkLinkedinQuota } from './linkedin-reads';
 import { readContactedAccount, readMeetingChain, readRepliesAttention, readRepliesStalled } from './reply-reads';
 import { readMetricsChannels, readMetricsDiagnose, readMetricsIncidents, readMetricsRates } from './metric-reads';
+import { readDeliverabilityBounces, readDeliverabilityCheck, readDeliverabilitySender } from './deliverability-reads';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -128,6 +129,18 @@ export function coworkReadCapabilities(
     },
     extended('crm.search', 'CRM del equipo (toda la organización) que coincide con un texto'),
     extended('crm.get_lead', 'Ficha CRM con historial de contactados, por UUID'),
+    {
+      name: 'deliverability.check', version: 1, effect: 'read', description: 'SPF, DKIM, DMARC y MX de un dominio remitente',
+      input: z.string().max(120), output: z.unknown(), execute: input => readDeliverabilityCheck(client, scope, input as string),
+    },
+    {
+      name: 'deliverability.bounces', version: 1, effect: 'read', description: 'Causas de rebote contra el umbral del 2%',
+      input: z.literal(''), output: z.unknown(), execute: () => readDeliverabilityBounces(client, scope),
+    },
+    {
+      name: 'deliverability.sender', version: 1, effect: 'read', description: 'Identidad declarada contra cabeceras de envíos reales',
+      input: z.literal(''), output: z.unknown(), execute: () => readDeliverabilitySender(client, scope),
+    },
     {
       name: 'metrics.rates', version: 1, effect: 'read', description: 'Tasas con período, denominador y origen por métrica',
       input: z.literal(''), output: z.unknown(), execute: () => readMetricsRates(client, scope),
