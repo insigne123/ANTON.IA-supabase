@@ -78,3 +78,12 @@ Estado: implementación parcial del plan original en el árbol local; migración
 - Prueba de punta a punta de permisos, estado incierto, bajas y contenido final usando proveedores reales con un destinatario de prueba autorizado.
 
 El plan original tenía tramos 0–5; la iteración posterior renumeró seguimiento/actividad como 5–6. Esa renumeración no equivale a completar compromisos ni auditoría visual.
+
+## Corrección del bucle de sincronización (egress PostgREST)
+
+Causa: los contactos con hilo no verificable (`incomplete_thread`, 598 en producción) se reintentaban cada 5 minutos con dos `PATCH` por contacto y pasada, generando ráfagas de `PATCH /rest/v1/contacted_leads`.
+
+- `src/lib/server/reply-sync-policy.ts`: filtro de vencimiento por estado (hilos sanos cada 5 min, errores transitorios 60 min, conexión 6 h, hilos incompletos 24 h), aplicado antes del límite para no desplazar hilos sanos.
+- Una sola escritura de intento por página y errores agrupados por estado en `syncRepliesForOrganization`; los tokens con fallo se reutilizan dentro de la pasada sin reintentar.
+- El cron y la sincronización manual usan el mismo filtro.
+- Esta corrección detiene la ráfaga actual; no demuestra por sí sola los 5,92 GB acumulados del ciclo, cuyo consumo diario elevado precede al despliegue reciente.

@@ -10,6 +10,7 @@ function load() {
   const exports: any = {};
   new Function('require', 'exports', compiled)(() => ({
     tokenService: { getToken: async () => null }, detectDeliveryFailure: () => null,
+    replySyncDueFilter: () => 'reply_sync_attempted_at.is.null',
   }), exports);
   return exports;
 }
@@ -93,8 +94,16 @@ test('bounded scan filters before limit and cursor advances beyond repeatedly un
       select() { return this; }, update() { return this; }, eq() { return this; }, not() { return this; },
       in(key: string, values: any[]) { rows = rows.filter((r: any) => values.includes(r[key])); return this; },
       is(key: string, value: any) { rows = rows.filter((r: any) => r[key] === value); return this; },
-      or(filter: string) { assert.equal(filter, 'status.is.null,status.not.in.(scheduled,failed)'); rows = rows.filter((r) => !['failed'].includes(r.status)); return this; },
-      order(key: string) { assert.equal(key, 'id'); return this; },
+      or(filter: string) {
+        if (filter.startsWith('status.is.null')) {
+          assert.equal(filter, 'status.is.null,status.not.in.(scheduled,failed)');
+          rows = rows.filter((r) => !['failed'].includes(r.status));
+        } else {
+          assert.match(filter, /reply_sync_attempted_at/);
+        }
+        return this;
+      },
+      order(key: string) { assert.ok(key === 'reply_sync_attempted_at' || key === 'id'); return this; },
       limit(value: number) { assert.equal(value, 2); return this; },
       gt(_key: string, cursor: string) { rows = rows.filter((r) => r.id > cursor); return this; },
       then(resolve: any) { return Promise.resolve({ data: rows.slice(0, 2), error: null }).then(resolve); },
@@ -108,4 +117,26 @@ test('bounded scan filters before limit and cursor advances beyond repeatedly un
   assert.equal(second.skippedNoToken, 1);
   const third = await sync(client, { organizationId: 'org', limit: 1, cursor: second.nextCursor });
   assert.equal(third.scanned, 1); assert.equal(third.nextCursor, null);
+});
+test('sync writes one attempt update per page and groups error states', async () => {
+  const records = [
+    { id: 'a', provider: 'gmail', status: 'sent', replied_at: null, sent_at: 'date' },
+    { id: 'c', provider: 'gmail', status: 'sent', replied_at: null, sent_at: 'date' },
+  ];
+  let updates = 0;
+  const client = { from() {
+    let rows = records.slice();
+    return {
+      select() { return this; }, update() { updates++; return this; }, eq() { return this; }, not() { return this; },
+      in(key: string, values: any[]) { rows = rows.filter((r: any) => values.includes(r[key])); return this; },
+      or() { return this; },
+      order() { return this; },
+      limit() { return this; },
+      then(resolve: any) { return Promise.resolve({ data: rows.slice(0, 10), error: null }).then(resolve); },
+    };
+  } };
+  const result = await load().syncRepliesForOrganization(client, { organizationId: 'org', limit: 10 });
+  assert.equal(result.scanned, 2);
+  assert.equal(result.skippedNoToken, 2);
+  assert.equal(updates, 2);
 });

@@ -11,6 +11,7 @@ import { stripHtmlToText } from '@/lib/email-outbound';
 import { ingestInboundReply } from '@/lib/server/inbound-reply-ingestion';
 import { isExplicitOptOut } from '@/lib/reply-text';
 import { conversationAdvice } from '@/lib/conversation-advice';
+import { replySyncDueFilter } from '@/lib/server/reply-sync-policy';
 
 export { ingestInboundReply } from '@/lib/server/inbound-reply-ingestion';
 export type { InboundReplyIngestionResult } from '@/lib/server/inbound-reply-ingestion';
@@ -471,7 +472,8 @@ export async function syncRepliesForOrganization(supabase: any, input: { organiz
     .eq('organization_id', input.organizationId)
     .in('provider', ['gmail', 'outlook'])
     .not('sent_at', 'is', null)
-    .or('status.is.null,status.not.in.(scheduled,failed)');
+    .or('status.is.null,status.not.in.(scheduled,failed)')
+    .or(replySyncDueFilter());
   if (input.fairQueue) query = query.order('reply_sync_attempted_at', { ascending: true, nullsFirst: true });
   query = query.order('id', { ascending: true }).limit(limit + 1);
   if (input.contactedIds) query = query.in('id', input.contactedIds);
@@ -487,26 +489,36 @@ export async function syncRepliesForOrganization(supabase: any, input: { organiz
   result.scanned = rows.length;
 
   const tokenCache = new Map<string, string | null>();
+  const tokenErrors = new Map<string, unknown>();
+  // One scoped attempt write for the entire page instead of one per contact.
+  if (rows.length) {
+    const attempt = await supabase.from('contacted_leads').update({ reply_sync_attempted_at: new Date().toISOString() })
+      .eq('organization_id', input.organizationId).in('id', rows.map(row => row.id));
+    if (attempt.error) throw attempt.error;
+  }
+  const errorsByState = new Map<string, string[]>();
+  const noteError = (state: string, id: string) => errorsByState.set(state, [...(errorsByState.get(state) || []), id]);
 
   for (const row of rows) {
     const provider = row.provider === 'gmail' ? 'google' : 'outlook';
     const tokenKey = `${row.user_id || ''}:${provider}`;
     try {
-      const attempt = await supabase.from('contacted_leads').update({ reply_sync_attempted_at: new Date().toISOString() }).eq('id', row.id).eq('organization_id', input.organizationId);
-      if (attempt.error) throw attempt.error;
       if (!row.user_id) {
         result.skippedNoToken += 1;
+        noteError('connection_required', row.id);
         continue;
       }
 
+      if (tokenErrors.has(tokenKey)) throw tokenErrors.get(tokenKey);
       if (!tokenCache.has(tokenKey)) {
-        tokenCache.set(tokenKey, await mailboxAccessToken(supabase, row.user_id, row.provider || ''));
+        try { tokenCache.set(tokenKey, await mailboxAccessToken(supabase, row.user_id, row.provider || '')); }
+        catch (error) { tokenErrors.set(tokenKey, error); throw error; }
       }
 
       const accessToken = tokenCache.get(tokenKey);
       if (!accessToken) {
         result.skippedNoToken += 1;
-        await supabase.from('contacted_leads').update({ reply_sync_error: 'connection_required' }).eq('id', row.id).eq('organization_id', input.organizationId);
+        noteError('connection_required', row.id);
         continue;
       }
 
@@ -527,6 +539,11 @@ export async function syncRepliesForOrganization(supabase: any, input: { organiz
         if (inserted) result.synced += 1;
       }
       const outboundAt = conversation.messages.filter(m => m.direction === 'outbound').at(-1)?.receivedAt;
+      if (!conversation.complete) {
+        noteError('incomplete_thread', row.id);
+        result.errors.push({ contactedId: row.id, error: 'incomplete_thread' });
+        continue;
+      }
       const saved = await supabase.from('contacted_leads').update({
         ...(conversation.complete ? { reply_sync_succeeded_at: new Date().toISOString() } : {}),
         reply_sync_error: conversation.complete ? null : 'incomplete_thread',
@@ -535,9 +552,15 @@ export async function syncRepliesForOrganization(supabase: any, input: { organiz
       if (saved.error) throw saved.error;
       if (!conversation.complete) result.errors.push({ contactedId: row.id, error: 'incomplete_thread' });
     } catch (err: any) {
-      await supabase.from('contacted_leads').update({ reply_sync_error: 'sync_failed' }).eq('id', row.id).eq('organization_id', input.organizationId);
+      noteError('sync_failed', row.id);
       result.errors.push({ contactedId: row.id, email: row.email, provider: row.provider, error: err?.message || String(err) });
     }
+  }
+
+  for (const [state, ids] of errorsByState) {
+    const saved = await supabase.from('contacted_leads').update({ reply_sync_error: state })
+      .eq('organization_id', input.organizationId).in('id', ids);
+    if (saved.error) throw saved.error;
   }
 
   return result;

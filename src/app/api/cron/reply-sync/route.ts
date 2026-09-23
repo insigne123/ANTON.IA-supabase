@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
 import { syncRepliesForOrganization } from '@/lib/server/reply-sync';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
+import { replySyncDueFilter } from '@/lib/server/reply-sync-policy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -15,11 +16,6 @@ type ReplySyncOwner = {
 function limitInRange(value: string | null, fallback: number, maximum: number) {
   const parsed = Number(value || fallback);
   return Math.min(Math.max(Number.isFinite(parsed) ? Math.trunc(parsed) : fallback, 1), maximum);
-}
-
-function batchInRange(value: string | null, fallback: number, maximum: number) {
-  const parsed = Number(value ?? fallback);
-  return Math.min(Math.max(Number.isFinite(parsed) ? Math.trunc(parsed) : fallback, 0), maximum);
 }
 
 function addOwner(owners: Map<string, ReplySyncOwner>, row: any) {
@@ -36,12 +32,6 @@ async function runReplySync(req: NextRequest) {
 
   const ownerLimit = limitInRange(req.nextUrl.searchParams.get('owners'), 25, 100);
   const perOwnerLimit = limitInRange(req.nextUrl.searchParams.get('limit'), 200, 500);
-  const candidateLimit = ownerLimit * 20;
-  // Rotate through bounded contact windows every five minutes so one tenant
-  // cannot permanently occupy the owner batch.
-  const defaultBatch = Math.floor(Date.now() / (5 * 60 * 1000)) % 24;
-  const ownerBatch = batchInRange(req.nextUrl.searchParams.get('batch'), defaultBatch, 23);
-  const ownerOffset = 0;
   const supabase = getSupabaseAdminClient();
 
   try {
@@ -52,6 +42,7 @@ async function runReplySync(req: NextRequest) {
       .in('provider', ['gmail', 'outlook'])
       .not('sent_at', 'is', null)
       .or('status.is.null,status.not.in.(scheduled,failed)')
+      .or(replySyncDueFilter())
       .not('organization_id', 'is', null)
       .not('user_id', 'is', null)
       .order('reply_sync_attempted_at', { ascending: true, nullsFirst: true })
@@ -89,8 +80,6 @@ async function runReplySync(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      ownerBatch,
-      ownerOffset,
       ownersProcessed: Math.min(owners.size, ownerLimit),
       ...summary,
     }, { headers: firebaseSchedulerResponseHeaders() });

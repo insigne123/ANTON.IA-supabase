@@ -111,8 +111,12 @@ test('Firebase owns all production scheduler bridges and Vercel only schedules S
     const replySyncSource = firebaseBridgeRoutes.find(({ route }) => route === 'reply-sync')!.source;
     assert.doesNotMatch(replySyncSource, /\.from\('provider_tokens'\)/);
     assert.match(replySyncSource, /\.from\('contacted_leads'\)/);
-    assert.match(replySyncSource, /\.is\('replied_at', null\)/);
-    assert.match(replySyncSource, /\.range\(ownerOffset, ownerOffset \+ candidateLimit - 1\)/);
+    // Cooling-down threads must not be rescanned every tick; replied threads stay
+    // in scope for conversation sync and failed threads back off by error state.
+    assert.match(replySyncSource, /replySyncDueFilter/);
+    assert.match(replySyncSource, /\.order\('reply_sync_attempted_at'/);
+    assert.doesNotMatch(replySyncSource, /\.is\('replied_at', null\)/);
+    assert.doesNotMatch(replySyncSource, /ownerOffset/);
 
     assert.match(deploymentDocs, /Firebase Scheduled Functions es la [^\n]+ propietaria/);
     assert.match(deploymentDocs, /`antoniaTick`/);
