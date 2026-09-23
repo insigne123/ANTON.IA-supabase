@@ -105,6 +105,16 @@ function SequencePreparation() {
   const [steerInstruction, setSteerInstruction] = useState('');
   const [steering, setSteering] = useState(false);
   const [steerError, setSteerError] = useState<string | null>(null);
+  const [days, setDays] = useState<number[] | null>(null);
+  const [savingDays, setSavingDays] = useState(false);
+  const [daysFeedback, setDaysFeedback] = useState('');
+  const effectiveDays = days ?? view?.offsets ?? [];
+  const daysError = effectiveDays.some((day) => !Number.isInteger(day) || day < 1 || day > 30)
+    ? 'Cada día debe ser un número entre 1 y 30.'
+    : effectiveDays.some((day, index) => index > 0 && day <= effectiveDays[index - 1]!)
+      ? 'Los días deben aumentar de un correo al siguiente.'
+      : '';
+  const daysDirty = days !== null && view !== null && (days.length !== view.offsets.length || days.some((day, index) => day !== view.offsets[index]));
   const load = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch(`/api/research-sequences?jobId=${encodeURIComponent(jobId || '')}`, { cache: 'no-store', signal });
     const payload = await response.json();
@@ -114,7 +124,25 @@ function SequencePreparation() {
     return next;
   }, [jobId]);
 
-  useEffect(() => { setView(null); }, [jobId]);
+  useEffect(() => { setView(null); setDays(null); setDaysFeedback(''); }, [jobId]);
+
+  async function saveDays() {
+    if (!jobId || savingDays || daysError || !daysDirty || days === null) return;
+    setSavingDays(true);
+    setDaysFeedback('');
+    try {
+      const response = await fetch('/api/research-sequences', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, offsets: days }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || 'No pudimos guardar los días.');
+      setDays(null);
+      setDaysFeedback('Días actualizados. Los correos ya escritos se conservan.');
+      await load();
+    } catch (failure) { setDaysFeedback(failure instanceof Error ? failure.message : 'No pudimos guardar los días.'); }
+    finally { setSavingDays(false); }
+  }
 
   useEffect(() => {
     if (!jobId) { setError('Falta la preparación. Vuelve a la investigación para crearla.'); return; }
@@ -185,6 +213,31 @@ function SequencePreparation() {
           {composeId && view && ['completed', 'review_required', 'failed'].includes(view.status) && <Button asChild><Link href={`/contact/compose?draftId=${encodeURIComponent(composeId)}`}>Revisar y editar correos</Link></Button>}
           {view && ['failed', 'review_required', 'completed'].includes(view.status) && <Button variant={composeId ? 'outline' : 'default'} onClick={() => void retry()} disabled={retrying}>{retrying ? 'Reanudando…' : view.status === 'failed' ? 'Reintentar pendientes' : 'Revisar secuencia nuevamente'}</Button>}
         </div>
+        {view && view.offsets.length > 0 && (
+          <div className="space-y-2 border-t border-border pt-3">
+            <Label>Días de envío <span className="font-normal text-muted-foreground">(después del inicial)</span></Label>
+            {view.slots.slice(1).map((slot, position) => (
+              <div key={slot.index} className="flex items-center justify-between gap-3">
+                <span className="text-sm text-muted-foreground">{slot.index}. {slot.name}</span>
+                <span className="flex items-center gap-1.5">
+                  <Input id={`sequence-day-${slot.index}`} className="h-10 w-20 text-right" inputMode="numeric" type="number" min={1} max={30}
+                    value={Number.isFinite(effectiveDays[position]) ? effectiveDays[position] : ''} disabled={savingDays}
+                    onChange={(event) => setDays((current) => {
+                      const base = current ?? view.offsets;
+                      return base.map((day, dayIndex) => dayIndex === position ? Number(event.target.value) : day);
+                    })}
+                    aria-label={`Día de envío del correo ${slot.index}, ${slot.name}`} />
+                  <span className="text-xs text-muted-foreground">días</span>
+                </span>
+              </div>
+            ))}
+            {daysError ? <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">{daysError}</p> : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" onClick={() => void saveDays()} disabled={savingDays || Boolean(daysError) || !daysDirty}>{savingDays ? 'Guardando…' : 'Guardar días'}</Button>
+              {daysFeedback ? <p role="status" className="text-xs text-muted-foreground">{daysFeedback}</p> : <p className="text-xs text-muted-foreground">Solo mueve la fecha; los correos ya escritos se conservan.</p>}
+            </div>
+          </div>
+        )}
         {view?.researchSnapshotId && (
           <div className="space-y-2 border-t border-border pt-3">
             <Label htmlFor="sequence-steer">Pedir otra versión a la IA</Label>

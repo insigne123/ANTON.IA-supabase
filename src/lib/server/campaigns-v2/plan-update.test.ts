@@ -21,6 +21,17 @@ test('plan updates stay creator-scoped and regenerate drafts before re-reading t
   assert.match(planSource, /CAMPAIGN_V2_PLAN_PERSIST_FAILED/);
 });
 
+test('day reschedules stay creator-scoped, pre-send only and never touch drafts', () => {
+  assert.match(planSource, /export async function rescheduleFirstContactPlan/);
+  assert.match(planSource, /assertCampaignV2CreatorAccess/);
+  assert.match(planSource, /status !== 'pending_initial_send'/);
+  assert.match(planSource, /v2_status.*!== 'draft'|!== 'draft'[\s\S]*?antes del envío inicial/);
+  assert.match(planSource, /step\.state !== 'not_due'/);
+  assert.match(planSource, /offset_days: offsets\[index\]/);
+  assert.match(planSource, /\.from\('campaign_sequence_steps_v2'\)/);
+  assert.doesNotMatch(planSource.slice(planSource.indexOf('export async function rescheduleFirstContactPlan'), planSource.indexOf('export async function retryFirstContactPlanStep')), /lifecycle = 'archived'|delete from|reserve_campaign|link_campaign/);
+});
+
 test('auto-send toggles stay creator-scoped and only apply to schedulable plans', () => {
   assert.match(planSource, /export async function setFirstContactPlanAutoSend/);
   assert.match(planSource, /auto_send: input\.autoSend/);

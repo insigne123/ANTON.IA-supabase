@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { processResearchSequenceQueue, enqueueResearchSequence, readResearchSequence, researchSequenceView, retryResearchSequence, type SequenceWorkerDependencies } from './research-sequence-worker';
+import { processResearchSequenceQueue, enqueueResearchSequence, readResearchSequence, rescheduleResearchSequenceDays, researchSequenceView, retryResearchSequence, type SequenceWorkerDependencies } from './research-sequence-worker';
 import { buildSharedSequenceBrief } from '@/lib/outreach-sequence-brief';
 import { draftContextFixture } from './draft-v2-test-fixtures';
 
@@ -142,6 +142,36 @@ test('custom follow-up days flow into the plan and the view, and invalid cadence
   const view = await researchSequenceView(h.db.rows[0], h.deps);
   assert.deepEqual(view.offsets, [2, 4, 9]);
   assert.equal(view.slots.length, 4);
+});
+
+test('sequence view shows rescheduled plan days instead of the original request', async () => {
+  const h = await harness();
+  for (let i = 0; i < 6; i++) await h.tick();
+  assert.equal(h.db.rows[0].status, 'completed');
+  const rescheduled = [2, 4, 9];
+  const view = await researchSequenceView(h.db.rows[0], {
+    ...h.deps,
+    queryPlan: async () => ({
+      steps: rescheduled.map((offsetDays, index) => ({
+        ...(h as any).steps[index],
+        offsetDays,
+        draft: { draftId: `d-${index}`, versionId: `v-${index}`, subject: `S${index}`, body: `B${index}` },
+      })),
+    }) as any,
+  });
+  assert.deepEqual(view.offsets, rescheduled);
+  assert.equal(view.slots.length, 4);
+});
+
+test('rescheduling validates days and requires the initial draft without touching plans', async () => {
+  const h = await harness();
+  await assert.rejects(() => rescheduleResearchSequenceDays(h.db.rows[0], [5, 5, 9]), /must increase/);
+  await assert.rejects(() => rescheduleResearchSequenceDays(h.db.rows[0], [2, 4]), /one day per follow-up/);
+  await assert.rejects(() => rescheduleResearchSequenceDays(h.db.rows[0], [2, 4, 9]), /contacto inicial esté listo/);
+  const route = readFileSync('src/app/api/research-sequences/route.ts', 'utf8');
+  assert.match(route, /rescheduleResearchSequenceDays\(job, body\.offsets\)/);
+  assert.match(route, /\{ ok: true, offsets/);
+  assert.match(route, /uno por seguimiento, de 1 a 30 y en orden creciente/);
 });
 
 test('concurrent workers have only one CAS winner and recover an expired lease', async () => {

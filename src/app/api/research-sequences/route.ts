@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { requireAuth, handleAuthError } from '@/lib/server/auth-utils';
 import { getNativeSnapshot } from '@/lib/server/native-research';
 import { ResearchSequenceRequestSchema } from '@/lib/research-sequence-contracts';
-import { enqueueResearchSequence, processResearchSequenceQueue, readResearchSequence, researchSequenceView, retryResearchSequence } from '@/lib/server/research-sequence-worker';
+import { enqueueResearchSequence, processResearchSequenceQueue, readResearchSequence, rescheduleResearchSequenceDays, researchSequenceView, retryResearchSequence } from '@/lib/server/research-sequence-worker';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -52,11 +52,27 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const auth = await requireAuth();
-    const { jobId } = z.object({ jobId: z.string().uuid() }).strict().parse(await req.json());
-    const job = await readResearchSequence(jobId, auth.user.id, auth.organizationIds);
+    const body = z.object({
+      jobId: z.string().uuid(),
+      offsets: z.array(z.number().int().min(1).max(30)).max(3).optional(),
+    }).strict().parse(await req.json());
+    const job = await readResearchSequence(body.jobId, auth.user.id, auth.organizationIds);
     if (!job) return NextResponse.json({ error: 'Preparación no encontrada.' }, { status: 404 });
+    if (body.offsets !== undefined) {
+      try {
+        const result = await rescheduleResearchSequenceDays(job, body.offsets);
+        return NextResponse.json({ ok: true, offsets: result.offsets }, { headers: { 'Cache-Control': 'no-store' } });
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AuthError') return handleAuthError(error);
+        if (error instanceof z.ZodError) return NextResponse.json({ error: 'Revisa los días: uno por seguimiento, de 1 a 30 y en orden creciente.' }, { status: 400 });
+        if (error instanceof Error && error.message.startsWith('RESCHEDULE_INITIAL_NOT_READY:')) {
+          return NextResponse.json({ error: error.message.split(':').slice(1).join(':') }, { status: 409 });
+        }
+        return failure(error);
+      }
+    }
     await retryResearchSequence(job);
-    wake(jobId);
+    wake(body.jobId);
     return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return failure(error); }
 }

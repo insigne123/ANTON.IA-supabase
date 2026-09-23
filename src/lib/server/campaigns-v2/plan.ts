@@ -274,6 +274,89 @@ export async function createFirstContactPlan(input: {
   return { enabled: true as const, plan };
 }
 
+// Reschedules follow-up days without touching drafts: only offset_days of
+// pending steps change. Unlike updateFirstContactPlan, nothing is archived,
+// deleted or regenerated, so already written emails are preserved.
+export async function rescheduleFirstContactPlan(input: {
+  draftId: string;
+  organizationId: string;
+  userId: string;
+  offsets: number[];
+  client?: SupabaseClientLike;
+}) {
+  const client = input.client ?? getSupabaseAdminClient();
+  const offsets = input.offsets.map(Number);
+  if (offsets.length === 0 || offsets.length > 4
+    || offsets.some((day) => !Number.isInteger(day) || day < 1 || day > 30)
+    || offsets.some((day, index) => index > 0 && day <= offsets[index - 1]!)) {
+    throw new AuthError('Los días de envío deben aumentar de 1 a 30 días, un día por seguimiento.', 400);
+  }
+  const enabled = await isCampaignsV2Enabled(input.organizationId, client);
+  const campaignResult = await client
+    .from('campaigns')
+    .select('id,user_id,v2_status')
+    .eq('organization_id', input.organizationId)
+    .eq('outreach_version', 2)
+    .eq('initial_native_draft_id', input.draftId)
+    .maybeSingle();
+  if (campaignResult.error) throw campaignResult.error;
+  const campaign = campaignResult.data;
+  if (!campaign) throw new AuthError('Campaign V2 plan not found', 404);
+  assertCampaignV2CreatorAccess({
+    enabled,
+    creatorId: text((campaign as any).user_id),
+    userId: input.userId,
+  });
+  if ((campaign as any).v2_status !== 'draft') {
+    throw new AuthError('Los días solo se pueden cambiar antes del envío inicial.', 409);
+  }
+  const enrollmentResult = await client
+    .from('campaign_enrollments')
+    .select('id,sequence_version_id,status')
+    .eq('organization_id', input.organizationId)
+    .eq('campaign_id', (campaign as any).id)
+    .maybeSingle();
+  if (enrollmentResult.error) throw enrollmentResult.error;
+  const enrollment = enrollmentResult.data;
+  if (!enrollment || (enrollment as any).status !== 'pending_initial_send') {
+    throw new AuthError('Los días solo se pueden cambiar antes del envío inicial.', 409);
+  }
+  const recipientStepsResult = await client
+    .from('campaign_recipient_steps')
+    .select('id,state')
+    .eq('organization_id', input.organizationId)
+    .eq('enrollment_id', (enrollment as any).id)
+    .gt('step_index', 0)
+    .order('step_index', { ascending: true });
+  if (recipientStepsResult.error) throw recipientStepsResult.error;
+  const recipientSteps = (recipientStepsResult.data || []) as Array<{ id: string; state: string }>;
+  if (recipientSteps.length !== offsets.length || recipientSteps.some((step) => step.state !== 'not_due')) {
+    throw new AuthError('La secuencia cambió o ya empezó a enviarse. Revisa su plan antes de continuar.', 409);
+  }
+  const sequenceStepsResult = await client
+    .from('campaign_sequence_steps_v2')
+    .select('id,step_index')
+    .eq('organization_id', input.organizationId)
+    .eq('sequence_version_id', (enrollment as any).sequence_version_id)
+    .gt('step_index', 0)
+    .order('step_index', { ascending: true });
+  if (sequenceStepsResult.error) throw sequenceStepsResult.error;
+  const sequenceSteps = (sequenceStepsResult.data || []) as Array<{ id: string; step_index: number }>;
+  if (sequenceSteps.length !== offsets.length) {
+    throw new AuthError('La secuencia cambió o ya empezó a enviarse. Revisa su plan antes de continuar.', 409);
+  }
+  for (const [index, step] of sequenceSteps.entries()) {
+    const { error } = await client
+      .from('campaign_sequence_steps_v2')
+      .update({ offset_days: offsets[index] })
+      .eq('id', step.id)
+      .eq('organization_id', input.organizationId)
+      .eq('user_id', input.userId);
+    if (error) throw error;
+  }
+  return { offsets };
+}
+
 export async function retryFirstContactPlanStep(input: {
   draftId: string;
   stepId: string;

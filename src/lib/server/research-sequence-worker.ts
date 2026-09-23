@@ -48,6 +48,10 @@ export async function researchSequenceView(job: any, dependencies: Pick<Sequence
   );
   const initial = job.initial_draft_id ? await (dependencies.getDraft || getCurrentNativeDraft)({ ...access, draftId: job.initial_draft_id }) : null;
   const plan = initial && steps.length ? await (dependencies.queryPlan || (await import('./campaigns-v2/plan')).queryFirstContactPlan)({ ...access, draftId: initial.draftId }) : null;
+  const planOffsets = (plan?.steps || []).map((step) => Number(step.offsetDays)).filter((day) => Number.isInteger(day) && day > 0);
+  // The plan is the live schedule: rescheduled days show here even though the
+  // original request keeps the days chosen before preparation.
+  const offsets = planOffsets.length === steps.length && steps.length > 0 ? planOffsets : steps.map((step) => step.offsetDays);
   const summaries = [initial ? { draftId: initial.draftId, versionId: initial.versionId, subject: initial.content.subject || '', body: initial.content.text || initial.content.html || '' } : null, ...steps.map((_, index) => plan?.steps[index]?.draft || null)];
   const pending = summaries.findIndex((draft) => !draft);
   // A completed review only covers these exact versions. Editing never silently
@@ -60,7 +64,7 @@ export async function researchSequenceView(job: any, dependencies: Pick<Sequence
     researchSnapshotId: request.success ? request.data.researchSnapshotId : null,
     styleProfileId: request.success ? request.data.styleProfileId : null,
     followUpCount: steps.length,
-    offsets: steps.map((step) => step.offsetDays),
+    offsets,
     editorial: changed ? null : job.editorial,
     slots: ['Contacto inicial', ...steps.map((step) => step.name)].map((name, index) => ({
       index, name,
@@ -68,6 +72,25 @@ export async function researchSequenceView(job: any, dependencies: Pick<Sequence
       draftId: summaries[index]?.draftId || null, versionId: summaries[index]?.versionId || null,
       subject: summaries[index]?.subject || null, body: summaries[index]?.body || null,
     })),
+  });
+}
+
+// Changes follow-up days of an existing preparation without regenerating
+// drafts: only the schedule moves. Blocked once the initial send starts.
+export async function rescheduleResearchSequenceDays(job: any, offsets: unknown, client?: Client) {
+  const request = ResearchSequenceRequestSchema.parse(job.request);
+  const parsed = ResearchSequenceRequestSchema.parse({ ...request, offsets });
+  // Plain error on purpose: research-sequence-worker must stay free of
+  // next/headers (via auth-utils) so the isolated unit loader can import it.
+  // The route maps this message to 409; plan-level guards use AuthError.
+  if (!job.initial_draft_id) throw new Error('RESCHEDULE_INITIAL_NOT_READY:Espera a que el contacto inicial esté listo para cambiar los días de envío.');
+  const { rescheduleFirstContactPlan } = await import('./campaigns-v2/plan');
+  return rescheduleFirstContactPlan({
+    draftId: job.initial_draft_id,
+    organizationId: job.organization_id,
+    userId: job.user_id,
+    offsets: parsed.offsets,
+    client: (client ?? getSupabaseAdminClient()) as never,
   });
 }
 
