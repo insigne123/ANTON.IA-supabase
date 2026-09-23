@@ -118,6 +118,32 @@ test('zero, one and two follow-ups persist only the selected drafts and never cr
   }
 });
 
+test('custom follow-up days flow into the plan and the view, and invalid cadences are rejected', async () => {
+  await assert.rejects(
+    () => enqueueResearchSequence(access, { researchSnapshotId: uuid(3), followUpCount: 3, offsets: [5, 5, 9] }, database().client, async () => true),
+    /must increase/,
+  );
+  await assert.rejects(
+    () => enqueueResearchSequence(access, { researchSnapshotId: uuid(3), followUpCount: 3, offsets: [2, 4] }, database().client, async () => true),
+    /one day per follow-up/,
+  );
+  const h = await harness(3);
+  h.db.rows[0].request = { researchSnapshotId: uuid(3), styleProfileId: null, instruction: '', followUpCount: 3, offsets: [2, 4, 9] };
+  let plannedOffsets: number[] = [];
+  const planned = h.deps.createPlan;
+  assert.ok(planned);
+  h.deps.createPlan = async (input) => {
+    plannedOffsets = input.body.steps.map((step) => step.offsetDays);
+    return planned(input);
+  };
+  for (let turn = 0; turn < 6; turn++) await h.tick();
+  assert.deepEqual(plannedOffsets, [2, 4, 9]);
+  assert.equal(h.db.rows[0].status, 'completed');
+  const view = await researchSequenceView(h.db.rows[0], h.deps);
+  assert.deepEqual(view.offsets, [2, 4, 9]);
+  assert.equal(view.slots.length, 4);
+});
+
 test('concurrent workers have only one CAS winner and recover an expired lease', async () => {
   const h = await harness();
   const outcomes = await Promise.all([h.tick(), h.tick()]);

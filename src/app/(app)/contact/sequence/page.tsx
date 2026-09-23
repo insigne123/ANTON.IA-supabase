@@ -153,7 +153,7 @@ function SequencePreparation() {
       const response = await fetch('/api/research-sequences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ researchSnapshotId: view.researchSnapshotId, styleProfileId: view.styleProfileId, followUpCount: view.followUpCount, instruction }),
+        body: JSON.stringify({ researchSnapshotId: view.researchSnapshotId, styleProfileId: view.styleProfileId, followUpCount: view.followUpCount, offsets: view.offsets, instruction }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.id) throw new Error(payload?.error || 'No pudimos preparar otra versión.');
@@ -170,7 +170,7 @@ function SequencePreparation() {
     <main className="mx-auto w-full max-w-4xl space-y-6 px-4 py-6 sm:px-6">
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Tu secuencia de contacto</h1>
-        <p className="text-sm text-muted-foreground">Un correo inicial{view?.followUpCount ? ` y ${view.followUpCount} ${view.followUpCount === 1 ? 'seguimiento' : 'seguimientos'}` : ''}. Se guardan como borradores; preparar no envía ningún correo.</p>
+        <p className="text-sm text-muted-foreground">Un correo inicial{view?.followUpCount ? ` y ${view.followUpCount} ${view.followUpCount === 1 ? 'seguimiento' : 'seguimientos'}` : ''}{view?.offsets?.length ? ` · días ${view.offsets.join(', ')} después del inicial` : ''}. Se guardan como borradores; preparar no envía ningún correo.</p>
       </header>
       <section aria-label="Progreso de preparación" className="space-y-3 rounded-2xl border border-border bg-card p-4 sm:p-5">
         <p role="status" aria-live="polite" className="text-sm text-foreground">
@@ -207,7 +207,7 @@ function SequencePreparation() {
       {error && <div role="alert" className="space-y-3 rounded-xl border border-border bg-card p-4 text-sm text-foreground"><p>{error}</p><Button variant="outline" onClick={() => setRefreshKey((key) => key + 1)}>Actualizar progreso</Button></div>}
       <ol className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
         {slots.map((slot) => <li key={slot.index} className="space-y-3 p-4 sm:p-5">
-          <div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className="font-medium text-foreground">{slot.index + 1}. {slot.name}</h2><span className="text-sm text-muted-foreground">{labels[slot.status]}</span></div>
+          <div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className="font-medium text-foreground">{slot.index + 1}. {slot.name}{slot.index > 0 && view?.offsets[slot.index - 1] ? <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground">Día {view.offsets[slot.index - 1]}</span> : null}</h2><span className="text-sm text-muted-foreground">{labels[slot.status]}</span></div>
           {slot.draftId && slot.versionId ? <SequenceEmailEditor key={slot.draftId} slot={slot} onSaved={() => load()} /> : <p className="text-sm text-muted-foreground">{slot.status === 'running' ? 'Estamos redactando este correo.' : 'El correo aparecerá aquí cuando esté guardado.'}</p>}
         </li>)}
       </ol>

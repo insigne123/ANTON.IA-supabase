@@ -23,6 +23,9 @@ test('the report offers follow-up count, style and AI-or-custom guidance before 
   assert.match(report, /Que la IA elija según la investigación/);
   assert.match(report, /Dar mis indicaciones/);
   assert.match(report, /Sin seguimientos/);
+  assert.match(report, /Días de envío/);
+  assert.match(report, /Día de envío del correo/);
+  assert.match(report, /Los días deben aumentar de un correo al siguiente/);
   assert.match(report, /Preparar borradores/);
   assert.doesNotMatch(report, /sticky bottom-0/);
 });

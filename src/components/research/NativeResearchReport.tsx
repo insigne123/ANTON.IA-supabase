@@ -13,6 +13,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Textarea } from '@/components/ui/textarea';
@@ -78,7 +79,7 @@ export type NativeResearchReportProps = {
   createDraftDisabled?: boolean;
   createDraftLabel?: string;
   creatingDraftLabel?: string;
-  onCreateDraft?: (styleProfileId: string | null, instruction: string | undefined, followUpCount: number) => void;
+  onCreateDraft?: (styleProfileId: string | null, instruction: string | undefined, followUpCount: number, offsets: number[]) => void;
   onCompleteProfile?: () => void;
   refreshing?: boolean;
   refreshLabel?: string;
@@ -512,10 +513,17 @@ export function NativeResearchReport({
   const [draftStyleId, setDraftStyleId] = useState(DEFAULT_DRAFT_STYLE);
   const [draftConfigOpen, setDraftConfigOpen] = useState(false);
   const [followUpCount, setFollowUpCount] = useState(3);
+  const [followUpDays, setFollowUpDays] = useState<number[]>([3, 5, 10]);
   const [instructionMode, setInstructionMode] = useState<'ai' | 'custom'>('ai');
   const [draftInstruction, setDraftInstruction] = useState({ reportIdentity, value: '' });
   const currentDraftInstruction = draftInstruction.reportIdentity === reportIdentity ? draftInstruction.value : '';
-  useEffect(() => { setDraftInstruction({ reportIdentity, value: '' }); setDraftConfigOpen(false); setFollowUpCount(3); setInstructionMode('ai'); }, [reportIdentity]);
+  const followUpNames = followUpCount === 0 ? [] : followUpCount === 1 ? ['Cierre'] : followUpCount === 2 ? ['Respaldo', 'Cierre'] : ['Respaldo', 'Segundo ángulo', 'Cierre'];
+  const followUpDaysError = followUpDays.some((day) => !Number.isInteger(day) || day < 1 || day > 30)
+    ? 'Cada día debe ser un número entre 1 y 30.'
+    : followUpDays.some((day, index) => index > 0 && day <= followUpDays[index - 1]!)
+      ? 'Los días deben aumentar de un correo al siguiente.'
+      : '';
+  useEffect(() => { setDraftInstruction({ reportIdentity, value: '' }); setDraftConfigOpen(false); setFollowUpCount(3); setFollowUpDays([3, 5, 10]); setInstructionMode('ai'); }, [reportIdentity]);
   const showActionFooter = (profileCompletionRequired && Boolean(onCompleteProfile))
     || (actionAvailable && Boolean(onCreateDraft))
     || refreshAvailable
@@ -1034,11 +1042,28 @@ export function NativeResearchReport({
             <PopoverContent align="end" side="top" className="z-50 w-[min(26rem,calc(100vw-2rem))] space-y-4 rounded-2xl border-border bg-popover p-5 shadow-xl" aria-label="Configurar correos para este contacto">
               <div><h3 className="font-semibold">Preparar correos</h3><p className="mt-1 text-sm text-muted-foreground">Solo crea borradores; nada se envía ahora.</p></div>
               <div className="space-y-1.5"><Label htmlFor={`${id}-followups`}>Seguimientos</Label>
-                <Select value={String(followUpCount)} onValueChange={(value) => setFollowUpCount(Number(value))} disabled={creatingDraft}>
+                <Select value={String(followUpCount)} onValueChange={(value) => { const count = Number(value); setFollowUpCount(count); setFollowUpDays([3, 5, 10].slice(0, count)); }} disabled={creatingDraft}>
                   <SelectTrigger id={`${id}-followups`} className="h-11 w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>{[0, 1, 2, 3].map((count) => <SelectItem key={count} value={String(count)}>{count === 0 ? 'Sin seguimientos' : `${count} ${count === 1 ? 'seguimiento' : 'seguimientos'}`}</SelectItem>)}</SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">Cada correo prueba un enfoque distinto; el último siempre cierra en directo.</p>
               </div>
+              {followUpNames.length > 0 ? <fieldset className="space-y-2">
+                <legend className="text-sm font-medium">Días de envío <span className="font-normal text-muted-foreground">(después del inicial)</span></legend>
+                {followUpNames.map((name, index) => (
+                  <div key={name} className="flex items-center justify-between gap-3">
+                    <Label htmlFor={`${id}-followup-day-${index}`} className="text-sm text-muted-foreground">{index + 1}. {name}</Label>
+                    <div className="flex items-center gap-1.5">
+                      <Input id={`${id}-followup-day-${index}`} className="h-10 w-20 text-right" inputMode="numeric" type="number" min={1} max={30}
+                        value={Number.isFinite(followUpDays[index]) ? followUpDays[index] : ''} disabled={creatingDraft}
+                        onChange={(event) => setFollowUpDays((current) => current.map((day, dayIndex) => dayIndex === index ? Number(event.target.value) : day))}
+                        aria-label={`Día de envío del correo ${index + 1}, ${name}`} />
+                      <span className="text-xs text-muted-foreground">días</span>
+                    </div>
+                  </div>
+                ))}
+                {followUpDaysError ? <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">{followUpDaysError}</p> : null}
+              </fieldset> : null}
               <div className="space-y-1.5"><Label htmlFor={`${id}-draft-style`}>Plantilla o estilo</Label>
                 <Select value={draftStyleId} onValueChange={setDraftStyleId} disabled={creatingDraft}>
                   <SelectTrigger id={`${id}-draft-style`} className="h-11 w-full"><SelectValue /></SelectTrigger>
@@ -1055,8 +1080,8 @@ export function NativeResearchReport({
                 <Textarea id={`${id}-draft-instruction`} rows={3} maxLength={1_000} className="min-h-24 resize-y" value={currentDraftInstruction} onChange={(event) => setDraftInstruction({ reportIdentity, value: event.target.value })} disabled={creatingDraft} placeholder="Ej. enfócate en reclutamiento para operaciones; evita hablar de precios." />
                 <p className="text-xs text-muted-foreground">Se aplicará a la secuencia completa; no se usarán datos que la investigación no respalde.</p>
               </div> : null}
-              <Button type="button" className="min-h-11 w-full" disabled={creatingDraft || createDraftDisabled || (instructionMode === 'custom' && !currentDraftInstruction.trim())}
-                onClick={() => onCreateDraft(draftStyleId === DEFAULT_DRAFT_STYLE ? null : draftStyleId, instructionMode === 'custom' ? currentDraftInstruction.trim() : undefined, followUpCount)}>
+              <Button type="button" className="min-h-11 w-full" disabled={creatingDraft || createDraftDisabled || Boolean(followUpDaysError) || (instructionMode === 'custom' && !currentDraftInstruction.trim())}
+                onClick={() => onCreateDraft(draftStyleId === DEFAULT_DRAFT_STYLE ? null : draftStyleId, instructionMode === 'custom' ? currentDraftInstruction.trim() : undefined, followUpCount, followUpDays.slice(0, followUpCount))}>
                 {creatingDraft ? <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <FileText aria-hidden="true" />}
                 {creatingDraft ? creatingDraftLabel : 'Preparar borradores'}
               </Button>

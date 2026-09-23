@@ -59,10 +59,11 @@ export type ValidateDraftPreflightV2Options = {
   checkGeneratedCopy?: boolean;
   existingContentFingerprints?: Iterable<string>;
   now?: Date;
-  // The closing step ends the sequence without asking for a meeting, so the
-  // server appends no CTA and the model must not write one either. Follow-up
-  // steps ('model') write their own single closing question with the
-  // configured minutes instead of repeating the approved text verbatim.
+  // The closing step ends the sequence with a direct breakup: the server
+  // appends no CTA and the model must not write a meeting ask either, but a
+  // single direct yes-or-no question is the close itself. Follow-up steps
+  // ('model') write their own single closing question with the configured
+  // minutes instead of repeating the approved text verbatim.
   expectedCtaCount?: 0 | 1 | 'model';
 };
 
@@ -622,18 +623,23 @@ export function validateDraftPreflightV2(
         ? `El seguimiento cierra con una sola pregunta que proponga una conversación breve de ${minutes} minutos, con tus palabras y sin enlaces. No repitas el CTA aprobado literalmente.`
         : 'El seguimiento cierra con una sola pregunta que proponga una conversación breve, con tus palabras y sin enlaces.', 'body');
     }
+  } else if (expectedCtaCount === 0) {
+    const closeQuestionCount = (bodyOutsideRequiredCta.match(/\?/g) || []).length;
+    const closeOk = requiredCtaCount === 0
+      && ctaSentenceCount(bodyOutsideRequiredCta) === 0
+      && closeQuestionCount <= 1
+      && !meetingLinkCue.test(bodyOutsideRequiredCta);
+    if (!closeOk) {
+      add('cta_count', 'El cierre es directo y breve: como máximo una pregunta de sí o no para cerrar el tema, sin pedir reunión, sin enlaces y sin el CTA aprobado.', 'body');
+    }
   } else {
-    const ctaCountOk = expectedCtaCount === 0
-      ? requiredCtaCount === 0
-      : requiredCtaCount === context.constraints.cta.maximumCount;
+    const ctaCountOk = requiredCtaCount === context.constraints.cta.maximumCount;
     if (
       !ctaCountOk
       || ctaSentenceCount(bodyOutsideRequiredCta) > 0
       || hasExtraQuestion
     ) {
-      add('cta_count', expectedCtaCount === 0
-        ? 'El cierre termina la secuencia sin pedir reunión: no lleva CTA ni preguntas y el servidor no agrega ningún pedido.'
-        : 'El correo debe incluir exactamente un CTA y usar el CTA aprobado para este estilo.', 'body');
+      add('cta_count', 'El correo debe incluir exactamente un CTA y usar el CTA aprobado para este estilo.', 'body');
     }
   }
 

@@ -23,6 +23,11 @@ test('follow-up selection keeps one thread and always ends an existing sequence 
   assert.deepEqual(researchSequenceSteps(2).map((step) => step.name), ['Respaldo', 'Cierre']);
   assert.deepEqual(researchSequenceSteps(1).map((step) => step.name), ['Cierre']);
   assert.deepEqual(researchSequenceSteps(0), []);
+  assert.deepEqual(researchSequenceSteps(3, [2, 4, 9]).map((step) => step.offsetDays), [2, 4, 9]);
+  assert.deepEqual(researchSequenceSteps(3).map((step) => step.offsetDays), [3, 5, 10]);
+  assert.match(RESEARCH_SEQUENCE_STEPS[2].instruction, /última vez/);
+  assert.match(RESEARCH_SEQUENCE_STEPS[2].instruction, /60 palabras/);
+  assert.match(RESEARCH_SEQUENCE_STEPS[0].instruction, /distinto al ya usado/);
   assert.deepEqual(buildSharedSequenceBrief(draftContextFixture(), 0).stages.map((stage) => stage.goal), ['initial']);
   assert.deepEqual(buildSharedSequenceBrief(draftContextFixture(), 1).stages.map((stage) => stage.goal), ['initial', 'close']);
   assert.deepEqual(buildSharedSequenceBrief(draftContextFixture(), 2).stages.map((stage) => stage.goal), ['initial', 'proof', 'close']);

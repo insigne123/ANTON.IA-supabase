@@ -807,7 +807,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
     await startResearchFor([activeLead], true);
   }
 
-  async function createDraft(item: ResearchWorkspaceRunItem, styleProfileId: string | null = null, instruction?: string, followUpCount = 3) {
+  async function createDraft(item: ResearchWorkspaceRunItem, styleProfileId: string | null = null, instruction?: string, followUpCount = 3, offsets: number[] = []) {
     if (!item.canCreateDraft || !item.researchSnapshotId || draftRequestRef.current) return;
     draftRequestRef.current = item.id;
     setProfileRequiredItemId((current) => current === item.id ? null : current);
@@ -816,7 +816,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
       const response = await fetch('/api/research-sequences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `native-draft:${item.researchSnapshotId}` },
-        body: JSON.stringify({ researchSnapshotId: item.researchSnapshotId, styleProfileId, followUpCount, ...(instruction ? { instruction } : {}) }),
+        body: JSON.stringify({ researchSnapshotId: item.researchSnapshotId, styleProfileId, followUpCount, offsets, ...(instruction ? { instruction } : {}) }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.id) {
@@ -1322,7 +1322,7 @@ export default function ResearchWorkspace({ embedded = false, onClose, scope = '
                             createDraftDisabled={draftRequestPending || activeReportDetailLoading || Boolean(activeReportDetailError) || activeReportSynthesisPending || activeReportSynthesisFailed}
                              createDraftLabel="Preparar correos"
                             creatingDraftLabel="Preparando borrador…"
-                             onCreateDraft={(styleProfileId, instruction, followUpCount) => void createDraft(activeItem, styleProfileId, instruction, followUpCount)}
+                             onCreateDraft={(styleProfileId, instruction, followUpCount, offsets) => void createDraft(activeItem, styleProfileId, instruction, followUpCount, offsets)}
                             onCompleteProfile={() => router.push('/profile')}
                             refreshing={creatingBatch}
                             onRefresh={selectionLocked || researchUnavailable ? undefined : () => void refreshActiveResearch()}

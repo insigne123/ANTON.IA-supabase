@@ -117,18 +117,16 @@ test('draft preflight passes an evidence-backed message with exactly one approve
   assert.equal(result.preflight.errors.length, 0);
 });
 
-test('closing step passes without any CTA and fails with questions or meeting asks', () => {
+test('closing step ends with a single direct yes-or-no question, never a meeting ask', () => {
   const context = draftContextFixture();
   const evidence = context.evidence.find((item) => item.supportedFactClaimIds.includes('claim-acme-overview'))!;
   const closeOutput = {
     subject: 'Cierro el tema en Acme',
     body: `Hola Ada,
 
-Cierro el seguimiento de los procesos de operaciones en Acme por acá.
+Cierro el seguimiento de los procesos de operaciones en Acme por acá. Esta es la última vez que te escribo sobre esto. Entiendo que ayudan a equipos de operaciones a reducir trabajo manual.
 
-Si en algún momento necesitan reducir el trabajo manual de esos procesos, tienen mi correo acá arriba.
-
-Gracias por el tiempo de leer hasta acá.`,
+¿Lo dejo hasta aquí?`,
     personalization: [{
       evidenceId: evidence.evidenceId,
       claimId: 'claim-acme-overview',
@@ -139,12 +137,12 @@ Gracias por el tiempo de leer hasta acá.`,
   const passed = validateDraftPreflightV2(context, closeOutput, { expectedCtaCount: 0 });
   assert.equal(passed.valid, true, JSON.stringify(passed.issues));
 
-  const withQuestion = validateDraftPreflightV2(
+  const withMeetingAsk = validateDraftPreflightV2(
     context,
     { ...closeOutput, body: `${closeOutput.body}\n\n¿Agendamos 15 minutos?` },
     { expectedCtaCount: 0 },
   );
-  assert.ok(withQuestion.issues.some((issue) => issue.code === 'cta_count'));
+  assert.ok(withMeetingAsk.issues.some((issue) => issue.code === 'cta_count'));
 
   const withApprovedCta = validateDraftPreflightV2(
     context,
@@ -152,6 +150,13 @@ Gracias por el tiempo de leer hasta acá.`,
     { expectedCtaCount: 0 },
   );
   assert.ok(withApprovedCta.issues.some((issue) => issue.code === 'cta_count'));
+
+  const withLink = validateDraftPreflightV2(
+    context,
+    { ...closeOutput, body: `${closeOutput.body} https://cal.com/acme` },
+    { expectedCtaCount: 0 },
+  );
+  assert.ok(withLink.issues.some((issue) => issue.code === 'cta_count'));
 
   const defaultPolicy = validateDraftPreflightV2(context, closeOutput);
   assert.ok(defaultPolicy.issues.some((issue) => issue.code === 'cta_count'));

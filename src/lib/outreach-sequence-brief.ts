@@ -4,20 +4,29 @@ import { selectOutreachStrategy } from './outreach-evidence-ranking';
 import { selectOutreachExamples } from './outreach-example-library';
 import type { DraftContextV2 } from './server/draft-context-v2';
 
-// Four email drafts for the SAME recipient. The playbook's channel switch and
+// Email drafts for the SAME recipient. Each follow-up tries a different
+// approach to the same topic so that one of them lands: proof, another
+// angle, then a direct breakup close. The playbook's channel switch and
 // alternate recipient are deliberately not email steps or evidence of contact.
 export const RESEARCH_SEQUENCE_STEPS = [
-  { name: 'Respaldo', offsetDays: 3, instruction: 'Aporta una prueba autorizada o concreta cómo se aplica la misma oferta. No inventes cifras, garantías ni objeciones del contacto.' },
-  { name: 'Segundo ángulo', offsetDays: 5, instruction: 'Profundiza una aplicación distinta del mismo servicio pertinente a este cargo. No cambies de destinatario ni afirmes contacto con colegas.' },
-  { name: 'Cierre', offsetDays: 10, instruction: 'Cierra el tema en menos de 80 palabras, sin presión ni nueva oferta. No afirmes envíos previos, silencio ni falta de prioridad.' },
+  { name: 'Respaldo', offsetDays: 3, instruction: 'Cambia el enfoque respecto al inicial: aporta una prueba autorizada o un ejemplo concreto de aplicación distinto al ya usado. Si no hay prueba nueva, precisa el alcance (qué incluye y qué queda fuera). No repitas la propuesta del inicial con otras palabras.' },
+  { name: 'Segundo ángulo', offsetDays: 5, instruction: 'Cambia el enfoque otra vez: aborda una aplicación distinta del mismo servicio u otra consecuencia práctica para este cargo (por ejemplo, impacto operativo frente a impacto en personas). No re-presentes al vendedor ni repitas el ejemplo del correo anterior.' },
+  { name: 'Cierre', offsetDays: 10, instruction: 'Cierre directo y breve (máximo 60 palabras): retoma el tema en una frase, deja claro que esta es la última vez que escribirás sobre esto y termina con una sola pregunta directa de sí o no (por ejemplo, si lo dejas hasta aquí). Sin pedir reunión, sin presentar nada nuevo, sin afirmar envíos previos ni silencio.' },
 ] as const;
 
-export function researchSequenceSteps(followUpCount: number) {
+export const DEFAULT_SEQUENCE_OFFSETS = [3, 5, 10];
+
+export function researchSequenceSteps(followUpCount: number, offsets: number[] = []) {
   const selected = followUpCount === 0 ? [] : followUpCount === 1
     ? [RESEARCH_SEQUENCE_STEPS[2]]
     : followUpCount === 2 ? [RESEARCH_SEQUENCE_STEPS[0], RESEARCH_SEQUENCE_STEPS[2]]
       : [...RESEARCH_SEQUENCE_STEPS];
-  return selected.map((step, index) => ({ ...step, offsetDays: RESEARCH_SEQUENCE_STEPS[index].offsetDays }));
+  const days = offsets.length > 0 ? offsets : DEFAULT_SEQUENCE_OFFSETS.slice(0, selected.length);
+  return selected.map((step, index) => ({ ...step, offsetDays: days[index] ?? RESEARCH_SEQUENCE_STEPS[index].offsetDays }));
+}
+
+export function researchSequenceStepNames(followUpCount: number) {
+  return researchSequenceSteps(followUpCount).map((step) => step.name);
 }
 
 export const SharedSequenceBriefSchema = z.object({

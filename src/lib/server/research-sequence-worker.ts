@@ -42,7 +42,10 @@ export async function readResearchSequence(id: string, userId: string, organizat
 export async function researchSequenceView(job: any, dependencies: Pick<SequenceWorkerDependencies, 'getDraft' | 'queryPlan'> = {}) {
   const access = { organizationId: job.organization_id, userId: job.user_id };
   const request = ResearchSequenceRequestSchema.safeParse(job.request);
-  const steps = researchSequenceSteps(request.success ? request.data.followUpCount : 3);
+  const steps = researchSequenceSteps(
+    request.success ? request.data.followUpCount : 3,
+    request.success ? request.data.offsets : [],
+  );
   const initial = job.initial_draft_id ? await (dependencies.getDraft || getCurrentNativeDraft)({ ...access, draftId: job.initial_draft_id }) : null;
   const plan = initial && steps.length ? await (dependencies.queryPlan || (await import('./campaigns-v2/plan')).queryFirstContactPlan)({ ...access, draftId: initial.draftId }) : null;
   const summaries = [initial ? { draftId: initial.draftId, versionId: initial.versionId, subject: initial.content.subject || '', body: initial.content.text || initial.content.html || '' } : null, ...steps.map((_, index) => plan?.steps[index]?.draft || null)];
@@ -57,6 +60,7 @@ export async function researchSequenceView(job: any, dependencies: Pick<Sequence
     researchSnapshotId: request.success ? request.data.researchSnapshotId : null,
     styleProfileId: request.success ? request.data.styleProfileId : null,
     followUpCount: steps.length,
+    offsets: steps.map((step) => step.offsetDays),
     editorial: changed ? null : job.editorial,
     slots: ['Contacto inicial', ...steps.map((step) => step.name)].map((name, index) => ({
       index, name,
@@ -125,7 +129,7 @@ export async function processResearchSequenceQueue(input: { jobId?: string } = {
     if (candidate.status === 'running' && Number(candidate.attempt_count) >= 4) throw new Error('La preparación se interrumpió varias veces. Reintenta los correos pendientes.');
     if (!await (dependencies.enabled || campaignsEnabled)(access.organizationId, client)) throw new Error('CAMPAIGNS_V2_DISABLED');
     const request = ResearchSequenceRequestSchema.parse(job.request);
-    const steps = researchSequenceSteps(request.followUpCount);
+    const steps = researchSequenceSteps(request.followUpCount, request.offsets);
     const finishEditorial = async (drafts: Awaited<ReturnType<typeof getCurrentNativeDraft>>[]) => {
       const editorial = await (dependencies.review || validateResearchSequence)(job.prepared_context.brief, drafts.filter((draft): draft is NonNullable<typeof draft> => Boolean(draft)));
       if (editorial.usage) {

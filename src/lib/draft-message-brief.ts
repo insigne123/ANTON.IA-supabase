@@ -53,7 +53,7 @@ export function buildDraftMessageBrief(context: DraftContextV2, sequence?: Outre
         subject: draftPriorMessageReference(message.subject),
         body: draftPriorMessageReference(message.body),
       })) || [],
-      ctaPolicy: 'El servidor agrega un unico CTA aprobado literalmente. No generar preguntas ni CTA alternativos.',
+      ctaPolicy: 'El servidor agrega el saludo y, salvo en el cierre, el unico CTA aprobado literalmente. Solo el cierre puede terminar con su propia pregunta directa de si o no, sin pedir reunion.',
     },
   };
 }
