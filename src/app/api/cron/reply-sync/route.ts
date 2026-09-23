@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { firebaseSchedulerResponseHeaders, isFirebaseSchedulerRequest } from '../_firebase-scheduler-auth';
 import { syncRepliesForOrganization } from '@/lib/server/reply-sync';
+import { sweepMailboxForOwner } from '@/lib/server/mailbox-sweep';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { replySyncDueFilter } from '@/lib/server/reply-sync-policy';
 
@@ -54,7 +55,7 @@ async function runReplySync(req: NextRequest) {
       addOwner(owners, row);
     }
 
-    const summary = { scanned: 0, synced: 0, skippedNoToken: 0, errors: 0 };
+    const summary = { scanned: 0, synced: 0, skippedNoToken: 0, errors: 0, sweepPages: 0, sweepSynced: 0 };
     for (const owner of Array.from(owners.values()).slice(0, ownerLimit)) {
       try {
         const result = await syncRepliesForOrganization(supabase, {
@@ -68,6 +69,16 @@ async function runReplySync(req: NextRequest) {
         summary.synced += result.synced;
         summary.skippedNoToken += result.skippedNoToken;
         summary.errors += result.errors.length;
+        // Stage 6.3 mailbox sweep: durable cursor, bounded pages, never fails the tick.
+        for (const provider of ['gmail', 'outlook'] as const) {
+          try {
+            const sweep = await sweepMailboxForOwner(supabase, { organizationId: owner.organizationId, userId: owner.userId, provider });
+            summary.sweepPages += sweep.pages;
+            summary.sweepSynced += sweep.synced;
+          } catch (error) {
+            console.error('[cron/reply-sync] sweep failed', { organizationId: owner.organizationId, userId: owner.userId, provider, error: error instanceof Error ? error.message : String(error) });
+          }
+        }
       } catch (error) {
         console.error('[cron/reply-sync] owner sync failed', {
           organizationId: owner.organizationId,

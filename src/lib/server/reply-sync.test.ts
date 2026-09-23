@@ -10,6 +10,7 @@ function load() {
   const exports: any = {};
   new Function('require', 'exports', compiled)(() => ({
     tokenService: { getToken: async () => null }, detectDeliveryFailure: () => null,
+    detectAutoReplyHeaders: () => null,
     replySyncDueFilter: () => 'reply_sync_attempted_at.is.null',
   }), exports);
   return exports;

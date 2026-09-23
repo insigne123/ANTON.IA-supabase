@@ -10,6 +10,7 @@ import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS } from '@/lib/cow
 import { queryCoworkContactabilityBatch, queryCoworkDomainRead } from './domain-reads';
 import { readCoworkBatchReport, readCoworkCompanyPlan, readCoworkNextTouch, readCoworkRetryReview } from './batch-reads';
 import { readCoworkLinkedinFollowups, readCoworkLinkedinInbox, readCoworkLinkedinJobs, readCoworkLinkedinNetwork, readCoworkLinkedinQuota } from './linkedin-reads';
+import { readContactedAccount, readMeetingChain, readRepliesAttention, readRepliesStalled } from './reply-reads';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -126,6 +127,22 @@ export function coworkReadCapabilities(
     },
     extended('crm.search', 'CRM del equipo (toda la organización) que coincide con un texto'),
     extended('crm.get_lead', 'Ficha CRM con historial de contactados, por UUID'),
+    {
+      name: 'replies.attention', version: 1, effect: 'read', description: 'Rebotes, bloqueos y respuestas sin clasificar con acción recomendada',
+      input: z.literal(''), output: z.unknown(), execute: () => readRepliesAttention(client, scope),
+    },
+    {
+      name: 'replies.stalled', version: 1, effect: 'read', description: 'Interesados sin seguimiento tras 48 horas',
+      input: z.literal(''), output: z.unknown(), execute: () => readRepliesStalled(client, scope),
+    },
+    {
+      name: 'contacted.account', version: 1, effect: 'read', description: 'Toda la cuenta: hilos y personas de la misma empresa, por UUID de contacto',
+      input: z.string().uuid(), output: z.unknown(), execute: input => readContactedAccount(client, scope, input as string),
+    },
+    {
+      name: 'replies.meeting_chain', version: 1, effect: 'read', description: 'Cadena verificable envío-respuesta-compromiso-reunión, por UUID de contacto',
+      input: z.string().uuid(), output: z.unknown(), execute: input => readMeetingChain(client, scope, input as string),
+    },
     extended('contacted.search', 'Historial de contactados del equipo que coincide con un texto'),
     extended('contacted.timeline', 'Historial de envíos de un contacto por UUID de ficha'),
     extended('metrics.overview', 'Métricas de la organización de los últimos 7 días, sin entrada'),

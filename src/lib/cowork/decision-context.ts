@@ -34,6 +34,7 @@ export function coworkDecisionContext(
     researchCapability: instructions.researchCapability,
     externalSearchCapability: instructions.externalSearchCapability,
     extendedReadCapability: instructions.extendedReadCapability,
+    replyDetectionCapability: instructions.replyDetectionCapability,
     additionalCapability: instructions.additionalCapability,
     effectCapability: instructions.effectCapability,
     threadBudgetCapability: instructions.threadBudgetCapability,

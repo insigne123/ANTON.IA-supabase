@@ -73,12 +73,12 @@ El resultado v4 contiene `passed:false`: su rúbrica histórica esperaba turno d
 | 5.5 | Identidad destinatario | P: controles extensión; pruebas autenticadas y puente chat |
 | 5.6 | Cupo invitaciones | D: separar pendientes de cuota observada, sin límite fijo inventado |
 | 5.7 | Seguimiento LinkedIn | D: historial, negativas, negociación y nuevo contenido |
-| 6.1 | Rebotes/bloqueos | P: ingesta; exposición y clasificación conversacional |
-| 6.2 | Respuesta humana | P: clasificador; fecha, ambigüedad y regresiones |
-| 6.3 | Barrido histórico | D: cursor durable, cobertura, permisos de buzón |
-| 6.4 | Tibios olvidados | P: registros; cola y sincronización suficientes pendientes |
-| 6.5 | Estado de cuenta | P: contacto con incertidumbre; agregar cuenta/hilos reales |
-| 6.6 | Origen de reunión | D: cadena verificable hasta aceptación de reunión |
+| 6.1 | Rebotes/bloqueos | Hecha 23-09-2026: lectura `replies.attention` con acción por ítem; detalle en `docs/cowork-stage6-acceptance.md`. Falta recorrido autenticado. |
+| 6.2 | Respuesta humana | Hecha 23-09-2026: cabeceras deterministas + métricas humanas separadas + corpus real; detalle en `docs/cowork-stage6-acceptance.md`. Falta buzón real. |
+| 6.3 | Barrido histórico | Hecha 23-09-2026: cursor durable, ventanas acotadas, cobertura declarada, migración aplicada en prod; detalle en `docs/cowork-stage6-acceptance.md`. Primer barrido real con el despliegue. |
+| 6.4 | Tibios olvidados | Hecha 23-09-2026: lectura `replies.stalled` (48 h, sin envío posterior ni compromiso abierto); detalle en `docs/cowork-stage6-acceptance.md`. |
+| 6.5 | Estado de cuenta | Hecha 23-09-2026: lectura `contacted.account` con conflictos + índice en prod; detalle en `docs/cowork-stage6-acceptance.md`. |
+| 6.6 | Origen de reunión | Hecha 23-09-2026: origen server-side + lectura `replies.meeting_chain` con veredicto; detalle en `docs/cowork-stage6-acceptance.md`. |
 | 7.1 | Tasas | P: helpers; períodos y denominadores completos |
 | 7.2 | Diagnóstico | P: hipótesis controladas; comparar evidencia sin causalidad inventada |
 | 7.3 | Canales | D: cohortes comparables y atribución |

@@ -4,7 +4,7 @@ Documento de referencia permanente. Fuente de funciones: `C:\Users\nicol\Desktop
 
 **Regla de cierre:** una función solo queda terminada cuando está conectada al agente, respeta el alcance del usuario, supera sus casos de fallo y produce un resultado comprobable. Código existente o prueba simulada no cuentan como aceptación.
 
-**Leyenda:** 🟡 Parcial (hay base reutilizable, falta integración o verificación). 🔴 Pendiente (falta una parte esencial).
+**Leyenda:** 🟢 Hecha (conectada al agente, con pruebas y migración aplicada; puede faltar recorrido autenticado). 🟡 Parcial (hay base reutilizable, falta integración o verificación). 🔴 Pendiente (falta una parte esencial).
 
 **Contexto:** la parte 1 (Definición de audiencia, funciones 1.1–1.5) está implementada en local y parcialmente probada con modelo real y Apollo; faltan despliegue, recorrido autenticado y cierre visual. Detalle en `docs/cowork-audience-acceptance.md`.
 
@@ -98,12 +98,14 @@ Documento de referencia permanente. Fuente de funciones: `C:\Users\nicol\Desktop
 
 | ID | Función | Estado | Qué falta para cerrarla |
 |---|---|---|---|
-| 6.1 | Detectar rebotes y bloqueos | 🟡 | Clasificación expuesta y accionable desde chat. |
-| 6.2 | Distinguir respuesta humana de automática | 🟡 | Filtro de fecha + patrones de autorespuesta (sin eso, el conteo se infla). Falta aceptación con mensajes reales. |
-| 6.3 | Barrer el historial completo | 🟡 | Gmail real leyó 20 metadatos con `hasMore:true`; faltan paginación, cursor durable y permisos verificados. |
-| 6.4 | Encontrar interesados nunca seguidos | 🟡 | Cruce respondió↔acción posterior con cobertura suficiente (caso real: 5 reuniones enfriadas, 1 contrato sin firmar). |
-| 6.5 | Reconstruir el estado de una cuenta | 🟡 | Pasar del contacto a todos los hilos/personas de la empresa; hoy el turno es por contacto con incertidumbre explícita. |
-| 6.6 | Trazar una reunión hasta su origen | 🔴 | Cadena verificable: mensaje → día → respuesta → derivación → reunión confirmada. |
+| 6.1 | Detectar rebotes y bloqueos | 🟢 | Lectura `replies.attention` con acción recomendada por ítem; automáticas informativas aparte. |
+| 6.2 | Distinguir respuesta humana de automática | 🟢 | Cabeceras deterministas + métricas humanas separadas + corpus de mensajes reales. Buzón real pendiente de recorrido autenticado. |
+| 6.3 | Barrer el historial completo | 🟢 | Cursor durable por buzón, ventanas acotadas, cobertura declarada en cada lectura; migración aplicada en prod. Primer barrido real con el despliegue. |
+| 6.4 | Encontrar interesados nunca seguidos | 🟢 | Lectura `replies.stalled`: interés humano sin seguimiento tras 48 h. |
+| 6.5 | Reconstruir el estado de una cuenta | 🟢 | Lectura `contacted.account` con conflictos explícitos e índice en prod. |
+| 6.6 | Trazar una reunión hasta su origen | 🟢 | Origen server-side en compromisos + lectura `replies.meeting_chain` con veredicto verificable. |
+
+**Avance verificado (23 sep 2026, local + migración + PGlite + build):** 4 lecturas Cowork registradas (`replies.attention`, `replies.stalled`, `contacted.account`, `replies.meeting_chain`), barrido conectado al cron sin romper el tick, migración `20260923020000` aplicada y verificada en prod (tabla con RLS, índice, función con origen; `contacted_leads` intacta), typecheck/build en verde, 19 pruebas nuevas en verde. Detalle en `docs/cowork-stage6-acceptance.md`. Cambios de app por desplegar; aceptación autenticada pendiente.
 
 **Dependencias:** sincronización Gmail/Outlook (alcance, paginación, última actualización), cuentas controladas `nicolas.yarur.g@yago.cl` ↔ `nicogun123@gmail.com`.
 

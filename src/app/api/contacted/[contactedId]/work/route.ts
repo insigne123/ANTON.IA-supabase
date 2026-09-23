@@ -20,7 +20,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ contac
     const { contactedId } = await context.params;
     const body = schema.parse(await req.json());
     const admin = getSupabaseAdminClient();
-    const { data: row, error } = await admin.from('contacted_leads').select('id,email,user_id,organization_id,last_reply_text,reply_message_id,replied_at,data').eq('id', contactedId).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).maybeSingle();
+    const { data: row, error } = await admin.from('contacted_leads').select('id,email,user_id,organization_id,last_reply_text,reply_message_id,replied_at,thread_key,data').eq('id', contactedId).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).maybeSingle();
     if (error) throw error;
     if (!row) throw new AuthError('Conversación no disponible', 404);
     if (body.action === 'reschedule' || body.action === 'automation') {
@@ -43,6 +43,28 @@ export async function POST(req: NextRequest, context: { params: Promise<{ contac
     }
     let kind: string = body.action;
     let value: unknown = body;
+    if (body.action === 'commitment' && row.reply_message_id) {
+      // Stage 6.6: the server pins the commitment to the observed reply event
+      // so the message-to-meeting chain stays verifiable. No client input.
+      const events = await admin.from('lead_responses')
+        .select('message_id,internet_message_id,inbound_event_key,thread_key,event_at')
+        .eq('organization_id', auth.organizationId).eq('contacted_id', contactedId)
+        .order('event_at', { ascending: false }).limit(5);
+      if (!events.error) {
+        const replyId = String(row.reply_message_id).replace(/^<|>$/g, '');
+        const match = (events.data || []).find((event: any) =>
+          String(event.message_id || '').replace(/^<|>$/g, '') === replyId
+          || String(event.internet_message_id || '').replace(/^<|>$/g, '') === replyId);
+        if (match?.inbound_event_key) {
+          value = { ...body, origin: {
+            replyEventKey: match.inbound_event_key,
+            threadKey: match.thread_key || row.thread_key || '',
+            derivedAt: new Date().toISOString(),
+            derivedBy: auth.user.id,
+          } };
+        }
+      }
+    }
     if (body.action === 'replyDraft') {
       const pending = (row.data as any)?.replyDraft;
       if (pending?.pending && pending.key !== body.key) throw new AuthError('Comprueba primero el envío pendiente de esta conversación.', 409);

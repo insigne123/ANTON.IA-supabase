@@ -23,7 +23,7 @@ function mockClient(tables: Record<string, { rows?: unknown[]; count?: number; e
       const chain: Record<string, (...args: any[]) => any> = {
         select: (...args) => { calls.push({ table, method: 'select', args }); return chain; },
         eq: (...args) => { calls.push({ table, method: 'eq', args }); return chain; },
-        order: () => chain, limit: () => chain, or: () => chain, gte: () => chain, in: () => chain,
+        order: () => chain, limit: () => chain, or: () => chain, gte: () => chain, in: () => chain, not: (...args) => { calls.push({ table, method: 'not', args }); return chain; },
         maybeSingle: async () => state.error
           ? { data: null, error: state.error }
           : { data: (state.single ?? null) as unknown, error: null },
@@ -112,13 +112,19 @@ test('metrics.overview reports the last 7 days with explicit scope', async () =>
   const tables = {
     leads: { count: 100 }, contacted_leads: { count: 7 },
   };
-  const { client } = mockClient(tables);
+  const { client, calls } = mockClient(tables);
   const result = await queryCoworkExtendedReads(client, scope, 'metrics.overview', '') as {
-    period: string; scope: string; savedContacts: number;
+    period: string; scope: string; savedContacts: number; repliesThisWeek: number;
+    autoRepliesThisWeek: number; bouncesThisWeek: number;
   };
   assert.equal(result.period, 'last_7_days');
   assert.equal(result.scope, 'organization_metrics');
   assert.equal(result.savedContacts, 100);
+  assert.ok(calls.some(call => call.method === 'not' && call.args[0] === 'reply_intent'),
+    'human replies must exclude automatic and bounce intents');
+  assert.equal(result.repliesThisWeek, 7);
+  assert.equal(result.autoRepliesThisWeek, 7);
+  assert.equal(result.bouncesThisWeek, 7);
 });
 
 test('app.context exposes connections and offer without tokens or memories', async () => {

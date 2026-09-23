@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { contactRecordEvidence } from '@/lib/cowork/contact-evidence';
+import { readMailboxCoverage } from './reply-reads';
 import { buildSupliaContext } from '@/lib/server/suplia-context';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
@@ -31,7 +32,7 @@ export async function queryCoworkExtendedReads(
 ): Promise<{ contacted: unknown[]; scope: string; truncated: boolean } & ReturnType<typeof contactRecordEvidence>>;
 export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: 'metrics.overview', value: string,
-): Promise<{ scope: string; period: string; savedContacts: number; contactedTotal: number; contactedThisWeek: number; repliesThisWeek: number }>;
+): Promise<{ scope: string; period: string; savedContacts: number; contactedTotal: number; contactedThisWeek: number; repliesThisWeek: number; autoRepliesThisWeek: number; bouncesThisWeek: number }>;
 export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: 'app.context', value: string,
 ): Promise<{ scope: string; emailConnections: { google: boolean; outlook: boolean }; counts: Record<string, number>; performance: unknown; offer: string | null }>;
@@ -56,7 +57,7 @@ export async function queryCoworkExtendedReads(
   | { items: unknown[]; returned: number; limit: number; scope: string; truncated: boolean; evidence?: unknown }
   | { lead: unknown; contacted: unknown[]; scope: string }
   | { contacted: unknown[]; scope: string; truncated: boolean; turn: unknown }
-  | { scope: string; period: string; savedContacts: number; contactedTotal: number; contactedThisWeek: number; repliesThisWeek: number }
+  | { scope: string; period: string; savedContacts: number; contactedTotal: number; contactedThisWeek: number; repliesThisWeek: number; autoRepliesThisWeek: number; bouncesThisWeek: number }
   | { scope: string; emailConnections: { google: boolean; outlook: boolean }; counts: Record<string, number>; performance: unknown; offer: string | null }
   | { scope: string; draftId: string; versionId: string; revision: number; channel: string; subject: string | null; contentHash: string; recipientEmail: string | null; recipientName: string | null; lifecycle: string; textLength: number }
   | { scope: string; campaigns: Array<{ id: string; name: string; status: string; revision: number; recipients: number; createdAt: string }> }
@@ -101,9 +102,11 @@ export async function queryCoworkExtendedReads(
     if (term) query = query.or(`name.ilike.%${term}%,email.ilike.%${term}%,company.ilike.%${term}%,subject.ilike.%${term}%`);
     const { data, error } = await query;
     if (error) throw new Error('No se pudieron consultar los contactados.');
+    const coverage = await readMailboxCoverage(client, scope);
     return { items: data || [], returned: data?.length || 0, limit: 20, scope: 'organization_contacted', truncated: (data?.length || 0) >= 20,
       evidence: { source: 'application_contact_records', queriedAt: new Date().toISOString(),
-        mailboxSyncedAt: null, mailboxCoverageComplete: false, pendingStatus: 'needs_verification',
+        mailboxSyncedAt: coverage.gmail?.lastCompletedAt || coverage.outlook?.lastCompletedAt || null,
+        mailboxCoverage: coverage, pendingStatus: 'needs_verification',
         nextRead: 'contacted.timeline', limitation: 'Lista de registros, no cola de respuestas pendientes confirmadas.' } };
   }
   const leadId = z.string().uuid().parse(value);
@@ -115,25 +118,35 @@ export async function queryCoworkExtendedReads(
   const rows = (contacted || []) as Array<{ id: string; sent_at?: string | null; replied_at?: string | null; reply_intent?: string | null }>;
   const now = new Date().toISOString();
   const evidence = contactRecordEvidence(rows, rows.length >= 15, now);
-  return { contacted: rows, scope: 'organization_contacted', truncated: rows.length >= 15, ...evidence };
+  const coverage = await readMailboxCoverage(client, scope);
+  const sweep = { mailboxCoverage: coverage, mailboxSyncedAt: coverage.gmail?.lastCompletedAt || coverage.outlook?.lastCompletedAt || null };
+  return { contacted: rows, scope: 'organization_contacted', truncated: rows.length >= 15, ...evidence, ...sweep };
 }
 
 async function readCoworkMetrics(client: SupabaseClient, scope: Scope) {
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const org = scope.organizationId;
-  const [leads, contacted, contactedWeek, repliesWeek] = await Promise.all([
+  const repliedThisWeek = () => client.from('contacted_leads')
+    .select('id', { count: 'exact', head: true }).eq('organization_id', org).gte('replied_at', since);
+  const [leads, contacted, contactedWeek, humanReplies, autoReplies, bounces] = await Promise.all([
     client.from('leads').select('id', { count: 'exact', head: true }).eq('organization_id', org),
     client.from('contacted_leads').select('id', { count: 'exact', head: true }).eq('organization_id', org),
     client.from('contacted_leads').select('id', { count: 'exact', head: true }).eq('organization_id', org).gte('sent_at', since),
-    client.from('contacted_leads').select('id', { count: 'exact', head: true }).eq('organization_id', org).gte('replied_at', since),
+    repliedThisWeek().not('reply_intent', 'in', '(auto_reply,delivery_failure)'),
+    repliedThisWeek().eq('reply_intent', 'auto_reply'),
+    repliedThisWeek().eq('reply_intent', 'delivery_failure'),
   ]);
-  const failed = [leads, contacted, contactedWeek, repliesWeek].find(result => result.error)?.error;
+  const failed = [leads, contacted, contactedWeek, humanReplies, autoReplies, bounces].find(result => result.error)?.error;
   if (failed) throw new Error('No se pudieron calcular las métricas.');
   const count = (result: { count?: number | null } | null) => Number(result?.count || 0);
   return {
     scope: 'organization_metrics', period: 'last_7_days',
     savedContacts: count(leads), contactedTotal: count(contacted),
-    contactedThisWeek: count(contactedWeek), repliesThisWeek: count(repliesWeek),
+    contactedThisWeek: count(contactedWeek),
+    // Human replies only: automatic and bounce intents ride separately so the
+    // response rate never inflates with out-of-office noise (stage 6.2).
+    repliesThisWeek: count(humanReplies),
+    autoRepliesThisWeek: count(autoReplies), bouncesThisWeek: count(bounces),
   };
 }
 

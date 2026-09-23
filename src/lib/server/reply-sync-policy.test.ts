@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { replySyncDueFilter } from './reply-sync-policy';
+import { mailboxSweepDue, replySyncDueFilter } from './reply-sync-policy';
 
 test('due filter cools down failed threads without starving healthy ones', () => {
   const filter = replySyncDueFilter(Date.parse('2026-09-23T00:00:00.000Z'));
@@ -17,4 +17,17 @@ test('due filter is server-generated grammar with no client input', () => {
   const filter = replySyncDueFilter();
   assert.doesNotMatch(filter, /[;'"\\]/);
   assert.match(filter, /^[\w.,():=-]+$/);
+});
+
+test('sweep resumes fresh cursors and restarts stale ones', () => {
+  const now = Date.parse('2026-09-23T12:00:00.000Z');
+  assert.deepEqual(mailboxSweepDue(null, now), { due: true, reason: 'never_swept' });
+  assert.deepEqual(mailboxSweepDue({ page_token: 'abc', window_started_at: new Date(now - 3600000).toISOString() }, now),
+    { due: true, reason: 'resume_window' });
+  assert.deepEqual(mailboxSweepDue({ page_token: 'abc', window_started_at: new Date(now - 25 * 3600000).toISOString() }, now),
+    { due: true, reason: 'stale_cursor_restart' });
+  assert.deepEqual(mailboxSweepDue({ last_completed_at: new Date(now - 3600000).toISOString() }, now),
+    { due: false, reason: 'cooling_down' });
+  assert.deepEqual(mailboxSweepDue({ last_completed_at: new Date(now - 13 * 3600000).toISOString() }, now),
+    { due: true, reason: 'window_expired' });
 });

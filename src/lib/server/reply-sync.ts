@@ -10,6 +10,7 @@ import { syncLeadAutopilotToCrm } from '@/lib/server/crm-autopilot';
 import { stripHtmlToText } from '@/lib/email-outbound';
 import { ingestInboundReply } from '@/lib/server/inbound-reply-ingestion';
 import { isExplicitOptOut } from '@/lib/reply-text';
+import { detectAutoReplyHeaders } from '@/lib/reply-autoresponse';
 import { conversationAdvice } from '@/lib/conversation-advice';
 import { replySyncDueFilter } from '@/lib/server/reply-sync-policy';
 
@@ -52,6 +53,8 @@ type InboundReply = {
   html?: string | null;
   snippet?: string | null;
   references?: string | null;
+  /** Provider header proof that the message is automatic (stage 6.2). */
+  autoReplyHeader?: string | null;
 };
 
 export type ReplySyncResult = {
@@ -62,7 +65,7 @@ export type ReplySyncResult = {
   errors: Array<{ contactedId?: string; email?: string | null; provider?: string | null; error: string }>;
 };
 
-function normalizeEmail(value?: string | null) {
+export function normalizeEmail(value?: string | null) {
   return String(value || '').trim().toLowerCase();
 }
 
@@ -125,6 +128,7 @@ function gmailMessageToReply(message: any): InboundReply {
     html: bodies.html,
     snippet: message?.snippet || null,
     references: `${getHeader(headers, 'In-Reply-To')} ${getHeader(headers, 'References')}`,
+    autoReplyHeader: detectAutoReplyHeaders(headers),
   };
 }
 
@@ -310,6 +314,9 @@ function outlookMessageToReply(message: any): InboundReply {
     html: message?.body?.content || null,
     snippet: message?.bodyPreview || null,
     references: `${getHeader(message?.internetMessageHeaders, 'In-Reply-To')} ${getHeader(message?.internetMessageHeaders, 'References')}`,
+    // Only present when the caller selected internetMessageHeaders (thread
+    // reads do; single-message lookups may not). Absence never proves human.
+    autoReplyHeader: detectAutoReplyHeaders(message?.internetMessageHeaders),
   };
 }
 
@@ -373,6 +380,19 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
       deliveryStatus: failure.deliveryStatus,
       bounceCategory: failure.bounceCategory,
       bounceReason: failure.bounceReason,
+    };
+  } else if (reply.autoReplyHeader) {
+    // Header proof wins over the model: an automatic message is never human,
+    // and skipping the model call keeps auto replies out of the human count.
+    classification = {
+      intent: 'auto_reply',
+      sentiment: 'neutral',
+      confidence: 0.95,
+      summary: `Respuesta automática detectada por cabeceras (${reply.autoReplyHeader})`,
+      reason: 'auto_reply_headers',
+      shouldContinue: true,
+      evaluationStatus: 'pending',
+      autoReplySource: 'headers',
     };
   } else {
     classification = await classifyReply(rawText || reply.snippet || '');
@@ -462,6 +482,51 @@ async function recordInboundReply(supabase: any, row: ContactedRow, reply: Inbou
   return true;
 }
 
+export type SingleContactSyncState = 'ok' | 'incomplete_thread' | 'sync_failed';
+
+/** One contact through the full pipeline: verified thread, candidates, ingest.
+ * Shared by the per-row tick and the mailbox sweep (stage 6.3) so discovery
+ * never invents its own matching rules. */
+export async function syncSingleContactRow(supabase: any, organizationId: string, row: ContactedRow, accessToken: string): Promise<{ synced: number; state: SingleContactSyncState; error?: string }> {
+  try {
+    const conversation = await readMailboxConversation(accessToken, row);
+    const boundRow = { ...row, thread_id: row.thread_id || conversation.messages.find(m => m.threadId)?.threadId, conversation_id: row.conversation_id || conversation.messages.find(m => m.conversationId)?.conversationId };
+    let synced = 0;
+    for (const reply of inboundCandidates(conversation.messages, boundRow)) {
+      if (row.replied_at && Date.parse(reply.receivedAt) <= Date.parse(row.replied_at)) {
+        // Backfill must not replace the latest conversation state. An older
+        // explicit opt-out still needs suppression even if first polling missed it.
+        if (isExplicitOptOut(reply.text || reply.html || '')) {
+          const stop = await supabase.rpc('record_scoped_unsubscribe_v2', { p_email: normalizeEmail(row.email), p_user_id: row.user_id, p_organization_id: organizationId, p_reason: 'reply_opt_out_backfill' });
+          if (stop.error) throw stop.error;
+        }
+        continue;
+      }
+      // The ingestion RPC owns idempotency through provider message aliases.
+      const inserted = await recordInboundReply(supabase, row, reply);
+      if (inserted) synced += 1;
+    }
+    const outboundAt = conversation.messages.filter(m => m.direction === 'outbound').at(-1)?.receivedAt;
+    if (!conversation.complete) {
+      const saved = await supabase.from('contacted_leads').update({
+        reply_sync_error: 'incomplete_thread',
+        ...(outboundAt ? { conversation_outbound_at: outboundAt } : {}),
+      }).eq('id', row.id).eq('organization_id', organizationId).select('id');
+      if (saved.error) throw saved.error;
+      return { synced, state: 'incomplete_thread', error: 'incomplete_thread' };
+    }
+    const saved = await supabase.from('contacted_leads').update({
+      reply_sync_succeeded_at: new Date().toISOString(),
+      reply_sync_error: null,
+      ...(outboundAt ? { conversation_outbound_at: outboundAt } : {}),
+    }).eq('id', row.id).eq('organization_id', organizationId).select('id');
+    if (saved.error) throw saved.error;
+    return { synced, state: 'ok' };
+  } catch (err: any) {
+    return { synced: 0, state: 'sync_failed', error: err?.message || String(err) };
+  }
+}
+
 export async function syncRepliesForOrganization(supabase: any, input: { organizationId: string; userId?: string | null; limit?: number; cursor?: string | null; fairQueue?: boolean; contactedIds?: string[] }): Promise<ReplySyncResult> {
   const limit = Number.isFinite(input.limit) ? Math.min(Math.max(Math.trunc(input.limit!), 1), 500) : 200;
   const result: ReplySyncResult = { scanned: 0, synced: 0, skippedNoToken: 0, errors: [], nextCursor: null };
@@ -523,35 +588,12 @@ export async function syncRepliesForOrganization(supabase: any, input: { organiz
         continue;
       }
 
-      const conversation = await readMailboxConversation(accessToken, row);
-      const boundRow = { ...row, thread_id: row.thread_id || conversation.messages.find(m => m.threadId)?.threadId, conversation_id: row.conversation_id || conversation.messages.find(m => m.conversationId)?.conversationId };
-      for (const reply of inboundCandidates(conversation.messages, boundRow)) {
-        if (row.replied_at && Date.parse(reply.receivedAt) <= Date.parse(row.replied_at)) {
-          // Backfill must not replace the latest conversation state. An older
-          // explicit opt-out still needs suppression even if first polling missed it.
-          if (isExplicitOptOut(reply.text || reply.html || '')) {
-            const stop = await supabase.rpc('record_scoped_unsubscribe_v2', { p_email: normalizeEmail(row.email), p_user_id: row.user_id, p_organization_id: input.organizationId, p_reason: 'reply_opt_out_backfill' });
-            if (stop.error) throw stop.error;
-          }
-          continue;
-        }
-        // The ingestion RPC owns idempotency through provider message aliases.
-        const inserted = await recordInboundReply(supabase, row, reply);
-        if (inserted) result.synced += 1;
+      const single = await syncSingleContactRow(supabase, input.organizationId, row, accessToken);
+      result.synced += single.synced;
+      if (single.state !== 'ok') {
+        noteError(single.state, row.id);
+        result.errors.push({ contactedId: row.id, email: row.email, provider: row.provider, error: single.error || single.state });
       }
-      const outboundAt = conversation.messages.filter(m => m.direction === 'outbound').at(-1)?.receivedAt;
-      if (!conversation.complete) {
-        noteError('incomplete_thread', row.id);
-        result.errors.push({ contactedId: row.id, error: 'incomplete_thread' });
-        continue;
-      }
-      const saved = await supabase.from('contacted_leads').update({
-        ...(conversation.complete ? { reply_sync_succeeded_at: new Date().toISOString() } : {}),
-        reply_sync_error: conversation.complete ? null : 'incomplete_thread',
-        ...(outboundAt ? { conversation_outbound_at: outboundAt } : {}),
-      }).eq('id', row.id).eq('organization_id', input.organizationId).select('id');
-      if (saved.error) throw saved.error;
-      if (!conversation.complete) result.errors.push({ contactedId: row.id, error: 'incomplete_thread' });
     } catch (err: any) {
       noteError('sync_failed', row.id);
       result.errors.push({ contactedId: row.id, email: row.email, provider: row.provider, error: err?.message || String(err) });
