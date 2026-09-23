@@ -26,7 +26,7 @@ export type CoworkEffectKind = z.infer<typeof coworkEffectKindSchema>;
 
 export const coworkDecisionSchema = z.object({
   action: z.enum(['leads.search', 'leads.get', 'research.get_existing', 'reads.parallel', 'reads.plan', 'specialists.review',
-    'crm.search', 'crm.get_lead', 'contacted.search', 'contacted.timeline', 'contacted.account', 'replies.meeting_chain', 'replies.attention', 'replies.stalled', 'metrics.overview', 'app.context', 'draft.get', 'campaigns.list', 'files.list', 'saved_searches.list', 'profile.get',
+    'crm.search', 'crm.get_lead', 'contacted.search', 'contacted.timeline', 'contacted.account', 'replies.meeting_chain', 'replies.attention', 'replies.stalled', 'metrics.overview', 'metrics.rates', 'metrics.diagnose', 'metrics.channels', 'metrics.incidents', 'app.context', 'draft.get', 'campaigns.list', 'files.list', 'saved_searches.list', 'profile.get',
     'privacy.contactability_batch', 'lists.review_batch',
     'crm.propose_note', 'prospecting.propose_search',
     'leads.save_contact', 'research.start', 'draft.request', 'lead.enrich', 'email.send',
@@ -67,7 +67,7 @@ export const coworkDecisionSchema = z.object({
 }).strict();
 
 export type CoworkReadAction = CoworkDomainRead | 'privacy.contactability_batch' | 'lists.review_batch' | 'leads.search' | 'leads.get' | 'research.get_existing'
-  | 'crm.search' | 'crm.get_lead' | 'contacted.search' | 'contacted.timeline' | 'contacted.account' | 'replies.meeting_chain' | 'replies.attention' | 'replies.stalled' | 'metrics.overview' | 'app.context' | 'draft.get' | 'campaigns.list' | 'files.list' | 'saved_searches.list' | 'profile.get'
+  | 'crm.search' | 'crm.get_lead' | 'contacted.search' | 'contacted.timeline' | 'contacted.account' | 'replies.meeting_chain' | 'replies.attention' | 'replies.stalled' | 'metrics.overview' | 'metrics.rates' | 'metrics.diagnose' | 'metrics.channels' | 'metrics.incidents' | 'app.context' | 'draft.get' | 'campaigns.list' | 'files.list' | 'saved_searches.list' | 'profile.get'
   | 'campaigns.batch_report' | 'campaigns.next_touch' | 'campaigns.retry_review' | 'campaigns.company_plan'
   | 'linkedin.network' | 'linkedin.inbox' | 'linkedin.quota' | 'linkedin.followups' | 'linkedin.jobs';
 export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draft.request' | 'lead.enrich' | 'email.send' | 'campaign.create' | 'campaign.activate' | 'campaign.pause' | 'code.execute'
@@ -479,7 +479,7 @@ export async function runCoworkReadLoop(input: {
       : decision.action === 'leads.search' || decision.action === 'crm.search' || decision.action === 'contacted.search'
       ? (decision.query ?? (decision.reads?.length === 1 && decision.reads[0].action === decision.action
           ? decision.reads[0].input : null))
-        : decision.action === 'metrics.overview' || decision.action === 'app.context' || decision.action === 'campaigns.list' || decision.action === 'files.list' || decision.action === 'saved_searches.list' || decision.action === 'profile.get'
+        : decision.action === 'metrics.overview' || decision.action === 'metrics.rates' || decision.action === 'metrics.diagnose' || decision.action === 'metrics.channels' || decision.action === 'metrics.incidents' || decision.action === 'app.context' || decision.action === 'campaigns.list' || decision.action === 'files.list' || decision.action === 'saved_searches.list' || decision.action === 'profile.get'
         || decision.action === 'linkedin.network' || decision.action === 'linkedin.inbox' || decision.action === 'linkedin.quota'
         || decision.action === 'linkedin.followups' || decision.action === 'linkedin.jobs'
         || decision.action === 'replies.attention' || decision.action === 'replies.stalled'

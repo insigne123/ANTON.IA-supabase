@@ -117,10 +117,12 @@ Documento de referencia permanente. Fuente de funciones: `C:\Users\nicol\Desktop
 
 | ID | Función | Estado | Qué falta para cerrarla |
 |---|---|---|---|
-| 7.1 | Tasas de respuesta, rebote y reunión | 🟡 | Período, unidad y registros de origen por métrica (línea base real: 1.143 correos · 4 respuestas · 2 reuniones · 0,17%). |
-| 7.2 | Diagnosticar bajo rendimiento | 🟡 | Probar hipótesis contra datos (el largo del mensaje no era el problema; mirar segmento y entregabilidad). Sin causalidad inventada. |
-| 7.3 | Comparar canales | 🔴 | Cohortes comparables y atribución (LinkedIn superó al correo en el caso real; no generalizar sin denominadores). |
-| 7.4 | Detectar fallas sistémicas | 🟡 | Detección de cierres a empresas en negociación o plantillas a quien ya dijo que sí; causas verificables. |
+| 7.1 | Tasas de respuesta, rebote y reunión | 🟢 | Lectura `metrics.rates` con período, unidad por contacto, denominador y origen por métrica (línea base real: 1.143 correos · 4 respuestas · 2 reuniones · 0,17%). |
+| 7.2 | Diagnosticar bajo rendimiento | 🟢 | Lectura `metrics.diagnose`: hipótesis contra datos con veredicto y límite; el largo del mensaje queda `untestable` por contrato. |
+| 7.3 | Comparar canales | 🟢 | Lectura `metrics.channels`: veredicto de comparabilidad y regla de atribución; LinkedIn sin resultados hoy, así que no hay comparación posible y la función lo dice. |
+| 7.4 | Detectar fallas sistémicas | 🟢 | Lectura `metrics.incidents`: toques con respuesta, inscripciones con do_not_contact, sin clasificar, errores de barrido/sync y excepciones abiertas, cada una con su acción. |
+
+**Avance verificado (23 sep 2026, local + PostgREST real + build):** 4 lecturas Cowork registradas (`metrics.rates`, `metrics.diagnose`, `metrics.channels`, `metrics.incidents`), sin migración (solo lectura), sintaxis PostgREST verificada contra producción, typecheck/build en verde, 12 pruebas en verde. Detalle en `docs/cowork-stage7-acceptance.md`. Cambios de app por desplegar; aceptación autenticada pendiente.
 
 **Dependencias:** partes 4, 5 y 6 (datos de ejecución y respuesta completos).
 

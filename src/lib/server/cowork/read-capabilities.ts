@@ -11,6 +11,7 @@ import { queryCoworkContactabilityBatch, queryCoworkDomainRead } from './domain-
 import { readCoworkBatchReport, readCoworkCompanyPlan, readCoworkNextTouch, readCoworkRetryReview } from './batch-reads';
 import { readCoworkLinkedinFollowups, readCoworkLinkedinInbox, readCoworkLinkedinJobs, readCoworkLinkedinNetwork, readCoworkLinkedinQuota } from './linkedin-reads';
 import { readContactedAccount, readMeetingChain, readRepliesAttention, readRepliesStalled } from './reply-reads';
+import { readMetricsChannels, readMetricsDiagnose, readMetricsIncidents, readMetricsRates } from './metric-reads';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -127,6 +128,22 @@ export function coworkReadCapabilities(
     },
     extended('crm.search', 'CRM del equipo (toda la organización) que coincide con un texto'),
     extended('crm.get_lead', 'Ficha CRM con historial de contactados, por UUID'),
+    {
+      name: 'metrics.rates', version: 1, effect: 'read', description: 'Tasas con período, denominador y origen por métrica',
+      input: z.literal(''), output: z.unknown(), execute: () => readMetricsRates(client, scope),
+    },
+    {
+      name: 'metrics.diagnose', version: 1, effect: 'read', description: 'Hipótesis de rendimiento probadas contra datos',
+      input: z.literal(''), output: z.unknown(), execute: () => readMetricsDiagnose(client, scope),
+    },
+    {
+      name: 'metrics.channels', version: 1, effect: 'read', description: 'Comparación email/LinkedIn sin generalizar sin denominadores',
+      input: z.literal(''), output: z.unknown(), execute: () => readMetricsChannels(client, scope),
+    },
+    {
+      name: 'metrics.incidents', version: 1, effect: 'read', description: 'Fallas sistémicas con qué hacer en cada una',
+      input: z.literal(''), output: z.unknown(), execute: () => readMetricsIncidents(client, scope),
+    },
     {
       name: 'replies.attention', version: 1, effect: 'read', description: 'Rebotes, bloqueos y respuestas sin clasificar con acción recomendada',
       input: z.literal(''), output: z.unknown(), execute: () => readRepliesAttention(client, scope),

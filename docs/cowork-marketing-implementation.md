@@ -79,10 +79,10 @@ El resultado v4 contiene `passed:false`: su rúbrica histórica esperaba turno d
 | 6.4 | Tibios olvidados | Hecha 23-09-2026: lectura `replies.stalled` (48 h, sin envío posterior ni compromiso abierto); detalle en `docs/cowork-stage6-acceptance.md`. |
 | 6.5 | Estado de cuenta | Hecha 23-09-2026: lectura `contacted.account` con conflictos + índice en prod; detalle en `docs/cowork-stage6-acceptance.md`. |
 | 6.6 | Origen de reunión | Hecha 23-09-2026: origen server-side + lectura `replies.meeting_chain` con veredicto; detalle en `docs/cowork-stage6-acceptance.md`. |
-| 7.1 | Tasas | P: helpers; períodos y denominadores completos |
-| 7.2 | Diagnóstico | P: hipótesis controladas; comparar evidencia sin causalidad inventada |
-| 7.3 | Canales | D: cohortes comparables y atribución |
-| 7.4 | Incidentes sistémicos | P: excepciones; detección automatizada y causas verificables |
+| 7.1 | Tasas | Hecha 23-09-2026: lectura `metrics.rates` 7/30 días con denominador y origen; detalle en `docs/cowork-stage7-acceptance.md`. |
+| 7.2 | Diagnóstico | Hecha 23-09-2026: lectura `metrics.diagnose` con 5 hipótesis y veredictos honestos; detalle en `docs/cowork-stage7-acceptance.md`. |
+| 7.3 | Canales | Hecha 23-09-2026: lectura `metrics.channels` que se niega a generalizar sin denominadores; detalle en `docs/cowork-stage7-acceptance.md`. |
+| 7.4 | Incidentes sistémicos | Hecha 23-09-2026: lectura `metrics.incidents` con 6 chequeos y acción; detalle en `docs/cowork-stage7-acceptance.md`. |
 | 8.1 | DNS entregabilidad | D: MX/SPF/DMARC/DKIM con selector y límites claros |
 | 8.2 | Causa de rebote | P: detector; métrica temporal y umbral configurable |
 | 8.3 | Remitente real | P: cuenta verificada; contraste con cabeceras entregadas |
