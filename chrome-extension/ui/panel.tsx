@@ -56,6 +56,9 @@ function App() {
   useEffect(() => { if (confirmSend) sendConfirmRef.current?.focus(); }, [confirmSend]);
   const [composeUrl, setComposeUrl] = useState('');
   const [jobs, setJobs] = useState<any[] | null>(null);
+  const [sweepNetwork, setSweepNetwork] = useState<any[] | null>(null);
+  const [sweepInbox, setSweepInbox] = useState<any[] | null>(null);
+  const [sweepComplete, setSweepComplete] = useState(false);
   const [campaigns, setCampaigns] = useState<any[] | null>(null);
   const [campaignId, setCampaignId] = useState('');
   const [origin, setOrigin] = useState('https://studio--leadflowai-3yjcy.us-central1.hosted.app');
@@ -72,6 +75,7 @@ function App() {
     dirty.current = false; setCachedEdits(null); setPhoneJob(null);
     setEnrichedReady(false); setConfirmSend(false); setSendState('');
     setCampaigns(null); setCampaignId(''); setJobs(null);
+    setSweepNetwork(null); setSweepInbox(null); setSweepComplete(false);
     epoch.current++; setProfile(empty); setUrl(''); setSaved(null); setResearch(null); setMessage(''); setMessageOptions([]); setSources([]); setComposeUrl(''); setNotice(''); setError('');
   };
   useEffect(() => {
@@ -321,6 +325,24 @@ function App() {
     setCampaigns(items => items?.map(item => item.id === campaignId ? { ...item, alreadyAdded: true, revision: result.revision } : item) || null);
     setNotice(result.alreadyAdded ? 'Este lead ya está en la campaña.' : 'Lead añadido. Revisa y aprueba la campaña desde la app para iniciar los envíos.');
   });
+  const collectSweep = (kind: 'network' | 'inbox') => run(kind === 'network' ? 'Recolectando red visible…' : 'Recolectando bandeja visible…', async valid => {
+    const result = await rpc('PROSPECT_SWEEP_COLLECT', { kind });
+    if (!valid()) return;
+    if (kind === 'network') setSweepNetwork(result.entries || []);
+    else setSweepInbox(result.threads || []);
+    setNotice(result.reachedCap
+      ? 'Se alcanzó el tope por página. Envía este reporte, desplázate para cargar más y repite.'
+      : 'Página recolectada. Si ya no queda más por cargar, marca barrido completo antes de enviar.');
+  });
+  const sendSweep = (kind: 'network' | 'inbox') => run('Enviando reporte…', async valid => {
+    const payload = kind === 'network'
+      ? { action: 'network-report', networkEntries: (sweepNetwork || []).map((entry: any) => ({ url: entry.url, name: entry.name })), networkHasMore: !sweepComplete }
+      : { action: 'inbox-report', inboxThreads: (sweepInbox || []).map((thread: any) => ({ key: thread.key, url: thread.url, name: thread.name, direction: thread.direction, at: thread.at, snippet: thread.snippet, replyNeeded: thread.replyNeeded })), inboxHasMore: !sweepComplete };
+    const result = await api(payload.action, payload);
+    if (!valid()) return;
+    if (kind === 'network') setSweepNetwork(null); else setSweepInbox(null);
+    setNotice(`Reporte guardado: ${result.observed} observados${result.hasMore ? ', quedan más por cargar.' : ', barrido completo.'}`);
+  });
 
   return <div className="shell">
     <header className="brand"><img className="brand-logo" src="icon.png" alt="Logo de Anton.IA" /><div><strong>Anton.IA</strong><span className="eyebrow">LINKEDIN WORKSPACE</span></div>
@@ -412,6 +434,19 @@ function App() {
                   <button className="secondary full" disabled={!candidate} onClick={() => void executeJob(item)}>Ejecutar ante este perfil</button>
                 </div>)}
                 {jobs && !jobs.filter(item => !item.expired).length && <p className="helper">Sin trabajos pendientes para este perfil.</p>}
+              </div>
+              <div className="email-section"><div className="section-heading"><h2>Barrido de red y bandeja</h2></div>
+                <p>Solo se registra lo visible en tu LinkedIn abierto; nada se infiere. Recolecta cada página y envía su reporte.</p>
+                <div className="columns"><div><button className="secondary full" disabled={!!busy} onClick={() => void collectSweep('network')}>Recolectar red visible</button>
+                  {sweepNetwork && <p className="helper">{sweepNetwork.length} contactos en esta página.</p>}</div>
+                  <div><button className="secondary full" disabled={!!busy} onClick={() => void collectSweep('inbox')}>Recolectar bandeja visible</button>
+                  {sweepInbox && <p className="helper">{sweepInbox.length} hilos en esta página.</p>}</div></div>
+                <label className="helper"><input type="checkbox" checked={sweepComplete} onChange={event => setSweepComplete(event.target.checked)} /> Llegué al final, no queda más por cargar</label>
+                <div className="columns">
+                  <button className="secondary full" disabled={!!busy || !sweepNetwork?.length} onClick={() => void sendSweep('network')}>Enviar reporte de red</button>
+                  <button className="secondary full" disabled={!!busy || !sweepInbox?.length} onClick={() => void sendSweep('inbox')}>Enviar reporte de bandeja</button>
+                </div>
+                <p className="helper">Abre tu red (linkedin.com/mynetwork) o Mensajes antes de recolectar. Desplázate para cargar más y repite hasta completar.</p>
               </div>
               <div className="email-section"><div className="section-heading"><h2>Seguimiento por email</h2><Mail size={16} /></div><p>Prepara el primer correo y una secuencia personalizada en Anton.IA.</p>
                 <details><summary>Añadir a una campaña existente</summary>

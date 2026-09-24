@@ -54,6 +54,12 @@
   }
   chrome.runtime.onMessage.addListener((request, sender, respond) => {
     if (sender.id !== chrome.runtime.id || sender.tab) return false;
+    if (request.action === 'PROSPECT_SWEEP_NETWORK' || request.action === 'PROSPECT_SWEEP_INBOX') {
+      try {
+        respond({ ok: true, ...(request.action === 'PROSPECT_SWEEP_NETWORK' ? sweepNetwork() : sweepInbox()) });
+      } catch (error) { respond({ ok: false, error: error.message }); }
+      return false;
+    }
     if (request.action === 'PROSPECT_READ_PROFILE') {
       const header = linkedinProfileHeader(request.fullName);
       const heading = header?.heading;
@@ -66,4 +72,52 @@
     prepare(request).then(result => respond({ ok: true, ...result })).catch(error => respond({ ok: false, error: error.message }));
     return true;
   });
+
+  // Barrido de red y bandeja: solo lectura del DOM visible, sin clics ni
+  // envíos. Lo que no está renderizado no se declara: el reporte indica si se
+  // alcanzó el tope y el usuario marca cuando llegó al final.
+  const SWEEP_NETWORK_CAP = 200;
+  const SWEEP_INBOX_CAP = 50;
+  function resolveCanonicalLinkedin(href) {
+    try {
+      const url = new URL(href, location.href);
+      return canonical(url.href);
+    } catch { return ''; }
+  }
+  function sweepNetwork() {
+    if (!/linkedin\.com$|linkedin\.com\//.test(location.hostname + location.pathname)) throw new Error('Abre LinkedIn para recolectar.');
+    const seen = new Map();
+    for (const anchor of document.querySelectorAll('a[href*="/in/"]')) {
+      if (seen.size >= SWEEP_NETWORK_CAP) break;
+      const url = resolveCanonicalLinkedin(anchor.getAttribute('href') || '');
+      if (!url || seen.has(url)) continue;
+      const name = (anchor.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+      if (!name) continue;
+      seen.set(url, name);
+    }
+    return { entries: Array.from(seen, ([url, name]) => ({ url, name })), reachedCap: seen.size >= SWEEP_NETWORK_CAP };
+  }
+  function sweepInbox() {
+    if (!/linkedin\.com$|linkedin\.com\//.test(location.hostname + location.pathname)) throw new Error('Abre LinkedIn para recolectar.');
+    const threads = [];
+    for (const item of document.querySelectorAll('li.msg-conversation-listitem')) {
+      if (threads.length >= SWEEP_INBOX_CAP) break;
+      const link = item.querySelector('a[href*="/messaging/thread/"]');
+      const path = (() => { try { return new URL(link?.getAttribute('href') || '', location.href).pathname; } catch { return ''; } })();
+      const name = (item.querySelector('.msg-conversation-card__participant-names')?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+      const snippet = (item.querySelector('.msg-conversation-card__message-snippet-body')?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+      if (!name && !snippet) continue;
+      const unread = !!item.querySelector('.msg-conversation-card__unread-count-notification-badge, [aria-label*="sin leer"], [aria-label*="unread"]');
+      threads.push({
+        key: path || `fila-${threads.length + 1}`,
+        url: path ? `https://www.linkedin.com${path}` : '',
+        name,
+        direction: /^\s*you\s*:/i.test(snippet) ? 'out' : 'in',
+        at: null,
+        snippet,
+        replyNeeded: unread,
+      });
+    }
+    return { threads, reachedCap: threads.length >= SWEEP_INBOX_CAP };
+  }
 })();

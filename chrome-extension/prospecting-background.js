@@ -90,6 +90,16 @@ async function prospectHandle(request, sender) {
       return { linkedinUrl: tab.url.split(/[?#]/)[0].replace(/\/+$/, ''), fullName: '', title: '', companyName: '', tabId: tab.id };
     }
   }
+  if (request.action === 'PROSPECT_SWEEP_COLLECT') {
+    if (!panelSender(sender)) throw new Error('Origen no autorizado.');
+    const kind = request.kind === 'inbox' ? 'inbox' : 'network';
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url?.startsWith('https://www.linkedin.com/')) throw new Error('Abre LinkedIn en la pestaña activa: tu red para contactos, Mensajes para la bandeja.');
+    await ensureLinkedinScripts(tab.id);
+    const collected = await chrome.tabs.sendMessage(tab.id, { action: kind === 'inbox' ? 'PROSPECT_SWEEP_INBOX' : 'PROSPECT_SWEEP_NETWORK' });
+    if (!collected?.ok) throw new Error(collected?.error || 'No se pudo leer la página. Desplázate y reintenta.');
+    return collected;
+  }
   if (request.action === 'PROSPECT_PREPARE') {
     if (typeof request.message !== 'string' || !request.message.trim() || request.message.length > 1200) throw new Error('Escribe un mensaje de hasta 1200 caracteres.');
     const tab = await chrome.tabs.get(request.tabId);
