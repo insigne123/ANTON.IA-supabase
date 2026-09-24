@@ -5,9 +5,27 @@
 // Uso: node scripts/measure-draft-edits.mjs [--org <uuid>] [--limit 200]
 // Requiere .env.local con NEXT_PUBLIC_SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY.
 import dotenv from 'dotenv'
+import { readFileSync } from 'node:fs'
 import { createClient } from '@supabase/supabase-js'
 
-dotenv.config({ path: '.env.local' })
+// Carga robusta de .env.local: ruta absoluta y comillas peladas a mano,
+// porque el parseo por defecto no es confiable en este entorno.
+function loadLocalEnv() {
+  try {
+    const text = readFileSync('C:\\Users\\nicol\\Desktop\\ANTON.IA\\.env.local', 'utf8');
+    for (const line of text.split(/\r?\n/)) {
+      const eq = line.indexOf('=');
+      if (eq === -1 || line.trim().startsWith('#')) continue;
+      const key = line.slice(0, eq).trim();
+      let value = line.slice(eq + 1).trim();
+      if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+      if (key && value) process.env[key] = value;
+    }
+  } catch {
+    dotenv.config({ path: '.env.local' });
+  }
+}
+loadLocalEnv();
 
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
