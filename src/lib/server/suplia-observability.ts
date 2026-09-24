@@ -10,6 +10,8 @@ export type OpenAiUsage = {
 };
 
 const MODEL_COSTS_USD_PER_1K: Record<string, { input: number; output: number }> = {
+  'gpt-6-luna': { input: 0.0001, output: 0.0005 },
+  'gpt-6-sol': { input: 0.002, output: 0.01 },
   'gpt-5.6-luna': { input: 0.0002, output: 0.0012 },
   'gpt-5.6-terra': { input: 0.002, output: 0.012 },
   'gpt-5.6-sol': { input: 0.004, output: 0.02 },

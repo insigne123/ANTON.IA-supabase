@@ -1,6 +1,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { generateStructured } from '@/ai/openai-json';
+import { OUTREACH_TONE_BLOCK } from '@/lib/outreach-tone';
 
 export const generateCampaignFlow = ai.defineFlow(
     {
@@ -63,6 +64,7 @@ export const generateCampaignFlow = ai.defineFlow(
                 - Personalization: Use {{lead.name}} for lead name, {{company}} for lead company, {{sender.name}} for sender
                 - Tone: Professional but conversational
                 - Length: Concise and impactful
+                - ${OUTREACH_TONE_BLOCK}
             `;
         } else if (campaignType === 'reconnection') {
             prompt = `
@@ -90,6 +92,7 @@ export const generateCampaignFlow = ai.defineFlow(
               - Use placeholders {{lead.name}}, {{company}}, {{sender.name}} when they help, but keep the structure strong even before personalization.
               - Mention the new offer and one concrete outcome.
               - Close each email with a simple CTA.
+              - ${OUTREACH_TONE_BLOCK}
             `;
         } else {
             prompt = `
@@ -108,6 +111,7 @@ export const generateCampaignFlow = ai.defineFlow(
               - The Body in HTML format (use <p>, <br>, <strong>). 
                 - Use placeholders {{lead.name}} for the lead's name and {{company}} for the lead's company.
                 - Use {{sender.name}} for my name.
+              - ${OUTREACH_TONE_BLOCK}
             `;
         }
 

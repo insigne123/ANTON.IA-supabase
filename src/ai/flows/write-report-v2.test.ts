@@ -6,7 +6,7 @@ import { serializeReportV2Context } from './write-report-v2-section';
 test('editor permits profile and commercial reasoning without decorative citations and bounds model selection', async () => {
   const result = await writeReportV2({ entity: { contact: { title: 'Coordinador de Seleccion' } }, analysis: {}, claims: [], sellerProfile: { products: [] }, language: 'es' } as any, {
     generate: (async (options: any) => {
-      assert.deepEqual(options.openAiModels, ['gpt-5.6-luna']);
+      assert.deepEqual(options.openAiModels, ['gpt-6-luna']);
       assert.equal(options.allowDefaultModelFallback, false);
       assert.match(options.prompt, /Coordinador de Seleccion/);
       return { data: { sections: [{ key: 'contact', title: 'Contacto', paragraphs: [{ text: 'Por su cargo, conviene explorar la coordinacion de entrevistas.', claimIds: [], context: 'target', basis: 'analysis' }] }] }, telemetry: { modelName: 'gpt-5.6-terra', durationMs: 1 } };
@@ -81,7 +81,7 @@ test('initial and repair editor prompts require per-opportunity measurement and 
         assert.match(options.schema.shape.sections.element.shape.paragraphs.element.shape.text.description, /cada oportunidad incluye su piloto y metrica/);
         const data = { sections: [{ key: 'fit', title: 'Piloto', paragraphs: [paragraph] }] };
         assert.doesNotThrow(() => options.schema.parse(data));
-        return { data, telemetry: { modelName: 'gpt-5.6-luna' } };
+        return { data, telemetry: { modelName: 'gpt-6-luna' } };
       }) as any,
     });
     assert.equal(calls, 1);

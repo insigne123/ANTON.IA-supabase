@@ -162,7 +162,7 @@ test('model review returns cost telemetry with normalized usage', async () => {
     });
     const review = await validateResearchSequence(buildSharedSequenceBrief(draftContextFixture()), sequenceDrafts(DISTINCT_SEQUENCE_BODIES));
     assert.equal(review.passed, true);
-    assert.equal(review.model, 'gpt-5.6-luna');
+    assert.equal(review.model, 'gpt-6-luna');
     assert.deepEqual(review.usage, { inputTokens: 4100, outputTokens: 120, reasoningTokens: 30 });
   } finally {
     globalThis.fetch = previousFetch;

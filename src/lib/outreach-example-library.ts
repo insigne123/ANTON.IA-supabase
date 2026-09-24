@@ -8,6 +8,41 @@
 export type OutreachExampleGoal = 'initial' | 'proof' | 'angle' | 'close';
 export type OutreachExampleRole = 'operations' | 'people' | 'finance' | 'executive' | 'any';
 
+// La variedad entre correos viene de la entrada, no de la temperatura: el código
+// asigna un tipo de apertura por correo y rota los ejemplos. Si todos los
+// correos parten igual, se leen como envío masivo aunque el texto varíe.
+export type OutreachOpeningKind = 'dato' | 'pregunta' | 'observacion';
+
+export const OUTREACH_OPENING_KINDS: OutreachOpeningKind[] = ['dato', 'pregunta', 'observacion'];
+
+export type OutreachOpeningScaffold = {
+  kind: OutreachOpeningKind;
+  instruction: string;
+  scaffold: string;
+};
+
+const OPENING_SCAFFOLDS: OutreachOpeningScaffold[] = [
+  {
+    kind: 'dato',
+    instruction: 'Abre con el dato fechado del destinatario en una frase y su implicancia en la siguiente.',
+    scaffold: '[Dato con fecha: qué pasó y cuándo]. [Qué significa eso para su operación en una línea].',
+  },
+  {
+    kind: 'pregunta',
+    instruction: 'Abre con una pregunta directa sobre su operación que solo esa persona puede responder.',
+    scaffold: '[Pregunta concreta sobre su operación, sin rodeos]. [Por qué la haces, en media línea].',
+  },
+  {
+    kind: 'observacion',
+    instruction: 'Abre con una observación honesta de su industria, sin fingir un dato que no tienes.',
+    scaffold: '[Lo que se ve seguido en operaciones como la suya]. [Cómo pega eso en su caso].',
+  },
+];
+
+export function selectOpeningScaffold(kind: OutreachOpeningKind): OutreachOpeningScaffold {
+  return OPENING_SCAFFOLDS.find((scaffold) => scaffold.kind === kind) || OPENING_SCAFFOLDS[0];
+}
+
 export type OutreachExample = {
   id: string;
   goals: OutreachExampleGoal[];
@@ -215,7 +250,8 @@ export function selectOutreachExamples(input: {
       angle: `Hola [Nombre],\n\n[Una segunda aplicación de ${line.theme}, pertinente al mismo cargo y respaldada por el brief].\n\n[Qué cambia en esta aplicación, sin sumar otra línea de servicio ni atribuir problemas].\n\n[Único CTA aprobado].`,
       close: `Hola [Nombre],\n\n[Cierre breve del tema de ${line.theme}, dejando una salida sin presión]. [Resultado autorizado en pocas palabras, sin nuevo pitch ni afirmar falta de respuesta].\n\n[Único CTA aprobado; sin agregar otro pedido].`,
     };
-    return [{ id: `v2-${line.id}-${role}-${input.goal}`, goals: [input.goal], roles: [role], subject: input.goal === 'close' ? 'Cerrando el ciclo — [Empresa]' : '[Empresa] · [tema concreto]', body: bodies[input.goal], imitate: `${stage}. ${line.mechanism}. Adaptación por cargo: ${roleAngle}. No importar cifras, marcas, clientes, cobertura, garantías ni condiciones legales del documento.` }].filter((example) => !avoid.has(example.id));
+    const scaffoldExample = { id: `v2-${line.id}-${role}-${input.goal}`, goals: [input.goal], roles: [role], subject: input.goal === 'close' ? 'Cerrando el ciclo — [Empresa]' : '[Empresa] · [tema concreto]', body: bodies[input.goal], imitate: `${stage}. ${line.mechanism}. Adaptación por cargo: ${roleAngle}. No importar cifras, marcas, clientes, cobertura, garantías ni condiciones legales del documento.` };
+    return [scaffoldExample, ...curatedCompanion(input.goal, role, avoid)].filter((example) => !avoid.has(example.id));
   }
   const pool = EXAMPLES.filter((example) => example.goals.includes(input.goal) && !avoid.has(example.id));
   const ranked = [...pool].sort((left, right) => {
@@ -225,6 +261,20 @@ export function selectOutreachExamples(input: {
     return left.id.localeCompare(right.id);
   });
   return ranked.slice(0, Math.max(1, Math.min(3, input.count ?? 2)));
+}
+
+// Un ejemplo curado del playbook junto al andamiaje sintético: el andamiaje da
+// la estructura del paso y el curado enseña el tono humano. Nunca cifras,
+// clientes ni coberturas del curado (su imitate ya lo prohíbe).
+function curatedCompanion(goal: OutreachExampleGoal, role: OutreachExampleRole, avoid: Set<string>) {
+  const pool = EXAMPLES.filter((example) => example.goals.includes(goal) && !avoid.has(example.id));
+  const ranked = [...pool].sort((left, right) => {
+    const leftRole = left.roles.includes(role) || left.roles.includes('any') ? 0 : 1;
+    const rightRole = right.roles.includes(role) || right.roles.includes('any') ? 0 : 1;
+    if (leftRole !== rightRole) return leftRole - rightRole;
+    return left.id.localeCompare(right.id);
+  });
+  return ranked.slice(0, 1);
 }
 
 export function outreachExampleById(id: string) {

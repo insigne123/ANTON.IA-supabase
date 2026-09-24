@@ -1,7 +1,7 @@
 export type ReportModelTier = 'fast' | 'balanced' | 'reasoning';
 
 export function getReportModels(_tier: ReportModelTier): string[] {
-  return ['gpt-5.6-luna'];
+  return ['gpt-6-luna'];
 }
 
 export function reportGenerationOptions(tier: ReportModelTier) {

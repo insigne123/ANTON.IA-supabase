@@ -113,8 +113,13 @@ async function main() {
               { email: 'ana@acme.cl', company: 'Acme', companyKey: 'company:acme', basis: 'company', sendDay: '2026-09-22', reservedDay: null },
               { email: 'luis@acme.cl', company: 'Acme', companyKey: 'company:acme', basis: 'company', sendDay: '2026-09-23', reservedDay: null },
               { email: 'mia@beta.cl', company: 'Beta', companyKey: 'company:beta', basis: 'company', sendDay: '2026-09-22', reservedDay: null } ] };
-          if (action === 'campaigns.list') return { scope: 'own_campaigns',
-            campaigns: [{ id: CAMPAIGN, name: 'Lote Q4', status: 'approved', revision: 1, recipients: 3, createdAt: '2026-09-01T12:00:00Z' }] };
+           if (action === 'campaigns.list') return { scope: 'own_campaigns',
+             campaigns: [{ id: CAMPAIGN, name: 'Lote Q4', status: 'approved', revision: 1, recipients: 3, createdAt: '2026-09-01T12:00:00Z' }] };
+           if (action === 'message.context') return { scope: 'organization_messaging_context', configured: true,
+             context: { voiceExamples: ['Correo breve y consultivo; un pedido por mensaje.'],
+               prohibitedTerms: [], requiredTerms: [], approvedClaims: [{ claim: 'Ofrecemos servicios transitorios.', evidence: 'Material comercial aprobado para esta prueba sintética.' }],
+               trialOffer: null, defaultStyleProfileId: null, roleCta: null, verticalNotes: null,
+               updatedAt: '2026-09-01T12:00:00Z' } };
           if (action === 'leads.search') {
             const all = [
               { id: '00000000-0000-4000-8000-000000000021', name: 'Ana', email: 'ana@acme.cl' },
@@ -129,9 +134,11 @@ async function main() {
           }
           if (action === 'contacted.search') return { scope: 'organization_contacted', returned: 0, limit: 20,
             truncated: false, items: [], evidence: { source: 'application_contact_records', pendingStatus: 'needs_verification' } };
-          if (action === 'contacted.timeline') return { scope: 'organization_contacted', truncated: false,
-            contacted: [], pendingStatus: 'needs_verification' };
-          throw new Error(`Unexpected tool: ${action}`);
+           if (action === 'contacted.timeline') return { scope: 'organization_contacted', truncated: false,
+             contacted: [], pendingStatus: 'needs_verification' };
+           if (action === 'compliance.check') return { scope: 'organization_compliance', lead: { id: input },
+             verdict: 'allow', reasons: [], nextEligibleAt: null, sendAuthorized: false };
+           throw new Error(`Unexpected tool: ${action}`);
         },
       });
       if (scenario.id === 'seven_touch_default') {

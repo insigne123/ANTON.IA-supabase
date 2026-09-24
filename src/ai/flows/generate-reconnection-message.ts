@@ -3,6 +3,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
 import { generateStructured } from '@/ai/openai-json';
+import { OUTREACH_TONE_BLOCK } from '@/lib/outreach-tone';
 
 const ReconnectionMessageInputSchema = z.object({
   brief: z.object({
@@ -88,6 +89,7 @@ Instrucciones:
 - Si hay una guia previa de asunto o cuerpo, usala como direccion, no como copia literal.
 - Evita sonar como spam, newsletter o mensaje masivo.
 - No uses placeholders en la salida final.
+- ${OUTREACH_TONE_BLOCK}
 
 Devuelve solo JSON valido con esta forma exacta:
 {"subject":"...","bodyHtml":"..."}

@@ -32,6 +32,10 @@ export const coworkCampaignDraftSchema = z.object({
     context.addIssue({ code: 'custom', path: ['emails'], message: 'Hay destinatarios duplicados.' });
   }
   value.messages.forEach((message, index) => {
+    if (value.emails.length > 1 && /^\s*(?:hola|estimad[oa])\s+[\p{L}]{2,}/iu.test(message.body)) {
+      context.addIssue({ code: 'custom', path: ['messages', index, 'body'],
+        message: 'Una campaña para varias personas no puede incluir el nombre fijo de una sola en el saludo. Usa un saludo neutro.' });
+    }
     // A reviewed sequence must not promise to stop and then send again.
     // Reject explicit closing promises; never silently rewrite approved copy.
     const text = `${message.subject} ${message.body}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '');

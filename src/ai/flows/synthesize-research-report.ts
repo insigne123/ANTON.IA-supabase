@@ -27,7 +27,7 @@ import {
   type ResearchSnapshotV1,
 } from '@/lib/research-contracts';
 
-export const RESEARCH_REPORT_PROMPT_VERSION = 'native-research-report-synthesis/v8';
+export const RESEARCH_REPORT_PROMPT_VERSION = 'native-research-report-synthesis/v9';
 
 const DEFAULT_ANALYST_TIMEOUT_MS = 45_000;
 const MAX_ANALYST_INPUT_BYTES = 48_000;
@@ -85,11 +85,11 @@ const narrativeSectionCharacterLimits: Record<NarrativeSection, number> = {
 };
 
 const narrativeSectionInstructions: Record<NarrativeSection, string> = {
-  executiveSummary: 'Escribe un briefing breve dirigido al usuario antes de contactar al lead. Explica que dato del contacto, senal reciente y contexto de empresa realmente importan, y como usarlos al abrir la conversacion. No copies titulos, snippets, slogans, etiquetas de autor ni frases canonicas de forma literal. No incluyas hipotesis ni encaje comercial.',
-  leadContext: 'Explica exclusivamente el contexto publico verificado del contacto, como su rol o trayectoria. No conviertas datos importados del sujeto en hechos investigados.',
-  companyProfile: 'Explica que hace la empresa, su oferta, mercado y escala solo cuando las afirmaciones canonicas lo respalden.',
-  commercialReading: 'Presenta posibles retos o prioridades concretas que convenga explorar. Derivalos solo de senales e hipotesis canonicas, formula cada uno como hipotesis explicita y explica que preguntar para validarlo. Nunca afirmes que existe un dolor, causa, necesidad, presupuesto o intencion de compra.',
-  serviceFit: 'Habla directamente al usuario y explica que parte de su oferta declarada podria ser relevante para el contexto canonico de la empresa. Presenta el encaje como una posibilidad a validar, nunca como necesidad, dolor, presupuesto, intencion o fit confirmado.',
+  executiveSummary: 'Escribe un briefing breve dirigido al usuario antes de contactar al lead. Explica que dato del contacto, senal reciente y contexto de empresa realmente importan, y como usarlos al abrir la conversacion. Cierra con una línea de por qué importa para este contacto. No copies titulos, snippets, slogans, etiquetas de autor ni frases canonicas de forma literal. No incluyas hipotesis ni encaje comercial. Tono de colega: frases cortas, sin muletillas corporativas.',
+  leadContext: 'Explica exclusivamente el contexto publico verificado del contacto, como su rol o trayectoria. No conviertas datos importados del sujeto en hechos investigados. Tono de colega: frases cortas, sin muletillas corporativas.',
+  companyProfile: 'Explica que hace la empresa, su oferta, mercado y escala solo cuando las afirmaciones canonicas lo respalden. Describe la actividad como contexto, nunca como descubrimiento para el lector. Tono de colega: frases cortas, sin muletillas corporativas.',
+  commercialReading: 'Presenta posibles retos o prioridades concretas que convenga explorar. Derivalos solo de senales e hipotesis canonicas, formula cada uno como hipotesis explicita y explica que preguntar para validarlo. Nunca afirmes que existe un dolor, causa, necesidad, presupuesto o intencion de compra. Tono de colega: frases cortas, sin muletillas corporativas.',
+  serviceFit: 'Habla directamente al usuario y explica que parte de su oferta declarada podria ser relevante para el contexto canonico de la empresa. Presenta el encaje como una posibilidad a validar, nunca como necesidad, dolor, presupuesto, intencion o fit confirmado. Tono de colega: frases cortas, sin muletillas corporativas.',
 };
 
 export type ResearchReportSynthesisResult = {
@@ -912,7 +912,10 @@ Rules:
 - Address the product user as a practical research analyst. Connect and paraphrase cited claims into useful prose; never paste page titles, snippets, slogans, author labels, navigation, or canonical sentences verbatim.
 - Do not add facts, entities, numbers, causes, customers, needs, pains, intent, or conclusions absent from the canonical claims. A possible challenge must remain a question or hypothesis to validate, not a fact.
 - Use only claim IDs present below. Facts and hypotheses must retain their classification and uncertainty; hypotheses require explicit cautious language.
-- Seller context, when present, is private declared context and not evidence about the target. It may describe only the seller's own capabilities.
+ - Seller context, when present, is private declared context and not evidence about the target. It may describe only the seller's own capabilities.
+ - Section-specific citation rule: leadContext cites ONLY person-scoped factual claims; companyProfile cites ONLY company-scoped facts; executiveSummary should start from a company fact when available. commercialReading and serviceFit cite ONLY company-scoped claims, never a person's role to prove the company's need.
+ - For commercialReading and serviceFit, EACH sentence (including the last sentence) must say "podría", "conviene explorar/validar" or another explicit uncertainty marker. Do not append a second sentence as an unqualified recommendation.
+ - Do not call information "public", "verified", "recent" or "documented" unless a cited claim supports that status; do not state the absence of signals, products, market, scale or priorities as a fact. If there is one supported claim, prefer one useful sentence over filler.
 
 Canonical section input:
 ${JSON.stringify(canonicalInput)}

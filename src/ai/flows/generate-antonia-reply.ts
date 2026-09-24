@@ -3,6 +3,7 @@
 import { z } from 'genkit';
 import { ai } from '@/ai/genkit';
 import { generateStructured } from '@/ai/openai-json';
+import { OUTREACH_TONE_BLOCK } from '@/lib/outreach-tone';
 
 const AssetSchema = z.object({
   name: z.string(),
@@ -143,11 +144,12 @@ ${JSON.stringify(input.assets || [])}
 
 Reglas:
 - Maximo 140 palabras.
-- No uses frases roboticas ni menciones IA.
+- ${OUTREACH_TONE_BLOCK}
+- Un solo pedido: si ya propusiste reunión, no agregues otra pregunta ni otro CTA.
 - Si el lead pide reunion y existe booking link, usalo de forma natural.
 - Si el lead pide brochure o deck, solo recomienda un asset disponible si realmente corresponde.
 - Si el caso parece complejo, mantente prudente y cierra con CTA simple.
-- Devuelve HTML simple con <p>, <br>, <strong> y nada mas.
+- Devuelve HTML simple con <p>, <br> y nada mas (sin <strong> salvo que resalte un dato concreto).
 
 Devuelve solo JSON valido:
 {"subject":"...","bodyText":"...","bodyHtml":"...","recommendedAssetNames":["..."]}

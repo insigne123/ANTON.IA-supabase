@@ -32,7 +32,8 @@ const startedAt = Date.now();
 const calls: StructuredTelemetry[] = [];
 const save = (name: string, data: unknown) => writeFile(path.join(output, name), JSON.stringify(data, null, 2));
 const generate: typeof generateStructuredWithTelemetry = async (options) => {
-  if (options.allowDefaultModelFallback !== false || options.openAiModels?.length !== 1 || options.openAiModels[0] !== 'gpt-5.6-luna') throw new Error('REPORT_MODEL_POLICY_VIOLATION');
+  if (options.allowDefaultModelFallback !== false || options.openAiModels?.length !== 1
+    || !['gpt-6-luna', 'gpt-6-sol'].includes(options.openAiModels[0])) throw new Error('REPORT_MODEL_POLICY_VIOLATION');
   const result = await generateStructuredWithTelemetry(options);
   calls.push(result.telemetry);
   return result;
@@ -134,8 +135,8 @@ async function main() {
   validateReportV2CoverageGapConsistency(result.document);
   const estimatedModelCostUsd = calls.reduce((sum, call) => {
     const usage = call.usage as any;
-    const inputRate = 0.2;
-    const outputRate = 1.2;
+    const inputRate = call.modelName.startsWith('gpt-6-sol') ? 2 : 0.1;
+    const outputRate = call.modelName.startsWith('gpt-6-sol') ? 10 : 0.5;
     const cached = Number(usage?.prompt_tokens_details?.cached_tokens) || 0;
     const written = Number(usage?.prompt_tokens_details?.cache_write_tokens) || 0;
     const plain = Math.max(0, (Number(usage?.prompt_tokens) || 0) - cached - written);

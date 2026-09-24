@@ -87,6 +87,7 @@ test('defaults every specialized research analyst to Luna', async () => {
     await assert.rejects(() => synthesizeResearchReportDocumentV1({
         snapshot: draftSnapshotFixture(),
         sellerProfile: { companyName: 'Northstar', services: ['Automatización de operaciones'] },
+        generatedAt: '2026-08-22T12:00:00.000Z',
       }, {
         generate: async (input) => {
           selectedModels.push(input.openAiModel);
@@ -94,7 +95,7 @@ test('defaults every specialized research analyst to Luna', async () => {
         },
       }), ReportSynthesisFailed);
     assert.equal(selectedModels.length, 5);
-    assert.deepEqual(new Set(selectedModels), new Set(['gpt-5.6-luna']));
+    assert.deepEqual(new Set(selectedModels), new Set(['gpt-6-luna']));
   } finally {
     previous.forEach((value, name) => {
       if (value === undefined) delete process.env[name];
@@ -134,8 +135,8 @@ test('runs five bounded specialized analysts in parallel and preserves valid int
   assert.equal(new Set(prompts).size, 5);
   assert.equal(result.metadata.generationMethod, 'model');
   assert.equal(result.metadata.model, 'test-model');
-  assert.equal(result.metadata.promptVersion, 'native-research-report-synthesis/v8');
-  assert.equal(RESEARCH_REPORT_PROMPT_VERSION, 'native-research-report-synthesis/v8');
+  assert.equal(result.metadata.promptVersion, 'native-research-report-synthesis/v9');
+  assert.equal(RESEARCH_REPORT_PROMPT_VERSION, 'native-research-report-synthesis/v9');
   assert.match(result.document.narrative?.executiveSummary[0]?.text || '', /^Antes de contactar/);
   assert.equal(
     result.document.narrative?.companyProfile[0].text,

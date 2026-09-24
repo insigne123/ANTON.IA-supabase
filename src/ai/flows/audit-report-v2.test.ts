@@ -52,7 +52,7 @@ test('P7 uses a separate Luna review with the actual evidence', async () => {
       return { data: { issues: [] }, telemetry: { modelName: 'gpt-5.6-luna', durationMs: 1 } };
     }) as any,
   });
-  assert.deepEqual(options.openAiModels, ['gpt-5.6-luna']);
+  assert.deepEqual(options.openAiModels, ['gpt-6-luna']);
   assert.equal(options.allowDefaultModelFallback, false);
   assert.ok(options.prompt.includes(facts[0].statement));
   assert.match(options.prompt, /Acme ofrece soporte operativo y administracion/);

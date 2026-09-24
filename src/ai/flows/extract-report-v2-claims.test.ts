@@ -113,8 +113,8 @@ test('accepts a real non-empty Luna payload through the strict claim contract, i
   assert.equal(calls.length, 1);
   assert.equal(calls[0].provider, 'openai');
   assert.equal(calls[0].allowDefaultModelFallback, false);
-  assert.equal(calls[0].openAiModels?.[0], 'gpt-5.6-luna');
-  assert.deepEqual(calls[0].openAiModels, ['gpt-5.6-luna']);
+  assert.equal(calls[0].openAiModels?.[0], 'gpt-6-luna');
+  assert.deepEqual(calls[0].openAiModels, ['gpt-6-luna']);
   assert.equal(extracted.errorCode, null);
   assert.equal(extracted.claims.length, 5);
   assert.ok(extracted.claims.every((claim) => claim.observedAt === null && claim.freshnessDays === null));

@@ -23,7 +23,7 @@ test('three distinct specialties share one Luna request and count its telemetry 
   assert.equal(new Set(calls.map((call) => call.prompt.split('\n').slice(0, 4).join('\n'))).size, 1);
   assert.ok(calls.every((call) => call.prompt.includes('Directora de Finanzas') && call.prompt.includes('accounting')));
   assert.ok(calls.every((call) => call.allowDefaultModelFallback === false && call.maxOutputTokens === 7500));
-  calls.forEach((call) => assert.deepEqual(call.openAiModels, ['gpt-5.6-luna']));
+  calls.forEach((call) => assert.deepEqual(call.openAiModels, ['gpt-6-luna']));
   assert.equal(result.filter((item) => item.brief?.observations.length).length, 3);
   assert.equal(result.filter((item) => item.telemetry).length, 1);
   assert.match(calls[0].prompt, /Para Finanzas\/CFO prioriza facturacion, cobranza, cierre y excepciones/);

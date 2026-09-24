@@ -130,7 +130,7 @@ test('field badges are never color-only and keep light/dark plus focus styles', 
   assert.ok(source.includes('Skeleton'), 'missing Skeleton for loading');
 });
 
-test('NativeResearchReport supports preview/full, hides duplicated header, and keeps full sections plus sticky footer', () => {
+test('NativeResearchReport supports preview/full, hides duplicated header, and keeps full sections plus an accessible draft footer', () => {
   const source = readWorktreeFile('src/components/research/NativeResearchReport.tsx');
   assert.ok(source.includes("variant?: NativeResearchReportVariant") || source.includes("variant = 'full'"), 'missing variant prop');
   assert.ok(source.includes("'preview'") && source.includes("'full'"), 'missing preview/full variants');
@@ -143,8 +143,8 @@ test('NativeResearchReport supports preview/full, hides duplicated header, and k
   assert.ok(source.includes('<Table'), 'missing Table primitive for assumptions');
   assert.ok(source.includes('Vacíos y contradicciones'), 'missing gaps/contradictions');
   assert.ok(source.includes('Fuentes y calidad'), 'missing sources/quality');
-  assert.ok(source.includes('sticky bottom-0'), 'missing accessible sticky action footer');
   assert.ok(source.includes('aria-label="Acciones del informe"'), 'missing footer accessible label');
+  assert.ok(source.includes('aria-label="Configurar correos para este contacto"'), 'missing draft configuration popover');
   assert.ok(source.includes('Collapsible'), 'missing keyboard-accessible collapsibles');
 });
 

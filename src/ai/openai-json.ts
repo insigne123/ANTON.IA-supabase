@@ -40,7 +40,7 @@ export type StructuredResult<T extends z.ZodTypeAny> = {
   telemetry: StructuredTelemetry;
 };
 
-const DEFAULT_OPENAI_MODEL = 'gpt-5.6-luna';
+const DEFAULT_OPENAI_MODEL = 'gpt-6-luna';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_GLM_MODEL = process.env.GLM_MODEL || 'glm-5.2';
 const DEFAULT_GLM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
@@ -68,8 +68,8 @@ function chatCompletionsUrl(baseUrl: string) {
   return normalized.endsWith('/chat/completions') ? normalized : `${normalized}/chat/completions`;
 }
 
-function isGpt5Model(model: string) {
-  return /^gpt-5(?:[.-]|$)/i.test(model);
+function isReasoningModel(model: string) {
+  return /^gpt-[56](?:[.-]|$)/i.test(model);
 }
 
 function deterministicSchemaName(schema: object) {
@@ -207,11 +207,11 @@ async function tryChatCompletions<T extends z.ZodTypeAny>(
   const startedAt = Date.now();
   const requestBody = {
     model,
-    ...(isGpt5Model(model) ? {} : { temperature }),
+    ...(isReasoningModel(model) ? {} : { temperature }),
     ...(config.provider === 'openai' && opts.maxOutputTokens !== undefined
       ? { max_completion_tokens: opts.maxOutputTokens } : {}),
-    ...(config.provider === 'openai' && isGpt5Model(model) && opts.reasoningEffort !== undefined
-      ? { reasoning_effort: opts.reasoningEffort } : {}),
+    ...(config.provider === 'openai' && isReasoningModel(model)
+      ? { reasoning_effort: opts.reasoningEffort ?? (model.toLowerCase().startsWith('gpt-6-') ? 'low' : undefined) } : {}),
     response_format: responseFormat(opts.schema, config.provider),
     messages: [
       {

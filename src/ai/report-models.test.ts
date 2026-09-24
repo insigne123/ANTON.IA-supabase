@@ -47,7 +47,7 @@ for (const override of ['gpt-5.6-sol', 'gpt-5.6-astra', 'gpt-5.6-terra']) {
   test(`report models and limits ignore ${override} environment overrides`, (t) => {
     mockReportEnv(t, override);
     for (const tier of TIERS) {
-      const expected = ['gpt-5.6-luna'];
+      const expected = ['gpt-6-luna'];
       assert.deepEqual(getReportModels(tier), expected);
       assert.deepEqual(reportGenerationOptions(tier), {
         provider: 'openai',
@@ -107,10 +107,10 @@ test('reasoning reports use Luna and expose the actual model', async (t) => {
     prompt: 'Return a report.',
     schema: z.object({ summary: z.string() }),
   });
-  assert.deepEqual(models, ['gpt-5.6-luna']);
+  assert.deepEqual(models, ['gpt-6-luna']);
   assert.deepEqual(result.data, { summary: 'ok' });
-  assert.equal(result.telemetry.modelName, 'gpt-5.6-luna-2026-09-08');
-  assert.equal(result.telemetry.requestedModel, 'gpt-5.6-luna');
+  assert.equal(result.telemetry.modelName, 'gpt-6-luna-2026-09-08');
+  assert.equal(result.telemetry.requestedModel, 'gpt-6-luna');
   assert.deepEqual(result.telemetry.usage, { prompt_tokens: 100, completion_tokens: 30 });
 });
 
@@ -126,10 +126,10 @@ test('report rate limits attempt each allowed model only once', async (t) => {
     prompt: 'Return a report.',
     schema: z.object({ summary: z.string() }),
   }), /OPENAI_HTTP_429/);
-  assert.deepEqual(models, ['gpt-5.6-luna']);
+  assert.deepEqual(models, ['gpt-6-luna']);
 });
 
-test('invalid Luna output fails closed without escalating to Terra', async (t) => {
+test('invalid Luna output fails closed without escalating to an older model', async (t) => {
   mockReportEnv(t, 'gpt-5.6-terra');
   const models: string[] = [];
   t.mock.method(globalThis, 'fetch', async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -139,5 +139,5 @@ test('invalid Luna output fails closed without escalating to Terra', async (t) =
   await assert.rejects(generateStructuredWithTelemetry({
     ...reportGenerationOptions('reasoning'), prompt: 'Return a report.', schema: z.object({ summary: z.string() }),
   }));
-  assert.deepEqual(models, ['gpt-5.6-luna']);
+  assert.deepEqual(models, ['gpt-6-luna']);
 });

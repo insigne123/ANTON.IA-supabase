@@ -75,10 +75,10 @@ test('separates prompts and sends a deterministic strict schema to OpenAI', asyn
     assert.deepEqual(secondResult, firstResult);
     assert.equal(requestedUrl, 'https://api.openai.com/v1/chat/completions');
     assert.equal(requestedBodies.length, 2);
-    assert.equal(requestedBodies[0].model, 'gpt-5.6-luna');
+    assert.equal(requestedBodies[0].model, 'gpt-6-luna');
     assert.equal(requestedBodies[0].temperature, undefined);
     assert.equal(requestedBodies[0].max_completion_tokens, undefined);
-    assert.equal(requestedBodies[0].reasoning_effort, undefined);
+    assert.equal(requestedBodies[0].reasoning_effort, 'low');
     assert.deepEqual(requestedBodies[0].messages, [
       { role: 'system', content: 'Extract the requested fields without adding commentary.' },
       { role: 'user', content: 'Return a value.' },
@@ -326,6 +326,19 @@ test('sends requested GPT-5 token controls and records the effective response mo
   assert.equal(result.telemetry.requestedModel, 'gpt-5.6-luna');
   assert.deepEqual(result.telemetry.usage, usage);
   assert.ok(result.telemetry.durationMs >= 0);
+});
+
+test('GPT-6 Sol omits temperature and defaults to low reasoning for structured output', async (t) => {
+  let body: RequestBody = {};
+  mockOpenAi(t, async (_input, init) => {
+    body = JSON.parse(String(init?.body));
+    return Response.json({ choices: [{ message: { content: '{"value":"ok"}' } }] });
+  });
+  await generateStructured({ prompt: 'Return a value.', schema: z.object({ value: z.string() }),
+    provider: 'openai', openAiModel: 'gpt-6-sol', temperature: 0.7 });
+  assert.equal(body.model, 'gpt-6-sol');
+  assert.equal(body.temperature, undefined);
+  assert.equal(body.reasoning_effort, 'low');
 });
 
 test('omits GPT-5 reasoning controls for other OpenAI models', async (t) => {

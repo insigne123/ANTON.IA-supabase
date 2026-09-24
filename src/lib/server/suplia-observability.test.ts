@@ -12,6 +12,8 @@ test('normalizes OpenAI usage fields', () => {
 });
 
 test('estimates model cost when pricing is known', () => {
+  assert.equal(estimateOpenAiCostUsd('gpt-6-luna', { prompt_tokens: 1000, completion_tokens: 1000 }), 0.0006);
+  assert.equal(estimateOpenAiCostUsd('gpt-6-sol', { prompt_tokens: 1000, completion_tokens: 1000 }), 0.012);
   assert.equal(estimateOpenAiCostUsd('gpt-5.6-luna', { prompt_tokens: 1000, completion_tokens: 1000 }), 0.0014);
   assert.equal(estimateOpenAiCostUsd('gpt-5.6-terra', { prompt_tokens: 1000, completion_tokens: 1000 }), 0.014);
   assert.equal(estimateOpenAiCostUsd('gpt-5.6-sol', { prompt_tokens: 1000, completion_tokens: 1000 }), 0.024);

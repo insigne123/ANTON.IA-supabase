@@ -38,7 +38,7 @@ function generated(context: DraftContextV2): GeneratedOutreachFromDraftContextV2
     subject: 'Procesos en Acme',
     body: `Hola Ada,
 
-Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+Si Acme quiere reducir el trabajo manual de sus equipos de operaciones, hay una forma de partir sin sumar puestos permanentes.
 
 En Northstar automatizamos tareas repetitivas para reducir trabajo manual y dejar la información disponible para el equipo.`,
     personalization: [{
@@ -47,6 +47,8 @@ En Northstar automatizamos tareas repetitivas para reducir trabajo manual y deja
       sourceUrl: evidence.source.url,
     }],
     hypothesisIds: [],
+    hechos_usados: ['actividad: ayuda a equipos de operaciones a reducir trabajo manual'],
+    datos_faltantes: [],
     provider: 'openai',
     model: 'test-model',
     promptVersion: NATIVE_DRAFT_PROMPT_VERSION,
@@ -230,7 +232,7 @@ test('native drafting prefers visible Report V2 and persists its exact document 
       subject: 'Menos tareas manuales en Acme',
       body: `Hola Ada,
 
-Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+Si Acme quiere reducir el trabajo manual de sus equipos de operaciones, hay una forma de partir sin sumar puestos permanentes.
 
 En Northstar automatizamos operaciones repetitivas para reducir tareas manuales y mantener la información disponible para el equipo.`,
     }),
@@ -408,7 +410,7 @@ test('native drafting permits one corrective generation pass, then persists a tr
   assert.equal(result.draft.lifecycle, 'draft');
   assert.equal(result.draft.preflight.status, 'passed');
   assert.equal(result.draft.approval.status, 'pending');
-  assert.match(result.draft.content.text || '', /Hola Ada,\n\nAcme comunica que ayuda/);
+  assert.match(result.draft.content.text || '', /Hola Ada,\n\nSi Acme quiere reducir/);
   assert.ok(result.draft.content.text?.endsWith(result.context.constraints.cta.exactText));
   assert.equal(fixture.persisted.length, 1);
   assert.deepEqual(fixture.metadata[0].claimIds, ['claim-acme-overview']);
@@ -421,9 +423,9 @@ test('generated company-definition opening triggers the bounded editorial rewrit
     fixture.value.generate = async ({ context, rewrite }) => {
       calls += 1;
       const output = generated(context);
-      if (rewrite) assert.ok(rewrite.errors.some((error) => error.includes('ficha')));
+      if (rewrite) assert.ok(rewrite.errors.some((error) => error.includes('propia empresa')));
       if (repairSucceeds && rewrite) return output;
-      return { ...output, body: output.body.replace('Acme comunica que ayuda', 'Acme es una empresa que ayuda') };
+      return { ...output, body: output.body.replace('Si Acme quiere reducir el trabajo manual', 'Acme es una empresa que ayuda') };
     };
     const result = await createNativeDraft({ ...access, snapshotId: DRAFT_FIXTURE_IDS.snapshot }, fixture.value);
     assert.equal(calls, 2);
@@ -441,7 +443,7 @@ test('follow-up sequence step persists its own varied CTA without the approved t
       subject: 'Avance de procesos en Acme',
       body: `Hola Ada,
 
-Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+Si Acme quiere reducir el trabajo manual de tus equipos de operaciones, hay otro aspecto que conviene mirar: los contratos de quienes se incorporen.
 
 En Northstar automatizamos operaciones repetitivas para reducir trabajo manual y mantener la información disponible para el equipo.
 
@@ -648,7 +650,7 @@ test('native drafting deterministically narrows a catalogued personalization bef
       ...output,
       body: output.body
         .replace(
-          'Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.',
+          'Si Acme quiere reducir el trabajo manual de sus equipos de operaciones',
           'Acme reúne outsourcing de Recursos Humanos, reclutamiento y servicios transitorios.',
         )
         .replace(
@@ -963,7 +965,7 @@ test('simulated numeric drafts accept supported paraphrase, fail closed twice, a
       const invented = mode === 'unsupported-twice' || (mode === 'recovery' && calls === 1);
       return {
         ...output,
-        body: output.body.replace('Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.',
+        body: output.body.replace('Si Acme quiere reducir el trabajo manual de sus equipos de operaciones, hay una forma de partir sin sumar puestos permanentes.',
           `Acme opera 16 sedes para reducir trabajo manual en operaciones.${invented ? ' Acme transporta 1 FCL.' : ''}`),
       };
     };
@@ -1024,7 +1026,7 @@ test('requested AI rewrites create a canonical revision and replace its generati
         subject: 'Menos tareas manuales en Acme',
         body: `Hola Ada,
 
-Acme comunica que ayuda a equipos de operaciones a reducir trabajo manual.
+Si Acme quiere reducir el trabajo manual de tus equipos de operaciones, hay una forma de partir sin sumar puestos permanentes.
 
 En Northstar automatizamos operaciones repetitivas para reducir tareas manuales y mantener la información disponible para el equipo.
 
@@ -1072,7 +1074,7 @@ En Northstar automatizamos operaciones repetitivas para reducir tareas manuales 
   assert.equal(result.draft.revision, 2);
   assert.equal(result.draft.parentVersionId, initial.draft.versionId);
   assert.equal(result.preflight.status, 'passed');
-  assert.match(result.draft.content.text || '', /Hola Ada,\n\nAcme comunica que ayuda/);
+  assert.match(result.draft.content.text || '', /Hola Ada,\n\nSi Acme quiere reducir/);
   assert.deepEqual(replacedMetadata[0].claimIds, ['claim-acme-overview']);
   assert.equal(replacedMetadata[0].generationMethod, 'model');
 });

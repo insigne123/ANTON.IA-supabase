@@ -3,11 +3,11 @@ import type { SupliaMessage } from '@/lib/suplia/types';
 export type OpenAiModelTier = 'fast' | 'balanced' | 'orchestrator' | 'reasoning' | 'critical';
 export type AiModelProvider = 'openai' | 'glm';
 
-const DEFAULT_FAST_MODEL = 'gpt-5.6-luna';
-const DEFAULT_BALANCED_MODEL = 'gpt-5.6-luna';
-const DEFAULT_ORCHESTRATOR_MODEL = 'gpt-5.6-terra';
-const DEFAULT_REASONING_MODEL = 'gpt-5.6-terra';
-const DEFAULT_CRITICAL_MODEL = 'gpt-5.6-sol';
+const DEFAULT_FAST_MODEL = 'gpt-6-luna';
+const DEFAULT_BALANCED_MODEL = 'gpt-6-luna';
+const DEFAULT_ORCHESTRATOR_MODEL = 'gpt-6-sol';
+const DEFAULT_REASONING_MODEL = 'gpt-6-sol';
+const DEFAULT_CRITICAL_MODEL = 'gpt-6-sol';
 const DEFAULT_GLM_MODEL = 'glm-5.2';
 
 function env(name: string) {

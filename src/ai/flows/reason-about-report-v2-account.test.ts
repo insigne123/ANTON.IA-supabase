@@ -41,7 +41,7 @@ test('P5 uses only Luna and replaces model arithmetic with configured volume cal
     sellerProfile: { products: [{ key: 'product-a', volumeAssumptions: { scenarioMultipliers: [1, 2, 3], minutesPerEvent: 6 } }] },
   }, { generate: (async (input: any) => { options = input; return modelAnalysis(); }) as any });
   assert.equal(options.provider, 'openai');
-  assert.deepEqual(options.openAiModels, ['gpt-5.6-luna']);
+  assert.deepEqual(options.openAiModels, ['gpt-6-luna']);
   assert.equal(options.allowDefaultModelFallback, false);
   assert.ok(!options.prompt.includes(claims[0].internalId));
   assert.equal(result.analysis.volumeModel?.scenarios.length, 3);

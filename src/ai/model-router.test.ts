@@ -37,24 +37,24 @@ async function withCleanModelEnv(run: () => void | Promise<void>) {
   }
 }
 
-test('uses the GPT-5.6 tier defaults and Luna-only default fallback', async () => {
+test('routes GPT-6 Luna and Sol with a Luna fallback', async () => {
   await withCleanModelEnv(() => {
-    assert.equal(getOpenAiModelForTier('fast'), 'gpt-5.6-luna');
-    assert.equal(getOpenAiModelForTier('balanced'), 'gpt-5.6-luna');
-    assert.equal(getOpenAiModelForTier('orchestrator'), 'gpt-5.6-terra');
-    assert.equal(getOpenAiModelForTier('reasoning'), 'gpt-5.6-terra');
-    assert.equal(getOpenAiModelForTier('critical'), 'gpt-5.6-sol');
+    assert.equal(getOpenAiModelForTier('fast'), 'gpt-6-luna');
+    assert.equal(getOpenAiModelForTier('balanced'), 'gpt-6-luna');
+    assert.equal(getOpenAiModelForTier('orchestrator'), 'gpt-6-sol');
+    assert.equal(getOpenAiModelForTier('reasoning'), 'gpt-6-sol');
+    assert.equal(getOpenAiModelForTier('critical'), 'gpt-6-sol');
 
-    assert.deepEqual(getOpenAiModelsForTier('fast'), ['gpt-5.6-luna']);
-    assert.deepEqual(getOpenAiModelsForTier('balanced'), ['gpt-5.6-luna']);
-    assert.deepEqual(getOpenAiModelsForTier('orchestrator'), ['gpt-5.6-terra', 'gpt-5.6-luna']);
-    assert.deepEqual(getOpenAiModelsForTier('reasoning'), ['gpt-5.6-terra', 'gpt-5.6-luna']);
-    assert.deepEqual(getOpenAiModelsForTier('critical'), ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']);
+    assert.deepEqual(getOpenAiModelsForTier('fast'), ['gpt-6-luna']);
+    assert.deepEqual(getOpenAiModelsForTier('balanced'), ['gpt-6-luna']);
+    assert.deepEqual(getOpenAiModelsForTier('orchestrator'), ['gpt-6-sol', 'gpt-6-luna']);
+    assert.deepEqual(getOpenAiModelsForTier('reasoning'), ['gpt-6-sol', 'gpt-6-luna']);
+    assert.deepEqual(getOpenAiModelsForTier('critical'), ['gpt-6-sol', 'gpt-6-luna']);
     assert.doesNotMatch(getOpenAiModelsForTier('critical').join(','), /gpt-4o-mini|gpt-5\.[45]/);
   });
 });
 
-test('routes generic and classification work to Luna, strategy to Terra, and high-risk work to Sol', async () => {
+test('routes generic and classification work to Luna and strategy or high-risk work to Sol', async () => {
   await withCleanModelEnv(() => {
     const messages: Parameters<typeof selectSupliaModelTier>[0]['messages'] = [];
     const genericTier = selectSupliaModelTier({ message: 'Redacta un email breve para presentar el producto.', messages });
@@ -62,10 +62,10 @@ test('routes generic and classification work to Luna, strategy to Terra, and hig
     const strategyTier = selectSupliaModelTier({ message: 'Analiza y recomienda una estrategia comercial.', messages });
     const highRiskTier = selectSupliaModelTier({ message: 'Envia una campana a todos sin aprobar.', messages });
 
-    assert.equal(getOpenAiModelForTier(genericTier), 'gpt-5.6-luna');
-    assert.equal(getOpenAiModelForTier(classificationTier), 'gpt-5.6-luna');
-    assert.equal(getOpenAiModelForTier(strategyTier), 'gpt-5.6-terra');
-    assert.equal(getOpenAiModelForTier(highRiskTier), 'gpt-5.6-sol');
+    assert.equal(getOpenAiModelForTier(genericTier), 'gpt-6-luna');
+    assert.equal(getOpenAiModelForTier(classificationTier), 'gpt-6-luna');
+    assert.equal(getOpenAiModelForTier(strategyTier), 'gpt-6-sol');
+    assert.equal(getOpenAiModelForTier(highRiskTier), 'gpt-6-sol');
   });
 });
 
@@ -76,8 +76,8 @@ test('keeps explicit model environment overrides compatible', async () => {
     assert.equal(getOpenAiModelForTier('reasoning'), 'custom-reasoning-model');
     assert.deepEqual(getOpenAiModelsForTier('reasoning'), [
       'custom-reasoning-model',
-      'gpt-5.6-terra',
-      'gpt-5.6-luna',
+      'gpt-6-sol',
+      'gpt-6-luna',
       'custom-fallback-model',
     ]);
   });
@@ -87,15 +87,15 @@ test('declares the current tier models in local and App Hosting config', () => {
   const appHosting = readFileSync('apphosting.yaml', 'utf8');
   const envExample = readFileSync('.env.example', 'utf8');
   const expected = {
-    OPENAI_MODEL: 'gpt-5.6-luna',
-    OPENAI_EMAIL_MODEL: 'gpt-5.6-luna',
-    OPENAI_FAST_MODEL: 'gpt-5.6-luna',
-    OPENAI_BALANCED_MODEL: 'gpt-5.6-luna',
-    OPENAI_ORCHESTRATOR_MODEL: 'gpt-5.6-terra',
-    OPENAI_REASONING_MODEL: 'gpt-5.6-terra',
-    NATIVE_RESEARCH_REPORT_MODEL: 'gpt-5.6-terra',
-    OPENAI_CRITICAL_MODEL: 'gpt-5.6-sol',
-    OPENAI_FALLBACK_MODEL: 'gpt-5.6-luna',
+    OPENAI_MODEL: 'gpt-6-luna',
+    OPENAI_EMAIL_MODEL: 'gpt-6-luna',
+    OPENAI_FAST_MODEL: 'gpt-6-luna',
+    OPENAI_BALANCED_MODEL: 'gpt-6-luna',
+    OPENAI_ORCHESTRATOR_MODEL: 'gpt-6-sol',
+    OPENAI_REASONING_MODEL: 'gpt-6-sol',
+    NATIVE_RESEARCH_REPORT_MODEL: 'gpt-6-luna',
+    OPENAI_CRITICAL_MODEL: 'gpt-6-sol',
+    OPENAI_FALLBACK_MODEL: 'gpt-6-luna',
   } as const;
 
   for (const [name, model] of Object.entries(expected)) {

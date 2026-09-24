@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { buildSharedSequenceBrief, SharedSequenceBriefSchema, type SharedSequenceBrief } from '@/lib/outreach-sequence-brief';
+import { OUTREACH_OPENING_KINDS, type OutreachOpeningKind } from '@/lib/outreach-example-library';
 
 import {
   MessagingDraftV1Schema,
@@ -904,6 +905,21 @@ export async function prepareNativeSequenceBrief(input: NativeDraftAccess & { sn
   return { brief: buildSharedSequenceBrief(result.context, input.followUpCount), seller: result.context.seller, writingStyle: style };
 }
 
+// La variedad de aperturas viene de la entrada: cada destinatario rota de
+// forma estable entre dato/pregunta/observación según su email, salvo que el
+// llamador pida un tipo explícito (que sí entra a la identidad del borrador).
+export function resolveOpeningKind(explicit: unknown, email: string): OutreachOpeningKind {
+  const normalized = String(explicit || '').trim().toLocaleLowerCase('es');
+  if ((OUTREACH_OPENING_KINDS as string[]).includes(normalized)) return normalized as OutreachOpeningKind;
+  const hash = canonicalSha256(`opening-kind:${email.toLowerCase()}`);
+  return OUTREACH_OPENING_KINDS[parseInt(hash.slice(0, 8), 16) % OUTREACH_OPENING_KINDS.length];
+}
+
+function explicitOpeningKind(explicit: unknown): OutreachOpeningKind | null {
+  const normalized = String(explicit || '').trim().toLocaleLowerCase('es');
+  return (OUTREACH_OPENING_KINDS as string[]).includes(normalized) ? (normalized as OutreachOpeningKind) : null;
+}
+
 export async function createNativeDraft(input: NativeDraftAccess & {
   snapshotId: string;
   styleProfileId?: string | null;
@@ -911,6 +927,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   idempotencyKey?: string | null;
   userInstruction?: string | null;
   instruction?: string | null;
+  openingKind?: OutreachOpeningKind | string | null;
   sequenceContext?: OutreachSequenceContextV2;
   sharedSequenceBrief?: SharedSequenceBrief;
   campaignRecipientStepId?: string | null;
@@ -926,11 +943,12 @@ export async function createNativeDraft(input: NativeDraftAccess & {
   const sequenceContext = input.sequenceContext
     ? OutreachSequenceContextV2Schema.parse(input.sequenceContext)
     : undefined;
-  const snapshotRow = await (dependencies?.getSnapshot?.({ snapshotId: input.snapshotId, access: input })
-    || getNativeSnapshot({ snapshotId: input.snapshotId, access: input }));
+  const snapshotRow = await (dependencies?.getSnapshot?.({ snapshotId: input.snapshotId, access: input })    || getNativeSnapshot({ snapshotId: input.snapshotId, access: input }));
   if (!snapshotRow) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
   const parsedSnapshot = parseNativeSnapshotRow(snapshotRow, input.snapshotId);
   const snapshotEmail = text(parsedSnapshot.subject.email).toLowerCase();
+  const openingKind = resolveOpeningKind(input.openingKind, snapshotEmail);
+  const requestedOpeningKind = explicitOpeningKind(input.openingKind);
   const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
   if (snapshotEmail && await isSuppressed(snapshotEmail, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
   const style = input.writingStyle || await loadDraftWritingStyle({
@@ -988,6 +1006,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
     idempotencyKey: text(input.idempotencyKey) || null,
     ...(userInstruction ? { userInstruction } : {}),
     instruction: instruction || null,
+    ...(requestedOpeningKind ? { openingKind: requestedOpeningKind } : {}),
     sequenceContext: sequenceContext || null,
     ...(sharedSequenceBrief ? { sharedSequenceBrief } : {}),
     snapshotId: parsedSnapshot.id,
@@ -1125,7 +1144,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
         ...(sharedSequenceBrief ? { sharedSequenceBrief } : {}),
         ...(userInstruction ? { userInstruction } : {}),
         ...(instruction ? { instruction } : {}),
-        ...(sequenceContext ? { sequenceContext } : {}),
+        ...(sequenceContext ? { sequenceContext } : { openingKind }),
       });
     } catch (error) {
       console.warn('[native-drafts] OpenAI generation failed:', error);
@@ -1141,7 +1160,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
 
     const ctaPolicy = ctaPolicyFor(sequenceContext);
     let generatedOutput = outputForPreflight(context, generated, ctaPolicy);
-    let validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+    let validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
     bufferedAttempts.push({
       generated,
       attemptNo: 1,
@@ -1155,7 +1174,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
           ...(sharedSequenceBrief ? { sharedSequenceBrief } : {}),
           ...(userInstruction ? { userInstruction } : {}),
           ...(instruction ? { instruction } : {}),
-          ...(sequenceContext ? { sequenceContext } : {}),
+          ...(sequenceContext ? { sequenceContext } : { openingKind }),
           rewrite: {
             previous: generatedOutput,
             errors: validation.issues.map((issue) => issue.message),
@@ -1173,7 +1192,7 @@ export async function createNativeDraft(input: NativeDraftAccess & {
         });
       }
       generatedOutput = outputForPreflight(context, generated, ctaPolicy);
-      validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+      validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
       bufferedAttempts.push({
         generated,
         attemptNo: 2,
@@ -1339,6 +1358,7 @@ export async function reviseNativeDraft(input: NativeDraftAccess & {
 type NativeDraftRewriteInput = NativeDraftAccess & {
   draft: MessagingDraftV1;
   instruction: string;
+  openingKind?: OutreachOpeningKind | string | null;
   styleProfileId?: string | null;
   sequenceContext?: OutreachSequenceContextV2;
   previewOnly?: boolean;
@@ -1384,6 +1404,7 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
   if (!snapshotRow) throw new Error('NATIVE_RESEARCH_SNAPSHOT_NOT_FOUND');
   const snapshot = parseNativeSnapshotRow(snapshotRow, input.draft.researchSnapshotId);
   const email = assertNativeDraftRecipient(snapshot, input.draft);
+  const openingKind = resolveOpeningKind(input.openingKind, email);
   const isSuppressed = dependencies?.isSuppressed || ((value, access) => isEmailSuppressedForScope(value, access));
   if (await isSuppressed(email, input)) throw new Error('NATIVE_DRAFT_PRIVACY_SUPPRESSED');
   const requestedStyleProfileId = text(input.styleProfileId) || metadata.styleProfileId;
@@ -1479,7 +1500,7 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
     try {
       generated = await generate({
         context,
-        ...(sequenceContext ? { sequenceContext } : {}),
+        ...(sequenceContext ? { sequenceContext } : { openingKind }),
         rewrite: { previous, errors: [], instruction },
       });
     } catch (error) {
@@ -1490,7 +1511,7 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
     }
     const ctaPolicy = ctaPolicyFor(sequenceContext);
     let generatedOutput = outputForPreflight(context, generated, ctaPolicy);
-    let validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+    let validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
     bufferedAttempts.push({
       generated,
       attemptNo: 1,
@@ -1501,7 +1522,7 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
       try {
         generated = await generate({
           context,
-          ...(sequenceContext ? { sequenceContext } : {}),
+          ...(sequenceContext ? { sequenceContext } : { openingKind }),
           rewrite: {
             previous: generatedOutput,
             errors: validation.issues.map((issue) => issue.message),
@@ -1514,7 +1535,7 @@ export async function rewriteNativeDraft(input: NativeDraftRewriteInput, depende
         throw new Error('NATIVE_DRAFT_OPENAI_REWRITE_FAILED');
       }
       generatedOutput = outputForPreflight(context, generated, ctaPolicy);
-      validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
+      validation = validateDraftPreflightV2(context, generatedOutput, { existingContentFingerprints, now, checkGeneratedCopy: true, checkHumanTone: true, expectedCtaCount: ctaPolicy.expectedCtaCount });
       bufferedAttempts.push({
         generated,
         attemptNo: 2,

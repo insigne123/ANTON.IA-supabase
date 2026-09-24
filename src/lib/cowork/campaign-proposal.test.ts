@@ -66,3 +66,9 @@ test('permits a closing promise at the actual end only', () => {
     { subject: 'Cierre', body: 'Cierro el hilo.', delayDays: 2 },
   ] }).success, true);
 });
+
+test('multi-recipient campaigns reject a fixed greeting with one person’s name', () => {
+  const multi = { ...base, emails: ['ana@example.com', 'luis@example.com'] };
+  assert.equal(coworkCampaignDraftSchema.safeParse({ ...multi, messages: [{ subject: 'Tema', body: 'Hola Ana, una consulta.', delayDays: 0 }] }).success, false);
+  assert.equal(coworkCampaignDraftSchema.safeParse({ ...multi, messages: [{ subject: 'Tema', body: 'Hola, una consulta.', delayDays: 0 }] }).success, true);
+});

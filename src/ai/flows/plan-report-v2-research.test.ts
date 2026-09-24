@@ -70,8 +70,8 @@ test('accepts a real four-query Luna plan without padding seven mandatory famili
   assert.equal(calls.length, 1);
   assert.equal(calls[0].provider, 'openai');
   assert.equal(calls[0].allowDefaultModelFallback, false);
-  assert.equal(calls[0].openAiModels?.[0], 'gpt-5.6-luna');
-  assert.deepEqual(calls[0].openAiModels, ['gpt-5.6-luna']);
+  assert.equal(calls[0].openAiModels?.[0], 'gpt-6-luna');
+  assert.deepEqual(calls[0].openAiModels, ['gpt-6-luna']);
   assert.deepEqual(plan.queries, focusedQueries);
   assert.ok(plan.queries.every((query) => !['hiring', 'industry', 'registry'].includes(query.family)));
   assert.equal(plan.queries[0].recencyDays, null);

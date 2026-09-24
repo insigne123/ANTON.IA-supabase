@@ -9,7 +9,8 @@ test('the brief plans four distinct stages before writing and retains facts, app
   const brief = buildSharedSequenceBrief(context);
   assert.equal(RESEARCH_SEQUENCE_STEPS.length, 3);
   assert.deepEqual(brief.stages.map((stage) => stage.goal), ['initial', 'proof', 'angle', 'close']);
-  assert.equal(new Set(brief.stages.flatMap((stage) => stage.exampleIds)).size, 4);
+  for (const stage of brief.stages) assert.equal(stage.exampleIds.length, 2);
+  assert.equal(new Set(brief.stages.flatMap((stage) => stage.exampleIds)).size, 8);
   const authorized = JSON.parse(brief.authorizedContext);
   assert.deepEqual(authorized.writingStyle, context.style.profile);
   assert.equal(authorized.approvedCta, context.constraints.cta.exactText);

@@ -1,0 +1,186 @@
+{
+  "version": "outreach-eval-set/v1",
+  "description": "Set fijo para medir calidad de borradores. No editar casos para comparar versiones; agregar nuevos con otro id.",
+  "seller": {
+    "name": "Carla Muñoz",
+    "jobTitle": "Ejecutiva comercial",
+    "companyName": "ServiPro",
+    "services": [
+      "Dotación de personal temporal",
+      "Reemplazo de turnos el mismo día",
+      "Administración laboral (contratos, anexos y finiquitos)"
+    ],
+    "valueProposition": "Ponemos la dotación que necesitas por el tiempo que la necesitas, y el costo se va con el peak.",
+    "description": "Empresa de outsourcing y servicios transitorios en Chile."
+  },
+  "cases": [
+    {
+      "id": "frio-retail-senal",
+      "type": "frio",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Rodrigo", "cargo": "Gerente de Operaciones", "empresa": "Tiendas Ejemplo", "dominio": "tiendasejemplo.cl" },
+      "actividadEmpresa": "Cadena de retail con 40 tiendas en la zona sur.",
+      "senal": { "hecho": "Abrirán dos tiendas nuevas en la zona sur antes de diciembre", "fuente": "nota de prensa", "fecha": "2026-09-10" }
+    },
+    {
+      "id": "frio-mineria-senal",
+      "type": "frio",
+      "tratamiento": "usted",
+      "destinatario": { "nombre": "Paula", "cargo": "Jefa de Recursos Humanos", "empresa": "Minera Cascada", "dominio": "mineracascada.cl" },
+      "actividadEmpresa": "Faena minera con más de 2.000 trabajadores entre propios y contratistas.",
+      "senal": { "hecho": "La Dirección del Trabajo anunció fiscalización de acreditación de contratistas en la región", "fuente": "noticia sectorial", "fecha": "2026-09-05" }
+    },
+    {
+      "id": "frio-logistica-senal",
+      "type": "frio",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Felipe", "cargo": "Jefe de Centro de Distribución", "empresa": "CD Pudahuel", "dominio": "cdpudahuel.cl" },
+      "actividadEmpresa": "Centro de distribución que opera turnos noche de domingo a jueves.",
+      "senal": { "hecho": "Publicaron 12 ofertas de operarios de bodega en las últimas 3 semanas", "fuente": "portal de empleos", "fecha": "2026-09-12" }
+    },
+    {
+      "id": "frio-agricola-senal",
+      "type": "frio",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Marcela", "cargo": "Gerenta Agrícola", "empresa": "Packing Santa Rosa", "dominio": "packingsantarosa.cl" },
+      "actividadEmpresa": "Packing de cerezas en la Sexta Región.",
+      "senal": { "hecho": "La cosecha de cerezas parte en 6 semanas y la temporada pasada les faltó gente en selección", "fuente": "temporada de la industria", "fecha": "2026-09-01" }
+    },
+    {
+      "id": "frio-seguridad-senal",
+      "type": "frio",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Daniela", "cargo": "Administradora", "empresa": "Edificios Parque Sur", "dominio": "parquesur.cl" },
+      "actividadEmpresa": "Administración de 8 edificios residenciales y 2 centros comerciales.",
+      "senal": { "hecho": "Tres conserjes renunciaron en agosto y cubren turnos con horas extra", "fuente": "conversación previa", "fecha": "2026-08-28" }
+    },
+    {
+      "id": "frio-construccion-senal",
+      "type": "frio",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Jorge", "cargo": "Administrador de Obra", "empresa": "Constructora Andina", "dominio": "candina.cl" },
+      "actividadEmpresa": "Constructora con 3 obras activas en Santiago.",
+      "senal": { "hecho": "Parten una obra de 18 meses en Quilicura en noviembre con peak de 120 personas", "fuente": "nota de prensa", "fecha": "2026-09-08" }
+    },
+    {
+      "id": "frio-retail-sin-senal",
+      "type": "frio",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Rodrigo", "cargo": "Gerente de Operaciones", "empresa": "Tiendas Ejemplo", "dominio": "tiendasejemplo.cl" },
+      "actividadEmpresa": "Cadena de retail con 40 tiendas en la zona sur.",
+      "senal": null
+    },
+    {
+      "id": "frio-mineria-sin-senal",
+      "type": "frio",
+      "tratamiento": "usted",
+      "destinatario": { "nombre": "Paula", "cargo": "Jefa de Recursos Humanos", "empresa": "Minera Cascada", "dominio": "mineracascada.cl" },
+      "actividadEmpresa": "Faena minera con más de 2.000 trabajadores entre propios y contratistas.",
+      "senal": null
+    },
+    {
+      "id": "frio-startup-sin-senal",
+      "type": "frio",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Camila", "cargo": "People Manager", "empresa": "Fintech PagosYa", "dominio": "pagosya.cl" },
+      "actividadEmpresa": "Startup de pagos con 90 personas, creciendo al doble este año.",
+      "senal": null
+    },
+    {
+      "id": "frio-sin-nombre",
+      "type": "frio",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "", "cargo": "Gerente de Operaciones", "empresa": "Tiendas Ejemplo", "dominio": "tiendasejemplo.cl" },
+      "actividadEmpresa": "Cadena de retail con 40 tiendas en la zona sur.",
+      "senal": { "hecho": "Abrirán dos tiendas nuevas en la zona sur antes de diciembre", "fuente": "nota de prensa", "fecha": "2026-09-10" }
+    },
+    {
+      "id": "frio-no-decisor",
+      "type": "frio",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Diego", "cargo": "Analista de Recursos Humanos", "empresa": "Tiendas Ejemplo", "dominio": "tiendasejemplo.cl" },
+      "actividadEmpresa": "Cadena de retail con 40 tiendas en la zona sur.",
+      "senal": { "hecho": "Abrirán dos tiendas nuevas en la zona sur antes de diciembre", "fuente": "nota de prensa", "fecha": "2026-09-10" }
+    },
+    {
+      "id": "frio-solo-nombre-empresa",
+      "type": "frio",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Lucía", "cargo": "Jefa de Administración", "empresa": "Comercial Los Andes", "dominio": "losandes.cl" },
+      "actividadEmpresa": "",
+      "senal": null
+    },
+    {
+      "id": "frio-con-cifras",
+      "type": "frio",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Rodrigo", "cargo": "Gerente de Operaciones", "empresa": "Tiendas Ejemplo", "dominio": "tiendasejemplo.cl" },
+      "actividadEmpresa": "Cadena de retail con 40 tiendas en la zona sur.",
+      "senal": { "hecho": "La rotación de cajeros llegó al 18% el último trimestre según su reporte interno", "fuente": "reporte del cliente", "fecha": "2026-08-30" }
+    },
+    {
+      "id": "frio-banca-usted",
+      "type": "frio",
+      "tratamiento": "usted",
+      "destinatario": { "nombre": "Ricardo", "cargo": "Gerente General", "empresa": "Banco Regional", "dominio": "bancoregional.cl" },
+      "actividadEmpresa": "Banco regional con 60 sucursales.",
+      "senal": { "hecho": "Abren 5 sucursales nuevas en regiones durante el primer semestre", "fuente": "nota de prensa", "fecha": "2026-09-03" }
+    },
+    {
+      "id": "secuencia-retail",
+      "type": "secuencia",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Rodrigo", "cargo": "Gerente de Operaciones", "empresa": "Tiendas Ejemplo", "dominio": "tiendasejemplo.cl" },
+      "actividadEmpresa": "Cadena de retail con 40 tiendas en la zona sur.",
+      "senal": { "hecho": "Abrirán dos tiendas nuevas en la zona sur antes de diciembre", "fuente": "nota de prensa", "fecha": "2026-09-10" }
+    },
+    {
+      "id": "secuencia-mineria",
+      "type": "secuencia",
+      "tratamiento": "usted",
+      "destinatario": { "nombre": "Paula", "cargo": "Jefa de Recursos Humanos", "empresa": "Minera Cascada", "dominio": "mineracascada.cl" },
+      "actividadEmpresa": "Faena minera con más de 2.000 trabajadores entre propios y contratistas.",
+      "senal": null
+    },
+    {
+      "id": "objecion-proveedor",
+      "type": "objecion",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Felipe", "cargo": "Jefe de Centro de Distribución", "empresa": "CD Pudahuel", "dominio": "cdpudahuel.cl" },
+      "actividadEmpresa": "Centro de distribución que opera turnos noche de domingo a jueves.",
+      "senal": null,
+      "objecion": "Gracias, pero ya trabajamos con otra empresa de personal y estamos conformes."
+    },
+    {
+      "id": "objecion-presupuesto",
+      "type": "objecion",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Marcela", "cargo": "Gerenta Agrícola", "empresa": "Packing Santa Rosa", "dominio": "packingsantarosa.cl" },
+      "actividadEmpresa": "Packing de cerezas en la Sexta Región.",
+      "senal": null,
+      "objecion": "No tenemos presupuesto para esto este año."
+    },
+    {
+      "id": "objecion-info",
+      "type": "objecion",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Daniela", "cargo": "Administradora", "empresa": "Edificios Parque Sur", "dominio": "parquesur.cl" },
+      "actividadEmpresa": "Administración de 8 edificios residenciales y 2 centros comerciales.",
+      "senal": null,
+      "objecion": "Mándame información de sus servicios por correo."
+    },
+    {
+      "id": "reconexion-antiguo",
+      "type": "reconexion",
+      "tratamiento": "tu",
+      "destinatario": { "nombre": "Verónica", "cargo": "Jefa de Operaciones", "empresa": "CD Lo Espejo", "dominio": "cdloespejo.cl" },
+      "actividadEmpresa": "Centro de distribución en Lo Espejo.",
+      "senal": null,
+      "reconexion": {
+        "oferta": "Armado de equipos para peak de fin de año",
+        "ultimoContacto": "Trabajaron juntos en la temporada 2024 del CD",
+        "diasDesdeContacto": 300
+      }
+    }
+  ]
+}

@@ -5,7 +5,8 @@ import {
   canonicalSha256,
   type MessagingPreflightV1,
 } from '@/lib/messaging-contracts';
-import { DRAFT_STYLE_ADVISORIES, type DraftContextV2 } from '@/lib/server/draft-context-v2';
+import { DRAFT_STYLE_ADVISORIES, isSignalLikeEvidence, type DraftContextV2 } from '@/lib/server/draft-context-v2';
+import { checkHumanTone } from '@/lib/server/human-tone-checks';
 
 export const DRAFT_PREFLIGHT_V2_VERSION = 'native-draft-preflight/v2';
 
@@ -42,7 +43,13 @@ export type DraftPreflightIssueV2 = {
     | 'source_url_invalid'
     | 'hypothesis_invalid'
     | 'unsupported_material_claim'
-    | 'hypothesis_unqualified';
+    | 'hypothesis_unqualified'
+    | 'tone_muletilla'
+    | 'tone_formato'
+    | 'tone_asunto'
+    | 'tone_tratamiento'
+    | 'tone_pregunta'
+    | 'tone_ficha';
   message: string;
   location: 'subject' | 'body' | 'research';
 };
@@ -65,6 +72,10 @@ export type ValidateDraftPreflightV2Options = {
   // ('model') write their own single closing question with the configured
   // minutes instead of repeating the approved text verbatim.
   expectedCtaCount?: 0 | 1 | 'model';
+  // Chequeos de tono humano (muletillas, formato, asunto, tratamiento,
+  // ficha corporativa). Solo para texto del modelo, nunca ediciones del
+  // usuario: el llamador los activa junto a checkGeneratedCopy.
+  checkHumanTone?: boolean;
 };
 
 export function requiredDraftPersonalizationV2(context: DraftContextV2): DraftPersonalizationProvenanceV2[] {
@@ -75,10 +86,12 @@ export function requiredDraftPersonalizationV2(context: DraftContextV2): DraftPe
       sourceUrl: evidence.source.url,
       subjectScope: evidence.subjectScope,
       confidence: evidence.confidence,
+      signalLike: isSignalLikeEvidence(evidence.statement),
     })),
   );
   candidates.sort((left, right) => {
     if (left.subjectScope !== right.subjectScope) return left.subjectScope === 'company' ? -1 : 1;
+    if (left.signalLike !== right.signalLike) return left.signalLike ? -1 : 1;
     if (left.confidence !== right.confidence) return right.confidence - left.confidence;
     return `${left.evidenceId}:${left.claimId}`.localeCompare(`${right.evidenceId}:${right.claimId}`);
   });
@@ -502,6 +515,9 @@ export function validateDraftPreflightV2(
   if (subject.length < context.constraints.subject.minCharacters || subject.length > context.constraints.subject.maxCharacters) {
     add('subject_length', `El asunto debe tener entre ${context.constraints.subject.minCharacters} y ${context.constraints.subject.maxCharacters} caracteres.`, 'subject');
   }
+  if (options.checkGeneratedCopy && /^seguimiento\b/i.test(subject)) {
+    add('prohibited_phrase', 'El asunto no debe empezar por «Seguimiento». Nombra el tema concreto que aporta este correo.', 'subject');
+  }
   const words = wordCount(body);
   if (words < context.constraints.body.minWords || words > context.constraints.body.maxWords) {
     add('body_length', `El cuerpo debe tener entre ${context.constraints.body.minWords} y ${context.constraints.body.maxWords} palabras.`, 'body');
@@ -610,6 +626,9 @@ export function validateDraftPreflightV2(
   const hasExtraQuestion = /[¿?]/.test(bodyOutsideRequiredCta);
   const expectedCtaCount = options.expectedCtaCount ?? 1;
   if (expectedCtaCount === 'model') {
+    if (/(?:última vez|no volver[ée] a escribir|no (?:te )?escribir[ée] (?:más|de nuevo)|cierro (?:el (?:tema|hilo)|por acá)|lo (?:dejo|dejamos) (?:hasta )?aqu[ií])/i.test(bodyOutsideRequiredCta)) {
+      add('cta_count', 'Este seguimiento no es el último: elimina la despedida definitiva y termina con una sola propuesta de conversación breve.', 'body');
+    }
     const minutes = draftCtaMinutes(context.constraints.cta.exactText);
     const questionCount = (bodyOutsideRequiredCta.match(/\?/g) || []).length;
     const question = sentenceParts(bodyOutsideRequiredCta).find((item) => /[¿?]/.test(item)) || '';
@@ -692,6 +711,38 @@ export function validateDraftPreflightV2(
   }
   if (output.hypothesisIds.length > 0 && (!containsHypothesisHedge(body) || hasAbsoluteHypothesisLanguage(body))) {
     add('hypothesis_unqualified', 'Las hipótesis deben mantenerse explícitamente como posibilidades, no como hechos.', 'body');
+  }
+
+  if (options.checkHumanTone && options.checkGeneratedCopy) {
+    const tone = checkHumanTone({
+      subject,
+      body: rawBody,
+      ctaExactText: context.constraints.cta.exactText,
+      recipientFirstName: String(context.recipient.displayName || '').trim().split(/\s+/)[0] || null,
+      companyName: context.company.name,
+      maxModelQuestions: expectedCtaCount === 1 ? 0 : 1,
+      hasSignal: context.evidence.some((item) => isSignalLikeEvidence(item.statement)),
+    });
+    for (const finding of tone.errors) {
+      add(finding.code, finding.message, finding.code === 'tone_asunto' ? 'subject' : 'body');
+    }
+    for (const finding of tone.warnings) {
+      warnings.push(finding.message);
+    }
+    // El CTA lo configura el usuario en su estilo: si tutea y el correo es de
+    // usted (o viceversa), se avisa sin bloquear para no dejar sin salida a
+    // quien aún no ajustó su estilo.
+    const ustedMark = /\b(usted|le|les|su|sus|consigo)\b/;
+    const tuMark = /\b(tu|te|ti|contigo|tienes|puedes|quieres|necesitas|sabes|avisame|cuentame|dime|escribeme|mandame)\b/;
+    const modelNorm = normalizeForMatch(bodyOutsideRequiredCta);
+    const ctaNorm = normalizeForMatch(requiredCta);
+    const bodyUsted = ustedMark.test(modelNorm) && !tuMark.test(modelNorm);
+    const bodyTu = tuMark.test(modelNorm) && !ustedMark.test(modelNorm);
+    const ctaUsted = ustedMark.test(ctaNorm) && !tuMark.test(ctaNorm);
+    const ctaTu = tuMark.test(ctaNorm) && !ustedMark.test(ctaNorm);
+    if ((bodyUsted && ctaTu) || (bodyTu && ctaUsted)) {
+      warnings.push('El CTA aprobado usa otro tratamiento (tú/usted) que el correo. Ajusta el CTA en tu estilo de escritura para que concuerden.');
+    }
   }
 
   const preflight = issues.length === 0

@@ -8,7 +8,7 @@ import { z } from 'genkit';
 import { generateStructured, generateStructuredWithTelemetry } from '@/ai/openai-json';
 import { NATIVE_DRAFT_PROMPT_VERSION } from '@/lib/native-draft-version';
 import { buildDraftMessageBrief, draftMessageBriefForModel, draftPriorMessageReference } from '@/lib/draft-message-brief';
-import { selectOutreachExamples } from '@/lib/outreach-example-library';
+import { selectOutreachExamples, selectOpeningScaffold, type OutreachOpeningKind } from '@/lib/outreach-example-library';
 import { SharedSequenceBriefSchema, type SharedSequenceBrief } from '@/lib/outreach-sequence-brief';
 import { selectOutreachStrategy } from '@/lib/outreach-evidence-ranking';
 import {
@@ -47,6 +47,10 @@ const GenerateOutreachFromDraftContextV2InputSchema = z.object({
   instruction: z.string().trim().min(1).max(1_000).optional(),
   sequenceContext: OutreachSequenceContextV2Schema.optional(),
   sharedSequenceBrief: SharedSequenceBriefSchema.optional(),
+  openingKind: z.enum(['dato', 'pregunta', 'observacion']).optional()
+    .describe('Tipo de apertura asignado por el código para variar entre correos.'),
+  avoidOpenings: z.array(z.string().trim().min(1).max(200)).max(10).optional().default([])
+    .describe('Primeras frases ya usadas en esta campaña; no repetirlas.'),
   rewrite: z.object({
     previous: GeneratedOutreachV2Schema,
     errors: z.array(z.string().trim().min(1).max(2_000)).max(20).default([]),
@@ -59,7 +63,11 @@ const GeneratedOutreachModelV2Schema = z.object({
   opening: z.string().trim().min(1).max(900)
     .describe('Apertura en uno o dos párrafos breves con el hecho verificable del destinatario, escrito como situación concreta y sin describir la investigación. Sin saludo.'),
   value: z.string().trim().min(1).max(1400)
-    .describe('Bloque comercial en prosa o con hasta 4 bullets con · que conecta una capacidad autorizada con una consecuencia práctica, sin CTA ni firma.'),
+    .describe('Bloque comercial en prosa que conecta una capacidad autorizada con una consecuencia práctica, sin CTA ni firma.'),
+  hechos_usados: z.array(z.string().trim().min(1).max(500)).max(8).default([])
+    .describe('Cada hecho usado en el correo con el campo de entrada de donde salió (ej. "señal: ..."). Vacío solo si el correo no usa ningún hecho.'),
+  datos_faltantes: z.array(z.string().trim().min(1).max(300)).max(8).default([])
+    .describe('Datos que faltaron para un mejor correo (ej. "nombre del contacto"). Vacío si no falta nada.'),
 }).strict();
 
 export type GenerateOutreachFromDraftContextV2Input = {
@@ -68,6 +76,8 @@ export type GenerateOutreachFromDraftContextV2Input = {
   instruction?: string;
   sequenceContext?: OutreachSequenceContextV2;
   sharedSequenceBrief?: SharedSequenceBrief;
+  openingKind?: OutreachOpeningKind;
+  avoidOpenings?: string[];
   rewrite?: {
     previous: GeneratedOutreachV2;
     errors: string[];
@@ -80,6 +90,8 @@ export type GeneratedOutreachFromDraftContextV2 = GeneratedOutreachV2 & {
   model: string;
   promptVersion: typeof NATIVE_DRAFT_PROMPT_VERSION;
   usage: DraftModelUsage;
+  hechos_usados: string[];
+  datos_faltantes: string[];
 };
 
 export type DraftModelUsage = {
@@ -166,19 +178,18 @@ function modelForDraftPriority(priority: DraftContextV2['quality']['priority']) 
     return String(
       process.env.SUPLIA_OPENAI_REASONING_MODEL
       || process.env.OPENAI_REASONING_MODEL
-      || 'gpt-5.6-terra',
+      || 'gpt-6-sol',
     ).trim();
   }
-  return String(process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || process.env.OPENAI_MODEL || 'gpt-5.6-luna').trim();
+  return String(process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || process.env.OPENAI_MODEL || 'gpt-6-luna').trim();
 }
 
 function modelForDraftRequest(input: GenerateOutreachFromDraftContextV2Input) {
+  // Los reintentos y reescrituras usan siempre el modelo de correo (Luna):
+  // son ediciones rápidas a pedido del usuario o del validador, no razonamiento.
+  // Solo la generación inicial de cuentas prioritarias usa el modelo de razonamiento.
   if (input.rewrite) {
-    return String(
-      process.env.SUPLIA_OPENAI_REASONING_MODEL
-      || process.env.OPENAI_REASONING_MODEL
-      || 'gpt-5.6-terra',
-    ).trim();
+    return String(process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || process.env.OPENAI_MODEL || 'gpt-6-luna').trim();
   }
   return modelForDraftPriority(input.context.quality.priority);
 }
@@ -261,7 +272,7 @@ function sequenceWritingContext(input: OutreachSequenceContextV2, context: Draft
 function validationWritingFeedback(errors: string[]) {
   return errors.map((error) => (
       /La cifra o su alcance/i.test(error)
-        ? `${error.slice(0, 600)} Elimina la cantidad inventada y su promesa o alcance no respaldado; no la escribas con palabras ni la sustituyas por otra cifra. Conserva solo el servicio o hecho autorizado por el brief.`
+        ? `${error.slice(0, 600)} Si la cifra viene de la evidencia, repítela con su sujeto y alcance exactos en la misma oración (por ejemplo, las 40 tiendas de [Empresa]); solo elimina la cantidad si no está en la evidencia, y no la escribas con palabras ni la sustituyas por otra cifra. Conserva solo el servicio o hecho autorizado por el brief.`
         : /frase prohibida/i.test(error)
         ? 'Usaste una fórmula vetada. Sustituye esa oración completa por una acción concreta en voz activa.'
         : /enumera la fuente/i.test(error)
@@ -397,7 +408,9 @@ No hay una hipótesis comercial específica seleccionada. Conecta el hecho con u
   const isFollowUpStep = Boolean(input.sequenceContext) && !isCloseStep;
   const ctaMinutes = draftCtaMinutes(input.context.constraints.cta.exactText);
   const serverAddedWords = (!input.sequenceContext ? approvedCtaWords : 0) + draftWordCount(greeting);
-  const sequenceMaxWords = input.sequenceContext ? 90 : 150;
+  // Frío: 50 a 110 palabras contando saludo y CTA del servidor. Seguimientos:
+  // máximo 70. El modelo recibe el tope descontando lo que agrega el servidor.
+  const sequenceMaxWords = input.sequenceContext ? 65 : 100;
   const maximumModelBodyWords = Math.max(
     1,
     Math.min(isCloseStep ? 50 : sequenceMaxWords, input.context.constraints.body.maxWords) - serverAddedWords,
@@ -430,16 +443,24 @@ ${JSON.stringify({
   exploratory: strategy.exploratory,
 })}
 
-Sigue esta estrategia: integra el hecho primario en un motivo concreto para escribir, conéctalo con la capacidad indicada y usa el punto de respaldo solo si encaja sin forzar. Si exploratory es true, plantea una aplicación condicional, no un problema confirmado ni una pregunta adicional: el único pedido será el CTA aprobado.
+ Sigue esta estrategia: integra el hecho primario en un motivo concreto para escribir, conéctalo con la capacidad indicada y usa el punto de respaldo solo si encaja sin forzar. Si exploratory es true, plantea una aplicación condicional, no un problema confirmado ni una pregunta adicional. ${isCloseStep ? 'En este cierre no pidas reunión: solo una pregunta directa de sí o no.' : isFollowUpStep ? 'El único pedido será tu pregunta de conversación breve.' : 'El único pedido será el CTA aprobado que agregará el servidor.'}
 `
     : '';
   const examplesPrompt = examples.length > 0
     ? `
-STYLE_EXAMPLES (imitan estructura y tono; sus cifras, clientes y coberturas NO son hechos y jamás se copian):
+STYLE_EXAMPLES (el primero es andamiaje de estructura; el segundo, si viene, es un correo real que enseña tono humano; las cifras, clientes y coberturas de ambos NO son hechos y jamás se copian):
 ${examples.map((example) => JSON.stringify({ id: example.id, subject: example.subject, body: example.body, imitate: example.imitate })).join('\n')}
 
- Usa el primer ejemplo como andamiaje de redacción, no como decoración: motivo para escribir → implicación práctica → propuesta concreta → una acción. El segundo es una alternativa, no otra estructura que debas sumar. La voz, el tuteo o usted y la extensión los define el estilo del usuario, no estos ejemplos. Adapta la estructura a los hechos disponibles; omite costos, dolores, pruebas y bullets que no puedas respaldar. No rellenes esas piezas inventándolas. Nunca copies cifras, nombres de empresas ni la firma de los ejemplos.${isCloseStep ? ' No uses el CTA del ejemplo: el cierre es un breakup directo. Retoma el tema, avisa que es la última vez que escribes sobre esto y termina con una sola pregunta de sí o no, sin pedir reunión.' : ' El CTA del ejemplo no reemplaza el aprobado.'}
- Para proof, aporta una prueba autorizada distinta con un enfoque nuevo respecto al inicial; si falta, concreta la aplicación sin fabricar respaldo. Para angle, cambia el enfoque sin volver a presentar al vendedor: otra aplicación, otra consecuencia, otro ejemplo. Para close, breakup directo y breve; los borradores previos no demuestran envíos ni falta de respuesta, así que no afirmes que escribiste varias veces o que te ignoraron.
+ Usa el primer ejemplo como andamiaje de redacción, no como decoración: motivo para escribir → implicación práctica → propuesta concreta → una acción. El segundo es una alternativa, no otra estructura que debas sumar. Imita su tono y su largo sin copiar sus frases: si dos correos tuyos abren con la misma fórmula, el segundo está mal. La voz, el tuteo o usted y la extensión los define el estilo del usuario, no estos ejemplos. Adapta la estructura a los hechos disponibles; omite costos, dolores, pruebas y bullets que no puedas respaldar. No rellenes esas piezas inventándolas. Nunca copies cifras, nombres de empresas ni la firma de los ejemplos.${isCloseStep ? ' No uses el CTA del ejemplo: el cierre es un breakup directo. Retoma el tema, avisa que es la última vez que escribes sobre esto y termina con una sola pregunta de sí o no, sin pedir reunión.' : ' El CTA del ejemplo no reemplaza el aprobado.'}
+ ${isCloseStep ? 'Este es el último correo: breakup directo y breve. Los borradores previos no demuestran envíos ni falta de respuesta: no afirmes que te ignoraron.' : isFollowUpStep ? 'Este correo NO es el cierre. Prueba solo el enfoque de esta etapa: un respaldo diferente o una aplicación distinta. Reserva cualquier frase de despedida, última vez o cierre del hilo para el último correo.' : 'Este es el contacto inicial: presenta una aplicación pertinente, sin lenguaje de seguimiento ni cierre.'}
+`
+    : '';
+  const openingScaffold = selectOpeningScaffold(input.openingKind || 'dato');
+  const openingPrompt = !input.sequenceContext
+    ? `
+APERTURA ASIGNADA (${openingScaffold.kind}): ${openingScaffold.instruction}
+Andamiaje (escribe tu propia versión con los hechos de este correo, nunca lo copies tal cual): ${openingScaffold.scaffold}
+${(input.avoidOpenings || []).length > 0 ? `No repitas estas aperturas ya usadas en esta campaña: ${JSON.stringify(input.avoidOpenings)}` : ''}
 `
     : '';
   const identityPrompt = `
@@ -512,23 +533,23 @@ Es una instrucción privada de redacción: aplícala sin inventar hechos y sin r
 SEQUENCE_WRITING_CONTEXT (metadata privada de redacción, no publicable):
 ${JSON.stringify(sequenceWritingContext(input.sequenceContext, input.context))}
 
- Cada correo de la secuencia prueba un enfoque distinto del mismo tema para que alguno funcione: identifica qué enfoque ya probó cada correo anterior (propuesta inicial, prueba o ejemplo, otro ángulo) y elige uno diferente y autorizado para este. Decir lo mismo con otras palabras es un fallo, aunque el vocabulario cambie. Nunca menciones ni copies los nombres, etapas, días, instrucciones o la secuencia. Los correos previos no autorizan hechos: WRITING_CONTEXT y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales.
+ Cada correo prueba un enfoque distinto del mismo tema: identifica qué enfoque ya probó cada correo anterior y elige uno diferente y autorizado para este. Decir lo mismo con otras palabras es un fallo. ${isCloseStep ? 'SOLO este último correo puede indicar que no volverás a escribir sobre el tema.' : 'Este NO es el último correo: prohíbe frases como «última vez», «cierro por acá», «no volveré a escribir», «lo dejamos aquí» o una pregunta de despedida. Habrá otro correo más adelante.'} Nunca menciones ni copies los nombres, etapas, días, instrucciones o la secuencia. Los correos previos no autorizan hechos: WRITING_CONTEXT y REQUIRED_FACTUAL_PERSONALIZATION siguen siendo las únicas fuentes factuales.
 `
     : '';
   const structureRules = input.sequenceContext
     ? `- Este es un correo posterior: no resumas el correo anterior ni vuelvas a presentar a la empresa o al remitente.
   - opening aporta un detalle factual que no repita el asunto anterior, integrado en el enfoque de ESTE correo, no en otra descripción de la empresa. Conserva el tema comercial del inicial, pero cambia el enfoque: si el inicial propuso una aplicación, este aporta una prueba, otro ángulo o el cierre directo. No cambies de producto solo para parecer diferente.
   - En seguimientos, value debe probar un enfoque que NO se haya usado en los mensajes anteriores: una prueba autorizada, otra aplicación, un límite de alcance o una distinción útil. Reformular el mismo enfoque con otras palabras es repetición aunque el vocabulario cambie.
-  - El cierre es un breakup directo y breve: retoma el tema en una frase, deja claro que esta es la última vez que escribes sobre esto y termina con una sola pregunta directa de sí o no (por ejemplo, si lo dejas hasta aquí). Sin describir mecanismos, sin proponer otra aplicación, sin pedir reunión y sin lenguaje de agenda. Si el cierre necesita más de tres frases cortas para sonar completo, está volviendo a vender: recórtalo.
+  ${isCloseStep ? '- Este es el cierre: breakup directo y breve. Retoma el tema en una frase, di que esta es la última vez que escribes sobre esto y termina con una pregunta directa de sí o no. Sin nueva aplicación ni pedido de reunión.' : '- Este es un seguimiento intermedio. Está prohibido anunciar que es la última vez, cerrar el hilo, despedirte de forma definitiva o preguntar si se deja el tema aquí. Aporta un enfoque nuevo y pide una conversación breve.'}
   - Usa uno o dos detalles de la evidencia, nunca una lista de categorías o servicios copiada de la web. No abras con "La empresa reúne A, B y C".
   - Si el detalle contiene varias categorías separadas por comas o por "y", elige solo una y redacta una oración sin enumeraciones.
   - No preguntes si leyó el correo anterior. No anuncies que traes una idea ni expliques por qué elegiste el tema.
-  - value puede usar hasta 4 bullets con · para capacidades o cambios concretos; cada bullet, una sola idea verificable. El cierre no usa bullets.`
+  - Prosa siempre: sin viñetas ni listas en seguimientos. El cierre tampoco usa bullets.`
     : `- opening explica por qué escribes a esta persona, integrando un único detalle factual del destinatario en una o dos oraciones naturales; no es un resumen de su empresa.
   - value conecta ese detalle con una capacidad concreta del vendedor y una consecuencia práctica para el equipo del destinatario.
   - Usa uno o dos detalles de la evidencia, nunca una lista de categorías o servicios copiada de la web.
   - Si el detalle contiene varias categorías separadas por comas o por "y", elige solo una y redacta una oración sin enumeraciones.
-  - value puede usar hasta 4 bullets con · cuando aclaren la oferta; cada bullet, una sola idea. Sin bullets para destinatarios ejecutivos: prosa breve.`;
+  - Prosa siempre: sin viñetas ni listas en el correo en frío; el formato de lista hace que parezca un envío masivo.`;
 
   const language = String(input.context.style.profile.language || '').toLowerCase().startsWith('en')
     ? 'English'
@@ -541,7 +562,8 @@ Usa exclusivamente WRITING_CONTEXT, REQUIRED_FACTUAL_PERSONALIZATION y los campo
 REPORT_RESTRICTIONS agrega límites factuales, no contenido para copiar.
 
 Reglas no negociables:
-- Asunto entre ${input.context.constraints.subject.minCharacters} y ${input.context.constraints.subject.maxCharacters} caracteres. Tres a seis palabras, tono de colega, sin exclamaciones ni emojis. Nunca uses como asunto: Seguimiento, Recordatorio, ¿Recibiste mi correo?, Presentación de servicios ni promesas de ahorro que el correo no demuestra.
+- Si algo choca, manda en este orden: veracidad, instrucción de campaña, estilo, largo.
+- Asunto entre ${input.context.constraints.subject.minCharacters} y ${input.context.constraints.subject.maxCharacters} caracteres. Dos a seis palabras sin contar nombres propios, minúscula tipo oración, específico para este destinatario, tono de colega, sin exclamaciones ni emojis. Nunca uses como asunto: Seguimiento, Recordatorio, ¿Recibiste mi correo?, Presentación de servicios ni promesas de ahorro que el correo no demuestra.
 - Devuelve entre ${modelBodyWords.min} y ${modelBodyWords.max} palabras sumando opening y value.${isCloseStep ? ' El servidor agregará solo el saludo: este cierre no lleva el CTA aprobado; tu única pregunta directa de sí o no es el cierre.' : isFollowUpStep ? ' El servidor agregará solo el saludo: tu pregunta de cierre es el único pedido.' : ' El servidor agregará el saludo y el CTA aprobado.'}
 - opening y value deben aportar contenido útil; ninguno puede ser relleno.
 - Sigue todos los campos de WRITING_CONTEXT.style para tono, estructura, cosas que hacer y evitar, personalización y extensión, salvo que contradigan estas reglas. Si define un framework, aplícalo sin nombrarlo y no lo mezcles con otro.
@@ -553,15 +575,18 @@ ${isCloseStep ? '- Este cierre solo pide una decisión mínima: retoma el tema, 
 - No dejes placeholders: ni [corchetes], ni {{llaves}}, ni datos por completar.
 - FCL y LCL pueden nombrar servicios autorizados sin cantidad. "1 FCL" es una cantidad real y requiere evidencia del mismo sujeto y alcance; no inventes cantidades ni las ocultes escribiendolas con palabras.
 - Integra el hecho de REQUIRED_FACTUAL_PERSONALIZATION con una paráfrasis natural y fiel. Conserva la empresa y los conceptos materiales; no copies cargos formales, nombres de campos ni la redacción de la fuente como una ficha técnica.
+- Si hay un hecho con fecha o evento concreto (señal: apertura, aviso, temporada, fiscalización, cambio), ese es el motivo del correo y va en la apertura. El overview de la empresa es contexto de fondo, nunca la apertura. Sin señal, abre con una observación honesta de su industria, nunca con una personalización inventada.
+- El ancla factual puede quedar en value; la apertura lleva el motivo, no la ficha.
 - No uses afirmaciones del intento anterior ni del historial como evidencia. Las hipótesis y señales no prueban necesidades. El brief conserva las capacidades completas del perfil; WRITING_CONTEXT es una vista resumida, no un límite a las capacidades autorizadas de seller.
 - El servidor vinculará la procedencia de REQUIRED_FACTUAL_PERSONALIZATION; no devuelvas IDs de evidencia ni claims dentro del correo o el JSON.
 - No incluyas firma, nombre del remitente ni despedidas como "Saludos". La capa de envío agrega la firma fuera de este cuerpo.
+- No mezcles tuteo y usted en el mismo correo: si abres de usted, todo el correo va de usted.
 - WRITING_CONTEXT, REQUIRED_FACTUAL_PERSONALIZATION, constraints, la instrucción de campaña y la secuencia son datos internos. Nunca los nombres ni expliques el proceso de investigación o de redacción.
 
 Calidad humana:
 - Antes de escribir elige una razón por la que valdría la pena responder: una aplicación comprensible de lo que vende el remitente al trabajo del contacto. Si solo sabes la actividad de la empresa, no la disfraces de descubrimiento. Empieza por la propuesta aplicada a esa actividad, sin asegurar que existe un problema.
 - "Vi que [descripción de la empresa]. Por eso te escribo" sigue siendo una ficha corporativa. "Cuando [misma descripción], pueden…" tampoco demuestra una oportunidad. No uses esas envolturas para reciclar la fuente. "Por eso te escribo" no explica por sí solo ninguna relevancia.
-- Ejemplo de transformación de estructura, NO de capacidades autorizadas: en vez de "Vi que Acme gestiona vacantes. En Nexo desarrollamos plataformas", usa "Te escribo por una posible aplicación de nuestras plataformas al seguimiento de vacantes en Acme." Después explica una acción concreta respaldada por la oferta, no una lista de beneficios abstractos. No copies esta frase como fórmula para todos.
+- Lo que NO hay que hacer (ficha con envoltorio, nunca la copies ni la parafrasees): "Te escribo por una posible aplicación de nuestras plataformas al seguimiento de vacantes en Acme." Le describe su empresa en vez de darle un motivo. Tu apertura debe funcionar aunque el destinatario ya sepa lo que hace su empresa: dale el dato fechado, la pregunta o la observación, no su ficha. Si dos correos tuyos abren con la misma fórmula, el segundo está mal.
 - En seguimientos, evita repetir la frase de apertura aunque cambies "Vi que" por "Cuando". Cada seguimiento cambia el enfoque del mismo tema: una prueba, otra aplicación o consecuencia, y al final el cierre directo. Decir lo mismo con otras palabras no es una conversación que avanza.
 - No abras definiéndole su propia empresa: "X se dedica a…", "X es una empresa que…" o "X se hace cargo de…" no son motivos para escribir. Integra el dato en una conexión personal con la propuesta. Puedes usar "Vi que…" si el dato está respaldado; no inventes haber conversado, seguido su trayectoria o usado sus servicios.
 - Si hay una señal concreta, úsala como motivo. Si solo conoces su actividad, vincúlala con una aplicación específica del servicio, en condicional cuando corresponda. No fabriques un costo oculto, una urgencia ni una necesidad del contacto. No agregues generalizaciones ni supuestos sobre la operación.
@@ -599,13 +624,15 @@ El brief conserva el alcance completo de los hechos seleccionados y el cargo par
 ${commercialAnglePrompt}
 ${strategyPrompt}
 ${examplesPrompt}
+${openingPrompt}
 ${identityPrompt}
 ${userWritingInstruction}
 ${campaignInstruction}
 ${sequenceContext}
 ${correction}
-Devuelve SOLO JSON válido con esta forma exacta:
-{"subject":"...","opening":"...","value":"..."}`;
+ TRAZABILIDAD (obligatorio): en "hechos_usados" anota cada hecho del correo con el campo de entrada de donde salió (por ejemplo "señal: abrirán dos tiendas" o "actividad: cadena de retail"). En "datos_faltantes" anota lo que te habría servido y no recibiste (por ejemplo "nombre del contacto"); si no falta nada, devuelve [].
+ Devuelve SOLO JSON válido con esta forma exacta:
+{"subject":"...","opening":"...","value":"...","hechos_usados":["..."],"datos_faltantes":[]}`;
 }
 
 /**
@@ -655,6 +682,8 @@ ${JSON.stringify({ subject: result.data.subject.slice(0, 1_000), opening: result
     ].join('\n\n'),
     personalization: requiredReportAwareDraftPersonalizationV2(parsed.context),
     hypothesisIds: [],
+    hechos_usados: edited.data.hechos_usados || [],
+    datos_faltantes: edited.data.datos_faltantes || [],
     provider: 'openai',
     model: edited.telemetry.modelName,
     promptVersion: NATIVE_DRAFT_PROMPT_VERSION,

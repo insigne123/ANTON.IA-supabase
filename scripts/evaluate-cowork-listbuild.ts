@@ -32,7 +32,7 @@ async function main() {
         authorize: async () => {}, record: async () => {},
         history: (scenario as { history?: Array<{ runId: string; request: string; reply: string; document: null; observations: unknown[] }> }).history,
         decide: async (observations, mustAnswer) => {
-          if (++calls > 8) throw new Error('Budget exhausted');
+           if (++calls > 12) throw new Error('Budget exhausted');
           const response = await generateStructuredWithTelemetry({ schema: coworkDecisionSchema,
             systemPrompt: instructions.systemPrompt, prompt: JSON.stringify(coworkDecisionContext(instructions, {
               history: { turns: [] }, request: scenario.message, observations, mustAnswer, executionPolicy: { mode: 'approval' },
@@ -55,9 +55,12 @@ async function main() {
             lead: { id: LEAD_A, name: 'Ana', email: null } };
           if (action === 'contacted.search') return { scope: 'organization_contacted', returned: 0, limit: 20,
             truncated: false, items: [], evidence: { pendingStatus: 'needs_verification' } };
-          if (action === 'contacted.timeline') return { scope: 'organization_contacted', truncated: false,
-            contacted: [], turn: { status: 'unknown', reason: 'mailbox_coverage_unverified' },
-            pendingStatus: 'needs_verification' };
+           if (action === 'contacted.timeline') return { scope: 'organization_contacted', truncated: false,
+             contacted: [], turn: { status: 'unknown', reason: 'mailbox_coverage_unverified' },
+             pendingStatus: 'needs_verification' };
+           if (action === 'compliance.check') return { scope: 'organization_compliance', lead: { id: input },
+             verdict: 'allow', reasons: [], sendAuthorized: false };
+           if (action === 'research.get_existing') return { scope: 'own_research', status: 'not_found', leadId: input };
           if (action !== 'lists.review_batch' && action !== 'lists.review_contact') throw new Error(`Unexpected tool: ${action}`);
           const ids = action === 'lists.review_batch' ? JSON.parse(input) : [input];
           return { scope: 'organization_list_review', sendAuthorized: false,

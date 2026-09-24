@@ -801,6 +801,15 @@ export function buildDraftContextV2(input: BuildDraftContextV2Input): DraftConte
   return { status: 'ready', context };
 }
 
+// Una señal es un hecho fechado o un evento concreto (apertura, aviso,
+// temporada, fiscalización, ofertas publicadas): el motivo del correo.
+// El overview estático de la empresa es contexto de fondo, no motivo.
+const SIGNAL_LIKE_HINT = /(20\d\d|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre|abrir[áa]n|abren|abierto|publicaron|publicado|publicada|anunci[óo]|fiscalizaci[óo]n|temporada|renunci|cosecha|peak|ofertas|vacantes|licitaci[óo]n|huelga|paralizaci[óo]n|multa|clausura|inaugur)/i;
+
+export function isSignalLikeEvidence(statement: unknown) {
+  return SIGNAL_LIKE_HINT.test(String(statement || ''));
+}
+
 export function requiredReportAwareDraftPersonalizationV2(context: DraftContextV2) {
   const reportAnchorOrder = new Map(
     (context.report?.outreachBrief.selectedFactualAnchorClaimIds || []).map((claimId, index) => [claimId, index]),
@@ -813,6 +822,7 @@ export function requiredReportAwareDraftPersonalizationV2(context: DraftContextV
       subjectScope: evidence.subjectScope,
       confidence: evidence.confidence,
       reportAnchorOrder: reportAnchorOrder.get(claimId),
+      signalLike: isSignalLikeEvidence(evidence.statement),
     })),
   );
   candidates.sort((left, right) => {
@@ -823,6 +833,9 @@ export function requiredReportAwareDraftPersonalizationV2(context: DraftContextV
     if (left.reportAnchorOrder !== right.reportAnchorOrder) {
       return (left.reportAnchorOrder ?? Number.MAX_SAFE_INTEGER) - (right.reportAnchorOrder ?? Number.MAX_SAFE_INTEGER);
     }
+    // Una señal fechada o evento concreto es el motivo del correo: va antes
+    // que el overview de la empresa, que queda como contexto de fondo.
+    if (left.signalLike !== right.signalLike) return left.signalLike ? -1 : 1;
     if (left.confidence !== right.confidence) return right.confidence - left.confidence;
     return `${left.evidenceId}:${left.claimId}`.localeCompare(`${right.evidenceId}:${right.claimId}`);
   });

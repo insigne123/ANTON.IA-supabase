@@ -117,6 +117,14 @@ test('draft preflight passes an evidence-backed message with exactly one approve
   assert.equal(result.preflight.errors.length, 0);
 });
 
+test('generated email subjects must name a topic rather than announce a follow-up', () => {
+  const context = draftContextFixture();
+  const generated = { ...validOutput(), subject: 'Seguimiento de procesos en Acme' };
+  const result = validateDraftPreflightV2(context, generated, { checkGeneratedCopy: true });
+  assert.ok(result.issues.some((issue) => issue.location === 'subject' && issue.message.includes('Seguimiento')));
+  assert.equal(validateDraftPreflightV2(context, generated).issues.some((issue) => issue.location === 'subject' && issue.message.includes('Seguimiento')), false);
+});
+
 test('closing step ends with a single direct yes-or-no question, never a meeting ask', () => {
   const context = draftContextFixture();
   const evidence = context.evidence.find((item) => item.supportedFactClaimIds.includes('claim-acme-overview'))!;
@@ -186,6 +194,12 @@ En Northstar automatizamos operaciones repetitivas para reducir trabajo manual y
 ¿Te sirve que lo revisemos juntos 15 minutos esta semana?`,
   }, { expectedCtaCount: 'model' });
   assert.equal(varied.valid, true, JSON.stringify(varied.issues));
+
+  const prematureClose = validateDraftPreflightV2(context, {
+    ...base,
+    body: `Hola Ada,\n\nAcme ayuda a equipos de operaciones a reducir trabajo manual. En Northstar automatizamos operaciones repetitivas. Esta es la última vez que escribo sobre esto. ¿Te sirve que lo revisemos 15 minutos?`,
+  }, { expectedCtaCount: 'model' });
+  assert.ok(prematureClose.issues.some((issue) => issue.code === 'cta_count' && issue.message.includes('no es el último')));
 
   const repeated = validateDraftPreflightV2(context, {
     ...base,
@@ -673,4 +687,25 @@ test('percent paraphrases preserve metric and subject and numeric feedback stays
   assert.match(issue.message, /1 FCL.*Oración/);
   assert.ok(issue.message.length < 400);
   assert.doesNotMatch(issue.message, /Hola Ada/);
+});
+
+test('required personalization prefers a dated signal over the static company overview', () => {
+  const context = draftContextFixture();
+  const [first] = requiredDraftPersonalizationV2(context);
+  assert.ok(first);
+  assert.equal(first.claimId, 'claim-acme-overview');
+  const withSignal = {
+    ...context,
+    evidence: [
+      ...context.evidence,
+      {
+        ...context.evidence[0],
+        evidenceId: 'evidence-signal',
+        statement: 'Acme abrirá dos tiendas nuevas en diciembre según nota de prensa del 2026-09-10.',
+        supportedFactClaimIds: ['claim-signal'],
+      },
+    ],
+  };
+  const [signalFirst] = requiredDraftPersonalizationV2(withSignal);
+  assert.equal(signalFirst.claimId, 'claim-signal');
 });

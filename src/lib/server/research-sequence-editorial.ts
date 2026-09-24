@@ -99,7 +99,7 @@ export async function validateResearchSequence(brief: SharedSequenceBrief, draft
   if (deterministic.length > 0) return { passed: false, issues: deterministic.slice(0, 12), versionIds, model: null, usage: null };
   const result = await generateStructuredWithTelemetry({
     provider: 'openai',
-    openAiModel: process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || 'gpt-5.6-luna',
+    openAiModel: process.env.OPENAI_EMAIL_MODEL || process.env.OPENAI_BALANCED_MODEL || 'gpt-6-luna',
     schema: EditorialSchema,
     temperature: 0.1,
     prompt: `Revisa la secuencia COMPLETA de ${drafts.length} ${drafts.length === 1 ? 'correo' : 'correos'} antes de revisión humana. No redactes ni envíes.
