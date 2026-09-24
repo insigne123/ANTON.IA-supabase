@@ -38,6 +38,7 @@ export const DRAFT_CONTEXT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 export const MIN_DRAFT_QUALITY_SCORE = 48;
 
 export const DEFAULT_DRAFT_CTA = '¿Te parece si lo conversamos 15 minutos esta semana?';
+export const DEFAULT_DRAFT_CTA_USTED = '¿Le parece si lo conversamos 15 minutos esta semana?';
 export const DRAFT_BLOCKED_SAFETY_PHRASES = [
   'soy una ia',
   'como ia',

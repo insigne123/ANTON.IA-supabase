@@ -76,6 +76,17 @@ test('human tone blocks company-definition openings', () => {
   assert.deepEqual(signal.errors, []);
 });
 
+test('human tone warns instead of blocking ficha when no signal exists', () => {
+  const ficha = checkHumanTone({
+    subject: 'dotación temporal en tiendas',
+    body: 'Hola Rodrigo,\n\nPara una cadena de retail con 40 tiendas en la zona sur como Tiendas Ejemplo, sumar personal puede servir.\n\n¿Conversamos?',
+    companyName: 'Tiendas Ejemplo',
+    hasSignal: false,
+  });
+  assert.deepEqual(ficha.errors, []);
+  assert.ok(ficha.warnings.some((finding) => finding.code === 'tone_ficha'));
+});
+
 test('ficha feedback points to industry observation when no signal exists', () => {
   const without = checkHumanTone({
     subject: 'dotación en faena', body: 'Hola Paula,\n\nEn una faena como la de Minera Cascada, con más de 2.000 trabajadores, la dotación temporal puede servir.\n\n¿Conversamos?',

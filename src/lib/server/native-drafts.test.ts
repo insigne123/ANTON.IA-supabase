@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   createNativeDraft,
   normalizeNativeDraftBody,
+  resolveEffectiveCta,
   reviseNativeDraft,
   rewriteNativeDraft,
   type NativeDraftGenerationDependencies,
@@ -17,6 +18,7 @@ import type { OutreachSequenceContextV2 } from '@/lib/campaigns-v2/outreach-sequ
 import {
   DRAFT_FIXTURE_IDS,
   DRAFT_FIXTURE_NOW,
+  draftContextFixture,
   draftReportV2Fixture,
   draftSnapshotFixture,
 } from './draft-v2-test-fixtures';
@@ -418,7 +420,13 @@ test('native drafting permits one corrective generation pass, then persists a tr
 
 test('generated company-definition opening triggers the bounded editorial rewrite before persistence', async () => {
   for (const repairSucceeds of [true, false]) {
-    const fixture = dependencies(draftSnapshotFixture());
+    const snapshot = draftSnapshotFixture();
+    snapshot.evidence.push({
+      ...snapshot.evidence[0],
+      id: 'evidence-signal-test',
+      statement: 'Acme anunció que reducirá el trabajo manual en operaciones este trimestre según su reporte.',
+    });
+    const fixture = dependencies(snapshot);
     let calls = 0;
     fixture.value.generate = async ({ context, rewrite }) => {
       calls += 1;
@@ -1300,4 +1308,19 @@ test('research below the quality threshold returns a blocked result before it cl
   assert.equal(result.preflight.status, 'failed');
   assert.equal(fixture.claimCount(), 0);
   assert.equal(fixture.persisted.length, 0);
+});
+
+test('effective CTA follows the body tratamiento without touching custom CTAs', () => {
+  const base = draftContextFixture();
+  const ustedBody = 'Hola Paula,\n\nLe escribo por la dotación. Su equipo podría sumar personal.\n\n¿Le parece?';
+  const tuBody = 'Hola Rodrigo,\n\nTe escribo por la dotación. Tu equipo podría sumar personal.\n\n¿Te parece?';
+  assert.equal(resolveEffectiveCta(base, tuBody), base.constraints.cta.exactText);
+  assert.equal(resolveEffectiveCta(base, ustedBody), '¿Le parece si lo conversamos 15 minutos esta semana?');
+  const custom = {
+    ...base,
+    style: { ...base.style, profile: { ...base.style.profile, cta: { label: '¿Coordinamos una visita el martes?', duration: '15' } } },
+    constraints: { ...base.constraints, cta: { ...base.constraints.cta, exactText: '¿Coordinamos una visita el martes?' } },
+  };
+  assert.equal(resolveEffectiveCta(custom, ustedBody), '¿Coordinamos una visita el martes?');
+  assert.equal(resolveEffectiveCta(custom, tuBody), '¿Coordinamos una visita el martes?');
 });

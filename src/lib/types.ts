@@ -475,7 +475,7 @@ export type StyleProfile = {
   do?: string[];
   dont?: string[];
   personalization?: { useLeadName?: boolean; useCompanyName?: boolean; useReportSignals?: boolean; };
-  cta?: { label?: string; duration?: string };
+  cta?: { label?: string; duration?: string; ctaUsted?: string };
   language?: 'es' | 'en';
   constraints?: { noFabrication?: boolean; noSensitiveClaims?: boolean };
   tokens?: string[];

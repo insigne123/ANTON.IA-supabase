@@ -73,7 +73,7 @@ export const OUTSOURCING_EMAIL_STYLE_PRESETS: OutsourcingEmailStylePreset[] = [
       do: [...COMMON_DO, 'usar prueba social solo cuando esté verificada'],
       dont: COMMON_DONT,
       personalization: { useLeadName: true, useCompanyName: true, useReportSignals: true },
-      cta: { label: '¿Te muestro cómo podría aplicarse en una llamada corta?', duration: '15' },
+      cta: { label: '¿Te muestro cómo podría aplicarse en una llamada corta?', duration: '15', ctaUsted: '¿Le muestro cómo podría aplicarse en una llamada corta?' },
       constraints: { noFabrication: true, noSensitiveClaims: true },
       subjectTemplate: 'Un siguiente paso para {{company.name}}',
       bodyTemplate: 'Hola {{lead.firstName}},\n\nCuando una parte de la operación en {{company.name}} consume más tiempo del necesario, suele haber espacio para simplificarla.\n\n{{companyProfile.valueProposition}}\n\n¿Te muestro cómo podría aplicarse en una llamada de {{cta.duration}} minutos?\n\nSaludos,\n{{sender.name}}',

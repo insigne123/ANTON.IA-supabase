@@ -191,6 +191,7 @@ test('DraftContextV2 generation reserves enough model words for server normaliza
     assert.match(prompt, /Usa el primer ejemplo como andamiaje/);
     assert.match(prompt, /La voz, el tuteo o usted y la extensión los define el estilo del usuario/);
     assert.match(prompt, /No abras definiéndole su propia empresa/);
+    assert.match(prompt, /Nunca suenes a vigilancia/);
     assert.match(prompt, /Puedes usar "Vi que…" si el dato está respaldado/);
     assert.match(prompt, /No fabriques un costo oculto/);
     assert.doesNotMatch(prompt, /opening empieza directamente con el hecho|plantea la aplicación como pregunta concreta/);
@@ -471,6 +472,8 @@ test('close step caps model words and forbids re-pitching in the final message',
     assert.ok(bounds);
     assert.ok(Number(bounds[2]) <= 50, `close model cap must stay brief, got ${bounds[2]}`);
     assert.match(prompt, /breakup directo y breve/);
+    assert.match(prompt, /Retoma el BENEFICIO/);
+    assert.match(prompt, /sin aclaraciones innecesarias/);
     assert.match(prompt, /última vez que escribes sobre esto/);
     assert.match(prompt, /UNA sola pregunta directa de sí o no/);
     assert.match(prompt, /Reformular el mismo enfoque con otras palabras es repetición/);

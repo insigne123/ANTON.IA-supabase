@@ -181,13 +181,19 @@ export function checkHumanTone(input: HumanToneCheckInput): { errors: HumanToneF
     const copula = firstToken && FICHA_COPULAS.find((phrase) => opening.includes(phrase) && opening.includes(firstToken));
     const conNumero = firstToken && new RegExp(`\\bcon (?:mas de |\\d+|${NUMERO_PALABRAS.join('|')})\\b`).test(opening) && opening.includes(firstToken);
     if (copula || conNumero) {
-      errors.push({
+      // Con señal disponible se bloquea: el modelo tiene material para
+      // corregirlo en el reintento. Sin señal no hay con qué cumplirlo, así
+      // que se avisa y decide el humano (que revisa el 100% al inicio).
+      const blocking = input.hasSignal !== false;
+      const finding = {
         code: 'tone_ficha',
         message: input.hasSignal
           ? 'La apertura le describe su propia empresa en vez de darle un motivo. Usa el dato fechado o la pregunta, no su ficha.'
           : 'La apertura le describe su propia empresa en vez de darle un motivo. Como no hay una señal concreta, abre con una observación honesta de su industria y deja el dato de la empresa para el resto del correo.',
-        blocking: true,
-      });
+        blocking,
+      } as const;
+      if (blocking) errors.push({ ...finding });
+      else warnings.push({ ...finding });
     }
   }
 

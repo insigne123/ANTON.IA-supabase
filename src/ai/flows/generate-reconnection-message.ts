@@ -81,6 +81,8 @@ Historial de interaccion:
 ${JSON.stringify(input.interaction || null)}
 
 Instrucciones:
+- Es un recontacto cálido, no un frío: abre con cercanía ("¿Cómo estás?", "Hace harto que no hablamos") y una referencia concreta al trabajo pasado, en una o dos líneas.
+- Máximo 4 párrafos cortos con aire entre ellos; nunca un bloque único de texto.
 - El asunto debe tener maximo 8 palabras y no usar mayusculas exageradas.
 - El cuerpo debe ser HTML simple usando solo <p>, <br>, <strong> y <ul><li> si realmente ayuda.
 - 90 a 170 palabras.

@@ -9,9 +9,9 @@ import type { DraftContextV2 } from './server/draft-context-v2';
 // angle, then a direct breakup close. The playbook's channel switch and
 // alternate recipient are deliberately not email steps or evidence of contact.
 export const RESEARCH_SEQUENCE_STEPS = [
-  { name: 'Respaldo', offsetDays: 3, instruction: 'Cambia el enfoque respecto al inicial: aporta una prueba autorizada o un ejemplo concreto de aplicación distinto al ya usado. Si no hay prueba nueva, precisa el alcance (qué incluye y qué queda fuera). No repitas la propuesta del inicial con otras palabras.' },
-  { name: 'Segundo ángulo', offsetDays: 5, instruction: 'Cambia el enfoque otra vez: aborda una aplicación distinta del mismo servicio u otra consecuencia práctica para este cargo (por ejemplo, impacto operativo frente a impacto en personas). No re-presentes al vendedor ni repitas el ejemplo del correo anterior.' },
-  { name: 'Cierre', offsetDays: 10, instruction: 'Cierre directo y breve (máximo 60 palabras): retoma el tema en una frase, deja claro que esta es la última vez que escribirás sobre esto y termina con una sola pregunta directa de sí o no (por ejemplo, si lo dejas hasta aquí). Sin pedir reunión, sin presentar nada nuevo, sin afirmar envíos previos ni silencio.' },
+  { name: 'Respaldo', offsetDays: 3, instruction: 'Cambia el enfoque respecto al inicial: entra directo con una prueba autorizada o un beneficio concreto distinto al ya usado, sin anunciar que traes algo nuevo ("hay otro punto además de…", "retomo…"). Si no hay prueba nueva, precisa el alcance (qué incluye y qué queda fuera). No repitas la propuesta del inicial con otras palabras.' },
+  { name: 'Segundo ángulo', offsetDays: 5, instruction: 'Cambia el enfoque otra vez: abre directo con otra aplicación del mismo servicio u otra consecuencia práctica para este cargo (por ejemplo, impacto operativo frente a impacto en personas). Beneficio concreto primero, sin rodeos. No re-presentes al vendedor ni repitas el ejemplo del correo anterior.' },
+  { name: 'Cierre', offsetDays: 10, instruction: 'Cierre directo y breve (máximo 60 palabras): retoma el BENEFICIO en una frase (el costo que se va, lo que queda resuelto), no solo el tema; deja claro que esta es la última vez que escribirás sobre esto y termina con una sola pregunta directa de sí o no (por ejemplo, si lo dejas hasta aquí). Sin pedir reunión, sin presentar nada nuevo, sin afirmar envíos previos ni silencio.' },
 ] as const;
 
 export const DEFAULT_SEQUENCE_OFFSETS = [3, 5, 10];
