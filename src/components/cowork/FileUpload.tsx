@@ -11,6 +11,7 @@ export function FileUpload({ runId, onError, onAccessDenied }: {
 }) {
   const [files, setFiles] = useState<Array<{ name: string; size: number }>>([]);
   const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const load = useCallback(async () => {
     try {
       const response = await fetch(`/api/cowork/runs/${runId}/files`, { cache: 'no-store' });
@@ -40,10 +41,12 @@ export function FileUpload({ runId, onError, onAccessDenied }: {
       setUploading(false);
     }
   }
-  return <section aria-label="Archivos de entrada" className="space-y-2 rounded-xl border border-border p-5">
+  return <section aria-label="Archivos de entrada" onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
+    onDrop={event => { event.preventDefault(); setDragging(false); void upload(event.dataTransfer?.files || null); }}
+    className={`space-y-2 rounded-xl border p-5 ${dragging ? 'border-primary bg-primary/5' : 'border-border'}`}>
     <h3 className="font-medium">Archivos de entrada</h3>
     {files.length === 0
-      ? <p className="text-sm text-muted-foreground">Sin archivos. Sube CSV, JSON, MD, TXT o XLSX (máx 20 MB cada uno) para usarlos en código.</p>
+      ? <p className="text-sm text-muted-foreground">Arrastra archivos aquí o elígelos abajo. Solo se usan si el trabajo ejecuta código (CSV, JSON, MD, TXT o XLSX, máx 20 MB cada uno).</p>
       : <ul className="space-y-1 text-sm">{files.map(file => <li key={file.name} className="break-words">{file.name}<span className="text-muted-foreground"> · {(file.size / 1024).toFixed(1)} KB</span></li>)}</ul>}
     <div>
       <Label htmlFor={`cowork-files-${runId}`} className="sr-only">Subir archivos</Label>

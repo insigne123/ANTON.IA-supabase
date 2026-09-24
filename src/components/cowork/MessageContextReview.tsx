@@ -18,6 +18,30 @@ const LABELS: Record<string, string> = {
   vertical_notes: 'Notas por sector',
 };
 
+/** Renderiza el parche como texto legible: nunca JSON crudo al usuario. */
+function renderPatchItem(item: unknown, index: number) {
+  if (typeof item === 'string') return <li key={index} className="whitespace-pre-wrap break-words">{item}</li>;
+  if (item && typeof item === 'object') {
+    const record = item as Record<string, unknown>;
+    const text = ['text', 'note', 'claim', 'term', 'label', 'sector', 'evidence', 'cta'].map(key => record[key]).filter(value => typeof value === 'string' && value.trim());
+    const detail = ['label', 'sector', 'role'].map(key => record[key]).filter(value => typeof value === 'string' && value.trim() && !text.includes(value as string));
+    return <li key={index} className="whitespace-pre-wrap break-words">{text.join(' — ')}{detail.length > 0 ? <span className="text-muted-foreground"> ({detail.join(', ')})</span> : null}</li>;
+  }
+  return <li key={index} className="whitespace-pre-wrap break-words">{String(item ?? '')}</li>;
+}
+
+function renderPatchValue(value: unknown) {
+  if (typeof value === 'string') return <p className="whitespace-pre-wrap break-words">{value}</p>;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <p className="text-muted-foreground">Sin cambios en este campo.</p>;
+    return <ul className="list-disc space-y-1 pl-5">{value.map((item, index) => renderPatchItem(item, index))}</ul>;
+  }
+  if (value && typeof value === 'object') {
+    return <ul className="list-disc space-y-1 pl-5">{Object.entries(value as Record<string, unknown>).map(([key, item], index) => <li key={index} className="whitespace-pre-wrap break-words"><span className="font-medium">{key}:</span> {typeof item === 'string' ? item : JSON.stringify(item)}</li>)}</ul>;
+  }
+  return <p className="whitespace-pre-wrap break-words">{String(value ?? '')}</p>;
+}
+
 /** Messaging-context review card: shows the exact staged patch pinned by the
  * proposal target. Drift or concurrent edits block approval. */
 export function MessageContextReview({ runId, onApprove, onReject, resolving }: {
@@ -42,10 +66,10 @@ export function MessageContextReview({ runId, onApprove, onReject, resolving }: 
   if (!preview) return <p role="status" className="text-sm text-muted-foreground">Cargando cambio exacto del contexto…</p>;
   const entries = Object.entries(preview.patch || {});
   return <div className="space-y-3">
-    <dl className="space-y-2 text-sm">
+    <dl className="space-y-3 text-sm">
       {entries.map(([key, value]) => <div key={key}>
-        <dt className="font-medium">{LABELS[key] || key}</dt>
-        <dd className="whitespace-pre-wrap break-words text-muted-foreground">{typeof value === 'string' ? value : JSON.stringify(value)}</dd>
+        <dt className="text-xs uppercase tracking-wide text-muted-foreground">{LABELS[key] || key}</dt>
+        <dd className="mt-1 text-foreground">{renderPatchValue(value)}</dd>
       </div>)}
     </dl>
     <p className="text-xs text-muted-foreground">{!preview.matches || !preview.fresh
