@@ -25,6 +25,16 @@ export async function coworkResearchTarget(auth: AuthContext, runId: string, lea
 
 export async function startCoworkResearch(auth: AuthContext, runId: string, leadId: string) {
   const row = await coworkResearchTarget(auth, runId, leadId);
+  // Regla de producto: sin correo no se investiga. Acepta correo directo o un
+  // enriquecimiento ya intentado (aunque no haya encontrado nada): lo que se
+  // exige es enriquecer primero, no un resultado perfecto.
+  if (!row.email) {
+    const attempted = await auth.supabase.from('enriched_leads').select('id')
+      .eq('user_id', auth.user.id).eq('organization_id', auth.organizationId)
+      .filter('data->>sourceSavedLeadId', 'eq', leadId).limit(1).maybeSingle();
+    if (attempted.error) throw attempted.error;
+    if (!attempted.data) throw new Error('COWORK_RESEARCH_EMAIL_REQUIRED');
+  }
   const lead = NativeResearchLeadSchema.parse({ id: row.id, fullName: row.name || null, email: row.email || null,
     title: row.title || null, companyName: row.company || null, companyWebsite: row.company_website || null,
     companyLinkedinUrl: row.company_linkedin || null, linkedinUrl: row.linkedin_url || null,

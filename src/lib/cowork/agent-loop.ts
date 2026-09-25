@@ -197,6 +197,24 @@ function effectTargetRun(
     collectCoworkLeadRows([payload]).some(row => row.id === targetId));
 }
 
+/** Display name for lead-scoped effects, resolved from already-observed rows.
+ * Never invents: falls back to null and the caller keeps the raw target. */
+function describeLeadTarget(
+  action: CoworkEffectAction, targetId: string,
+  observations: CoworkObservation[], history: CoworkHistoryTurn[],
+): string | null {
+  if (action !== 'leads.save_contact' && action !== 'research.start' && action !== 'lead.enrich') return null;
+  const payloads = [...observations, ...history.flatMap(turn => turn.observations || [])];
+  for (const row of collectCoworkLeadRows(payloads)) {
+    if (row.id !== targetId) continue;
+    const name = String(row.name || '').trim();
+    const company = String((row as Record<string, unknown>).company || '').trim();
+    if (name && company) return `${name} (${company})`;
+    if (name) return name;
+  }
+  return null;
+}
+
 /** Origin for code.execute: input files must have been observed via files.list.
  * Runs without inputs anchor to the proposing run itself (allowed as origin). */
 function codeOriginRunId(
@@ -225,9 +243,11 @@ function codeOriginRunId(
   return null;
 }
 
-function effectLabel(action: CoworkEffectAction, targetId: string): string {  if (action === 'leads.save_contact') return `Guardar contacto ${targetId.slice(0, 120)}`;
-  if (action === 'research.start') return `Investigar contacto ${targetId.slice(0, 120)}`;
-  if (action === 'lead.enrich') return `Enriquecer contacto ${targetId.slice(0, 120)}`;
+function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: string | null): string {
+  const named = (verb: string) => targetName ? `${verb} ${targetName}` : `${verb} ${targetId.slice(0, 120)}`;
+  if (action === 'leads.save_contact') return named('Guardar contacto');
+  if (action === 'research.start') return named('Investigar contacto');
+  if (action === 'lead.enrich') return named('Enriquecer contacto');
   if (action === 'email.send') return `Enviar correo del borrador ${targetId.slice(0, 120)}`;
   if (action === 'campaign.create') return 'Crear borrador de campaña';
   if (action === 'campaign.activate') return `Aprobar y activar campaña ${targetId.slice(0, 120)}`;
@@ -419,7 +439,8 @@ export async function runCoworkReadLoop(input: {
       if (!originRunId) throw new Error('Effect target must be observed first');
       await input.authorize();
       input.signal.throwIfAborted();
-      await input.proposeEffect({ kind, targetId, label: effectLabel(decision.action, targetId), originRunId,
+      const targetName = describeLeadTarget(decision.action, targetId, observations, input.history || []);
+      await input.proposeEffect({ kind, targetId, label: effectLabel(decision.action, targetId, targetName), originRunId,
         ...(campaign === undefined ? {} : { campaign }), ...(code === undefined ? {} : { code }),
         ...(profile === undefined ? {} : { profile }), ...(savedSearch === undefined ? {} : { savedSearch }),
         ...(campaignId === undefined ? {} : { campaignId }), ...(enrollmentId === undefined ? {} : { enrollmentId }),

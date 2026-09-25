@@ -131,11 +131,18 @@ async function executeEffect(
       result: { leadId: (saved.lead as { id?: string } | null)?.id || null, reused: saved.reused } };
   }
   if (proposal.kind === 'start_research') {
-    const started = await startCoworkResearch(auth, proposal.origin_run_id, proposal.target_id);
-    return { reply: started.status === 'completed'
-      ? 'La investigación ya estaba disponible y quedó vinculada al trabajo.'
-      : 'La investigación quedó en curso; el resultado se incorporará al retomarse el trabajo.',
+    try {
+      const started = await startCoworkResearch(auth, proposal.origin_run_id, proposal.target_id);
+      return { reply: started.status === 'completed'
+        ? 'La investigación ya estaba disponible y quedó vinculada al trabajo.'
+        : 'La investigación quedó en curso; el resultado se incorporará al retomarse el trabajo.',
       result: { reportId: started.reportId, status: started.status, reused: started.reused } };
+    } catch (error) {
+      if (error instanceof Error && error.message === 'COWORK_RESEARCH_EMAIL_REQUIRED') {
+        throw new Error('Este contacto aún no tiene correo: propón enriquecerlo antes de investigarlo.');
+      }
+      throw error;
+    }
   }
   if (proposal.kind === 'enrich_contact') {
     const enriched = await enrichCoworkContact(auth, proposal.origin_run_id, proposal.target_id);

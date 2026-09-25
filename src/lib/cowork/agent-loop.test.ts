@@ -22,6 +22,23 @@ test('read loop gives observed results to the next decision and records real que
   assert.equal(recorded.length, 1);
 });
 
+test('lead-scoped effect labels use the observed contact name, never raw IDs', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const leadId = '00000000-0000-4000-8000-000000000021';
+  const proposals: Array<{ kind: string; targetId: string; label: string }> = [];
+  const found = { action: 'leads.search' as const, query: 'José', leadId: null, answer: null };
+  const enrich = { action: 'lead.enrich' as const, query: null, leadId, providerId: null, snapshotId: null, note: null, answer: null };
+  await runCoworkReadLoop({
+    message: 'Enriquece', runId, signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: [{ id: leadId, name: 'José C.', company: 'GrupoExpro' }], scope: 'own_saved_contacts' }),
+    record: async () => {},
+    proposeEffect: async (proposal: { kind: string; targetId: string; label: string }) => { proposals.push(proposal); },
+    decide: async observations => observations.length === 0 ? found : enrich,
+  });
+  assert.deepEqual(proposals, [{ kind: 'enrich_contact', targetId: leadId,
+    label: 'Enriquecer contacto José C. (GrupoExpro)', originRunId: runId }]);
+});
+
 test('tool loop is bounded even when the model never finishes', async () => {
   let calls = 0;
   await assert.rejects(runCoworkReadLoop({

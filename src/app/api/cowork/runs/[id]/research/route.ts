@@ -20,6 +20,9 @@ async function handle(req: NextRequest, context: Context, start: boolean) {
     return NextResponse.json(result, { status: start ? 202 : 200, headers });
   } catch (error) {
     if (error instanceof AuthError) return handleAuthError(error);
+    if (error instanceof Error && error.message === 'COWORK_RESEARCH_EMAIL_REQUIRED') {
+      return NextResponse.json({ error: 'Primero enriquece el contacto: sin correo no se puede investigar.', code: 'COWORK_RESEARCH_EMAIL_REQUIRED' }, { status: 409, headers });
+    }
     return NextResponse.json({ error: 'No se pudo consultar o iniciar la investigación. Reintentar conserva la misma solicitud.' }, { status: error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 503, headers });
   }
 }

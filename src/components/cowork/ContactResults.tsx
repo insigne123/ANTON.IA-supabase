@@ -7,18 +7,19 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { ExportMenu } from './ExportMenu';
 import { StartResearch } from './StartResearch';
+import { EnrichContact } from './EnrichContact';
 import { SaveContact } from './SaveContact';
 
-export function ContactResults({ runId, events, onError, onAccessDenied, canResearch = false, onUseReport, onEnrichLead }: {
+export function ContactResults({ runId, events, onError, onAccessDenied, canResearch = false, onUseReport }: {
   runId: string;
   events: CoworkEvent[];
   onError: (message: string) => void;
   onAccessDenied: () => void;
   canResearch?: boolean;
   onUseReport?: (leadId: string) => void;
-  onEnrichLead?: (leadId: string, displayName: string) => void;
 }) {
   const [search, setSearch] = useState('');
+  const [enriched, setEnriched] = useState<Record<string, string | null>>({});
   const observations = useMemo(() => events.filter(event => event.kind === 'tool.completed').map(event => event.payload), [events]);
   const rows = useMemo(() => collectCoworkLeadRows(observations), [observations]);
   const companiesOnly = rows.length > 0 && rows.every(row => row.id.startsWith('apollo-company:'));
@@ -48,14 +49,13 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
     {filtered.length === 0 ? <p className="border-t border-border p-4 text-sm text-muted-foreground">No hay coincidencias. Cambia o borra el filtro.</p> : <ul className="max-h-96 divide-y divide-border overflow-y-auto border-t border-border">
       {filtered.map(row => <li key={row.id} className="grid min-w-0 gap-2 p-4 sm:grid-cols-2">
         <div className="min-w-0"><p className="break-words text-sm font-medium">{String(row.name || 'Nombre no disponible')}</p><p className="break-words text-xs text-muted-foreground">{row.id.startsWith('apollo-company:') ? String(row.industry || 'Sector no informado') : [row.title, row.company].filter(Boolean).join(' · ') || 'Cargo y empresa no disponibles'}</p></div>
-        <div className="min-w-0 sm:text-right"><p className="break-all text-sm">{String(row.id.startsWith('apollo-company:') ? row.domain || 'Dominio no disponible' : row.email || 'Correo no disponible')}</p><p className="break-words text-xs text-muted-foreground">{String(row.location || '')}</p>{row.id.startsWith('apollo-company:') && <p className="text-xs text-muted-foreground">{row.employees == null ? 'Dotación no informada' : `${row.employees} empleados`}</p>}</div>
+        <div className="min-w-0 sm:text-right"><p className="break-all text-sm">{String(row.id.startsWith('apollo-company:') ? row.domain || 'Dominio no disponible' : row.email || enriched[row.id] || 'Correo no disponible')}</p><p className="break-words text-xs text-muted-foreground">{String(row.location || '')}</p>{row.id.startsWith('apollo-company:') && <p className="text-xs text-muted-foreground">{row.employees == null ? 'Dotación no informada' : `${row.employees} empleados`}</p>}</div>
         {row.id.startsWith('apollo:') && <SaveContact runId={runId} providerId={row.id} onAccessDenied={onAccessDenied} onUseContact={id => onUseReport?.(id)} />}
         {canResearch && !row.id.startsWith('apollo:') && !row.id.startsWith('apollo-company:') && <>
-          {!row.email && onEnrichLead && <div className="space-y-1 text-xs sm:col-span-2">
-            <button type="button" className="font-medium text-primary underline underline-offset-4 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onEnrichLead(row.id, String(row.name || 'este contacto'))}>Enriquecer contacto primero</button>
-            <p className="text-muted-foreground">Sin correo, la investigación rinde menos: primero el dato, después el informe.</p>
-          </div>}
-          <StartResearch runId={runId} leadId={row.id} onAccessDenied={onAccessDenied} onUseReport={() => onUseReport?.(row.id)} />
+          {(row.email || row.id in enriched)
+            ? <StartResearch key={`${row.id}:${row.id in enriched ? 'enriched' : 'email'}`} runId={runId} leadId={row.id} onAccessDenied={onAccessDenied} onUseReport={() => onUseReport?.(row.id)} />
+            : <EnrichContact runId={runId} leadId={row.id} displayName={String(row.name || 'este contacto')} company={String(row.company || '')} onAccessDenied={onAccessDenied}
+              onEnriched={email => setEnriched(previous => ({ ...previous, [row.id]: email }))} />}
         </>}
       </li>)}
     </ul>}
