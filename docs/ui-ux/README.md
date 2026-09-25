@@ -16,6 +16,7 @@ Esta carpeta define como mejorar interfaces en este proyecto sin caer en UI gene
 - `docs/ui-ux/reference-workflow.md`: flujo obligatorio antes de tocar UI
 - `docs/ui-ux/release-audit-checklist.md`: checklist de revision visual antes de deploy
 - `docs/ui-ux/email-studio-notes.md`: referencias y decisiones especificas de Email Studio
+- `docs/ui-ux/tutorial-guiado.md`: recorrido guiado para cuentas nuevas, como omitirlo, volver a verlo y cambiarlo
 
 ## Fuentes de referencia prioritarias
 
