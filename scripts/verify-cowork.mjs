@@ -10,7 +10,7 @@ const checks = [
   ['scripts/test-cowork-send-batch.mjs'],
   ['scripts/test-cowork-linkedin-jobs.mjs'],
   ['--loader', './scripts/ts-test-loader.mjs', '--test', ...suites, 'scripts/cowork-axis-replay.test.ts'],
-  ...['scheduler','save-contact','external-search','autonomy','native-draft','draft-polling','start-research','thread','export-route','search-queue-ui','workspace','effects','enrich-contact','campaigns','queue-fairness','code-execution','artifact-preview','specialist-queue','domains','domain-effects','domain-effects-2','domain-effects-3']
+  ...['scheduler','save-contact','external-search','autonomy','native-draft','draft-polling','start-research','thread','export-route','search-queue-ui','workspace','draft','effects','enrich-contact','campaigns','queue-fairness','code-execution','artifact-preview','specialist-queue','domains','domain-effects','domain-effects-2','domain-effects-3']
     .map(name => [`scripts/test-cowork-${name}.mjs`]),
   ['--loader', './scripts/ts-test-loader.mjs', 'scripts/test-cowork-send-email.mjs'],
 ];

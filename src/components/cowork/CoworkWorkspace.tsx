@@ -47,11 +47,39 @@ function activityTitle(event: CoworkEvent) {
 type Turn = { run: CoworkRun; events: CoworkEvent[] };
 type State = Turn & { ancestors?: Turn[]; olderTurnsOmitted?: boolean; canCreateDraft?: boolean; canResearch?: boolean; budget?: { depth: number; maxDepth: number; exhausted: boolean } };
 
-export function CoworkWorkspace() {
+export function CoworkWorkspace({ userId }: { userId?: string }) {
   const [runs, setRuns] = useState<CoworkRun[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [state, setState] = useState<State | null>(null);
   const [message, setMessage] = useState('');
+  const [draftOwner, setDraftOwner] = useState<string | null>(null);
+  // Draft survives the remount the app does once the session resolves
+  // (the tree is keyed by user and workspace): it is restored on mount,
+  // cleared only after a successful send, and kept on failure. The stored
+  // userId prevents showing one account's draft to another in this tab.
+  const draftKey = 'cowork:draft';
+  useEffect(() => {
+    let text = '';
+    try {
+      const raw = window.sessionStorage.getItem(draftKey);
+      const saved = raw ? JSON.parse(raw) as { userId?: unknown; text?: unknown } | null : null;
+      if (userId && saved?.userId === userId && typeof saved.text === 'string') text = saved.text.slice(0, 20000);
+    } catch {
+      // Private mode or unavailable storage: keep typing without persistence.
+    }
+    setMessage(text);
+    setDraftOwner(userId || null);
+  }, [userId]);
+  useEffect(() => {
+    // Never overwrite storage before hydration or copy text across accounts.
+    if (!userId || draftOwner !== userId) return;
+    try {
+      if (message) window.sessionStorage.setItem(draftKey, JSON.stringify({ userId, text: message }));
+      else window.sessionStorage.removeItem(draftKey);
+    } catch {
+      // Ignore persistence failures; the message stays on screen.
+    }
+  }, [message, userId, draftOwner]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -147,7 +175,7 @@ export function CoworkWorkspace() {
 
   async function send() {
     const text = message.trim();
-    if (!text || sending || !ready) return;
+    if (!text || sending || !ready || (userId && draftOwner !== userId)) return;
     const parentRunId = state?.run.status === 'completed' ? state.run.id : null;
     if (pending.current?.message !== text || pending.current?.parentRunId !== parentRunId || pending.current?.mode !== mode) pending.current = { message: text, requestId: crypto.randomUUID(), parentRunId, mode };
     setSending(true); setError('');
@@ -204,7 +232,7 @@ export function CoworkWorkspace() {
             <h2 className="mb-8 text-center text-3xl font-medium tracking-tight md:text-4xl">¿En qué trabajamos hoy?</h2>
             <form onSubmit={event => { event.preventDefault(); void send(); }} className="rounded-2xl border border-border bg-muted/30 p-4 shadow-sm">
               <Label htmlFor="cowork-message" className="sr-only">Describe tu trabajo</Label>
-              <Textarea id="cowork-message" value={message} maxLength={20000} onChange={event => setMessage(event.target.value)} placeholder="Describe lo que necesitas preparar…" className="min-h-28 resize-y border-0 bg-transparent text-base shadow-none" disabled={sending} />
+              <Textarea id="cowork-message" value={message} maxLength={20000} onChange={event => setMessage(event.target.value)} placeholder="Describe lo que necesitas preparar…" className="min-h-28 resize-y border-0 bg-transparent text-base shadow-none" disabled={sending || Boolean(userId && draftOwner !== userId)} />
               {canAutonomous && <ExecutionMode id="cowork-mode" value={mode} onChange={setMode} disabled={sending} />}
               <div className="mt-3 flex items-center justify-between gap-3"><span className="text-xs text-muted-foreground">Consulta tus contactos guardados o prepara un documento{searchQuota ? ` · Búsquedas externas hoy: ${searchQuota.remaining} de ${searchQuota.limit}` : ''}</span><Button type="submit" size="icon" className="rounded-xl" aria-label="Crear trabajo" disabled={!ready || !message.trim() || sending}>{sending ? <Loader2 className="motion-safe:animate-spin" /> : <ArrowUp />}</Button></div>
             </form>
@@ -329,7 +357,7 @@ export function CoworkWorkspace() {
             {state.run.status === 'completed' && <form onSubmit={event => { event.preventDefault(); void send(); }} className="rounded-2xl border border-border bg-muted/30 p-4">
               <Label htmlFor="cowork-followup">Continúa este trabajo</Label>
               {canAutonomous && <ExecutionMode id="cowork-followup-mode" value={mode} onChange={setMode} disabled={sending} />}
-              <Textarea id="cowork-followup" value={message} maxLength={20000} onChange={event => setMessage(event.target.value)} placeholder="Pide un ajuste o el siguiente paso…" disabled={sending} className="mt-2 min-h-24" />
+              <Textarea id="cowork-followup" value={message} maxLength={20000} onChange={event => setMessage(event.target.value)} placeholder="Pide un ajuste o el siguiente paso…" disabled={sending || Boolean(userId && draftOwner !== userId)} className="mt-2 min-h-24" />
               <div className="mt-3 flex items-center justify-between"><Button type="button" variant="ghost" size="icon" aria-label={showFiles ? 'Ocultar archivos' : 'Adjuntar archivos'} aria-expanded={showFiles} title="Adjuntar archivos" disabled={sending} onClick={() => setShowFiles(value => !value)}><Plus /></Button><Button type="submit" disabled={!ready || !message.trim() || sending}>{sending ? 'Guardando…' : 'Continuar'}<ArrowUp /></Button></div>
             </form>}
           </div>}
