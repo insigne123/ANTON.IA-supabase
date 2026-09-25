@@ -35,7 +35,7 @@ try {
   const response = await module.exports.GET(request('md'), context('run'));
   assert.equal(response.status, 200);
   assert.match(response.headers.get('cache-control'), /private, no-store/);
-  assert.match(response.headers.get('content-disposition'), /cowork-documento.md/);
+  assert.match(response.headers.get('content-disposition'), /filename="informe\.md"/);
   assert.equal(await response.text(), 'Contenido privado');
   assert.equal((await module.exports.GET(request('md'), context('missing'))).status, 404);
   const before = authState.reads;

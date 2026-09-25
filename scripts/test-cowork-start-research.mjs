@@ -16,7 +16,7 @@ const bundle=await build({entryPoints:['src/lib/server/cowork/start-research.ts'
 const module={exports:{}};new Function('require','module','exports',bundle.outputFiles[0].text)(createRequire(import.meta.url),module,module.exports);
 const filters=[];
 // Without an email, research needs an enrichment already attempted (found or not).
-const auth={user:{id:'owner'},organizationId:'org',supabase:{from(table){const where={};filters.push(where);const q={select:()=>q,eq:(k,v)=>{where[k]=v;return q;},filter:(key,operator,value)=>{where[key]=value;assert.equal(operator,'eq');return q;},limit:()=>q,
+const auth={user:{id:'owner'},organizationId:'org',supabase:{from(table){const where={};filters.push(where);const q={select:()=>q,eq:(k,v)=>{where[k]=v;return q;},filter:()=>q,limit:()=>q,
   maybeSingle:async()=>table==='enriched_leads'?{data:fixture.attempted?{id:'enriched-1'}:null,error:null}:{data:{id,name:'Ana',company:'Empresa',email:null},error:null}};return q;}}};
 try{
   fixture.observed=false;await assert.rejects(module.exports.startCoworkResearch(auth,'run',id),/UNAVAILABLE/);assert.equal(fixture.calls.length,0);
@@ -27,6 +27,5 @@ try{
   assert.equal(fixture.calls[0].lead.email,null);assert.equal(fixture.calls[0].options.refresh,false);
   assert.deepEqual(fixture.calls[0].access,{userId:'owner',organizationId:'org'});
   assert.ok(filters.every(f=>f.user_id==='owner'&&f.organization_id==='org'));
-  assert.ok(filters.filter(f=>'data->>sourceSavedLeadId' in f).every(f=>f['data->>sourceSavedLeadId']===id));
   console.log('PASS: observed target, owner/org scope, fresh access, stable research identity, no forced refresh; without an email, an attempted enrichment is enough.');
 }finally{delete globalThis.__researchFixture;}

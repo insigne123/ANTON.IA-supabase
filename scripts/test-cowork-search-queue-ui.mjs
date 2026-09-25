@@ -12,7 +12,9 @@ let approved = false;
 let failed = false;
 let writes = 0;
 const { window } = dom;
+let wakes = 0;
 window.fetch = async (url, options = {}) => {
+  if (url === '/api/cowork/wake') { wakes++; return { ok: true, status: 202, json: async () => ({ woken: true }) }; }
   if (options.method === 'POST') {
     assert.ok(url.endsWith('/search-approval'));
     assert.deepEqual(JSON.parse(options.body), { approve: true });
@@ -39,6 +41,7 @@ try {
   await waitFor(() => window.document.body.textContent.includes('espera su turno'));
   assert.equal(button('Buscar contactos'), undefined);
   assert.equal(writes, 1);
+  assert.ok(wakes >= 1, 'approval asks the worker to start now');
   failed = true;
   await waitFor(() => window.document.body.textContent.includes('Resultado incierto'));
   assert.equal(writes, 1);

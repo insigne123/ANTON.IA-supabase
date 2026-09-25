@@ -13,10 +13,10 @@ try {
   dom.window.eval(bundle.outputFiles[0].text);
   for (let i = 0; i < 100 && !dom.window.document.querySelector('section'); i++) await new Promise(resolve => setTimeout(resolve, 10));
   const text = dom.window.document.body.textContent;
-  assert.match(text, /Empresas consultadas/);
+  assert.match(text, /Empresas encontradas/);
   assert.match(text, /example.com/);
   assert.match(text, /80 empleados/);
-  assert.match(text, /La descarga incluye 1 empresas/);
+  assert.match(text, /La descarga incluye 1 empresa,/);
   assert.doesNotMatch(text, /Guardar contacto|Investigar contacto/);
   assert.equal(dom.window.document.querySelectorAll('li').length, 1);
   console.log('PASS: company results render domains/counts and never expose person actions. DOM only, not visual certification.');

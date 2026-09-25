@@ -1,0 +1,1111 @@
+From e8b4c6016c0a3b4df0a43ef96fa254c2def0f2df Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 25 Sep 2026 18:06:42 +0000
+Subject: [PATCH 6/8] Onboarding: tutorial guiado para cuentas nuevas
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Las cuentas de menos de 30 días ven una bienvenida con «Empezar recorrido»
+o «Ahora no». El recorrido resalta una entrada del menú a la vez (Perfil,
+Conexiones, Búsqueda de Leads, Guardados, Campañas, Leads Contactados,
+Agente ANTON.IA) y termina en «Ver tutorial», el nuevo botón al final del
+menú para volver a verlo cuando se quiera.
+
+- Se omite en cualquier paso (Omitir, Escape o «Ahora no») y queda
+  registrado; al omitir a mitad de camino un aviso dice dónde volver a verlo.
+- El estado vive en user_metadata.anton_tour, escrito por
+  /api/onboarding/tour con la sesión de la persona, y en localStorage para
+  no consultar en cada carga. Repetirlo no reescribe la cuenta.
+- En teléfono el primer paso muestra el botón del menú y cada paso indica
+  en qué entrada del menú está; si se abre desde el menú lateral, lo cierra
+  antes de empezar.
+- En escritorio despliega el menú plegado y lo vuelve a plegar; devuelve
+  el scroll del menú a donde estaba.
+- El resaltado sigue a la entrada en cada cuadro: el menú se mueve después
+  de pintarse cuando termina de cargar el selector de workspace.
+- Teclado: foco atrapado en la tarjeta, flechas para avanzar y retroceder,
+  cada paso se anuncia al lector de pantalla; respeta reducir movimiento.
+
+Pruebas: product-tour.test.ts (cuándo se ofrece, lectura del estado,
+límites de los pasos) y scripts/test-product-tour.mjs (DOM aislado:
+bienvenida, pasos, omitir, volver a verlo, menú plegado, Escape, teléfono
+y resaltado que sigue a una entrada que se movió).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JymggvBMiwiZstxk26eCmv
+---
+ scripts/test-product-tour.mjs             | 230 +++++++++++
+ src/app/api/onboarding/tour/route.ts      |  55 +++
+ src/components/app-shell.tsx              |  43 +-
+ src/components/app-sidebar.tsx            |  32 +-
+ src/components/onboarding/ProductTour.tsx | 456 ++++++++++++++++++++++
+ src/lib/onboarding/product-tour.test.ts   |  41 ++
+ src/lib/onboarding/product-tour.ts        |  67 ++++
+ 7 files changed, 897 insertions(+), 27 deletions(-)
+ create mode 100644 scripts/test-product-tour.mjs
+ create mode 100644 src/app/api/onboarding/tour/route.ts
+ create mode 100644 src/components/onboarding/ProductTour.tsx
+ create mode 100644 src/lib/onboarding/product-tour.test.ts
+ create mode 100644 src/lib/onboarding/product-tour.ts
+
+diff --git a/scripts/test-product-tour.mjs b/scripts/test-product-tour.mjs
+new file mode 100644
+index 0000000..1a62cbb
+--- /dev/null
++++ b/scripts/test-product-tour.mjs
+@@ -0,0 +1,230 @@
++// Isolated DOM test: the guided tour opens once for new accounts, can be skipped
++// at any step, is replayed from «Ver tutorial» and works on desktop and phones.
++import assert from 'node:assert/strict';
++import { build } from 'esbuild';
++import { JSDOM } from 'jsdom';
++
++const USER = '00000000-0000-4000-8000-0000000000aa';
++const MENU_TARGETS = ['antonia', 'profile', 'search', 'campaigns', 'saved-leads', 'contacted', 'connections'];
++const bundle = await build({
++  stdin: {
++    contents: `import React from 'react'; import {createRoot} from 'react-dom/client';
++    import {SidebarProvider, useSidebar} from './src/components/ui/sidebar';
++    import {ProductTourProvider, useProductTour} from './src/components/onboarding/ProductTour';
++    import {Toaster} from './src/components/ui/toaster';
++    function Shell() {
++      const tour = useProductTour(); const sidebar = useSidebar();
++      return <div>
++        <output id="sidebar-state">{sidebar.isMobile ? (sidebar.openMobile ? 'sheet-open' : 'sheet-closed') : (sidebar.open ? 'open' : 'closed')}</output>
++        <button data-tour="menu">Menú</button>
++        <button id="open-sheet" onClick={() => sidebar.setOpenMobile(true)}>Abrir menú</button>
++        <nav>{${JSON.stringify(MENU_TARGETS)}.map(target => <a key={target} href="#" data-tour={target}>{target}</a>)}</nav>
++        <button data-tour="tour-help" onClick={tour.start}>Ver tutorial</button>
++      </div>;
++    }
++    const root = createRoot(document.getElementById('root'));
++    window.navigations = [];
++    window.mount = (key, sidebarOpen = true) => root.render(<SidebarProvider key={key} defaultOpen={sidebarOpen}>
++      <ProductTourProvider userId="${USER}" onNavigate={href => window.navigations.push(href)}><Shell/></ProductTourProvider>
++      <Toaster/>
++    </SidebarProvider>);`,
++    resolveDir: process.cwd(), loader: 'tsx',
++  },
++  bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
++  define: { 'process.env.NODE_ENV': '"test"' },
++});
++
++// Where each menu entry sits. On phones the entries live in the closed menu sheet.
++const DESKTOP_RECTS = {
++  antonia: [72, 16, 224, 40], profile: [120, 16, 224, 40], search: [220, 16, 224, 40], campaigns: [268, 16, 224, 40],
++  'saved-leads': [380, 16, 224, 40], contacted: [428, 16, 224, 40], connections: [560, 16, 224, 40], 'tour-help': [690, 16, 224, 40],
++};
++const PHONE_RECTS = { menu: [8, 12, 40, 40] };
++
++async function open({ width = 1280, offer = true, sidebarOpen = true } = {}) {
++  const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/dashboard', runScripts: 'outside-only', pretendToBeVisual: true });
++  const { window } = dom;
++  Object.defineProperty(window, 'innerWidth', { value: width, configurable: true });
++  Object.defineProperty(window, 'innerHeight', { value: 768, configurable: true });
++  window.matchMedia = media => ({ matches: false, media, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} });
++  window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
++  const rects = { ...(width < 768 ? PHONE_RECTS : DESKTOP_RECTS) };
++  window.HTMLElement.prototype.getBoundingClientRect = function () {
++    const [top, left, width, height] = rects[this.getAttribute('data-tour')] || [0, 0, 0, 0];
++    return { top, left, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON() {} };
++  };
++  const calls = { gets: 0, posts: [] };
++  window.fetch = async (url, options = {}) => {
++    const json = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
++    if (url !== '/api/onboarding/tour') return json({ error: 'No encontrado' }, 404);
++    if (options.method === 'POST') {
++      calls.posts.push(JSON.parse(options.body));
++      return json({ record: { version: 1, status: JSON.parse(options.body).status, updatedAt: '2026-09-25T15:00:00Z' } });
++    }
++    calls.gets += 1;
++    return json({ record: null, offer });
++  };
++  window.eval(bundle.outputFiles[0].text);
++  window.mount('first', sidebarOpen);
++  const doc = window.document;
++  const text = () => doc.body.textContent;
++  const card = () => doc.querySelector('[data-product-tour]');
++  const button = label => [...doc.querySelectorAll('button')].find(node => node.textContent.trim() === label);
++  const key = (name, target = doc.activeElement || doc.body) => target.dispatchEvent(new window.KeyboardEvent('keydown', { key: name, bubbles: true }));
++  const stored = () => JSON.parse(window.localStorage.getItem(`antonia:tour:${USER}`) || 'null');
++  return { window, doc, rects, calls, text, card, button, key, stored, close: () => window.close() };
++}
++
++const waitFor = async (predicate, label) => {
++  for (let i = 0; i < 400; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
++  throw new Error(`Timed out: ${label}`);
++};
++const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
++
++// 1. A new account on desktop: welcome, steps, keyboard, back, skip and replay.
++{
++  const app = await open();
++  try {
++    await waitFor(() => app.text().includes('Te damos la bienvenida a ANTON.IA'), 'welcome for a new account');
++    assert.match(app.text(), /En 8 pasos cortos/);
++    assert.match(app.text(), /puedes verlo cuando quieras desde «Ver tutorial»/);
++    await waitFor(() => app.doc.activeElement === app.button('Empezar recorrido'), 'focus on the main action');
++    app.button('Empezar recorrido').click();
++
++    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 8'), 'first step');
++    assert.match(app.card().textContent, /Cuéntanos qué vendes/);
++    assert.equal(app.card().getAttribute('role'), 'dialog');
++    assert.equal(app.doc.getElementById(app.card().getAttribute('aria-labelledby')).textContent, 'Cuéntanos qué vendes');
++    await waitFor(() => app.doc.querySelector('[data-tour-spotlight]')?.style.top === '116px', 'spotlight on «Perfil»');
++    assert.equal(app.card().style.left, '256px', 'the card sits right of the menu');
++    assert.equal(app.card().style.top, '112px');
++    assert.ok(app.card().querySelector('.sr-only')?.textContent.includes('En el menú: Perfil'), 'the location is only read aloud when the entry is highlighted');
++    await waitFor(() => app.doc.activeElement === app.button('Siguiente'), 'focus on «Siguiente»');
++    assert.equal(app.button('Atrás'), undefined);
++
++    // The menu still moves well after the step opens (the workspace switcher loads): the spotlight follows.
++    await pause(900);
++    app.rects.profile = [147, 16, 224, 40];
++    await waitFor(() => app.doc.querySelector('[data-tour-spotlight]').style.top === '143px', 'spotlight follows a menu that moved');
++    assert.equal(app.card().style.top, '139px');
++    app.rects.profile = DESKTOP_RECTS.profile;
++    await waitFor(() => app.doc.querySelector('[data-tour-spotlight]').style.top === '116px', 'and back');
++
++    app.key('ArrowRight');
++    await waitFor(() => app.card().textContent.includes('Paso 2 de 8'), 'arrow key goes forward');
++    assert.match(app.card().textContent, /Conecta tu correo/);
++    assert.match(app.card().textContent, /Paso 2 de 8: Conecta tu correo\./, 'the new step is announced');
++    await waitFor(() => app.card().style.bottom === '160px', 'entries in the lower half grow the card upwards');
++
++    app.button('Atrás').click();
++    await waitFor(() => app.card().textContent.includes('Paso 1 de 8'), 'back');
++    await waitFor(() => app.doc.activeElement === app.button('Siguiente'), 'focus stays in the card when «Atrás» goes away');
++
++    app.button('Omitir').click();
++    await waitFor(() => !app.card(), 'skip closes the tour');
++    await waitFor(() => app.calls.posts.length === 1, 'skip is saved on the account');
++    assert.deepEqual(app.calls.posts[0], { status: 'skipped' });
++    assert.equal(app.stored().status, 'skipped');
++    await waitFor(() => app.text().includes('Recorrido omitido'), 'skip says where to find it again');
++
++    app.doc.querySelector('[data-tour="tour-help"]').click();
++    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 8'), 'replay starts at the first step');
++    assert.doesNotMatch(app.text(), /Te damos la bienvenida/, 'replay skips the welcome');
++    for (let step = 2; step <= 8; step++) {
++      app.key('ArrowRight');
++      await waitFor(() => app.card().textContent.includes(`Paso ${step} de 8`), `step ${step}`);
++    }
++    assert.match(app.card().textContent, /Listo para empezar/);
++    assert.equal(app.button('Omitir'), undefined, 'nothing to skip on the last step');
++    assert.ok(app.button('Terminar'));
++    app.key('ArrowRight');
++    await pause(30);
++    assert.match(app.card().textContent, /Paso 8 de 8/);
++    app.button('Ir a mi perfil').click();
++    await waitFor(() => !app.card(), 'last step closes the tour');
++    assert.deepEqual([...app.window.navigations], ['/profile']);
++    assert.equal(app.calls.posts.length, 1, 'a replay leaves the account as it is');
++    assert.equal(app.stored().status, 'completed');
++
++    app.window.mount('after-reload');
++    await pause(80);
++    assert.equal(app.calls.gets, 1, 'a finished tour is not asked for again');
++    assert.doesNotMatch(app.text(), /Te damos la bienvenida/);
++  } finally { app.close(); }
++}
++
++// 2. «Ahora no» on the welcome is final and quiet; older accounts never see it.
++{
++  const app = await open();
++  try {
++    await waitFor(() => app.button('Ahora no'), 'welcome');
++    app.button('Ahora no').click();
++    await waitFor(() => app.calls.posts.length === 1, 'declining is saved');
++    assert.deepEqual(app.calls.posts[0], { status: 'skipped' });
++    await pause(50);
++    assert.equal(app.card(), null);
++    assert.doesNotMatch(app.text(), /Recorrido omitido/, 'the welcome already said where to find it');
++  } finally { app.close(); }
++
++  const old = await open({ offer: false });
++  try {
++    await waitFor(() => old.calls.gets === 1, 'asked once');
++    await pause(80);
++    assert.doesNotMatch(old.text(), /Te damos la bienvenida/);
++    assert.equal(old.stored(), null);
++  } finally { old.close(); }
++}
++
++// 3. A folded sidebar opens for the tour and folds back; Escape skips.
++{
++  const app = await open({ sidebarOpen: false });
++  try {
++    await waitFor(() => app.button('Empezar recorrido'), 'welcome');
++    assert.equal(app.doc.getElementById('sidebar-state').textContent, 'closed');
++    app.button('Empezar recorrido').click();
++    await waitFor(() => app.card(), 'tour');
++    assert.equal(app.doc.getElementById('sidebar-state').textContent, 'open');
++    app.key('Escape');
++    await waitFor(() => !app.card(), 'Escape closes the tour');
++    assert.equal(app.doc.getElementById('sidebar-state').textContent, 'closed', 'the sidebar folds back');
++    assert.deepEqual(app.calls.posts, [{ status: 'skipped' }]);
++  } finally { app.close(); }
++}
++
++// 4. Phones: the menu button stands in for the entries, which live in the folded menu.
++{
++  const app = await open({ width: 390 });
++  try {
++    await waitFor(() => app.text().includes('En 9 pasos cortos'), 'welcome on a phone');
++    app.button('Empezar recorrido').click();
++    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 9'), 'first phone step');
++    assert.match(app.card().textContent, /Todo está en este menú/);
++    await waitFor(() => app.doc.querySelector('[data-tour-spotlight]')?.style.top === '4px', 'spotlight on the menu button');
++    assert.equal(app.card().style.left, '12px');
++    assert.equal(app.card().style.right, '12px');
++
++    app.button('Siguiente').click();
++    await waitFor(() => app.card().textContent.includes('Paso 2 de 9'), 'second phone step');
++    const where = [...app.card().querySelectorAll('p')].find(node => node.textContent.startsWith('En el menú:'));
++    assert.equal(where.textContent, 'En el menú: Perfil');
++    assert.ok(!where.classList.contains('sr-only'), 'the location is shown when the entry is folded away');
++    assert.equal(app.doc.querySelector('[data-tour-spotlight]').style.top, '4px', 'the menu button stays highlighted');
++    for (let step = 3; step <= 9; step++) {
++      app.button('Siguiente').click();
++      await waitFor(() => app.card().textContent.includes(`Paso ${step} de 9`), `phone step ${step}`);
++    }
++    app.button('Terminar').click();
++    await waitFor(() => !app.card(), 'finished');
++    assert.deepEqual(app.calls.posts, [{ status: 'completed' }]);
++    assert.deepEqual([...app.window.navigations], []);
++
++    // Replayed from inside the open menu sheet: the sheet closes first.
++    app.doc.getElementById('open-sheet').click();
++    await waitFor(() => app.doc.getElementById('sidebar-state').textContent === 'sheet-open', 'sheet open');
++    app.doc.querySelector('[data-tour="tour-help"]').click();
++    await waitFor(() => app.doc.getElementById('sidebar-state').textContent === 'sheet-closed', 'sheet closes');
++    await waitFor(() => app.card()?.textContent.includes('Paso 1 de 9'), 'tour after the sheet closed');
++  } finally { app.close(); }
++}
++
++console.log('PASS: the tour opens once for new accounts, can be skipped or replayed, and works on desktop and phones.');
+diff --git a/src/app/api/onboarding/tour/route.ts b/src/app/api/onboarding/tour/route.ts
+new file mode 100644
+index 0000000..58c37c0
+--- /dev/null
++++ b/src/app/api/onboarding/tour/route.ts
+@@ -0,0 +1,55 @@
++import { NextResponse } from 'next/server';
++import { z } from 'zod';
++
++import {
++  PRODUCT_TOUR_METADATA_KEY, PRODUCT_TOUR_VERSION, productTourRecord, shouldOfferProductTour,
++} from '@/lib/onboarding/product-tour';
++import { requestAuthErrorResponse, requireSessionRequestAuth } from '@/lib/server/request-auth';
++
++export const dynamic = 'force-dynamic';
++
++const noStore = { 'Cache-Control': 'private, no-store' };
++const TourStatusSchema = z.object({ status: z.enum(['completed', 'skipped']) }).strict();
++
++/** Whether the guided tour opens on its own for the signed-in person. */
++export async function GET() {
++  try {
++    const { user } = await requireSessionRequestAuth();
++    const record = productTourRecord(user.user_metadata);
++    return NextResponse.json(
++      { record, offer: shouldOfferProductTour({ record, createdAt: user.created_at }) },
++      { headers: noStore },
++    );
++  } catch (error) {
++    return failure(error, 'No se pudo leer el estado del tutorial.');
++  }
++}
++
++/** Remembers that the person finished or skipped the tour, so it does not open on its own again. */
++export async function POST(request: Request) {
++  try {
++    const auth = await requireSessionRequestAuth();
++    const body = TourStatusSchema.safeParse(await request.json().catch(() => null));
++    if (!body.success) {
++      return NextResponse.json({ error: 'Estado del tutorial no válido.' }, { status: 400, headers: noStore });
++    }
++    const record = { version: PRODUCT_TOUR_VERSION, status: body.data.status, updatedAt: new Date().toISOString() };
++    // Saved here with the person's own session: saving it from the browser emits USER_UPDATED,
++    // and the auth context would reload the organization and flash its loading state.
++    const { error } = await auth.supabase.auth.updateUser({ data: { [PRODUCT_TOUR_METADATA_KEY]: record } });
++    if (error) throw error;
++    return NextResponse.json({ record }, { headers: noStore });
++  } catch (error) {
++    return failure(error, 'No se pudo guardar el estado del tutorial.');
++  }
++}
++
++function failure(error: unknown, message: string) {
++  const authResponse = requestAuthErrorResponse(error);
++  if (authResponse) {
++    authResponse.headers.set('Cache-Control', 'private, no-store');
++    return authResponse;
++  }
++  console.error('[onboarding/tour]', error instanceof Error ? error.message : error);
++  return NextResponse.json({ error: message }, { status: 503, headers: noStore });
++}
+diff --git a/src/components/app-shell.tsx b/src/components/app-shell.tsx
+index 3d27c5c..fce392d 100644
+--- a/src/components/app-shell.tsx
++++ b/src/components/app-shell.tsx
+@@ -1,14 +1,19 @@
+ 'use client';
+ 
+ import { useEffect, useRef, useState, type ReactNode } from 'react';
++import { useRouter } from 'next/navigation';
+ 
+ import { AppSidebar } from '@/components/app-sidebar';
++import { ProductTourProvider } from '@/components/onboarding/ProductTour';
+ import QuotaSync from '@/components/quota/quota-sync';
+ import ThemeToggle from '@/components/theme-toggle';
+ import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
++import { useAuth } from '@/context/AuthContext';
+ import { cn } from '@/lib/utils';
+ 
+ export function AppShell({ children }: { children: ReactNode }) {
++  const { user } = useAuth();
++  const router = useRouter();
+   const [workspaceAnnouncement, setWorkspaceAnnouncement] = useState('');
+   const contentRef = useRef<HTMLElement>(null);
+ 
+@@ -23,26 +28,28 @@ export function AppShell({ children }: { children: ReactNode }) {
+ 
+   return (
+     <SidebarProvider defaultOpen>
+-      <QuotaSync />
+-      <AppSidebar />
+-      <SidebarInset>
+-        <p className="sr-only" role="status" aria-live="polite">{workspaceAnnouncement}</p>
+-        <header className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b bg-background/85 px-4 backdrop-blur-sm md:hidden">
+-          <SidebarTrigger />
+-          <div className="ml-auto"><ThemeToggle /></div>
+-        </header>
++      <ProductTourProvider userId={user?.id} onNavigate={(href) => router.push(href)}>
++        <QuotaSync />
++        <AppSidebar />
++        <SidebarInset>
++          <p className="sr-only" role="status" aria-live="polite">{workspaceAnnouncement}</p>
++          <header className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b bg-background/85 px-4 backdrop-blur-sm md:hidden">
++            <SidebarTrigger data-tour="menu" />
++            <div className="ml-auto"><ThemeToggle /></div>
++          </header>
+ 
+-        <div className="sticky top-0 z-10 hidden h-12 items-center justify-between border-b bg-background/85 px-6 backdrop-blur-sm md:flex">
+-          <SidebarTrigger />
+-          <ThemeToggle />
+-        </div>
++          <div className="sticky top-0 z-10 hidden h-12 items-center justify-between border-b bg-background/85 px-6 backdrop-blur-sm md:flex">
++            <SidebarTrigger />
++            <ThemeToggle />
++          </div>
+ 
+-        <main ref={contentRef} tabIndex={-1} className={cn(
+-          'flex-1 min-h-0 min-w-0 overflow-x-hidden px-4 py-4 md:px-6 md:py-5'
+-        )}>
+-          {children}
+-        </main>
+-      </SidebarInset>
++          <main ref={contentRef} tabIndex={-1} className={cn(
++            'flex-1 min-h-0 min-w-0 overflow-x-hidden px-4 py-4 md:px-6 md:py-5'
++          )}>
++            {children}
++          </main>
++        </SidebarInset>
++      </ProductTourProvider>
+     </SidebarProvider>
+   );
+ }
+diff --git a/src/components/app-sidebar.tsx b/src/components/app-sidebar.tsx
+index 15131dc..af61bcb 100644
+--- a/src/components/app-sidebar.tsx
++++ b/src/components/app-sidebar.tsx
+@@ -20,7 +20,7 @@ import {
+   SidebarTrigger
+ } from '@/components/ui/sidebar';
+ import {
+-  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, LogOut, Shield, ShieldCheck, LayoutGrid, Bot, Link2
++  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, LogOut, Shield, ShieldCheck, LayoutGrid, Bot, Link2, CircleHelp
+ } from 'lucide-react';
+ import Logo from './logo';
+ import { useAuth } from '@/context/AuthContext';
+@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils';
+ import { isOpportunitiesEnabled } from '@/lib/opportunities/access';
+ import { WorkspaceSwitcher } from '@/components/organization/WorkspaceSwitcher';
+ import { COWORK_OWNER_EMAIL } from '@/lib/cowork/access';
++import { useProductTour } from '@/components/onboarding/ProductTour';
+ 
+ type NavItem = {
+   href: string;
+@@ -36,6 +37,8 @@ type NavItem = {
+   label: string;
+   aliases?: string[];
+   feature?: 'opportunities' | 'admin-dashboard' | 'cowork';
++  /** Step of the guided tour that highlights this entry. */
++  tour?: string;
+ };
+ 
+ const navSections: Array<{ label: string; items: NavItem[] }> = [
+@@ -43,9 +46,9 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
+     label: 'Centro de mando',
+     items: [
+       { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+-      { href: '/antonia', icon: Bot, label: 'Agente ANTON.IA' },
++      { href: '/antonia', icon: Bot, label: 'Agente ANTON.IA', tour: 'antonia' },
+       { href: '/cowork', icon: Bot, label: 'Cowork', feature: 'cowork' },
+-      { href: '/profile', icon: User, label: 'Perfil' },
++      { href: '/profile', icon: User, label: 'Perfil', tour: 'profile' },
+     ],
+   },
+   {
+@@ -57,9 +60,9 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
+   {
+     label: 'Prospección',
+     items: [
+-      { href: '/search', icon: Search, label: 'Búsqueda de Leads' },
++      { href: '/search', icon: Search, label: 'Búsqueda de Leads', tour: 'search' },
+       { href: '/opportunities', icon: Briefcase, label: 'Oportunidades', feature: 'opportunities' },
+-      { href: '/campaigns', icon: MailCheck, label: 'Campañas' },
++      { href: '/campaigns', icon: MailCheck, label: 'Campañas', tour: 'campaigns' },
+     ],
+   },
+   {
+@@ -67,15 +70,15 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
+     items: [
+       { href: '/sheet', label: 'Sheet (Datos)', icon: TableIcon },
+       { href: '/crm', label: 'Pipeline (CRM)', icon: LayoutGrid },
+-      { href: '/saved/leads', icon: Users, label: 'Guardados · Leads' },
++      { href: '/saved/leads', icon: Users, label: 'Guardados · Leads', tour: 'saved-leads' },
+       { href: '/saved/opportunities', icon: Briefcase, label: 'Guardados · Oportunidades', feature: 'opportunities' },
+-      { href: '/contacted', icon: Send, label: 'Leads Contactados' },
++      { href: '/contacted', icon: Send, label: 'Leads Contactados', tour: 'contacted' },
+     ],
+   },
+   {
+     label: 'Configuración',
+     items: [
+-      { href: '/connections', icon: Link2, label: 'Conexiones', aliases: ['/gmail', '/outlook'] },
++      { href: '/connections', icon: Link2, label: 'Conexiones', aliases: ['/gmail', '/outlook'], tour: 'connections' },
+       { href: '/settings/email-studio', icon: Settings, label: 'Email Studio' },
+       {
+         href: '/settings/privacy',
+@@ -90,6 +93,7 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
+ export function AppSidebar() {
+   const pathname = usePathname();
+   const { signOut, user, organizationId, organizationRole } = useAuth();
++  const productTour = useProductTour();
+   const [coworkScope, setCoworkScope] = React.useState<string | null>(null);
+   const currentScope = `${user?.id || ''}:${organizationId || ''}`;
+   React.useEffect(() => {
+@@ -158,7 +162,7 @@ export function AppSidebar() {
+                             isActive && 'bg-sidebar-accent/95 text-sidebar-accent-foreground shadow-[0_18px_38px_-28px_rgba(15,23,42,0.55)]',
+                           )}
+                         >
+-                          <Link href={item.href} className="text-[0.95rem]" aria-current={isActive ? 'page' : undefined}>
++                          <Link href={item.href} className="text-[0.95rem]" aria-current={isActive ? 'page' : undefined} data-tour={item.tour}>
+                             <item.icon />
+                             <span>{item.label}</span>
+                           </Link>
+@@ -181,6 +185,16 @@ export function AppSidebar() {
+           <div className="mt-1 text-sm font-medium text-sidebar-foreground/85">{APP_VERSION}</div>
+         </div>
+         <SidebarMenu>
++          <SidebarMenuItem>
++            <SidebarMenuButton
++              data-tour="tour-help"
++              onClick={productTour.start}
++              className="h-10 rounded-2xl px-3 text-[0.95rem] font-medium text-sidebar-foreground/82 hover:bg-sidebar-accent/75 hover:text-sidebar-accent-foreground"
++            >
++              <CircleHelp />
++              <span>Ver tutorial</span>
++            </SidebarMenuButton>
++          </SidebarMenuItem>
+           <SidebarMenuItem>
+             <SidebarMenuButton
+               onClick={() => signOut()}
+diff --git a/src/components/onboarding/ProductTour.tsx b/src/components/onboarding/ProductTour.tsx
+new file mode 100644
+index 0000000..3d11f8f
+--- /dev/null
++++ b/src/components/onboarding/ProductTour.tsx
+@@ -0,0 +1,456 @@
++'use client';
++
++import {
++  createContext, forwardRef, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
++  type CSSProperties, type ReactNode,
++} from 'react';
++import * as DialogPrimitive from '@radix-ui/react-dialog';
++import { Compass } from 'lucide-react';
++
++import { Button } from '@/components/ui/button';
++import {
++  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
++} from '@/components/ui/dialog';
++import { useSidebar } from '@/components/ui/sidebar';
++import { toast } from '@/hooks/use-toast';
++import { getBrowserStorage } from '@/lib/browser-storage';
++import {
++  PRODUCT_TOUR_METADATA_KEY, PRODUCT_TOUR_VERSION, productTourRecord, productTourSteps,
++  type ProductTourRecord, type ProductTourStatus, type ProductTourStep,
++} from '@/lib/onboarding/product-tour';
++import { cn } from '@/lib/utils';
++
++const TOUR_ENDPOINT = '/api/onboarding/tour';
++const CARD_WIDTH = 352;
++const CARD_GAP = 16;
++const EDGE = 16;
++const SPOTLIGHT_PADDING = 4;
++const SCREEN_INSET = 3;
++/** The menu sheet takes this long to close. */
++const SETTLE_MS = 320;
++
++type ProductTourContextValue = { start: () => void; active: boolean };
++
++const ProductTourContext = createContext<ProductTourContextValue>({ start: () => {}, active: false });
++
++/** Opens the guided tour. Outside the app shell it does nothing. */
++export function useProductTour() {
++  return useContext(ProductTourContext);
++}
++
++type Phase = 'idle' | 'welcome' | 'touring';
++
++type ProductTourProviderProps = {
++  userId?: string | null;
++  /** Client-side navigation, used by the last step to open the profile. */
++  onNavigate: (href: string) => void;
++  children: ReactNode;
++};
++
++export function ProductTourProvider({ userId, onNavigate, children }: ProductTourProviderProps) {
++  const sidebar = useSidebar();
++  const [phase, setPhase] = useState<Phase>('idle');
++  const [steps, setSteps] = useState<ProductTourStep[]>([]);
++  const [index, setIndex] = useState(0);
++  const [announcement, setAnnouncement] = useState('');
++  const collapseSidebarAfter = useRef(false);
++  const scrolledAreas = useRef(new Map<HTMLElement, number>());
++  const startTimer = useRef<number | undefined>(undefined);
++
++  useEffect(() => () => window.clearTimeout(startTimer.current), []);
++
++  // Opens on its own once, for new accounts that have not finished or skipped this version.
++  useEffect(() => {
++    if (!userId) return;
++    const stored = readStoredRecord(userId);
++    if (stored && stored.version >= PRODUCT_TOUR_VERSION) return;
++    const controller = new AbortController();
++    fetch(TOUR_ENDPOINT, { cache: 'no-store', signal: controller.signal })
++      .then(response => (response.ok ? response.json() : null))
++      .then((data) => {
++        if (!data || controller.signal.aborted) return;
++        const record = productTourRecord({ [PRODUCT_TOUR_METADATA_KEY]: data.record });
++        if (record) storeRecord(userId, record);
++        if (data.offer === true) setPhase(current => (current === 'idle' ? 'welcome' : current));
++      })
++      .catch(() => {});
++    return () => controller.abort();
++  }, [userId]);
++
++  const save = useCallback((status: ProductTourStatus) => {
++    if (!userId) return;
++    const stored = readStoredRecord(userId);
++    storeRecord(userId, { version: PRODUCT_TOUR_VERSION, status, updatedAt: new Date().toISOString() });
++    // Replays leave the account as it is.
++    if (stored && stored.version >= PRODUCT_TOUR_VERSION) return;
++    fetch(TOUR_ENDPOINT, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ status }),
++      keepalive: true,
++    }).catch(() => {});
++  }, [userId]);
++
++  const begin = useCallback(() => {
++    if (!sidebar.isMobile && !sidebar.open) {
++      // Folded on desktop: unfold it for the tour and fold it back afterwards.
++      collapseSidebarAfter.current = true;
++      sidebar.setOpen(true);
++    }
++    setSteps(productTourSteps(sidebar.isMobile));
++    setIndex(0);
++    setAnnouncement('');
++    setPhase('touring');
++  }, [sidebar]);
++
++  const start = useCallback(() => {
++    window.clearTimeout(startTimer.current);
++    if (sidebar.isMobile && sidebar.openMobile) {
++      // Replayed from the menu sheet: close it first, the tour starts at its button.
++      sidebar.setOpenMobile(false);
++      startTimer.current = window.setTimeout(begin, SETTLE_MS);
++      return;
++    }
++    begin();
++  }, [begin, sidebar]);
++
++  const decline = useCallback(() => {
++    setPhase('idle');
++    save('skipped');
++  }, [save]);
++
++  const close = useCallback((status: ProductTourStatus, navigateTo?: string) => {
++    setPhase('idle');
++    save(status);
++    if (collapseSidebarAfter.current) {
++      collapseSidebarAfter.current = false;
++      sidebar.setOpen(false);
++    }
++    // The menu goes back to where the person left it.
++    scrolledAreas.current.forEach((top, area) => { area.scrollTop = top; });
++    scrolledAreas.current.clear();
++    if (status === 'skipped') {
++      toast({ title: 'Recorrido omitido', description: 'Puedes verlo cuando quieras desde «Ver tutorial», al final del menú.' });
++    }
++    if (navigateTo) onNavigate(navigateTo);
++  }, [onNavigate, save, sidebar]);
++
++  const goTo = useCallback((next: number) => {
++    const step = steps[next];
++    if (!step) return;
++    setIndex(next);
++    setAnnouncement(`Paso ${next + 1} de ${steps.length}: ${step.title}. ${step.body}`);
++  }, [steps]);
++
++  const value = useMemo(() => ({ start, active: phase !== 'idle' }), [phase, start]);
++
++  return (
++    <ProductTourContext.Provider value={value}>
++      {children}
++      <WelcomeDialog
++        open={phase === 'welcome'}
++        stepCount={productTourSteps(sidebar.isMobile).length}
++        onStart={begin}
++        onDecline={decline}
++      />
++      {phase === 'touring' && steps[index] && (
++        <TourStep
++          steps={steps}
++          index={index}
++          isMobile={sidebar.isMobile}
++          announcement={announcement}
++          scrolledAreas={scrolledAreas.current}
++          onBack={() => goTo(index - 1)}
++          onNext={() => goTo(index + 1)}
++          onClose={close}
++        />
++      )}
++    </ProductTourContext.Provider>
++  );
++}
++
++function WelcomeDialog({ open, stepCount, onStart, onDecline }: {
++  open: boolean;
++  stepCount: number;
++  onStart: () => void;
++  onDecline: () => void;
++}) {
++  const startRef = useRef<HTMLButtonElement>(null);
++  const starting = useRef(false);
++
++  return (
++    <Dialog open={open} onOpenChange={(next) => { if (!next) onDecline(); }}>
++      <DialogContent
++        className="w-[calc(100%-2rem)] max-w-md gap-6 rounded-2xl p-6 sm:rounded-2xl"
++        onOpenAutoFocus={(event) => {
++          event.preventDefault();
++          startRef.current?.focus();
++        }}
++        onCloseAutoFocus={(event) => {
++          // The tour takes the focus from here.
++          if (starting.current) event.preventDefault();
++          starting.current = false;
++        }}
++      >
++        <DialogHeader className="items-center gap-3 space-y-0 text-center sm:items-start sm:text-left">
++          <span className="flex size-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
++            <Compass className="size-5" aria-hidden />
++          </span>
++          <DialogTitle className="text-xl tracking-tight">Te damos la bienvenida a ANTON.IA</DialogTitle>
++          <DialogDescription className="leading-relaxed">
++            En {stepCount} pasos cortos te mostramos dónde está cada cosa para que empieces a prospectar.
++          </DialogDescription>
++        </DialogHeader>
++        <DialogFooter className="gap-2 sm:space-x-0">
++          <Button variant="ghost" onClick={onDecline}>Ahora no</Button>
++          <Button
++            ref={startRef}
++            onClick={() => {
++              starting.current = true;
++              onStart();
++            }}
++          >
++            Empezar recorrido
++          </Button>
++        </DialogFooter>
++        <p className="-mt-2 text-center text-xs text-muted-foreground sm:text-left">
++          Si lo omites, puedes verlo cuando quieras desde «Ver tutorial», al final del menú.
++        </p>
++      </DialogContent>
++    </Dialog>
++  );
++}
++
++function TourStep({ steps, index, isMobile, announcement, scrolledAreas, onBack, onNext, onClose }: {
++  steps: ProductTourStep[];
++  index: number;
++  isMobile: boolean;
++  announcement: string;
++  /** Scroll areas moved to reveal an entry, with their position before the tour. */
++  scrolledAreas: Map<HTMLElement, number>;
++  onBack: () => void;
++  onNext: () => void;
++  onClose: (status: ProductTourStatus, navigateTo?: string) => void;
++}) {
++  const step = steps[index];
++  const last = index === steps.length - 1;
++  const layout = useTargetLayout(step.target, isMobile, scrolledAreas);
++  const cardRef = useRef<HTMLDivElement>(null);
++  const primaryRef = useRef<HTMLButtonElement>(null);
++
++  // «Atrás» disappears on the first step: keep the focus on a button of the card.
++  useEffect(() => {
++    const frame = window.requestAnimationFrame(() => {
++      const active = document.activeElement;
++      if (!cardRef.current?.contains(active) || active === cardRef.current) primaryRef.current?.focus();
++    });
++    return () => window.cancelAnimationFrame(frame);
++  }, [index]);
++
++  return (
++    <DialogPrimitive.Root open onOpenChange={(open) => { if (!open) onClose(last ? 'completed' : 'skipped'); }}>
++      <DialogPrimitive.Portal>
++        <Spotlight layout={layout} />
++        <DialogPrimitive.Content
++          ref={cardRef}
++          data-product-tour=""
++          onOpenAutoFocus={(event) => {
++            event.preventDefault();
++            primaryRef.current?.focus();
++          }}
++          onPointerDownOutside={(event) => event.preventDefault()}
++          onKeyDown={(event) => {
++            if (event.key === 'ArrowRight' && !last) {
++              event.preventDefault();
++              onNext();
++            } else if (event.key === 'ArrowLeft' && index > 0) {
++              event.preventDefault();
++              onBack();
++            }
++          }}
++          className={cn(
++            'fixed z-[61] grid gap-4 rounded-2xl border bg-background p-5 text-foreground shadow-2xl outline-none',
++            'duration-300 animate-in fade-in-0 motion-reduce:animate-none',
++            isMobile
++              ? 'mx-auto max-w-md'
++              : 'w-[22rem] transition-[top,bottom,left] ease-out motion-reduce:transition-none',
++          )}
++          style={cardPosition(layout, isMobile)}
++        >
++          <div className="flex min-h-8 items-center justify-between gap-3">
++            <p className="text-xs font-medium tabular-nums text-muted-foreground">
++              Paso {index + 1} de {steps.length}
++            </p>
++            {!last && (
++              <Button
++                variant="ghost"
++                size="sm"
++                className="-mr-2 h-8 px-2.5 text-muted-foreground"
++                onClick={() => onClose('skipped')}
++              >
++                Omitir
++              </Button>
++            )}
++          </div>
++          <div className="grid gap-1.5">
++            <DialogPrimitive.Title className="text-base font-semibold leading-snug tracking-tight">
++              {step.title}
++            </DialogPrimitive.Title>
++            <DialogPrimitive.Description className="text-sm leading-relaxed text-muted-foreground">
++              {step.body}
++            </DialogPrimitive.Description>
++          </div>
++          {step.menuLabel && (
++            // Where to find it when the entry itself is not on screen (the folded menu on phones).
++            <p className={layout.onTarget ? 'sr-only' : 'w-fit rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground'}>
++              En el menú: <span className="font-medium text-foreground">{step.menuLabel}</span>
++            </p>
++          )}
++          <div className="flex items-center justify-between gap-2">
++            {index > 0 ? <Button variant="ghost" size="sm" onClick={onBack}>Atrás</Button> : <span />}
++            <div className="flex items-center gap-2">
++              {last && <Button variant="outline" size="sm" onClick={() => onClose('completed')}>Terminar</Button>}
++              <Button
++                ref={primaryRef}
++                size="sm"
++                onClick={last ? () => onClose('completed', '/profile') : onNext}
++              >
++                {last ? 'Ir a mi perfil' : 'Siguiente'}
++              </Button>
++            </div>
++          </div>
++          <p className="sr-only" aria-live="polite">{announcement}</p>
++        </DialogPrimitive.Content>
++      </DialogPrimitive.Portal>
++    </DialogPrimitive.Root>
++  );
++}
++
++/** Dims the screen around the highlighted entry. Radix portals hand their children a ref. */
++const Spotlight = forwardRef<HTMLDivElement, { layout: Layout }>(({ layout }, ref) => {
++  const { box, viewportWidth, viewportHeight } = layout;
++  if (!box) {
++    return <div ref={ref} aria-hidden className="fixed inset-0 z-[60] bg-black/50 duration-300 animate-in fade-in-0 motion-reduce:animate-none" />;
++  }
++  // Kept a few pixels inside the screen so the outline is never cut at the edge.
++  const top = Math.max(SCREEN_INSET, box.top - SPOTLIGHT_PADDING);
++  const left = Math.max(SCREEN_INSET, box.left - SPOTLIGHT_PADDING);
++  const bottom = Math.min(viewportHeight - SCREEN_INSET, box.top + box.height + SPOTLIGHT_PADDING);
++  const right = Math.min(viewportWidth - SCREEN_INSET, box.left + box.width + SPOTLIGHT_PADDING);
++  return (
++    <div
++      ref={ref}
++      aria-hidden
++      data-tour-spotlight=""
++      // The outline is the ring; the shadow is the dim, so neither replaces the other.
++      className="pointer-events-none fixed z-[60] rounded-[20px] outline outline-2 outline-primary transition-[top,left,width,height] duration-300 ease-out motion-reduce:transition-none"
++      style={{ top, left, width: right - left, height: bottom - top, boxShadow: '0 0 0 9999px rgb(0 0 0 / 0.5)' }}
++    />
++  );
++});
++Spotlight.displayName = 'Spotlight';
++
++type Box = { top: number; left: number; width: number; height: number };
++type Layout = { box: Box | null; onTarget: boolean; viewportWidth: number; viewportHeight: number };
++
++/** Where the highlighted element is. On phones the entries live in the folded menu, so its button stands in. */
++function useTargetLayout(target: string, isMobile: boolean, scrolledAreas: Map<HTMLElement, number>): Layout {
++  const [layout, setLayout] = useState<Layout>(() => ({
++    box: null, onTarget: false, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight,
++  }));
++
++  useLayoutEffect(() => {
++    let frame = 0;
++    // Followed on every frame while the step is open: the menu keeps moving after it
++    // renders (the workspace switcher loads, the sidebar slides in, the window resizes).
++    const track = () => {
++      const element = visibleElement(target);
++      if (element) revealInScrollArea(element, scrolledAreas);
++      const rect = (element || (isMobile ? visibleElement('menu') : null))?.getBoundingClientRect();
++      const next: Layout = {
++        box: rect ? { top: rect.top, left: rect.left, width: rect.width, height: rect.height } : null,
++        onTarget: Boolean(element),
++        viewportWidth: window.innerWidth,
++        viewportHeight: window.innerHeight,
++      };
++      setLayout(current => (sameLayout(current, next) ? current : next));
++      frame = window.requestAnimationFrame(track);
++    };
++    track();
++    return () => window.cancelAnimationFrame(frame);
++  }, [target, isMobile, scrolledAreas]);
++
++  return layout;
++}
++
++function visibleElement(target: string): HTMLElement | null {
++  for (const element of document.querySelectorAll<HTMLElement>(`[data-tour="${target}"]`)) {
++    const rect = element.getBoundingClientRect();
++    if (rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.left < window.innerWidth) return element;
++  }
++  return null;
++}
++
++/** Scrolls only the menu's own scroll area, so the page underneath stays where it was. */
++function revealInScrollArea(element: HTMLElement, scrolledAreas: Map<HTMLElement, number>) {
++  const area = scrollArea(element);
++  if (!area) return;
++  const rect = element.getBoundingClientRect();
++  const view = area.getBoundingClientRect();
++  const shift = rect.top < view.top ? rect.top - view.top - 8 : rect.bottom > view.bottom ? rect.bottom - view.bottom + 8 : 0;
++  if (!shift) return;
++  if (!scrolledAreas.has(area)) scrolledAreas.set(area, area.scrollTop);
++  area.scrollTop += shift;
++}
++
++function scrollArea(element: HTMLElement): HTMLElement | null {
++  let node = element.parentElement;
++  while (node && node !== document.body) {
++    const { overflowY } = window.getComputedStyle(node);
++    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) return node;
++    node = node.parentElement;
++  }
++  return null;
++}
++
++function sameLayout(a: Layout, b: Layout) {
++  const round = (value: number | undefined) => Math.round(value ?? -1);
++  return a.onTarget === b.onTarget
++    && a.viewportWidth === b.viewportWidth
++    && a.viewportHeight === b.viewportHeight
++    && Boolean(a.box) === Boolean(b.box)
++    && round(a.box?.top) === round(b.box?.top)
++    && round(a.box?.left) === round(b.box?.left)
++    && round(a.box?.width) === round(b.box?.width)
++    && round(a.box?.height) === round(b.box?.height);
++}
++
++function cardPosition(layout: Layout, isMobile: boolean): CSSProperties {
++  if (isMobile) return { left: 12, right: 12, bottom: 'max(12px, env(safe-area-inset-bottom))' };
++  const { box, viewportWidth, viewportHeight } = layout;
++  if (!box) return { inset: 0, margin: 'auto', height: 'fit-content' };
++  const left = Math.max(EDGE, Math.min(box.left + box.width + CARD_GAP, viewportWidth - CARD_WIDTH - EDGE));
++  // Grows down from entries in the upper half and up from the rest, so it always fits on screen.
++  return box.top + box.height / 2 <= viewportHeight / 2
++    ? { left, top: Math.max(EDGE, box.top - 8) }
++    : { left, bottom: Math.max(EDGE, viewportHeight - box.top - box.height - 8) };
++}
++
++const storageKey = (userId: string) => `antonia:tour:${userId}`;
++
++function readStoredRecord(userId: string): ProductTourRecord | null {
++  try {
++    const raw = getBrowserStorage()?.getItem(storageKey(userId));
++    return raw ? productTourRecord({ [PRODUCT_TOUR_METADATA_KEY]: JSON.parse(raw) }) : null;
++  } catch {
++    return null;
++  }
++}
++
++function storeRecord(userId: string, record: ProductTourRecord) {
++  try {
++    getBrowserStorage()?.setItem(storageKey(userId), JSON.stringify(record));
++  } catch {
++    // Storage full or blocked: the account keeps its own copy.
++  }
++}
+diff --git a/src/lib/onboarding/product-tour.test.ts b/src/lib/onboarding/product-tour.test.ts
+new file mode 100644
+index 0000000..c5ae4e7
+--- /dev/null
++++ b/src/lib/onboarding/product-tour.test.ts
+@@ -0,0 +1,41 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import {
++  PRODUCT_TOUR_METADATA_KEY, PRODUCT_TOUR_STEPS, PRODUCT_TOUR_VERSION,
++  productTourRecord, productTourSteps, shouldOfferProductTour,
++} from './product-tour';
++
++const now = new Date('2026-09-25T15:00:00Z');
++
++test('the tour is offered once to new accounts and never after finishing or skipping it', () => {
++  assert.equal(shouldOfferProductTour({ record: null, createdAt: '2026-09-25T14:59:00Z', now }), true);
++  assert.equal(shouldOfferProductTour({ record: null, createdAt: '2026-09-25T15:00:05Z', now }), true, 'a clock slightly behind still counts as new');
++  assert.equal(shouldOfferProductTour({ record: null, createdAt: '2026-08-01T00:00:00Z', now }), false, 'older accounts replay it from the menu');
++  assert.equal(shouldOfferProductTour({ record: null, createdAt: null, now }), false);
++  for (const status of ['completed', 'skipped'] as const) {
++    assert.equal(shouldOfferProductTour({ record: { version: PRODUCT_TOUR_VERSION, status, updatedAt: '' }, createdAt: '2026-09-25T14:59:00Z', now }), false);
++  }
++  assert.equal(shouldOfferProductTour({ record: { version: PRODUCT_TOUR_VERSION - 1, status: 'completed', updatedAt: '' }, createdAt: '2026-09-25T14:59:00Z', now }), true,
++    'a new version is offered again to new accounts');
++});
++
++test('only a well-formed record counts as seen', () => {
++  const record = { version: 1, status: 'skipped', updatedAt: '2026-09-25T15:00:00Z' };
++  assert.deepEqual(productTourRecord({ full_name: 'Ana', [PRODUCT_TOUR_METADATA_KEY]: record }), record);
++  assert.equal(productTourRecord({ [PRODUCT_TOUR_METADATA_KEY]: { version: 1, status: 'maybe' } }), null);
++  assert.equal(productTourRecord({ [PRODUCT_TOUR_METADATA_KEY]: 'completed' }), null);
++  assert.equal(productTourRecord(null), null);
++});
++
++test('steps are short, unique and point at menu entries; the menu button step is mobile only', () => {
++  const ids = PRODUCT_TOUR_STEPS.map(step => step.id);
++  assert.equal(new Set(ids).size, ids.length);
++  for (const step of PRODUCT_TOUR_STEPS) {
++    assert.ok(step.title.length <= 40, step.id);
++    assert.ok(step.body.length <= 140, step.id);
++    assert.ok(step.mobileOnly || step.menuLabel, `${step.id} says where it is in the menu`);
++  }
++  assert.deepEqual(productTourSteps(false).map(step => step.id), ids.filter(id => id !== 'menu'));
++  assert.equal(productTourSteps(true)[0].id, 'menu');
++  assert.equal(productTourSteps(false).at(-1)?.target, 'tour-help', 'it ends where it can be replayed');
++});
+diff --git a/src/lib/onboarding/product-tour.ts b/src/lib/onboarding/product-tour.ts
+new file mode 100644
+index 0000000..b273fb2
+--- /dev/null
++++ b/src/lib/onboarding/product-tour.ts
+@@ -0,0 +1,67 @@
++/** Guided first-run tour: its steps, the status stored per person and when it
++ * is offered on its own. Anyone can replay it from «Ver tutorial». */
++
++/** Bump when the steps change enough to offer the tour again to new accounts. */
++export const PRODUCT_TOUR_VERSION = 1;
++/** Accounts younger than this are offered the tour once. */
++export const PRODUCT_TOUR_NEW_ACCOUNT_DAYS = 30;
++/** Key inside the Supabase user metadata. */
++export const PRODUCT_TOUR_METADATA_KEY = 'anton_tour';
++
++export type ProductTourStatus = 'completed' | 'skipped';
++export type ProductTourRecord = { version: number; status: ProductTourStatus; updatedAt: string };
++
++export type ProductTourStep = {
++  id: string;
++  /** `data-tour` value of the element to highlight. */
++  target: string;
++  /** Name of the menu entry, shown when the element is not on screen (mobile). */
++  menuLabel?: string;
++  title: string;
++  body: string;
++  /** Only on small screens, where the menu is folded behind its button. */
++  mobileOnly?: boolean;
++};
++
++export const PRODUCT_TOUR_STEPS: ProductTourStep[] = [
++  { id: 'menu', target: 'menu', mobileOnly: true, title: 'Todo está en este menú',
++    body: 'Desde aquí llegas a cada parte de ANTON.IA. Te mostramos las más importantes.' },
++  { id: 'profile', target: 'profile', menuLabel: 'Perfil', title: 'Cuéntanos qué vendes',
++    body: 'Completa tu empresa, lo que ofreces y tu firma. ANTON.IA lo usa para escribir correos a tu medida.' },
++  { id: 'connections', target: 'connections', menuLabel: 'Conexiones', title: 'Conecta tu correo',
++    body: 'Vincula Gmail u Outlook para enviar desde tu propia cuenta y recibir las respuestas.' },
++  { id: 'search', target: 'search', menuLabel: 'Búsqueda de Leads', title: 'Encuentra prospectos',
++    body: 'Busca personas por cargo, industria y ubicación, y guarda las que quieras trabajar.' },
++  { id: 'saved-leads', target: 'saved-leads', menuLabel: 'Guardados · Leads', title: 'Prepara tus contactos',
++    body: 'Completa sus correos e investiga a cada persona antes de escribirle.' },
++  { id: 'campaigns', target: 'campaigns', menuLabel: 'Campañas', title: 'Escribe y envía',
++    body: 'Arma tus secuencias de correo, revisa a quién le llegan y decide cuándo activarlas.' },
++  { id: 'contacted', target: 'contacted', menuLabel: 'Leads Contactados', title: 'Sigue las respuestas',
++    body: 'Mira quién respondió y qué seguimiento toca con cada persona.' },
++  { id: 'antonia', target: 'antonia', menuLabel: 'Agente ANTON.IA', title: 'Deja que el agente trabaje',
++    body: 'Crea misiones para que ANTON.IA busque, investigue y contacte por ti, con los límites diarios que tú fijes.' },
++  { id: 'help', target: 'tour-help', menuLabel: 'Ver tutorial', title: 'Listo para empezar',
++    body: 'Te recomendamos partir por tu perfil. Si quieres repasar, vuelve a ver este recorrido desde aquí.' },
++];
++
++export function productTourSteps(isMobile: boolean): ProductTourStep[] {
++  return PRODUCT_TOUR_STEPS.filter(step => isMobile || !step.mobileOnly);
++}
++
++/** The stored record, or null when the person has not finished or skipped it. */
++export function productTourRecord(metadata: unknown): ProductTourRecord | null {
++  if (!metadata || typeof metadata !== 'object') return null;
++  const value = (metadata as Record<string, unknown>)[PRODUCT_TOUR_METADATA_KEY] as Partial<ProductTourRecord> | null | undefined;
++  if (!value || typeof value !== 'object' || typeof value.version !== 'number') return null;
++  if (value.status !== 'completed' && value.status !== 'skipped') return null;
++  return { version: value.version, status: value.status, updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : '' };
++}
++
++/** Offered on its own once, to new accounts that have not finished or skipped this version. */
++export function shouldOfferProductTour(input: { record: ProductTourRecord | null; createdAt: string | null | undefined; now?: Date }): boolean {
++  if (input.record && input.record.version >= PRODUCT_TOUR_VERSION) return false;
++  const created = Date.parse(String(input.createdAt || ''));
++  if (!Number.isFinite(created)) return false;
++  // A clock slightly behind the database still counts a brand-new account as new.
++  return (input.now || new Date()).getTime() - created <= PRODUCT_TOUR_NEW_ACCOUNT_DAYS * 86_400_000;
++}
+-- 
+2.43.0
+

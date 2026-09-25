@@ -1,0 +1,2823 @@
+{
+  "mode": "real_model_real_loop_corpus_tools",
+  "summary": {
+    "model": "gpt-6-luna",
+    "calls": 60,
+    "cases": 28,
+    "casesPassed": 26,
+    "checksPassed": "166/168",
+    "failedRuns": 0,
+    "answersWithIssues": 1
+  },
+  "usage": [
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3423,
+      "inputTokens": 12272,
+      "outputTokens": 203,
+      "totalTokens": 12475,
+      "cachedInputTokens": 12269,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 4499,
+      "inputTokens": 12460,
+      "outputTokens": 338,
+      "totalTokens": 12798,
+      "cachedInputTokens": 12457,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 4120,
+      "inputTokens": 12511,
+      "outputTokens": 345,
+      "totalTokens": 12856,
+      "cachedInputTokens": 12508,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 6142,
+      "inputTokens": 13081,
+      "outputTokens": 533,
+      "totalTokens": 13614,
+      "cachedInputTokens": 8873,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3408,
+      "inputTokens": 12277,
+      "outputTokens": 283,
+      "totalTokens": 12560,
+      "cachedInputTokens": 12274,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3513,
+      "inputTokens": 12530,
+      "outputTokens": 214,
+      "totalTokens": 12744,
+      "cachedInputTokens": 8873,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 1713,
+      "inputTokens": 12275,
+      "outputTokens": 156,
+      "totalTokens": 12431,
+      "cachedInputTokens": 12272,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3364,
+      "inputTokens": 12659,
+      "outputTokens": 281,
+      "totalTokens": 12940,
+      "cachedInputTokens": 12656,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2440,
+      "inputTokens": 12281,
+      "outputTokens": 202,
+      "totalTokens": 12483,
+      "cachedInputTokens": 12278,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3004,
+      "inputTokens": 12502,
+      "outputTokens": 262,
+      "totalTokens": 12764,
+      "cachedInputTokens": 12499,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 4746,
+      "inputTokens": 12638,
+      "outputTokens": 361,
+      "totalTokens": 12999,
+      "cachedInputTokens": 8873,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2993,
+      "inputTokens": 12278,
+      "outputTokens": 194,
+      "totalTokens": 12472,
+      "cachedInputTokens": 12275,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3638,
+      "inputTokens": 12355,
+      "outputTokens": 319,
+      "totalTokens": 12674,
+      "cachedInputTokens": 12352,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3242,
+      "inputTokens": 12483,
+      "outputTokens": 229,
+      "totalTokens": 12712,
+      "cachedInputTokens": 12480,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 4877,
+      "inputTokens": 12281,
+      "outputTokens": 439,
+      "totalTokens": 12720,
+      "cachedInputTokens": 12278,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 4042,
+      "inputTokens": 12555,
+      "outputTokens": 313,
+      "totalTokens": 12868,
+      "cachedInputTokens": 12552,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 4191,
+      "inputTokens": 12285,
+      "outputTokens": 208,
+      "totalTokens": 12493,
+      "cachedInputTokens": 12282,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 8815,
+      "inputTokens": 12906,
+      "outputTokens": 933,
+      "totalTokens": 13839,
+      "cachedInputTokens": 12903,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3449,
+      "inputTokens": 12467,
+      "outputTokens": 176,
+      "totalTokens": 12643,
+      "cachedInputTokens": 12464,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3189,
+      "inputTokens": 12529,
+      "outputTokens": 240,
+      "totalTokens": 12769,
+      "cachedInputTokens": 8873,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 4515,
+      "inputTokens": 12895,
+      "outputTokens": 434,
+      "totalTokens": 13329,
+      "cachedInputTokens": 8873,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2669,
+      "inputTokens": 12284,
+      "outputTokens": 208,
+      "totalTokens": 12492,
+      "cachedInputTokens": 12281,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3536,
+      "inputTokens": 12380,
+      "outputTokens": 221,
+      "totalTokens": 12601,
+      "cachedInputTokens": 12377,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2840,
+      "inputTokens": 12505,
+      "outputTokens": 215,
+      "totalTokens": 12720,
+      "cachedInputTokens": 12502,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2979,
+      "inputTokens": 12276,
+      "outputTokens": 240,
+      "totalTokens": 12516,
+      "cachedInputTokens": 12273,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2778,
+      "inputTokens": 12523,
+      "outputTokens": 236,
+      "totalTokens": 12759,
+      "cachedInputTokens": 12520,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2846,
+      "inputTokens": 12276,
+      "outputTokens": 255,
+      "totalTokens": 12531,
+      "cachedInputTokens": 12273,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 5208,
+      "inputTokens": 12846,
+      "outputTokens": 490,
+      "totalTokens": 13336,
+      "cachedInputTokens": 12843,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2876,
+      "inputTokens": 12288,
+      "outputTokens": 203,
+      "totalTokens": 12491,
+      "cachedInputTokens": 12285,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3387,
+      "inputTokens": 12428,
+      "outputTokens": 273,
+      "totalTokens": 12701,
+      "cachedInputTokens": 12425,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2368,
+      "inputTokens": 12272,
+      "outputTokens": 197,
+      "totalTokens": 12469,
+      "cachedInputTokens": 12269,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2944,
+      "inputTokens": 12460,
+      "outputTokens": 217,
+      "totalTokens": 12677,
+      "cachedInputTokens": 12457,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3838,
+      "inputTokens": 12511,
+      "outputTokens": 261,
+      "totalTokens": 12772,
+      "cachedInputTokens": 12508,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 5736,
+      "inputTokens": 12739,
+      "outputTokens": 472,
+      "totalTokens": 13211,
+      "cachedInputTokens": 12736,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3284,
+      "inputTokens": 12277,
+      "outputTokens": 227,
+      "totalTokens": 12504,
+      "cachedInputTokens": 12274,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2920,
+      "inputTokens": 12500,
+      "outputTokens": 223,
+      "totalTokens": 12723,
+      "cachedInputTokens": 12497,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2683,
+      "inputTokens": 12275,
+      "outputTokens": 156,
+      "totalTokens": 12431,
+      "cachedInputTokens": 12272,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3043,
+      "inputTokens": 12659,
+      "outputTokens": 295,
+      "totalTokens": 12954,
+      "cachedInputTokens": 12656,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3494,
+      "inputTokens": 12281,
+      "outputTokens": 287,
+      "totalTokens": 12568,
+      "cachedInputTokens": 12278,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2266,
+      "inputTokens": 12580,
+      "outputTokens": 206,
+      "totalTokens": 12786,
+      "cachedInputTokens": 8873,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 4346,
+      "inputTokens": 12619,
+      "outputTokens": 428,
+      "totalTokens": 13047,
+      "cachedInputTokens": 8873,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2533,
+      "inputTokens": 12278,
+      "outputTokens": 184,
+      "totalTokens": 12462,
+      "cachedInputTokens": 12275,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2185,
+      "inputTokens": 12355,
+      "outputTokens": 177,
+      "totalTokens": 12532,
+      "cachedInputTokens": 12352,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3454,
+      "inputTokens": 12483,
+      "outputTokens": 234,
+      "totalTokens": 12717,
+      "cachedInputTokens": 12480,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3340,
+      "inputTokens": 12281,
+      "outputTokens": 306,
+      "totalTokens": 12587,
+      "cachedInputTokens": 12278,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 4321,
+      "inputTokens": 12555,
+      "outputTokens": 321,
+      "totalTokens": 12876,
+      "cachedInputTokens": 12552,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2962,
+      "inputTokens": 12285,
+      "outputTokens": 232,
+      "totalTokens": 12517,
+      "cachedInputTokens": 12282,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 8175,
+      "inputTokens": 12906,
+      "outputTokens": 928,
+      "totalTokens": 13834,
+      "cachedInputTokens": 12903,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3886,
+      "inputTokens": 12467,
+      "outputTokens": 288,
+      "totalTokens": 12755,
+      "cachedInputTokens": 12464,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2965,
+      "inputTokens": 12622,
+      "outputTokens": 225,
+      "totalTokens": 12847,
+      "cachedInputTokens": 12619,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3903,
+      "inputTokens": 12987,
+      "outputTokens": 325,
+      "totalTokens": 13312,
+      "cachedInputTokens": 8873,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2748,
+      "inputTokens": 12284,
+      "outputTokens": 190,
+      "totalTokens": 12474,
+      "cachedInputTokens": 12281,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2715,
+      "inputTokens": 12380,
+      "outputTokens": 214,
+      "totalTokens": 12594,
+      "cachedInputTokens": 12377,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 5032,
+      "inputTokens": 12505,
+      "outputTokens": 411,
+      "totalTokens": 12916,
+      "cachedInputTokens": 12502,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3276,
+      "inputTokens": 12276,
+      "outputTokens": 257,
+      "totalTokens": 12533,
+      "cachedInputTokens": 12273,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 3659,
+      "inputTokens": 12467,
+      "outputTokens": 206,
+      "totalTokens": 12673,
+      "cachedInputTokens": 8873,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 2614,
+      "inputTokens": 12276,
+      "outputTokens": 206,
+      "totalTokens": 12482,
+      "cachedInputTokens": 12273,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 7094,
+      "inputTokens": 12846,
+      "outputTokens": 626,
+      "totalTokens": 13472,
+      "cachedInputTokens": 12843,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 4646,
+      "inputTokens": 12288,
+      "outputTokens": 186,
+      "totalTokens": 12474,
+      "cachedInputTokens": 12285,
+      "costUsd": null,
+      "pricing": null
+    },
+    {
+      "model": "gpt-6-luna",
+      "durationMs": 5827,
+      "inputTokens": 12428,
+      "outputTokens": 569,
+      "totalTokens": 12997,
+      "cachedInputTokens": 12425,
+      "costUsd": null,
+      "pricing": null
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "pendientes-vacio",
+      "result": {
+        "actions": [
+          "contacted.search",
+          "replies.attention",
+          "campaigns.inbox"
+        ],
+        "reply": "No aparecen pendientes en lo registrado en ANTON.IA: hay 0 respuestas o incidencias listadas y 0 seguimientos propios en la bandeja de campañas. No puedo confirmar que el correo esté sincronizado por completo. ¿Reviso tus contactos guardados para detectar a quién le falta correo o seguimiento?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "consulta pendientes antes de responder",
+          "passed": true
+        },
+        {
+          "label": "propone algo concreto (incidencias, campañas o contactos)",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 7.9,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "contacted.search",
+              "input": ""
+            },
+            {
+              "action": "replies.attention",
+              "input": ""
+            },
+            {
+              "action": "campaigns.inbox",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "No aparecen pendientes en lo registrado en ANTON.IA: hay 0 respuestas o incidencias listadas y 0 seguimientos propios en la bandeja de campañas. No puedo confirmar que el correo esté sincronizado por completo. ¿Reviso tus contactos guardados para detectar a quién le falta correo o seguimiento?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "recomendacion-hoy",
+      "result": {
+        "actions": [
+          "leads.search",
+          "app.context",
+          "audience.analyze"
+        ],
+        "reply": "Para avanzar hoy, partiría por completar los correos de Nehal Pa***a (Recruitment Manager, Adecco) y Katherine Sa***o (Consultor de Selección, Adecco), contactos guardados sin correo y vinculados al segmento de RR. HH., donde tienes 118 contactos. En total hay 256 contactos guardados, 21 con correo y cero envíos registrados; propongo buscar esos dos correos primero y luego preparar el primer contacto para revisión.",
+        "document": null,
+        "proposal": {
+          "kind": "enrich_batch",
+          "label": "Enriquecer lote de contactos"
+        },
+        "search": null,
+        "note": "Para avanzar hoy, partiría por completar los correos de Nehal Pa***a (Recruitment Manager, Adecco) y Katherine Sa***o (Consultor de Selección, Adecco), contactos guardados sin correo y vinculados al segmento de RR. HH., donde tienes 118 contactos. En total hay 256 contactos guardados, 21 con correo y cero envíos registrados; propongo buscar esos dos correos primero y luego preparar el primer contacto para revisión.",
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "no repite las lecturas del turno anterior",
+          "passed": true
+        },
+        {
+          "label": "usa datos de la cuenta (incidencias, campañas o contactos)",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 10.3,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "leads.search",
+              "input": ""
+            },
+            {
+              "action": "app.context",
+              "input": ""
+            },
+            {
+              "action": "audience.analyze",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "lead.enrich_batch",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Para avanzar hoy, partiría por completar los correos de Nehal Pa***a (Recruitment Manager, Adecco) y Katherine Sa***o (Consultor de Selección, Adecco), contactos guardados sin correo y vinculados al segmento de RR. HH., donde tienes 118 contactos. En total hay 256 contactos guardados, 21 con correo y cero envíos registrados; propongo buscar esos dos correos primero y luego preparar el primer contacto para revisión.",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "metricas-semana",
+      "result": {
+        "actions": [
+          "metrics.rates",
+          "metrics.overview",
+          "metrics.incidents"
+        ],
+        "reply": "Esta semana, en los últimos 7 días, el equipo registra **0 correos enviados, 0 respuestas y 0 rebotes**. Hay **256 contactos guardados**, pero ninguno figura como contactado; sin envíos no hay tasa de respuesta que calcular. ¿Quieres que identifique contactos sin correo para preparar los primeros envíos?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "consulta métricas",
+          "passed": true
+        },
+        {
+          "label": "da los números (0 envíos)",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 6.9,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "metrics.rates",
+              "input": ""
+            },
+            {
+              "action": "metrics.overview",
+              "input": ""
+            },
+            {
+              "action": "metrics.incidents",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Esta semana, en los últimos 7 días, el equipo registra **0 correos enviados, 0 respuestas y 0 rebotes**. Hay **256 contactos guardados**, pero ninguno figura como contactado; sin envíos no hay tasa de respuesta que calcular. ¿Quieres que identifique contactos sin correo para preparar los primeros envíos?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "ultimos-guardados",
+      "result": {
+        "actions": [
+          "leads.search"
+        ],
+        "reply": "Estos son tus últimos contactos guardados:\n- Carlos Ah***a — Operations Manager, Minera Centinela — 25 sep, 01:26 — sin correo.\n- Nehal Pa***a — Recruitment Manager, Adecco — 22 sep, 16:18 — sin correo.\n- Jose Ca***o — Reclutador Junior, GrupoExpro — 22 sep, 16:10 — jcastro@grupoexpro.com.\n- Katherine Sa***o — Consultor de Selección, Adecco — 22 sep, 16:05 — sin correo.\n\n¿Busco los correos que faltan?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "consulta tus guardados",
+          "passed": true
+        },
+        {
+          "label": "ofrece completar los correos que faltan",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 5.1,
+      "decisions": [
+        {
+          "action": "leads.search",
+          "reads": null,
+          "query": "",
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Estos son tus últimos contactos guardados:\n- Carlos Ah***a — Operations Manager, Minera Centinela — 25 sep, 01:26 — sin correo.\n- Nehal Pa***a — Recruitment Manager, Adecco — 22 sep, 16:18 — sin correo.\n- Jose Ca***o — Reclutador Junior, GrupoExpro — 22 sep, 16:10 — jcastro@grupoexpro.com.\n- Katherine Sa***o — Consultor de Selección, Adecco — 22 sep, 16:05 — sin correo.\n\n¿Busco los correos que faltan?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "vale-la-pena",
+      "result": {
+        "actions": [
+          "leads.search",
+          "research.get_existing",
+          "app.context"
+        ],
+        "reply": "Nehal figura como Recruitment Manager en Adecco, pero no hay investigación guardada ni correo registrado. Vale la pena tantear si su equipo necesita revisar antecedentes laborales de postulantes; el cargo sugiere cercanía al proceso de selección, pero no confirma que tenga esa necesidad ni que decida la compra. Propongo buscar su correo primero; si aparece verificado, avanzamos con un mensaje breve.",
+        "document": null,
+        "proposal": {
+          "kind": "enrich_contact",
+          "label": "Enriquecer contacto Nehal Pa***a (Adecco)"
+        },
+        "search": null,
+        "note": "Nehal figura como Recruitment Manager en Adecco, pero no hay investigación guardada ni correo registrado. Vale la pena tantear si su equipo necesita revisar antecedentes laborales de postulantes; el cargo sugiere cercanía al proceso de selección, pero no confirma que tenga esa necesidad ni que decida la compra. Propongo buscar su correo primero; si aparece verificado, avanzamos con un mensaje breve.",
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "no pregunta qué vende el usuario",
+          "passed": true
+        },
+        {
+          "label": "propone o pregunta por buscar su correo",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 10.2,
+      "decisions": [
+        {
+          "action": "leads.search",
+          "reads": null,
+          "query": "Nehal Adecco",
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "research.get_existing",
+              "input": "00000000-0000-4000-8000-000000000022"
+            },
+            {
+              "action": "app.context",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "lead.enrich",
+          "reads": null,
+          "query": null,
+          "leadId": "00000000-0000-4000-8000-000000000022",
+          "answer": {
+            "reply": "Nehal figura como Recruitment Manager en Adecco, pero no hay investigación guardada ni correo registrado. Vale la pena tantear si su equipo necesita revisar antecedentes laborales de postulantes; el cargo sugiere cercanía al proceso de selección, pero no confirma que tenga esa necesidad ni que decida la compra. Propongo buscar su correo primero; si aparece verificado, avanzamos con un mensaje breve.",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "dominio",
+      "result": {
+        "actions": [
+          "profile.get",
+          "deliverability.check"
+        ],
+        "reply": "Revisé yago.cl: la configuración requiere ajustes. MX y DKIM están bien; SPF termina en ~all (softfail) y DMARC usa p=none, que solo monitorea. Eso puede debilitar la autenticación, pero no confirma por sí solo que tus correos estén cayendo en spam. Puedo revisar los rebotes registrados y proponerte el siguiente diagnóstico, ¿lo hago?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "revisa el dominio sin preguntarlo",
+          "passed": true
+        },
+        {
+          "label": "menciona yago.cl",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 9.9,
+      "decisions": [
+        {
+          "action": "profile.get",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "deliverability.check",
+              "input": "yago.cl"
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Revisé yago.cl: la configuración requiere ajustes. MX y DKIM están bien; SPF termina en ~all (softfail) y DMARC usa p=none, que solo monitorea. Eso puede debilitar la autenticación, pero no confirma por sí solo que tus correos estén cayendo en spam. Puedo revisar los rebotes registrados y proponerte el siguiente diagnóstico, ¿lo hago?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "prospeccion-mineria",
+      "result": {
+        "actions": [],
+        "reply": "Dejaré propuesta una búsqueda de hasta 25 personas en Antofagasta, Chile, con cargos equivalentes a gerencia y jefatura de operaciones en empresas mineras. La ubicación corresponde a la persona; al aprobar, podrás revisar los criterios antes de ejecutar la búsqueda.",
+        "document": null,
+        "proposal": null,
+        "search": {
+          "target": "people",
+          "rolePolicy": null,
+          "titles": [
+            "Gerente de Operaciones",
+            "Operations Manager",
+            "Superintendente de Operaciones",
+            "Jefe de Operaciones",
+            "Operations Superintendent"
+          ],
+          "industries": [
+            "minería",
+            "mining"
+          ],
+          "locations": [
+            "Antofagasta, Chile"
+          ],
+          "seniorities": null,
+          "companyLocations": null,
+          "employeeRanges": null,
+          "companyDomains": null,
+          "limit": 25
+        },
+        "note": "Dejaré propuesta una búsqueda de hasta 25 personas en Antofagasta, Chile, con cargos equivalentes a gerencia y jefatura de operaciones en empresas mineras. La ubicación corresponde a la persona; al aprobar, podrás revisar los criterios antes de ejecutar la búsqueda.",
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "propone una búsqueda",
+          "passed": true
+        },
+        {
+          "label": "amplía cargos del rubro (3 o más)",
+          "passed": true
+        },
+        {
+          "label": "no restringe a una sola seniority",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 4.9,
+      "decisions": [
+        {
+          "action": "prospecting.propose_search",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Dejaré propuesta una búsqueda de hasta 25 personas en Antofagasta, Chile, con cargos equivalentes a gerencia y jefatura de operaciones en empresas mineras. La ubicación corresponde a la persona; al aprobar, podrás revisar los criterios antes de ejecutar la búsqueda.",
+            "document": null
+          },
+          "searchCriteria": {
+            "target": "people",
+            "rolePolicy": null,
+            "titles": [
+              "Gerente de Operaciones",
+              "Operations Manager",
+              "Superintendente de Operaciones",
+              "Jefe de Operaciones",
+              "Operations Superintendent"
+            ],
+            "industries": [
+              "minería",
+              "mining"
+            ],
+            "locations": [
+              "Antofagasta, Chile"
+            ],
+            "seniorities": null,
+            "companyLocations": null,
+            "employeeRanges": null,
+            "companyDomains": null,
+            "limit": 25
+          }
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "reintento-enriquecer",
+      "result": {
+        "actions": [],
+        "reply": "Carlos Ah***a es Operations Manager en Minera Centinela; su correo no apareció pese a la búsqueda anterior. Propongo iniciar la investigación con su nombre, cargo y empresa; cuando esté disponible, preparo el correo usando sus hallazgos, sin inventar datos de contacto.",
+        "document": null,
+        "proposal": {
+          "kind": "start_research",
+          "label": "Investigar contacto Carlos Ah***a (Minera Centinela)"
+        },
+        "search": null,
+        "note": "Carlos Ah***a es Operations Manager en Minera Centinela; su correo no apareció pese a la búsqueda anterior. Propongo iniciar la investigación con su nombre, cargo y empresa; cuando esté disponible, preparo el correo usando sus hallazgos, sin inventar datos de contacto.",
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "no vuelve a proponer buscar el correo",
+          "passed": true
+        },
+        {
+          "label": "propone investigar",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 4,
+      "decisions": [
+        {
+          "action": "research.start",
+          "reads": null,
+          "query": null,
+          "leadId": "00000000-0000-4000-8000-000000000021",
+          "answer": {
+            "reply": "Carlos Ah***a es Operations Manager en Minera Centinela; su correo no apareció pese a la búsqueda anterior. Propongo iniciar la investigación con su nombre, cargo y empresa; cuando esté disponible, preparo el correo usando sus hallazgos, sin inventar datos de contacto.",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "informe-jefe",
+      "result": {
+        "actions": [
+          "metrics.rates",
+          "leads.search",
+          "campaigns.list"
+        ],
+        "reply": "En septiembre hay 4 contactos guardados y una campaña en borrador para 7 destinatarios, pero no se registran envíos en los últimos 30 días, así que aún no hay tasa de respuesta que calcular. Te dejo el informe listo para compartir; ¿quieres que después proponga completar los correos faltantes de los tres contactos que no tienen uno registrado?",
+        "document": {
+          "title": "Informe de prospección — septiembre 2026, al 25 de septiembre",
+          "content": "La prospección tiene actividad inicial, pero todavía no hay envíos registrados para medir resultados. Entre el 22 y el 25 de septiembre se guardaron cuatro contactos; además, existe una campaña en borrador para siete destinatarios.\n\n## Actividad\n\n| Indicador | Resultado | Período o detalle |\n|---|---:|---|\n| Contactos guardados | 4 | 22–25 sep 2026 |\n| Contactos con correo registrado | 1 | De los 4 guardados; el correo no aparece como verificado |\n| Contactos sin correo registrado | 3 | De los 4 guardados |\n| Campañas en borrador | 1 | Creada el 18 sep 2026 |\n| Destinatarios considerados en el borrador | 7 | No significa que se hayan enviado correos |\n\n## Resultados\n\nEn los últimos 30 días se registran 0 envíos y 0 respuestas. Sin envíos no hay tasa de respuesta que calcular. La sincronización del correo no está confirmada, por lo que este informe refleja solo lo registrado en ANTON.IA.\n\n## Qué aprendimos\n\nYa hay una base inicial de contactos y una campaña preparada como borrador, pero todavía falta completar correos para tres contactos y pasar de la preparación a envíos revisados. Con los datos disponibles no se puede evaluar qué mensajes o segmentos están generando respuestas.\n\n## Próximos pasos\n\n1. Completar los correos faltantes de los tres contactos.\n2. Revisar que los siete destinatarios del borrador correspondan al público objetivo y aprobar el contenido.\n3. Iniciar envíos revisados y medir envíos y respuestas durante el período siguiente.\n\n**Alcance:** contactos guardados y campaña observada en septiembre de 2026; métricas de envíos y respuestas de los últimos 30 días."
+        },
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "entrega un documento",
+          "passed": true
+        },
+        {
+          "label": "incluye actividad y próximos pasos",
+          "passed": true
+        },
+        {
+          "label": "usa actividad además de métricas",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 13,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "metrics.rates",
+              "input": ""
+            },
+            {
+              "action": "leads.search",
+              "input": ""
+            },
+            {
+              "action": "campaigns.list",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "En septiembre hay 4 contactos guardados y una campaña en borrador para 7 destinatarios, pero no se registran envíos en los últimos 30 días, así que aún no hay tasa de respuesta que calcular. Te dejo el informe listo para compartir; ¿quieres que después proponga completar los correos faltantes de los tres contactos que no tienen uno registrado?",
+            "document": {
+              "title": "Informe de prospección — septiembre 2026, al 25 de septiembre",
+              "content": "La prospección tiene actividad inicial, pero todavía no hay envíos registrados para medir resultados. Entre el 22 y el 25 de septiembre se guardaron cuatro contactos; además, existe una campaña en borrador para siete destinatarios.\n\n## Actividad\n\n| Indicador | Resultado | Período o detalle |\n|---|---:|---|\n| Contactos guardados | 4 | 22–25 sep 2026 |\n| Contactos con correo registrado | 1 | De los 4 guardados; el correo no aparece como verificado |\n| Contactos sin correo registrado | 3 | De los 4 guardados |\n| Campañas en borrador | 1 | Creada el 18 sep 2026 |\n| Destinatarios considerados en el borrador | 7 | No significa que se hayan enviado correos |\n\n## Resultados\n\nEn los últimos 30 días se registran 0 envíos y 0 respuestas. Sin envíos no hay tasa de respuesta que calcular. La sincronización del correo no está confirmada, por lo que este informe refleja solo lo registrado en ANTON.IA.\n\n## Qué aprendimos\n\nYa hay una base inicial de contactos y una campaña preparada como borrador, pero todavía falta completar correos para tres contactos y pasar de la preparación a envíos revisados. Con los datos disponibles no se puede evaluar qué mensajes o segmentos están generando respuestas.\n\n## Próximos pasos\n\n1. Completar los correos faltantes de los tres contactos.\n2. Revisar que los siete destinatarios del borrador correspondan al público objetivo y aprobar el contenido.\n3. Iniciar envíos revisados y medir envíos y respuestas durante el período siguiente.\n\n**Alcance:** contactos guardados y campaña observada en septiembre de 2026; métricas de envíos y respuestas de los últimos 30 días."
+            }
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "campana-no-guardado",
+      "result": {
+        "actions": [
+          "leads.search",
+          "leads.search"
+        ],
+        "reply": "No puedo crearla todavía: nicogun123@gmail.com no aparece entre tus contactos guardados en ANTON.IA, y la campaña requiere un contacto guardado con ese correo. Impórtalo como contacto y puedo preparar la campaña pausada con los textos aprobados; ¿quieres que la cree apenas esté guardado?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "explica que el correo debe estar guardado como contacto",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 11.2,
+      "decisions": [
+        {
+          "action": "leads.search",
+          "reads": null,
+          "query": "nicogun123@gmail.com",
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "leads.search",
+          "reads": null,
+          "query": "",
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "No puedo crearla todavía: nicogun123@gmail.com no aparece entre tus contactos guardados en ANTON.IA, y la campaña requiere un contacto guardado con ese correo. Impórtalo como contacto y puedo preparar la campaña pausada con los textos aprobados; ¿quieres que la cree apenas esté guardado?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "agendar-reunion",
+      "result": {
+        "actions": [
+          "contacted.search",
+          "leads.search"
+        ],
+        "reply": "Encontré a Carlos Ah***a, Operations Manager de Minera Centinela. No puedo agendar directamente desde Cowork; además, “el martes” corresponde al 29 de septiembre de 2026, pero falta definir duración y zona horaria para dejar lista la invitación. ¿La preparo para 30 minutos en hora de Santiago?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "dice que no agenda y ofrece la alternativa",
+          "passed": true
+        },
+        {
+          "label": "no pregunta la zona horaria",
+          "passed": false
+        }
+      ],
+      "passed": false,
+      "attempt": 1,
+      "seconds": 9,
+      "decisions": [
+        {
+          "action": "contacted.search",
+          "reads": null,
+          "query": "",
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "leads.search",
+          "reads": null,
+          "query": "Carlos Minera Centinela",
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Encontré a Carlos Ah***a, Operations Manager de Minera Centinela. No puedo agendar directamente desde Cowork; además, “el martes” corresponde al 29 de septiembre de 2026, pero falta definir duración y zona horaria para dejar lista la invitación. ¿La preparo para 30 minutos en hora de Santiago?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "linkedin-seguimiento",
+      "result": {
+        "actions": [
+          "linkedin.followups",
+          "linkedin.inbox",
+          "linkedin.network"
+        ],
+        "reply": "No hay contactos listos para seguimiento en LinkedIn esta semana: no aparecen candidatos a segundo mensaje y tu LinkedIn aún no está sincronizado, así que no puedo confirmar quién quedó pendiente. Abre LinkedIn con la extensión de ANTON.IA y usa «Sincronizar historial de LinkedIn»; como alternativa, puedo revisar tus contactos guardados con perfil de LinkedIn para identificar a quién invitar. ¿Reviso esos contactos guardados?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "explica cómo sincronizar LinkedIn",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 5.8,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "linkedin.followups",
+              "input": ""
+            },
+            {
+              "action": "linkedin.inbox",
+              "input": ""
+            },
+            {
+              "action": "linkedin.network",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "No hay contactos listos para seguimiento en LinkedIn esta semana: no aparecen candidatos a segundo mensaje y tu LinkedIn aún no está sincronizado, así que no puedo confirmar quién quedó pendiente. Abre LinkedIn con la extensión de ANTON.IA y usa «Sincronizar historial de LinkedIn»; como alternativa, puedo revisar tus contactos guardados con perfil de LinkedIn para identificar a quién invitar. ¿Reviso esos contactos guardados?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "vender-mas",
+      "result": {
+        "actions": [
+          "app.context",
+          "audience.analyze",
+          "leads.search"
+        ],
+        "reply": "Partiría por tus contactos guardados: hay 256, pero solo 21 tienen correo y no aparecen envíos registrados. Propongo buscar el correo de Nehal P. y Katherine S., ambas vinculadas a selección; con los resultados, seguimos con los contactos que tengan correo verificado y preparamos una primera campaña pequeña para medir interés.",
+        "document": null,
+        "proposal": {
+          "kind": "enrich_batch",
+          "label": "Enriquecer lote de contactos"
+        },
+        "search": null,
+        "note": "Partiría por tus contactos guardados: hay 256, pero solo 21 tienen correo y no aparecen envíos registrados. Propongo buscar el correo de Nehal P. y Katherine S., ambas vinculadas a selección; con los resultados, seguimos con los contactos que tengan correo verificado y preparamos una primera campaña pequeña para medir interés.",
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "no pregunta qué vende el usuario",
+          "passed": true
+        },
+        {
+          "label": "aterriza en datos de la cuenta",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 8.1,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "app.context",
+              "input": ""
+            },
+            {
+              "action": "audience.analyze",
+              "input": ""
+            },
+            {
+              "action": "leads.search",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "lead.enrich_batch",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Partiría por tus contactos guardados: hay 256, pero solo 21 tienen correo y no aparecen envíos registrados. Propongo buscar el correo de Nehal P. y Katherine S., ambas vinculadas a selección; con los resultados, seguimos con los contactos que tengan correo verificado y preparamos una primera campaña pequeña para medir interés.",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "ley-chile",
+      "result": {
+        "actions": [
+          "compliance.law"
+        ],
+        "reply": "No conviene asumir que basta con que el correo sea público. En Chile, la Ley 19.628 exige una base legal o consentimiento para tratar datos personales y reconoce el derecho a oponerse a la publicidad; además, debes detener los envíos cuando alguien se dé de baja o esté marcado como «no contactar». La Ley 21.719 aún no está vigente hoy, 25 sep 2026: su entrada en vigencia está prevista para el 1 dic 2026. Es información general, no asesoría legal. ¿Quieres que revise las reglas de contacto aplicables antes de escribirle a un contacto específico?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "consulta el marco legal",
+          "passed": true
+        },
+        {
+          "label": "aclara que no es asesoría legal",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 1,
+      "seconds": 6.3,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "compliance.law",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "No conviene asumir que basta con que el correo sea público. En Chile, la Ley 19.628 exige una base legal o consentimiento para tratar datos personales y reconoce el derecho a oponerse a la publicidad; además, debes detener los envíos cuando alguien se dé de baja o esté marcado como «no contactar». La Ley 21.719 aún no está vigente hoy, 25 sep 2026: su entrada en vigencia está prevista para el 1 dic 2026. Es información general, no asesoría legal. ¿Quieres que revise las reglas de contacto aplicables antes de escribirle a un contacto específico?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "pendientes-vacio",
+      "result": {
+        "actions": [
+          "contacted.search",
+          "replies.attention",
+          "campaigns.inbox"
+        ],
+        "reply": "No aparece nada pendiente para hoy en lo registrado en ANTON.IA: no hay envíos recientes registrados, respuestas por atender ni seguimientos de campañas propios. Como la sincronización del correo no está confirmada, no puedo asegurar que esto cubra toda tu bandeja. ¿Quieres que revise tus contactos guardados para encontrar a quién conviene contactar hoy?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "consulta pendientes antes de responder",
+          "passed": true
+        },
+        {
+          "label": "propone algo concreto (incidencias, campañas o contactos)",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 5.3,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "contacted.search",
+              "input": ""
+            },
+            {
+              "action": "replies.attention",
+              "input": ""
+            },
+            {
+              "action": "campaigns.inbox",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "No aparece nada pendiente para hoy en lo registrado en ANTON.IA: no hay envíos recientes registrados, respuestas por atender ni seguimientos de campañas propios. Como la sincronización del correo no está confirmada, no puedo asegurar que esto cubra toda tu bandeja. ¿Quieres que revise tus contactos guardados para encontrar a quién conviene contactar hoy?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "recomendacion-hoy",
+      "result": {
+        "actions": [
+          "app.context",
+          "audience.analyze",
+          "campaigns.inbox"
+        ],
+        "reply": "Para avanzar hoy, partiría por tus contactos guardados: hay 256, pero solo 21 tienen correo registrado y no aparecen envíos registrados. Completar los datos de contacto y dejar un primer grupo listo para revisión puede abrir el camino a tu primera campaña; también hay 2 incidencias abiertas del equipo. ¿Quieres que identifique primero los contactos sin correo y priorice cuáles completar?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "no repite las lecturas del turno anterior",
+          "passed": true
+        },
+        {
+          "label": "usa datos de la cuenta (incidencias, campañas o contactos)",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 9.6,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "app.context",
+              "input": ""
+            },
+            {
+              "action": "audience.analyze",
+              "input": ""
+            },
+            {
+              "action": "campaigns.inbox",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Para avanzar hoy, partiría por tus contactos guardados: hay 256, pero solo 21 tienen correo registrado y no aparecen envíos registrados. Completar los datos de contacto y dejar un primer grupo listo para revisión puede abrir el camino a tu primera campaña; también hay 2 incidencias abiertas del equipo. ¿Quieres que identifique primero los contactos sin correo y priorice cuáles completar?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "metricas-semana",
+      "result": {
+        "actions": [
+          "metrics.rates",
+          "metrics.overview"
+        ],
+        "reply": "En los últimos 7 días, el equipo registra 0 correos enviados, 0 respuestas, 0 rebotes y 0 contactos contactados. Hay 256 contactos guardados, pero como no hay envíos registrados no corresponde calcular una tasa de respuesta; la sincronización del correo no está confirmada. ¿Reviso las métricas de los últimos 30 días para comparar?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "consulta métricas",
+          "passed": true
+        },
+        {
+          "label": "da los números (0 envíos)",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 6.2,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "metrics.rates",
+              "input": ""
+            },
+            {
+              "action": "metrics.overview",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "En los últimos 7 días, el equipo registra 0 correos enviados, 0 respuestas, 0 rebotes y 0 contactos contactados. Hay 256 contactos guardados, pero como no hay envíos registrados no corresponde calcular una tasa de respuesta; la sincronización del correo no está confirmada. ¿Reviso las métricas de los últimos 30 días para comparar?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "ultimos-guardados",
+      "result": {
+        "actions": [
+          "leads.search"
+        ],
+        "reply": "Estos son tus contactos guardados más recientes:\n\n- Carlos Ah***a — Operations Manager, Minera Centinela — guardado el 25 sep, 01:26; sin correo.\n- Nehal Pa***a — Recruitment Manager, Adecco — guardado el 22 sep, 16:18; sin correo.\n- Jose Ca***o — Reclutador Junior, GrupoExpro — guardado el 22 sep, 16:10; jcastro@grupoexpro.com.\n- Katherine Sa***o — Consultor de Selección, Adecco — guardado el 22 sep, 16:05; sin correo.\n\n¿Busco los correos que faltan?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "consulta tus guardados",
+          "passed": true
+        },
+        {
+          "label": "ofrece completar los correos que faltan",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 5.7,
+      "decisions": [
+        {
+          "action": "leads.search",
+          "reads": null,
+          "query": "",
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Estos son tus contactos guardados más recientes:\n\n- Carlos Ah***a — Operations Manager, Minera Centinela — guardado el 25 sep, 01:26; sin correo.\n- Nehal Pa***a — Recruitment Manager, Adecco — guardado el 22 sep, 16:18; sin correo.\n- Jose Ca***o — Reclutador Junior, GrupoExpro — guardado el 22 sep, 16:10; jcastro@grupoexpro.com.\n- Katherine Sa***o — Consultor de Selección, Adecco — guardado el 22 sep, 16:05; sin correo.\n\n¿Busco los correos que faltan?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "vale-la-pena",
+      "result": {
+        "actions": [
+          "leads.search",
+          "contacted.search",
+          "research.get_existing"
+        ],
+        "reply": "Nehal aparece guardada como Recruitment Manager en Adecco, pero no tiene correo ni investigación, y no hay envíos registrados a su nombre. El cargo por sí solo no confirma que sea una oportunidad: primero propongo buscar su correo; después evaluamos si calza con lo que vendes antes de escribirle.",
+        "document": null,
+        "proposal": {
+          "kind": "enrich_contact",
+          "label": "Enriquecer contacto Nehal Pa***a (Adecco)"
+        },
+        "search": null,
+        "note": "Nehal aparece guardada como Recruitment Manager en Adecco, pero no tiene correo ni investigación, y no hay envíos registrados a su nombre. El cargo por sí solo no confirma que sea una oportunidad: primero propongo buscar su correo; después evaluamos si calza con lo que vendes antes de escribirle.",
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "no pregunta qué vende el usuario",
+          "passed": true
+        },
+        {
+          "label": "propone o pregunta por buscar su correo",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 10.1,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "leads.search",
+              "input": "Nehal Adecco"
+            },
+            {
+              "action": "contacted.search",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "research.get_existing",
+              "input": "00000000-0000-4000-8000-000000000022"
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "lead.enrich",
+          "reads": null,
+          "query": null,
+          "leadId": "00000000-0000-4000-8000-000000000022",
+          "answer": {
+            "reply": "Nehal aparece guardada como Recruitment Manager en Adecco, pero no tiene correo ni investigación, y no hay envíos registrados a su nombre. El cargo por sí solo no confirma que sea una oportunidad: primero propongo buscar su correo; después evaluamos si calza con lo que vendes antes de escribirle.",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "dominio",
+      "result": {
+        "actions": [
+          "profile.get",
+          "deliverability.check"
+        ],
+        "reply": "Revisé yago.cl: MX y DKIM están bien, pero SPF termina en ~all (softfail) y DMARC está en p=none, que solo monitorea. La configuración es parcial: conviene revisar el SPF con quien administra el dominio y avanzar DMARC gradualmente a una política de aplicación, verificando antes que todos tus servicios de correo estén autenticados. ¿Quieres que consulte la guía vigente para estos ajustes?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "revisa el dominio sin preguntarlo",
+          "passed": true
+        },
+        {
+          "label": "menciona yago.cl",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 8.2,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "profile.get",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "deliverability.check",
+          "reads": null,
+          "query": "yago.cl",
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Revisé yago.cl: MX y DKIM están bien, pero SPF termina en ~all (softfail) y DMARC está en p=none, que solo monitorea. La configuración es parcial: conviene revisar el SPF con quien administra el dominio y avanzar DMARC gradualmente a una política de aplicación, verificando antes que todos tus servicios de correo estén autenticados. ¿Quieres que consulte la guía vigente para estos ajustes?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "prospeccion-mineria",
+      "result": {
+        "actions": [],
+        "reply": "Propongo buscar hasta 25 personas de empresas mineras en Antofagasta con cargos equivalentes a gerente, jefe o superintendente de operaciones. La ubicación se aplica a la persona, no solo a la casa matriz; al aprobar los criterios, la búsqueda externa consumirá una operación de cuota y podrás revisar los resultados antes de guardar contactos.",
+        "document": null,
+        "proposal": null,
+        "search": {
+          "target": "people",
+          "rolePolicy": {
+            "decisionTerms": [],
+            "userTerms": [],
+            "referralTerms": [],
+            "excludeTerms": []
+          },
+          "titles": [
+            "Gerente de Operaciones",
+            "Operations Manager",
+            "Jefe de Operaciones",
+            "Superintendente de Operaciones"
+          ],
+          "industries": [
+            "minería"
+          ],
+          "locations": [
+            "Antofagasta"
+          ],
+          "seniorities": null,
+          "companyLocations": null,
+          "employeeRanges": null,
+          "companyDomains": null,
+          "limit": 25
+        },
+        "note": "Propongo buscar hasta 25 personas de empresas mineras en Antofagasta con cargos equivalentes a gerente, jefe o superintendente de operaciones. La ubicación se aplica a la persona, no solo a la casa matriz; al aprobar los criterios, la búsqueda externa consumirá una operación de cuota y podrás revisar los resultados antes de guardar contactos.",
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "propone una búsqueda",
+          "passed": true
+        },
+        {
+          "label": "amplía cargos del rubro (3 o más)",
+          "passed": true
+        },
+        {
+          "label": "no restringe a una sola seniority",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 3.3,
+      "decisions": [
+        {
+          "action": "prospecting.propose_search",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Propongo buscar hasta 25 personas de empresas mineras en Antofagasta con cargos equivalentes a gerente, jefe o superintendente de operaciones. La ubicación se aplica a la persona, no solo a la casa matriz; al aprobar los criterios, la búsqueda externa consumirá una operación de cuota y podrás revisar los resultados antes de guardar contactos.",
+            "document": null
+          },
+          "searchCriteria": {
+            "target": "people",
+            "rolePolicy": {
+              "decisionTerms": [],
+              "userTerms": [],
+              "referralTerms": [],
+              "excludeTerms": []
+            },
+            "titles": [
+              "Gerente de Operaciones",
+              "Operations Manager",
+              "Jefe de Operaciones",
+              "Superintendente de Operaciones"
+            ],
+            "industries": [
+              "minería"
+            ],
+            "locations": [
+              "Antofagasta"
+            ],
+            "seniorities": null,
+            "companyLocations": null,
+            "employeeRanges": null,
+            "companyDomains": null,
+            "limit": 25
+          }
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "reintento-enriquecer",
+      "result": {
+        "actions": [],
+        "reply": "Carlos Ah***a es Operations Manager en Minera Centinela; ya se buscó su correo y no se encontró. Propongo investigar su perfil con esos datos; cuando esté lista la investigación, preparo un borrador de correo basado en sus hallazgos, sin inventar información.",
+        "document": null,
+        "proposal": {
+          "kind": "start_research",
+          "label": "Investigar contacto Carlos Ah***a (Minera Centinela)"
+        },
+        "search": null,
+        "note": "Carlos Ah***a es Operations Manager en Minera Centinela; ya se buscó su correo y no se encontró. Propongo investigar su perfil con esos datos; cuando esté lista la investigación, preparo un borrador de correo basado en sus hallazgos, sin inventar información.",
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "no vuelve a proponer buscar el correo",
+          "passed": true
+        },
+        {
+          "label": "propone investigar",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 4.3,
+      "decisions": [
+        {
+          "action": "research.start",
+          "reads": null,
+          "query": null,
+          "leadId": "00000000-0000-4000-8000-000000000021",
+          "answer": {
+            "reply": "Carlos Ah***a es Operations Manager en Minera Centinela; ya se buscó su correo y no se encontró. Propongo investigar su perfil con esos datos; cuando esté lista la investigación, preparo un borrador de correo basado en sus hallazgos, sin inventar información.",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "informe-jefe",
+      "result": {
+        "actions": [
+          "metrics.rates",
+          "leads.search",
+          "campaigns.list"
+        ],
+        "reply": "En septiembre hay 4 contactos guardados y una campaña en borrador para 7 destinatarios. No se registran envíos en los últimos 30 días, así que todavía no hay una tasa de respuesta que calcular. Te dejo el informe ejecutivo listo para compartir; ¿quieres que prepare un plan de próximos pasos para completar contactos y avanzar con la campaña?",
+        "document": {
+          "title": "Informe de prospección — septiembre 2026",
+          "content": "En septiembre se guardaron 4 contactos y hay una campaña en borrador dirigida a 7 destinatarios. No se registran envíos durante los últimos 30 días, por lo que todavía no hay resultados de respuesta que evaluar ni tasas que calcular.\n\n## Actividad\n\n| Actividad | Resultado en septiembre |\n|---|---:|\n| Contactos guardados | 4 |\n| Contactos con correo registrado | 1 de 4 |\n| Campañas preparadas | 1 borrador |\n| Destinatarios considerados en el borrador | 7 |\n\nContactos guardados entre el 22 y el 25 de septiembre: Carlos Ah***a, de Minera Centinela; Nehal Pa***a, de Adecco; Jose Ca***o, de GrupoExpro; y Katherine Sa***o, de Adecco.\n\n## Resultados\n\n| Indicador | Últimos 30 días |\n|---|---:|\n| Envíos registrados | 0 |\n| Respuestas registradas | 0 |\n| Tasa de respuesta | Sin envíos no hay tasa que calcular |\n\n## Qué aprendimos\n\nHay contactos incorporados y un borrador de campaña, pero aún no hay actividad de envío registrada para evaluar respuestas. Tres de los cuatro contactos guardados no tienen correo registrado, lo que limita su preparación para una campaña.\n\n## Próximos pasos\n\n1. Completar los correos de los 3 contactos que no los tienen registrados.\n2. Revisar el borrador y sus 7 destinatarios antes de avanzar.\n3. Medir envíos y respuestas una vez que comience la actividad, para establecer una primera referencia de resultados.\n\n**Alcance:** cifras de contactos guardados, campaña y métricas de la organización disponibles en ANTON.IA. Los resultados de envío corresponden a los últimos 30 días; la sincronización del correo no está confirmada."
+        },
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "entrega un documento",
+          "passed": true
+        },
+        {
+          "label": "incluye actividad y próximos pasos",
+          "passed": true
+        },
+        {
+          "label": "usa actividad además de métricas",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 11.1,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "metrics.rates",
+              "input": ""
+            },
+            {
+              "action": "leads.search",
+              "input": ""
+            },
+            {
+              "action": "campaigns.list",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "En septiembre hay 4 contactos guardados y una campaña en borrador para 7 destinatarios. No se registran envíos en los últimos 30 días, así que todavía no hay una tasa de respuesta que calcular. Te dejo el informe ejecutivo listo para compartir; ¿quieres que prepare un plan de próximos pasos para completar contactos y avanzar con la campaña?",
+            "document": {
+              "title": "Informe de prospección — septiembre 2026",
+              "content": "En septiembre se guardaron 4 contactos y hay una campaña en borrador dirigida a 7 destinatarios. No se registran envíos durante los últimos 30 días, por lo que todavía no hay resultados de respuesta que evaluar ni tasas que calcular.\n\n## Actividad\n\n| Actividad | Resultado en septiembre |\n|---|---:|\n| Contactos guardados | 4 |\n| Contactos con correo registrado | 1 de 4 |\n| Campañas preparadas | 1 borrador |\n| Destinatarios considerados en el borrador | 7 |\n\nContactos guardados entre el 22 y el 25 de septiembre: Carlos Ah***a, de Minera Centinela; Nehal Pa***a, de Adecco; Jose Ca***o, de GrupoExpro; y Katherine Sa***o, de Adecco.\n\n## Resultados\n\n| Indicador | Últimos 30 días |\n|---|---:|\n| Envíos registrados | 0 |\n| Respuestas registradas | 0 |\n| Tasa de respuesta | Sin envíos no hay tasa que calcular |\n\n## Qué aprendimos\n\nHay contactos incorporados y un borrador de campaña, pero aún no hay actividad de envío registrada para evaluar respuestas. Tres de los cuatro contactos guardados no tienen correo registrado, lo que limita su preparación para una campaña.\n\n## Próximos pasos\n\n1. Completar los correos de los 3 contactos que no los tienen registrados.\n2. Revisar el borrador y sus 7 destinatarios antes de avanzar.\n3. Medir envíos y respuestas una vez que comience la actividad, para establecer una primera referencia de resultados.\n\n**Alcance:** cifras de contactos guardados, campaña y métricas de la organización disponibles en ANTON.IA. Los resultados de envío corresponden a los últimos 30 días; la sincronización del correo no está confirmada."
+            }
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "campana-no-guardado",
+      "result": {
+        "actions": [
+          "leads.search",
+          "campaigns.list",
+          "leads.search"
+        ],
+        "reply": "No puedo crearla todavía: nicogun123@gmail.com no aparece entre tus contactos guardados, y la campaña requiere que el destinatario esté guardado en ANTON.IA. Guarda el correo como contacto mediante Importar Leads y después preparo la campaña con los 3 textos aprobados, usando Gmail. ¿La preparo apenas quede guardado?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "explica que el correo debe estar guardado como contacto",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 10.8,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "leads.search",
+              "input": "nicogun123@gmail.com"
+            },
+            {
+              "action": "campaigns.list",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "leads.search",
+          "reads": null,
+          "query": "",
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "No puedo crearla todavía: nicogun123@gmail.com no aparece entre tus contactos guardados, y la campaña requiere que el destinatario esté guardado en ANTON.IA. Guarda el correo como contacto mediante Importar Leads y después preparo la campaña con los 3 textos aprobados, usando Gmail. ¿La preparo apenas quede guardado?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "agendar-reunion",
+      "result": {
+        "actions": [
+          "contacted.search",
+          "leads.search"
+        ],
+        "reply": "Encontré a Carlos Ah***a de Minera Centinela, guardado como Operations Manager. No puedo agendar directamente en tu calendario; el próximo martes es 29 sep a las 10:00, hora de Santiago. ¿Preparo una invitación para que la envíes?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "dice que no agenda y ofrece la alternativa",
+          "passed": true
+        },
+        {
+          "label": "no pregunta la zona horaria",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 10.5,
+      "decisions": [
+        {
+          "action": "contacted.search",
+          "reads": null,
+          "query": "",
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "leads.search",
+          "reads": null,
+          "query": "Carlos Minera Centinela",
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Encontré a Carlos Ah***a de Minera Centinela, guardado como Operations Manager. No puedo agendar directamente en tu calendario; el próximo martes es 29 sep a las 10:00, hora de Santiago. ¿Preparo una invitación para que la envíes?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "linkedin-seguimiento",
+      "result": {
+        "actions": [
+          "linkedin.followups",
+          "linkedin.network",
+          "linkedin.quota"
+        ],
+        "reply": "Esta semana no hay contactos elegibles para seguimiento por LinkedIn: aparecen 0 candidatos. Además, tu LinkedIn no está sincronizado por completo; abre LinkedIn con la extensión de ANTON.IA y usa «Sincronizar historial de LinkedIn». Después puedo revisar de nuevo a quién corresponde contactar.",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": false
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "explica cómo sincronizar LinkedIn",
+          "passed": true
+        }
+      ],
+      "passed": false,
+      "attempt": 2,
+      "seconds": 6.9,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "linkedin.followups",
+              "input": ""
+            },
+            {
+              "action": "linkedin.network",
+              "input": ""
+            },
+            {
+              "action": "linkedin.quota",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Esta semana no hay contactos elegibles para seguimiento por LinkedIn: aparecen 0 candidatos. Además, tu LinkedIn no está sincronizado por completo; abre LinkedIn con la extensión de ANTON.IA y usa «Sincronizar historial de LinkedIn». Después puedo revisar de nuevo a quién corresponde contactar.",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": [
+        "no cierra con un siguiente paso concreto"
+      ]
+    },
+    {
+      "id": "vender-mas",
+      "result": {
+        "actions": [
+          "app.context",
+          "audience.analyze",
+          "leads.search"
+        ],
+        "reply": "Partiría por RR. HH.: hay 118 contactos guardados en ese sector y el equipo aún no registra envíos. En total, solo 21 de 256 contactos tienen correo; propongo buscar los correos de dos contactos de selección de Adecco y después preparar una prueba acotada con los contactos aptos, midiendo respuestas antes de ampliar. La búsqueda queda pendiente de tu aprobación.",
+        "document": null,
+        "proposal": {
+          "kind": "enrich_batch",
+          "label": "Enriquecer lote de contactos"
+        },
+        "search": null,
+        "note": "Partiría por RR. HH.: hay 118 contactos guardados en ese sector y el equipo aún no registra envíos. En total, solo 21 de 256 contactos tienen correo; propongo buscar los correos de dos contactos de selección de Adecco y después preparar una prueba acotada con los contactos aptos, midiendo respuestas antes de ampliar. La búsqueda queda pendiente de tu aprobación.",
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "no pregunta qué vende el usuario",
+          "passed": true
+        },
+        {
+          "label": "aterriza en datos de la cuenta",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 9.7,
+      "decisions": [
+        {
+          "action": "reads.parallel",
+          "reads": [
+            {
+              "action": "app.context",
+              "input": ""
+            },
+            {
+              "action": "audience.analyze",
+              "input": ""
+            },
+            {
+              "action": "leads.search",
+              "input": ""
+            }
+          ],
+          "query": null,
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "lead.enrich_batch",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "Partiría por RR. HH.: hay 118 contactos guardados en ese sector y el equipo aún no registra envíos. En total, solo 21 de 256 contactos tienen correo; propongo buscar los correos de dos contactos de selección de Adecco y después preparar una prueba acotada con los contactos aptos, midiendo respuestas antes de ampliar. La búsqueda queda pendiente de tu aprobación.",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "ley-chile",
+      "result": {
+        "actions": [
+          "compliance.law"
+        ],
+        "reply": "No es un «sí» automático: según la referencia legal consultada, tratar datos personales requiere una autorización legal o consentimiento; que los datos estén en una fuente accesible al público puede ser relevante, pero no elimina el derecho a oponerse a publicidad. Si alguien pide que no le escribas, detén los correos; y en ANTON.IA, los contactos marcados como «no contactar» están bloqueados. La Ley 21.719 tiene vigencia prevista para el 1 dic 2026; esto es información general, no asesoría legal. ¿Quieres que revise las reglas de contacto para un contacto guardado antes de proponerle un correo?",
+        "document": null,
+        "proposal": null,
+        "search": null,
+        "note": null,
+        "failed": null
+      },
+      "checks": [
+        {
+          "label": "termina sin fallar",
+          "passed": true
+        },
+        {
+          "label": "sin jerga, códigos, IDs ni horas UTC",
+          "passed": true
+        },
+        {
+          "label": "cierra con un siguiente paso o una propuesta",
+          "passed": true
+        },
+        {
+          "label": "si propone, explica la propuesta",
+          "passed": true
+        },
+        {
+          "label": "consulta el marco legal",
+          "passed": true
+        },
+        {
+          "label": "aclara que no es asesoría legal",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "attempt": 2,
+      "seconds": 10.5,
+      "decisions": [
+        {
+          "action": "compliance.law",
+          "reads": null,
+          "query": "Chile: requisitos legales para enviar correos comerciales no solicitados a personas que no han dado permiso; reglas de c",
+          "leadId": null,
+          "answer": null,
+          "searchCriteria": null
+        },
+        {
+          "action": "answer",
+          "reads": null,
+          "query": null,
+          "leadId": null,
+          "answer": {
+            "reply": "No es un «sí» automático: según la referencia legal consultada, tratar datos personales requiere una autorización legal o consentimiento; que los datos estén en una fuente accesible al público puede ser relevante, pero no elimina el derecho a oponerse a publicidad. Si alguien pide que no le escribas, detén los correos; y en ANTON.IA, los contactos marcados como «no contactar» están bloqueados. La Ley 21.719 tiene vigencia prevista para el 1 dic 2026; esto es información general, no asesoría legal. ¿Quieres que revise las reglas de contacto para un contacto guardado antes de proponerle un correo?",
+            "document": null
+          },
+          "searchCriteria": null
+        }
+      ],
+      "issues": []
+    }
+  ],
+  "limitation": "Fixture tools copied from one production workspace; lexical checks screen behavior and need a human read of the replies."
+}

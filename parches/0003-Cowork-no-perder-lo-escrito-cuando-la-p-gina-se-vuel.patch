@@ -1,0 +1,213 @@
+From 0bfc047b359cb7853281d2a8ef97b9a297ec4f83 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 25 Sep 2026 17:01:59 +0000
+Subject: [PATCH 3/8] =?UTF-8?q?Cowork:=20no=20perder=20lo=20escrito=20cuan?=
+ =?UTF-8?q?do=20la=20p=C3=A1gina=20se=20vuelve=20a=20montar?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+AuthContext envuelve la app en un Fragment con clave usuario:workspace;
+al resolverse la sesión (1 a 2 s) la página completa se vuelve a montar.
+Lo escrito en ese lapso se borraba y Enter no enviaba nada: el «primer
+envío se perdió» de la evaluación en producción. Prueba A/B en el
+navegador: antes quedaba vacío; ahora se conserva y se envía.
+
+- El borrador se guarda en la pestaña (sessionStorage) por usuario, se
+  restaura con el foco al final y se borra al enviar. La página pasa el
+  id del usuario desde la sesión del servidor.
+- Un mensaje en espera que no se pudo guardar vuelve al cuadro.
+- test-cowork-draft.mjs cubre el remontaje, el envío y otra cuenta.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JymggvBMiwiZstxk26eCmv
+---
+ scripts/test-cowork-draft.mjs             | 59 +++++++++++++++++++++++
+ scripts/verify-cowork.mjs                 |  2 +-
+ src/app/(app)/cowork/page.tsx             |  2 +-
+ src/components/cowork/CoworkWorkspace.tsx | 47 ++++++++++++++++--
+ 4 files changed, 105 insertions(+), 5 deletions(-)
+ create mode 100644 scripts/test-cowork-draft.mjs
+
+diff --git a/scripts/test-cowork-draft.mjs b/scripts/test-cowork-draft.mjs
+new file mode 100644
+index 0000000..1954675
+--- /dev/null
++++ b/scripts/test-cowork-draft.mjs
+@@ -0,0 +1,59 @@
++// Isolated DOM test: an unsent message survives the remount the app does once
++// the session resolves (AuthContext keys its tree by user and workspace).
++import assert from 'node:assert/strict';
++import { build } from 'esbuild';
++import { JSDOM } from 'jsdom';
++
++const OWNER = '00000000-0000-4000-8000-0000000000aa';
++const bundle = await build({
++  stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client'; import {CoworkWorkspace} from './src/components/cowork/CoworkWorkspace';
++    const root = createRoot(document.getElementById('root'));
++    window.mountWorkspace = key => root.render(<CoworkWorkspace key={key} userId="${OWNER}"/>);
++    window.mountWorkspace('anonymous:personal');`, resolveDir: process.cwd(), loader: 'tsx' },
++  bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
++  define: { 'process.env.NODE_ENV': '"test"' },
++});
++const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/cowork', runScripts: 'outside-only', pretendToBeVisual: true });
++const { window } = dom;
++const posts = [];
++window.fetch = async (url, options = {}) => {
++  const json = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
++  if (url === '/api/cowork/runs' && options.method === 'POST') { posts.push(JSON.parse(options.body)); return json({ id: '00000000-0000-4000-8000-0000000000bb' }, 202); }
++  if (url === '/api/cowork/runs') return json({ runs: [], canSubmit: true });
++  return json({ error: 'No encontrado' }, 404);
++};
++window.eval(bundle.outputFiles[0].text);
++const waitFor = async (predicate, label) => {
++  for (let i = 0; i < 400; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
++  throw new Error(`Timed out: ${label}`);
++};
++const box = () => window.document.getElementById('cowork-message');
++const type = value => {
++  Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(box(), value);
++  box().dispatchEvent(new window.Event('input', { bubbles: true }));
++};
++const saved = () => JSON.parse(window.sessionStorage.getItem('cowork:draft') || 'null');
++try {
++  await waitFor(() => box(), 'composer');
++  // 1. Typed before the session resolved, restored after the remount.
++  type('que tengo pendiente para hoy?');
++  await waitFor(() => saved()?.text === 'que tengo pendiente para hoy?', 'draft saved');
++  window.mountWorkspace(`${OWNER}:org`);
++  await waitFor(() => box()?.value === 'que tengo pendiente para hoy?', 'draft restored after remount');
++
++  // 2. Mounting never clears a saved draft, and sending does.
++  await waitFor(() => !window.document.querySelector('[aria-label="Crear trabajo"]').disabled, 'send enabled');
++  window.document.querySelector('[aria-label="Crear trabajo"]').click();
++  await waitFor(() => posts.length === 1, 'message sent');
++  assert.equal(posts[0].message, 'que tengo pendiente para hoy?');
++  await waitFor(() => saved() === null, 'draft cleared after sending');
++
++  // 3. A draft saved by another account in this tab is never shown.
++  window.sessionStorage.setItem('cowork:draft', JSON.stringify({ userId: 'otra-cuenta', text: 'borrador ajeno' }));
++  window.mountWorkspace('otra:vez');
++  const composer = () => window.document.querySelector('#cowork-message, #cowork-followup');
++  await waitFor(() => composer(), 'composer after remount');
++  await new Promise(resolve => setTimeout(resolve, 50));
++  assert.equal(composer().value, '');
++  console.log('PASS: the unsent message survives a remount, is cleared when sent and never crosses accounts.');
++} finally { window.close(); }
+diff --git a/scripts/verify-cowork.mjs b/scripts/verify-cowork.mjs
+index c8f3a1a..a1228fb 100644
+--- a/scripts/verify-cowork.mjs
++++ b/scripts/verify-cowork.mjs
+@@ -10,7 +10,7 @@ const checks = [
+   ['scripts/test-cowork-send-batch.mjs'],
+   ['scripts/test-cowork-linkedin-jobs.mjs'],
+   ['--loader', './scripts/ts-test-loader.mjs', '--test', ...suites, 'scripts/cowork-axis-replay.test.ts', 'scripts/cowork-conversation-corpus.test.ts'],
+-  ...['scheduler','save-contact','external-search','autonomy','native-draft','draft-polling','start-research','thread','export-route','search-queue-ui','workspace','conversation-flow','wake','effects','enrich-contact','campaigns','queue-fairness','code-execution','artifact-preview','specialist-queue','domains','domain-effects','domain-effects-2','domain-effects-3']
++  ...['scheduler','save-contact','external-search','autonomy','native-draft','draft-polling','start-research','thread','export-route','search-queue-ui','workspace','conversation-flow','draft','wake','effects','enrich-contact','campaigns','queue-fairness','code-execution','artifact-preview','specialist-queue','domains','domain-effects','domain-effects-2','domain-effects-3']
+     .map(name => [`scripts/test-cowork-${name}.mjs`]),
+   ['--loader', './scripts/ts-test-loader.mjs', 'scripts/test-cowork-send-email.mjs'],
+ ];
+diff --git a/src/app/(app)/cowork/page.tsx b/src/app/(app)/cowork/page.tsx
+index 4f9bff4..6a57ee6 100644
+--- a/src/app/(app)/cowork/page.tsx
++++ b/src/app/(app)/cowork/page.tsx
+@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
+ export default async function CoworkPage() {
+   try {
+     const auth = await requireCoworkAccess();
+-    return <CoworkWorkspace key={`${auth.user.id}:${auth.organizationId}`} />;
++    return <CoworkWorkspace key={`${auth.user.id}:${auth.organizationId}`} userId={auth.user.id} />;
+   } catch (error) {
+     if (error instanceof AuthError) notFound();
+     throw error;
+diff --git a/src/components/cowork/CoworkWorkspace.tsx b/src/components/cowork/CoworkWorkspace.tsx
+index 86a1fae..1dbabb9 100644
+--- a/src/components/cowork/CoworkWorkspace.tsx
++++ b/src/components/cowork/CoworkWorkspace.tsx
+@@ -31,8 +31,25 @@ type ThreadState = CoworkTurnData & {
+ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+ const CONTINUATION_GRACE_MS = 45000;
+ const CONTINUE_PROMPT = 'Sigue con el resultado de la acción anterior: dime qué pasó y propón el siguiente paso.';
++const DRAFT_KEY = 'cowork:draft';
+ const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+ 
++/** The unsent message of this tab. A draft written before the session resolved
++ * has no owner yet; one saved by another account is never shown. */
++function readDraft(userId: string | null) {
++  try {
++    const saved = JSON.parse(window.sessionStorage.getItem(DRAFT_KEY) || 'null') as { userId?: string | null; text?: unknown } | null;
++    return typeof saved?.text === 'string' && (!saved.userId || saved.userId === userId) ? saved.text : '';
++  } catch { return ''; }
++}
++
++function writeDraft(userId: string | null, text: string) {
++  try {
++    if (text.trim()) window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ userId, text }));
++    else window.sessionStorage.removeItem(DRAFT_KEY);
++  } catch { /* Storage unavailable: the draft only lives in memory. */ }
++}
++
+ function useMedia(query: string) {
+   const [matches, setMatches] = useState(false);
+   useEffect(() => {
+@@ -64,7 +81,8 @@ function PendingTurn({ text }: { text: string }) {
+   </article>;
+ }
+ 
+-export function CoworkWorkspace() {
++/** userId scopes the unsent draft; the page passes it from the server session. */
++export function CoworkWorkspace({ userId = null }: { userId?: string | null } = {}) {
+   const [runs, setRuns] = useState<CoworkRun[]>([]);
+   const [selected, setSelected] = useState<string | null>(null);
+   const [state, setState] = useState<ThreadState | null>(null);
+@@ -146,6 +164,27 @@ export function CoworkWorkspace() {
+     return () => { disposed = true; };
+   }, [listVersion, request]);
+ 
++  // What you are writing survives a reload, or the remount the app does once the
++  // session resolves (AuthContext keys its tree by user and workspace), even mid-sentence.
++  const draftWatched = useRef(false);
++  useEffect(() => {
++    const saved = readDraft(userId);
++    if (!saved) return;
++    setMessage(current => !current || saved.startsWith(current) ? saved : current.startsWith(saved) ? current : `${saved}${current}`);
++    // The remount drops focus: keep writing where you were, at the end of the text.
++    requestAnimationFrame(() => {
++      if (document.activeElement !== document.body) return;
++      const node = (document.getElementById('cowork-followup') || document.getElementById('cowork-message')) as HTMLTextAreaElement | null;
++      node?.focus();
++      node?.setSelectionRange(node.value.length, node.value.length);
++    });
++  }, [userId]);
++  useEffect(() => {
++    // Mounting never clears a saved draft; later changes (including a send) do.
++    if (!draftWatched.current) { draftWatched.current = true; return; }
++    writeDraft(userId, message);
++  }, [message, userId]);
++
+   // Selected conversation: poll while work is in flight and follow continuations.
+   useEffect(() => {
+     if (!selected) { setAwaitingContinuation(false); setContinuationMissing(false); return; }
+@@ -423,7 +462,9 @@ export function CoworkWorkspace() {
+     if (!queued || sending || !latest || !latestIsCurrent || busy || isCoworkActive(latest.run.status)) return;
+     const text = queued;
+     setQueued(null);
+-    void post(text, latest.run.status === 'completed' ? latest.run.id : (latest.run.parent_run_id ?? null));
++    // A message that could not be saved goes back to the box instead of vanishing.
++    void post(text, latest.run.status === 'completed' ? latest.run.id : (latest.run.parent_run_id ?? null))
++      .then(sent => { if (!sent) setMessage(current => current.trim() ? current : text); });
+     // post is recreated each render; the queue only reacts to state changes.
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [queued, sending, latest, latestIsCurrent, busy]);
+@@ -437,7 +478,7 @@ export function CoworkWorkspace() {
+     const text = queued;
+     if (!await resolve(false)) return;
+     setQueued(null);
+-    await post(text, latest.run.id);
++    if (!await post(text, latest.run.id)) setMessage(current => current.trim() ? current : text);
+   }
+ 
+   function retry() {
+-- 
+2.43.0
+
