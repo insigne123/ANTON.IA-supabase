@@ -44,14 +44,14 @@ const sources = {
   './access': 'export const requireCoworkWorkerAccess=async()=>{};',
   '@/lib/cowork/capabilities': 'export const createCoworkGateway=()=>{throw new Error("gateway unused in this suite")};',
   './save-contact': 'export const saveCoworkContact=async()=>{globalThis.__coworkEffects.executed.push("save");return {lead:{id:"lead-1",name:"Ana"},reused:false};};',
-  './start-research': 'export const startCoworkResearch=async()=>{globalThis.__coworkEffects.executed.push("research");return {reportId:"rep",status:"running",reused:false};};',
+  './start-research': 'export const startCoworkResearch=async()=>{globalThis.__coworkEffects.executed.push("research");if(globalThis.__coworkEffects.failResearch)throw new Error("No se pudo preparar la investigación.");return {reportId:"rep",status:"running",reused:false};};',
   './draft-from-research': 'export const requestCoworkDraft=async()=>{globalThis.__coworkEffects.executed.push("draft");return {status:"pending",reused:false};};',
   './code-runner': 'export const executeCoworkCode=async()=>{globalThis.__coworkEffects.executed.push("code");if(globalThis.__coworkEffects.failCode)throw new Error("El código terminó con error (salida 1).\\nSalida:\\nTraceback KeyError: monto");return {reply:"ok",result:{}};};',
   './profile-update': 'export const executeCoworkProfileUpdate=async()=>{globalThis.__coworkEffects.executed.push("profile");return {reply:"ok",result:{}};};',
   './saved-search-ops': 'export const executeCoworkSavedSearchCreate=async()=>{globalThis.__coworkEffects.executed.push("saved-search");return {reply:"ok",result:{}};};export const executeCoworkSavedSearchUpdate=async()=>{globalThis.__coworkEffects.executed.push("saved-search");return {reply:"ok",result:{}};};export const executeCoworkSavedSearchDelete=async()=>{globalThis.__coworkEffects.executed.push("saved-search");return {reply:"ok",result:{}};};',
   './campaign-stop': 'export const executeCoworkCampaignStop=async()=>{globalThis.__coworkEffects.executed.push("campaign-stop");return {reply:"ok",result:{}};};',
 };
-globalThis.__coworkEffects = { client, executed: state.executed, failCode: false };
+globalThis.__coworkEffects = { client, executed: state.executed, failCode: false, failResearch: false };
 const bundle = await build({ entryPoints: ['src/lib/server/cowork/effects.ts'], bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external',
   plugins: [{ name: 'isolated-services', setup(build) {
     build.onResolve({ filter: /.*/ }, args => sources[args.path] ? { path: args.path, namespace: 'fixture' } : undefined);
@@ -74,6 +74,8 @@ try {
   assert.ok(String(state.finishes[0].p_reply).length > 10);
   assert.equal(state.admissions.length, 1);
   assert.equal(state.admissions[0].p_parent_run_id, 'run-effect');
+  // Named explicitly: with the 6- and 7-argument versions in the database, omitting it is PGRST203.
+  assert.equal(state.admissions[0].p_reset_depth, false);
   const second = await module.exports.processCoworkEffectQueue();
   assert.deepEqual(second, { processed: 0, claimed: false });
   // Failed code execution records the failure and resumes the thread with the
@@ -91,15 +93,27 @@ try {
   assert.match(state.admissions[1].p_message, /falló/);
   assert.match(state.admissions[1].p_message, /KeyError/);
   assert.match(state.admissions[1].p_message, /otra revisión humana/);
+  // Any other failed action also resumes the thread: the person gets an
+  // explanation and an alternative, never a raw error as the last word.
+  state.kind = 'start_research';
+  globalThis.__coworkEffects.failResearch = true;
+  state.takes = 0;
+  assert.deepEqual(await module.exports.processCoworkEffectQueue(), { processed: 0, claimed: true });
+  assert.equal(state.finishes[state.finishes.length - 1].p_success, false);
+  assert.equal(state.admissions.length, 3);
+  assert.match(state.admissions[2].p_message, /no se pudo completar/);
+  assert.match(state.admissions[2].p_message, /No se pudo preparar la investigación/);
+  assert.match(state.admissions[2].p_message, /no vuelvas a proponer la misma acción/);
+  assert.equal(state.admissions[2].p_reset_depth, false);
   // Thread budget: at max depth the chain stops gracefully with an observed event.
   state.depth = 5;
   const refused = await module.exports.admitCoworkContinuation(client,
     { userId: 'owner', organizationId: 'org' }, 'run-effect', 'Continúa');
   assert.equal(refused, null);
-  assert.equal(state.admissions.length, 2);
+  assert.equal(state.admissions.length, 3);
   assert.equal(state.events.length, 1);
   assert.equal(state.events[0].kind, 'thread.budget_exhausted');
-  console.log('PASS: effect propose, approval, single execution, finish, continuation and thread budget.');
+  console.log('PASS: effect propose, approval, single execution, finish, continuation (also after a failed action) and thread budget.');
 } finally {
   delete globalThis.__coworkEffects;
   delete process.env.COWORK_ENABLED;
