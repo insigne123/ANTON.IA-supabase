@@ -1,5 +1,7 @@
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
 import { coworkDecisionSchema, runCoworkReadLoop } from '@/lib/cowork/agent-loop';
+import { coworkFailureCategory, coworkFailureMessage } from '@/lib/cowork/failure-messages';
+import { polishCoworkAnswer } from '@/lib/cowork/answer-quality';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { requireCoworkWorkerAccess } from './access';
 import { coworkWorkerConfigured } from './runs';
@@ -350,16 +352,17 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     await requireCoworkWorkerAccess(client, scope);
     const finished = await client.rpc('cowork_finish_run', {
       p_run_id: run.id, p_token: run.lease_token, p_status: 'completed',
-      p_payload: { ...result, telemetry },
+      p_payload: { ...polishCoworkAnswer(result), telemetry },
     });
     if (finished.error) throw finished.error;
     return { claimed: true, processed: finished.data === true ? 1 : 0 };
   } catch (error) {
     if (error instanceof CoworkSpecialistsDeferred) return { claimed: true, processed: 1 };
+    console.warn('[cowork] run failed', { runId: run.id, reason: coworkFailureCategory(error) });
     // Cancellation invalidates the lease; terminal writes cannot revive it.
     const failed = await client.rpc('cowork_finish_run', {
       p_run_id: run.id, p_token: run.lease_token, p_status: 'failed',
-      p_payload: { message: 'No se pudo completar la respuesta. Tu solicitud sigue guardada.' },
+      p_payload: { message: coworkFailureMessage(error) },
     });
     if (failed.error) throw failed.error;
     return { claimed: true, processed: 0 };

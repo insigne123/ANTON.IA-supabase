@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { polishCoworkText } from './answer-quality';
 import { COWORK_NOTE_ACTION, coworkDocumentSchema } from './contracts';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema } from './code-proposal';
@@ -272,23 +273,64 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
 }
 
 /** Run a previous completed (or the current paused) work whose events hold observations. */
-/** A proposal cannot carry a document. Ask for correction before staging it. */
-const DOCUMENT_WITH_PROPOSAL = 'Entregaste un documento junto con una propuesta y el documento se perdería. Si el usuario pidió un documento, entrégalo con answer (reply y document) y ofrece la acción como pregunta al final; si no, propón la acción con document null.';
+export type CoworkHistoryTurn = { runId: string; observations: unknown[] };
 
-export type CoworkRejection = { action: string; reason: string };
-
+/** A decision the loop refuses but the model can correct on its next decision.
+ * The run only fails if the last decision is still invalid. */
 export class CoworkDecisionRejected extends Error {
-  constructor(message: string, readonly feedback: string) {
+  constructor(message: string, readonly feedback: string, readonly userFacing = false) {
     super(message);
     this.name = 'CoworkDecisionRejected';
   }
 }
+
+export type CoworkRejection = { action: string; reason: string };
+
+const MISSING_PROPOSAL_FIELDS = 'Faltan datos de la propuesta: usa un ID observado como objetivo y completa el objeto que exige la acción (campaign, code, profile, savedSearch, crmRecord, stepId, crmAssign, exceptionResolve, missionControl, messageContext, leadIds, linkedinMessage o campaignId).';
+
+function budgetFeedback(readsUsed: number) {
+  const left = Math.max(0, 3 - readsUsed);
+  return left > 0
+    ? `Solo quedan ${left} lecturas en este trabajo: pide como máximo ${left} o responde con lo observado.`
+    : 'No quedan lecturas en este trabajo: responde con lo observado o propone un paso sobre un objetivo ya observado.';
+}
+
+function rejected(message: string, feedback: string) {
+  return new CoworkDecisionRejected(message, feedback);
+}
+
+/** A proposal keeps only its explanation, so a document sent with it would be
+ * lost while the note claims it was delivered. The model gets one chance to
+ * deliver the document first; on the last decision the proposal stands. */
+const DOCUMENT_WITH_PROPOSAL = 'Entregaste un documento junto con una propuesta y el documento se perdería. Si el usuario pidió un documento, entrégalo con answer (reply y document) y ofrece la acción como pregunta al final; si no, propón la acción con document null.';
 
 /** The same email lookup already ran in this thread (history.actions): it would
  * spend another credit for the same provider answer. */
 function repeatedEnrichment(label: string, history: CoworkHistoryTurn[]) {
   return history.some(turn => ((turn as { actions?: Array<{ kind?: unknown; label?: unknown }> }).actions || [])
     .some(action => action.kind === 'enrich_contact' && action.label === label));
+}
+
+function issueSummary(error: unknown): string | null {
+  const issues = (error as { issues?: Array<{ message?: string; path?: Array<string | number> }> } | null)?.issues;
+  if (!Array.isArray(issues) || !issues.length) return null;
+  return issues.slice(0, 4).map(issue => `${(issue.path || []).join('.') || 'decisión'}: ${issue.message || 'valor inválido'}`).join('; ');
+}
+
+/** Schema failures of the model output are correctable; anything else is not. */
+function invalidDecisionReason(error: unknown): string | null {
+  const summary = issueSummary(error);
+  return summary ? `La decisión anterior no cumple el formato (${summary}). Corrígela.`.slice(0, 600) : null;
+}
+
+/** A proposal the server could not stage (for example a recipient outside the
+ * audience) goes back to the model; access, cancellation and timeouts do not. */
+function proposalRejection(error: unknown, signal: AbortSignal): unknown {
+  if (signal.aborted || !(error instanceof Error)) return error;
+  const status = (error as { status?: number }).status;
+  if (['AuthError', 'AbortError', 'TimeoutError', 'CoworkDecisionRejected'].includes(error.name) || status === 401 || status === 403) return error;
+  const reason = (issueSummary(error) || error.message || 'motivo no informado').slice(0, 300);
+  return new CoworkDecisionRejected(error.message, `La propuesta no se pudo preparar: ${reason}`, true);
 }
 
 export type CoworkHistoryTurn = { runId: string; observations: unknown[]; actions?: Array<{ kind?: unknown; label?: unknown }> };
@@ -322,8 +364,10 @@ export async function runCoworkReadLoop(input: {
   let readsUsed = 0;
   let reviewed = false;
   const rejections: CoworkRejection[] = [];
+  // The model's own explanation travels with the approval card instead of a
+  // canned line; it is persisted as a note event, never as a data read.
   const explain = async (decision: Decision) => {
-    const reply = decision.answer?.reply.trim();
+    const reply = polishCoworkText(decision.answer?.reply || '').trim();
     if (!reply) return null;
     await input.authorize();
     input.signal.throwIfAborted();
@@ -333,23 +377,24 @@ export async function runCoworkReadLoop(input: {
   for (let turn = 0; turn < 4; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
-    const raw = await input.decide(observations, turn === 3 || readsUsed >= 3, rejections.slice());
-    const parsed = coworkDecisionSchema.safeParse(raw);
-    if (!parsed.success) {
-      if (turn === 3 || input.signal.aborted) throw parsed.error;
-      rejections.push({ action: 'decision', reason: `Corrige el formato de la decisión: ${parsed.error.issues.slice(0, 4).map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`.slice(0, 600) });
+    let decision: Decision;
+    try {
+      decision = coworkDecisionSchema.parse(await input.decide(observations, turn === 3 || readsUsed >= 3, rejections.slice()));
+    } catch (error) {
+      const reason = invalidDecisionReason(error);
+      if (reason === null || turn === 3 || input.signal.aborted) throw error;
+      rejections.push({ action: 'decision', reason });
       continue;
     }
-    const decision = parsed.data;
     input.signal.throwIfAborted();
     try {
     if (decision.action === 'answer') {
-      if (!decision.answer) throw new Error('Missing final answer');
+      if (!decision.answer) throw rejected('Missing final answer', 'Elegiste answer sin contenido: entrega answer.reply con la respuesta completa.');
       return decision.answer;
     }
     if (decision.action === 'specialists.review') {
       if (reviewed || turn === 3 || !input.review || !decision.specialists || !observations.length) {
-        throw new Error('Specialist review unavailable or budget exhausted');
+        throw rejected('Specialist review unavailable or budget exhausted', 'La revisión de especialistas no está disponible ahora: continúa con lecturas o responde.');
       }
       reviewed = true;
       await input.authorize(); input.signal.throwIfAborted();
@@ -361,26 +406,31 @@ export async function runCoworkReadLoop(input: {
       continue;
     }
     if (decision.action === 'prospecting.propose_search') {
-      if (!input.proposeSearch || !decision.searchCriteria) throw new Error('Invalid external search proposal');
-      if (decision.answer?.document) throw new CoworkDecisionRejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
+      if (!input.proposeSearch || !decision.searchCriteria) {
+        throw rejected('Invalid external search proposal', input.proposeSearch
+          ? 'Para proponer una búsqueda incluye searchCriteria completo.' : 'La búsqueda externa no está disponible: responde con lo que tienes.');
+      }
+      const parsed = coworkSearchCriteriaSchema.safeParse(decision.searchCriteria);
+      if (!parsed.success) throw rejected('Invalid external search proposal', `Criterios de búsqueda inválidos: ${issueSummary(parsed.error)}. Corrígelos.`);
+      if (decision.answer?.document && turn < 3) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
       const note = await explain(decision);
       await input.authorize(); input.signal.throwIfAborted();
-      await input.proposeSearch(coworkSearchCriteriaSchema.parse(decision.searchCriteria));
+      try { await input.proposeSearch(parsed.data); } catch (error) { throw proposalRejection(error, input.signal); }
       return { reply: note || (decision.searchCriteria.target === 'companies'
         ? 'Revisa los criterios antes de buscar empresas.' : 'Revisa los criterios antes de buscar nuevos contactos.'), document: null };
     }
     if (decision.action === 'crm.propose_note') {
-      if (!input.proposeNote || !decision.leadId || !decision.note) throw new Error('Invalid note proposal');
+      if (!input.proposeNote || !decision.leadId || !decision.note) throw rejected('Invalid note proposal', 'Para proponer una nota incluye leadId de un contacto observado y el texto completo en note.');
       const observed = observations.some(observation => {
         const result = observation.result as { items?: Array<{ id?: string }> } | null;
         return Array.isArray(result?.items) && result.items.some(item => item.id === decision.leadId);
       });
-      if (!observed) throw new Error('Note target must be observed first');
-      if (decision.answer?.document) throw new CoworkDecisionRejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
+      if (!observed) throw rejected('Note target must be observed first', 'El contacto de la nota no aparece en los resultados de este trabajo: búscalo primero con leads.search y usa su id.');
+      if (decision.answer?.document && turn < 3) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
       const explanation = await explain(decision);
       await input.authorize();
       input.signal.throwIfAborted();
-      await input.proposeNote(decision.leadId, decision.note);
+      try { await input.proposeNote(decision.leadId, decision.note); } catch (error) { throw proposalRejection(error, input.signal); }
       return { reply: explanation || 'Revisa el cambio de nota antes de guardarlo.', document: null };
     }
     if (decision.action === 'leads.save_contact' || decision.action === 'research.start' || decision.action === 'draft.request' || decision.action === 'lead.enrich' || decision.action === 'email.send' || decision.action === 'campaign.create' || decision.action === 'campaign.activate' || decision.action === 'campaign.pause' || decision.action === 'code.execute'
@@ -390,7 +440,7 @@ export async function runCoworkReadLoop(input: {
       || decision.action === 'message_context.update' || decision.action === 'lead.enrich_batch'
       || decision.action === 'campaign.schedule_batch'
       || decision.action === 'linkedin.invite' || decision.action === 'linkedin.message') {
-      if (!input.proposeEffect) throw new Error('Effect proposals unavailable');
+      if (!input.proposeEffect) throw rejected('Effect proposals unavailable', 'En este contexto no puedes proponer acciones: responde con lo observado.');
       const kind: CoworkEffectKind = decision.action === 'leads.save_contact' ? 'save_contact'
         : decision.action === 'research.start' ? 'start_research'
         : decision.action === 'lead.enrich' ? 'enrich_contact'
@@ -448,45 +498,46 @@ export async function runCoworkReadLoop(input: {
       const exceptionResolve = decision.action === 'exception.resolve' ? decision.exceptionResolve ?? undefined : undefined;
       const missionControl = decision.action === 'mission.control' ? decision.missionControl ?? undefined : undefined;
       const messageContext = decision.action === 'message_context.update' ? decision.messageContext ?? undefined : undefined;
-      if (!targetId) throw new Error('Missing effect target');
-      if (decision.action === 'campaign.create' && !campaign) throw new Error('Missing campaign definition');
-      if (decision.action === 'code.execute' && !code) throw new Error('Missing code proposal');
-      if (decision.action === 'profile.update' && !profile) throw new Error('Missing profile patch');
+      if (!targetId) throw rejected('Missing effect target', MISSING_PROPOSAL_FIELDS);
+      if (decision.action === 'campaign.create' && !campaign) throw rejected('Missing campaign definition', MISSING_PROPOSAL_FIELDS);
+      if (decision.action === 'code.execute' && !code) throw rejected('Missing code proposal', MISSING_PROPOSAL_FIELDS);
+      if (decision.action === 'profile.update' && !profile) throw rejected('Missing profile patch', MISSING_PROPOSAL_FIELDS);
       if ((decision.action === 'saved_search.create' || decision.action === 'saved_search.update' || decision.action === 'saved_search.delete') && !savedSearch) {
-        throw new Error('Missing saved-search proposal');
+        throw rejected('Missing saved-search proposal', MISSING_PROPOSAL_FIELDS);
       }
-      if (decision.action === 'campaign.stop_v2' && (!campaignId || !enrollmentId)) throw new Error('Missing campaign stop target');
-      if (decision.action === 'crm.update_record' && !crmRecord) throw new Error('Missing CRM record patch');
-      if (decision.action === 'campaign.prepare_draft_v2' && !stepId) throw new Error('Missing campaign step target');
-      if (decision.action === 'crm.assign_lead' && !crmAssign) throw new Error('Missing collaboration assignment');
-      if (decision.action === 'exception.resolve' && !exceptionResolve) throw new Error('Missing exception triage');
-      if (decision.action === 'mission.control' && !missionControl) throw new Error('Missing mission control');
-      if (decision.action === 'message_context.update' && !messageContext) throw new Error('Missing message context patch');
+      if (decision.action === 'campaign.stop_v2' && (!campaignId || !enrollmentId)) throw rejected('Missing campaign stop target', MISSING_PROPOSAL_FIELDS);
+      if (decision.action === 'crm.update_record' && !crmRecord) throw rejected('Missing CRM record patch', MISSING_PROPOSAL_FIELDS);
+      if (decision.action === 'campaign.prepare_draft_v2' && !stepId) throw rejected('Missing campaign step target', MISSING_PROPOSAL_FIELDS);
+      if (decision.action === 'crm.assign_lead' && !crmAssign) throw rejected('Missing collaboration assignment', MISSING_PROPOSAL_FIELDS);
+      if (decision.action === 'exception.resolve' && !exceptionResolve) throw rejected('Missing exception triage', MISSING_PROPOSAL_FIELDS);
+      if (decision.action === 'mission.control' && !missionControl) throw rejected('Missing mission control', MISSING_PROPOSAL_FIELDS);
+      if (decision.action === 'message_context.update' && !messageContext) throw rejected('Missing message context patch', MISSING_PROPOSAL_FIELDS);
       const enrichBatch = decision.action === 'lead.enrich_batch' ? decision.leadIds ?? undefined : undefined;
-      if (decision.action === 'lead.enrich_batch' && (!enrichBatch || !enrichBatch.length)) throw new Error('Missing batch targets');
+      if (decision.action === 'lead.enrich_batch' && (!enrichBatch || !enrichBatch.length)) throw rejected('Missing batch targets', MISSING_PROPOSAL_FIELDS);
       const linkedinJob = decision.action === 'linkedin.invite' && decision.leadId ? { leadId: decision.leadId }
         : decision.action === 'linkedin.message' && decision.leadId && decision.linkedinMessage
           ? { leadId: decision.leadId, message: decision.linkedinMessage } : undefined;
-      if (decision.action === 'linkedin.invite' && !linkedinJob) throw new Error('Missing invite target');
-      if (decision.action === 'linkedin.message' && !linkedinJob) throw new Error('Missing message target and text');
+      if (decision.action === 'linkedin.invite' && !linkedinJob) throw rejected('Missing invite target', MISSING_PROPOSAL_FIELDS);
+      if (decision.action === 'linkedin.message' && !linkedinJob) throw rejected('Missing message target and text', MISSING_PROPOSAL_FIELDS);
       const scheduleBatch = decision.action === 'campaign.schedule_batch' && decision.campaignId
         ? { campaignId: decision.campaignId, ...(decision.spacingMinutes == null ? {} : { spacingMinutes: decision.spacingMinutes }) }
         : undefined;
-      if (decision.action === 'campaign.schedule_batch' && !scheduleBatch) throw new Error('Missing batch schedule');
+      if (decision.action === 'campaign.schedule_batch' && !scheduleBatch) throw rejected('Missing batch schedule', MISSING_PROPOSAL_FIELDS);
       const originRunId = decision.action === 'code.execute'
         ? codeOriginRunId(code?.inputFiles || [], observations, input.history || [], input.runId || '')
         : effectTargetRun(decision.action, targetId, observations, input.history || [], input.runId || '');
-      if (!originRunId) throw new Error('Effect target must be observed first');
-      if (decision.answer?.document) throw new CoworkDecisionRejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
+      if (!originRunId) throw rejected('Effect target must be observed first', 'El objetivo de la propuesta no aparece en los resultados de este hilo: consúltalo primero (leads.search, campaigns.list, draft.get o research.get_existing) y usa su ID exacto. Para crear una campaña, los destinatarios deben ser contactos guardados con correo.');
+      if (decision.answer?.document && turn < 3) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
       await input.authorize();
       input.signal.throwIfAborted();
       const targetName = describeLeadTarget(decision.action, targetId, observations, input.history || []);
       const label = effectLabel(decision.action, targetId, targetName);
-      if (kind === 'enrich_contact' && repeatedEnrichment(label, input.history || [])) {
-        throw new CoworkDecisionRejected('Repeated enrichment', 'Ya se buscó el correo de este contacto en este hilo. No repitas el gasto: continúa con lo solicitado usando los resultados existentes o explica la alternativa.');
+      if (kind === 'enrich_contact' && turn < 3 && repeatedEnrichment(label, input.history || [])) {
+        throw rejected('Enrichment already ran in this thread', 'Ya se buscó el correo de este contacto en este hilo (mira history.actions): repetirlo gasta otro crédito y el proveedor responde lo mismo. No lo vuelvas a proponer; sigue con lo que pidió el usuario (por ejemplo, investigarlo con research.start) o explica la alternativa.');
       }
       const explanation = await explain(decision);
       await input.authorize(); input.signal.throwIfAborted();
+      try {
       await input.proposeEffect({ kind, targetId, label, originRunId,
         ...(campaign === undefined ? {} : { campaign }), ...(code === undefined ? {} : { code }),
         ...(profile === undefined ? {} : { profile }), ...(savedSearch === undefined ? {} : { savedSearch }),
@@ -499,11 +550,12 @@ export async function runCoworkReadLoop(input: {
         ...(enrichBatch === undefined ? {} : { enrichBatch }),
         ...(scheduleBatch === undefined ? {} : { scheduleBatch }),
         ...(linkedinJob === undefined ? {} : { linkedinJob }) });
+      } catch (error) { throw proposalRejection(error, input.signal); }
       return { reply: explanation || 'Revisa la propuesta antes de ejecutar el cambio.', document: null };
     }
     if (turn === 3) throw new Error('Cowork tool budget exhausted');
     if (decision.action === 'reads.plan') {
-      if (!decision.plan || readsUsed + decision.plan.length > 3) throw new Error('Cowork tool budget exhausted');
+      if (!decision.plan || readsUsed + decision.plan.length > 3) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed));
       readsUsed += decision.plan.length;
       const results = await executeCoworkReadPlan(decision.plan, {
         signal: input.signal, authorize: input.authorize,
@@ -520,7 +572,7 @@ export async function runCoworkReadLoop(input: {
       // A fixed read asked twice (for example, with two periods) is one read.
       const reads = decision.reads?.filter((task, index, all) =>
         all.findIndex(other => other.action === task.action && other.input === task.input) === index);
-      if (!reads || readsUsed + reads.length > 3) throw new Error('Cowork tool budget exhausted');
+      if (!reads || readsUsed + reads.length > 3) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed));
       readsUsed += reads.length;
       const results = await executeCoworkParallelReads(reads, {
         signal: input.signal, authorize: input.authorize,
@@ -532,7 +584,8 @@ export async function runCoworkReadLoop(input: {
     }
     if (decision.action === 'privacy.contactability_batch' || decision.action === 'lists.review_batch') {
       // One batch consumes the turn's read budget: at most 5 minimized checks.
-      if (!decision.leadIds || readsUsed > 0) throw new Error('Cowork tool budget exhausted');
+      if (!decision.leadIds || readsUsed > 0) throw rejected('Cowork tool budget exhausted', decision.leadIds
+        ? 'Las revisiones en lote solo pueden ser la primera consulta del trabajo: responde o usa lecturas individuales.' : 'Falta leadIds con 1 a 5 contactos observados.');
       readsUsed = 3;
       await input.authorize();
       input.signal.throwIfAborted();
@@ -544,8 +597,7 @@ export async function runCoworkReadLoop(input: {
       observations.push(observation);
       continue;
     }
-    if (readsUsed >= 3) throw new Error('Cowork tool budget exhausted');
-    readsUsed++;
+    if (readsUsed >= 3) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed));
     const value = COWORK_DOMAIN_FIXED_READS.some(action => action === decision.action) ? ''
       : decision.action === 'leads.search' || decision.action === 'crm.search' || decision.action === 'contacted.search' || decision.action === 'deliverability.check' || decision.action === 'compliance.obligation'
       ? (decision.query ?? (decision.reads?.length === 1 && decision.reads[0].action === decision.action
@@ -565,7 +617,10 @@ export async function runCoworkReadLoop(input: {
         : decision.action === 'campaigns.step_context'
           ? decision.stepId
         : decision.leadId;
-    if (value === null || value === undefined) throw new Error('Missing tool argument');
+    if (value === null || value === undefined) {
+      throw rejected('Missing tool argument', 'Falta el argumento de la consulta (query, leadId, draftId, campaignId o stepId según la acción): complétalo con un valor observado.');
+    }
+    readsUsed++;
     await input.authorize();
     input.signal.throwIfAborted();
     const result = await input.execute(decision.action, value);
@@ -575,8 +630,7 @@ export async function runCoworkReadLoop(input: {
     await input.record(observation);
     observations.push(observation);
     } catch (error) {
-      // Only loop validation is correctable. Authorization, provider, storage,
-      // cancellation and partially staged proposal failures must propagate.
+      // Correctable refusals go back to the model; the last decision must stand on its own.
       if (!(error instanceof CoworkDecisionRejected) || turn === 3 || input.signal.aborted) throw error;
       rejections.push({ action: decision.action, reason: error.feedback });
     }

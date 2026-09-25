@@ -28,23 +28,60 @@ test('a document attached to a proposal is corrected internally before any effec
   assert.equal(proposals, 0);
 });
 
-test('repeated enrichment cannot bypass rejection on the last decision', async () => {
+test('repeated enrichment is refused with feedback until the model corrects it', async () => {
   const leadId = '00000000-0000-4000-8000-000000000021';
-  let decisions = 0;
+  const seen: Array<{ action: string; reason: string }> = [];
   let proposals = 0;
-  await assert.rejects(runCoworkReadLoop({
+  const result = await runCoworkReadLoop({
     message: 'Continúa', signal: new AbortController().signal, authorize: async () => {},
     history: [{ runId: 'previous', observations: [{ action: 'leads.search', result: { scope: 'own_saved_contacts', items: [{ id: leadId, name: 'Ana' }] } }],
       actions: [{ kind: 'enrich_contact', label: 'Enriquecer contacto Ana' }] }],
     execute: async () => { throw new Error('Unexpected read'); }, record: async () => {},
     proposeEffect: async () => { proposals++; },
     decide: async (_observations, _mustAnswer, rejected) => {
-      assert.equal(rejected?.length, decisions++);
-      return { action: 'lead.enrich', query: null, leadId, answer: null };
+      seen.push(...(rejected || []).slice(seen.length));
+      if (!rejected?.length) return { action: 'lead.enrich', query: null, leadId, answer: null };
+      assert.match(rejected[0].reason, /Ya se buscó el correo/);
+      return answer;
     },
-  }), /Repeated enrichment/);
-  assert.equal(decisions, 4);
+  });
+  assert.equal(result.reply, 'Un contacto encontrado.');
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].action, 'lead.enrich');
   assert.equal(proposals, 0);
+});
+
+test('a staging failure goes back to the model, access failures do not', async () => {
+  const leadId = '00000000-0000-4000-8000-000000000022';
+  const reasons: string[] = [];
+  let proposals = 0;
+  const found = { action: 'leads.search' as const, query: 'Ana', leadId: null, answer: null };
+  const enrich = { action: 'lead.enrich' as const, query: null, leadId, providerId: null, snapshotId: null, note: null, answer: null };
+  const result = await runCoworkReadLoop({
+    message: 'Enriquece', runId: '00000000-0000-4000-8000-000000000010',
+    signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: [{ id: leadId, name: 'Ana' }], scope: 'own_saved_contacts' }),
+    record: async () => {},
+    proposeEffect: async () => { proposals++; throw new Error('Recipient outside the audience'); },
+    decide: async (observations, _mustAnswer, rejected) => {
+      if (rejected?.length) reasons.push(rejected[0].reason);
+      if (!observations.length) return found;
+      if (!rejected?.length) return enrich;
+      assert.match(rejected[0].reason, /No pude preparar|no se pudo preparar/i);
+      return answer;
+    },
+  });
+  assert.equal(result.reply, 'Un contacto encontrado.');
+  assert.equal(proposals, 1);
+  assert.equal(reasons.length, 1);
+  await assert.rejects(runCoworkReadLoop({
+    message: 'Enriquece', runId: '00000000-0000-4000-8000-000000000010',
+    signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: [{ id: leadId, name: 'Ana' }], scope: 'own_saved_contacts' }),
+    record: async () => {},
+    proposeEffect: async () => { const error = new Error('revoked') as Error & { status?: number }; error.status = 401; throw error; },
+    decide: async observations => (!observations.length ? found : enrich),
+  }), /revoked/);
 });
 
 test('proposal explanation is persisted as a note before staging, not as a read', async () => {
