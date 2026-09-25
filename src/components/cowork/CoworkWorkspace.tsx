@@ -1,85 +1,92 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, FileText, History, Loader2, Plus, Square, X } from 'lucide-react';
-import { ExportMenu } from './ExportMenu';
-import { ContactResults } from './ContactResults';
-import { ResearchSources } from './ResearchSources';
-import { ExecutionMode } from './ExecutionMode';
-import { DocumentVersions } from './DocumentVersions';
-import { SendReview } from './SendReview';
-import { CampaignReview } from './CampaignReview';
-import { CodeReview } from './CodeReview';
-import { ProfileReview } from './ProfileReview';
-import { SavedSearchReview } from './SavedSearchReview';
-import { CampaignStopReview } from './CampaignStopReview';
-import { CrmRecordReview } from './CrmRecordReview';
-import { CampaignPrepareReview } from './CampaignPrepareReview';
-import { CrmAssignReview } from './CrmAssignReview';
-import { ExceptionReview } from './ExceptionReview';
-import { MissionReview } from './MissionReview';
-import { MessageContextReview } from './MessageContextReview';
-import { EnrichBatchReview } from './EnrichBatchReview';
-import { ArtifactPreview } from './ArtifactPreview';
-import { FileUpload } from './FileUpload';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, CornerDownRight, PanelLeft, PanelRight, RotateCcw, SquarePen, TriangleAlert } from 'lucide-react';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
-import { coworkSearchCriteriaSchema } from '@/lib/cowork/search-proposal';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { MarkdownText } from '@/components/ui/markdown-text';
+import type { CoworkRun } from '@/lib/cowork/contracts';
+import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
+import {
+  coworkCleanTitle, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
+  coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
+} from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
-import { coworkDocumentSchema, type CoworkEvent, type CoworkRun } from '@/lib/cowork/contracts';
+import { CoworkArtifactPanel } from './CoworkArtifactPanel';
+import { CoworkComposer, type CoworkComposerHandle } from './CoworkComposer';
+import { CoworkHome } from './CoworkHome';
+import { CoworkSidePanel } from './CoworkSidePanel';
+import { CoworkThreadList } from './CoworkThreadList';
+import { CoworkTurn, type CoworkTurnData } from './CoworkTurn';
+import { FileUpload } from './FileUpload';
+import { CoworkMark, CwButton, CwStatusPill } from './ui';
 
-const labels: Record<CoworkRun['status'], string> = {
-  queued: 'En cola', running: 'Preparando respuesta', waiting_approval: 'Esperando tu aprobación', waiting_workers: 'Revisando los resultados. Puedes volver más tarde.',
-  completed: 'Completado', cancelled: 'Cancelado', failed: 'No se pudo completar',
+type ThreadState = CoworkTurnData & {
+  ancestors?: CoworkTurnData[];
+  olderTurnsOmitted?: boolean;
+  canCreateDraft?: boolean;
+  canResearch?: boolean;
+  budget?: { depth: number; maxDepth: number; exhausted: boolean };
+  continuation?: { id: string; status: string } | null;
 };
-function activityTitle(event: CoworkEvent) {
-  if (event.kind === 'search.approved') return 'Búsqueda aprobada y guardada en cola';
-  if (event.kind === 'tool.completed') {
-    if (event.payload.action === 'research.get_existing') return 'Consultó la investigación guardada del contacto';
-    if (event.payload.action === 'prospecting.search') return 'Consultó nuevos contactos en el proveedor';
-    return event.payload.action === 'leads.get' ? 'Consultó una ficha de tus contactos guardados' : 'Buscó en tus contactos guardados';
-  }
-  return ({ 'work.created': 'Solicitud guardada', 'run.started': 'Comenzó la preparación', 'run.completed': 'Resultado guardado', 'run.failed': 'La preparación no terminó', 'run.cancelled': 'Trabajo cancelado', 'approval.requested': 'Preparó una propuesta para revisión', 'search.started': 'Comenzó la búsqueda externa', 'effect.approved': 'Propuesta aprobada y guardada en cola', 'effect.started': 'Ejecutando la acción aprobada', 'effect.completed': 'Acción ejecutada', 'effect.failed': 'No se pudo ejecutar la acción', 'draft.requested': 'Solicitó un borrador del informe', 'draft.started': 'Preparando borrador', 'draft.completed': 'Borrador guardado', 'draft.failed': 'No se pudo preparar el borrador', 'thread.budget_exhausted': 'Alcanzó el tope de pasos automáticos del hilo' } as Record<string, string>)[event.kind] || 'Actualización del trabajo';
-}
-type Turn = { run: CoworkRun; events: CoworkEvent[] };
-type State = Turn & { ancestors?: Turn[]; olderTurnsOmitted?: boolean; canCreateDraft?: boolean; canResearch?: boolean; budget?: { depth: number; maxDepth: number; exhausted: boolean } };
 
-export function CoworkWorkspace({ userId }: { userId?: string }) {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CONTINUATION_GRACE_MS = 45000;
+const CONTINUE_PROMPT = 'Sigue con el resultado de la acción anterior: dime qué pasó y propón el siguiente paso.';
+const DRAFT_KEY = 'cowork:draft';
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
+/** The unsent message of this tab. A draft written before the session resolved
+ * has no owner yet; one saved by another account is never shown. */
+function readDraft(userId: string | null) {
+  try {
+    const saved = JSON.parse(window.sessionStorage.getItem(DRAFT_KEY) || 'null') as { userId?: string | null; text?: unknown } | null;
+    return typeof saved?.text === 'string' && (!saved.userId || saved.userId === userId) ? saved.text : '';
+  } catch { return ''; }
+}
+
+function writeDraft(userId: string | null, text: string) {
+  try {
+    if (text.trim()) window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ userId, text }));
+    else window.sessionStorage.removeItem(DRAFT_KEY);
+  } catch { /* Storage unavailable: the draft only lives in memory. */ }
+}
+
+function useMedia(query: string) {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener?.('change', update);
+    return () => media.removeEventListener?.('change', update);
+  }, [query]);
+  return matches;
+}
+
+function setWorkUrl(id: string | null, mode: 'push' | 'replace') {
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set('work', id); else url.searchParams.delete('work');
+  if (mode === 'push') window.history.pushState(null, '', url); else window.history.replaceState(null, '', url);
+}
+
+function PendingTurn({ text }: { text: string }) {
+  return <article className="cw-rise space-y-4" aria-label="Mensaje enviándose">
+    <div className="flex justify-end">
+      <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-[18px] rounded-br-md bg-cw-user px-4 py-2.5 text-[15px] leading-[1.55] text-cw-text">{text}</p>
+    </div>
+    <div className="flex items-center gap-3">
+      <CoworkMark working size={26} className="hidden sm:inline-flex" />
+      <p role="status" className="cw-shimmer text-[13.5px]">Enviando…</p>
+    </div>
+  </article>;
+}
+
+/** userId scopes the unsent draft; the page passes it from the server session. */
+export function CoworkWorkspace({ userId = null }: { userId?: string | null } = {}) {
   const [runs, setRuns] = useState<CoworkRun[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [state, setState] = useState<State | null>(null);
+  const [state, setState] = useState<ThreadState | null>(null);
   const [message, setMessage] = useState('');
-  const [draftOwner, setDraftOwner] = useState<string | null>(null);
-  // Draft survives the remount the app does once the session resolves
-  // (the tree is keyed by user and workspace): it is restored on mount,
-  // cleared only after a successful send, and kept on failure. The stored
-  // userId prevents showing one account's draft to another in this tab.
-  const draftKey = 'cowork:draft';
-  useEffect(() => {
-    let text = '';
-    try {
-      const raw = window.sessionStorage.getItem(draftKey);
-      const saved = raw ? JSON.parse(raw) as { userId?: unknown; text?: unknown } | null : null;
-      if (userId && saved?.userId === userId && typeof saved.text === 'string') text = saved.text.slice(0, 20000);
-    } catch {
-      // Private mode or unavailable storage: keep typing without persistence.
-    }
-    setMessage(text);
-    setDraftOwner(userId || null);
-  }, [userId]);
-  useEffect(() => {
-    // Never overwrite storage before hydration or copy text across accounts.
-    if (!userId || draftOwner !== userId) return;
-    try {
-      if (message) window.sessionStorage.setItem(draftKey, JSON.stringify({ userId, text: message }));
-      else window.sessionStorage.removeItem(draftKey);
-    } catch {
-      // Ignore persistence failures; the message stays on screen.
-    }
-  }, [message, userId, draftOwner]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -89,285 +96,549 @@ export function CoworkWorkspace({ userId }: { userId?: string }) {
   const [searchQuota, setSearchQuota] = useState<{ remaining: number; limit: number } | null>(null);
   const [canAutonomous, setCanAutonomous] = useState(false);
   const [mode, setMode] = useState<CoworkExecutionMode>('approval');
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [documentOpen, setDocumentOpen] = useState(false);
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [artifactId, setArtifactId] = useState<string | null>(null);
+  const [maximized, setMaximized] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
-  const [refresh, setRefresh] = useState(0);
+  const [listVersion, setListVersion] = useState(0);
+  const [threadVersion, setThreadVersion] = useState(0);
+  const [optimistic, setOptimistic] = useState<{ text: string; runId: string | null } | null>(null);
+  const [queued, setQueued] = useState<string | null>(null);
+  const [awaitingContinuation, setAwaitingContinuation] = useState(false);
+  // The worker should resume after an approved action; if it never does, offer the next step instead of a dead end.
+  const [continuationMissing, setContinuationMissing] = useState(false);
+  const [showJump, setShowJump] = useState(false);
+
+  const isDesktop = useMedia('(min-width: 1024px)');
   const pending = useRef<{ message: string; requestId: string; parentRunId: string | null; mode: CoworkExecutionMode } | null>(null);
-  const documentButton = useRef<HTMLButtonElement>(null);
-  const documentHeading = useRef<HTMLHeadingElement>(null);
-  const active = state && ['queued', 'running', 'waiting_approval', 'waiting_workers'].includes(state.run.status);
-  const completed = state?.events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
-  const result = coworkDocumentSchema.safeParse(completed ? { reply: completed.reply, document: completed.document } : null);
-  const output = result.success ? result.data : null;
-  const proposal = state?.run.status === 'waiting_approval'
-    ? state.events.slice().reverse().find(event => event.kind === 'approval.requested')?.payload : null;
-  const searchProposal = proposal?.action === 'prospecting.search' ? coworkSearchCriteriaSchema.safeParse(proposal.criteria) : null;
-  const searchStarted = state?.events.some(event => event.kind === 'search.started');
-  const searchApproved = state?.events.some(event => event.kind === 'search.approved');
-  const failure = state?.events.slice().reverse().find(event => event.kind === 'run.failed')?.payload;
-  const statusLabel = state ? (state.run.status === 'waiting_approval' && searchApproved
-    ? (searchStarted ? 'Buscando nuevos contactos' : 'Búsqueda aprobada · En cola') : labels[state.run.status]) : '';
+  const composer = useRef<CoworkComposerHandle>(null);
+  const contactRef = useRef<string | null>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const conversation = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
+  const artifactHeading = useRef<HTMLHeadingElement>(null);
+  const artifactOpener = useRef<HTMLElement | null>(null);
+  const focusArtifact = useRef(false);
+  const wakeState = useRef({ inflight: false, last: 0 });
+  const liveRuns = useRef(new Set<string>());
+  const autoOpened = useRef(new Set<string>());
+  /** A historical turn opened on purpose (an older document version) is not auto-forwarded. */
+  const pinnedRun = useRef<string | null>(null);
 
-  async function request(url: string, options?: RequestInit) {
+  const clearPrivateResults = useCallback(() => {
+    setRuns([]); setState(null); setReady(false); setArtifactId(null); setOptimistic(null); setQueued(null);
+  }, []);
+
+  const request = useCallback(async (url: string, options?: RequestInit) => {
     const response = await fetch(url, { ...options, cache: 'no-store' });
-    const data = await response.json();
-    if (response.status === 401 || response.status === 403) {
-      setRuns([]); setState(null); setReady(false); setDocumentOpen(false);
-    }
-    if (!response.ok) throw new Error(data.error || 'No se pudo completar la solicitud.');
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401 || response.status === 403) clearPrivateResults();
+    if (!response.ok) throw Object.assign(new Error(data.error || 'No se pudo completar la solicitud.'), { status: response.status });
     return data;
-  }
+  }, [clearPrivateResults]);
 
+  /** Asks the worker to take the next step now instead of waiting for the scheduler. */
+  const wake = useCallback((force = false) => {
+    const now = Date.now();
+    if (wakeState.current.inflight || (!force && now - wakeState.current.last < 8000)) return;
+    wakeState.current = { inflight: true, last: now };
+    Promise.resolve().then(() => fetch('/api/cowork/wake', { method: 'POST', cache: 'no-store' }))
+      .catch(() => undefined)
+      .finally(() => { wakeState.current.inflight = false; });
+  }, []);
+
+  // Runs list.
   useEffect(() => {
     let disposed = false;
     setLoading(true);
     request('/api/cowork/runs').then(data => {
       if (disposed) return;
-      setRuns(data.runs); setReady(data.canSubmit); setError('');
+      setRuns(Array.isArray(data.runs) ? data.runs : []); setReady(data.canSubmit === true); setError('');
       setSearchQuota(data.searchQuota && typeof data.searchQuota.remaining === 'number' ? data.searchQuota : null);
       setCanAutonomous(data.canAutonomous === true);
       if (!data.canAutonomous) setMode('approval');
-    }).catch(error => { if (!disposed) setError(error.message); })
+    }).catch(problem => { if (!disposed) setError(problem.message); })
       .finally(() => { if (!disposed) setLoading(false); });
     return () => { disposed = true; };
-  }, [refresh]);
+  }, [listVersion, request]);
 
+  // What you are writing survives a reload, or the remount the app does once the
+  // session resolves (AuthContext keys its tree by user and workspace), even mid-sentence.
+  const draftWatched = useRef(false);
   useEffect(() => {
-    if (!selected) return;
+    const saved = readDraft(userId);
+    if (!saved) return;
+    setMessage(current => !current || saved.startsWith(current) ? saved : current.startsWith(saved) ? current : `${saved}${current}`);
+    // The remount drops focus: keep writing where you were, at the end of the text.
+    requestAnimationFrame(() => {
+      if (document.activeElement !== document.body) return;
+      const node = (document.getElementById('cowork-followup') || document.getElementById('cowork-message')) as HTMLTextAreaElement | null;
+      node?.focus();
+      node?.setSelectionRange(node.value.length, node.value.length);
+    });
+  }, [userId]);
+  useEffect(() => {
+    // Mounting never clears a saved draft; later changes (including a send) do.
+    if (!draftWatched.current) { draftWatched.current = true; return; }
+    writeDraft(userId, message);
+  }, [message, userId]);
+
+  // Selected conversation: poll while work is in flight and follow continuations.
+  useEffect(() => {
+    if (!selected) { setAwaitingContinuation(false); setContinuationMissing(false); return; }
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const controller = new AbortController();
+    const openedAt = Date.now();
+    let completionSeenAt: number | null = null;
+    let failures = 0;
     async function poll() {
       try {
-        const data = await request(`/api/cowork/runs/${selected}`, { signal: controller.signal });
+        const data: ThreadState = await request(`/api/cowork/runs/${selected}`, { signal: controller.signal });
         if (disposed) return;
+        failures = 0;
         setState(data);
-        setRuns(previous => previous.map(run => run.id === data.run.id ? data.run : run));
-        if (['queued', 'running', 'waiting_approval', 'waiting_workers'].includes(data.run.status)) timer = setTimeout(poll, 3000);
-      } catch (error) {
-        if (!disposed) setError(error instanceof Error ? error.message : 'No se pudo actualizar el trabajo.');
+        setError('');
+        setRuns(previous => previous.some(run => run.id === data.run.id)
+          ? previous.map(run => run.id === data.run.id ? { ...run, ...data.run } : run)
+          : [data.run, ...previous]);
+        const status = data.run.status;
+        if (isCoworkActive(status)) liveRuns.current.add(data.run.id);
+        if (data.continuation?.id && !isCoworkActive(status) && data.continuation.id !== selected && pinnedRun.current !== selected) {
+          // The worker resumed the thread in a new turn: keep reading there.
+          liveRuns.current.add(data.continuation.id);
+          setWorkUrl(data.continuation.id, 'replace');
+          setSelected(data.continuation.id);
+          return;
+        }
+        let delay: number | null = null;
+        if (isCoworkActive(status)) {
+          const approvedNotStarted = status === 'waiting_approval'
+            && data.events.some(event => event.kind === 'effect.approved' || event.kind === 'search.approved')
+            && !data.events.some(event => event.kind === 'effect.started' || event.kind === 'search.started');
+          const decisionPending = status === 'waiting_approval' && coworkProposalView(data.run, data.events)?.state === 'pending';
+          // Nothing moves while a decision waits on you; otherwise stay close to live.
+          delay = decisionPending ? 10000 : Date.now() - openedAt < 60000 ? 2000 : 4000;
+          if (status === 'queued' || status === 'waiting_workers' || approvedNotStarted) wake();
+          setAwaitingContinuation(false);
+          setContinuationMissing(false);
+        } else if (coworkExpectsContinuation(data.events) && !data.continuation) {
+          completionSeenAt ??= Date.now();
+          // An old completion is not worth waiting for: measure from when it happened.
+          const completedAt = Date.parse(data.events.slice().reverse().find(event => event.kind === 'run.completed')?.created_at || '');
+          const since = Number.isFinite(completedAt) ? Math.min(completionSeenAt, completedAt) : completionSeenAt;
+          const waiting = Date.now() - since < CONTINUATION_GRACE_MS;
+          setAwaitingContinuation(waiting);
+          setContinuationMissing(!waiting);
+          if (waiting) delay = 2000;
+        } else {
+          setAwaitingContinuation(false);
+          setContinuationMissing(false);
+        }
+        if (delay !== null) timer = setTimeout(poll, delay);
+      } catch (problem) {
+        if (disposed || controller.signal.aborted) return;
+        const status = (problem as { status?: number }).status;
+        setError(problem instanceof Error ? problem.message : 'No se pudo actualizar el trabajo.');
+        if (status !== 401 && status !== 403 && status !== 404 && failures < 3) {
+          failures += 1;
+          timer = setTimeout(poll, 4000 * failures);
+        }
       }
     }
     void poll();
     return () => { disposed = true; controller.abort(); clearTimeout(timer); };
-  }, [selected, refresh]);
+  }, [selected, threadVersion, request, wake]);
 
-  useEffect(() => { if (documentOpen) documentHeading.current?.focus(); }, [documentOpen]);
-
+  // Restore from the URL and follow browser navigation.
   useEffect(() => {
     const restore = () => {
       const id = new URL(window.location.href).searchParams.get('work');
-      setSelected(id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id : null);
-      setState(null); setDocumentOpen(false); setError('');
+      setSelected(id && UUID.test(id) ? id : null);
+      setState(null); setArtifactId(null); setError(''); setOptimistic(null); setQueued(null);
+      stickToBottom.current = true;
     };
     restore();
     window.addEventListener('popstate', restore);
     return () => window.removeEventListener('popstate', restore);
   }, []);
 
-  function choose(id: string | null) {
-    const url = new URL(window.location.href);
-    if (id) url.searchParams.set('work', id); else url.searchParams.delete('work');
-    window.history.pushState(null, '', url);
-    setState(null); setSelected(id); setDocumentOpen(false); setHistoryOpen(false); setError('');
+  const choose = useCallback((id: string | null, options: { pin?: boolean } = {}) => {
+    pinnedRun.current = options.pin ? id : null;
+    setWorkUrl(id, 'push');
+    setState(null); setSelected(id); setArtifactId(null); setMaximized(false); setDrawerOpen(false); setError('');
+    setOptimistic(null); setQueued(null); setShowFiles(false);
+    stickToBottom.current = true;
+    if (!id) requestAnimationFrame(() => composer.current?.focus());
+  }, []);
+
+  // While following a continuation the previous state stays on screen until the new turn loads.
+  const turns: CoworkTurnData[] = useMemo(() => state && selected
+    ? [...(state.ancestors || []), { run: state.run, events: state.events }] : [], [state, selected]);
+  const latest = turns[turns.length - 1] || null;
+  const latestIsCurrent = Boolean(latest && latest.run.id === selected);
+  const artifacts = useMemo(() => turns.flatMap(turn => coworkTurnArtifacts(turn.run, turn.events)), [turns]);
+  const openArtifact = artifactId ? artifacts.find(item => item.id === artifactId) || null : null;
+  const proposal = latest ? coworkProposalView(latest.run, latest.events) : null;
+  const pendingDecision = Boolean(latest && latest.run.status === 'waiting_approval' && proposal?.state === 'pending');
+  const active = Boolean(latest && isCoworkActive(latest.run.status));
+  const busy = (active && !pendingDecision) || awaitingContinuation;
+  const threads = useMemo(() => groupCoworkThreads(runs), [runs]);
+
+  const selectedRoot = useMemo(() => {
+    if (!selected) return null;
+    const byId = new Map(runs.map(run => [run.id, run]));
+    let cursor = byId.get(selected);
+    if (!cursor) return turns[0]?.run.id ?? selected;
+    const seen = new Set<string>();
+    while (cursor.parent_run_id && byId.has(cursor.parent_run_id) && !seen.has(cursor.id)) {
+      seen.add(cursor.id);
+      cursor = byId.get(cursor.parent_run_id) as CoworkRun;
+    }
+    return cursor.id;
+  }, [runs, selected, turns]);
+  const title = useMemo(() => {
+    const summary = threads.find(thread => thread.rootId === selectedRoot);
+    if (summary) return summary.title;
+    const first = turns.find(turn => !turn.run.automatic);
+    return first ? coworkCleanTitle(first.run.message) : optimistic ? coworkCleanTitle(optimistic.text) : 'Cowork';
+  }, [threads, selectedRoot, turns, optimistic]);
+  const inConversationTitle = selected || optimistic ? coworkCleanTitle(title, 60) : '';
+
+  const openArtifactPanel = useCallback((artifact: CoworkArtifact, opener?: HTMLElement | null, focus = true) => {
+    artifactOpener.current = opener || null;
+    focusArtifact.current = focus;
+    setArtifactId(artifact.id);
+    setDrawerOpen(false);
+  }, []);
+
+  const closeArtifact = useCallback(() => {
+    setArtifactId(null);
+    setMaximized(false);
+    requestAnimationFrame(() => {
+      const opener = artifactOpener.current;
+      if (opener && opener.isConnected) opener.focus(); else composer.current?.focus();
+    });
+  }, []);
+
+  useEffect(() => {
+    if (openArtifact && focusArtifact.current) {
+      focusArtifact.current = false;
+      artifactHeading.current?.focus();
+    }
+  }, [openArtifact]);
+
+  useEffect(() => { if (artifactId && !openArtifact && state) setArtifactId(null); }, [artifactId, openArtifact, state]);
+
+  // Open the main result of a turn that finished while you were watching, as Claude does.
+  useEffect(() => {
+    if (!latest || !isDesktop || isCoworkActive(latest.run.status) || !liveRuns.current.has(latest.run.id)) return;
+    if (autoOpened.current.has(latest.run.id)) return;
+    autoOpened.current.add(latest.run.id);
+    const produced = coworkTurnArtifacts(latest.run, latest.events);
+    const best = produced.find(item => item.kind === 'document')
+      || produced.find(item => item.kind === 'contacts' && item.count >= 3)
+      || produced.find(item => item.kind === 'file');
+    if (best) openArtifactPanel(best, null, false);
+  }, [latest, isDesktop, openArtifactPanel]);
+
+  // Keep the newest content in view unless the reader scrolled up.
+  useIsomorphicLayoutEffect(() => {
+    const node = scroller.current;
+    if (node && stickToBottom.current) node.scrollTop = node.scrollHeight;
+  }, [turns, optimistic, queued]);
+
+  // Cards that load their details later (approvals, previews) must not push the decision out of view.
+  useEffect(() => {
+    const content = conversation.current;
+    const node = scroller.current;
+    if (!content || !node || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => { if (stickToBottom.current) node.scrollTop = node.scrollHeight; });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [selected, optimistic]);
+
+  function onScroll() {
+    const node = scroller.current;
+    if (!node) return;
+    const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
+    stickToBottom.current = distance < 160;
+    setShowJump(distance > 480);
   }
 
-  async function send() {
-    const text = message.trim();
-    if (!text || sending || !ready || (userId && draftOwner !== userId)) return;
-    const parentRunId = state?.run.status === 'completed' ? state.run.id : null;
-    if (pending.current?.message !== text || pending.current?.parentRunId !== parentRunId || pending.current?.mode !== mode) pending.current = { message: text, requestId: crypto.randomUUID(), parentRunId, mode };
+  function jumpToEnd() {
+    const node = scroller.current;
+    if (!node) return;
+    stickToBottom.current = true;
+    node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
+  }
+
+  async function post(text: string, parentRunId: string | null) {
+    // A contact picked from a table travels as a reference the model can use,
+    // without showing its ID in the composer or in your message bubble.
+    const reference = contactRef.current;
+    const outgoing = reference && !text.includes(reference) ? `${text}\n\n(ID del contacto: ${reference})` : text;
+    if (pending.current?.message !== outgoing || pending.current?.parentRunId !== parentRunId || pending.current?.mode !== mode) {
+      pending.current = { message: outgoing, requestId: crypto.randomUUID(), parentRunId, mode };
+    }
     setSending(true); setError('');
+    setOptimistic({ text, runId: null });
+    stickToBottom.current = true;
     try {
       const data = await request('/api/cowork/runs', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(pending.current),
       });
-      setMessage(''); pending.current = null; choose(data.id); setRefresh(value => value + 1);
-    } catch (error) { setError(error instanceof Error ? error.message : 'No se pudo guardar la solicitud.'); }
-    finally { setSending(false); }
+      pending.current = null;
+      contactRef.current = null;
+      setOptimistic({ text, runId: data.id });
+      liveRuns.current.add(data.id);
+      if (parentRunId && selected) {
+        setWorkUrl(data.id, 'replace');
+        setSelected(data.id);
+      } else {
+        setWorkUrl(data.id, 'push');
+        setState(null);
+        setSelected(data.id);
+      }
+      setListVersion(value => value + 1);
+      wake(true);
+      return true;
+    } catch (problem) {
+      setOptimistic(null);
+      setError(problem instanceof Error ? problem.message : 'No se pudo guardar la solicitud.');
+      return false;
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const resolve = useCallback(async (approve: boolean): Promise<boolean> => {
+    if (!latest || resolving) return false;
+    const view = coworkProposalView(latest.run, latest.events);
+    const endpoint = view?.type === 'search' ? 'search-approval' : view?.type === 'effect' ? 'effect-approval' : 'approval';
+    setResolving(true);
+    try {
+      await request(`/api/cowork/runs/${latest.run.id}/${endpoint}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approve }),
+      });
+      if (approve) { liveRuns.current.add(latest.run.id); wake(true); }
+      setThreadVersion(value => value + 1);
+      return true;
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : 'No se pudo resolver la propuesta.');
+      return false;
+    } finally {
+      setResolving(false);
+    }
+  }, [latest, resolving, request, wake]);
+
+  async function submit() {
+    const text = message.trim();
+    if (!text || sending || !ready) return;
+    if (!selected) {
+      setMessage('');
+      if (!await post(text, null)) setMessage(text);
+      return;
+    }
+    if (!latest || !latestIsCurrent) { setQueued(text); setMessage(''); return; }
+    const status = latest.run.status;
+    if (pendingDecision) {
+      // Writing instead of deciding means "no, do this instead".
+      if (!await resolve(false)) return;
+      setMessage('');
+      if (!await post(text, latest.run.id)) setMessage(text);
+      return;
+    }
+    if (busy) { setQueued(text); setMessage(''); return; }
+    setMessage('');
+    if (!await post(text, status === 'completed' ? latest.run.id : (latest.run.parent_run_id ?? null))) setMessage(text);
+  }
+
+  // Send a message written while the previous step was still running.
+  useEffect(() => {
+    if (!queued || sending || !latest || !latestIsCurrent || busy || isCoworkActive(latest.run.status)) return;
+    const text = queued;
+    setQueued(null);
+    // A message that could not be saved goes back to the box instead of vanishing.
+    void post(text, latest.run.status === 'completed' ? latest.run.id : (latest.run.parent_run_id ?? null))
+      .then(sent => { if (!sent) setMessage(current => current.trim() ? current : text); });
+    // post is recreated each render; the queue only reacts to state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queued, sending, latest, latestIsCurrent, busy]);
+
+  useEffect(() => {
+    if (optimistic?.runId && turns.some(turn => turn.run.id === optimistic.runId)) setOptimistic(null);
+  }, [optimistic, turns]);
+
+  async function sendQueuedNow() {
+    if (!queued || !latest || !pendingDecision) return;
+    const text = queued;
+    if (!await resolve(false)) return;
+    setQueued(null);
+    if (!await post(text, latest.run.id)) setMessage(current => current.trim() ? current : text);
+  }
+
+  function retry() {
+    if (!latest) return;
+    void post(latest.run.message, latest.run.parent_run_id ?? null);
   }
 
   async function cancel() {
-    if (!selected || cancelling) return;
+    if (!latest || cancelling) return;
     setCancelling(true);
-    try { await request(`/api/cowork/runs/${selected}`, { method: 'DELETE' }); setRefresh(value => value + 1); }
-    catch (error) { setError(error instanceof Error ? error.message : 'No se pudo cancelar.'); }
+    try {
+      await request(`/api/cowork/runs/${latest.run.id}`, { method: 'DELETE' });
+      setQueued(null);
+      setThreadVersion(value => value + 1);
+    } catch (problem) { setError(problem instanceof Error ? problem.message : 'No se pudo cancelar.'); }
     finally { setCancelling(false); }
   }
 
-  async function resolveNote(approve: boolean) {
-    if (!selected || resolving) return;
-    setResolving(true);
-    try {
-      await request(`/api/cowork/runs/${selected}/${proposal?.action === 'prospecting.search' ? 'search-approval' : proposal?.action === 'cowork.effect' ? 'effect-approval' : 'approval'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ approve }) });
-      setRefresh(value => value + 1);
-    } catch (error) { setError(error instanceof Error ? error.message : 'No se pudo resolver el cambio.'); }
-    finally { setResolving(false); }
+  function askAboutContact(leadId: string) {
+    const rows = collectCoworkLeadRows(turns.flatMap(turn => turn.events.filter(event => event.kind === 'tool.completed').map(event => event.payload)));
+    const row = rows.find(item => item.id === leadId);
+    const who = row?.name ? `${row.name}${row.company ? ` (${row.company})` : ''}` : 'este contacto guardado';
+    contactRef.current = leadId;
+    setMessage(`Consulta la ficha de ${who} y su investigación disponible. Resume las fuentes y recomendaciones si existen.`);
+    requestAnimationFrame(() => composer.current?.focus());
   }
 
-  function clearPrivateResults() {
-    setRuns([]); setState(null); setReady(false); setDocumentOpen(false);
+  function applySuggestion(prompt: string) {
+    setMessage(prompt);
+    requestAnimationFrame(() => {
+      composer.current?.focus();
+      const node = document.getElementById('cowork-message') as HTMLTextAreaElement | null;
+      const start = prompt.indexOf('[');
+      const end = prompt.indexOf(']', start);
+      if (node && start >= 0 && end > start) node.setSelectionRange(start, end + 1);
+    });
   }
 
-  return (
-    <section aria-label="Cowork" className="flex min-h-[75dvh] min-w-0 flex-col rounded-2xl bg-background text-foreground">
-      <header className="flex items-center justify-between gap-2 border-b border-border/60 pb-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <Button variant="ghost" size="icon" aria-label="Mostrar trabajos" aria-expanded={historyOpen} onClick={() => setHistoryOpen(!historyOpen)}><History /></Button>
-          <h1 className="truncate text-sm font-medium">{state ? state.run.message.slice(0, 70) : 'Cowork'}</h1>
-        </div>
-        <Button variant="ghost" onClick={() => choose(null)}><Plus />Nuevo trabajo</Button>
-      </header>
-      {error && <div role="alert" className="my-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted p-3 text-sm"><p>{error}</p><Button variant="outline" size="sm" onClick={() => setRefresh(value => value + 1)}>Reintentar</Button></div>}
-      <div className="flex min-h-0 flex-1 flex-col gap-5 pt-5 lg:flex-row">
-        {historyOpen && <nav aria-label="Trabajos recientes" className="max-h-72 w-full shrink-0 overflow-y-auto border-b border-border pb-4 lg:max-h-[65dvh] lg:w-56 lg:border-b-0 lg:border-r lg:pr-3">
-          <h2 className="mb-3 text-sm font-medium">Trabajos recientes</h2>
-          {runs.length === 0 && <p className="text-sm text-muted-foreground">Tus trabajos aparecerán aquí.</p>}
-          {runs.map(run => <Button key={run.id} variant="ghost" className="mb-1 w-full justify-start overflow-hidden" aria-current={selected === run.id ? 'page' : undefined} onClick={() => choose(run.id)}><span className="truncate">{run.message}</span></Button>)}
-        </nav>}
-        <div className={cn('flex min-w-0 flex-1 flex-col', documentOpen && 'hidden lg:flex')}>
-          {!selected ? <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center py-10 md:py-16">
-            <h2 className="mb-8 text-center text-3xl font-medium tracking-tight md:text-4xl">¿En qué trabajamos hoy?</h2>
-            <form onSubmit={event => { event.preventDefault(); void send(); }} className="rounded-2xl border border-border bg-muted/30 p-4 shadow-sm">
-              <Label htmlFor="cowork-message" className="sr-only">Describe tu trabajo</Label>
-              <Textarea id="cowork-message" value={message} maxLength={20000} onChange={event => setMessage(event.target.value)} placeholder="Describe lo que necesitas preparar…" className="min-h-28 resize-y border-0 bg-transparent text-base shadow-none" disabled={sending || Boolean(userId && draftOwner !== userId)} />
-              {canAutonomous && <ExecutionMode id="cowork-mode" value={mode} onChange={setMode} disabled={sending} />}
-              <div className="mt-3 flex items-center justify-between gap-3"><span className="text-xs text-muted-foreground">Consulta tus contactos guardados o prepara un documento{searchQuota ? ` · Búsquedas externas hoy: ${searchQuota.remaining} de ${searchQuota.limit}` : ''}</span><Button type="submit" size="icon" className="rounded-xl" aria-label="Crear trabajo" disabled={!ready || !message.trim() || sending}>{sending ? <Loader2 className="motion-safe:animate-spin" /> : <ArrowUp />}</Button></div>
-            </form>
-            {!ready && !loading && <p className="mt-3 text-sm text-muted-foreground">El procesamiento todavía no está disponible. Puedes consultar los trabajos guardados.</p>}
-            <div className="mt-10"><h3 className="mb-3 text-sm text-muted-foreground">Recientes</h3>
-              {loading ? <p role="status" className="text-sm text-muted-foreground">Cargando trabajos…</p> : runs.length === 0 ? <p className="text-sm text-muted-foreground">Aún no hay trabajos. Describe tu primer objetivo arriba.</p> : runs.slice(0, 6).map(run => <button key={run.id} onClick={() => choose(run.id)} className="flex w-full items-center justify-between gap-4 border-b border-border/60 py-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><span className="min-w-0 truncate">{run.message}</span><span className="shrink-0 text-xs text-muted-foreground">{labels[run.status]}</span></button>)}
-            </div>
-          </div> : !state ? <p role="status" className="p-6 text-sm text-muted-foreground">Cargando conversación…</p> : <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 py-5">
-            {state.olderTurnsOmitted && <p className="text-xs text-muted-foreground">Se muestran los últimos ocho turnos anteriores.</p>}
-            {state.ancestors?.map(turn => {
-              const payload = turn.events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
-              const previous = coworkDocumentSchema.safeParse(payload ? { reply: payload.reply, document: payload.document } : null);
-              return <section key={turn.run.id} aria-label="Turno anterior" className="space-y-4 border-b border-border/60 pb-6">
-                <p className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-muted px-5 py-4">{turn.run.message}</p>
-                {previous.success && <MarkdownText text={previous.data.reply} />}
-                {previous.success && previous.data.document && <Button variant="outline" onClick={() => choose(turn.run.id)}><FileText />Ver resultado anterior</Button>}
-              </section>;
-            })}
-            <p className="ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-2xl bg-muted px-5 py-4">{state.run.message}</p>
-            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">{active ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : state.run.status === 'completed' ? <Check className="h-4 w-4" /> : null}{statusLabel}</p>
-            {output && <MarkdownText text={output.reply} />}
-            {state.events.some(event => event.kind === 'artifact.created') && <section aria-label="Archivos generados" className="space-y-2 rounded-xl border border-border p-5">
-              <h3 className="font-medium">Archivos generados</h3>
-              <ul className="space-y-1 text-sm">
-                {state.events.filter(event => event.kind === 'artifact.created').map(event => {
-                  const payload = event.payload as { name?: string; size?: number } | null;
-                  const name = String(payload?.name || '');
-                  if (!name) return null;
-                  return <li key={`${event.sequence}-${name}`}><ArtifactPreview runId={state.run.id} name={name} size={typeof payload?.size === 'number' ? payload.size : undefined} /></li>;
-                })}
-              </ul>
-            </section>}
-            {searchProposal?.success && <section aria-label="Revisar búsqueda externa" className="space-y-4 rounded-xl border border-border p-5">
-              <h3 className="font-medium">Buscar nuevos contactos</h3>
-              <dl className="space-y-2 text-sm"><div><dt className="font-medium">Buscar</dt><dd>{searchProposal.data.target === 'companies' ? 'Empresas' : 'Personas'}</dd></div><div><dt className="font-medium">Cargos</dt><dd>{searchProposal.data.titles.join(', ') || 'Sin filtro'}</dd></div><div><dt className="font-medium">Sectores</dt><dd>{searchProposal.data.industries.join(', ') || 'Sin filtro'}</dd></div><div><dt className="font-medium">Ubicación de la persona</dt><dd>{searchProposal.data.locations.join(', ') || 'Sin filtro'}</dd></div>
-                {!!searchProposal.data.seniorities?.length && <div><dt className="font-medium">Nivel de responsabilidad</dt><dd>{searchProposal.data.seniorities.join(', ')}</dd></div>}
-                {!!searchProposal.data.companyLocations?.length && <div><dt className="font-medium">Ubicación de la empresa</dt><dd>{searchProposal.data.companyLocations.join(', ')}</dd></div>}
-                {!!searchProposal.data.employeeRanges?.length && <div><dt className="font-medium">Número de empleados</dt><dd>{searchProposal.data.employeeRanges.join(', ')}</dd></div>}
-                {!!searchProposal.data.companyDomains?.length && <div><dt className="font-medium">Dominios de empresas</dt><dd className="break-words">{searchProposal.data.companyDomains.join(', ')}</dd></div>}
-                {searchProposal.data.rolePolicy && <div><dt className="font-medium">Criterios de clasificación por cargo</dt><dd className="break-words">Posibles compradores: {searchProposal.data.rolePolicy.decisionTerms.join(', ') || 'Sin criterio'}; usuarios: {searchProposal.data.rolePolicy.userTerms.join(', ') || 'Sin criterio'}; referidores: {searchProposal.data.rolePolicy.referralTerms.join(', ') || 'Sin criterio'}; excluir: {searchProposal.data.rolePolicy.excludeTerms.join(', ') || 'Ninguno'}. Las coincidencias contradictorias quedan para revisión.</dd></div>}
-              </dl>
-              <p className="text-sm text-muted-foreground">Hasta {searchProposal.data.limit} contactos. Consume una operación de tu cuota de búsqueda. No revela correos ni teléfonos y no guarda contactos ni envía mensajes.</p>
-              {searchApproved || searchStarted ? <p role="status" className="text-sm">{searchStarted ? 'La búsqueda está en curso.' : 'La búsqueda está aprobada y espera su turno.'} Puedes cerrar esta pestaña y volver al trabajo.</p> : <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar búsqueda</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando aprobación…' : 'Buscar contactos'}</Button></div>}
-            </section>}
-            {proposal?.action === 'crm.replace_note' && <section aria-label="Revisar cambio de nota" className="space-y-4 rounded-xl border border-border p-5">
-              <h3 className="font-medium">Reemplazar nota comercial</h3>
-              <p className="text-sm font-medium">{String(proposal.leadName || proposal.leadId || '')}</p>
-              <p className="text-sm text-muted-foreground">Se reemplazará la nota de este contacto en el CRM. Revisa el texto completo antes de guardar.</p>
-              <div><h4 className="text-sm font-medium">Nota actual</h4><p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">{String(proposal.previousNote || 'Sin nota')}</p></div>
-              <div><h4 className="text-sm font-medium">Nueva nota</h4><p className="mt-1 whitespace-pre-wrap break-words text-sm">{String(proposal.proposedNote || '')}</p></div>
-              <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando decisión…' : 'Guardar nueva nota'}</Button></div>
-            </section>}
-            {proposal?.action === 'cowork.effect' && <section aria-label="Revisar acción propuesta" className="space-y-4 rounded-xl border border-border p-5">
-              <h3 className="font-medium">{proposal?.kind === 'save_contact' ? 'Guardar contacto' : proposal?.kind === 'start_research' ? 'Investigar contacto' : proposal?.kind === 'enrich_contact' ? 'Enriquecer contacto' : proposal?.kind === 'send_email' ? 'Enviar correo' : proposal?.kind === 'campaign_create' ? 'Crear campaña' : proposal?.kind === 'campaign_activate' ? 'Activar campaña' : proposal?.kind === 'campaign_pause' ? 'Pausar campaña' : proposal?.kind === 'code_execute' ? 'Ejecutar código' : proposal?.kind === 'profile_update' ? 'Actualizar perfil' : proposal?.kind === 'saved_search_create' ? 'Guardar búsqueda' : proposal?.kind === 'saved_search_update' ? 'Actualizar búsqueda' : proposal?.kind === 'saved_search_delete' ? 'Eliminar búsqueda' : proposal?.kind === 'campaign_stop_v2' ? 'Detener seguimiento' : proposal?.kind === 'crm_update_record' ? 'Actualizar ficha comercial' : proposal?.kind === 'campaign_prepare_draft_v2' ? 'Preparar borrador del paso' : proposal?.kind === 'crm_assign_lead' ? 'Asignar o reservar contacto' : proposal?.kind === 'exception_resolve' ? 'Resolver incidencia' : proposal?.kind === 'mission_control' ? 'Controlar misión' : proposal?.kind === 'message_context_update' ? 'Actualizar contexto de redacción' : proposal?.kind === 'enrich_batch' ? 'Enriquecer lote' : proposal?.kind === 'campaign_schedule_batch' ? 'Programar lote' : proposal?.kind === 'linkedin_invite' ? 'Invitar en LinkedIn' : proposal?.kind === 'linkedin_message' ? 'Mensaje LinkedIn' : 'Preparar borrador'}</h3>
-              {proposal?.kind !== 'message_context_update' && <p className="text-sm">{String(proposal?.label || '')}</p>}
-              {proposal?.kind === 'send_email'
-                ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                  ? <p role="status" className="text-sm">El envío está aprobado y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                  : <SendReview runId={state.run.id} draftId={String(proposal?.targetId || '').split(':')[0]} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : proposal?.kind === 'campaign_create' || proposal?.kind === 'campaign_activate' || proposal?.kind === 'campaign_pause'
-                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                    : <CampaignReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : proposal?.kind === 'code_execute'
-                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                    : <CodeReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : proposal?.kind === 'profile_update'
-                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                    : <ProfileReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : proposal?.kind === 'saved_search_create' || proposal?.kind === 'saved_search_update' || proposal?.kind === 'saved_search_delete'
-                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                    : <SavedSearchReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : proposal?.kind === 'campaign_stop_v2'
-                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                    : <CampaignStopReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : proposal?.kind === 'crm_update_record'
-                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                    : <CrmRecordReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : proposal?.kind === 'campaign_prepare_draft_v2'
-                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                    : <CampaignPrepareReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : proposal?.kind === 'crm_assign_lead'
-                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                    : <CrmAssignReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : proposal?.kind === 'exception_resolve'
-                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                    : <ExceptionReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : proposal?.kind === 'mission_control'
-                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                    : <MissionReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : proposal?.kind === 'message_context_update'
-                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                    : <MessageContextReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : proposal?.kind === 'enrich_batch'
-                  ? (state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started')
-                    ? <p role="status" className="text-sm">La propuesta está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p>
-                    : <EnrichBatchReview runId={state.run.id} onApprove={() => void resolveNote(true)} onReject={() => void resolveNote(false)} resolving={resolving} />)
-                : <>
-              <p className="text-sm text-muted-foreground">{proposal?.kind === 'save_contact' ? 'Se guardará en tus contactos sin correo verificado. Podrás enriquecerlo después.' : proposal?.kind === 'start_research' ? 'Se encolará la investigación con tu cuota disponible. El resultado se incorporará al retomarse el trabajo.' : proposal?.kind === 'enrich_contact' ? 'Se consultará el correo al proveedor (solo email, sin teléfono). Consume 1 crédito de enriquecimiento y no inventa datos.' : proposal?.kind === 'profile_update' ? 'Se actualizará solo tu perfil comercial con los valores mostrados.' : proposal?.kind === 'saved_search_create' || proposal?.kind === 'saved_search_update' ? 'Solo se guardará la búsqueda; no se ejecutará ni consumirá créditos.' : proposal?.kind === 'saved_search_delete' ? 'Solo se eliminará tu búsqueda; no afecta contactos ni campañas.' : proposal?.kind === 'campaign_stop_v2' ? 'Se omitirán los pasos pendientes de ese destinatario; lo enviado no se revierte.' : proposal?.kind === 'crm_update_record' ? 'Solo cambiará la ficha comercial mostrada; no reasigna responsables del equipo.' : proposal?.kind === 'campaign_prepare_draft_v2' ? 'Solo se preparará el borrador del paso; no se enviará nada.' : proposal?.kind === 'crm_assign_lead' ? 'Se aplicará la misma regla de asignación que usa la pantalla de colaboración.' : proposal?.kind === 'exception_resolve' ? 'Solo se registrará el resultado revisado con su motivo.' : proposal?.kind === 'mission_control' ? 'Pausar omite tareas pendientes; reactivar retoma el ciclo.' : proposal?.kind === 'message_context_update' ? 'Solo cambiará el contexto de redacción de tu organización; no reescribe borradores existentes.' : proposal?.kind === 'enrich_batch' ? 'Se consultará el correo de cada contacto del lote; los ya enriquecidos se reutilizan sin gastar de más.' : proposal?.kind === 'campaign_schedule_batch' ? 'Se reservará un día por empresa y un espaciado entre envíos. No crea ni activa la campaña ni envía nada.' : proposal?.kind === 'linkedin_invite' ? 'Se encolará una invitación sin nota. La ejecutarás desde la extensión ante ese perfil.' : proposal?.kind === 'linkedin_message' ? 'Se encolará el mensaje aprobado. La ejecutarás desde la extensión ante ese perfil; solo lo confirmado cuenta como enviado.' : 'Se preparará el borrador en segundo plano. Podrás revisarlo cuando esté listo.'}</p>
-              {state?.events.some(event => event.kind === 'effect.approved' || event.kind === 'effect.started') ? <p role="status" className="text-sm">La acción está aprobada y en curso. Puedes cerrar esta pestaña y volver al trabajo.</p> : <div className="flex flex-wrap justify-end gap-2"><Button variant="ghost" disabled={resolving} onClick={() => void resolveNote(false)}>Descartar</Button><Button disabled={resolving} onClick={() => void resolveNote(true)}>{resolving ? 'Guardando aprobación…' : 'Aprobar y ejecutar'}</Button></div>}
-                </>}
-            </section>}
-            {state.run.status === 'failed' && <p className="text-sm text-muted-foreground">{typeof failure?.message === 'string' ? failure.message : 'Tu solicitud sigue guardada. No se pudo completar el trabajo.'}</p>}
-            {state.budget?.exhausted && <p className="text-sm text-muted-foreground">Se alcanzó el tope de pasos automáticos de este hilo. Lo logrado quedó guardado; escríbeme abajo para seguir.</p>}
-            <ContactResults key={state.run.id} runId={state.run.id} events={state.events} onError={setError} onAccessDenied={clearPrivateResults}              canResearch={state.run.status === 'completed' && state.canResearch}
-              onUseReport={leadId => { setMessage(`Consulta la ficha del contacto guardado ${leadId} y su investigación disponible. Resume las fuentes y recomendaciones si existen.`); requestAnimationFrame(() => document.getElementById('cowork-followup')?.focus()); }} />
-            <ResearchSources events={state.events} runId={state.run.id} canCreateDraft={state.run.status === 'completed' && state.canCreateDraft} onAccessDenied={clearPrivateResults} />
-            {showFiles && <FileUpload key={`files-${state.run.id}`} runId={state.run.id} onError={setError} onAccessDenied={clearPrivateResults} />}
-            {output?.document && <div className="flex items-center gap-3 rounded-xl border border-border p-4"><FileText className="h-5 w-5 shrink-0" /><div className="min-w-0 flex-1"><h3 className="break-words font-medium">{output.document.title}</h3><p className="text-xs text-muted-foreground">Documento · Solo tú</p></div><Button ref={documentButton} variant="secondary" onClick={() => setDocumentOpen(true)}>Abrir</Button></div>}
-            <details className="text-sm"><summary className="cursor-pointer text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring">Actividad del trabajo</summary><ol className="mt-3 space-y-2">{state.events.map(event => <li key={event.sequence}>{activityTitle(event)}</li>)}</ol></details>
-            <div className="mt-auto flex justify-end pt-6">{active ? <Button variant="outline" disabled={cancelling} onClick={() => void cancel()}><Square />{cancelling ? 'Cancelando…' : 'Detener trabajo'}</Button> : <Button variant="outline" onClick={() => choose(null)}>Nuevo trabajo</Button>}</div>
-            {state.run.status === 'completed' && <form onSubmit={event => { event.preventDefault(); void send(); }} className="rounded-2xl border border-border bg-muted/30 p-4">
-              <Label htmlFor="cowork-followup">Continúa este trabajo</Label>
-              {canAutonomous && <ExecutionMode id="cowork-followup-mode" value={mode} onChange={setMode} disabled={sending} />}
-              <Textarea id="cowork-followup" value={message} maxLength={20000} onChange={event => setMessage(event.target.value)} placeholder="Pide un ajuste o el siguiente paso…" disabled={sending || Boolean(userId && draftOwner !== userId)} className="mt-2 min-h-24" />
-              <div className="mt-3 flex items-center justify-between"><Button type="button" variant="ghost" size="icon" aria-label={showFiles ? 'Ocultar archivos' : 'Adjuntar archivos'} aria-expanded={showFiles} title="Adjuntar archivos" disabled={sending} onClick={() => setShowFiles(value => !value)}><Plus /></Button><Button type="submit" disabled={!ready || !message.trim() || sending}>{sending ? 'Guardando…' : 'Continuar'}<ArrowUp /></Button></div>
-            </form>}
-          </div>}
-        </div>
-        {documentOpen && output?.document ? <aside aria-label="Documento" className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-muted/20 lg:basis-1/2">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4"><h2 ref={documentHeading} tabIndex={-1} className="min-w-0 truncate font-medium focus-visible:outline-none">{output.document.title}</h2><div className="flex shrink-0 gap-1"><ExportMenu key={selected} runId={selected!} kind="document" onError={setError} onAccessDenied={clearPrivateResults} /><Button variant="ghost" size="icon" aria-label="Cerrar documento" onClick={() => { setDocumentOpen(false); requestAnimationFrame(() => documentButton.current?.focus()); }}><X /></Button></div></div>
-          <pre className="max-h-[65dvh] overflow-y-auto whitespace-pre-wrap break-words p-5 font-sans text-sm leading-7 md:p-8">{output.document.content}</pre>
-          <DocumentVersions runId={selected!} onSelect={choose} onAccessDenied={clearPrivateResults} />
-        </aside> : state && <aside aria-label="Resumen del trabajo" className="hidden w-64 shrink-0 self-start rounded-2xl border border-border bg-muted/25 p-5 xl:block"><h2 className="font-medium">Progreso</h2><p className="mt-2 text-sm text-muted-foreground">{labels[state.run.status]}</p><h2 className="mt-6 font-medium">Resultados</h2><p className="mt-2 text-sm text-muted-foreground">{output?.document ? output.document.title : 'Los documentos aparecerán aquí.'}</p><h2 className="mt-6 font-medium">Contexto</h2><p className="mt-2 text-sm text-muted-foreground">Tu mensaje</p></aside>}
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const previous = document.title;
+    document.title = inConversationTitle ? `${inConversationTitle} · Cowork` : 'Cowork · ANTON.IA';
+    return () => { document.title = previous; };
+  }, [inConversationTitle]);
+
+  useEffect(() => {
+    if (!openArtifact) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') closeArtifact(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [openArtifact, closeArtifact]);
+
+  const executing = Boolean(latest && latest.run.status === 'waiting_approval' && proposal && (proposal.state === 'approved' || proposal.state === 'running'));
+  const status = latest ? coworkStatusCopy(latest.run.status, { executing }) : null;
+  const inConversation = Boolean(selected || optimistic);
+  const artifactOpen = Boolean(openArtifact);
+  const railVisible = !railCollapsed && !artifactOpen;
+  const composerPlaceholder = !latest ? 'Escribe tu mensaje…'
+    : pendingDecision ? 'Pide un cambio o aprueba la propuesta'
+      : busy ? 'Escribe; lo envío al terminar este paso'
+        : latest.run.status === 'completed' ? 'Responde o pide el siguiente paso…' : 'Reformula o indica cómo seguir…';
+  const quotaNote = searchQuota ? `Búsquedas externas hoy: ${searchQuota.remaining} de ${searchQuota.limit}` : '';
+
+  const homeComposer = <CoworkComposer ref={composer} id="cowork-message" size="large" value={message} onChange={setMessage} onSubmit={() => void submit()}
+    placeholder="Describe lo que necesitas. Por ejemplo: «prioriza mis respuestas pendientes de hoy»"
+    ready={ready} sending={sending} submitLabel="Crear trabajo" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
+    footnote={quotaNote || undefined} />;
+
+  return <section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] md:h-[calc(100dvh-5.5rem)]">
+    <div className={cn('hidden w-[256px] shrink-0 border-r border-cw-border bg-cw-rail', railVisible && 'lg:block')}>
+      <CoworkThreadList threads={threads} loading={loading} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setRailCollapsed(true)} />
+    </div>
+    {drawerOpen && <div className="cw-fade absolute inset-0 z-40 flex">
+      <div className="w-[86%] max-w-[300px] border-r border-cw-border bg-cw-rail shadow-[var(--cw-shadow-lg)]">
+        <CoworkThreadList idPrefix="cowork-drawer" threads={threads} loading={loading} selectedThreadId={selectedRoot} onSelect={choose} onNew={() => choose(null)} onClose={() => setDrawerOpen(false)} />
       </div>
-    </section>
-  );
+      <button type="button" aria-label="Cerrar lista de trabajos" className="flex-1 bg-black/25" onClick={() => setDrawerOpen(false)} />
+    </div>}
+
+    <div className={cn('relative flex min-w-0 flex-1 flex-col', artifactOpen && 'hidden lg:flex', artifactOpen && maximized && 'lg:hidden')}>
+      <header className="flex h-12 shrink-0 items-center gap-1.5 border-b border-cw-border px-2.5 sm:px-3">
+        <CwButton variant="ghost" size="icon-sm" className={cn(railVisible && 'lg:hidden')} aria-label="Mostrar trabajos" title="Trabajos"
+          onClick={() => { if (isDesktop && !artifactOpen) setRailCollapsed(false); else setDrawerOpen(true); }}>
+          <PanelLeft aria-hidden="true" />
+        </CwButton>
+        <h1 className="min-w-0 flex-1 truncate px-1 text-[14px] font-medium text-cw-text">{inConversation ? title : 'Cowork'}</h1>
+        {inConversation && status && <CwStatusPill tone={status.tone} pulse={busy} className="hidden sm:inline-flex">{status.label}</CwStatusPill>}
+        {inConversation && !artifactOpen && !panelOpen && <CwButton variant="ghost" size="icon-sm" className="hidden xl:inline-flex" onClick={() => setPanelOpen(true)} aria-label="Mostrar resumen" title="Resumen"><PanelRight aria-hidden="true" /></CwButton>}
+        <CwButton variant="ghost" size="sm" onClick={() => choose(null)} className={cn(!inConversation && 'hidden')} title="Nuevo trabajo">
+          <SquarePen aria-hidden="true" /><span className="hidden sm:inline">Nuevo trabajo</span>
+        </CwButton>
+      </header>
+
+      <p className="sr-only" aria-live="polite">{inConversation && status ? status.label : ''}</p>
+      {error && <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-cw-border bg-cw-danger-soft px-4 py-2 text-[13px] text-cw-danger">
+        <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <p className="min-w-0 flex-1">{error}</p>
+        <CwButton size="xs" variant="secondary" onClick={() => { setError(''); setListVersion(value => value + 1); setThreadVersion(value => value + 1); }}><RotateCcw aria-hidden="true" />Reintentar</CwButton>
+      </div>}
+
+      {!inConversation
+        ? <CoworkHome composer={homeComposer} threads={threads} ready={ready} loading={loading} onSuggestion={applySuggestion} onOpenThread={choose} />
+        : <>
+          <div ref={scroller} onScroll={onScroll} className="cw-scroll min-h-0 flex-1 overflow-y-auto">
+            <div ref={conversation} className="mx-auto w-full max-w-[46rem] space-y-9 px-4 pb-8 pt-7 sm:px-6">
+              {state?.olderTurnsOmitted && <p className="text-center text-[12px] text-cw-faint">Se muestran los últimos ocho turnos anteriores.</p>}
+              {turns.map((turn, index) => <CoworkTurn key={turn.run.id} turn={turn} latest={index === turns.length - 1}
+                resolving={resolving} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
+                onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null}
+                budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)} />)}
+              {continuationMissing && latestIsCurrent && latest?.run.status === 'completed' && !optimistic && !queued && ready && <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-[38px]">
+                <CwButton size="sm" variant="secondary" disabled={sending}
+                  onClick={() => { setContinuationMissing(false); void post(CONTINUE_PROMPT, latest.run.id); }}>
+                  <CornerDownRight aria-hidden="true" />Seguir con el resultado
+                </CwButton>
+                <span className="text-[12.5px] text-cw-muted">o escribe qué quieres hacer ahora.</span>
+              </div>}
+              {optimistic && !turns.some(turn => turn.run.id === optimistic.runId) && <PendingTurn text={optimistic.text} />}
+              {selected && !state && !optimistic && <div role="status" className="flex items-center gap-3 py-6 text-[13.5px] text-cw-muted">
+                <CoworkMark working size={24} />Cargando conversación…
+              </div>}
+            </div>
+          </div>
+          {showJump && <button type="button" onClick={jumpToEnd} aria-label="Ir al final"
+            className="absolute bottom-[132px] left-1/2 z-10 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-cw-border bg-cw-elevated text-cw-muted shadow-[var(--cw-shadow)] hover:text-cw-text">
+            <ArrowDown className="h-4 w-4" aria-hidden="true" />
+          </button>}
+          <div className="shrink-0 px-3 pb-3 pt-1 sm:px-6 sm:pb-4">
+            <div className="mx-auto w-full max-w-[46rem]">
+              <CoworkComposer ref={composer} id="cowork-followup" value={message} onChange={setMessage} onSubmit={() => void submit()}
+                placeholder={composerPlaceholder} ready={ready} sending={sending} submitLabel="Enviar mensaje"
+                onStop={active && !pendingDecision && latestIsCurrent ? () => void cancel() : null} stopping={cancelling}
+                canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
+                onToggleFiles={latest && latest.run.status === 'completed' ? () => setShowFiles(value => !value) : null} filesOpen={showFiles}
+                attachments={showFiles && latest && latest.run.status === 'completed' ? <FileUpload key={`files-${latest.run.id}`} runId={latest.run.id} onError={setError} onAccessDenied={clearPrivateResults} /> : null}
+                queued={queued ? {
+                  text: queued,
+                  note: pendingDecision ? 'Se enviará cuando resuelvas la propuesta' : 'Se enviará cuando termine este paso',
+                  onCancel: () => { setMessage(queued); setQueued(null); requestAnimationFrame(() => composer.current?.focus()); },
+                  onSendNow: pendingDecision ? () => void sendQueuedNow() : null,
+                } : null}
+                footnote="ANTON.IA puede equivocarse. Revisa cada propuesta antes de aprobarla." />
+            </div>
+          </div>
+        </>}
+    </div>
+
+    {openArtifact
+      ? <div className={cn('flex min-w-0 flex-1 flex-col lg:max-w-[min(56rem,52%)] lg:border-l lg:border-cw-border', maximized && 'lg:max-w-none')}>
+        <CoworkArtifactPanel artifact={openArtifact} events={turns.find(turn => turn.run.id === openArtifact.runId)?.events || []}
+          canResearch={Boolean(state?.canResearch) && latest?.run.status === 'completed'} canCreateDraft={Boolean(state?.canCreateDraft) && latest?.run.status === 'completed'}
+          maximized={maximized} onToggleMaximize={() => setMaximized(value => !value)} onClose={closeArtifact} headingRef={artifactHeading}
+          onError={setError} onAccessDenied={clearPrivateResults} onUseReport={askAboutContact}
+          onSelectVersion={id => { if (turns.some(turn => turn.run.id === id)) { const doc = artifacts.find(item => item.runId === id && item.kind === 'document'); if (doc) setArtifactId(doc.id); } else choose(id, { pin: true }); }} />
+      </div>
+      : inConversation && latest && panelOpen && <div className="hidden w-[272px] shrink-0 border-l border-cw-border bg-cw-rail xl:block">
+        <CoworkSidePanel steps={coworkTurnProgress(latest.run, latest.events)} turnCount={turns.filter(turn => !turn.run.automatic).length}
+          artifacts={artifacts.slice().reverse()} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
+          sources={coworkConsultedSources(turns.flatMap(turn => turn.events))} mode={latest.run.mode}
+          budget={state?.budget || null} searchQuota={searchQuota} onClose={() => setPanelOpen(false)} />
+      </div>}
+  </section>;
 }

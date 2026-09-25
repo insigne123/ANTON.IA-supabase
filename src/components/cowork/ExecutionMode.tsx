@@ -1,20 +1,26 @@
-import { Label } from '@/components/ui/label';
+import { ChevronDown, ShieldCheck, Zap } from 'lucide-react';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 
+export const COWORK_MODE_HELP: Record<CoworkExecutionMode, string> = {
+  approval: 'Antes de consultar un proveedor o cambiar algo, revisarás la propuesta.',
+  autonomous: 'Aprueba por ti búsquedas y efectos exactos dentro de topes estrictos (máximo 3 pasos automáticos y 1 búsqueda externa por hilo). Notas, envíos y campañas siempre pasan por tu revisión.',
+};
+
+/** Compact mode picker for the composer. Native select keeps it accessible. */
 export function ExecutionMode({ id, value, onChange, disabled }: {
   id: string; value: CoworkExecutionMode; onChange: (value: CoworkExecutionMode) => void; disabled: boolean;
 }) {
-  return <div className="space-y-2">
-    <div className="flex flex-wrap items-center gap-3">
-      <Label htmlFor={id} className="text-sm">Modo de trabajo</Label>
-      <select id={id} value={value} disabled={disabled} onChange={event => onChange(event.target.value as CoworkExecutionMode)}
-        className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
-        <option value="approval">Con aprobaciones</option>
-        <option value="autonomous">Autónomo</option>
-      </select>
-    </div>
-    <p className="text-xs text-muted-foreground">{value === 'autonomous'
-      ? 'Delegación permanente (cuando esté habilitada): aprueba por ti búsquedas y efectos exactos dentro de topes estrictos —máximo 3 pasos automáticos y 1 búsqueda externa por hilo—. Las notas siempre se revisan antes de guardar y los envíos o campañas siempre requieren tu revisión.'
-      : 'Antes de consultar un proveedor o cambiar una nota, revisarás la propuesta.'}</p>
+  const Icon = value === 'autonomous' ? Zap : ShieldCheck;
+  return <div className="relative inline-flex items-center" title={COWORK_MODE_HELP[value]}>
+    <label htmlFor={id} className="sr-only">Modo de trabajo</label>
+    <Icon className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-cw-muted" aria-hidden="true" />
+    <select id={id} value={value} disabled={disabled} onChange={event => onChange(event.target.value as CoworkExecutionMode)}
+      aria-describedby={`${id}-help`}
+      className="h-8 cursor-pointer appearance-none rounded-lg border border-transparent bg-transparent pl-7 pr-7 text-[13px] font-medium text-cw-muted hover:bg-cw-hover hover:text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)] disabled:opacity-50">
+      <option value="approval">Con aprobaciones</option>
+      <option value="autonomous">Autónomo</option>
+    </select>
+    <ChevronDown className="pointer-events-none absolute right-2 h-3.5 w-3.5 text-cw-muted" aria-hidden="true" />
+    <span id={`${id}-help`} className="sr-only">{COWORK_MODE_HELP[value]}</span>
   </div>;
 }

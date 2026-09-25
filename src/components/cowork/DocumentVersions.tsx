@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
+import { History } from 'lucide-react';
 import { z } from 'zod';
+import { CwButton } from './ui';
 
 const versionsSchema = z.object({ currentRevision: z.number().int().positive().nullable(), versions: z.array(z.object({ revision: z.number().int().positive(), run_id: z.string().uuid(), title: z.string(), created_at: z.string() })).max(50) });
+
+/** Version picker for a document that was revised across turns. */
 export function DocumentVersions({ runId, onSelect, onAccessDenied }: {
   runId: string; onSelect: (runId: string) => void; onAccessDenied: () => void;
 }) {
@@ -25,12 +27,18 @@ export function DocumentVersions({ runId, onSelect, onAccessDenied }: {
     // Scope changes remount the document pane; callback identity does not reload data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, refresh]);
-  if (error) return <Button variant="ghost" size="sm" onClick={() => setRefresh(value => value + 1)}>Reintentar historial</Button>;
-  if (!state?.versions.length) return null;
-  return <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-    <Label htmlFor="cowork-document-revision" className="text-xs">Versión</Label>
-    <select id="cowork-document-revision" value={runId} onChange={event => onSelect(event.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      {state.versions.map(version => <option key={version.revision} value={version.run_id}>Versión {version.revision}</option>)}
+  if (error) return <CwButton variant="ghost" size="xs" onClick={() => setRefresh(value => value + 1)}>Reintentar historial</CwButton>;
+  if (!state || state.versions.length < 2) return null;
+  const current = state.versions.find(version => version.run_id === runId);
+  return <div className="flex items-center gap-1.5">
+    <History className="h-3.5 w-3.5 text-cw-muted" aria-hidden="true" />
+    <label htmlFor={`cowork-document-revision-${runId}`} className="sr-only">Versión</label>
+    <select id={`cowork-document-revision-${runId}`} value={runId} onChange={event => onSelect(event.target.value)}
+      className="h-7 rounded-md border border-cw-border bg-cw-elevated px-1.5 text-[12.5px] text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+      {!current && <option value={runId}>Esta versión</option>}
+      {state.versions.map(version => <option key={version.revision} value={version.run_id}>
+        Versión {version.revision}{version.revision === state.currentRevision ? ' (última)' : ''}
+      </option>)}
     </select>
   </div>;
 }

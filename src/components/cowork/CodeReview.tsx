@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { ReviewActions, ReviewChips, ReviewError, ReviewField, ReviewFields, ReviewLoading, ReviewNote, ReviewPaper } from './ReviewParts';
 
 type Preview = {
   language: string; code: string; inputFiles: string[]; matches: boolean; label: string;
@@ -26,20 +26,17 @@ export function CodeReview({ runId, onApprove, onReject, resolving }: {
       .catch(err => { if (!disposed) setError(err instanceof Error ? err.message : 'No se pudo cargar la vista previa.'); });
     return () => { disposed = true; };
   }, [runId]);
-  if (error) return <p role="alert" className="text-sm">{error}</p>;
-  if (!preview) return <p role="status" className="text-sm text-muted-foreground">Cargando código exacto a ejecutar…</p>;
-  return <div className="space-y-3">
-    <dl className="space-y-2 text-sm">
-      <div><dt className="font-medium">Lenguaje</dt><dd>{preview.language === 'python' ? 'Python' : 'Node.js'} · entorno aislado (2 GB, 1 vCPU, 120 s, sin red)</dd></div>
-      {preview.inputFiles.length > 0 && <div><dt className="font-medium">Archivos de entrada</dt><dd className="break-words">{preview.inputFiles.join(', ')}</dd></div>}
-    </dl>
-    <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 p-4 font-mono text-[13px] leading-6">{preview.code}</pre>
-    <p className="text-xs text-muted-foreground">{preview.matches
+  if (error) return <ReviewError message={error} />;
+  if (!preview) return <ReviewLoading label="Cargando código exacto a ejecutar…" />;
+  return <div className="space-y-4">
+    <ReviewFields>
+      <ReviewField label="Lenguaje">{preview.language === 'python' ? 'Python' : 'Node.js'} · entorno aislado (2 GB, 1 vCPU, 120 s, sin red)</ReviewField>
+      {preview.inputFiles.length > 0 && <ReviewField label="Archivos de entrada"><ReviewChips values={preview.inputFiles} /></ReviewField>}
+    </ReviewFields>
+    <ReviewPaper mono>{preview.code}</ReviewPaper>
+    <ReviewNote ok={preview.matches}>{preview.matches
       ? 'Coincide con la propuesta. Al aprobar se ejecutará exactamente este código.'
-      : 'El código cambió desde la propuesta. Descártala y pide una nueva revisión.'}</p>
-    <div className="flex flex-wrap justify-end gap-2">
-      <Button variant="ghost" disabled={resolving} onClick={onReject}>Descartar</Button>
-      <Button disabled={resolving || !preview.matches} onClick={onApprove}>{resolving ? 'Guardando aprobación…' : 'Aprobar y ejecutar'}</Button>
-    </div>
+      : 'El código cambió desde la propuesta. Descártala y pide una nueva revisión.'}</ReviewNote>
+    <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel="Aprobar y ejecutar" disabled={!preview.matches} resolving={resolving} />
   </div>;
 }

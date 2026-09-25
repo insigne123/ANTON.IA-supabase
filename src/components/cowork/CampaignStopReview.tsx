@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { ReviewActions, ReviewError, ReviewField, ReviewFields, ReviewLoading, ReviewNote } from './ReviewParts';
 
 type Preview = {
   matches: boolean; label: string; campaignName: string | null; campaignStatus: string | null;
@@ -26,20 +26,17 @@ export function CampaignStopReview({ runId, onApprove, onReject, resolving }: {
       .catch(err => { if (!disposed) setError(err instanceof Error ? err.message : 'No se pudo cargar la vista previa.'); });
     return () => { disposed = true; };
   }, [runId]);
-  if (error) return <p role="alert" className="text-sm">{error}</p>;
-  if (!preview) return <p role="status" className="text-sm text-muted-foreground">Cargando seguimiento exacto a detener…</p>;
-  return <div className="space-y-3">
-    <dl className="space-y-2 text-sm">
-      <div><dt className="font-medium">Campaña</dt><dd className="break-words">{preview.campaignName || '—'} <span className="text-muted-foreground">({preview.campaignStatus || '—'})</span></dd></div>
-      <div><dt className="font-medium">Destinatario</dt><dd className="break-words">{preview.recipientName ? `${preview.recipientName} · ` : ''}{preview.recipientEmail}</dd></div>
-      <div><dt className="font-medium">Estado actual</dt><dd>{preview.enrollmentStatus}</dd></div>
-    </dl>
-    <p className="text-xs text-muted-foreground">{preview.stoppable
+  if (error) return <ReviewError message={error} />;
+  if (!preview) return <ReviewLoading label="Cargando seguimiento exacto a detener…" />;
+  return <div className="space-y-4">
+    <ReviewFields>
+      <ReviewField label="Campaña">{preview.campaignName || '—'} <span className="text-cw-muted">({preview.campaignStatus || '—'})</span></ReviewField>
+      <ReviewField label="Destinatario">{preview.recipientName ? `${preview.recipientName} · ` : ''}{preview.recipientEmail}</ReviewField>
+      <ReviewField label="Estado actual">{preview.enrollmentStatus}</ReviewField>
+    </ReviewFields>
+    <ReviewNote ok={preview.stoppable}>{preview.stoppable
       ? 'Se omitirán los pasos pendientes. Lo ya enviado no se revierte.'
-      : 'El seguimiento ya cambió de estado; descarta la propuesta.'}</p>
-    <div className="flex flex-wrap justify-end gap-2">
-      <Button variant="ghost" disabled={resolving} onClick={onReject}>Descartar</Button>
-      <Button disabled={resolving || !preview.matches || !preview.stoppable} onClick={onApprove}>{resolving ? 'Guardando aprobación…' : 'Detener seguimiento'}</Button>
-    </div>
+      : 'El seguimiento ya cambió de estado; descarta la propuesta.'}</ReviewNote>
+    <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel="Detener seguimiento" disabled={!preview.matches || !preview.stoppable} resolving={resolving} />
   </div>;
 }

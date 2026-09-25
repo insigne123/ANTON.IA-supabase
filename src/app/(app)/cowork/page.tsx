@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { AuthError } from '@/lib/server/auth-utils';
 import { requireCoworkAccess } from '@/lib/server/cowork/access';
 import { CoworkWorkspace } from '@/components/cowork/CoworkWorkspace';
+import '@/styles/cowork.css';
 
 export const dynamic = 'force-dynamic';
 

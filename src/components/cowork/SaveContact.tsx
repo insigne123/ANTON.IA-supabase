@@ -1,6 +1,7 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
+import { Check, UserPlus } from 'lucide-react';
+import { CwButton } from './ui';
 
 export function SaveContact({ runId, providerId, onAccessDenied, onUseContact }: {
   runId: string; providerId: string; onAccessDenied: () => void; onUseContact: (id: string) => void;
@@ -23,9 +24,13 @@ export function SaveContact({ runId, providerId, onAccessDenied, onUseContact }:
     } catch (error) { if (!request.signal.aborted) setError(error instanceof Error ? error.message : 'No se pudo guardar.'); }
     finally { controller.current = null; if (!request.signal.aborted) setBusy(false); }
   }
-  return <div className="sm:col-span-2">
-    {savedId ? <Button variant="outline" size="sm" onClick={() => onUseContact(savedId)}>Consultar contacto guardado en el chat</Button>
-      : <Button variant="outline" size="sm" disabled={busy} onClick={() => void save()}>{busy ? 'Guardando…' : 'Guardar contacto'}</Button>}
-    {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}
+  return <div className="flex flex-wrap items-center gap-2">
+    {savedId
+      ? <>
+        <span className="inline-flex items-center gap-1 text-[12.5px] font-medium text-cw-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Guardado</span>
+        <CwButton size="xs" variant="ghost" onClick={() => onUseContact(savedId)}>Consultar contacto guardado en el chat</CwButton>
+      </>
+      : <CwButton size="xs" variant="secondary" disabled={busy} onClick={() => void save()}><UserPlus aria-hidden="true" />{busy ? 'Guardando…' : 'Guardar contacto'}</CwButton>}
+    {error && <p role="alert" className="w-full text-[12px] text-cw-danger">{error}</p>}
   </div>;
 }

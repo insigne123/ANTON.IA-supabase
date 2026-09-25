@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { ReviewActions, ReviewError, ReviewField, ReviewFields, ReviewLoading, ReviewNote, ReviewPaper } from './ReviewParts';
 
 type Preview = {
   action: 'resolved' | 'dismissed'; reason: string;
@@ -29,21 +29,21 @@ export function ExceptionReview({ runId, onApprove, onReject, resolving }: {
       .catch(err => { if (!disposed) setError(err instanceof Error ? err.message : 'No se pudo cargar la vista previa.'); });
     return () => { disposed = true; };
   }, [runId]);
-  if (error) return <p role="alert" className="text-sm">{error}</p>;
-  if (!preview) return <p role="status" className="text-sm text-muted-foreground">Cargando estado exacto de la incidencia…</p>;
+  if (error) return <ReviewError message={error} />;
+  if (!preview) return <ReviewLoading label="Cargando estado exacto de la incidencia…" />;
   const title = preview.action === 'resolved' ? 'Marcar resuelta' : 'Descartar incidencia';
-  return <div className="space-y-3">
-    <dl className="space-y-2 text-sm">
-      <div><dt className="font-medium">Incidencia</dt><dd className="break-words">{preview.current?.title || 'Sin título'}</dd></div>
-      <div><dt className="font-medium">Estado actual</dt><dd>{preview.current?.status || 'No disponible'}</dd></div>
-      <div><dt className="font-medium">Motivo aprobado</dt><dd className="whitespace-pre-wrap break-words text-muted-foreground">{preview.reason}</dd></div>
-    </dl>
-    <p className="text-xs text-muted-foreground">{!preview.matches
-      ? 'La incidencia cambió desde la revisión. Descártala y pide una nueva.'
-      : 'Solo se registrará este resultado con su motivo; no se afirma que la causa quedó reparada.'}</p>
-    <div className="flex flex-wrap justify-end gap-2">
-      <Button variant="ghost" disabled={resolving} onClick={onReject}>Descartar</Button>
-      <Button disabled={resolving || !preview.matches} onClick={onApprove}>{resolving ? 'Guardando aprobación…' : title}</Button>
+  return <div className="space-y-4">
+    <ReviewFields>
+      <ReviewField label="Incidencia"><span className="font-medium">{preview.current?.title || 'Sin título'}</span></ReviewField>
+      <ReviewField label="Estado actual">{preview.current?.status || 'No disponible'}</ReviewField>
+    </ReviewFields>
+    <div>
+      <p className="mb-1.5 text-[12.5px] font-medium text-cw-muted">Motivo que quedará registrado</p>
+      <ReviewPaper>{preview.reason}</ReviewPaper>
     </div>
+    <ReviewNote ok={preview.matches}>{!preview.matches
+      ? 'La incidencia cambió desde la revisión. Descártala y pide una nueva.'
+      : 'Solo se registrará este resultado con su motivo; no se afirma que la causa quedó reparada.'}</ReviewNote>
+    <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel={title} disabled={!preview.matches} resolving={resolving} />
   </div>;
 }

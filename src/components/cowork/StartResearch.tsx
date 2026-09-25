@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { BookOpen, LoaderCircle, RotateCcw } from 'lucide-react';
+import { CwButton } from './ui';
 
 export function StartResearch({ runId, leadId, onAccessDenied, onUseReport }: {
   runId: string; leadId: string; onAccessDenied: () => void; onUseReport: () => void;
@@ -36,13 +37,21 @@ export function StartResearch({ runId, leadId, onAccessDenied, onUseReport }: {
     } catch { setError('No se pudo confirmar la solicitud. Reintentar usa la misma investigación.'); }
     finally { setBusy(false); }
   }
-  return <div className="space-y-2 text-xs sm:col-span-2">
-    {['completed', 'partial', 'insufficient_data'].includes(status) ? <Button variant="outline" size="sm" onClick={onUseReport}>Consultar informe en el chat</Button>
-      : ['queued', 'running'].includes(status) ? <p role="status" className="text-muted-foreground">Investigación {status === 'queued' ? 'en cola' : 'en curso'}. Puedes volver después.</p>
-      : status === 'loading' ? <p className="text-muted-foreground">Consultando investigación…</p>
-      : status === 'not_started' ? <Button variant="ghost" size="sm" onClick={() => setConfirm(!confirm)}>Investigar contacto</Button>
-      : <Button variant="ghost" size="sm" onClick={() => setRefresh(value => value + 1)}>Actualizar estado de investigación</Button>}
-    {confirm && <div className="rounded-lg border border-border p-3"><p>Solicitar investigación estándar. El servicio aplicará tus cuotas y puede consultar proveedores externos. No enviará mensajes.</p><Button className="mt-2" size="sm" disabled={busy} onClick={() => void start()}>{busy ? 'Solicitando…' : 'Confirmar investigación'}</Button></div>}
-    {error && <p role="alert" className="text-destructive">{error}</p>}
+  return <div className="space-y-2 text-[12.5px]">
+    {['completed', 'partial', 'insufficient_data'].includes(status)
+      ? <CwButton size="xs" variant="secondary" onClick={onUseReport}><BookOpen aria-hidden="true" />Consultar informe en el chat</CwButton>
+      : ['queued', 'running'].includes(status)
+        ? <p role="status" className="inline-flex items-center gap-1.5 text-cw-muted"><LoaderCircle className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />Investigación {status === 'queued' ? 'en cola' : 'en curso'}. Puedes volver después.</p>
+        : status === 'loading' ? <p className="text-cw-muted">Consultando investigación…</p>
+          : status === 'not_started' ? <CwButton size="xs" variant="ghost" aria-expanded={confirm} onClick={() => setConfirm(!confirm)}><BookOpen aria-hidden="true" />Investigar contacto</CwButton>
+            : <CwButton size="xs" variant="ghost" onClick={() => setRefresh(value => value + 1)}><RotateCcw aria-hidden="true" />Actualizar estado de investigación</CwButton>}
+    {confirm && <div className="space-y-2 rounded-xl border border-cw-border bg-cw-panel p-3">
+      <p className="leading-5">Solicitar investigación estándar. El servicio aplicará tus cuotas y puede consultar proveedores externos. No enviará mensajes.</p>
+      <div className="flex gap-2">
+        <CwButton size="xs" variant="primary" disabled={busy} onClick={() => void start()}>{busy ? 'Solicitando…' : 'Confirmar investigación'}</CwButton>
+        <CwButton size="xs" variant="ghost" disabled={busy} onClick={() => setConfirm(false)}>Cancelar</CwButton>
+      </div>
+    </div>}
+    {error && <p role="alert" className="text-cw-danger">{error}</p>}
   </div>;
 }

@@ -96,6 +96,62 @@ html.dark {
   --sidebar-ring: var(--ring);
 }
 
+/* Cowork workspace: aliases of the app theme so Cowork keeps ANTON.IA's colors
+   (white/slate surfaces, primary blue, navy in dark mode). Tailwind exposes them as `cw-*`. */
+:root {
+  --cw-bg: hsl(var(--background));
+  --cw-rail: hsl(var(--sidebar-background));
+  --cw-panel: hsl(210 40% 98%);
+  --cw-elevated: hsl(var(--card));
+  --cw-user: hsl(var(--muted));
+  --cw-hover: hsl(210 40% 96.1% / 0.85);
+  --cw-active: hsl(var(--sidebar-accent));
+  --cw-border: hsl(var(--border));
+  --cw-border-strong: hsl(214 24% 83%);
+  --cw-text: hsl(var(--foreground));
+  --cw-muted: hsl(var(--muted-foreground));
+  --cw-faint: hsl(215 16% 60%);
+  --cw-accent: hsl(var(--primary));
+  --cw-accent-hover: hsl(217.2 91.2% 39%);
+  --cw-accent-soft: hsl(var(--primary) / 0.09);
+  --cw-accent-ring: hsl(var(--ring) / 0.45);
+  --cw-on-accent: hsl(var(--primary-foreground));
+  --cw-success: #047857;
+  --cw-success-soft: #ecfdf5;
+  --cw-warning: #b45309;
+  --cw-warning-soft: #fffbeb;
+  --cw-danger: hsl(var(--destructive));
+  --cw-danger-soft: #fef2f2;
+  --cw-code-bg: hsl(210 40% 97%);
+  --cw-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --cw-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 28px -16px rgba(15, 23, 42, 0.18);
+  --cw-shadow-lg: 0 28px 70px -36px rgba(15, 23, 42, 0.28);
+  --cw-sans: var(--font-body), 'PT Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --cw-heading: var(--font-body), 'PT Sans', ui-sans-serif, system-ui, sans-serif;
+  --cw-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+html.dark {
+  --cw-panel: hsl(222 47% 7%);
+  --cw-elevated: hsl(222 47% 9%);
+  --cw-user: hsl(var(--secondary));
+  --cw-hover: hsl(217.2 32.6% 17.5% / 0.6);
+  --cw-active: hsl(217 33% 20%);
+  --cw-border-strong: hsl(217 25% 27%);
+  --cw-faint: hsl(215 16% 50%);
+  --cw-accent-hover: hsl(217.2 91.2% 67%);
+  --cw-accent-soft: hsl(var(--primary) / 0.14);
+  --cw-success: #34d399;
+  --cw-success-soft: rgba(16, 185, 129, 0.12);
+  --cw-warning: #fbbf24;
+  --cw-warning-soft: rgba(245, 158, 11, 0.12);
+  --cw-danger-soft: rgba(239, 68, 68, 0.12);
+  --cw-code-bg: hsl(222 47% 7%);
+  --cw-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --cw-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px -16px rgba(0, 0, 0, 0.7);
+  --cw-shadow-lg: 0 30px 80px -30px rgba(0, 0, 0, 0.8);
+}
+
 /* Focus ring global (a11y) */
 :where(button, a, input, textarea, [role="button"], [tabindex]) {
   outline: none;

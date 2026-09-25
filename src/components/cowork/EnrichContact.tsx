@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Check, Sparkles } from 'lucide-react';
+import { CwButton } from './ui';
 
 type EnrichResult = { email: string | null; emailStatus: string | null; found: boolean; reused: boolean };
 
@@ -36,28 +37,28 @@ export function EnrichContact({ runId, leadId, displayName, company, onAccessDen
   }
 
   if (result) {
-    return <div className="space-y-1 text-xs sm:col-span-2" role="status">
+    return <div className="text-[12.5px]" role="status">
       {result.found && result.email
-        ? <p>Correo encontrado: <span className="font-medium">{result.email}</span>{result.emailStatus === 'verified' ? ' (verificado)' : ''}{result.reused ? ' (reutilizado)' : ''}. Ya puedes investigarlo.</p>
-        : <p>El proveedor no devolvió correo para este contacto. No se inventó ningún dato; puedes investigar con lo disponible.</p>}
+        ? <p className="flex items-start gap-1.5"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cw-success" aria-hidden="true" /><span>Correo encontrado: <span className="font-medium">{result.email}</span>{result.emailStatus === 'verified' ? ' (verificado)' : ''}{result.reused ? ' (reutilizado)' : ''}. Ya puedes investigarlo.</span></p>
+        : <p className="text-cw-muted">El proveedor no devolvió correo para este contacto. No se inventó ningún dato; puedes investigar con lo disponible.</p>}
     </div>;
   }
 
   if (!confirm) {
-    return <div className="space-y-1 text-xs sm:col-span-2">
-      <button type="button" className="font-medium text-primary underline underline-offset-4 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setConfirm(true)}>Enriquecer contacto primero</button>
-      <p className="text-muted-foreground">Sin correo, la investigación rinde menos: primero el dato, después el informe.</p>
+    return <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px]">
+      <CwButton size="xs" variant="secondary" onClick={() => setConfirm(true)}><Sparkles aria-hidden="true" />Enriquecer contacto primero</CwButton>
+      <span className="text-cw-muted">Sin correo, la investigación rinde menos.</span>
     </div>;
   }
 
-  return <div className="space-y-2 rounded-lg border border-border p-3 text-xs sm:col-span-2">
-    <p><span className="font-medium">{displayName}</span>{company ? ` · ${company}` : ''}</p>
-    <p className="text-muted-foreground">Busca el correo (solo email, 1 crédito de enriquecimiento). Sin teléfono en esta versión y sin datos inventados.</p>
+  return <div className="space-y-2 rounded-xl border border-cw-border bg-cw-panel p-3 text-[12.5px]">
+    <p><span className="font-medium">{displayName}</span>{company ? <span className="text-cw-muted"> · {company}</span> : ''}</p>
+    <p className="leading-5 text-cw-muted">Busca el correo (solo email, 1 crédito de enriquecimiento). Sin teléfono en esta versión y sin datos inventados.</p>
     <div className="flex flex-wrap gap-2">
-      <Button size="sm" disabled={running} onClick={() => void run()}>{running ? 'Enriqueciendo…' : 'Confirmar enriquecimiento'}</Button>
-      <Button size="sm" variant="ghost" disabled={running} onClick={() => setConfirm(false)}>Volver</Button>
+      <CwButton size="xs" variant="primary" disabled={running} onClick={() => void run()}>{running ? 'Enriqueciendo…' : 'Confirmar enriquecimiento'}</CwButton>
+      <CwButton size="xs" variant="ghost" disabled={running} onClick={() => setConfirm(false)}>Volver</CwButton>
     </div>
-    {running && <p role="status" className="text-muted-foreground">Consultando al proveedor; tarda unos segundos.</p>}
-    {error && <p role="alert" className="text-destructive">{error}</p>}
+    {running && <p role="status" className="text-cw-muted">Consultando al proveedor; tarda unos segundos.</p>}
+    {error && <p role="alert" className="text-cw-danger">{error}</p>}
   </div>;
 }

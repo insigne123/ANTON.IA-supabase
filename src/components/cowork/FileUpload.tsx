@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
+import { FileText, LoaderCircle, Upload } from 'lucide-react';
+import { coworkFileSize } from '@/lib/cowork/presentation';
+import { cn } from '@/lib/utils';
 
 /** Run-scoped file upload for code execution inputs. Lists what is already
  * uploaded; contents are never previewed or executed here. */
@@ -43,17 +44,22 @@ export function FileUpload({ runId, onError, onAccessDenied }: {
   }
   return <section aria-label="Archivos de entrada" onDragOver={event => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
     onDrop={event => { event.preventDefault(); setDragging(false); void upload(event.dataTransfer?.files || null); }}
-    className={`space-y-2 rounded-xl border p-5 ${dragging ? 'border-primary bg-primary/5' : 'border-border'}`}>
-    <h3 className="font-medium">Archivos de entrada</h3>
-    {files.length === 0
-      ? <p className="text-sm text-muted-foreground">Arrastra archivos aquí o elígelos abajo. Solo se usan si el trabajo ejecuta código (CSV, JSON, MD, TXT o XLSX, máx 20 MB cada uno).</p>
-      : <ul className="space-y-1 text-sm">{files.map(file => <li key={file.name} className="break-words">{file.name}<span className="text-muted-foreground"> · {(file.size / 1024).toFixed(1)} KB</span></li>)}</ul>}
-    <div>
-      <Label htmlFor={`cowork-files-${runId}`} className="sr-only">Subir archivos</Label>
-      <input id={`cowork-files-${runId}`} type="file" multiple accept=".csv,.json,.md,.txt,.xlsx" disabled={uploading}
-        onChange={event => { void upload(event.target.files); event.target.value = ''; }}
-        className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-lg file:border file:border-border file:bg-muted/50 file:px-3 file:py-1.5 file:text-sm file:text-foreground disabled:opacity-50" />
+    className={cn('space-y-2 rounded-xl border border-dashed px-3 py-2.5 transition-colors', dragging ? 'border-cw-accent bg-cw-accent-soft' : 'border-cw-border-strong bg-cw-panel')}>
+    {files.length > 0 && <ul className="flex flex-wrap gap-1.5">
+      {files.map(file => <li key={file.name} className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-cw-border bg-cw-elevated px-2 py-1 text-[12.5px]">
+        <FileText className="h-3.5 w-3.5 shrink-0 text-cw-muted" aria-hidden="true" />
+        <span className="truncate">{file.name}</span><span className="shrink-0 text-cw-muted">{coworkFileSize(file.size)}</span>
+      </li>)}
+    </ul>}
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <label htmlFor={`cowork-files-${runId}`} className={cn('inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] font-medium text-cw-text hover:bg-cw-hover focus-within:ring-2 focus-within:ring-[color:var(--cw-accent-ring)]', uploading && 'pointer-events-none opacity-50')}>
+        {uploading ? <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" /> : <Upload className="h-4 w-4" aria-hidden="true" />}
+        {uploading ? 'Subiendo…' : 'Elegir archivos'}
+        <input id={`cowork-files-${runId}`} type="file" multiple accept=".csv,.json,.md,.txt,.xlsx" disabled={uploading}
+          onChange={event => { void upload(event.target.files); event.target.value = ''; }} className="sr-only" />
+      </label>
+      <span className="text-[12px] text-cw-muted">o arrástralos aquí · CSV, JSON, MD, TXT o XLSX (máx. 20 MB). Se usan cuando el trabajo ejecuta código.</span>
     </div>
-    {uploading && <p role="status" className="text-sm text-muted-foreground">Subiendo…</p>}
+    {uploading && <p role="status" className="sr-only">Subiendo…</p>}
   </section>;
 }

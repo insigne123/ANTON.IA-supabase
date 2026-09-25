@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { FilePenLine, LoaderCircle, RotateCcw } from 'lucide-react';
+import { CwButton } from './ui';
 
 type DraftState =
   | { status: 'none' }
@@ -67,34 +68,33 @@ export function ResearchDraft({ runId, snapshotId, onAccessDenied }: {
   }
 
   if (state.status === 'completed' && state.draft) {
-    return <div className="mt-4 space-y-3 border-t border-border pt-4">
-      <section aria-label="Borrador guardado" className="space-y-3">
-        <h4 className="font-medium">{state.draft.subject || 'Borrador guardado'}</h4>
-        <p className="whitespace-pre-wrap break-words text-sm leading-6">{state.draft.text || 'El borrador está guardado en el editor de correos.'}</p>
-        <p className="text-xs text-muted-foreground">Versión actual del borrador. Crear este borrador no envía mensajes.</p>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline"><a href={`/contact/compose?draftId=${encodeURIComponent(state.draft.id)}`}>Abrir en el editor de correos</a></Button>
-          <Button variant="ghost" onClick={() => setRefresh(value => value + 1)}>Actualizar versión</Button>
-        </div>
-      </section>
-    </div>;
+    return <section aria-label="Borrador guardado" className="space-y-3 rounded-2xl border border-cw-border bg-cw-elevated p-4">
+      <p className="text-[11.5px] font-semibold uppercase tracking-[0.06em] text-cw-muted">Borrador guardado</p>
+      <h4 className="text-[15px] font-semibold tracking-tight">{state.draft.subject || 'Borrador guardado'}</h4>
+      <p className="whitespace-pre-wrap break-words text-[14px] leading-6">{state.draft.text || 'El borrador está guardado en el editor de correos.'}</p>
+      <p className="text-[12px] text-cw-muted">Versión actual del borrador. Crear este borrador no envía mensajes.</p>
+      <div className="flex flex-wrap gap-2">
+        <a href={`/contact/compose?draftId=${encodeURIComponent(state.draft.id)}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-cw-accent px-3 text-[13px] font-medium text-cw-on-accent hover:bg-cw-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">Abrir en el editor de correos</a>
+        <CwButton size="sm" variant="ghost" onClick={() => setRefresh(value => value + 1)}><RotateCcw aria-hidden="true" />Actualizar versión</CwButton>
+      </div>
+    </section>;
   }
 
-  return <div className="mt-4 space-y-3 border-t border-border pt-4">
+  return <div className="space-y-2 rounded-2xl border border-dashed border-cw-border-strong p-4">
     {state.status === 'none' && <>
-      <Button variant="outline" onClick={() => void request()} disabled={busy}>{busy ? 'Solicitando…' : 'Crear borrador con este informe'}</Button>
-      <p className="text-xs text-muted-foreground">Usa tu perfil y las comprobaciones del editor de correos. No envía mensajes.</p>
+      <CwButton variant="secondary" size="sm" onClick={() => void request()} disabled={busy}><FilePenLine aria-hidden="true" />{busy ? 'Solicitando…' : 'Crear borrador con este informe'}</CwButton>
+      <p className="text-[12px] text-cw-muted">Usa tu perfil y las comprobaciones del editor de correos. No envía mensajes.</p>
     </>}
-    {state.status === 'pending' && <p role="status" className="text-sm text-muted-foreground">Borrador en cola. Puedes cerrar esta pestaña y volver después.</p>}
-    {state.status === 'executing' && <p role="status" className="text-sm text-muted-foreground">Preparando borrador…</p>}
+    {state.status === 'pending' && <p role="status" className="flex items-center gap-1.5 text-[13px] text-cw-muted"><LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />Borrador en cola. Puedes cerrar esta pestaña y volver después.</p>}
+    {state.status === 'executing' && <p role="status" className="flex items-center gap-1.5 text-[13px] text-cw-muted"><LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />Preparando borrador…</p>}
     {state.status === 'failed' && <>
-      <p role="alert" className="text-sm text-destructive">{state.message || 'No se pudo preparar el borrador. Tu investigación sigue guardada.'}</p>
-      {!state.uncertain && <Button variant="outline" onClick={() => void request()} disabled={busy}>{busy ? 'Reintentando…' : 'Reintentar borrador'}</Button>}
+      <p role="alert" className="text-[13px] text-cw-danger">{state.message || 'No se pudo preparar el borrador. Tu investigación sigue guardada.'}</p>
+      {!state.uncertain && <CwButton variant="secondary" size="sm" onClick={() => void request()} disabled={busy}>{busy ? 'Reintentando…' : 'Reintentar borrador'}</CwButton>}
     </>}
     {state.status === 'completed' && !state.draft && <>
-      <p className="text-sm text-muted-foreground">El borrador está registrado. Actualiza para recuperar su contenido.</p>
-      <Button variant="outline" onClick={() => setRefresh(value => value + 1)} disabled={busy}>Actualizar borrador</Button>
+      <p className="text-[13px] text-cw-muted">El borrador está registrado. Actualiza para recuperar su contenido.</p>
+      <CwButton variant="secondary" size="sm" onClick={() => setRefresh(value => value + 1)} disabled={busy}>Actualizar borrador</CwButton>
     </>}
-    {error && <div><p role="alert" className="text-sm text-destructive">{error}</p><Button variant="ghost" onClick={() => setRefresh(value => value + 1)}>Actualizar estado</Button></div>}
+    {error && <div className="space-y-1"><p role="alert" className="text-[13px] text-cw-danger">{error}</p><CwButton variant="ghost" size="sm" onClick={() => setRefresh(value => value + 1)}>Actualizar estado</CwButton></div>}
   </div>;
 }

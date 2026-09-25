@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { ReviewActions, ReviewError, ReviewField, ReviewFields, ReviewLoading, ReviewNote } from './ReviewParts';
 
 type Preview = {
   op: 'assign' | 'claim' | 'release'; leadId: string;
@@ -32,24 +32,21 @@ export function CrmAssignReview({ runId, onApprove, onReject, resolving }: {
       .catch(err => { if (!disposed) setError(err instanceof Error ? err.message : 'No se pudo cargar la vista previa.'); });
     return () => { disposed = true; };
   }, [runId]);
-  if (error) return <p role="alert" className="text-sm">{error}</p>;
-  if (!preview) return <p role="status" className="text-sm text-muted-foreground">Cargando cambio exacto de colaboración…</p>;
+  if (error) return <ReviewError message={error} />;
+  if (!preview) return <ReviewLoading label="Cargando cambio exacto de colaboración…" />;
   const title = preview.op === 'assign' ? 'Asignar contacto' : preview.op === 'claim' ? 'Reservar contacto' : 'Liberar reserva';
-  const nameOf = (id: string | null) => (id ? preview.names[id] || id : 'Nadie');
-  return <div className="space-y-3">
-    <dl className="space-y-2 text-sm">
-      <div><dt className="font-medium">Acción</dt><dd>{title}</dd></div>
-      {preview.op === 'assign' && <div><dt className="font-medium">Asignar a</dt><dd>{preview.assignedToName || preview.assignedToUserId}</dd></div>}
-      {preview.op === 'claim' && <div><dt className="font-medium">Reserva</dt><dd>{preview.minutes} minutos</dd></div>}
-      <div><dt className="font-medium">Responsable actual</dt><dd>{nameOf(preview.current?.assigned_to_user_id || null)}</dd></div>
-      <div><dt className="font-medium">Reserva actual</dt><dd>{nameOf(preview.current?.claimed_by_user_id || null)}</dd></div>
-    </dl>
-    <p className="text-xs text-muted-foreground">{!preview.matches
+  const nameOf = (id: string | null) => (id ? preview.names[id] || 'Otro miembro del equipo' : 'Nadie');
+  return <div className="space-y-4">
+    <ReviewFields>
+      <ReviewField label="Acción">{title}</ReviewField>
+      {preview.op === 'assign' && <ReviewField label="Asignar a"><span className="font-medium">{preview.assignedToName || 'Miembro del equipo'}</span></ReviewField>}
+      {preview.op === 'claim' && <ReviewField label="Reserva">{preview.minutes} minutos</ReviewField>}
+      <ReviewField label="Responsable actual">{nameOf(preview.current?.assigned_to_user_id || null)}</ReviewField>
+      <ReviewField label="Reserva actual">{nameOf(preview.current?.claimed_by_user_id || null)}</ReviewField>
+    </ReviewFields>
+    <ReviewNote ok={preview.matches}>{!preview.matches
       ? 'La colaboración cambió desde la revisión. Descártala y pide una nueva.'
-      : 'Coincide con la propuesta. Se aplicará la misma regla que usa la pantalla de colaboración.'}</p>
-    <div className="flex flex-wrap justify-end gap-2">
-      <Button variant="ghost" disabled={resolving} onClick={onReject}>Descartar</Button>
-      <Button disabled={resolving || !preview.matches} onClick={onApprove}>{resolving ? 'Guardando aprobación…' : title}</Button>
-    </div>
+      : 'Coincide con la propuesta. Se aplicará la misma regla que usa la pantalla de colaboración.'}</ReviewNote>
+    <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel={title} disabled={!preview.matches} resolving={resolving} />
   </div>;
 }

@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { ReviewActions, ReviewError, ReviewField, ReviewFields, ReviewLoading, ReviewNote } from './ReviewParts';
 
 type Preview = {
   targetStatus: 'paused' | 'active';
   current: { title: string | null; status: string } | null;
   matches: boolean; fresh: boolean; label: string;
 };
+
+const STATUS: Record<string, string> = { active: 'Activa', paused: 'Pausada', completed: 'Terminada', draft: 'Borrador' };
 
 /** Mission control review card: confirms the state is unchanged before
  * approving pause or resume. Pausing omits pending tasks like manual pause. */
@@ -29,22 +31,18 @@ export function MissionReview({ runId, onApprove, onReject, resolving }: {
       .catch(err => { if (!disposed) setError(err instanceof Error ? err.message : 'No se pudo cargar la vista previa.'); });
     return () => { disposed = true; };
   }, [runId]);
-  if (error) return <p role="alert" className="text-sm">{error}</p>;
-  if (!preview) return <p role="status" className="text-sm text-muted-foreground">Cargando estado exacto de la misión…</p>;
+  if (error) return <ReviewError message={error} />;
+  if (!preview) return <ReviewLoading label="Cargando estado exacto de la misión…" />;
   const title = preview.targetStatus === 'paused' ? 'Pausar misión' : 'Reactivar misión';
-  return <div className="space-y-3">
-    <dl className="space-y-2 text-sm">
-      <div><dt className="font-medium">Misión</dt><dd className="break-words">{preview.current?.title || 'Sin título'}</dd></div>
-      <div><dt className="font-medium">Estado actual</dt><dd>{preview.current?.status || 'No disponible'}</dd></div>
-      {preview.targetStatus === 'paused' && <div><dt className="font-medium">Efecto</dt>
-        <dd className="text-muted-foreground">Las tareas pendientes de prospección y contacto quedarán omitidas.</dd></div>}
-    </dl>
-    <p className="text-xs text-muted-foreground">{!preview.matches
+  return <div className="space-y-4">
+    <ReviewFields>
+      <ReviewField label="Misión"><span className="font-medium">{preview.current?.title || 'Sin título'}</span></ReviewField>
+      <ReviewField label="Estado actual">{preview.current ? STATUS[preview.current.status] || preview.current.status : 'No disponible'}</ReviewField>
+      {preview.targetStatus === 'paused' && <ReviewField label="Efecto">Las tareas pendientes de prospección y contacto quedarán omitidas.</ReviewField>}
+    </ReviewFields>
+    <ReviewNote ok={preview.matches}>{!preview.matches
       ? 'La misión cambió desde la revisión. Descártala y pide una nueva.'
-      : `Coincide con la propuesta. Al aprobar, la misión quedará ${preview.targetStatus === 'paused' ? 'pausada' : 'activa'}.`}</p>
-    <div className="flex flex-wrap justify-end gap-2">
-      <Button variant="ghost" disabled={resolving} onClick={onReject}>Descartar</Button>
-      <Button disabled={resolving || !preview.matches} onClick={onApprove}>{resolving ? 'Guardando aprobación…' : title}</Button>
-    </div>
+      : `Coincide con la propuesta. Al aprobar, la misión quedará ${preview.targetStatus === 'paused' ? 'pausada' : 'activa'}.`}</ReviewNote>
+    <ReviewActions onReject={onReject} onApprove={onApprove} approveLabel={title} disabled={!preview.matches} resolving={resolving} />
   </div>;
 }
