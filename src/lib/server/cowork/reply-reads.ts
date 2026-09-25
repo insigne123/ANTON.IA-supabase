@@ -72,7 +72,7 @@ export async function readRepliesAttention(client: SupabaseClient, scope: Scope)
     automatic: ((automatic.data as unknown[]) || []).map((row) => shape(row as Record<string, unknown>, 'auto_reply_info')),
     truncated: ((failures.data as unknown[]) || []).length >= 20 || ((unclassified.data as unknown[]) || []).length >= 20,
     coverage,
-    limitation: 'Registros de la app con cobertura de buzón declarada aparte; un pendiente se confirma en el hilo, no en esta lista.',
+    limitation: 'Lo registrado en ANTON.IA; si el correo está sincronizado por completo se indica aparte. Un pendiente se confirma en la conversación, no en esta lista.',
   };
 }
 
@@ -114,7 +114,7 @@ export async function readContactedAccount(client: SupabaseClient, scope: Scope,
     scope: 'organization_account', anchor: { contactedId: anchor.id, leadId: anchor.lead_id, company: anchor.company },
     members: members.slice(0, 50), returned: Math.min(members.length, 50), total: members.length,
     truncated: members.length > 50, conflicts: accountConflicts(members), coverage,
-    limitation: 'Coincidencia exacta de empresa normalizada; la cobertura de buzón se declara aparte.',
+    limitation: 'Coincidencia exacta de empresa normalizada; si el correo está sincronizado por completo se indica aparte.',
   };
 }
 

@@ -27,5 +27,5 @@ test('audience scan scopes every page, caps work and reports incomplete populati
 test('audience query failure is not converted into zero activity', async () => {
   const chain = { select() { return chain; }, eq() { return chain; }, order() { return chain; },
     async range() { return { error: { message: 'private' }, data: null }; } };
-  await assert.rejects(readCoworkAudience({ from: () => chain } as never, 'org'), /cobertura/);
+  await assert.rejects(readCoworkAudience({ from: () => chain } as never, 'org'), /audiencia completa/);
 });

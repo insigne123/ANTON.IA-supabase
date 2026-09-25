@@ -13,15 +13,17 @@ export const coworkReadTaskSchema = z.object({
     'campaigns.batch_report', 'campaigns.next_touch', 'campaigns.retry_review', 'campaigns.company_plan',
     'linkedin.network', 'linkedin.inbox', 'linkedin.quota', 'linkedin.followups', 'linkedin.jobs', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
   input: z.string().max(120),
-}).strict().superRefine((task, context) => {
-  if (TEXT_ACTIONS.includes(task.action)) return;
-  if (FIXED_ACTIONS.includes(task.action)) {
-    if (task.input !== '') context.addIssue({ code: 'custom', path: ['input'], message: 'This read takes no input' });
-    return;
-  }
+}).strict().transform((task, context) => {
+  if (TEXT_ACTIONS.includes(task.action)) return task;
+  // Fixed reads take no input. A stray period («last_30_days», «este mes») is
+  // dropped instead of rejecting the decision: the model kept resending it
+  // until the run failed, and metrics.rates already returns 7 and 30 days.
+  if (FIXED_ACTIONS.includes(task.action)) return task.input === '' ? task : { ...task, input: '' };
   if (UUID_ACTIONS.includes(task.action) && !z.string().uuid().safeParse(task.input).success) {
     context.addIssue({ code: 'custom', path: ['input'], message: 'A saved contact UUID is required' });
+    return z.NEVER;
   }
+  return task;
 });
 export type CoworkReadTask = z.infer<typeof coworkReadTaskSchema>;
 

@@ -55,7 +55,7 @@ export async function readCoworkMessageContext(client: ReturnType<typeof getSupa
       defaultStyleProfileId: data.default_style_profile_id, roleCta: data.role_cta,
       verticalNotes: data.vertical_notes, updatedAt: data.updated_at,
     },
-    notice: 'Ejemplos y afirmaciones aprobadas por un humano; no verifican cobertura ni vigencia por sí solos.' };
+    notice: 'Ejemplos y afirmaciones aprobadas por un humano; no verifican alcance ni vigencia por sí solos.' };
 }
 
 export function parseCoworkMessageContextTarget(targetId: string) {

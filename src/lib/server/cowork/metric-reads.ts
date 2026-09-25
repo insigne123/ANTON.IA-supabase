@@ -49,7 +49,7 @@ export async function readMetricsRates(client: SupabaseClient, scope: Scope) {
   ]);
   const rates = assembleRates({ contacts: contacts as never, unsubscribedAt, meetingsAt });
   return { scope: 'organization_metrics', ...rates, coverage: await readMailboxCoverage(client, scope),
-    limitation: 'Tasas por contacto con denominador explícito; null significa sin envíos, no cero.' };
+    limitation: 'Tasas por contacto con la cantidad de envíos sobre la que se calculan; null significa sin envíos, no cero.' };
 }
 
 /** 7.2 Hypothesis tests against data; untestable stays untestable. */

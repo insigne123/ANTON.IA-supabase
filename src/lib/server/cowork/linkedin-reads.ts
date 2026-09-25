@@ -12,7 +12,7 @@ async function sweepState(client: SupabaseClient, scope: Scope, kind: 'network' 
   const { data, error } = await client.from('cowork_linkedin_sweep_state')
     .select('last_completed_at,cursor,has_more,observed_count,updated_at')
     .eq('organization_id', scope.organizationId).eq('user_id', scope.userId).eq('kind', kind).maybeSingle();
-  if (error) throw new Error('No se pudo leer el estado del barrido.');
+  if (error) throw new Error('No se pudo leer el estado de la sincronización de LinkedIn.');
   return (data as { last_completed_at: string | null; cursor: string | null; has_more: boolean;
     observed_count: number; updated_at: string } | null)
     || { last_completed_at: null, cursor: null, has_more: false, observed_count: 0, updated_at: new Date().toISOString() };
@@ -33,7 +33,7 @@ export async function readCoworkLinkedinNetwork(client: SupabaseClient, scope: S
     peers: rows, returned: rows.length, truncated: rows.length >= 50,
     coverage: { lastCompletedAt: sweep.last_completed_at, hasMore: sweep.has_more,
       observedCount: sweep.observed_count, complete: sweep.last_completed_at !== null && !sweep.has_more },
-    limitation: 'Solo conexiones reportadas por tu extensión. Sin barrido completo no se afirma quién es nuevo.',
+    limitation: 'Solo conexiones reportadas por tu extensión. Si falta sincronizar LinkedIn por completo, no se afirma quién es nuevo.',
   };
 }
 
@@ -59,8 +59,8 @@ export async function readCoworkLinkedinInbox(client: SupabaseClient, scope: Sco
     sweepComplete: complete,
     pendingCounts: complete ? { replyNeeded: rows.filter(row => row.reply_needed && !row.resolved_at).length } : null,
     coverage: { lastCompletedAt: sweep.last_completed_at, hasMore: sweep.has_more, observedCount: sweep.observed_count },
-    limitation: complete ? 'Barrido completo: los pendientes son los hilos observados.'
-      : 'Barrido incompleto o ausente: hay páginas sin revisar; no se afirma quién está pendiente.',
+    limitation: complete ? 'LinkedIn sincronizado por completo: los pendientes son las conversaciones observadas.'
+      : 'Falta sincronizar LinkedIn con la extensión («Sincronizar historial de LinkedIn»): hay conversaciones sin revisar; no se afirma quién está pendiente.',
   };
 }
 

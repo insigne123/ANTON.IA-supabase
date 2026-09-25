@@ -7,7 +7,7 @@ export async function readCoworkAudience(client: SupabaseClient, organizationId:
     for (let page = 0; page < 10; page++) {
       const { data, error } = await client.from(table).select(columns).eq('organization_id', organizationId)
         .order('id', { ascending: true }).range(page * 500, page * 500 + 499);
-      if (error) throw new Error('No se pudo comprobar la cobertura de audiencia.');
+      if (error) throw new Error('No se pudo comprobar la audiencia completa.');
       rows.push(...(data || []));
       if ((data || []).length < 500) return { rows, complete: true };
     }

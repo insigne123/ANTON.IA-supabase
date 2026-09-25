@@ -264,7 +264,7 @@ export function detectIncidents(input: {
       check: 'sweep_errors', severity: 'medium',
       found: input.sweepErrors.length, total: input.sweepErrors.length,
       items: input.sweepErrors,
-      action: 'Revisar la conexión del buzón; el barrido reanuda solo.',
+      action: 'Revisar la conexión del buzón; la sincronización se reanuda sola.',
     },
     {
       check: 'sync_error_states', severity: 'info',

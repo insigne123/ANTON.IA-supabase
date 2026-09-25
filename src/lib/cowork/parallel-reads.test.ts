@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { executeCoworkParallelReads } from './parallel-reads';
+import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
 
 const tasks = ['uno','dos','tres'].map(input => ({ action: 'leads.search' as const, input }));
 test('fan-out is bounded, records real results and preserves input order', async () => {
@@ -28,4 +28,9 @@ test('parallel pool rejects duplicates and unknown capabilities', async () => {
   const deps = { signal: new AbortController().signal, authorize: async () => {}, execute: async () => null, record: async () => {} };
   await assert.rejects(executeCoworkParallelReads([tasks[0], tasks[0]], deps), /Duplicate/);
   await assert.rejects(executeCoworkParallelReads([{ action: 'email.send' as never, input: 'x' }], deps));
+});
+test('fixed reads drop a stray input while entity reads still require a UUID', () => {
+  assert.deepEqual(coworkReadTaskSchema.parse({ action: 'metrics.rates', input: 'last_30_days' }), { action: 'metrics.rates', input: '' });
+  assert.deepEqual(coworkReadTaskSchema.parse({ action: 'leads.search', input: 'Adecco' }), { action: 'leads.search', input: 'Adecco' });
+  assert.equal(coworkReadTaskSchema.safeParse({ action: 'leads.get', input: 'Carlos' }).success, false);
 });
