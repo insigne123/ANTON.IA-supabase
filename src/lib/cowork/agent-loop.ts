@@ -333,8 +333,6 @@ function proposalRejection(error: unknown, signal: AbortSignal): unknown {
   return new CoworkDecisionRejected(error.message, `La propuesta no se pudo preparar: ${reason}`, true);
 }
 
-export type CoworkHistoryTurn = { runId: string; observations: unknown[]; actions?: Array<{ kind?: unknown; label?: unknown }> };
-
 /** Bounded read-only loop. Tool outputs are observations, never instructions. */
 export async function runCoworkReadLoop(input: {
   message: string;

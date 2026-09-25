@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runCoworkReadLoop } from './agent-loop';
+import { runCoworkReadLoop, type CoworkHistoryTurn } from './agent-loop';
 
 const answer = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Un contacto encontrado.', document: null } };
 const search = { action: 'leads.search' as const, query: 'Logística', leadId: null, answer: null };
@@ -35,7 +35,7 @@ test('repeated enrichment is refused with feedback until the model corrects it',
   const result = await runCoworkReadLoop({
     message: 'Continúa', signal: new AbortController().signal, authorize: async () => {},
     history: [{ runId: 'previous', observations: [{ action: 'leads.search', result: { scope: 'own_saved_contacts', items: [{ id: leadId, name: 'Ana' }] } }],
-      actions: [{ kind: 'enrich_contact', label: 'Enriquecer contacto Ana' }] }],
+      actions: [{ kind: 'enrich_contact', label: 'Enriquecer contacto Ana' }] } as CoworkHistoryTurn],
     execute: async () => { throw new Error('Unexpected read'); }, record: async () => {},
     proposeEffect: async () => { proposals++; },
     decide: async (_observations, _mustAnswer, rejected) => {
