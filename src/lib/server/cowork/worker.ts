@@ -142,7 +142,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         await authorize();
         return enqueueCoworkSpecialists(client, run.id, run.lease_token, tasks, observations);
       } : undefined,
-      decide: async (observations, mustAnswer) => {
+      decide: async (observations, mustAnswer, rejectedDecisions) => {
         const reservationId = await reserveCoworkModelCall(client, run.id, run.lease_token, 'coordinator');
         const turn = await generateStructuredWithTelemetry({
           schema: coworkDecisionSchema,
@@ -152,7 +152,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
               : ' Solo analizan datos observados; no asignes read porque las herramientas están deshabilitadas.')
             : 'specialists.review está deshabilitado.'}`,
           prompt: JSON.stringify(coworkDecisionContext(instructions, {
-            history, request: run.message, observations, mustAnswer, executionPolicy,
+            history, request: run.message, observations, mustAnswer, executionPolicy, rejectedDecisions,
           })),
           openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
           provider: 'openai',

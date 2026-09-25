@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { coworkDocumentSchema } from './contracts';
+import { COWORK_NOTE_ACTION, coworkDocumentSchema } from './contracts';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema } from './code-proposal';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
@@ -75,7 +75,7 @@ export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draf
   | 'crm.update_record' | 'campaign.prepare_draft_v2'
   | 'crm.assign_lead' | 'exception.resolve' | 'mission.control' | 'message_context.update' | 'lead.enrich_batch'
   | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message';
-export type CoworkObservation = { action: CoworkReadAction | 'specialists.review'; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
+export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
 type Decision = z.infer<typeof coworkDecisionSchema>;
 
 export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; label: string; originRunId: string;
@@ -272,7 +272,26 @@ function effectLabel(action: CoworkEffectAction, targetId: string, targetName?: 
 }
 
 /** Run a previous completed (or the current paused) work whose events hold observations. */
-export type CoworkHistoryTurn = { runId: string; observations: unknown[] };
+/** A proposal cannot carry a document. Ask for correction before staging it. */
+const DOCUMENT_WITH_PROPOSAL = 'Entregaste un documento junto con una propuesta y el documento se perdería. Si el usuario pidió un documento, entrégalo con answer (reply y document) y ofrece la acción como pregunta al final; si no, propón la acción con document null.';
+
+export type CoworkRejection = { action: string; reason: string };
+
+export class CoworkDecisionRejected extends Error {
+  constructor(message: string, readonly feedback: string) {
+    super(message);
+    this.name = 'CoworkDecisionRejected';
+  }
+}
+
+/** The same email lookup already ran in this thread (history.actions): it would
+ * spend another credit for the same provider answer. */
+function repeatedEnrichment(label: string, history: CoworkHistoryTurn[]) {
+  return history.some(turn => ((turn as { actions?: Array<{ kind?: unknown; label?: unknown }> }).actions || [])
+    .some(action => action.kind === 'enrich_contact' && action.label === label));
+}
+
+export type CoworkHistoryTurn = { runId: string; observations: unknown[]; actions?: Array<{ kind?: unknown; label?: unknown }> };
 
 /** Bounded read-only loop. Tool outputs are observations, never instructions. */
 export async function runCoworkReadLoop(input: {
@@ -282,7 +301,7 @@ export async function runCoworkReadLoop(input: {
   resumedObservations?: CoworkObservation[];
   signal: AbortSignal;
   authorize: () => Promise<void>;
-  decide: (observations: CoworkObservation[], mustAnswer: boolean) => Promise<Decision>;
+  decide: (observations: CoworkObservation[], mustAnswer: boolean, rejections?: CoworkRejection[]) => Promise<Decision>;
   execute: (action: CoworkReadAction, value: string) => Promise<unknown>;
   record: (observation: CoworkObservation) => Promise<void>;
   review?: (tasks: SpecialistTask[], observations: CoworkObservation[]) => Promise<unknown>;
@@ -302,11 +321,28 @@ export async function runCoworkReadLoop(input: {
   }
   let readsUsed = 0;
   let reviewed = false;
+  const rejections: CoworkRejection[] = [];
+  const explain = async (decision: Decision) => {
+    const reply = decision.answer?.reply.trim();
+    if (!reply) return null;
+    await input.authorize();
+    input.signal.throwIfAborted();
+    await input.record({ action: COWORK_NOTE_ACTION, input: '', result: { reply } });
+    return reply;
+  };
   for (let turn = 0; turn < 4; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
-    const decision = coworkDecisionSchema.parse(await input.decide(observations, turn === 3 || readsUsed >= 3));
+    const raw = await input.decide(observations, turn === 3 || readsUsed >= 3, rejections.slice());
+    const parsed = coworkDecisionSchema.safeParse(raw);
+    if (!parsed.success) {
+      if (turn === 3 || input.signal.aborted) throw parsed.error;
+      rejections.push({ action: 'decision', reason: `Corrige el formato de la decisión: ${parsed.error.issues.slice(0, 4).map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`.slice(0, 600) });
+      continue;
+    }
+    const decision = parsed.data;
     input.signal.throwIfAborted();
+    try {
     if (decision.action === 'answer') {
       if (!decision.answer) throw new Error('Missing final answer');
       return decision.answer;
@@ -326,10 +362,12 @@ export async function runCoworkReadLoop(input: {
     }
     if (decision.action === 'prospecting.propose_search') {
       if (!input.proposeSearch || !decision.searchCriteria) throw new Error('Invalid external search proposal');
+      if (decision.answer?.document) throw new CoworkDecisionRejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
+      const note = await explain(decision);
       await input.authorize(); input.signal.throwIfAborted();
       await input.proposeSearch(coworkSearchCriteriaSchema.parse(decision.searchCriteria));
-      return { reply: decision.searchCriteria.target === 'companies'
-        ? 'Revisa los criterios antes de buscar empresas.' : 'Revisa los criterios antes de buscar nuevos contactos.', document: null };
+      return { reply: note || (decision.searchCriteria.target === 'companies'
+        ? 'Revisa los criterios antes de buscar empresas.' : 'Revisa los criterios antes de buscar nuevos contactos.'), document: null };
     }
     if (decision.action === 'crm.propose_note') {
       if (!input.proposeNote || !decision.leadId || !decision.note) throw new Error('Invalid note proposal');
@@ -338,10 +376,12 @@ export async function runCoworkReadLoop(input: {
         return Array.isArray(result?.items) && result.items.some(item => item.id === decision.leadId);
       });
       if (!observed) throw new Error('Note target must be observed first');
+      if (decision.answer?.document) throw new CoworkDecisionRejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
+      const explanation = await explain(decision);
       await input.authorize();
       input.signal.throwIfAborted();
       await input.proposeNote(decision.leadId, decision.note);
-      return { reply: 'Revisa el cambio de nota antes de guardarlo.', document: null };
+      return { reply: explanation || 'Revisa el cambio de nota antes de guardarlo.', document: null };
     }
     if (decision.action === 'leads.save_contact' || decision.action === 'research.start' || decision.action === 'draft.request' || decision.action === 'lead.enrich' || decision.action === 'email.send' || decision.action === 'campaign.create' || decision.action === 'campaign.activate' || decision.action === 'campaign.pause' || decision.action === 'code.execute'
       || decision.action === 'profile.update' || decision.action === 'saved_search.create' || decision.action === 'saved_search.update' || decision.action === 'saved_search.delete' || decision.action === 'campaign.stop_v2'
@@ -437,10 +477,17 @@ export async function runCoworkReadLoop(input: {
         ? codeOriginRunId(code?.inputFiles || [], observations, input.history || [], input.runId || '')
         : effectTargetRun(decision.action, targetId, observations, input.history || [], input.runId || '');
       if (!originRunId) throw new Error('Effect target must be observed first');
+      if (decision.answer?.document) throw new CoworkDecisionRejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
       await input.authorize();
       input.signal.throwIfAborted();
       const targetName = describeLeadTarget(decision.action, targetId, observations, input.history || []);
-      await input.proposeEffect({ kind, targetId, label: effectLabel(decision.action, targetId, targetName), originRunId,
+      const label = effectLabel(decision.action, targetId, targetName);
+      if (kind === 'enrich_contact' && repeatedEnrichment(label, input.history || [])) {
+        throw new CoworkDecisionRejected('Repeated enrichment', 'Ya se buscó el correo de este contacto en este hilo. No repitas el gasto: continúa con lo solicitado usando los resultados existentes o explica la alternativa.');
+      }
+      const explanation = await explain(decision);
+      await input.authorize(); input.signal.throwIfAborted();
+      await input.proposeEffect({ kind, targetId, label, originRunId,
         ...(campaign === undefined ? {} : { campaign }), ...(code === undefined ? {} : { code }),
         ...(profile === undefined ? {} : { profile }), ...(savedSearch === undefined ? {} : { savedSearch }),
         ...(campaignId === undefined ? {} : { campaignId }), ...(enrollmentId === undefined ? {} : { enrollmentId }),
@@ -452,7 +499,7 @@ export async function runCoworkReadLoop(input: {
         ...(enrichBatch === undefined ? {} : { enrichBatch }),
         ...(scheduleBatch === undefined ? {} : { scheduleBatch }),
         ...(linkedinJob === undefined ? {} : { linkedinJob }) });
-      return { reply: 'Revisa la propuesta antes de ejecutar el cambio.', document: null };
+      return { reply: explanation || 'Revisa la propuesta antes de ejecutar el cambio.', document: null };
     }
     if (turn === 3) throw new Error('Cowork tool budget exhausted');
     if (decision.action === 'reads.plan') {
@@ -470,14 +517,17 @@ export async function runCoworkReadLoop(input: {
       continue;
     }
     if (decision.action === 'reads.parallel') {
-      if (!decision.reads || readsUsed + decision.reads.length > 3) throw new Error('Cowork tool budget exhausted');
-      readsUsed += decision.reads.length;
-      const results = await executeCoworkParallelReads(decision.reads, {
+      // A fixed read asked twice (for example, with two periods) is one read.
+      const reads = decision.reads?.filter((task, index, all) =>
+        all.findIndex(other => other.action === task.action && other.input === task.input) === index);
+      if (!reads || readsUsed + reads.length > 3) throw new Error('Cowork tool budget exhausted');
+      readsUsed += reads.length;
+      const results = await executeCoworkParallelReads(reads, {
         signal: input.signal, authorize: input.authorize,
         execute: task => input.execute(task.action, task.input),
         record: (task, result) => input.record({ action: task.action, input: task.input, result }),
       });
-      observations.push(...decision.reads.map((task, index) => ({ ...task, result: results[index] })));
+      observations.push(...reads.map((task, index) => ({ ...task, result: results[index] })));
       continue;
     }
     if (decision.action === 'privacy.contactability_batch' || decision.action === 'lists.review_batch') {
@@ -524,6 +574,12 @@ export async function runCoworkReadLoop(input: {
     await input.authorize();
     await input.record(observation);
     observations.push(observation);
+    } catch (error) {
+      // Only loop validation is correctable. Authorization, provider, storage,
+      // cancellation and partially staged proposal failures must propagate.
+      if (!(error instanceof CoworkDecisionRejected) || turn === 3 || input.signal.aborted) throw error;
+      rejections.push({ action: decision.action, reason: error.feedback });
+    }
   }
   throw new Error('Cowork did not produce a final answer');
 }

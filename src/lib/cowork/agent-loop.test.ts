@@ -5,6 +5,69 @@ import { runCoworkReadLoop } from './agent-loop';
 const answer = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Un contacto encontrado.', document: null } };
 const search = { action: 'leads.search' as const, query: 'Logística', leadId: null, answer: null };
 
+test('a document attached to a proposal is corrected internally before any effect', async () => {
+  const document = { title: 'Resumen', content: 'Contenido solicitado' };
+  let decisions = 0;
+  let proposals = 0;
+  const result = await runCoworkReadLoop({
+    message: 'Prepara el resumen', runId: '00000000-0000-4000-8000-000000000010',
+    signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ configured: true }), record: async () => {},
+    proposeEffect: async () => { proposals++; },
+    decide: async (_observations, _mustAnswer, rejected) => {
+      decisions++;
+      if (decisions === 1) return { action: 'message.context', query: null, leadId: null, answer: null };
+      if (decisions === 2) return { action: 'message_context.update', query: null, leadId: null,
+        messageContext: { prohibitedTerms: ['ejemplo'] }, answer: { reply: 'Resumen', document } };
+      assert.equal(rejected?.length, 1);
+      assert.equal(rejected[0].action, 'message_context.update');
+      return { ...answer, answer: { reply: 'Aquí tienes el resumen.', document } };
+    },
+  });
+  assert.deepEqual(result.document, document);
+  assert.equal(proposals, 0);
+});
+
+test('repeated enrichment cannot bypass rejection on the last decision', async () => {
+  const leadId = '00000000-0000-4000-8000-000000000021';
+  let decisions = 0;
+  let proposals = 0;
+  await assert.rejects(runCoworkReadLoop({
+    message: 'Continúa', signal: new AbortController().signal, authorize: async () => {},
+    history: [{ runId: 'previous', observations: [{ action: 'leads.search', result: { scope: 'own_saved_contacts', items: [{ id: leadId, name: 'Ana' }] } }],
+      actions: [{ kind: 'enrich_contact', label: 'Enriquecer contacto Ana' }] }],
+    execute: async () => { throw new Error('Unexpected read'); }, record: async () => {},
+    proposeEffect: async () => { proposals++; },
+    decide: async (_observations, _mustAnswer, rejected) => {
+      assert.equal(rejected?.length, decisions++);
+      return { action: 'lead.enrich', query: null, leadId, answer: null };
+    },
+  }), /Repeated enrichment/);
+  assert.equal(decisions, 4);
+  assert.equal(proposals, 0);
+});
+
+test('proposal explanation is persisted as a note before staging, not as a read', async () => {
+  const recorded: Array<{ action: string; result: unknown }> = [];
+  let decisions = 0;
+  const result = await runCoworkReadLoop({
+    message: 'Actualiza el contexto', runId: '00000000-0000-4000-8000-000000000010',
+    signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ configured: true }), record: async value => { recorded.push(value); },
+    proposeEffect: async () => {
+      assert.equal(recorded.at(-1)?.action, 'assistant.note');
+      assert.deepEqual(recorded.at(-1)?.result, { reply: 'Propongo excluir este término. Revisa el cambio.' });
+    },
+    decide: async () => decisions++ === 0
+      ? { action: 'message.context', query: null, leadId: null, answer: null }
+      : { action: 'message_context.update', query: null, leadId: null,
+        messageContext: { prohibitedTerms: ['ejemplo'] },
+        answer: { reply: 'Propongo excluir este término. Revisa el cambio.', document: null } },
+  });
+  assert.equal(result.reply, 'Propongo excluir este término. Revisa el cambio.');
+  assert.equal(recorded.length, 2);
+});
+
 test('read loop gives observed results to the next decision and records real queries', async () => {
   let decisions = 0;
   const recorded: unknown[] = [];

@@ -15,6 +15,11 @@ export type CoworkRun = {
   mode: 'approval' | 'autonomous';
   status: CoworkRunStatus;
   created_at: string;
+  /** Previous turn in the same conversation, when this run continues one. */
+  parent_run_id?: string | null;
+  /** True when the worker admitted this run to resume after an effect or search. */
+  automatic?: boolean;
+  depth?: number;
 };
 
 export type CoworkEvent = {
@@ -23,6 +28,19 @@ export type CoworkEvent = {
   payload: Record<string, unknown>;
   created_at: string;
 };
+
+/** A tool event that carries the assistant's own explanation next to a proposal.
+ * It is recorded right before the approval card, is never a data read, and is
+ * shown as the assistant's message for that turn. */
+export const COWORK_NOTE_ACTION = 'assistant.note';
+
+export function coworkNoteText(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const record = payload as { action?: unknown; result?: { reply?: unknown } | null };
+  if (record.action !== COWORK_NOTE_ACTION) return null;
+  const reply = record.result?.reply;
+  return typeof reply === 'string' && reply.trim() ? reply.trim() : null;
+}
 
 export const coworkDocumentSchema = z.object({
   reply: z.string().min(1).max(20000),
