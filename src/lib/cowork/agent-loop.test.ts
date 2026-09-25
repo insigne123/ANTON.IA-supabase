@@ -1,109 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runCoworkReadLoop, type CoworkHistoryTurn } from './agent-loop';
+import { runCoworkReadLoop } from './agent-loop';
 
 const answer = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Un contacto encontrado.', document: null } };
 const search = { action: 'leads.search' as const, query: 'Logística', leadId: null, answer: null };
-
-test('a document attached to a proposal is corrected internally before any effect', async () => {
-  const document = { title: 'Resumen', content: 'Contenido solicitado' };
-  let decisions = 0;
-  let proposals = 0;
-  const result = await runCoworkReadLoop({
-    message: 'Prepara el resumen', runId: '00000000-0000-4000-8000-000000000010',
-    signal: new AbortController().signal, authorize: async () => {},
-    execute: async () => ({ configured: true }), record: async () => {},
-    proposeEffect: async () => { proposals++; },
-    decide: async (_observations, _mustAnswer, rejected) => {
-      decisions++;
-      if (decisions === 1) return { action: 'message.context', query: null, leadId: null, answer: null };
-      if (decisions === 2) return { action: 'message_context.update', query: null, leadId: null,
-        messageContext: { prohibitedTerms: ['ejemplo'] }, answer: { reply: 'Resumen', document } };
-      assert.equal(rejected?.length, 1);
-      assert.equal(rejected[0].action, 'message_context.update');
-      return { ...answer, answer: { reply: 'Aquí tienes el resumen.', document } };
-    },
-  });
-  assert.deepEqual(result.document, document);
-  assert.equal(proposals, 0);
-});
-
-test('repeated enrichment is refused with feedback until the model corrects it', async () => {
-  const leadId = '00000000-0000-4000-8000-000000000021';
-  const seen: Array<{ action: string; reason: string }> = [];
-  let proposals = 0;
-  const result = await runCoworkReadLoop({
-    message: 'Continúa', signal: new AbortController().signal, authorize: async () => {},
-    history: [{ runId: 'previous', observations: [{ action: 'leads.search', result: { scope: 'own_saved_contacts', items: [{ id: leadId, name: 'Ana' }] } }],
-      actions: [{ kind: 'enrich_contact', label: 'Enriquecer contacto Ana' }] } as CoworkHistoryTurn],
-    execute: async () => { throw new Error('Unexpected read'); }, record: async () => {},
-    proposeEffect: async () => { proposals++; },
-    decide: async (_observations, _mustAnswer, rejected) => {
-      seen.push(...(rejected || []).slice(seen.length));
-      if (!rejected?.length) return { action: 'lead.enrich', query: null, leadId, answer: null };
-      assert.match(rejected[0].reason, /Ya se buscó el correo/);
-      return answer;
-    },
-  });
-  assert.equal(result.reply, 'Un contacto encontrado.');
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0].action, 'lead.enrich');
-  assert.equal(proposals, 0);
-});
-
-test('a staging failure goes back to the model, access failures do not', async () => {
-  const leadId = '00000000-0000-4000-8000-000000000022';
-  const reasons: string[] = [];
-  let proposals = 0;
-  const found = { action: 'leads.search' as const, query: 'Ana', leadId: null, answer: null };
-  const enrich = { action: 'lead.enrich' as const, query: null, leadId, providerId: null, snapshotId: null, note: null, answer: null };
-  const result = await runCoworkReadLoop({
-    message: 'Enriquece', runId: '00000000-0000-4000-8000-000000000010',
-    signal: new AbortController().signal, authorize: async () => {},
-    execute: async () => ({ items: [{ id: leadId, name: 'Ana' }], scope: 'own_saved_contacts' }),
-    record: async () => {},
-    proposeEffect: async () => { proposals++; throw new Error('Recipient outside the audience'); },
-    decide: async (observations, _mustAnswer, rejected) => {
-      if (rejected?.length) reasons.push(rejected[0].reason);
-      if (!observations.length) return found;
-      if (!rejected?.length) return enrich;
-      assert.match(rejected[0].reason, /No pude preparar|no se pudo preparar/i);
-      return answer;
-    },
-  });
-  assert.equal(result.reply, 'Un contacto encontrado.');
-  assert.equal(proposals, 1);
-  assert.equal(reasons.length, 1);
-  await assert.rejects(runCoworkReadLoop({
-    message: 'Enriquece', runId: '00000000-0000-4000-8000-000000000010',
-    signal: new AbortController().signal, authorize: async () => {},
-    execute: async () => ({ items: [{ id: leadId, name: 'Ana' }], scope: 'own_saved_contacts' }),
-    record: async () => {},
-    proposeEffect: async () => { const error = new Error('revoked') as Error & { status?: number }; error.status = 401; throw error; },
-    decide: async observations => (!observations.length ? found : enrich),
-  }), /revoked/);
-});
-
-test('proposal explanation is persisted as a note before staging, not as a read', async () => {
-  const recorded: Array<{ action: string; result: unknown }> = [];
-  let decisions = 0;
-  const result = await runCoworkReadLoop({
-    message: 'Actualiza el contexto', runId: '00000000-0000-4000-8000-000000000010',
-    signal: new AbortController().signal, authorize: async () => {},
-    execute: async () => ({ configured: true }), record: async value => { recorded.push(value); },
-    proposeEffect: async () => {
-      assert.equal(recorded.at(-1)?.action, 'assistant.note');
-      assert.deepEqual(recorded.at(-1)?.result, { reply: 'Propongo excluir este término. Revisa el cambio.' });
-    },
-    decide: async () => decisions++ === 0
-      ? { action: 'message.context', query: null, leadId: null, answer: null }
-      : { action: 'message_context.update', query: null, leadId: null,
-        messageContext: { prohibitedTerms: ['ejemplo'] },
-        answer: { reply: 'Propongo excluir este término. Revisa el cambio.', document: null } },
-  });
-  assert.equal(result.reply, 'Propongo excluir este término. Revisa el cambio.');
-  assert.equal(recorded.length, 2);
-});
 
 test('read loop gives observed results to the next decision and records real queries', async () => {
   let decisions = 0;
@@ -244,6 +144,25 @@ test('parallel and sequential queries share one total read budget', async () => 
   assert.equal(calls, 3);
 });
 
+test('a fixed read sent with periods runs once instead of costing the decision', async () => {
+  const executed: string[] = [];
+  let decisions = 0;
+  const result = await runCoworkReadLoop({
+    message: 'Informe del mes', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    decide: async observations => {
+      if (decisions++ > 0) {
+        assert.deepEqual(observations.map(item => item.action), ['metrics.rates', 'leads.search']);
+        return answer;
+      }
+      return { action: 'reads.parallel', query: null, leadId: null, answer: null, reads: [
+        { action: 'metrics.rates', input: 'last_30_days' }, { action: 'metrics.rates', input: 'last_7_days' }, { action: 'leads.search', input: '' }] };
+    },
+    execute: async (action, value) => { executed.push(`${action}:${value}`); return {}; },
+  });
+  assert.equal(result.reply, 'Un contacto encontrado.');
+  assert.deepEqual(executed.sort(), ['leads.search:', 'metrics.rates:']);
+});
+
 test('effect proposals require an observed target and resolve its origin run', async () => {
   const runId = '00000000-0000-4000-8000-000000000010';
   const parentId = '00000000-0000-4000-8000-000000000011';
@@ -326,4 +245,134 @@ test('code execution anchors input files to files.list observations', async () =
     code: { language: 'node' as const, code: 'x', inputFiles: [] }, answer: null };
   await runCoworkReadLoop({ ...base, history: [], decide: async () => bare });
   assert.equal(proposals[1].originRunId, runId);
+});
+
+test('a proposal carries the model explanation as a persisted note, recorded before the approval card', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const leadId = '00000000-0000-4000-8000-000000000021';
+  const order: string[] = [];
+  const recorded: Array<{ action: string; result: unknown }> = [];
+  const found = { action: 'leads.search' as const, query: 'Nehal', leadId: null, answer: null };
+  const enrich = { action: 'lead.enrich' as const, query: null, leadId, providerId: null, snapshotId: null, note: null,
+    answer: { reply: 'Nehal no tiene correo ni investigación. Propongo buscar su correo (1 crédito).', document: null } };
+  const result = await runCoworkReadLoop({
+    message: '¿Vale la pena escribirle a Nehal?', runId, signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: [{ id: leadId, name: 'Nehal P.', company: 'Adecco' }], scope: 'own_saved_contacts' }),
+    record: async value => { order.push(`record:${value.action}`); recorded.push(value); },
+    proposeEffect: async () => { order.push('propose'); },
+    decide: async observations => observations.length === 0 ? found : enrich,
+  });
+  assert.equal(result.reply, enrich.answer.reply);
+  assert.deepEqual(order, ['record:leads.search', 'record:assistant.note', 'propose']);
+  assert.deepEqual(recorded[1], { action: 'assistant.note', input: '', result: { reply: enrich.answer.reply } });
+});
+
+test('a document sent with a proposal goes back to the model instead of being dropped', async () => {
+  const leadId = '00000000-0000-4000-8000-000000000021';
+  const report = { title: 'Prospección · septiembre', content: '## Actividad\n- 4 contactos' };
+  const proposals: unknown[] = [];
+  const recorded: Array<{ action: string }> = [];
+  const result = await runCoworkReadLoop({
+    message: 'Hazme el informe del mes', runId: '00000000-0000-4000-8000-000000000010', signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: [{ id: leadId, name: 'Nehal P.', company: 'Adecco' }], scope: 'own_saved_contacts' }),
+    record: async value => { recorded.push(value); },
+    proposeEffect: async proposal => { proposals.push(proposal); },
+    decide: async (observations, _mustAnswer, rejections = []) => {
+      if (observations.length === 0) return { action: 'leads.search' as const, query: '', leadId: null, answer: null };
+      if (!rejections.length) return { action: 'lead.enrich' as const, query: null, leadId, answer: { reply: 'Dejé el informe listo. ¿Busco su correo?', document: report } };
+      assert.match(rejections[0].reason, /documento se perdería/);
+      return { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Te dejé el informe. ¿Busco los correos que faltan?', document: report } };
+    },
+  });
+  assert.deepEqual(result.document, report);
+  assert.equal(proposals.length, 0);
+  assert.equal(recorded.some(value => value.action === 'assistant.note'), false);
+});
+
+test('an email lookup that already ran in the thread is not proposed again', async () => {
+  const leadId = '00000000-0000-4000-8000-000000000021';
+  const row = { id: leadId, name: 'Carlos A.', company: 'Minera Centinela' };
+  const proposals: Array<{ kind: string; label: string }> = [];
+  await runCoworkReadLoop({
+    message: 'No encontró correo? igual investígalo', runId: '00000000-0000-4000-8000-000000000010', signal: new AbortController().signal, authorize: async () => {},
+    history: [{ runId: '00000000-0000-4000-8000-000000000009', observations: [{ action: 'leads.search', input: 'Carlos', result: { items: [row], scope: 'own_saved_contacts' } }],
+      actions: [{ kind: 'enrich_contact', label: 'Enriquecer contacto Carlos A. (Minera Centinela)', outcome: 'ejecutada', result: { found: false } }] } as never],
+    execute: async () => ({}), record: async () => {},
+    proposeEffect: async proposal => { proposals.push(proposal); },
+    decide: async (_observations, _mustAnswer, rejections = []) => {
+      if (!rejections.length) return { action: 'lead.enrich' as const, query: null, leadId, answer: { reply: 'Vuelvo a buscar su correo.', document: null } };
+      assert.match(rejections[0].reason, /Ya se buscó el correo/);
+      return { action: 'research.start' as const, query: null, leadId, answer: { reply: 'El correo no apareció: lo investigo con su cargo y empresa.', document: null } };
+    },
+  });
+  assert.deepEqual(proposals.map(proposal => [proposal.kind, proposal.label]), [['start_research', 'Investigar contacto Carlos A. (Minera Centinela)']]);
+});
+
+test('a proposal without explanation keeps the short default and records no note', async () => {
+  const leadId = '00000000-0000-4000-8000-000000000021';
+  const recorded: string[] = [];
+  const result = await runCoworkReadLoop({
+    message: 'Enriquece', runId: '00000000-0000-4000-8000-000000000010', signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: [{ id: leadId, name: 'José C.', company: 'GrupoExpro' }], scope: 'own_saved_contacts' }),
+    record: async value => { recorded.push(value.action); },
+    proposeEffect: async () => {},
+    decide: async observations => observations.length === 0
+      ? { action: 'leads.search' as const, query: 'José', leadId: null, answer: null }
+      : { action: 'lead.enrich' as const, query: null, leadId, answer: null },
+  });
+  assert.match(result.reply, /Revisa la propuesta/);
+  assert.deepEqual(recorded, ['leads.search']);
+});
+
+test('a proposal the server cannot stage returns to the model with the reason instead of failing the run', async () => {
+  const leadId = '00000000-0000-4000-8000-000000000021';
+  const reasons: string[] = [];
+  const result = await runCoworkReadLoop({
+    message: 'Busca su correo', runId: '00000000-0000-4000-8000-000000000010', signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: [{ id: leadId, name: 'José C.', company: 'GrupoExpro' }], scope: 'own_saved_contacts' }),
+    record: async () => {},
+    proposeEffect: async () => { throw new Error('El destinatario ya no está disponible para esta audiencia.'); },
+    decide: async (observations, _mustAnswer, rejections = []) => {
+      reasons.push(...rejections.map(item => item.reason));
+      if (!observations.length) return { action: 'leads.search' as const, query: 'José', leadId: null, answer: null };
+      if (!rejections.length) return { action: 'lead.enrich' as const, query: null, leadId, answer: null };
+      return { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'No pude prepararlo: el destinatario no está en la audiencia.', document: null } };
+    },
+  });
+  assert.match(result.reply, /No pude prepararlo/);
+  assert.match(reasons.join('|'), /La propuesta no se pudo preparar: El destinatario ya no está disponible/);
+});
+
+test('access errors while staging a proposal still stop the run', async () => {
+  const leadId = '00000000-0000-4000-8000-000000000021';
+  await assert.rejects(runCoworkReadLoop({
+    message: 'Busca su correo', runId: '00000000-0000-4000-8000-000000000010', signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ items: [{ id: leadId, name: 'José C.' }], scope: 'own_saved_contacts' }),
+    record: async () => {},
+    proposeEffect: async () => { const error = new Error('Acceso Cowork revocado.'); error.name = 'AuthError'; throw error; },
+    decide: async observations => observations.length
+      ? { action: 'lead.enrich' as const, query: null, leadId, answer: null }
+      : { action: 'leads.search' as const, query: 'José', leadId: null, answer: null },
+  }), /revocado/);
+});
+
+test('an invalid model output is corrected on the next decision', async () => {
+  let calls = 0;
+  const result = await runCoworkReadLoop({
+    message: 'Hola', signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async () => ({}),
+    decide: async (_observations, _mustAnswer, rejections = []) => {
+      calls++;
+      if (!rejections.length) {
+        const error = new Error('invalid') as Error & { issues: unknown[] };
+        error.name = 'ZodError';
+        error.issues = [{ path: ['campaign', 'messages', 0, 'delayDays'], message: 'El primer correo es inmediato.' }];
+        throw error;
+      }
+      assert.match(rejections[0].reason, /delayDays: El primer correo es inmediato/);
+      return { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Listo.', document: null } };
+    },
+  });
+  assert.equal(result.reply, 'Listo.');
+  assert.equal(calls, 2);
 });

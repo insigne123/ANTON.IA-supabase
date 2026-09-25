@@ -21,7 +21,7 @@ test('reads always enforce user and organization and sanitize PostgREST grammar'
   const filter = String(f.calls.find(call => call[0] === 'or')?.[1]);
   const parts = filter.split(',');
   assert.ok(!filter.includes('('));
-  assert.equal(parts.length, 12);
+  assert.equal(parts.length, 14);
   assert.ok(parts.every(part => /^\w+\.ilike\.%[^%,()]*%$/.test(part)));
   assert.equal(result.scope, 'own_saved_contacts');
   assert.equal(result.returned, 0);
@@ -68,4 +68,14 @@ test('exact multi-term matches are not partial and empty queries list recent', a
   assert.ok(!listed.calls.some(call => call[0] === 'or'));
   assert.equal(empty.returned, 1);
   assert.equal(empty.partial, false);
+});
+
+test('a saved contact can be found by its email address', async () => {
+  const rows = [{ id: '9', name: 'Nico Prueba', title: null, company: null, email: 'nicogun123@gmail.com', city: null, country: null, created_at: '2026-09-25' }];
+  const f = rowsClient(rows);
+  const result = await queryCoworkLeads(f.db, { userId: 'owner', organizationId: 'org' }, 'leads.search', 'nicogun123@gmail.com');
+  const filter = String(f.calls.find(call => call[0] === 'or')?.[1]);
+  assert.ok(filter.split(',').includes('email.ilike.%nicogun123@gmail.com%'));
+  assert.equal(result.returned, 1);
+  assert.equal(result.partial, false);
 });

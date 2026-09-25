@@ -435,7 +435,7 @@ function App() {
                 </div>)}
                 {jobs && !jobs.filter(item => !item.expired).length && <p className="helper">Sin trabajos pendientes para este perfil.</p>}
               </div>
-              <div className="email-section"><div className="section-heading"><h2>Sincronizar red y bandeja</h2></div>
+              <div className="email-section"><div className="section-heading"><h2>Barrido de red y bandeja</h2></div>
                 <p>Solo se registra lo visible en tu LinkedIn abierto; nada se infiere. Recolecta cada página y envía su reporte.</p>
                 <div className="columns"><div><button className="secondary full" disabled={!!busy} onClick={() => void collectSweep('network')}>Recolectar red visible</button>
                   {sweepNetwork && <p className="helper">{sweepNetwork.length} contactos en esta página.</p>}</div>

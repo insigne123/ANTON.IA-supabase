@@ -48,16 +48,39 @@ function memoryValueText(value: unknown) {
   return safeText(value);
 }
 
+const OFFER_TEXT_KEYS = ['valueProposition', 'value_proposition', 'offer', 'summary', 'description', 'pitch', 'businessDescription'];
+
+function presentText(value: unknown) {
+  return typeof value === 'string' && value.trim() ? safeText(value) : '';
+}
+
+/** company_profile is JSON: never let String(object) reach a prompt as "[object Object]". */
+export function offerText(value: unknown): string {
+  if (typeof value === 'string') return safeText(value);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  const record = value as Record<string, unknown>;
+  for (const key of OFFER_TEXT_KEYS) {
+    const text = presentText(record[key]);
+    if (text) return text.slice(0, 600);
+  }
+  const name = presentText(record.companyName) || presentText(record.company_name) || presentText(record.name);
+  const products = (Array.isArray(record.products) ? record.products : []).map(product => {
+    if (typeof product === 'string') return presentText(product);
+    if (!product || typeof product !== 'object') return '';
+    const item = product as Record<string, unknown>;
+    return [presentText(item.name), presentText(item.summary) || presentText(item.description)].filter(Boolean).join(': ');
+  }).filter(Boolean).slice(0, 5);
+  return [name, products.length ? `Productos: ${products.join('; ')}` : ''].filter(Boolean).join('. ').slice(0, 600);
+}
+
 function profileOffer(profile: Record<string, unknown> | null) {
   if (!profile) return null;
-  return safeText(
-    profile.company_profile ||
-    profile.value_proposition ||
-    profile.offer ||
-    profile.companyName ||
-    profile.company ||
-    profile.businessDescription,
-  ) || null;
+  for (const candidate of [profile.company_profile, profile.value_proposition, profile.offer,
+    profile.companyName, profile.company, profile.businessDescription]) {
+    const text = offerText(candidate);
+    if (text) return text;
+  }
+  return null;
 }
 
 export async function buildSupliaContext(auth: AuthContext): Promise<SupliaAppContext> {

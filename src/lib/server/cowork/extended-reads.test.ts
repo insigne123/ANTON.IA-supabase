@@ -151,3 +151,20 @@ test('files.list scopes to the user prefix and reports names without contents', 
   assert.ok(calls.every(call => String(call.args[0] || '').startsWith('org-1/user-1')));
   assert.ok(!JSON.stringify(result).includes('a,b'));
 });
+
+test('app.context never sends "[object Object]": JSON company profiles become readable offers', async () => {
+  const builder = async () => ({
+    emailConnections: { google: true, outlook: false },
+    counts: { leads: 3, contacted: 0, campaigns: 0, activeMissions: 0, openExceptions: 0 },
+    performance: null, offer: null, user: { id: 'user-1' }, organizationId: 'org-1', profile: null, memories: [],
+  });
+  const client = { from: () => {
+    const chain = { select: () => chain, eq: () => chain,
+      maybeSingle: async () => ({ data: { user_company_profile: { companyName: 'Yago SpA', products: [{ name: 'AXIS', summary: 'consultas judiciales automáticas en el PJUD' }] } }, error: null }) };
+    return chain;
+  } };
+  const result = await readCoworkAppContext(scope, builder as never, client as never);
+  assert.equal(result.offer, 'Yago SpA. Productos: AXIS: consultas judiciales automáticas en el PJUD');
+  assert.equal(result.offerSource, 'organization');
+  assert.doesNotMatch(JSON.stringify(result), /\[object Object\]/);
+});

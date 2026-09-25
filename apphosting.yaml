@@ -27,6 +27,11 @@ env:
   - variable: COWORK_WORKER_SECRET
     secret: COWORK_WORKER_SECRET
     availability: [RUNTIME]
+  # El workspace abierto despierta al worker (POST /api/cowork/wake) para no
+  # esperar el cron de 1 minuto. "false" vuelve a depender solo del cron.
+  - variable: COWORK_INLINE_WAKE
+    value: "true"
+    availability: [RUNTIME]
   # Fase 0 plan Cowork: búsqueda externa, investigación, borradores y versiones.
   # Autonomía sigue desactivada (COWORK_AUTONOMY_ENABLED ausente = false).
   - variable: COWORK_EXTERNAL_SEARCH_ENABLED

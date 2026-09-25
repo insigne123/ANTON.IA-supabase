@@ -17,5 +17,5 @@ export const coworkCommercialBehavior = [
   '«Adelante» se refiere al plan vigente y revisado, no autoriza cambiar remitente, ampliar destinatarios ni eludir revisiones del sistema. No sustituyas una reunión solicitada por una reunión confirmada.',
   'Para antigüedad y vencimientos usa fechas con zona horaria y una fuente de tiempo confiable. Una fecha del cuerpo de un correo es una pista, no prueba suficiente del reloj real.',
   'Si el reloj estaba equivocado, cuantifica el desfase y la antigüedad corregida y señala qué cálculos o acciones deben rehacerse.',
-  'Español natural y directo: dato antes que adjetivo, malas noticias primero, recomendación con motivo. Respuestas cortas: máximo 5 líneas antes de cualquier lista, sin IDs internos a la vista. Corrige errores en una línea y continúa. Si fallan enlaces, entrega el formato solicitado.',
+  'Español natural y directo: dato antes que adjetivo, malas noticias primero, recomendación con motivo. Corrige errores en una línea y continúa. Si fallan enlaces, entrega el formato solicitado.',
 ].join('\n');

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { contactRecordEvidence } from '@/lib/cowork/contact-evidence';
 import { readMailboxCoverage } from './reply-reads';
-import { buildSupliaContext } from '@/lib/server/suplia-context';
+import { buildSupliaContext, offerText } from '@/lib/server/suplia-context';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
 
@@ -35,7 +35,7 @@ export async function queryCoworkExtendedReads(
 ): Promise<{ scope: string; period: string; savedContacts: number; contactedTotal: number; contactedThisWeek: number; repliesThisWeek: number; autoRepliesThisWeek: number; bouncesThisWeek: number }>;
 export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: 'app.context', value: string,
-): Promise<{ scope: string; emailConnections: { google: boolean; outlook: boolean }; counts: Record<string, number>; performance: unknown; offer: string | null }>;
+): Promise<{ scope: string; emailConnections: { google: boolean; outlook: boolean }; counts: Record<string, number>; performance: unknown; offer: string | null; offerSource?: string | null }>;
 export async function queryCoworkExtendedReads(
   client: SupabaseClient, scope: Scope, action: 'draft.get', value: string,
 ): Promise<{ scope: string; draftId: string; versionId: string; revision: number; channel: string; subject: string | null; contentHash: string; recipientEmail: string | null; recipientName: string | null; lifecycle: string; textLength: number }>;
@@ -58,13 +58,13 @@ export async function queryCoworkExtendedReads(
   | { lead: unknown; contacted: unknown[]; scope: string }
   | { contacted: unknown[]; scope: string; truncated: boolean; turn: unknown }
   | { scope: string; period: string; savedContacts: number; contactedTotal: number; contactedThisWeek: number; repliesThisWeek: number; autoRepliesThisWeek: number; bouncesThisWeek: number }
-  | { scope: string; emailConnections: { google: boolean; outlook: boolean }; counts: Record<string, number>; performance: unknown; offer: string | null }
+  | { scope: string; emailConnections: { google: boolean; outlook: boolean }; counts: Record<string, number>; performance: unknown; offer: string | null; offerSource?: string | null }
   | { scope: string; draftId: string; versionId: string; revision: number; channel: string; subject: string | null; contentHash: string; recipientEmail: string | null; recipientName: string | null; lifecycle: string; textLength: number }
   | { scope: string; campaigns: Array<{ id: string; name: string; status: string; revision: number; recipients: number; createdAt: string }> }
   | { scope: string; files: Array<{ name: string; size: number; updatedAt: string }> }
 > {
   if (action === 'metrics.overview') return readCoworkMetrics(client, scope);
-  if (action === 'app.context') return readCoworkAppContext(scope);
+  if (action === 'app.context') return readCoworkAppContext(scope, buildSupliaContext, client);
   if (action === 'draft.get') return readCoworkDraft(scope, value);
   if (action === 'campaigns.list') return readCoworkCampaigns(client, scope);
   if (action === 'files.list') return readCoworkFiles(client, scope);
@@ -150,13 +150,29 @@ async function readCoworkMetrics(client: SupabaseClient, scope: Scope) {
   };
 }
 
-export async function readCoworkAppContext(scope: Scope, builder = buildSupliaContext) {  // Reuses the shared context builder (connections, counts, offer): Cowork needs
+/** What the organization sells, as configured for research (products). */
+async function readOrganizationOffer(client: SupabaseClient | undefined, organizationId: string) {
+  if (!client) return null;
+  try {
+    const { data, error } = await client.from('antonia_workflow_settings')
+      .select('user_company_profile').eq('organization_id', organizationId).maybeSingle();
+    if (error || !data) return null;
+    return offerText((data as { user_company_profile?: unknown }).user_company_profile) || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function readCoworkAppContext(scope: Scope, builder = buildSupliaContext, client?: SupabaseClient) {  // Reuses the shared context builder (connections, counts, offer): Cowork needs
   // the same verified connection state before discussing sends. No tokens included.
   const context = await builder({ user: { id: scope.userId }, organizationId: scope.organizationId, organizationIds: [scope.organizationId], supabase: null } as never);
+  const organizationOffer = context.offer ? null : await readOrganizationOffer(client, scope.organizationId);
   return {
     scope: 'organization_context',
     emailConnections: context.emailConnections, counts: context.counts,
-    performance: context.performance, offer: context.offer,
+    performance: context.performance,
+    offer: context.offer || organizationOffer,
+    offerSource: context.offer ? 'profile' : organizationOffer ? 'organization' : null,
   };
 }
 

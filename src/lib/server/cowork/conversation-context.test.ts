@@ -3,18 +3,15 @@ import test from 'node:test';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { loadCoworkHistory } from './conversation-context';
 
-function fixture(rows: Record<string, { parent: string | null; owner?: string }>, failActions = false) {
+function fixture(rows: Record<string, { parent: string | null; owner?: string }>) {
   const filters: Array<Record<string, string>> = [];
   const client = { from(table: string) {
     const where: Record<string, string> = {};
     filters.push(where);
-    const chain: Record<string, unknown> & { usedIn?: boolean } = {
-      select: () => chain, order: () => chain, limit: () => chain,
+    const chain = {
+      select: () => chain, order: () => chain, limit: () => chain, in: () => chain,
       eq: (key: string, value: string) => { where[key] = value; return chain; },
-      in: () => { chain.usedIn = true; return chain; },
-      then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve(chain.usedIn
-        ? { data: [], error: failActions ? { message: 'unavailable' } : null }
-        : { data: [{ payload: { action: 'prospecting.search', result: { items: [{ id: 'apollo:1' }] } } }], error: null })),
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: [{ payload: { action: 'prospecting.search', result: { items: [{ id: 'apollo:1' }] } } }], error: null })),
       maybeSingle: async () => {
         const id = where.id || where.run_id;
         const row = rows[id];
@@ -43,16 +40,15 @@ test('history surfaces the most recent tool results first in chronological order
   const payloads = [{ payload: { action: 'x', n: 1 } }, { payload: { action: 'x', n: 2 } }, { payload: { action: 'x', n: 3 } }];
   const client = { from(table: string) {
     const where: Record<string, string> = {};
-    const chain: Record<string, unknown> & { usedIn?: boolean } = {
+    const chain = {
       select: () => chain,
       order: (column: string, options?: { ascending: boolean }) => { orders.push({ column, ascending: options?.ascending !== false }); return chain; },
-      limit: () => chain,
+      limit: () => chain, in: () => chain,
       eq: (key: string, value: string) => { where[key] = value; return chain; },
-      in: () => { chain.usedIn = true; return chain; },
       maybeSingle: async () => ({ data: table === 'cowork_runs'
         ? { id: 'a', message: 'request-a', status: 'completed', parent_run_id: null }
         : { payload: { reply: 'reply-a', document: null } }, error: null }),
-      then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve(chain.usedIn ? { data: [], error: null } : { data: [...payloads].reverse(), error: null })),
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: [...payloads].reverse(), error: null })),
     };
     return chain;
   } } as unknown as SupabaseClient;
@@ -75,7 +71,45 @@ test('new work has no implicit previous context', async () => {
   assert.equal(f.filters.length, 0);
 });
 
-test('action history failure cannot masquerade as no prior effects', async () => {
-  const f = fixture({ a: { parent: null } }, true);
-  await assert.rejects(loadCoworkHistory(f.client, { userId: 'owner', organizationId: 'org' }, 'a'), /actions unavailable/);
+function orderedClient(newestFirst: Array<Record<string, unknown>>, createdAt = '2026-09-25T13:00:00Z') {
+  return { from(table: string) {
+    const chain = {
+      select: () => chain, order: () => chain, limit: () => chain, eq: () => chain, in: () => chain,
+      maybeSingle: async () => ({ data: table === 'cowork_runs'
+        ? { id: 'a', message: 'request-a', status: 'completed', parent_run_id: null, created_at: createdAt }
+        : { payload: { reply: 'reply-a', document: null } }, error: null }),
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: newestFirst.map(payload => ({ payload })), error: null })),
+    };
+    return chain;
+  } } as unknown as SupabaseClient;
+}
+
+test('history keeps three reads plus the assistant note and dates each turn', async () => {
+  const note = { action: 'assistant.note', input: '', result: { reply: 'Propongo buscar su correo.' } };
+  const reads = [1, 2, 3].map(n => ({ action: 'leads.search', n }));
+  const withNote = await loadCoworkHistory(orderedClient([note, reads[2], reads[1], reads[0]]), { userId: 'owner', organizationId: 'org' }, 'a');
+  assert.deepEqual(withNote.turns[0].observations, [reads[0], reads[1], reads[2], note]);
+  assert.equal(withNote.turns[0].at, '2026-09-25T13:00:00Z');
+  const fourReads = [4, 3, 2, 1].map(n => ({ action: 'leads.search', n }));
+  const capped = await loadCoworkHistory(orderedClient(fourReads), { userId: 'owner', organizationId: 'org' }, 'a');
+  assert.deepEqual(capped.turns[0].observations.map(item => (item as { n: number }).n), [2, 3, 4]);
+});
+
+test('history tells the model which approved actions already ran and how they ended', async () => {
+  const client = { from(table: string) {
+    let effects = false;
+    const chain = {
+      select: () => chain, order: () => chain, limit: () => chain, eq: () => chain,
+      in: () => { effects = true; return chain; },
+      maybeSingle: async () => ({ data: table === 'cowork_runs'
+        ? { id: 'a', message: 'Busca su correo', status: 'completed', parent_run_id: null, created_at: '2026-09-25T04:30:00Z' }
+        : { payload: { reply: 'El proveedor no devolvió correo para este contacto.', document: null } }, error: null }),
+      then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve({ data: effects
+        ? [{ kind: 'effect.completed', payload: { kind: 'enrich_contact', label: 'Enriquecer contacto Carlos A. (Minera Centinela)', result: { found: false, email: null } } }]
+        : [{ payload: { action: 'leads.search', result: { items: [] } } }], error: null })),
+    };
+    return chain;
+  } } as unknown as SupabaseClient;
+  const history = await loadCoworkHistory(client, { userId: 'owner', organizationId: 'org' }, 'a');
+  assert.deepEqual(history.turns[0].actions, [{ kind: 'enrich_contact', label: 'Enriquecer contacto Carlos A. (Minera Centinela)', outcome: 'ejecutada', result: { found: false, email: null } }]);
 });

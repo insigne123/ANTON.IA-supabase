@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-const SEARCH_FIELDS = ['name', 'title', 'company', 'location', 'city', 'country'] as const;
+// Email is searchable too: people often look a contact up by the address they know.
+const SEARCH_FIELDS = ['name', 'title', 'company', 'email', 'location', 'city', 'country'] as const;
 
 function searchTerms(raw: string) {
   return raw.replace(/[^\p{L}\p{N}\s@.-]/gu, ' ').replace(/\s+/g, ' ').trim()

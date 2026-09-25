@@ -39,8 +39,7 @@ export async function loadCoworkHistory(
     const acted = await client.from('cowork_run_events').select('kind,payload')
       .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
       .in('kind', ['effect.completed', 'effect.failed']).order('sequence', { ascending: false }).limit(2);
-    if (acted.error) throw new Error('Conversation actions unavailable');
-    const actions = ((acted.data || []) as Array<{ kind: string; payload: Record<string, unknown> | null }>).map(row => ({
+    const actions = acted.error ? [] : ((acted.data || []) as Array<{ kind: string; payload: Record<string, unknown> | null }>).map(row => ({
       kind: String(row.payload?.kind || ''), label: String(row.payload?.label || '').slice(0, 200),
       outcome: row.kind === 'effect.completed' ? 'ejecutada' : 'falló',
       ...(row.payload?.result === undefined ? {} : { result: row.payload.result }),
