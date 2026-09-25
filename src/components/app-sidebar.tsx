@@ -20,7 +20,7 @@ import {
   SidebarTrigger
 } from '@/components/ui/sidebar';
 import {
-  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, LogOut, Shield, ShieldCheck, LayoutGrid, Bot, Link2
+  User, Search, Send, Briefcase, Settings, Table as TableIcon, Users, MailCheck, LayoutDashboard, LogOut, Shield, ShieldCheck, LayoutGrid, Bot, Link2, CircleHelp
 } from 'lucide-react';
 import Logo from './logo';
 import { useAuth } from '@/context/AuthContext';
@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils';
 import { isOpportunitiesEnabled } from '@/lib/opportunities/access';
 import { WorkspaceSwitcher } from '@/components/organization/WorkspaceSwitcher';
 import { COWORK_OWNER_EMAIL } from '@/lib/cowork/access';
+import { useProductTour } from '@/components/onboarding/ProductTour';
 
 type NavItem = {
   href: string;
@@ -36,6 +37,8 @@ type NavItem = {
   label: string;
   aliases?: string[];
   feature?: 'opportunities' | 'admin-dashboard' | 'cowork';
+  /** Step of the guided tour that highlights this entry. */
+  tour?: string;
 };
 
 const navSections: Array<{ label: string; items: NavItem[] }> = [
@@ -43,9 +46,9 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
     label: 'Centro de mando',
     items: [
       { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-      { href: '/antonia', icon: Bot, label: 'Agente ANTON.IA' },
+      { href: '/antonia', icon: Bot, label: 'Agente ANTON.IA', tour: 'antonia' },
       { href: '/cowork', icon: Bot, label: 'Cowork', feature: 'cowork' },
-      { href: '/profile', icon: User, label: 'Perfil' },
+      { href: '/profile', icon: User, label: 'Perfil', tour: 'profile' },
     ],
   },
   {
@@ -57,9 +60,9 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
   {
     label: 'Prospección',
     items: [
-      { href: '/search', icon: Search, label: 'Búsqueda de Leads' },
+      { href: '/search', icon: Search, label: 'Búsqueda de Leads', tour: 'search' },
       { href: '/opportunities', icon: Briefcase, label: 'Oportunidades', feature: 'opportunities' },
-      { href: '/campaigns', icon: MailCheck, label: 'Campañas' },
+      { href: '/campaigns', icon: MailCheck, label: 'Campañas', tour: 'campaigns' },
     ],
   },
   {
@@ -67,15 +70,15 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: '/sheet', label: 'Sheet (Datos)', icon: TableIcon },
       { href: '/crm', label: 'Pipeline (CRM)', icon: LayoutGrid },
-      { href: '/saved/leads', icon: Users, label: 'Guardados · Leads' },
+      { href: '/saved/leads', icon: Users, label: 'Guardados · Leads', tour: 'saved-leads' },
       { href: '/saved/opportunities', icon: Briefcase, label: 'Guardados · Oportunidades', feature: 'opportunities' },
-      { href: '/contacted', icon: Send, label: 'Leads Contactados' },
+      { href: '/contacted', icon: Send, label: 'Leads Contactados', tour: 'contacted' },
     ],
   },
   {
     label: 'Configuración',
     items: [
-      { href: '/connections', icon: Link2, label: 'Conexiones', aliases: ['/gmail', '/outlook'] },
+      { href: '/connections', icon: Link2, label: 'Conexiones', aliases: ['/gmail', '/outlook'], tour: 'connections' },
       { href: '/settings/email-studio', icon: Settings, label: 'Email Studio' },
       {
         href: '/settings/privacy',
@@ -90,6 +93,7 @@ const navSections: Array<{ label: string; items: NavItem[] }> = [
 export function AppSidebar() {
   const pathname = usePathname();
   const { signOut, user, organizationId, organizationRole } = useAuth();
+  const productTour = useProductTour();
   const [coworkScope, setCoworkScope] = React.useState<string | null>(null);
   const currentScope = `${user?.id || ''}:${organizationId || ''}`;
   React.useEffect(() => {
@@ -158,7 +162,7 @@ export function AppSidebar() {
                             isActive && 'bg-sidebar-accent/95 text-sidebar-accent-foreground shadow-[0_18px_38px_-28px_rgba(15,23,42,0.55)]',
                           )}
                         >
-                          <Link href={item.href} className="text-[0.95rem]" aria-current={isActive ? 'page' : undefined}>
+                          <Link href={item.href} className="text-[0.95rem]" aria-current={isActive ? 'page' : undefined} data-tour={item.tour}>
                             <item.icon />
                             <span>{item.label}</span>
                           </Link>
@@ -181,6 +185,16 @@ export function AppSidebar() {
           <div className="mt-1 text-sm font-medium text-sidebar-foreground/85">{APP_VERSION}</div>
         </div>
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              data-tour="tour-help"
+              onClick={productTour.start}
+              className="h-10 rounded-2xl px-3 text-[0.95rem] font-medium text-sidebar-foreground/82 hover:bg-sidebar-accent/75 hover:text-sidebar-accent-foreground"
+            >
+              <CircleHelp />
+              <span>Ver tutorial</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={() => signOut()}
