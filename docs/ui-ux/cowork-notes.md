@@ -9,3 +9,11 @@ Estado implementado: inicio, recientes, solicitud con continuación enlazada, ac
 Revisión DOM automatizada: abrir/cerrar documento, recuperación de foco, contenido no ejecutable, carga de resultados con metadata y eliminación del resultado ante 403. Pendientes: capturas en navegador, contraste calculado, tamaños 360/768/1440, light/dark y teclado completo. No certificar checklist visual hasta completar esa revisión.
 
 Incremento de resultados: contactos observados en lista filtrable con scroll interno y columnas que colapsan en móvil. Menú de descarga compartido: Excel/CSV para contactos, PDF/Markdown para documento. La descarga incluye todo el resultado observado, no el filtro visual; se explica junto al input. Loading y errores de descarga preservan contexto, mientras 401/403 retiran resultados privados. DOM de filtro y revocación verificado; auditoría renderizada sigue pendiente.
+
+## Rediseño 24 sep 2026
+
+Se reemplazó la composición inicial por el modelo de trabajo de Claude Cowork: hilos a la izquierda, conversación continua al centro (turnos de continuación incluidos) y Resumen o artefacto abierto a la derecha. Tokens `cw-*` como alias del tema de ANTON.IA (azul primario, slate, navy en oscuro) y PT Sans. Detalle, archivos y verificación en `docs/cowork-experiencia-claude-2026-09-24.md`.
+
+## 25 sep 2026 · Evaluación con conversaciones reales
+
+Se probaron 12 conversaciones (24 turnos) en producción y se ajustaron prompts, bucle y presentación. Resultados, rúbrica y corpus de regresión en `docs/cowork-evaluacion-conversaciones-2026-09-25.md`.
