@@ -30,12 +30,14 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
     if (row.error || !row.data) {
       return NextResponse.json({ error: 'La propuesta ya no está disponible.' }, { status: 409, headers: privateHeaders });
     }
-    const current = await client.from('organization_messaging_context').select('updated_at')
+    const current = await client.from('organization_messaging_context')
+      .select('updated_at,voice_examples,prohibited_terms,required_terms,approved_claims,trial_offer,default_style_profile_id,role_cta,vertical_notes')
       .eq('organization_id', auth.organizationId).maybeSingle();
     const matches = `msgctx:${String(row.data.patch_hash)}` === String(proposal.targetId || '');
     const fresh = !current.error && (current.data?.updated_at || null) === (row.data.base_updated_at || null);
+    const { updated_at: _updatedAt, ...currentValues } = current.data || {};
     return NextResponse.json({
-      patch: row.data.patch, matches, fresh, label: String(proposal.label || ''),
+      patch: row.data.patch, current: current.data ? currentValues : null, matches, fresh, label: String(proposal.label || ''),
     }, { headers: privateHeaders });
   } catch (error) {
     if (error instanceof AuthError) {

@@ -63,6 +63,7 @@ export function CoworkWorkspace() {
   const [mode, setMode] = useState<CoworkExecutionMode>('approval');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [documentOpen, setDocumentOpen] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const pending = useRef<{ message: string; requestId: string; parentRunId: string | null; mode: CoworkExecutionMode } | null>(null);
   const documentButton = useRef<HTMLButtonElement>(null);
@@ -319,9 +320,10 @@ export function CoworkWorkspace() {
             {state.run.status === 'failed' && <p className="text-sm text-muted-foreground">{typeof failure?.message === 'string' ? failure.message : 'Tu solicitud sigue guardada. No se pudo completar el trabajo.'}</p>}
             {state.budget?.exhausted && <p className="text-sm text-muted-foreground">Se alcanzó el tope de pasos automáticos de este hilo. Lo logrado quedó guardado; escríbeme abajo para seguir.</p>}
             <ContactResults key={state.run.id} runId={state.run.id} events={state.events} onError={setError} onAccessDenied={clearPrivateResults}              canResearch={state.run.status === 'completed' && state.canResearch}
-              onUseReport={leadId => { setMessage(`Consulta la ficha del contacto guardado ${leadId} y su investigación disponible. Resume las fuentes y recomendaciones si existen.`); requestAnimationFrame(() => document.getElementById('cowork-followup')?.focus()); }} />
+              onUseReport={leadId => { setMessage(`Consulta la ficha del contacto guardado ${leadId} y su investigación disponible. Resume las fuentes y recomendaciones si existen.`); requestAnimationFrame(() => document.getElementById('cowork-followup')?.focus()); }}
+              onEnrichLead={(leadId, displayName) => { setMessage(`Enriquece el correo de ${displayName} (${leadId}) para poder investigarlo después.`); requestAnimationFrame(() => document.getElementById('cowork-followup')?.focus()); }} />
             <ResearchSources events={state.events} runId={state.run.id} canCreateDraft={state.run.status === 'completed' && state.canCreateDraft} onAccessDenied={clearPrivateResults} />
-            <FileUpload key={`files-${state.run.id}`} runId={state.run.id} onError={setError} onAccessDenied={clearPrivateResults} />
+            {showFiles && <FileUpload key={`files-${state.run.id}`} runId={state.run.id} onError={setError} onAccessDenied={clearPrivateResults} />}
             {output?.document && <div className="flex items-center gap-3 rounded-xl border border-border p-4"><FileText className="h-5 w-5 shrink-0" /><div className="min-w-0 flex-1"><h3 className="break-words font-medium">{output.document.title}</h3><p className="text-xs text-muted-foreground">Documento · Solo tú</p></div><Button ref={documentButton} variant="secondary" onClick={() => setDocumentOpen(true)}>Abrir</Button></div>}
             <details className="text-sm"><summary className="cursor-pointer text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring">Actividad del trabajo</summary><ol className="mt-3 space-y-2">{state.events.map(event => <li key={event.sequence}>{activityTitle(event)}</li>)}</ol></details>
             <div className="mt-auto flex justify-end pt-6">{active ? <Button variant="outline" disabled={cancelling} onClick={() => void cancel()}><Square />{cancelling ? 'Cancelando…' : 'Detener trabajo'}</Button> : <Button variant="outline" onClick={() => choose(null)}>Nuevo trabajo</Button>}</div>
@@ -329,7 +331,7 @@ export function CoworkWorkspace() {
               <Label htmlFor="cowork-followup">Continúa este trabajo</Label>
               {canAutonomous && <ExecutionMode id="cowork-followup-mode" value={mode} onChange={setMode} disabled={sending} />}
               <Textarea id="cowork-followup" value={message} maxLength={20000} onChange={event => setMessage(event.target.value)} placeholder="Pide un ajuste o el siguiente paso…" disabled={sending} className="mt-2 min-h-24" />
-              <div className="mt-3 flex justify-end"><Button type="submit" disabled={!ready || !message.trim() || sending}>{sending ? 'Guardando…' : 'Continuar'}<ArrowUp /></Button></div>
+              <div className="mt-3 flex items-center justify-between"><Button type="button" variant="ghost" size="icon" aria-label={showFiles ? 'Ocultar archivos' : 'Adjuntar archivos'} aria-expanded={showFiles} title="Adjuntar archivos" disabled={sending} onClick={() => setShowFiles(value => !value)}><Plus /></Button><Button type="submit" disabled={!ready || !message.trim() || sending}>{sending ? 'Guardando…' : 'Continuar'}<ArrowUp /></Button></div>
             </form>}
           </div>}
         </div>

@@ -9,13 +9,14 @@ import { ExportMenu } from './ExportMenu';
 import { StartResearch } from './StartResearch';
 import { SaveContact } from './SaveContact';
 
-export function ContactResults({ runId, events, onError, onAccessDenied, canResearch = false, onUseReport }: {
+export function ContactResults({ runId, events, onError, onAccessDenied, canResearch = false, onUseReport, onEnrichLead }: {
   runId: string;
   events: CoworkEvent[];
   onError: (message: string) => void;
   onAccessDenied: () => void;
   canResearch?: boolean;
   onUseReport?: (leadId: string) => void;
+  onEnrichLead?: (leadId: string, displayName: string) => void;
 }) {
   const [search, setSearch] = useState('');
   const observations = useMemo(() => events.filter(event => event.kind === 'tool.completed').map(event => event.payload), [events]);
@@ -49,7 +50,13 @@ export function ContactResults({ runId, events, onError, onAccessDenied, canRese
         <div className="min-w-0"><p className="break-words text-sm font-medium">{String(row.name || 'Nombre no disponible')}</p><p className="break-words text-xs text-muted-foreground">{row.id.startsWith('apollo-company:') ? String(row.industry || 'Sector no informado') : [row.title, row.company].filter(Boolean).join(' · ') || 'Cargo y empresa no disponibles'}</p></div>
         <div className="min-w-0 sm:text-right"><p className="break-all text-sm">{String(row.id.startsWith('apollo-company:') ? row.domain || 'Dominio no disponible' : row.email || 'Correo no disponible')}</p><p className="break-words text-xs text-muted-foreground">{String(row.location || '')}</p>{row.id.startsWith('apollo-company:') && <p className="text-xs text-muted-foreground">{row.employees == null ? 'Dotación no informada' : `${row.employees} empleados`}</p>}</div>
         {row.id.startsWith('apollo:') && <SaveContact runId={runId} providerId={row.id} onAccessDenied={onAccessDenied} onUseContact={id => onUseReport?.(id)} />}
-        {canResearch && !row.id.startsWith('apollo:') && !row.id.startsWith('apollo-company:') && <StartResearch runId={runId} leadId={row.id} onAccessDenied={onAccessDenied} onUseReport={() => onUseReport?.(row.id)} />}
+        {canResearch && !row.id.startsWith('apollo:') && !row.id.startsWith('apollo-company:') && <>
+          {!row.email && onEnrichLead && <div className="space-y-1 text-xs sm:col-span-2">
+            <button type="button" className="font-medium text-primary underline underline-offset-4 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onEnrichLead(row.id, String(row.name || 'este contacto'))}>Enriquecer contacto primero</button>
+            <p className="text-muted-foreground">Sin correo, la investigación rinde menos: primero el dato, después el informe.</p>
+          </div>}
+          <StartResearch runId={runId} leadId={row.id} onAccessDenied={onAccessDenied} onUseReport={() => onUseReport?.(row.id)} />
+        </>}
       </li>)}
     </ul>}
   </section>;

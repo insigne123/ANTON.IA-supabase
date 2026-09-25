@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 
 type Preview = {
-  patch: Record<string, unknown>; matches: boolean; fresh: boolean; label: string;
+  patch: Record<string, unknown>; current: Record<string, unknown> | null;
+  matches: boolean; fresh: boolean; label: string;
 };
 
 const LABELS: Record<string, string> = {
-  voice_examples: 'Ejemplos de voz',
+  voice_examples: 'Cómo suenan tus correos',
   prohibited_terms: 'Términos prohibidos',
   required_terms: 'Términos obligatorios',
   approved_claims: 'Afirmaciones aprobadas',
@@ -65,11 +66,13 @@ export function MessageContextReview({ runId, onApprove, onReject, resolving }: 
   if (error) return <p role="alert" className="text-sm">{error}</p>;
   if (!preview) return <p role="status" className="text-sm text-muted-foreground">Cargando cambio exacto del contexto…</p>;
   const entries = Object.entries(preview.patch || {});
+  const isEmpty = (value: unknown) => value == null || (Array.isArray(value) && value.length === 0) || value === '';
   return <div className="space-y-3">
-    <dl className="space-y-3 text-sm">
+    <dl className="space-y-4 text-sm">
       {entries.map(([key, value]) => <div key={key}>
         <dt className="text-xs uppercase tracking-wide text-muted-foreground">{LABELS[key] || key}</dt>
         <dd className="mt-1 text-foreground">{renderPatchValue(value)}</dd>
+        <p className="mt-1 text-xs text-muted-foreground">Actual: {preview.current && !isEmpty(preview.current[key]) ? renderPatchValue(preview.current[key]) : 'sin configurar'}</p>
       </div>)}
     </dl>
     <p className="text-xs text-muted-foreground">{!preview.matches || !preview.fresh
