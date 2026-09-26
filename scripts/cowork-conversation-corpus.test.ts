@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { CORPUS, LEAD } from './fixtures/cowork-conversation-corpus';
-import { MARKETING_CORPUS, MARKETING_LEAD } from './fixtures/cowork-marketing-corpus';
+import { MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { runCorpusCase, scoreCorpusCase, type CorpusDecider } from './fixtures/cowork-conversation-runner';
 
 const read = (action: string, query: string | null = null, extra: Record<string, unknown> = {}) =>
@@ -122,7 +122,32 @@ Object.assign(IDEAL, {
       null, chip('Sí, déjalo listo', 'Sí, deja listo el seguimiento para Marcela')),
 } satisfies Record<string, CorpusDecider>);
 
-const ALL_CASES = [...CORPUS, ...MARKETING_CORPUS];
+/** Home starters: what a good first turn looks like for each button. */
+Object.assign(IDEAL, {
+  'inicio-escribir': async context => context.observations.length === 0
+    ? parallel([{ action: 'leads.search', input: '' }, { action: 'contacted.search', input: '' }])
+    : answer('Iría a Felipe (Securitas), Rodrigo (Transportes Andes) y Camila (Adecco): tienen correo y aún no les escribes. Marcela ya recibió uno y Andrea no tiene correo.\n\nAsunto: Antecedentes laborales sin trámites manuales\nHola,\nEn Yago revisamos antecedentes laborales de postulantes en el Poder Judicial de forma automática con AXIS.\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Y.\nGerente Comercial, Yago SpA\n\n¿Creo la campaña pausada con este correo para los tres?',
+      null, chip('Sí, crea la campaña', 'Sí, crea la campaña pausada con este correo para Felipe, Rodrigo y Camila')),
+  'inicio-a-quien': async context => context.observations.length === 0
+    ? parallel([{ action: 'leads.search', input: '' }, { action: 'contacted.search', input: '' }])
+    : answer('Hoy le escribiría a Felipe (Securitas), Rodrigo (Transportes Andes) y Camila (Adecco): tienen correo y aún no les escribes. A Marcela le toca un seguimiento: no responde hace 6 días.\n¿Te preparo el correo para los tres?',
+      null, chip('Sí, prepáralo', 'Sí, prepara un correo sobre AXIS para Felipe, Rodrigo y Camila')),
+  'inicio-linkedin': async context => context.observations.length === 0
+    ? parallel([{ action: 'leads.search', input: '' }, { action: 'linkedin.quota', input: '' }])
+    : coworkDecisionSchema.parse({ action: 'linkedin.invite', query: null, leadId: MARKETING_LEAD.felipe,
+      answer: { reply: 'Tienes cupo esta semana (7 de 100 invitaciones). Parto por Felipe, Jefe de Reclutamiento en Securitas; después siguen Camila y Andrea. Rodrigo no tiene LinkedIn guardado.', document: null } }),
+  'inicio-mejorar': async () => answer('Así queda más concreto y fácil de responder:\n\nHola,\nEn Yago ayudamos a equipos de RR. HH. a revisar antecedentes laborales de postulantes en el Poder Judicial, sin trámites manuales, con AXIS.\n¿Te sirve que lo veamos 15 minutos esta semana?\nSaludos,\nNicolás Y.\n\nCambié «ayuda mucho» por lo que hace AXIS y cerré con una pregunta simple.\n¿Lo uso como primer correo de una campaña para tus contactos de RR. HH.?',
+    null, chip('Sí, úsalo', 'Sí, usa este correo como primer mensaje de una campaña para mis contactos de RR. HH.')),
+  'inicio-prospectos': async () => coworkDecisionSchema.parse({ action: 'prospecting.propose_search', query: null, leadId: null,
+    searchCriteria: { titles: ['Gerente de Recursos Humanos', 'Gerente de Personas', 'Jefe de Reclutamiento', 'HR Manager'], industries: [], locations: ['Chile'], limit: 10 },
+    answer: { reply: 'AXIS le sirve a quien revisa antecedentes de postulantes, así que busco 10 personas de RR. HH. y reclutamiento en Chile. Revisa los criterios y apruébalos.', document: null } }),
+  'inicio-como-voy': async context => context.observations.length === 0
+    ? parallel([{ action: 'metrics.rates', input: '' }, { action: 'campaigns.list', input: '' }])
+    : answer('Esta semana enviaste 1 correo (a Marcela, de Sodexo) y todavía no tiene respuesta. Aún no tienes campañas, así que no hay tasas que comparar.\n¿Armo tu primera campaña con Felipe, Rodrigo y Camila, que ya tienen correo?',
+      null, chip('Sí, ármala', 'Sí, arma mi primera campaña con Felipe, Rodrigo y Camila')),
+} satisfies Record<string, CorpusDecider>);
+
+const ALL_CASES = [...CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS];
 
 test('every corpus case has an ideal turn that passes all its checks through the real loop', async () => {
   assert.deepEqual(Object.keys(IDEAL).sort(), ALL_CASES.map(entry => entry.id).sort());

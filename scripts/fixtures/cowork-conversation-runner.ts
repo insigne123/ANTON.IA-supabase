@@ -54,7 +54,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider): P
       proposeNote: async () => { result.proposal = { kind: 'crm_note', label: 'Nota CRM' }; },
       proposeEffect: async proposal => {
         corpusStageEffect(proposal, entry.world?.savedEmails);
-        result.proposal = { kind: proposal.kind, label: proposal.label, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
+        result.proposal = { kind: proposal.kind, label: proposal.label, targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
           ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}) };
       },
     });

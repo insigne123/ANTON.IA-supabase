@@ -3,6 +3,7 @@
 // production). The account is small on purpose: 5 saved contacts, no campaigns
 // and one email sent. Names are fictional and complete: masked names made the
 // model guess surnames. No database, mailbox or provider is touched.
+import { coworkStarter } from '../../src/lib/cowork/starters';
 import { CORPUS_COMMON_CHECKS, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -192,4 +193,61 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       { label: 'redacta el seguimiento', test: r => /asunto/i.test(text(r)) || r.proposal?.kind === 'linkedin_message' || r.proposal?.kind === 'campaign_create' },
       { label: 'no reprocha el silencio ni anuncia cierre', test: r => !/no (?:me )?respondiste|última vez|ultimo mensaje|último mensaje|cierro (?:el|este) hilo/i.test(text(r)) },
       { label: 'firma con el nombre del perfil', test: r => r.proposal?.kind === 'linkedin_message' || /Nicol[aá]s/.test(text(r)) }] },
+];
+
+/** Contacts with an email who never received anything: Marcela already got one. */
+const NEVER_CONTACTED_EMAILS = ['fmunoz@securitas.cl', 'rpino@tandes.cl', 'cfuentes@adecco.cl'];
+const SAMPLE_EMAIL = 'Hola, les escribo de Yago. Tenemos AXIS, una solución para RRHH que ayuda mucho. Nos encantaría mostrarles una demo cuando puedan. Saludos.';
+/** Marcela may be named only as someone who already got an email. */
+const leavesMarcelaOut = (reply: string) => !/Marcela/.test(reply)
+  || /(?:exclu\w*|dej[ée] fuera|queda fuera|no incluy\w*)[^.\n]{0,20}Marcela|Marcela(?: Rojas)?[^.\n,]{0,40}(?:ya (?:le |recibi|tiene un)|contactad|envío registrado|enviad|queda fuera)/i.test(reply);
+
+/** Every button on the Cowork home (src/lib/cowork/starters.ts), sent as is: each must lead to a good first turn. */
+export const STARTER_CORPUS: CorpusCase[] = [
+  { id: 'inicio-escribir', title: 'Inicio: escribir a mis contactos', request: coworkStarter('escribir').prompt, world,
+    origin: 'Botón de inicio. El correo listo y firmado, solo para quienes tienen correo y nunca recibieron nada.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'revisa sus contactos y lo que ya envió', test: r => r.actions.includes('leads.search') && r.actions.some(action => ['contacted.search', 'contacted.timeline'].includes(action)) },
+      { label: 'muestra el correo o propone la campaña', test: r => r.proposal?.kind === 'campaign_create' || /asunto/i.test(text(r)) },
+      { label: 'solo para quienes nunca recibieron nada', test: r => campaign(r)
+        ? Boolean(campaign(r)?.emails?.length && campaign(r)!.emails!.every(email => NEVER_CONTACTED_EMAILS.includes(email)))
+        : leavesMarcelaOut(r.reply) },
+      { label: 'el correo va firmado con el nombre del perfil', test: r => Boolean(r.proposal) || /Nicol[aá]s/.test(text(r)) },
+      { label: 'sin datos de relleno entre corchetes', test: r => !PLACEHOLDER.test(text(r)) }] },
+  { id: 'inicio-a-quien', title: 'Inicio: a quién le escribo hoy', request: coworkStarter('a-quien').prompt, world,
+    origin: 'Botón de inicio. Nombres concretos con su motivo y el paso siguiente.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'nombra al menos dos contactos concretos', test: r => ['Marcela', 'Felipe', 'Andrea', 'Rodrigo', 'Camila'].filter(name => text(r).includes(name)).length >= 2 },
+      { label: 'no recomienda escribirle a Andrea por correo (no tiene)', test: r => !/andrea[^.\n]*(?:correo|email)[^.\n]*(?:escrib|envi|mand)/i.test(r.reply) || /sin correo|no tiene correo/i.test(r.reply) }] },
+  { id: 'inicio-linkedin', title: 'Inicio: invitar por LinkedIn', request: coworkStarter('linkedin').prompt, world,
+    origin: 'Botón de inicio. Revisar el cupo y elegir entre quienes tienen perfil de LinkedIn guardado.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'revisa el cupo de LinkedIn', test: r => r.actions.includes('linkedin.quota') },
+      { label: 'propone la invitación o nombra a quién invitar', test: r => r.proposal?.kind === 'linkedin_invite'
+        || ['Marcela', 'Felipe', 'Andrea', 'Camila'].some(name => r.reply.includes(name)) },
+      { label: 'no propone invitar a Rodrigo (no tiene LinkedIn)', test: r => r.proposal?.targetId !== MARKETING_LEAD.rodrigo
+        && !/invit\w*[^.\n?]*Rodrigo/i.test(lastLine(r.reply)) }] },
+  { id: 'inicio-mejorar', title: 'Inicio: mejorar un correo', world,
+    request: coworkStarter('mejorar').prompt.replace(/\[[^\]]+\]/, `"${SAMPLE_EMAIL}"`),
+    origin: 'Plantilla de inicio: la persona pega su correo en el lugar marcado. La versión nueva va concreta y firmada.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'entrega la versión mejorada', test: r => /hola/i.test(rewrittenEmail(r)) && text(r).length > 150 },
+      { label: 'lo concreta con la oferta real (antecedentes)', test: r => /antecedentes|poder judicial|pjud/i.test(rewrittenEmail(r)) },
+      { label: 'firma con el nombre del perfil', test: r => /Nicol[aá]s/.test(text(r)) },
+      { label: 'sin datos de relleno entre corchetes', test: r => !PLACEHOLDER.test(text(r)) }] },
+  { id: 'inicio-prospectos', title: 'Inicio: buscar prospectos nuevos', request: coworkStarter('prospectos').prompt, world,
+    origin: 'Botón de inicio sin cargos ni rubro: los criterios salen de la oferta del usuario.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'propone la búsqueda', test: r => Boolean(r.search) },
+      { label: 'respeta el tamaño pedido (10)', test: r => !r.search || Number(r.search.limit) === 10 },
+      { label: 'apunta a quien compra la oferta (RR. HH.)', test: r => !r.search
+        || ((r.search.titles as string[] | undefined) || []).some(title => PEOPLE_TEAMS.test(title)) },
+      { label: 'busca en Chile', test: r => !r.search
+        || [...((r.search.locations as string[] | undefined) || []), ...((r.search.companyLocations as string[] | undefined) || [])].some(place => /chile|santiago/i.test(place)) },
+      { label: 'no pregunta qué vende el usuario', test: r => !/qué (?:producto|servicio|vendes|ofreces)/i.test(text(r)) }] },
+  { id: 'inicio-como-voy', title: 'Inicio: cómo voy', request: coworkStarter('como-voy').prompt, world,
+    origin: 'Botón de inicio con una cuenta que recién empieza: los números reales, aunque sean chicos, y el paso que los mueve.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'consulta resultados', test: r => r.actions.some(action => action.startsWith('metrics.') || ['campaigns.list', 'contacted.search'].includes(action)) },
+      { label: 'da los números (1 correo enviado)', test: r => /\b1\b|\bun (?:solo )?(?:correo|envío)|\buna? sola?\b/i.test(r.reply) }] },
 ];

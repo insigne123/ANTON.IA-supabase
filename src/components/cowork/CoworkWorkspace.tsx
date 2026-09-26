@@ -550,7 +550,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const quotaNote = searchQuota ? `Búsquedas externas hoy: ${searchQuota.remaining} de ${searchQuota.limit}` : '';
 
   const homeComposer = <CoworkComposer ref={composer} id="cowork-message" size="large" value={message} onChange={setMessage} onSubmit={() => void submit()}
-    placeholder="Describe lo que necesitas. Por ejemplo: «prioriza mis respuestas pendientes de hoy»"
+    placeholder="Describe lo que necesitas. Por ejemplo: «escríbele a mis contactos que aún no contacto»"
     ready={ready} sending={sending} submitLabel="Crear trabajo" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
     footnote={quotaNote || undefined} />;
 

@@ -13,11 +13,12 @@ import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { coworkModelUsage } from '../src/lib/server/cowork/model-usage';
 import { coworkAnswerIssues } from '../src/lib/cowork/answer-quality';
 import { CORPUS as PRODUCTION_CORPUS } from './fixtures/cowork-conversation-corpus';
-import { MARKETING_CORPUS } from './fixtures/cowork-marketing-corpus';
+import { MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { corpusInstructions, runCorpusCase, type CorpusOutcome } from './fixtures/cowork-conversation-runner';
 
-// Production conversations first, then the marketing use cases (email and LinkedIn).
-const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS];
+// Production conversations first, then the marketing use cases (email and LinkedIn)
+// and every button on the Cowork home.
+const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS];
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {
