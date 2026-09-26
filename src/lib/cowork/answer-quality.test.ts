@@ -60,6 +60,12 @@ test('quick replies keep short plain chips and drop malformed ones one by one', 
     { label: 'Sincronizar LinkedIn', message: 'Voy a sincronizar mi LinkedIn' },
     { label: 'Ya lo guardé', message: 'Ya lo guardé, crea la campaña' },
   ]), [{ label: 'Ya lo guardé', message: 'Ya lo guardé, crea la campaña' }]);
+  // Seen with the real model: the chip waits for a time or a recipient the person has not given.
+  assert.deepEqual(coworkSuggestions([
+    { label: 'Cambiar horario', message: 'Prepara una invitación para Carlos de Minera Centinela y te indicaré otro horario.' },
+    { label: 'Adaptarlo al destinatario', message: 'Sí, adapta este correo para un destinatario específico que te indicaré.' },
+    { label: 'Preparar invitación', message: 'Sí, prepara la invitación para el martes 29 a las 10:00' },
+  ]), [{ label: 'Preparar invitación', message: 'Sí, prepara la invitación para el martes 29 a las 10:00' }]);
 });
 
 test('polishing an answer keeps its clean quick replies, or null when none survive', () => {

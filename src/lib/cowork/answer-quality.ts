@@ -22,6 +22,11 @@ export function polishCoworkText(text: string): string {
     .replace(ID_IN_PARENS, ''));
 }
 
+/** A quick reply that leaves something for later («Sí, cuando lo guarde…»,
+ * «…y te indicaré otro horario», «Voy a sincronizar») cannot be done on click.
+ * Shared with the evaluation corpus. */
+export const COWORK_DEFERRAL = /(?<!\p{L})(?:voy a|te indicar[ée]|te aviso|lo pienso|d[ée]jame pensar|m[áa]s tarde|despu[ée]s lo|luego lo)(?!\p{L})|^s[íi],? cuando(?!\p{L})/iu;
+
 /** Quick replies that are safe to show as buttons: plain text, no IDs or
  * internal codes, a short label and a self-contained message. Malformed chips
  * are dropped one by one; nothing here rewrites what a chip means. */
@@ -38,9 +43,9 @@ export function coworkSuggestions(value: unknown): CoworkSuggestion[] {
     const label = clean(raw.label).replace(/[.;:,]+$/, '');
     const message = clean(raw.message) || label;
     if (label.length < 2 || label.length > COWORK_SUGGESTION_LIMITS.label || message.length > COWORK_SUGGESTION_LIMITS.message) continue;
-    // A message ending in «:» waits for text the person has to add, and «Sí, cuando…» or
-    // «Voy a…» announce something they will do later: none can be sent as is.
-    if (UUID.test(label) || UUID.test(message) || /:$/.test(message) || /^(?:s[íi],? cuando|voy a)(?!\p{L})/iu.test(message)) continue;
+    // A message ending in «:» waits for text the person has to add, and a deferral leaves
+    // something for later: none can be sent as is.
+    if (UUID.test(label) || UUID.test(message) || /:$/.test(message) || COWORK_DEFERRAL.test(message)) continue;
     const key = label.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
