@@ -1,11 +1,12 @@
 # Proyecto
 
-La direccion visual por defecto de esta app es Apple-like: claridad, foco, superficies silenciosas y motion sutil.
+La direccion visual de esta app es la que resulte mas intuitiva y util para el objetivo del usuario (prospeccion, correo y LinkedIn), con la paleta de colores actual. Ya no se sigue el estilo Apple-like como restriccion.
 
 ## UI y UX
 
-- Prioriza una accion principal por superficie.
-- Reduce densidad antes de agregar mas cards, badges o texto.
+- Disena para que el usuario entienda y actue rapido: jerarquia clara, la accion principal destacada y las acciones utiles visibles donde se necesitan.
+- Usa tablas, tarjetas, graficos o acciones cuando acerquen al usuario a su objetivo; elimina lo decorativo o lo que no aporte lectura, decision o accion.
+- Mantiene la paleta actual: tokens existentes (incluidos los `cw-*` de Cowork) y sus pares light y dark. No agregues colores fuera de la paleta.
 - Reutiliza primero `src/components/ui/*`, tokens y patrones existentes.
 - Mantiene light y dark con la misma jerarquia y el mismo nivel de claridad.
 - Antes de cerrar una pantalla revisa responsive, focus states, loading states, empty states y contraste.
@@ -44,15 +45,13 @@ La direccion visual por defecto de esta app es Apple-like: claridad, foco, super
 - Las pruebas usan `.env.test.local`; jamas `.env.local` en una suite ni credenciales en el repo.
 - El deploy a produccion y el rollback los ejecuta el mantenedor. Punto de retorno: ultimo tag `prod-*`.
 
-## Limites del estilo Apple-like
+## Referencias externas
 
-- Inspira decisiones en Apple HIG, pero no copies branding, iconografia, tipografias propietarias ni assets de Apple.
-- En web, busca una sensacion de system UI y simplicidad, no una imitacion literal.
+- Puedes inspirarte en productos de referencia (Claude, LibreChat, LobeHub, herramientas de marketing), pero no copies branding, iconografia, tipografias propietarias ni assets de terceros.
 
 ## Fuentes del repo
 
 - `docs/ui-ux/README.md`
-- `docs/ui-ux/apple-inspired-methodology.md`
 - `docs/ui-ux/visual-system.md`
 - `docs/ui-ux/reference-workflow.md`
 - `docs/ui-ux/release-audit-checklist.md`
