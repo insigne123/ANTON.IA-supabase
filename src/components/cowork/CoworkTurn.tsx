@@ -4,13 +4,16 @@ import { useState } from 'react';
 import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, Library, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
-  coworkDisplayMessage, coworkFileSize, coworkLiveActivity, coworkProposalView, coworkTurnArtifacts, coworkTurnNote, coworkTurnOutput,
-  isCoworkActive, type CoworkArtifact,
+  coworkDisplayMessage, coworkFileSize, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
+  coworkTurnSuggestions, isCoworkActive, type CoworkArtifact,
 } from '@/lib/cowork/presentation';
+import { coworkReplyBody, type CoworkSuggestion } from '@/lib/cowork/contracts';
 import { markdownExcerpt } from '@/lib/cowork/markdown';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
+import { coworkBlockMeta } from '@/lib/cowork/blocks';
 import { cn } from '@/lib/utils';
 import { CoworkActivity } from './CoworkActivity';
+import { BlockCard, CoworkBlockIcon, MetricsBlock } from './CoworkBlocks';
 import { CoworkApproval } from './CoworkApproval';
 import { CoworkMarkdown } from './CoworkMarkdown';
 import { coworkArtifactUrls } from './ArtifactPreview';
@@ -18,12 +21,14 @@ import { CoworkMark, CwButton } from './ui';
 
 export type CoworkTurnData = { run: CoworkRun; events: CoworkEvent[] };
 
-export function CoworkArtifactIcon({ artifact, className }: { artifact: Pick<CoworkArtifact, 'kind'>; className?: string }) {
+export function CoworkArtifactIcon({ artifact, className }: { artifact: CoworkArtifact; className?: string }) {
+  if (artifact.kind === 'block') return <CoworkBlockIcon block={artifact.block} className={className} />;
   const Icon = artifact.kind === 'document' ? FileText : artifact.kind === 'contacts' ? Table2 : artifact.kind === 'sources' ? Library : FileText;
   return <Icon className={className} aria-hidden="true" />;
 }
 
 export function coworkArtifactMeta(artifact: CoworkArtifact) {
+  if (artifact.kind === 'block') return coworkBlockMeta(artifact.block);
   if (artifact.kind === 'document') return 'Documento';
   if (artifact.kind === 'contacts') return `Tabla · ${artifact.count} ${artifact.companies ? (artifact.count === 1 ? 'empresa' : 'empresas') : (artifact.count === 1 ? 'contacto' : 'contactos')}`;
   if (artifact.kind === 'sources') return `${artifact.count} fuente${artifact.count === 1 ? '' : 's'}`;
@@ -69,6 +74,29 @@ function ContactChips({ artifact, events, active, onOpen }: { artifact: CoworkAr
   </div>;
 }
 
+/** Quick replies under the latest answer: one click sends the message. The
+ * first answers the closing question, so it carries the accent. */
+function SuggestedReplies({ suggestions, live, onSelect }: { suggestions: CoworkSuggestion[]; live: boolean; onSelect: (message: string) => void }) {
+  return <div role="group" aria-label="Respuestas sugeridas" className={cn('flex flex-wrap gap-2', live && 'cw-rise')}>
+    {suggestions.map((chip, index) => <button key={chip.label} type="button" onClick={() => onSelect(chip.message)} title={chip.message}
+      aria-label={chip.message === chip.label ? chip.label : `${chip.label}: ${chip.message}`}
+      className={cn('inline-flex max-w-full items-center rounded-full border px-3.5 py-2 text-[13.5px] leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]',
+        index === 0
+          ? 'border-transparent bg-cw-accent-soft font-medium text-cw-accent hover:border-cw-accent'
+          : 'border-cw-border bg-cw-elevated text-cw-text shadow-[var(--cw-shadow-sm)] hover:border-cw-border-strong hover:bg-cw-panel')}>
+      <span className="truncate">{chip.label}</span>
+    </button>)}
+  </div>;
+}
+
+/** The next step Cowork offers, after the answer and its results. */
+function NextStep({ question, live }: { question: string; live: boolean }) {
+  return <p className={cn('flex items-start gap-2 text-[15px] font-medium leading-6 text-cw-text', live && 'cw-rise')}>
+    <CornerDownRight className="mt-1 h-4 w-4 shrink-0 text-cw-accent" aria-hidden="true" />
+    <span className="min-w-0">{question}</span>
+  </p>;
+}
+
 function CopyReply({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return <CwButton size="icon-sm" variant="ghost" className="h-7 w-7" aria-label={copied ? 'Respuesta copiada' : 'Copiar respuesta'} title="Copiar"
@@ -80,7 +108,7 @@ function CopyReply({ text }: { text: string }) {
 }
 
 /** One conversational turn: the request, what was consulted, the reply, results and any decision. */
-export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, budgetExhausted, live = false }: {
+export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false }: {
   turn: CoworkTurnData;
   latest: boolean;
   /** The turn finished while you were watching: reveal the answer gently. */
@@ -90,6 +118,8 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   onOpenArtifact: (artifact: CoworkArtifact, opener: HTMLElement) => void;
   onResolve: (approve: boolean) => void;
   onRetry: (() => void) | null;
+  /** Sends a quick reply as your next message; null when you cannot send now. */
+  onSuggestion?: ((message: string) => void) | null;
   budgetExhausted: boolean;
 }) {
   const { run, events } = turn;
@@ -97,17 +127,26 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   const output = coworkTurnOutput(events);
   const proposal = coworkProposalView(run, events);
   const artifacts = coworkTurnArtifacts(run, events);
+  // Emails, sequences and tables read as rich cards; figures stay inline.
+  const blockCards = artifacts.flatMap(artifact => artifact.kind === 'block' ? [artifact] : []);
+  const otherArtifacts = artifacts.filter(artifact => artifact.kind !== 'block');
+  const metrics = coworkTurnBlocks(events).flatMap(block => block.type === 'metrics' ? [block] : []);
   const failure = events.slice().reverse().find(event => event.kind === 'run.failed')?.payload;
   const startedAt = events.find(event => event.kind === 'run.started')?.created_at || run.created_at;
   const waitingDecision = proposal?.state === 'pending';
   const working = active && !waitingDecision;
   // The discard confirmation is already shown by the resolved approval row.
   const reply = output?.reply && !(proposal?.state === 'discarded' && /descartad[ao]/i.test(output.reply)) ? output.reply : '';
+  // The closing question reads apart, right above the quick replies that answer it.
+  const question = reply && !proposal ? output?.question ?? null : null;
+  const body = question ? coworkReplyBody(reply, question) : reply;
   // The assistant's explanation of its proposal reads before the card; the
   // outcome of the approved action reads after it.
   const note = proposal ? coworkTurnNote(events) : null;
+  // Only the conversation's current answer offers quick replies.
+  const suggestions = latest && onSuggestion && run.status === 'completed' && !proposal ? coworkTurnSuggestions(events) : [];
   const replyBlock = reply ? <div className={cn('group/reply', live && 'cw-rise')}>
-    <CoworkMarkdown text={reply} />
+    {body && <CoworkMarkdown text={body} />}
     {!active && <div className="-ml-1.5 mt-1 flex opacity-100 transition-opacity sm:opacity-0 sm:group-hover/reply:opacity-100 sm:focus-within:opacity-100"><CopyReply text={reply} /></div>}
   </div> : null;
 
@@ -121,14 +160,18 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
     <div className="flex gap-3">
       <CoworkMark working={working} size={26} className="mt-0.5 hidden sm:inline-flex" />
       <div className="min-w-0 flex-1 space-y-3.5">
-        <CoworkActivity events={events} active={working} liveLabel={coworkLiveActivity(run, events)} startedAt={startedAt} />
+        <CoworkActivity events={events} active={working} liveLabel={coworkLiveActivity(run, events)} startedAt={startedAt} plan={coworkPlanProgress(run, events)} />
         {note && <div className={cn(live && 'cw-rise')}><CoworkMarkdown text={note} /></div>}
         {!proposal && replyBlock}
-        {artifacts.length > 0 && <div className="grid gap-2">
-          {artifacts.map(artifact => artifact.kind === 'contacts' && !artifact.external && artifact.count <= 2
+        {!proposal && metrics.map((block, index) => <MetricsBlock key={`metrics-${index}`} block={block} live={live} />)}
+        {blockCards.map(artifact => <BlockCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} live={live} />)}
+        {otherArtifacts.length > 0 && <div className="grid gap-2">
+          {otherArtifacts.map(artifact => artifact.kind === 'contacts' && !artifact.external && artifact.count <= 2
             ? <ContactChips key={artifact.id} artifact={artifact} events={events} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />
             : <ArtifactCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />)}
         </div>}
+        {question && <NextStep question={question} live={live} />}
+        {suggestions.length > 0 && onSuggestion && <SuggestedReplies suggestions={suggestions} live={live} onSelect={onSuggestion} />}
         {proposal && <CoworkApproval run={run} proposal={proposal} resolving={resolving} interactive={latest} onResolve={onResolve} />}
         {proposal && replyBlock}
         {run.status === 'failed' && <div role="alert" className="flex flex-wrap items-start gap-3 rounded-2xl bg-cw-danger-soft px-4 py-3 text-[13.5px] text-cw-danger">
