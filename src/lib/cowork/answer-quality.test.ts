@@ -55,6 +55,7 @@ test('quick replies keep short plain chips and drop malformed ones one by one', 
     [{ label: 'Buscar correos', message: 'Busca los correos de Carlos Ah***a y Nehal Pa***a' }]);
   assert.deepEqual(coworkSuggestions([{ label: 'Ver ficha 00000000-0000-4000-8000-000000000022', message: 'Ver ficha' }]), []);
   assert.deepEqual(coworkSuggestions([{ label: 'Ya lo guardé', message: 'Ya lo guardé; estos son los textos:' }]), []);
+  assert.deepEqual(coworkSuggestions([{ label: 'Sí, te cuento', message: 'AXIS ayuda a [describe qué resuelve]. Prepara los correos' }]), []);
   assert.deepEqual(coworkSuggestions([
     { label: 'Sí, después', message: 'Sí, cuando guarde el contacto, prepara la campaña' },
     { label: 'Sincronizar LinkedIn', message: 'Voy a sincronizar mi LinkedIn' },

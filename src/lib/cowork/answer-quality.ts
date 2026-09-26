@@ -38,9 +38,10 @@ export function coworkSuggestions(value: unknown): CoworkSuggestion[] {
     const label = clean(raw.label).replace(/[.;:,]+$/, '');
     const message = clean(raw.message) || label;
     if (label.length < 2 || label.length > COWORK_SUGGESTION_LIMITS.label || message.length > COWORK_SUGGESTION_LIMITS.message) continue;
-    // A message ending in «:» waits for text the person has to add, and «Sí, cuando…» or
-    // «Voy a…» announce something they will do later: none can be sent as is.
-    if (UUID.test(label) || UUID.test(message) || /:$/.test(message) || /^(?:s[íi],? cuando|voy a)(?!\p{L})/iu.test(message)) continue;
+    // A message ending in «:» or holding a [placeholder] waits for text the person has to add, and
+    // «Sí, cuando…» or «Voy a…» announce something they will do later: none can be sent as is.
+    if (UUID.test(label) || UUID.test(message) || /:$/.test(message) || /\[[^\]]{2,}\]/.test(`${label} ${message}`)
+      || /^(?:s[íi],? cuando|voy a)(?!\p{L})/iu.test(message)) continue;
     const key = label.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);

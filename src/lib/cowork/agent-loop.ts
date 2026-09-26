@@ -309,13 +309,51 @@ const DOCUMENT_WITH_PROPOSAL = 'Entregaste un documento junto con una propuesta 
  * its last decision: after that the answer stands as it is. */
 const CLOSING_FEEDBACK = 'Cierre incompleto:';
 
-function closingFeedback(answer: { reply: string; suggestions?: unknown }): string | null {
+function closingFeedback(answer: { reply: string; document: { title: string } | null; suggestions?: unknown }): string | null {
   const lines = answer.reply.split('\n').filter(line => line.trim());
+  const chips = coworkSuggestions(answer.suggestions).length;
   const missing = [
     /[?¿]/.test(lines[lines.length - 1] || '') ? null : 'termina reply con la pregunta del siguiente paso (regla 4)',
-    coworkSuggestions(answer.suggestions).length ? null : 'agrega 1 a 3 respuestas sugeridas que se envíen tal cual al tocarlas (regla 9)',
+    chips ? null : 'agrega 1 a 3 respuestas sugeridas que se envíen tal cual al tocarlas (regla 9)',
+    // Two or more emails are meant to be copied and kept: they go in the document, not in the chat.
+    !answer.document && (answer.reply.match(/asunto\s*\d*\s*[:：]/gi) || []).length >= 2
+      ? 'pon los correos en document (un ## por correo con «Asunto:») y deja en reply un resumen breve' : null,
   ].filter(Boolean);
-  return missing.length ? `${CLOSING_FEEDBACK} ${missing.join(' y ')}.` : null;
+  if (!missing.length) return null;
+  // The model does not see its previous answer: name what already worked so the retry keeps it.
+  const keep = [answer.document ? `el document «${answer.document.title.slice(0, 80)}»` : null,
+    chips ? 'las respuestas sugeridas' : null].filter(Boolean);
+  return `${CLOSING_FEEDBACK} ${missing.join(' y ')}. Entrega de nuevo la respuesta completa${keep.length ? `, conservando ${keep.join(' y ')}` : ''}.`;
+}
+
+type CoworkAnswer = z.infer<typeof coworkDocumentSchema>;
+
+/** When the model proposes a search without explaining it, the card still gets a
+ * sentence built from the criteria, never a blank next to the approval. */
+function searchNote(criteria: CoworkSearchCriteria): string {
+  const titles = (criteria.titles || []).slice(0, 3);
+  const places = [...(criteria.locations || []), ...(criteria.companyLocations || [])].slice(0, 2);
+  const industries = (criteria.industries || []).slice(0, 2);
+  const list = (items: string[], last: string) => items.length > 1 ? `${items.slice(0, -1).join(', ')} ${last} ${items[items.length - 1]}` : items[0];
+  return [
+    `Propongo buscar hasta ${criteria.limit || 25} ${criteria.target === 'companies' ? 'empresas' : 'personas'}`,
+    titles.length ? ` con cargos como ${list(titles, 'o')}` : '',
+    industries.length ? `, del rubro ${list(industries, 'y')}` : '',
+    places.length ? `, en ${list(places, 'y')}` : '',
+    '. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.',
+  ].join('');
+}
+
+/** The retry only has to fix the closing. Quick replies or a document the first
+ * answer had and the retry dropped come back, unless the retry now carries the
+ * emails in the chat itself (then that document would repeat them). */
+function completeFrom(first: CoworkAnswer, retry: CoworkAnswer): CoworkAnswer {
+  const emailsInChat = (retry.reply.match(/asunto\s*\d*\s*[:：]/gi) || []).length >= 2;
+  return {
+    ...retry,
+    document: retry.document ?? (emailsInChat ? null : first.document),
+    suggestions: coworkSuggestions(retry.suggestions).length ? retry.suggestions : first.suggestions ?? null,
+  };
 }
 
 /** The same email lookup already ran in this thread (history.actions): it would
@@ -379,22 +417,27 @@ export async function runCoworkReadLoop(input: {
   const rejections: CoworkRejection[] = [];
   // The model's own explanation travels with the approval card instead of a
   // canned line; it is persisted as a note event, never as a data read.
-  const explain = async (decision: Decision) => {
-    const reply = polishCoworkText(decision.answer?.reply || '').trim();
+  const recordNote = async (text: string) => {
+    const reply = polishCoworkText(text).trim();
     if (!reply) return null;
     await input.authorize();
     input.signal.throwIfAborted();
     await input.record({ action: COWORK_NOTE_ACTION, input: '', result: { reply } });
     return reply;
   };
+  const explain = (decision: Decision) => recordNote(decision.answer?.reply || '');
+  // The answer that got the closing correction. From then on the loop never ends
+  // worse than that answer: no more reads, and a failed retry returns it.
+  let closingFallback: CoworkAnswer | null = null;
   for (let turn = 0; turn < 4; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
     let decision: Decision;
     try {
-      decision = coworkDecisionSchema.parse(await input.decide(observations, turn === 3 || readsUsed >= 3, rejections.slice()));
+      decision = coworkDecisionSchema.parse(await input.decide(observations, turn === 3 || readsUsed >= 3 || closingFallback !== null, rejections.slice()));
     } catch (error) {
       const reason = invalidDecisionReason(error);
+      if (closingFallback && !input.signal.aborted) return closingFallback;
       if (reason === null || turn === 3 || input.signal.aborted) throw error;
       rejections.push({ action: 'decision', reason });
       continue;
@@ -403,10 +446,17 @@ export async function runCoworkReadLoop(input: {
     try {
       if (decision.action === 'answer') {
         if (!decision.answer) throw rejected('Missing final answer', 'Elegiste answer sin contenido: entrega answer.reply con la respuesta completa.');
-        const closing = turn < 3 && !rejections.some(item => item.reason.startsWith(CLOSING_FEEDBACK)) ? closingFeedback(decision.answer) : null;
-        if (closing) throw rejected('Answer without its closing', closing);
+        if (closingFallback) return completeFrom(closingFallback, decision.answer);
+        const closing = turn < 3 ? closingFeedback(decision.answer) : null;
+        if (closing) {
+          // Asked directly, not thrown: the catch below returns closingFallback once it is set.
+          closingFallback = decision.answer;
+          rejections.push({ action: 'answer', reason: closing });
+          continue;
+        }
         return decision.answer;
       }
+      if (decision.action === 'specialists.review' && closingFallback) return closingFallback;
       if (decision.action === 'specialists.review') {
         if (reviewed || turn === 3 || !input.review || !decision.specialists || !observations.length) {
           throw rejected('Specialist review unavailable or budget exhausted', 'La revisión de especialistas no está disponible ahora: continúa con lecturas o responde.');
@@ -428,7 +478,7 @@ export async function runCoworkReadLoop(input: {
         const parsed = coworkSearchCriteriaSchema.safeParse(decision.searchCriteria);
         if (!parsed.success) throw rejected('Invalid external search proposal', `Criterios de búsqueda inválidos: ${issueSummary(parsed.error)}. Corrígelos.`);
         if (decision.answer?.document && turn < 3) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
-        const note = await explain(decision);
+        const note = await explain(decision) ?? await recordNote(searchNote(parsed.data));
         await input.authorize(); input.signal.throwIfAborted();
         try { await input.proposeSearch(parsed.data); } catch (error) { throw proposalRejection(error, input.signal); }
         return { reply: note || (decision.searchCriteria.target === 'companies'
@@ -567,6 +617,8 @@ export async function runCoworkReadLoop(input: {
         } catch (error) { throw proposalRejection(error, input.signal); }
         return { reply: note || 'Revisa la propuesta antes de ejecutar el cambio.', document: null };
       }
+      // Only reads remain below: after a closing correction the first answer stands instead.
+      if (closingFallback) return closingFallback;
       if (turn === 3) throw new Error('Cowork tool budget exhausted');
       if (decision.action === 'reads.plan') {
         if (!decision.plan || readsUsed + decision.plan.length > 3) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed));
@@ -645,6 +697,7 @@ export async function runCoworkReadLoop(input: {
       observations.push(observation);
     } catch (error) {
       // Correctable refusals go back to the model; the last decision must stand on its own.
+      if (closingFallback && error instanceof CoworkDecisionRejected && !input.signal.aborted) return closingFallback;
       if (!(error instanceof CoworkDecisionRejected) || turn === 3 || input.signal.aborted) throw error;
       rejections.push({ action: decision.action, reason: error.feedback });
     }
