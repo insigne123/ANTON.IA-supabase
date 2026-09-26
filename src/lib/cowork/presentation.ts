@@ -1,5 +1,5 @@
 import { collectCoworkLeadRows } from './lead-export';
-import { coworkDocumentSchema, coworkStoredSuggestions, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText } from './contracts';
+import { coworkDocumentSchema, coworkStoredQuestion, coworkStoredSuggestions, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText } from './contracts';
 
 /**
  * Pure presentation helpers for the Cowork workspace. Everything here derives
@@ -216,7 +216,7 @@ export function coworkExpectsContinuation(events: CoworkEvent[]): boolean {
     && before.some(event => event.kind === 'tool.completed' && event.payload?.action === 'prospecting.search');
 }
 
-export type CoworkTurnOutput = { reply: string; document: { title: string; content: string } | null };
+export type CoworkTurnOutput = { reply: string; document: { title: string; content: string } | null; question: string | null };
 
 /** Data reads of a turn: tool events other than the assistant's own note. */
 export function coworkReadEvents(events: CoworkEvent[]): CoworkEvent[] {
@@ -236,7 +236,8 @@ export function coworkTurnNote(events: CoworkEvent[]): string | null {
 export function coworkTurnOutput(events: CoworkEvent[]): CoworkTurnOutput | null {
   const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
   const parsed = coworkDocumentSchema.safeParse(completed ? { reply: completed.reply, document: completed.document } : null);
-  return parsed.success ? parsed.data : null;
+  // Turns saved before the question traveled apart keep it inside the reply.
+  return parsed.success ? { reply: parsed.data.reply, document: parsed.data.document, question: coworkStoredQuestion(completed?.question) } : null;
 }
 
 /** Quick replies of a finished answer; turns saved before they existed have none. */

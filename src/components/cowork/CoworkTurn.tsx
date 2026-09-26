@@ -7,7 +7,7 @@ import {
   coworkDisplayMessage, coworkFileSize, coworkLiveActivity, coworkProposalView, coworkTurnArtifacts, coworkTurnNote, coworkTurnOutput,
   coworkTurnSuggestions, isCoworkActive, type CoworkArtifact,
 } from '@/lib/cowork/presentation';
-import type { CoworkSuggestion } from '@/lib/cowork/contracts';
+import { coworkReplyBody, type CoworkSuggestion } from '@/lib/cowork/contracts';
 import { markdownExcerpt } from '@/lib/cowork/markdown';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { cn } from '@/lib/utils';
@@ -85,6 +85,14 @@ function SuggestedReplies({ suggestions, live, onSelect }: { suggestions: Cowork
   </div>;
 }
 
+/** The next step Cowork offers, after the answer and its results. */
+function NextStep({ question, live }: { question: string; live: boolean }) {
+  return <p className={cn('flex items-start gap-2 text-[15px] font-medium leading-6 text-cw-text', live && 'cw-rise')}>
+    <CornerDownRight className="mt-1 h-4 w-4 shrink-0 text-cw-accent" aria-hidden="true" />
+    <span className="min-w-0">{question}</span>
+  </p>;
+}
+
 function CopyReply({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return <CwButton size="icon-sm" variant="ghost" className="h-7 w-7" aria-label={copied ? 'Respuesta copiada' : 'Copiar respuesta'} title="Copiar"
@@ -121,13 +129,16 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   const working = active && !waitingDecision;
   // The discard confirmation is already shown by the resolved approval row.
   const reply = output?.reply && !(proposal?.state === 'discarded' && /descartad[ao]/i.test(output.reply)) ? output.reply : '';
+  // The closing question reads apart, right above the quick replies that answer it.
+  const question = reply && !proposal ? output?.question ?? null : null;
+  const body = question ? coworkReplyBody(reply, question) : reply;
   // The assistant's explanation of its proposal reads before the card; the
   // outcome of the approved action reads after it.
   const note = proposal ? coworkTurnNote(events) : null;
   // Only the conversation's current answer offers quick replies.
   const suggestions = latest && onSuggestion && run.status === 'completed' && !proposal ? coworkTurnSuggestions(events) : [];
   const replyBlock = reply ? <div className={cn('group/reply', live && 'cw-rise')}>
-    <CoworkMarkdown text={reply} />
+    {body && <CoworkMarkdown text={body} />}
     {!active && <div className="-ml-1.5 mt-1 flex opacity-100 transition-opacity sm:opacity-0 sm:group-hover/reply:opacity-100 sm:focus-within:opacity-100"><CopyReply text={reply} /></div>}
   </div> : null;
 
@@ -149,6 +160,7 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
             ? <ContactChips key={artifact.id} artifact={artifact} events={events} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />
             : <ArtifactCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />)}
         </div>}
+        {question && <NextStep question={question} live={live} />}
         {suggestions.length > 0 && onSuggestion && <SuggestedReplies suggestions={suggestions} live={live} onSelect={onSuggestion} />}
         {proposal && <CoworkApproval run={run} proposal={proposal} resolving={resolving} interactive={latest} onResolve={onResolve} />}
         {proposal && replyBlock}

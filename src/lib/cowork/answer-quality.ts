@@ -1,4 +1,4 @@
-import { COWORK_SUGGESTION_LIMITS, type CoworkSuggestion } from './contracts';
+import { COWORK_SUGGESTION_LIMITS, coworkSameLine, type CoworkSuggestion } from './contracts';
 import { COWORK_GLOSSARY } from './decision-context';
 
 /** Deterministic last pass over what the person reads. The prompt asks for
@@ -56,15 +56,56 @@ export function coworkSuggestions(value: unknown): CoworkSuggestion[] {
   return kept;
 }
 
-export function polishCoworkAnswer<T extends { reply: string; document: { title: string; content: string } | null; suggestions?: unknown }>(
+/** The closing question on the next step as one plain sentence, or null.
+ * Wrapping formatting goes; a missing opening «¿» is added. */
+export function coworkQuestion(value: unknown): string | null {
+  const text = polishCoworkText(String(value ?? '')).replace(/\s+/g, ' ').trim().replace(/^(?:\*\*)(.+)(?:\*\*)$/, '$1').trim();
+  if (text.length < 4 || text.length > 300 || UUID.test(text) || !/\?$/.test(text) || /\[[^\]]{2,}\]/.test(text)) return null;
+  return text.includes('¿') ? text : `¿${text}`;
+}
+
+/** A line without the questions it ends with: «Te dejo la lista. ¿La reviso?» keeps «Te dejo la lista.». */
+function withoutTrailingQuestions(line: string): string {
+  const sentences = line.match(/[^.!?…]+[.!?…]+[^\p{L}\p{N}¿¡(«"]*|[^.!?…]+$/gu) || [line];
+  while (sentences.length && /\?[^\p{L}\p{N}]*$/u.test(sentences[sentences.length - 1])) sentences.pop();
+  const kept = sentences.join('').trim();
+  // Emphasis left open by a dropped «**¿…?**» is not content.
+  return /[\p{L}\p{N}]/u.test(kept) ? kept : '';
+}
+
+/** A closed question always gets a one-tap yes: when the model offered no quick
+ * replies, this one answers answer.question as a person would type it. */
+export const COWORK_YES_CHIP: CoworkSuggestion = { label: 'Sí, adelante', message: 'Sí, adelante.' };
+
+/** The reply as it is kept and read back (history, copies, exports): it ends
+ * with the closing question, which also travels apart so the chat can show it
+ * next to the quick replies. */
+export function polishCoworkAnswer<T extends { reply: string; document: { title: string; content: string } | null; question?: unknown; suggestions?: unknown }>(
   answer: T,
-): T & { suggestions: CoworkSuggestion[] | null } {
+): T & { question: string | null; suggestions: CoworkSuggestion[] | null } {
   const suggestions = coworkSuggestions(answer.suggestions);
+  const question = coworkQuestion(answer.question);
+  let reply = polishCoworkText(answer.reply).trimEnd();
+  if (question) {
+    const lines = reply.split('\n');
+    let last = lines.length - 1;
+    while (last >= 0 && !lines[last].trim()) last--;
+    const closing = last >= 0 ? lines[last] : '';
+    // One closing question (rule 4): a reply that already ends asking something
+    // else gives way to answer.question instead of stacking two questions. Only
+    // the asking sentences go; what the paragraph said before them stays.
+    if (coworkSameLine(closing, question)) { /* already there */ }
+    else if (/\?\W*$/.test(closing) && !/^\s*(?:[-*+]|\d+[.)])\s/.test(closing)) {
+      lines[last] = withoutTrailingQuestions(closing);
+      reply = [lines.join('\n').trimEnd(), question].filter(Boolean).join('\n\n');
+    } else reply = `${reply}\n\n${question}`;
+  }
   return {
     ...answer,
-    reply: polishCoworkText(answer.reply),
+    reply,
     document: answer.document ? { ...answer.document, content: polishCoworkText(answer.document.content) } : null,
-    suggestions: suggestions.length ? suggestions : null,
+    question,
+    suggestions: suggestions.length ? suggestions : question ? [COWORK_YES_CHIP] : null,
   };
 }
 

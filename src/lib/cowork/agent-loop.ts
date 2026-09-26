@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { COWORK_NOTE_ACTION, coworkDocumentSchema } from './contracts';
-import { coworkSuggestions, polishCoworkText } from './answer-quality';
+import { coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema } from './code-proposal';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
@@ -302,19 +302,27 @@ function rejected(message: string, feedback: string) {
 /** A proposal keeps only its explanation, so a document sent with it would be
  * lost while the note claims it was delivered. The model gets one chance to
  * deliver the document first; on the last decision the proposal stands. */
-const DOCUMENT_WITH_PROPOSAL = 'Entregaste un documento junto con una propuesta y el documento se perdería. Si el usuario pidió un documento, entrégalo con answer (reply y document) y ofrece la acción como pregunta al final; si no, propón la acción con document null.';
+const DOCUMENT_WITH_PROPOSAL = 'Entregaste un documento junto con una propuesta y el documento se perdería. Si el usuario pidió un documento, entrégalo con answer (reply y document) y ofrece la acción en answer.question; si no, propón la acción con document null.';
 
 /** An answer closes with the next-step question and the quick replies that
  * answer it (rules 4 and 9). The model gets one correction per run, never on
  * its last decision: after that the answer stands as it is. */
 const CLOSING_FEEDBACK = 'Cierre incompleto:';
 
-function closingFeedback(answer: { reply: string; document: { title: string } | null; suggestions?: unknown }): string | null {
-  const lines = answer.reply.split('\n').filter(line => line.trim());
+/** The next-step question: answer.question, or a reply that already ends asking. */
+function closingQuestion(answer: { reply: string; question?: unknown }): string | null {
+  const fromField = coworkQuestion(answer.question);
+  if (fromField) return fromField;
+  const last = answer.reply.split('\n').filter(line => line.trim()).pop() || '';
+  return /\?\s*$/.test(last) ? last.trim() : null;
+}
+
+function closingFeedback(answer: { reply: string; document: { title: string } | null; question?: unknown; suggestions?: unknown }): string | null {
   const chips = coworkSuggestions(answer.suggestions).length;
   const missing = [
-    /[?¿]/.test(lines[lines.length - 1] || '') ? null : 'termina reply con la pregunta del siguiente paso (regla 4)',
-    chips ? null : 'agrega 1 a 3 respuestas sugeridas que se envíen tal cual al tocarlas (regla 9)',
+    closingQuestion(answer) ? null : 'completa answer.question con la pregunta del siguiente paso (regla 4)',
+    // A question apart already gets a one-tap yes (COWORK_YES_CHIP): not worth another call.
+    chips || coworkQuestion(answer.question) ? null : 'agrega 1 a 3 respuestas sugeridas que se envíen tal cual al tocarlas (regla 9)',
     // Two or more emails are meant to be copied and kept: they go in the document, not in the chat.
     !answer.document && (answer.reply.match(/asunto\s*\d*\s*[:：]/gi) || []).length >= 2
       ? 'pon los correos en document (un ## por correo con «Asunto:») y deja en reply un resumen breve' : null,
@@ -322,7 +330,7 @@ function closingFeedback(answer: { reply: string; document: { title: string } | 
   if (!missing.length) return null;
   // The model does not see its previous answer: name what already worked so the retry keeps it.
   const keep = [answer.document ? `el document «${answer.document.title.slice(0, 80)}»` : null,
-    chips ? 'las respuestas sugeridas' : null].filter(Boolean);
+    closingQuestion(answer) ? 'la pregunta final' : null, chips ? 'las respuestas sugeridas' : null].filter(Boolean);
   return `${CLOSING_FEEDBACK} ${missing.join(' y ')}. Entrega de nuevo la respuesta completa${keep.length ? `, conservando ${keep.join(' y ')}` : ''}.`;
 }
 
@@ -330,6 +338,13 @@ type CoworkAnswer = z.infer<typeof coworkDocumentSchema>;
 
 /** When the model proposes a search without explaining it, the card still gets a
  * sentence built from the criteria, never a blank next to the approval. */
+/** What a proposed campaign does, when the model left no explanation of its own. */
+function campaignNote(campaign: z.infer<typeof coworkCampaignDraftSchema>): string {
+  const people = campaign.emails.length;
+  const emails = campaign.messages.length;
+  return `Preparé la campaña «${campaign.name}» para ${people} ${people === 1 ? 'contacto' : 'contactos'}, con ${emails} ${emails === 1 ? 'correo' : 'correos'}. Queda pausada: revísala y, cuando la apruebes, se crea sin enviar nada todavía.`;
+}
+
 function searchNote(criteria: CoworkSearchCriteria): string {
   // The model sometimes repeats a term («retail», «retail»): each one is named once.
   const unique = (items: string[]) => items.map(item => item.trim())
@@ -347,14 +362,16 @@ function searchNote(criteria: CoworkSearchCriteria): string {
   ].join('');
 }
 
-/** The retry only has to fix the closing. Quick replies or a document the first
- * answer had and the retry dropped come back, unless the retry now carries the
- * emails in the chat itself (then that document would repeat them). */
+/** The retry only has to fix the closing. Quick replies, a closing question or a
+ * document the first answer had and the retry dropped come back, unless the
+ * retry now carries the emails in the chat itself (then that document would
+ * repeat them). */
 function completeFrom(first: CoworkAnswer, retry: CoworkAnswer): CoworkAnswer {
   const emailsInChat = (retry.reply.match(/asunto\s*\d*\s*[:：]/gi) || []).length >= 2;
   return {
     ...retry,
     document: retry.document ?? (emailsInChat ? null : first.document),
+    question: closingQuestion(retry) ? retry.question ?? null : closingQuestion(first),
     suggestions: coworkSuggestions(retry.suggestions).length ? retry.suggestions : first.suggestions ?? null,
   };
 }
@@ -432,6 +449,7 @@ export async function runCoworkReadLoop(input: {
   // The answer that got the closing correction. From then on the loop never ends
   // worse than that answer: no more reads, and a failed retry returns it.
   let closingFallback: CoworkAnswer | null = null;
+  let campaignsListed = false;
   for (let turn = 0; turn < 4; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
@@ -591,9 +609,23 @@ export async function runCoworkReadLoop(input: {
           ? { campaignId: decision.campaignId, ...(decision.spacingMinutes == null ? {} : { spacingMinutes: decision.spacingMinutes }) }
           : undefined;
         if (decision.action === 'campaign.schedule_batch' && !scheduleBatch) throw rejected('Missing batch schedule', MISSING_PROPOSAL_FIELDS);
-        const originRunId = decision.action === 'code.execute'
+        let originRunId = decision.action === 'code.execute'
           ? codeOriginRunId(code?.inputFiles || [], observations, input.history || [], input.runId || '')
           : effectTargetRun(decision.action, targetId, observations, input.history || [], input.runId || '');
+        // A campaign is proposed next to the list of existing ones. When the model
+        // skipped that read, the loop reads it instead of losing the whole proposal
+        // (seen with the real model on the last decision, after its three reads).
+        // It is one fixed read the loop needs, so it may go past the read budget once.
+        if (!originRunId && decision.action === 'campaign.create' && !campaignsListed) {
+          campaignsListed = true;
+          await input.authorize();
+          input.signal.throwIfAborted();
+          const listed: CoworkObservation = { action: 'campaigns.list', input: '', result: await input.execute('campaigns.list', '') };
+          readsUsed++;
+          await input.record(listed);
+          observations.push(listed);
+          originRunId = effectTargetRun(decision.action, targetId, observations, input.history || [], input.runId || '');
+        }
         if (!originRunId) throw rejected('Effect target must be observed first', 'El objetivo de la propuesta no aparece en los resultados de este hilo: consúltalo primero (leads.search, campaigns.list, draft.get o research.get_existing) y usa su ID exacto. Para crear una campaña, los destinatarios deben ser contactos guardados con correo.');
         if (decision.answer?.document && turn < 3) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
         const targetName = describeLeadTarget(decision.action, targetId, observations, input.history || []);
@@ -601,7 +633,7 @@ export async function runCoworkReadLoop(input: {
         if (kind === 'enrich_contact' && turn < 3 && repeatedEnrichment(label, input.history || [])) {
           throw rejected('Enrichment already ran in this thread', 'Ya se buscó el correo de este contacto en este hilo (mira history.actions): repetirlo gasta otro crédito y el proveedor responde lo mismo. No lo vuelvas a proponer; sigue con lo que pidió el usuario (por ejemplo, investigarlo con research.start) o explica la alternativa.');
         }
-        const note = await explain(decision);
+        const note = await explain(decision) ?? (campaign ? await recordNote(campaignNote(campaign)) : null);
         await input.authorize();
         input.signal.throwIfAborted();
         try {

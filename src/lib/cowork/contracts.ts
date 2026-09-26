@@ -66,9 +66,32 @@ export function coworkStoredSuggestions(value: unknown): CoworkSuggestion[] {
     .map(item => ({ label: item.label.trim(), message: item.message.trim() }));
 }
 
+/** Same line of text, ignoring spacing and Markdown emphasis. */
+export function coworkSameLine(a: string, b: string) {
+  const plain = (text: string) => text.replace(/[*_\s]+/g, ' ').trim().toLowerCase();
+  return plain(a) === plain(b);
+}
+
+/** The reply without its closing question, for a chat that shows the question apart. */
+export function coworkReplyBody(reply: string, question: string | null): string {
+  if (!question) return reply;
+  const lines = reply.trimEnd().split('\n');
+  let last = lines.length - 1;
+  while (last >= 0 && !lines[last].trim()) last--;
+  if (last < 0 || !coworkSameLine(lines[last], question)) return reply;
+  return lines.slice(0, last).join('\n').trimEnd();
+}
+
+/** A closing question as saved by the worker (already sanitized there); anything else reads as none. */
+export function coworkStoredQuestion(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 3 && value.length <= 300 && /\?\s*$/.test(value) ? value.trim() : null;
+}
+
 export const coworkDocumentSchema = z.object({
   reply: z.string().min(1).max(20000),
   document: z.object({ title: z.string().min(1).max(160), content: z.string().min(1).max(40000) }).nullable(),
+  /** The closing question on the next step, apart from the reply so it is never lost or buried. */
+  question: z.string().max(400).nullable().optional(),
   suggestions: z.array(coworkSuggestionSchema).max(6).nullable().optional(),
 }).strict();
 

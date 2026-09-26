@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkAnswerIssues, coworkSuggestions, polishCoworkAnswer, polishCoworkText } from './answer-quality';
+import { coworkAnswerIssues, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText } from './answer-quality';
+import { coworkReplyBody, coworkStoredQuestion } from './contracts';
 
 test('internal codes copied from tool results become plain Spanish', () => {
   assert.equal(polishCoworkText('El período disponible es *last_30_days* (30 días móviles).'), 'El período disponible es últimos 30 días (30 días móviles).');
@@ -74,4 +75,43 @@ test('polishing an answer keeps its clean quick replies, or null when none survi
     suggestions: [{ label: 'Sí, búscalo', message: 'Sí, busca el correo de Nehal Pa***a de Adecco' }] });
   assert.deepEqual(answer.suggestions, [{ label: 'Sí, búscalo', message: 'Sí, busca el correo de Nehal Pa***a de Adecco' }]);
   assert.equal(polishCoworkAnswer({ reply: 'Listo.', document: null }).suggestions, null);
+});
+
+test('the closing question is one plain sentence that ends the reply exactly once', () => {
+  assert.equal(coworkQuestion('**¿Busco su correo?**'), '¿Busco su correo?');
+  assert.equal(coworkQuestion('Te preparo el correo?'), '¿Te preparo el correo?');
+  assert.equal(coworkQuestion('Si quieres, ¿lo dejo listo?'), 'Si quieres, ¿lo dejo listo?');
+  for (const bad of [null, '', 'Listo.', '¿Le escribo a [nombre]?', '¿Busco 00000000-0000-4000-8000-000000000022?', `¿${'a'.repeat(300)}?`]) {
+    assert.equal(coworkQuestion(bad), null);
+  }
+  const polish = (reply: string, question: string | null) => polishCoworkAnswer({ reply, document: null, question });
+  // Apart from the reply, it is appended so history and copies read the whole answer.
+  assert.equal(polish('Te dejé la secuencia.', '¿Creo la campaña?').reply, 'Te dejé la secuencia.\n\n¿Creo la campaña?');
+  assert.equal(polish('Te dejé la secuencia.', '¿Creo la campaña?').question, '¿Creo la campaña?');
+  // Already the last line: no repetition.
+  assert.equal(polish('Te dejé la secuencia.\n¿Creo la campaña?', '¿Creo la campaña?').reply, 'Te dejé la secuencia.\n¿Creo la campaña?');
+  // A different closing question gives way: one question, the one in answer.question.
+  assert.equal(polish('Te dejé la secuencia.\n¿Quieres otro tono?', '¿Creo la campaña?').reply, 'Te dejé la secuencia.\n\n¿Creo la campaña?');
+  assert.equal(polish('Te dejé la secuencia.\n\n**¿Quieres otro tono?**', '¿Creo la campaña?').reply, 'Te dejé la secuencia.\n\n¿Creo la campaña?');
+  // Only the asking sentences go: seen with the real model, the whole paragraph with
+  // the people to write to was lost when its last sentence was a question.
+  assert.equal(polish('Priorizaría a Felipe Muñoz (Securitas) y a Camila Fuentes (Adecco): tienen correo. A Marcela ya le escribiste. ¿Te preparo el correo?', '¿Preparo el correo para Felipe y Camila?').reply,
+    'Priorizaría a Felipe Muñoz (Securitas) y a Camila Fuentes (Adecco): tienen correo. A Marcela ya le escribiste.\n\n¿Preparo el correo para Felipe y Camila?');
+  assert.equal(polish('Esto es información general, no asesoría legal. ¿Reviso tus bajas? ¿O prefieres otra cosa?', '¿Reviso tus bajas?').reply,
+    'Esto es información general, no asesoría legal.\n\n¿Reviso tus bajas?');
+  // A question inside a list is content, not the closing.
+  assert.equal(polish('Preguntas para la reunión:\n- ¿Cuántos postulantes revisan?', '¿La agendo?').reply,
+    'Preguntas para la reunión:\n- ¿Cuántos postulantes revisan?\n\n¿La agendo?');
+  assert.equal(polish('Listo.', null).question, null);
+  // A closed question without quick replies still gets a one-tap yes; without a question, none.
+  assert.deepEqual(polish('Te dejé la secuencia.', '¿Creo la campaña?').suggestions, [{ label: 'Sí, adelante', message: 'Sí, adelante.' }]);
+  assert.equal(polish('Listo.', null).suggestions, null);
+  assert.deepEqual(polishCoworkAnswer({ reply: 'Listo.', document: null, question: '¿Creo la campaña?',
+    suggestions: [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }] }).suggestions, [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }]);
+  // The chat shows the body and the question apart.
+  assert.equal(coworkReplyBody('Te dejé la secuencia.\n\n¿Creo la campaña?', '¿Creo la campaña?'), 'Te dejé la secuencia.');
+  assert.equal(coworkReplyBody('Te dejé la secuencia.', '¿Creo la campaña?'), 'Te dejé la secuencia.');
+  assert.equal(coworkStoredQuestion('¿Creo la campaña?'), '¿Creo la campaña?');
+  assert.equal(coworkStoredQuestion('Listo.'), null);
+  assert.equal(coworkStoredQuestion({ text: '¿Sí?' }), null);
 });

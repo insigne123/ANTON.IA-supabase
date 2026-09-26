@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runCoworkReadLoop } from './agent-loop';
+import { coworkDecisionSchema, runCoworkReadLoop } from './agent-loop';
 
 const answer = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Un contacto encontrado.', document: null } };
 const search = { action: 'leads.search' as const, query: 'Logística', leadId: null, answer: null };
@@ -422,6 +422,40 @@ test('an answer missing its closing question or quick replies gets one correctio
   assert.equal(calls, 1);
 });
 
+test('the closing question can travel apart in answer.question, and a retry never drops it', async () => {
+  const chips = [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }];
+  const base = { message: 'Secuencia', signal: new AbortController().signal, authorize: async () => {}, execute: async () => ({}), record: async () => {} };
+  let calls = 0;
+  const apart = await runCoworkReadLoop({ ...base, decide: async () => {
+    calls++;
+    return { ...answer, answer: { reply: 'Te dejé la secuencia de 3 correos.', document: null, question: '¿Creo la campaña pausada?', suggestions: chips } };
+  } });
+  assert.equal(calls, 1, 'a question in answer.question completes the closing');
+  assert.equal(apart.question, '¿Creo la campaña pausada?');
+  // The first answer had the question but no quick replies; the retry adds them and forgets the question.
+  const reasons: string[] = [];
+  const fixed = await runCoworkReadLoop({ ...base, decide: async (_observations, _mustAnswer, rejections = []) => {
+    reasons.push(...rejections.map(item => item.reason));
+    return rejections.length
+      ? { ...answer, answer: { reply: 'Te dejé la secuencia de 3 correos.', document: null, question: null, suggestions: chips } }
+      : { ...answer, answer: { reply: 'Te dejé la secuencia de 3 correos.', document: null, question: '¿Creo la campaña pausada?', suggestions: null } };
+  } });
+  // A question apart already has its one-tap yes: missing quick replies alone cost no second call.
+  assert.equal(reasons.length, 0);
+  assert.equal(fixed.question, '¿Creo la campaña pausada?');
+  // The retry keeps the question: a first answer with only the reply asking gets one.
+  const retried: string[] = [];
+  const kept = await runCoworkReadLoop({ ...base, decide: async (_observations, _mustAnswer, rejections = []) => {
+    retried.push(...rejections.map(item => item.reason));
+    return rejections.length
+      ? { ...answer, answer: { reply: 'Te dejé la secuencia de 3 correos.', document: null, question: null, suggestions: chips } }
+      : { ...answer, answer: { reply: 'Te dejé la secuencia de 3 correos.\n¿Creo la campaña pausada?', document: null, question: null, suggestions: null } };
+  } });
+  assert.match(retried[0], /conservando la pregunta final/);
+  assert.equal(kept.question, '¿Creo la campaña pausada?');
+  assert.deepEqual(kept.suggestions, chips);
+});
+
 test('a closing correction never leaves the turn worse than the first answer', async () => {
   const chips = [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }];
   const first = { ...answer, answer: { reply: 'Te dejé la secuencia.', document: { title: 'Secuencia', content: '## Correo 1\nAsunto: Hola' }, suggestions: chips } };
@@ -473,4 +507,54 @@ test('a search proposed without an explanation still gets a sentence built from 
   });
   assert.equal((repeated[0] as { result: { reply: string } }).result.reply,
     'Propongo buscar hasta 10 personas con cargos como HR Manager, del rubro retail, en Santiago, Chile. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.');
+});
+
+test('a campaign proposed before listing campaigns gets the list read by the loop, not a failed turn', async () => {
+  const executed: string[] = [];
+  const proposals: Array<{ kind: string; originRunId: string }> = [];
+  const campaign = { name: 'AXIS · RR. HH.', objective: 'Primera conversación',
+    criteria: { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [], minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: false },
+    emails: ['fmunoz@securitas.cl'], provider: 'google', messages: [{ subject: 'Hola', body: 'Hola,\nNicolás', delayDays: 0 }] };
+  const reply = await runCoworkReadLoop({
+    message: 'Mándale un correo a mis contactos de RR. HH.', runId: '00000000-0000-4000-8000-0000000000aa',
+    signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async action => { executed.push(action); return { scope: 'own', campaigns: [] }; },
+    proposeEffect: async proposal => { proposals.push({ kind: proposal.kind, originRunId: proposal.originRunId }); },
+    decide: async () => coworkDecisionSchema.parse({ action: 'campaign.create', query: null, leadId: null, campaign,
+      answer: { reply: 'Te dejo la campaña pausada para Felipe.', document: null } }),
+  });
+  assert.deepEqual(executed, ['campaigns.list']);
+  assert.deepEqual(proposals, [{ kind: 'campaign_create', originRunId: '00000000-0000-4000-8000-0000000000aa' }]);
+  assert.equal(reply.reply, 'Te dejo la campaña pausada para Felipe.');
+
+  // Seen with the real model: three reads first, then the campaign on the last decision.
+  const late: string[] = [];
+  const lateProposals: string[] = [];
+  const decisions = [
+    { action: 'leads.search', query: 'RRHH', leadId: null, answer: null },
+    { action: 'reads.parallel', reads: [{ action: 'app.context', input: '' }], query: null, leadId: null, answer: null },
+    { action: 'reads.parallel', reads: [{ action: 'message.context', input: '' }], query: null, leadId: null, answer: null },
+    { action: 'campaign.create', query: null, leadId: null, campaign, answer: { reply: 'Te dejo la campaña pausada.', document: null } },
+  ];
+  const lateReply = await runCoworkReadLoop({
+    message: 'Mándale un correo a mis contactos de RR. HH.', runId: '00000000-0000-4000-8000-0000000000aa',
+    signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async action => { late.push(action); return action === 'campaigns.list' ? { scope: 'own', campaigns: [] } : {}; },
+    proposeEffect: async proposal => { lateProposals.push(proposal.kind); },
+    decide: async () => coworkDecisionSchema.parse(decisions.shift()),
+  });
+  assert.deepEqual(late, ['leads.search', 'app.context', 'message.context', 'campaigns.list']);
+  assert.deepEqual(lateProposals, ['campaign_create']);
+  assert.equal(lateReply.reply, 'Te dejo la campaña pausada.');
+
+  // Without an explanation from the model, the card still comes with one.
+  const notes: unknown[] = [];
+  const silent = await runCoworkReadLoop({
+    message: 'Mándale un correo a mis contactos de RR. HH.', runId: '00000000-0000-4000-8000-0000000000aa',
+    signal: new AbortController().signal, authorize: async () => {}, record: async observation => { notes.push(observation); },
+    execute: async () => ({ scope: 'own', campaigns: [] }), proposeEffect: async () => {},
+    decide: async () => coworkDecisionSchema.parse({ action: 'campaign.create', query: null, leadId: null, campaign, answer: null }),
+  });
+  assert.equal(silent.reply, 'Preparé la campaña «AXIS · RR. HH.» para 1 contacto, con 1 correo. Queda pausada: revísala y, cuando la apruebes, se crea sin enviar nada todavía.');
+  assert.equal((notes.at(-1) as { action: string }).action, 'assistant.note');
 });
