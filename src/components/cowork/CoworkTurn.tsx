@@ -5,8 +5,9 @@ import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, Library
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
   coworkDisplayMessage, coworkFileSize, coworkLiveActivity, coworkProposalView, coworkTurnArtifacts, coworkTurnNote, coworkTurnOutput,
-  isCoworkActive, type CoworkArtifact,
+  coworkTurnSuggestions, isCoworkActive, type CoworkArtifact,
 } from '@/lib/cowork/presentation';
+import { coworkReplyBody, type CoworkSuggestion } from '@/lib/cowork/contracts';
 import { markdownExcerpt } from '@/lib/cowork/markdown';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { cn } from '@/lib/utils';
@@ -69,6 +70,29 @@ function ContactChips({ artifact, events, active, onOpen }: { artifact: CoworkAr
   </div>;
 }
 
+/** Quick replies under the latest answer: one click sends the message. The
+ * first answers the closing question, so it carries the accent. */
+function SuggestedReplies({ suggestions, live, onSelect }: { suggestions: CoworkSuggestion[]; live: boolean; onSelect: (message: string) => void }) {
+  return <div role="group" aria-label="Respuestas sugeridas" className={cn('flex flex-wrap gap-2', live && 'cw-rise')}>
+    {suggestions.map((chip, index) => <button key={chip.label} type="button" onClick={() => onSelect(chip.message)} title={chip.message}
+      aria-label={chip.message === chip.label ? chip.label : `${chip.label}: ${chip.message}`}
+      className={cn('inline-flex max-w-full items-center rounded-full border px-3.5 py-2 text-[13.5px] leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]',
+        index === 0
+          ? 'border-transparent bg-cw-accent-soft font-medium text-cw-accent hover:border-cw-accent'
+          : 'border-cw-border bg-cw-elevated text-cw-text shadow-[var(--cw-shadow-sm)] hover:border-cw-border-strong hover:bg-cw-panel')}>
+      <span className="truncate">{chip.label}</span>
+    </button>)}
+  </div>;
+}
+
+/** The next step Cowork offers, after the answer and its results. */
+function NextStep({ question, live }: { question: string; live: boolean }) {
+  return <p className={cn('flex items-start gap-2 text-[15px] font-medium leading-6 text-cw-text', live && 'cw-rise')}>
+    <CornerDownRight className="mt-1 h-4 w-4 shrink-0 text-cw-accent" aria-hidden="true" />
+    <span className="min-w-0">{question}</span>
+  </p>;
+}
+
 function CopyReply({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return <CwButton size="icon-sm" variant="ghost" className="h-7 w-7" aria-label={copied ? 'Respuesta copiada' : 'Copiar respuesta'} title="Copiar"
@@ -80,7 +104,7 @@ function CopyReply({ text }: { text: string }) {
 }
 
 /** One conversational turn: the request, what was consulted, the reply, results and any decision. */
-export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, budgetExhausted, live = false }: {
+export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false }: {
   turn: CoworkTurnData;
   latest: boolean;
   /** The turn finished while you were watching: reveal the answer gently. */
@@ -90,6 +114,8 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   onOpenArtifact: (artifact: CoworkArtifact, opener: HTMLElement) => void;
   onResolve: (approve: boolean) => void;
   onRetry: (() => void) | null;
+  /** Sends a quick reply as your next message; null when you cannot send now. */
+  onSuggestion?: ((message: string) => void) | null;
   budgetExhausted: boolean;
 }) {
   const { run, events } = turn;
@@ -103,11 +129,16 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   const working = active && !waitingDecision;
   // The discard confirmation is already shown by the resolved approval row.
   const reply = output?.reply && !(proposal?.state === 'discarded' && /descartad[ao]/i.test(output.reply)) ? output.reply : '';
+  // The closing question reads apart, right above the quick replies that answer it.
+  const question = reply && !proposal ? output?.question ?? null : null;
+  const body = question ? coworkReplyBody(reply, question) : reply;
   // The assistant's explanation of its proposal reads before the card; the
   // outcome of the approved action reads after it.
   const note = proposal ? coworkTurnNote(events) : null;
+  // Only the conversation's current answer offers quick replies.
+  const suggestions = latest && onSuggestion && run.status === 'completed' && !proposal ? coworkTurnSuggestions(events) : [];
   const replyBlock = reply ? <div className={cn('group/reply', live && 'cw-rise')}>
-    <CoworkMarkdown text={reply} />
+    {body && <CoworkMarkdown text={body} />}
     {!active && <div className="-ml-1.5 mt-1 flex opacity-100 transition-opacity sm:opacity-0 sm:group-hover/reply:opacity-100 sm:focus-within:opacity-100"><CopyReply text={reply} /></div>}
   </div> : null;
 
@@ -129,6 +160,8 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
             ? <ContactChips key={artifact.id} artifact={artifact} events={events} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />
             : <ArtifactCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />)}
         </div>}
+        {question && <NextStep question={question} live={live} />}
+        {suggestions.length > 0 && onSuggestion && <SuggestedReplies suggestions={suggestions} live={live} onSelect={onSuggestion} />}
         {proposal && <CoworkApproval run={run} proposal={proposal} resolving={resolving} interactive={latest} onResolve={onResolve} />}
         {proposal && replyBlock}
         {run.status === 'failed' && <div role="alert" className="flex flex-wrap items-start gap-3 rounded-2xl bg-cw-danger-soft px-4 py-3 text-[13.5px] text-cw-danger">
