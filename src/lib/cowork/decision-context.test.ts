@@ -64,3 +64,18 @@ test('assistant notes never consume the read budget and the time zone is configu
   assert.equal(context.clock.timeZone, 'America/Bogota');
   assert.match(context.clock.localNow, /10:00/);
 });
+
+test('the user context travels with its instruction and stays null when the server could not read it', () => {
+  const instructions = coworkAgentInstructions({ externalSearch: false, automaticExternalSearch: false });
+  const base = { history: { turns: [] }, request: 'Escríbele a Marcela', observations: [], mustAnswer: false, executionPolicy: {} };
+  const userContext = { fullName: 'Nicolás Y.', jobTitle: 'Gerente Comercial', companyName: 'Yago SpA', companyDomain: 'yago.cl',
+    offer: 'AXIS: consultas judiciales automáticas', offerSource: 'organization' as const };
+  const context = coworkDecisionContext(instructions, { ...base, userContext });
+  assert.deepEqual({ ...context.userContext, instruction: undefined }, { ...userContext, instruction: undefined });
+  assert.match(context.userContext?.instruction || '', /firma con fullName/);
+  // Reading it spends nothing from the three reads of the turn.
+  assert.equal(context.readBudget.remaining, 3);
+  assert.equal(coworkDecisionContext(instructions, base).userContext, null);
+  assert.equal(coworkDecisionContext(instructions, { ...base, userContext: null }).userContext, null);
+  assert.match(instructions.systemPrompt, /userContext trae quién es el usuario/);
+});

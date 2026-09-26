@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { CoworkEvent, CoworkRun } from './contracts';
 import {
   coworkExpectsContinuation, coworkProposalView, coworkTurnArtifacts, coworkTurnProgress, describeCoworkObservation,
-  groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity,
+  groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnSuggestions,
 } from './presentation';
 
 const at = (minute: number) => `2026-09-24T12:${String(minute).padStart(2, '0')}:00Z`;
@@ -87,4 +87,17 @@ test('date buckets', () => {
   assert.equal(coworkDateBucket(new Date(2026, 8, 23, 8).toISOString(), now), 'Ayer');
   assert.equal(coworkDateBucket(new Date(2026, 8, 19, 8).toISOString(), now), 'Últimos 7 días');
   assert.equal(coworkDateBucket(new Date(2026, 7, 1, 8).toISOString(), now), 'Anteriores');
+});
+
+test('quick replies come only from the finished answer and only in shapes that fit', () => {
+  const completed = (payload: Record<string, unknown>) => [{ sequence: 1, kind: 'run.completed', payload, created_at: '2026-09-26T12:00:00Z' }];
+  assert.deepEqual(coworkTurnSuggestions(completed({ reply: '¿Busco su correo?', document: null,
+    suggestions: [{ label: ' Sí, búscalo ', message: 'Sí, busca el correo de Nehal' }, { label: 'x'.repeat(41), message: 'Muy larga' },
+      { label: 'Sin mensaje' }, null, { label: 'Ver ficha', message: 'Muéstrame su ficha' }, { label: 'Otra', message: 'Otra' },
+      { label: 'Cuarta', message: 'No entra' }] })),
+  [{ label: 'Sí, búscalo', message: 'Sí, busca el correo de Nehal' }, { label: 'Ver ficha', message: 'Muéstrame su ficha' },
+    { label: 'Otra', message: 'Otra' }]);
+  // Turns saved before quick replies existed, and failed turns, have none.
+  assert.deepEqual(coworkTurnSuggestions(completed({ reply: 'Listo.', document: null })), []);
+  assert.deepEqual(coworkTurnSuggestions([{ sequence: 1, kind: 'run.failed', payload: { suggestions: [{ label: 'Sí', message: 'Sí' }] }, created_at: '2026-09-26T12:00:00Z' }]), []);
 });

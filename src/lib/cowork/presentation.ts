@@ -1,5 +1,5 @@
 import { collectCoworkLeadRows } from './lead-export';
-import { coworkDocumentSchema, type CoworkEvent, type CoworkRun, type CoworkRunStatus, coworkNoteText } from './contracts';
+import { coworkDocumentSchema, coworkStoredSuggestions, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText } from './contracts';
 
 /**
  * Pure presentation helpers for the Cowork workspace. Everything here derives
@@ -237,6 +237,12 @@ export function coworkTurnOutput(events: CoworkEvent[]): CoworkTurnOutput | null
   const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
   const parsed = coworkDocumentSchema.safeParse(completed ? { reply: completed.reply, document: completed.document } : null);
   return parsed.success ? parsed.data : null;
+}
+
+/** Quick replies of a finished answer; turns saved before they existed have none. */
+export function coworkTurnSuggestions(events: CoworkEvent[]): CoworkSuggestion[] {
+  const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
+  return coworkStoredSuggestions(completed?.suggestions);
 }
 
 export type CoworkArtifact =

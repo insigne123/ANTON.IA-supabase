@@ -75,10 +75,25 @@ function withLocalTimes(value: unknown, timeZone: string, depth = 0): unknown {
   return output;
 }
 
+/** Who the person is and what they sell, read by the server once per run so a
+ * draft is signed and pitched without spending reads on profile.get or
+ * app.context. A missing value stays null: the model never fills it in. */
+export type CoworkUserContext = {
+  fullName: string | null;
+  jobTitle: string | null;
+  companyName: string | null;
+  companyDomain: string | null;
+  offer: string | null;
+  offerSource: 'profile' | 'organization' | null;
+};
+
+const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trabajo: firma con fullName (y jobTitle y companyName si existen) y redacta con offer, sin consultar profile.get ni app.context para eso. Un valor null no se inventa.';
+
 /** Shared by the worker and AXIS replay. Time comes from the server, not the model. */
 export function coworkDecisionContext(
   instructions: ReturnType<typeof coworkAgentInstructions>,
-  input: { history: unknown; request: string; observations: unknown[]; mustAnswer: boolean; executionPolicy: unknown; rejectedDecisions?: unknown[] },
+  input: { history: unknown; request: string; observations: unknown[]; mustAnswer: boolean; executionPolicy: unknown; rejectedDecisions?: unknown[];
+    userContext?: CoworkUserContext | null },
   now = new Date(),
   timeZone = coworkTimeZone(),
 ) {
@@ -91,6 +106,7 @@ export function coworkDecisionContext(
   }
   return {
     ...input,
+    userContext: input.userContext ? { ...input.userContext, instruction: USER_CONTEXT_INSTRUCTION } : null,
     history: withLocalTimes(input.history, timeZone) as typeof input.history,
     observations: withLocalTimes(input.observations, timeZone) as unknown[],
     contactReadGuidance: {
