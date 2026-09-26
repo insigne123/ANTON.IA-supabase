@@ -24,6 +24,7 @@ import { getBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { resolveCoworkSender } from './sender';
 import { coworkAgentInstructions } from '@/lib/cowork/agent-instructions';
 import { coworkDecisionContext } from '@/lib/cowork/decision-context';
+import { loadCoworkUserContext } from './user-context';
 import { reserveCoworkModelCall } from './model-budget';
 import { recordCoworkModelUsage } from './model-usage';
 import { stageCoworkProfileUpdate } from './profile-update';
@@ -115,6 +116,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const telemetry: Array<{ model: string; durationMs: number }> = [];
     await authorize();
     const history = await loadCoworkHistory(client, scope, run.parent_run_id || null);
+    // Name, company and offer once per run: drafts get signed and pitched without spending reads.
+    const userContext = await loadCoworkUserContext(client, scope);
     let waitingApproval = false;
     const autonomyEnabled = process.env.COWORK_AUTONOMY_ENABLED === 'true';
     const executionPolicy = coworkExecutionPolicy(run.mode, autonomyEnabled);
@@ -154,7 +157,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
               : ' Solo analizan datos observados; no asignes read porque las herramientas están deshabilitadas.')
             : 'specialists.review está deshabilitado.'}`,
           prompt: JSON.stringify(coworkDecisionContext(instructions, {
-            history, request: run.message, observations, mustAnswer, executionPolicy,
+            history, request: run.message, observations, mustAnswer, executionPolicy, userContext,
             ...(rejections.length ? { rejectedDecisions: rejections } : {}),
           })),
           openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,
