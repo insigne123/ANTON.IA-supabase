@@ -4,6 +4,7 @@
 // returned. Each case says what a good turn must do and records the baseline
 // production outcome it replaces. No database, mailbox or provider is touched.
 import { coworkAnswerIssues } from '../../src/lib/cowork/answer-quality';
+import type { CoworkUserContext } from '../../src/lib/cowork/decision-context';
 
 export const CORPUS_NOW = new Date('2026-09-25T13:10:00Z');
 
@@ -19,6 +20,13 @@ const ownLeads = [
 ];
 
 const unknownCoverage = { gmail: null, outlook: null };
+
+const OFFER = 'Yago SpA. Productos: AXIS: consultas judiciales automáticas en el Poder Judicial (PJUD) para revisar antecedentes laborales de postulantes';
+const PROFILE = { fullName: 'Nicolás Y.', jobTitle: 'Gerente Comercial', companyName: 'Yago SpA', companyDomain: 'yago.cl' };
+
+/** What the worker reads once per run (loadCoworkUserContext): the same person
+ * and offer that profile.get and app.context return in this workspace. */
+export const CORPUS_USER_CONTEXT: CoworkUserContext = { ...PROFILE, offer: OFFER, offerSource: 'organization' };
 
 /** Compact copies of production results, keyed by action (and input when it matters). */
 export function corpusRead(action: string, input: string): unknown {
@@ -49,9 +57,9 @@ export function corpusRead(action: string, input: string): unknown {
     case 'app.context':
       return { scope: 'organization_context', emailConnections: { google: true, outlook: true },
         counts: { leads: 256, contacted: 0, campaigns: 19, activeMissions: 0, openExceptions: 2 }, performance: null,
-        offer: 'Yago SpA. Productos: AXIS: consultas judiciales automáticas en el Poder Judicial (PJUD) para revisar antecedentes laborales de postulantes', offerSource: 'organization' };
+        offer: OFFER, offerSource: 'organization' };
     case 'profile.get':
-      return { scope: 'own_profile', profile: { fullName: 'Nicolás Y.', jobTitle: 'Gerente Comercial', companyName: 'Yago SpA', companyDomain: 'yago.cl', email: 'ventas@yago.cl' }, signatures: [] };
+      return { scope: 'own_profile', profile: { ...PROFILE, email: 'ventas@yago.cl' }, signatures: [] };
     case 'metrics.overview':
       return { scope: 'organization', period: 'last_7_days', savedContacts: 256, contactedTotal: 0, contactedThisWeek: 0, repliesThisWeek: 0, autoRepliesThisWeek: 0, bouncesThisWeek: 0 };
     case 'metrics.rates':
@@ -127,7 +135,7 @@ export type CorpusTurnResult = {
   suggestions?: Array<{ label: string; message: string }>;
 };
 
-export type CorpusWorld = { read: (action: string, input: string) => unknown; savedEmails: string[] };
+export type CorpusWorld = { read: (action: string, input: string) => unknown; savedEmails: string[]; userContext?: CoworkUserContext | null };
 
 export type CorpusHistoryTurn = { request: string; reply: string; at: string; observations?: unknown[]; actions?: unknown[] };
 

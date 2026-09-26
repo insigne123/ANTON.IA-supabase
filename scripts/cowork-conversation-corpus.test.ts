@@ -31,9 +31,8 @@ const IDEAL: Record<string, CorpusDecider> = {
     ? read('leads.search', 'Nehal Adecco')
     : coworkDecisionSchema.parse({ action: 'lead.enrich', query: null, leadId: LEAD.nehal, answer: { reply: 'Sí vale la pena: como Recruitment Manager en Adecco revisa antecedentes de postulantes, justo lo que automatiza AXIS. Le falta el correo, así que propongo buscarlo (1 crédito).', document: null } }),
   dominio: async context => context.observations.length === 0
-    ? read('profile.get')
-    : context.observations.length === 1 ? read('deliverability.check', 'yago.cl')
-      : answer('Revisé yago.cl (el dominio de tu correo): está bien encaminado, con dos ajustes pendientes.\n- MX y DKIM: correctos.\n- SPF: termina en ~all; conviene cerrarlo cuando confirmes que solo Google envía por ti.\n- DMARC: está en modo solo monitoreo; el siguiente paso es cuarentena.\n¿Te preparo el texto exacto de los registros para tu proveedor de DNS?'),
+    ? read('deliverability.check', context.userContext?.companyDomain || '')
+    : answer('Revisé yago.cl (el dominio de tu correo): está bien encaminado, con dos ajustes pendientes.\n- MX y DKIM: correctos.\n- SPF: termina en ~all; conviene cerrarlo cuando confirmes que solo Google envía por ti.\n- DMARC: está en modo solo monitoreo; el siguiente paso es cuarentena.\n¿Te preparo el texto exacto de los registros para tu proveedor de DNS?'),
   'prospeccion-mineria': async () => coworkDecisionSchema.parse({ action: 'prospecting.propose_search', query: null, leadId: null,
     searchCriteria: { titles: ['Gerente de Operaciones', 'Operations Manager', 'Superintendente de Operaciones', 'Jefe de Operaciones'], industries: ['minería', 'mining'], locations: ['Antofagasta, Chile'], limit: 25 },
     answer: { reply: 'Busco hasta 25 personas en Antofagasta con cargos de operaciones en minería, incluidos superintendentes y jefes de área. Revisa los criterios y apruébalos.', document: null } }),
@@ -87,12 +86,12 @@ Object.assign(IDEAL, {
         messages: [{ subject: 'Antecedentes laborales en minutos', body: 'Hola,\nEn Yago automatizamos la consulta de antecedentes laborales en el Poder Judicial con AXIS.\n¿Te sirve que lo revisemos 15 minutos esta semana?\nNicolás Y.\nYago SpA', delayDays: 0 }] } });
   },
   'mkt-secuencia': async context => context.observations.length === 0
-    ? parallel([{ action: 'message.context', input: '' }, { action: 'profile.get', input: '' }])
+    ? read('message.context')
     : answer('Te dejé la secuencia de 3 correos en tono cercano, firmada con tu nombre y sin ofertas que no estén aprobadas.\n¿La convierto en una campaña pausada para tus contactos de RR. HH. con correo?',
       { title: 'Secuencia AXIS para gerentes de personas', content: 'Tres correos breves para abrir conversación sobre AXIS.\n\n## Correo 1\nAsunto: Antecedentes laborales en minutos\n\nHola,\nEn Yago automatizamos la consulta de antecedentes en el Poder Judicial.\n¿Lo vemos 15 minutos?\nNicolás Y.\n\n## Correo 2\nAsunto: ¿Cuánto tarda hoy una revisión?\n\nHola,\nQuería saber cómo revisan hoy los antecedentes de los postulantes.\nNicolás Y.\n\n## Correo 3\nAsunto: ¿Te lo muestro?\n\nHola,\nSi te sirve, te muestro AXIS con un caso real de tu área.\nNicolás Y.\n\n## Próximos pasos\n- Crear la campaña pausada y revisar los destinatarios.' },
       chip('Sí, crea la campaña', 'Sí, crea una campaña pausada con esta secuencia para mis contactos de RR. HH. con correo')),
   'mkt-linkedin-mensaje': async context => context.observations.length === 0
-    ? parallel([{ action: 'leads.search', input: 'Marcela' }, { action: 'profile.get', input: '' }])
+    ? read('leads.search', 'Marcela')
     : coworkDecisionSchema.parse({ action: 'linkedin.message', query: null, leadId: MARKETING_LEAD.marcela,
       linkedinMessage: 'Hola Marcela, soy Nicolás de Yago. Ayudamos a equipos de personas a revisar antecedentes laborales en minutos con AXIS. ¿Te interesa conversarlo?',
       answer: { reply: 'Encontré a Marcela, Gerente de Personas en Sodexo. Te dejo un mensaje corto firmado con tu nombre; se envía desde tu extensión cuando lo apruebes.', document: null } }),

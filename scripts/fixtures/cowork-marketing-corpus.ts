@@ -127,7 +127,8 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       { label: 'propone la campaña o muestra el correo', test: r => r.proposal?.kind === 'campaign_create' || /asunto/i.test(text(r)) },
       { label: 'la campaña solo incluye contactos de RR. HH. con correo', test: r => !campaign(r)
         || Boolean(campaign(r)?.emails?.length && campaign(r)!.emails!.every(email => PEOPLE_EMAILS.includes(email))) },
-      { label: 'sin datos de relleno entre corchetes', test: r => !PLACEHOLDER.test(text(r)) && !(campaign(r)?.messages || []).some(message => PLACEHOLDER.test(message.body)) }] },
+      { label: 'sin datos de relleno entre corchetes', test: r => !PLACEHOLDER.test(text(r)) && !(campaign(r)?.messages || []).some(message => PLACEHOLDER.test(message.body)) },
+      { label: 'el correo que muestra va firmado con el nombre del perfil', test: r => Boolean(r.proposal) || !/asunto/i.test(text(r)) || /Nicol[aá]s/.test(text(r)) }] },
   { id: 'mkt-secuencia', title: 'Secuencia de 3 correos', request: 'armame una secuencia de 3 correos para ofrecer axis a gerentes de personas, tono cercano', world,
     origin: 'Redactar una secuencia lista para usar: tres correos distintos, con asunto, firma real y sin prometer lo que no está aprobado.',
     checks: [...CORPUS_COMMON_CHECKS,
@@ -141,7 +142,8 @@ export const MARKETING_CORPUS: CorpusCase[] = [
     checks: [...CORPUS_COMMON_CHECKS,
       { label: 'propone el mensaje de LinkedIn', test: r => r.proposal?.kind === 'linkedin_message' },
       { label: 'el mensaje es breve y sin relleno', test: r => !r.proposal?.linkedinMessage
-        || (r.proposal.linkedinMessage.length <= 600 && !PLACEHOLDER.test(r.proposal.linkedinMessage)) }] },
+        || (r.proposal.linkedinMessage.length <= 600 && !PLACEHOLDER.test(r.proposal.linkedinMessage)) },
+      { label: 'el mensaje lleva el nombre real del usuario', test: r => !r.proposal?.linkedinMessage || /Nicol[aá]s/.test(r.proposal.linkedinMessage) }] },
   { id: 'mkt-linkedin-invitar', title: 'Invitar a un contacto en LinkedIn', request: 'invita a felipe de securitas a mi red de linkedin', world,
     origin: 'La invitación exige revisar el cupo semanal antes de proponerla.',
     checks: [...CORPUS_COMMON_CHECKS,
@@ -159,7 +161,8 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       { label: 'entrega la versión mejorada', test: r => /hola/i.test(text(r)) && text(r).length > 200 },
       // Only the rewritten email counts: the explanation may name what was removed.
       { label: 'quita promesas sin respaldo', test: r => !/el mejor del mercado|80 ?%/i.test(rewrittenEmail(r)) },
-      { label: 'lo concreta con la oferta real (AXIS)', test: r => /AXIS|antecedentes/i.test(text(r)) }] },
+      { label: 'lo concreta con la oferta real (AXIS)', test: r => /AXIS|antecedentes/i.test(text(r)) },
+      { label: 'firma con el nombre del perfil', test: r => /Nicol[aá]s/.test(text(r)) }] },
   { id: 'mkt-busqueda-y-campana', title: 'Pedido de varios pasos', world,
     request: 'busca 10 gerentes de rrhh en empresas de retail en santiago y despues armame una campaña para ellos',
     origin: 'Dos pasos encadenados: el primero es la búsqueda y la nota debe explicar qué sigue después de aprobarla.',

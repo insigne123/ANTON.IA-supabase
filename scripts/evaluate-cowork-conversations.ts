@@ -79,6 +79,9 @@ async function main() {
     casesPassed: outcomes.filter(outcome => outcome.passed).length,
     checksPassed: `${checks.filter(check => check.passed).length}/${checks.length}`,
     failedRuns: outcomes.filter(outcome => outcome.result.failed).length,
+    // Fewer reads and model calls per case mean faster turns with the same answer.
+    readsPerCase: Math.round(outcomes.reduce((sum, outcome) => sum + outcome.result.actions.length, 0) / Math.max(1, outcomes.length) * 100) / 100,
+    callsPerCase: Math.round(calls / Math.max(1, outcomes.length) * 100) / 100,
     answersWithIssues: outcomes.filter(outcome => outcome.issues.length).length,
     answersWithSuggestions: `${outcomes.filter(outcome => outcome.result.suggestions?.length).length}/${outcomes.filter(outcome => !outcome.result.proposal && !outcome.result.search && !outcome.result.failed).length}`,
   };
