@@ -3,7 +3,7 @@
 // real user typed; tool results are compact, masked copies of what production
 // returned. Each case says what a good turn must do and records the baseline
 // production outcome it replaces. No database, mailbox or provider is touched.
-import { coworkAnswerIssues } from '../../src/lib/cowork/answer-quality';
+import { COWORK_DEFERRAL, coworkAnswerIssues } from '../../src/lib/cowork/answer-quality';
 
 export const CORPUS_NOW = new Date('2026-09-25T13:10:00Z');
 
@@ -122,6 +122,8 @@ export type CorpusTurnResult = {
   search: Record<string, unknown> | null;
   note: string | null;
   failed: string | null;
+  /** Quick replies shown under the answer (empty for proposals and failures). */
+  suggestions?: Array<{ label: string; message: string }>;
 };
 
 export type CorpusHistoryTurn = { request: string; reply: string; at: string; observations?: unknown[]; actions?: unknown[] };
@@ -143,12 +145,19 @@ const noJargon = (result: CorpusTurnResult) => coworkAnswerIssues(shownText(resu
 const nextStep = (result: CorpusTurnResult) => Boolean(result.proposal || result.search)
   || !coworkAnswerIssues(result.reply).some(issue => issue.code === 'next_step');
 const explained = (result: CorpusTurnResult) => !(result.proposal || result.search) || Boolean(result.note && result.note.length > 20);
+// A plain answer offers at least one quick reply; a proposal already has its card.
+const suggested = (result: CorpusTurnResult) => Boolean(result.proposal || result.search) || (result.suggestions?.length ?? 0) > 0;
+// Each quick reply asks for something Cowork does on click, never a promise the person makes.
+// The sanitizer drops these; the check guards it on the chips the person would see.
+const actionable = (result: CorpusTurnResult) => (result.suggestions || []).every(chip => !COWORK_DEFERRAL.test(chip.message));
 
 const common = [
   { label: 'termina sin fallar', test: answerOk },
   { label: 'sin jerga, códigos, IDs ni horas UTC', test: noJargon },
   { label: 'cierra con un siguiente paso o una propuesta', test: nextStep },
   { label: 'si propone, explica la propuesta', test: explained },
+  { label: 'ofrece respuestas sugeridas para seguir', test: suggested },
+  { label: 'las sugerencias piden algo que Cowork hace al tocarlas', test: actionable },
 ];
 
 const recentAt = '2026-09-25T13:08:00Z';

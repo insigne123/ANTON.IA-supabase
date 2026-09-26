@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { COWORK_NOTE_ACTION, coworkDocumentSchema } from './contracts';
-import { polishCoworkText } from './answer-quality';
+import { coworkSuggestions, polishCoworkText } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema } from './code-proposal';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
@@ -304,6 +304,20 @@ function rejected(message: string, feedback: string) {
  * deliver the document first; on the last decision the proposal stands. */
 const DOCUMENT_WITH_PROPOSAL = 'Entregaste un documento junto con una propuesta y el documento se perdería. Si el usuario pidió un documento, entrégalo con answer (reply y document) y ofrece la acción como pregunta al final; si no, propón la acción con document null.';
 
+/** An answer closes with the next-step question and the quick replies that
+ * answer it (rules 4 and 9). The model gets one correction per run, never on
+ * its last decision: after that the answer stands as it is. */
+const CLOSING_FEEDBACK = 'Cierre incompleto:';
+
+function closingFeedback(answer: { reply: string; suggestions?: unknown }): string | null {
+  const lines = answer.reply.split('\n').filter(line => line.trim());
+  const missing = [
+    /[?¿]/.test(lines[lines.length - 1] || '') ? null : 'termina reply con la pregunta del siguiente paso (regla 4)',
+    coworkSuggestions(answer.suggestions).length ? null : 'agrega 1 a 3 respuestas sugeridas que se envíen tal cual al tocarlas (regla 9)',
+  ].filter(Boolean);
+  return missing.length ? `${CLOSING_FEEDBACK} ${missing.join(' y ')}.` : null;
+}
+
 /** The same email lookup already ran in this thread (history.actions): it would
  * spend another credit for the same provider answer. */
 function repeatedEnrichment(label: string, history: CoworkHistoryTurn[]) {
@@ -389,6 +403,8 @@ export async function runCoworkReadLoop(input: {
     try {
       if (decision.action === 'answer') {
         if (!decision.answer) throw rejected('Missing final answer', 'Elegiste answer sin contenido: entrega answer.reply con la respuesta completa.');
+        const closing = turn < 3 && !rejections.some(item => item.reason.startsWith(CLOSING_FEEDBACK)) ? closingFeedback(decision.answer) : null;
+        if (closing) throw rejected('Answer without its closing', closing);
         return decision.answer;
       }
       if (decision.action === 'specialists.review') {

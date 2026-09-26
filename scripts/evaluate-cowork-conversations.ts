@@ -76,6 +76,7 @@ async function main() {
     checksPassed: `${checks.filter(check => check.passed).length}/${checks.length}`,
     failedRuns: outcomes.filter(outcome => outcome.result.failed).length,
     answersWithIssues: outcomes.filter(outcome => outcome.issues.length).length,
+    answersWithSuggestions: `${outcomes.filter(outcome => outcome.result.suggestions?.length).length}/${outcomes.filter(outcome => !outcome.result.proposal && !outcome.result.search && !outcome.result.failed).length}`,
   };
   const report = { mode: 'real_model_real_loop_corpus_tools', summary, usage, outcomes,
     limitation: 'Fixture tools copied from one production workspace; lexical checks screen behavior and need a human read of the replies.' };
@@ -85,6 +86,7 @@ async function main() {
   for (const outcome of outcomes) {
     const failing = outcome.checks.filter(check => !check.passed).map(check => check.label);
     console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${outcome.id}${repeat > 1 ? ` #${outcome.attempt}` : ''} (${outcome.seconds}s)${failing.length ? ` · ${failing.join('; ')}` : ''}`);
+    if (outcome.result.suggestions?.length) console.log(`     ↳ ${outcome.result.suggestions.map(chip => `[${chip.label}]`).join(' ')}`);
   }
   if (summary.casesPassed !== summary.cases) process.exitCode = 1;
 }

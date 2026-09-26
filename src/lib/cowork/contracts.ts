@@ -42,9 +42,34 @@ export function coworkNoteText(payload: unknown): string | null {
   return typeof reply === 'string' && reply.trim() ? reply.trim() : null;
 }
 
+/** A quick reply the person can click to continue: `label` is what the button
+ * shows, `message` is what gets sent. The decision accepts generous lengths so
+ * one long chip never rejects the whole answer; `coworkSuggestions` keeps only
+ * the ones that fit (see answer-quality.ts). */
+export const coworkSuggestionSchema = z.object({
+  label: z.string().max(120),
+  message: z.string().max(600),
+}).strict();
+
+export type CoworkSuggestion = { label: string; message: string };
+
+export const COWORK_SUGGESTION_LIMITS = { count: 3, label: 40, message: 200 } as const;
+
+/** Structural read of stored quick replies for the UI. The worker already
+ * cleaned them (answer-quality.ts); this only refuses shapes that do not fit. */
+export function coworkStoredSuggestions(value: unknown): CoworkSuggestion[] {
+  if (!Array.isArray(value)) return [];
+  const fits = (text: unknown, max: number): text is string => typeof text === 'string' && text.trim().length > 1 && text.length <= max;
+  return value
+    .filter(item => item && fits(item.label, COWORK_SUGGESTION_LIMITS.label) && fits(item.message, COWORK_SUGGESTION_LIMITS.message))
+    .slice(0, COWORK_SUGGESTION_LIMITS.count)
+    .map(item => ({ label: item.label.trim(), message: item.message.trim() }));
+}
+
 export const coworkDocumentSchema = z.object({
   reply: z.string().min(1).max(20000),
   document: z.object({ title: z.string().min(1).max(160), content: z.string().min(1).max(40000) }).nullable(),
+  suggestions: z.array(coworkSuggestionSchema).max(6).nullable().optional(),
 }).strict();
 
 const transitions: Record<CoworkRunStatus, readonly CoworkRunStatus[]> = {

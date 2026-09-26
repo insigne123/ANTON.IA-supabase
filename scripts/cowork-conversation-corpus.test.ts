@@ -8,8 +8,9 @@ const read = (action: string, query: string | null = null, extra: Record<string,
   coworkDecisionSchema.parse({ action, query, leadId: null, answer: null, ...extra });
 const parallel = (reads: Array<{ action: string; input: string }>) =>
   coworkDecisionSchema.parse({ action: 'reads.parallel', query: null, leadId: null, answer: null, reads });
-const answer = (reply: string, document: { title: string; content: string } | null = null) =>
-  coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null, answer: { reply, document } });
+const answer = (reply: string, document: { title: string; content: string } | null = null,
+  suggestions: Array<{ label: string; message: string }> = [{ label: 'Sí, adelante', message: 'Sí, adelante con lo que propones' }]) =>
+  coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null, answer: { reply, document, suggestions } });
 
 /** What a good turn looks like for each case, played through the real loop. */
 const IDEAL: Record<string, CorpusDecider> = {
@@ -76,7 +77,7 @@ test('every corpus case has an ideal turn that passes all its checks through the
 
 test('the production baseline answers fail the checks the corpus was written for', () => {
   const baseline = (id: string, result: Partial<Parameters<typeof scoreCorpusCase>[1]>) => scoreCorpusCase(CORPUS.find(entry => entry.id === id)!,
-    { actions: [], reply: '', document: null, proposal: null, search: null, note: null, failed: null, ...result });
+    { actions: [], reply: '', document: null, proposal: null, search: null, note: null, failed: null, suggestions: [], ...result });
   const failing = (outcome: ReturnType<typeof scoreCorpusCase>) => outcome.checks.filter(check => !check.passed).map(check => check.label);
   assert.ok(failing(baseline('dominio', { reply: 'Pásame el dominio desnudo (por ejemplo, ejemplo.cl) y revisaré sus registros MX, SPF, DKIM y DMARC.' }))
     .includes('revisa el dominio sin preguntarlo'));
