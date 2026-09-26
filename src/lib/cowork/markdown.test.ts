@@ -74,3 +74,17 @@ test('pathological input stays fast', () => {
 test('excerpt skips markup', () => {
   assert.equal(markdownExcerpt('# Título\n\n**Resumen:** tres cuentas prioritarias.', 60), 'Título Resumen: tres cuentas prioritarias.');
 });
+
+test('a closing line under a list is its own paragraph; a wrapped item still continues', () => {
+  const closing = parseMarkdown('Para avanzar:\n- 3 de tus 4 contactos no tienen correo.\n- Hay 2 incidencias abiertas.\n¿Busco el correo de esos 3 contactos?');
+  assert.deepEqual(closing.map(block => block.type), ['paragraph', 'list', 'paragraph']);
+  const list = closing[1];
+  assert.equal(list.type === 'list' && list.items.length, 2);
+  const question = closing[2];
+  assert.equal(question.type === 'paragraph' && markdownInlineText(question.children), '¿Busco el correo de esos 3 contactos?');
+  // Without a sentence end the next line is the same item, wrapped.
+  const wrapped = parseMarkdown('- Revisar a Carlos de Minera\nCentinela y a Nehal de Adecco.');
+  assert.deepEqual(wrapped.map(block => block.type), ['list']);
+  const item = wrapped[0].type === 'list' ? wrapped[0].items[0].children[0] : null;
+  assert.equal(item?.type === 'paragraph' && markdownInlineText(item.children), 'Revisar a Carlos de Minera\nCentinela y a Nehal de Adecco.');
+});
