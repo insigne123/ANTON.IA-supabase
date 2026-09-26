@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireCoworkAccess } from '@/lib/server/cowork/access';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { getCoworkRun } from '@/lib/server/cowork/runs';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { getBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { loadAudience } from '@/lib/server/bulk-campaign-audience';
-import { parseCoworkCampaignTarget } from '@/lib/server/cowork/campaign-ops';
+import { editCoworkCampaignMessages, parseCoworkCampaignTarget } from '@/lib/server/cowork/campaign-ops';
+import { CoworkCampaignEditRefused, coworkCampaignEditSchema } from '@/lib/cowork/campaign-edit';
 import { CampaignInputSchema } from '@/lib/bulk-campaigns';
 
 export const dynamic = 'force-dynamic';
@@ -37,8 +39,10 @@ export async function GET(_req: NextRequest, context: Context) {
       const definition = CampaignInputSchema.parse(row.data.definition);
       const audience = await loadAudience(auth, definition.criteria);
       const matched = new Set(audience.filter(person => !person.blockedReason).map(person => person.email.toLowerCase()));
+      // Edits the person made before approving (proposal.edited), newest last.
+      const edits = state.events.filter((event: { kind: string }) => event.kind === 'proposal.edited').length;
       return NextResponse.json({
-        kind: 'campaign_create', label: String(proposal.label || ''),
+        kind: 'campaign_create', label: String(proposal.label || ''), edits,
         name: definition.name, objective: definition.objective, provider: definition.provider,
         messages: definition.messages.map(message => ({ subject: message.subject, body: message.body, delayDays: message.delayDays })),
         emails: definition.emails,
@@ -62,5 +66,21 @@ export async function GET(_req: NextRequest, context: Context) {
   } catch (error) {
     if (error instanceof AuthError) return handleAuthError(error);
     return NextResponse.json({ error: 'No se pudo cargar la vista previa.' }, { status: 503, headers });
+  }
+}
+
+/** Saves the person's edits to the emails of a pending campaign proposal. */
+export async function PATCH(req: NextRequest, context: Context) {
+  try {
+    const auth = await requireCoworkAccess();
+    const id = z.string().uuid().parse((await context.params).id);
+    const body = coworkCampaignEditSchema.parse(await req.json());
+    return NextResponse.json(await editCoworkCampaignMessages(auth, id, body.messages), { headers });
+  } catch (error) {
+    if (error instanceof AuthError) return handleAuthError(error);
+    if (error instanceof CoworkCampaignEditRefused) return NextResponse.json({ error: error.message }, { status: error.status, headers });
+    const invalid = error instanceof z.ZodError || error instanceof SyntaxError;
+    return NextResponse.json({ error: invalid ? 'Cada correo necesita asunto y cuerpo, dentro del largo permitido.' : 'No se pudo guardar la edición.' },
+      { status: invalid ? 400 : 503, headers });
   }
 }

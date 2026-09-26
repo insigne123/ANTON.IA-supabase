@@ -11,7 +11,7 @@ const externalResultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.
 const companyResultSchema = z.object({ items: z.array(rowSchema.extend({ id: z.string().startsWith('apollo-company:').max(215), website: optionalUrl })).max(25), scope: z.literal('external_company_search') });
 export const coworkLeadColumns = ['id', 'name', 'title', 'company', 'email', 'status', 'industry', 'location', 'domain', 'employees', 'company_website'] as const;
 
-function csvCell(value: unknown) {
+export function csvCell(value: unknown) {
   const text = String(value ?? '');
   // Quote CSV grammar and neutralize spreadsheet formulas/control prefixes.
   const safe = /^[\s\u0000-\u001f]*[=+@-]/.test(text) || /^[\t\r\n]/.test(text) ? `'${text}` : text;

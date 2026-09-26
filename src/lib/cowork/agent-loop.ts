@@ -1,11 +1,12 @@
 import { z } from 'zod';
-import { COWORK_NOTE_ACTION, coworkDocumentSchema } from './contracts';
-import { polishCoworkText } from './answer-quality';
+import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, coworkDocumentSchema, type CoworkBlock, type CoworkPlanStep } from './contracts';
+import { coworkBlocks, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema } from './code-proposal';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
 import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
 import { collectCoworkLeadRows } from './lead-export';
+import { coworkEditedEmails, type CoworkEditedEmail } from './blocks';
 import { coworkReadPlanSchema, executeCoworkReadPlan } from './read-plan';
 import { specialistTasksSchema, type SpecialistTask } from './specialists';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS, type CoworkDomainRead } from './domain-reads';
@@ -41,6 +42,8 @@ export const coworkDecisionSchema = z.object({
     'answer', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
   reads: z.array(coworkReadTaskSchema).min(1).max(3).nullable().optional(),
   plan: coworkReadPlanSchema.nullable().optional(),
+  /** The steps the person sees while the turn works (rule 12); only the first consulting decision uses it. */
+  outline: z.array(z.object({ label: z.string().max(300), read: z.string().max(80).nullable() }).strict()).max(10).nullable().optional(),
   specialists: specialistTasksSchema.nullable().optional(),
   query: z.string().max(120).nullable(),
   leadId: z.string().uuid().nullable(),
@@ -76,7 +79,7 @@ export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draf
   | 'crm.update_record' | 'campaign.prepare_draft_v2'
   | 'crm.assign_lead' | 'exception.resolve' | 'mission.control' | 'message_context.update' | 'lead.enrich_batch'
   | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message';
-export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
+export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
 type Decision = z.infer<typeof coworkDecisionSchema>;
 
 export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; label: string; originRunId: string;
@@ -205,9 +208,14 @@ function describeLeadTarget(
   observations: CoworkObservation[], history: CoworkHistoryTurn[],
 ): string | null {
   if (action !== 'leads.save_contact' && action !== 'research.start' && action !== 'lead.enrich') return null;
+  return observedLeadName(targetId, observations, history);
+}
+
+/** «Nombre (Empresa)» of a contact seen in this thread, or null. */
+function observedLeadName(leadId: string, observations: CoworkObservation[], history: CoworkHistoryTurn[]): string | null {
   const payloads = [...observations, ...history.flatMap(turn => turn.observations || [])];
   for (const row of collectCoworkLeadRows(payloads)) {
-    if (row.id !== targetId) continue;
+    if (row.id !== leadId) continue;
     const name = String(row.name || '').trim();
     const company = String((row as Record<string, unknown>).company || '').trim();
     if (name && company) return `${name} (${company})`;
@@ -302,7 +310,131 @@ function rejected(message: string, feedback: string) {
 /** A proposal keeps only its explanation, so a document sent with it would be
  * lost while the note claims it was delivered. The model gets one chance to
  * deliver the document first; on the last decision the proposal stands. */
-const DOCUMENT_WITH_PROPOSAL = 'Entregaste un documento junto con una propuesta y el documento se perdería. Si el usuario pidió un documento, entrégalo con answer (reply y document) y ofrece la acción como pregunta al final; si no, propón la acción con document null.';
+const DOCUMENT_WITH_PROPOSAL = 'Entregaste un documento junto con una propuesta y el documento se perdería. Si el usuario pidió un documento, entrégalo con answer (reply y document) y ofrece la acción en answer.question; si no, propón la acción con document null.';
+
+/** An answer closes with the next-step question and the quick replies that
+ * answer it (rules 4 and 9). The model gets one correction per run, never on
+ * its last decision: after that the answer stands as it is. */
+const CLOSING_FEEDBACK = 'Cierre incompleto:';
+
+/** A [placeholder] in any text of a card («[tu nombre]»), which would reach the recipient as is. */
+function hasFiller(block: CoworkBlock): boolean {
+  const texts: string[] = [];
+  const collect = (value: unknown) => {
+    if (typeof value === 'string') texts.push(value);
+    else if (Array.isArray(value)) value.forEach(collect);
+    else if (value && typeof value === 'object') Object.values(value).forEach(collect);
+  };
+  collect(block);
+  return texts.some(text => /\[[^\]]{2,}\]/.test(text));
+}
+
+/** The next-step question: answer.question, or a reply that already ends asking. */
+function closingQuestion(answer: { reply: string; question?: unknown }): string | null {
+  const fromField = coworkQuestion(answer.question);
+  if (fromField) return fromField;
+  const last = answer.reply.split('\n').filter(line => line.trim()).pop() || '';
+  return /\?\s*$/.test(last) ? last.trim() : null;
+}
+
+function closingFeedback(answer: { reply: string; document: { title: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown }): string | null {
+  const chips = coworkSuggestions(answer.suggestions).length;
+  const blocks = coworkBlocks(answer.blocks);
+  const drafts = blocks.some(block => block.type === 'email_draft' || block.type === 'sequence');
+  const filler = blocks.some(hasFiller);
+  const missing = [
+    closingQuestion(answer) ? null : 'completa answer.question con la pregunta del siguiente paso (regla 4)',
+    // A question apart already gets a one-tap yes (COWORK_YES_CHIP): not worth another call.
+    chips || coworkQuestion(answer.question) ? null : 'agrega 1 a 3 respuestas sugeridas que se envíen tal cual al tocarlas (regla 9)',
+    // Two or more emails are meant to be copied and kept: they go in a card, not in the chat.
+    !answer.document && !drafts && (answer.reply.match(/asunto\s*\d*\s*[:：]/gi) || []).length >= 2
+      ? 'pon los correos en un bloque sequence (regla 11) y deja en reply un resumen breve' : null,
+    // A card is copied as is: a [placeholder] would reach the recipient.
+    filler ? 'reemplaza los [corchetes] de relleno de los bloques con datos reales (userContext o lo observado) o quítalos' : null,
+  ].filter(Boolean);
+  if (!missing.length) return null;
+  // The model does not see its previous answer: name what already worked so the retry keeps it.
+  const keep = [answer.document ? `el document «${answer.document.title.slice(0, 80)}»` : null,
+    blocks.length && !filler ? 'los bloques' : null,
+    closingQuestion(answer) ? 'la pregunta final' : null, chips ? 'las respuestas sugeridas' : null].filter(Boolean);
+  return `${CLOSING_FEEDBACK} ${missing.join(' y ')}. Entrega de nuevo la respuesta completa${keep.length ? `, conservando ${keep.join(' y ')}` : ''}.`;
+}
+
+type CoworkAnswer = z.infer<typeof coworkDocumentSchema>;
+
+/** When the model proposes a search without explaining it, the card still gets a
+ * sentence built from the criteria, never a blank next to the approval. */
+/** What a proposal does when the model left no explanation of its own: the card
+ * never arrives with a generic line when the loop knows what it is about. */
+function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof coworkCampaignDraftSchema> | undefined, person: string | null): string | null {
+  if (campaign) return campaignNote(campaign);
+  const who = person || 'este contacto';
+  if (action === 'linkedin.message') return `Preparé un mensaje de LinkedIn para ${who}. Revisa el texto en la tarjeta antes de aprobarlo.`;
+  if (action === 'linkedin.invite') return `Propongo invitar a ${who} en LinkedIn. Revisa la invitación en la tarjeta antes de aprobarla.`;
+  if (action === 'lead.enrich') return `Propongo buscar el correo de ${who} con el proveedor; usa un crédito. Revísalo antes de aprobar.`;
+  if (action === 'research.start') return `Propongo investigar a ${who} para escribirle con más contexto. Revísalo antes de aprobar.`;
+  if (action === 'leads.save_contact') return `${person ? `Propongo guardar a ${person} en tus contactos.` : 'Propongo guardar este contacto en ANTON.IA.'} Revísalo antes de aprobar.`;
+  return null;
+}
+
+/** A campaign asked for with the person's exact emails («Crea una campaña pausada
+ * con esta versión…») carries that text word for word: the loop copies it over
+ * whatever the model wrote, and spaces the emails by the days they came with. */
+export function coworkCampaignWithExactEmails(campaign: z.infer<typeof coworkCampaignDraftSchema>, emails: CoworkEditedEmail[]) {
+  const messages = emails.slice(0, 7).map((email, index) => {
+    const previous = index > 0 ? emails[index - 1] : null;
+    const fromDays = previous && email.day !== null && previous.day !== null ? email.day - previous.day : null;
+    const delayDays = index === 0 ? 0 : Math.max(1, Math.min(90, fromDays ?? campaign.messages[index]?.delayDays ?? 3));
+    return { subject: email.subject, body: email.body, delayDays };
+  });
+  return { ...campaign, messages };
+}
+
+/** What a proposed campaign does, when the model left no explanation of its own. */
+function campaignNote(campaign: z.infer<typeof coworkCampaignDraftSchema>): string {
+  const people = campaign.emails.length;
+  const emails = campaign.messages.length;
+  return `Preparé la campaña «${campaign.name}» para ${people} ${people === 1 ? 'contacto' : 'contactos'}, con ${emails} ${emails === 1 ? 'correo' : 'correos'}. Queda pausada: revísala y, cuando la apruebes, se crea sin enviar nada todavía.`;
+}
+
+/** A search asked as the first step of a longer request («busca… y después armame
+ * una campaña») says what comes after it, even when the model left no note. */
+const LATER_STEP = /(?<!\p{L})(?:campa[ñn]as?|secuencias?|escribirles|mandarles|enviarles)(?!\p{L})/iu;
+
+function searchNote(criteria: CoworkSearchCriteria, request = ''): string {
+  // The model sometimes repeats a term («retail», «retail»): each one is named once.
+  const unique = (items: string[]) => items.map(item => item.trim())
+    .filter((item, index, all) => item && all.findIndex(other => other.toLowerCase() === item.toLowerCase()) === index);
+  const titles = unique(criteria.titles || []).slice(0, 3);
+  const places = unique([...(criteria.locations || []), ...(criteria.companyLocations || [])]).slice(0, 2);
+  const industries = unique(criteria.industries || []).slice(0, 2);
+  const list = (items: string[], last: string) => items.length > 1 ? `${items.slice(0, -1).join(', ')} ${last} ${items[items.length - 1]}` : items[0];
+  return [
+    `Propongo buscar hasta ${criteria.limit || 25} ${criteria.target === 'companies' ? 'empresas' : 'personas'}`,
+    titles.length ? ` con cargos como ${list(titles, 'o')}` : '',
+    industries.length ? `, del rubro ${list(industries, 'y')}` : '',
+    places.length ? `, en ${list(places, 'y')}` : '',
+    '. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.',
+    LATER_STEP.test(request) ? ' Cuando veas los resultados y guardes a quienes te sirvan, sigo con la campaña.' : '',
+  ].join('');
+}
+
+/** The retry only has to fix the closing. Quick replies, a closing question or a
+ * document the first answer had and the retry dropped come back, unless the
+ * retry now carries the emails in the chat itself (then that document would
+ * repeat them). */
+function completeFrom(first: CoworkAnswer, retry: CoworkAnswer): CoworkAnswer {
+  const emailsInChat = (retry.reply.match(/asunto\s*\d*\s*[:：]/gi) || []).length >= 2;
+  return {
+    ...retry,
+    document: retry.document ?? (emailsInChat ? null : first.document),
+    // Blocks come back too, unless they were the problem (a [placeholder] in a card).
+    blocks: coworkBlocks(retry.blocks).length ? retry.blocks
+      : emailsInChat || coworkBlocks(first.blocks).some(hasFiller) ? null : first.blocks ?? null,
+    question: closingQuestion(retry) ? retry.question ?? null : closingQuestion(first),
+    suggestions: coworkSuggestions(retry.suggestions).length ? retry.suggestions : first.suggestions ?? null,
+  };
+}
 
 /** The same email lookup already ran in this thread (history.actions): it would
  * spend another credit for the same provider answer. */
@@ -331,6 +463,28 @@ function proposalRejection(error: unknown, signal: AbortSignal): unknown {
   if (['AuthError', 'AbortError', 'TimeoutError', 'CoworkDecisionRejected'].includes(error.name) || status === 401 || status === 403) return error;
   const reason = (issueSummary(error) || error.message || 'motivo no informado').slice(0, 300);
   return new CoworkDecisionRejected(error.message, `La propuesta no se pudo preparar: ${reason}`, true);
+}
+
+const ID_TEXT = /[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}/i;
+const NOT_A_STEP_READ = new Set(['answer', 'reads.parallel', 'reads.plan']);
+
+/** The plan as the person reads it: two to five short steps without IDs or
+ * [filler]. A step keeps its read only when it names one the loop runs, so the
+ * chat can check it off when that read completes. */
+export function coworkOutline(value: Decision['outline']): CoworkPlanStep[] | null {
+  if (!value) return null;
+  const actions = new Set<string>(coworkDecisionSchema.shape.action.options);
+  const steps = value.flatMap(step => {
+    let label = polishCoworkText(step.label).replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim().replace(/[.:;,]+$/, '');
+    if (label.length < 3 || ID_TEXT.test(label) || /\[[^\]]{2,}\]/.test(label)) return [];
+    if (label.length > COWORK_PLAN_LIMITS.label) {
+      const cut = label.slice(0, COWORK_PLAN_LIMITS.label - 1);
+      label = `${cut.lastIndexOf(' ') > 40 ? cut.slice(0, cut.lastIndexOf(' ')) : cut}…`;
+    }
+    const read = step.read && actions.has(step.read) && !NOT_A_STEP_READ.has(step.read) ? step.read : null;
+    return [{ label: label[0].toUpperCase() + label.slice(1), read }];
+  }).slice(0, COWORK_PLAN_LIMITS.steps);
+  return steps.length > 1 ? steps : null;
 }
 
 /** Bounded read-only loop. Tool outputs are observations, never instructions. */
@@ -365,22 +519,40 @@ export async function runCoworkReadLoop(input: {
   const rejections: CoworkRejection[] = [];
   // The model's own explanation travels with the approval card instead of a
   // canned line; it is persisted as a note event, never as a data read.
-  const explain = async (decision: Decision) => {
-    const reply = polishCoworkText(decision.answer?.reply || '').trim();
+  const recordNote = async (text: string) => {
+    const reply = polishCoworkText(text).trim();
     if (!reply) return null;
     await input.authorize();
     input.signal.throwIfAborted();
     await input.record({ action: COWORK_NOTE_ACTION, input: '', result: { reply } });
     return reply;
   };
+  const explain = (decision: Decision) => recordNote(decision.answer?.reply || '');
+  // The plan shows up before the first read, so the person sees what is coming
+  // while it works. Only the first consulting decision draws it.
+  let outlined = false;
+  const recordPlan = async (decision: Decision) => {
+    if (outlined) return;
+    outlined = true;
+    const steps = coworkOutline(decision.outline);
+    if (!steps) return;
+    await input.authorize();
+    input.signal.throwIfAborted();
+    await input.record({ action: COWORK_PLAN_ACTION, input: '', result: { steps } });
+  };
+  // The answer that got the closing correction. From then on the loop never ends
+  // worse than that answer: no more reads, and a failed retry returns it.
+  let closingFallback: CoworkAnswer | null = null;
+  let campaignsListed = false;
   for (let turn = 0; turn < 4; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
     let decision: Decision;
     try {
-      decision = coworkDecisionSchema.parse(await input.decide(observations, turn === 3 || readsUsed >= 3, rejections.slice()));
+      decision = coworkDecisionSchema.parse(await input.decide(observations, turn === 3 || readsUsed >= 3 || closingFallback !== null, rejections.slice()));
     } catch (error) {
       const reason = invalidDecisionReason(error);
+      if (closingFallback && !input.signal.aborted) return closingFallback;
       if (reason === null || turn === 3 || input.signal.aborted) throw error;
       rejections.push({ action: 'decision', reason });
       continue;
@@ -389,8 +561,17 @@ export async function runCoworkReadLoop(input: {
     try {
       if (decision.action === 'answer') {
         if (!decision.answer) throw rejected('Missing final answer', 'Elegiste answer sin contenido: entrega answer.reply con la respuesta completa.');
+        if (closingFallback) return completeFrom(closingFallback, decision.answer);
+        const closing = turn < 3 ? closingFeedback(decision.answer) : null;
+        if (closing) {
+          // Asked directly, not thrown: the catch below returns closingFallback once it is set.
+          closingFallback = decision.answer;
+          rejections.push({ action: 'answer', reason: closing });
+          continue;
+        }
         return decision.answer;
       }
+      if (decision.action === 'specialists.review' && closingFallback) return closingFallback;
       if (decision.action === 'specialists.review') {
         if (reviewed || turn === 3 || !input.review || !decision.specialists || !observations.length) {
           throw rejected('Specialist review unavailable or budget exhausted', 'La revisión de especialistas no está disponible ahora: continúa con lecturas o responde.');
@@ -412,7 +593,7 @@ export async function runCoworkReadLoop(input: {
         const parsed = coworkSearchCriteriaSchema.safeParse(decision.searchCriteria);
         if (!parsed.success) throw rejected('Invalid external search proposal', `Criterios de búsqueda inválidos: ${issueSummary(parsed.error)}. Corrígelos.`);
         if (decision.answer?.document && turn < 3) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
-        const note = await explain(decision);
+        const note = await explain(decision) ?? await recordNote(searchNote(parsed.data, input.message));
         await input.authorize(); input.signal.throwIfAborted();
         try { await input.proposeSearch(parsed.data); } catch (error) { throw proposalRejection(error, input.signal); }
         return { reply: note || (decision.searchCriteria.target === 'companies'
@@ -484,7 +665,9 @@ export async function runCoworkReadLoop(input: {
           : decision.action === 'campaign.schedule_batch' ? decision.campaignId
           : decision.action === 'linkedin.invite' || decision.action === 'linkedin.message' ? 'new-linkedin-job'
           : decision.leadId;
-        const campaign = decision.action === 'campaign.create' ? decision.campaign ?? undefined : undefined;
+        const exactEmails = decision.action === 'campaign.create' ? coworkEditedEmails(input.message) : null;
+        const campaign = decision.action === 'campaign.create' && decision.campaign
+          ? (exactEmails ? coworkCampaignWithExactEmails(decision.campaign, exactEmails) : decision.campaign) : undefined;
         const code = decision.action === 'code.execute' ? decision.code ?? undefined : undefined;
         const profile = decision.action === 'profile.update' ? decision.profile ?? undefined : undefined;
         const savedSearch = decision.action === 'saved_search.create' || decision.action === 'saved_search.update' || decision.action === 'saved_search.delete'
@@ -522,9 +705,23 @@ export async function runCoworkReadLoop(input: {
           ? { campaignId: decision.campaignId, ...(decision.spacingMinutes == null ? {} : { spacingMinutes: decision.spacingMinutes }) }
           : undefined;
         if (decision.action === 'campaign.schedule_batch' && !scheduleBatch) throw rejected('Missing batch schedule', MISSING_PROPOSAL_FIELDS);
-        const originRunId = decision.action === 'code.execute'
+        let originRunId = decision.action === 'code.execute'
           ? codeOriginRunId(code?.inputFiles || [], observations, input.history || [], input.runId || '')
           : effectTargetRun(decision.action, targetId, observations, input.history || [], input.runId || '');
+        // A campaign is proposed next to the list of existing ones. When the model
+        // skipped that read, the loop reads it instead of losing the whole proposal
+        // (seen with the real model on the last decision, after its three reads).
+        // It is one fixed read the loop needs, so it may go past the read budget once.
+        if (!originRunId && decision.action === 'campaign.create' && !campaignsListed) {
+          campaignsListed = true;
+          await input.authorize();
+          input.signal.throwIfAborted();
+          const listed: CoworkObservation = { action: 'campaigns.list', input: '', result: await input.execute('campaigns.list', '') };
+          readsUsed++;
+          await input.record(listed);
+          observations.push(listed);
+          originRunId = effectTargetRun(decision.action, targetId, observations, input.history || [], input.runId || '');
+        }
         if (!originRunId) throw rejected('Effect target must be observed first', 'El objetivo de la propuesta no aparece en los resultados de este hilo: consúltalo primero (leads.search, campaigns.list, draft.get o research.get_existing) y usa su ID exacto. Para crear una campaña, los destinatarios deben ser contactos guardados con correo.');
         if (decision.answer?.document && turn < 3) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
         const targetName = describeLeadTarget(decision.action, targetId, observations, input.history || []);
@@ -532,7 +729,9 @@ export async function runCoworkReadLoop(input: {
         if (kind === 'enrich_contact' && turn < 3 && repeatedEnrichment(label, input.history || [])) {
           throw rejected('Enrichment already ran in this thread', 'Ya se buscó el correo de este contacto en este hilo (mira history.actions): repetirlo gasta otro crédito y el proveedor responde lo mismo. No lo vuelvas a proponer; sigue con lo que pidió el usuario (por ejemplo, investigarlo con research.start) o explica la alternativa.');
         }
-        const note = await explain(decision);
+        const fallback = proposalNote(decision.action, campaign, targetName
+          ?? (decision.leadId ? observedLeadName(decision.leadId, observations, input.history || []) : null));
+        const note = await explain(decision) ?? (fallback ? await recordNote(fallback) : null);
         await input.authorize();
         input.signal.throwIfAborted();
         try {
@@ -551,7 +750,10 @@ export async function runCoworkReadLoop(input: {
         } catch (error) { throw proposalRejection(error, input.signal); }
         return { reply: note || 'Revisa la propuesta antes de ejecutar el cambio.', document: null };
       }
+      // Only reads remain below: after a closing correction the first answer stands instead.
+      if (closingFallback) return closingFallback;
       if (turn === 3) throw new Error('Cowork tool budget exhausted');
+      await recordPlan(decision);
       if (decision.action === 'reads.plan') {
         if (!decision.plan || readsUsed + decision.plan.length > 3) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed));
         readsUsed += decision.plan.length;
@@ -629,6 +831,7 @@ export async function runCoworkReadLoop(input: {
       observations.push(observation);
     } catch (error) {
       // Correctable refusals go back to the model; the last decision must stand on its own.
+      if (closingFallback && error instanceof CoworkDecisionRejected && !input.signal.aborted) return closingFallback;
       if (!(error instanceof CoworkDecisionRejected) || turn === 3 || input.signal.aborted) throw error;
       rejections.push({ action: decision.action, reason: error.feedback });
     }
