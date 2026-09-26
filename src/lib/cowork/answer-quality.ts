@@ -1,3 +1,4 @@
+import { COWORK_SUGGESTION_LIMITS, type CoworkSuggestion } from './contracts';
 import { COWORK_GLOSSARY } from './decision-context';
 
 /** Deterministic last pass over what the person reads. The prompt asks for
@@ -21,11 +22,43 @@ export function polishCoworkText(text: string): string {
     .replace(ID_IN_PARENS, ''));
 }
 
-export function polishCoworkAnswer<T extends { reply: string; document: { title: string; content: string } | null }>(answer: T): T {
+/** Quick replies that are safe to show as buttons: plain text, no IDs or
+ * internal codes, a short label and a self-contained message. Malformed chips
+ * are dropped one by one; nothing here rewrites what a chip means. */
+export function coworkSuggestions(value: unknown): CoworkSuggestion[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const kept: CoworkSuggestion[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const raw = item as { label?: unknown; message?: unknown };
+    // Only formatting that wraps the whole chip is removed; text inside stays as written.
+    const clean = (text: unknown) => polishCoworkText(String(text ?? '')).replace(/\s+/g, ' ').trim()
+      .replace(/^(?:\*\*|`)(.+)(?:\*\*|`)$/, '$1').replace(/^#+\s*/, '');
+    const label = clean(raw.label).replace(/[.;:,]+$/, '');
+    const message = clean(raw.message) || label;
+    if (label.length < 2 || label.length > COWORK_SUGGESTION_LIMITS.label || message.length > COWORK_SUGGESTION_LIMITS.message) continue;
+    // A message ending in «:» waits for text the person has to add, and «Sí, cuando…» or
+    // «Voy a…» announce something they will do later: none can be sent as is.
+    if (UUID.test(label) || UUID.test(message) || /:$/.test(message) || /^(?:s[íi],? cuando|voy a)(?!\p{L})/iu.test(message)) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push({ label, message });
+    if (kept.length === COWORK_SUGGESTION_LIMITS.count) break;
+  }
+  return kept;
+}
+
+export function polishCoworkAnswer<T extends { reply: string; document: { title: string; content: string } | null; suggestions?: unknown }>(
+  answer: T,
+): T & { suggestions: CoworkSuggestion[] | null } {
+  const suggestions = coworkSuggestions(answer.suggestions);
   return {
     ...answer,
     reply: polishCoworkText(answer.reply),
     document: answer.document ? { ...answer.document, content: polishCoworkText(answer.document.content) } : null,
+    suggestions: suggestions.length ? suggestions : null,
   };
 }
 

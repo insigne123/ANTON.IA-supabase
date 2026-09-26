@@ -370,9 +370,44 @@ test('an invalid model output is corrected on the next decision', async () => {
         throw error;
       }
       assert.match(rejections[0].reason, /delayDays: El primer correo es inmediato/);
-      return { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Listo.', document: null } };
+      return { action: 'answer' as const, query: null, leadId: null,
+        answer: { reply: 'Listo.\n¿Creo la campaña?', document: null, suggestions: [{ label: 'Sí, créala', message: 'Sí, crea la campaña' }] } };
     },
   });
-  assert.equal(result.reply, 'Listo.');
+  assert.equal(result.reply, 'Listo.\n¿Creo la campaña?');
   assert.equal(calls, 2);
+});
+
+test('an answer missing its closing question or quick replies gets one correction, never a second one', async () => {
+  const chips = [{ label: 'Sí, búscalos', message: 'Sí, busca el correo de los tres contactos' }];
+  const open = { ...answer, answer: { reply: 'Tienes 3 contactos sin correo. Después los reviso.', document: null, suggestions: chips } };
+  const asked = { ...answer, answer: { reply: 'Tienes 3 contactos sin correo.\n¿Busco sus correos?', document: null, suggestions: chips } };
+  const seen: string[][] = [];
+  const base = { message: 'Pendientes', signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({}), record: async () => {} };
+  const corrected = await runCoworkReadLoop({ ...base, decide: async (_observations, _mustAnswer, rejections = []) => {
+    seen.push(rejections.map(item => item.reason));
+    return rejections.length ? asked : open;
+  } });
+  assert.equal(corrected.reply, 'Tienes 3 contactos sin correo.\n¿Busco sus correos?');
+  assert.equal(seen.length, 2);
+  assert.match(seen[1][0], /pregunta del siguiente paso/);
+  assert.doesNotMatch(seen[1][0], /respuestas sugeridas/);
+  // Still open after the correction: the answer stands rather than looping.
+  let calls = 0;
+  const kept = await runCoworkReadLoop({ ...base, decide: async () => { calls++; return open; } });
+  assert.equal(kept.reply, 'Tienes 3 contactos sin correo. Después los reviso.');
+  assert.equal(calls, 2);
+  // Quick replies that do not survive cleanup count as missing.
+  const reasons: string[] = [];
+  await runCoworkReadLoop({ ...base, decide: async (_observations, _mustAnswer, rejections = []) => {
+    reasons.push(...rejections.map(item => item.reason));
+    return { ...answer, answer: { reply: '¿Busco sus correos?', document: null, suggestions: [{ label: 'Sí', message: 'Aquí van los textos:' }] } };
+  } });
+  assert.equal(reasons.length, 1);
+  assert.match(reasons[0], /respuestas sugeridas/);
+  // A complete answer needs no second call.
+  calls = 0;
+  await runCoworkReadLoop({ ...base, decide: async () => { calls++; return asked; } });
+  assert.equal(calls, 1);
 });

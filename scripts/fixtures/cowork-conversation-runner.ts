@@ -59,6 +59,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider): P
     const polished = polishCoworkAnswer(answer);
     result.reply = polished.reply;
     result.document = polished.document;
+    result.suggestions = polished.suggestions || [];
   } catch (error) {
     result.failed = coworkFailureMessage(error);
   }

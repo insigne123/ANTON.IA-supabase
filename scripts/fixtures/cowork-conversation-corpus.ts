@@ -122,6 +122,8 @@ export type CorpusTurnResult = {
   search: Record<string, unknown> | null;
   note: string | null;
   failed: string | null;
+  /** Quick replies shown under the answer (empty for proposals and failures). */
+  suggestions?: Array<{ label: string; message: string }>;
 };
 
 export type CorpusHistoryTurn = { request: string; reply: string; at: string; observations?: unknown[]; actions?: unknown[] };
@@ -143,12 +145,19 @@ const noJargon = (result: CorpusTurnResult) => coworkAnswerIssues(shownText(resu
 const nextStep = (result: CorpusTurnResult) => Boolean(result.proposal || result.search)
   || !coworkAnswerIssues(result.reply).some(issue => issue.code === 'next_step');
 const explained = (result: CorpusTurnResult) => !(result.proposal || result.search) || Boolean(result.note && result.note.length > 20);
+// A plain answer offers at least one quick reply; a proposal already has its card.
+const suggested = (result: CorpusTurnResult) => Boolean(result.proposal || result.search) || (result.suggestions?.length ?? 0) > 0;
+// Each quick reply asks for something Cowork does on click, never a promise the person makes.
+const DEFERRAL = /(?<!\p{L})(?:voy a|te indicar[ée]|te aviso|lo pienso|d[ée]jame pensar|m[áa]s tarde|despu[ée]s lo|luego lo)(?!\p{L})|^s[íi],? cuando(?!\p{L})/iu;
+const actionable = (result: CorpusTurnResult) => (result.suggestions || []).every(chip => !DEFERRAL.test(chip.message));
 
 const common = [
   { label: 'termina sin fallar', test: answerOk },
   { label: 'sin jerga, códigos, IDs ni horas UTC', test: noJargon },
   { label: 'cierra con un siguiente paso o una propuesta', test: nextStep },
   { label: 'si propone, explica la propuesta', test: explained },
+  { label: 'ofrece respuestas sugeridas para seguir', test: suggested },
+  { label: 'las sugerencias piden algo que Cowork hace al tocarlas', test: actionable },
 ];
 
 const recentAt = '2026-09-25T13:08:00Z';
