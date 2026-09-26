@@ -8,6 +8,9 @@ import { CampaignInputSchema } from '@/lib/bulk-campaigns';
 import { loadAudience } from '@/lib/server/bulk-campaign-audience';
 import { reviewBulkCampaign, saveBulkCampaign } from '@/lib/server/bulk-campaigns';
 import { canonicalSha256, deterministicMessagingUuid } from '@/lib/messaging-contracts';
+import { coworkProposalView } from '@/lib/cowork/presentation';
+import { CoworkCampaignEditRefused, coworkEditedCampaignDefinition, type CoworkCampaignEdit } from '@/lib/cowork/campaign-edit';
+import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 
 /** Fase 2D: campaign effects on bulk campaigns. Creation stages the reviewed
  * definition and always lands paused as a draft; activation revalidates the
@@ -55,6 +58,41 @@ export async function stageCoworkCampaignDefinition(
     }
   }
   return { recipients: parsed.emails.length };
+}
+
+/**
+ * The person edits the emails of a campaign proposal before approving it. Only
+ * subjects and bodies change: recipients, number of emails and spacing stay as
+ * reviewed, so the approval card and its label stay true. Creation reads the
+ * staged definition when it runs, so the edit is what gets created (paused;
+ * activating it is another review bound to its own hash). The edit is recorded
+ * as a run event, without the text.
+ */
+export async function editCoworkCampaignMessages(
+  auth: AuthContext, runId: string, edits: CoworkCampaignEdit,
+): Promise<{ changed: number[] }> {
+  requireBulkEnabled();
+  const state = await getCoworkRun(auth, runId);
+  if (!state) throw new CoworkCampaignEditRefused('Trabajo no encontrado.', 404);
+  const proposal = coworkProposalView(state.run as CoworkRun, state.events as CoworkEvent[]);
+  if (proposal?.type !== 'effect' || proposal.payload.kind !== 'campaign_create' || proposal.state !== 'pending') {
+    throw new CoworkCampaignEditRefused('Esta propuesta ya no se puede editar: ya se aprobó, se descartó o cambió.', 409);
+  }
+  const admin = getSupabaseAdminClient();
+  await requireCoworkWorkerAccess(admin, { userId: auth.user.id, organizationId: auth.organizationId });
+  const row = await admin.from('cowork_campaign_definitions').select('definition')
+    .eq('run_id', runId).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).maybeSingle();
+  if (row.error || !row.data) throw new CoworkCampaignEditRefused('La definición de la campaña ya no está disponible.', 409);
+  const { next, changed } = coworkEditedCampaignDefinition(row.data.definition, edits);
+  if (!changed.length) return { changed };
+  const updated = await admin.from('cowork_campaign_definitions').update({ definition: next })
+    .eq('run_id', runId).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).select('run_id').maybeSingle();
+  if (updated.error || !updated.data) throw new Error('No se pudo guardar la edición de la campaña.');
+  // The trace says an edit happened and which emails; the text stays in the definition.
+  const recorded = await admin.from('cowork_run_events').insert({ run_id: runId, user_id: auth.user.id, organization_id: auth.organizationId,
+    kind: 'proposal.edited', payload: { kind: 'campaign_create', emails: changed.map(index => index + 1) } });
+  if (recorded.error) console.error('[cowork] campaign edit saved without its trace event');
+  return { changed };
 }
 
 export async function createCoworkCampaign(auth: AuthContext, runId: string) {

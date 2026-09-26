@@ -10,7 +10,7 @@ import {
 import { coworkReplyBody, type CoworkSuggestion } from '@/lib/cowork/contracts';
 import { markdownExcerpt } from '@/lib/cowork/markdown';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
-import { coworkBlockMeta } from '@/lib/cowork/blocks';
+import { coworkBlockMeta, coworkEditedEmails, type CoworkEditedEmail } from '@/lib/cowork/blocks';
 import { cn } from '@/lib/utils';
 import { CoworkActivity } from './CoworkActivity';
 import { BlockCard, CoworkBlockIcon, MetricsBlock } from './CoworkBlocks';
@@ -89,6 +89,25 @@ function SuggestedReplies({ suggestions, live, onSelect }: { suggestions: Cowork
   </div>;
 }
 
+/** A version sent from a card: the instruction reads first, the exact emails fold away. */
+function VersionMessage({ message, emails }: { message: string; emails: CoworkEditedEmail[] }) {
+  return <div className="max-w-[85%] rounded-[18px] rounded-br-md bg-cw-user px-4 py-2.5 text-[15px] leading-[1.55] text-cw-text">
+    <p className="break-words">{message.slice(0, message.indexOf('\n\n'))}</p>
+    <details className="group mt-1.5 text-[13.5px]">
+      <summary className="flex cursor-pointer list-none items-center gap-1 rounded text-cw-muted hover:text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
+        <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" aria-hidden="true" />
+        {emails.length === 1 ? 'Ver el correo' : `Ver los ${emails.length} correos`}
+      </summary>
+      <ol className="mt-2 space-y-3">
+        {emails.map((email, index) => <li key={index} className="rounded-xl bg-cw-elevated px-3 py-2.5">
+          <p className="font-semibold">{email.day === null ? '' : `Día ${email.day} · `}{email.subject}</p>
+          <p className="mt-1 whitespace-pre-wrap break-words text-cw-muted">{email.body}</p>
+        </li>)}
+      </ol>
+    </details>
+  </div>;
+}
+
 /** The next step Cowork offers, after the answer and its results. */
 function NextStep({ question, live }: { question: string; live: boolean }) {
   return <p className={cn('flex items-start gap-2 text-[15px] font-medium leading-6 text-cw-text', live && 'cw-rise')}>
@@ -123,6 +142,7 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   budgetExhausted: boolean;
 }) {
   const { run, events } = turn;
+  const version = coworkEditedEmails(run.message);
   const active = isCoworkActive(run.status);
   const output = coworkTurnOutput(events);
   const proposal = coworkProposalView(run, events);
@@ -154,7 +174,8 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
     {run.automatic
       ? <p className="flex items-center gap-2 text-[12.5px] text-cw-muted"><CornerDownRight className="h-3.5 w-3.5" aria-hidden="true" />Continuó automáticamente con el resultado</p>
       : <div className="flex justify-end">
-        <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-[18px] rounded-br-md bg-cw-user px-4 py-2.5 text-[15px] leading-[1.55] text-cw-text">{coworkDisplayMessage(run.message)}</p>
+        {version ? <VersionMessage message={run.message} emails={version} />
+          : <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-[18px] rounded-br-md bg-cw-user px-4 py-2.5 text-[15px] leading-[1.55] text-cw-text">{coworkDisplayMessage(run.message)}</p>}
       </div>}
 
     <div className="flex gap-3">

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { CORPUS, LEAD } from './fixtures/cowork-conversation-corpus';
-import { MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
+import { EDIT_CORPUS, EDITED_STEPS, MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { runCorpusCase, scoreCorpusCase, type CorpusDecider } from './fixtures/cowork-conversation-runner';
 
 const read = (action: string, query: string | null = null, extra: Record<string, unknown> = {}) =>
@@ -161,7 +161,25 @@ Object.assign(IDEAL, {
       null, chip('Sí, ármala', 'Sí, arma mi primera campaña con Felipe, Rodrigo y Camila')),
 } satisfies Record<string, CorpusDecider>);
 
-const ALL_CASES = [...CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS];
+const editedCampaign = (messages: Array<{ subject: string; body: string; delayDays: number }>, reply: string) => coworkDecisionSchema.parse({
+  action: 'campaign.create', query: null, leadId: null, answer: { reply, document: null },
+  campaign: { name: 'AXIS · RR. HH. (tu versión)', objective: 'Conseguir una conversación sobre revisión de antecedentes',
+    criteria: { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [], minimumDaysSinceSent: 0, excludeReplied: true },
+    emails: ['fmunoz@securitas.cl', 'cfuentes@adecco.cl'], provider: 'google', messages } });
+const EXACT = EDITED_STEPS.map((step, index) => ({ subject: step.subject, body: step.body, delayDays: index === 0 ? 0 : 3 }));
+
+Object.assign(IDEAL, {
+  // The model may even «improve» the text: the loop copies the person's version over it.
+  'editar-campana': async context => !seen(context, 'campaigns.list') ? read('campaigns.list')
+    : editedCampaign([{ subject: 'Otro asunto', body: 'Hola,\nOtra redacción.\nNicolás Y.', delayDays: 0 }, { subject: 'Otro más', body: 'Hola,\nOtra.\nNicolás Y.', delayDays: 2 }],
+      'Te dejo la campaña pausada con tu versión para Felipe (Securitas) y Camila (Adecco). Marcela ya recibió un correo y Andrea no tiene correo.'),
+  'editar-usar': async () => answer('Listo: tomo tu versión de la secuencia tal cual, sin cambios.', null,
+    chip('Sí, crea la campaña', 'Sí, crea la campaña pausada con esta versión para Felipe y Camila'), { question: '¿Creo la campaña pausada con ella para Felipe y Camila?' }),
+  'editar-luego-crear': async context => !seen(context, 'campaigns.list') ? read('campaigns.list')
+    : editedCampaign(EXACT, 'Te dejo la campaña pausada con tu versión para Felipe (Securitas) y Camila (Adecco).'),
+} satisfies Record<string, CorpusDecider>);
+
+const ALL_CASES = [...CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS];
 
 test('every corpus case has an ideal turn that passes all its checks through the real loop', async () => {
   assert.deepEqual(Object.keys(IDEAL).sort(), ALL_CASES.map(entry => entry.id).sort());

@@ -644,3 +644,29 @@ test('a LinkedIn proposal without an explanation still says for whom and what to
   assert.equal(reply.reply, 'Preparé un mensaje de LinkedIn para Felipe Muñoz (Securitas Chile). Revisa el texto en la tarjeta antes de aprobarlo.');
   assert.equal((notes.at(-1) as { action: string }).action, 'assistant.note');
 });
+
+test('a campaign asked with the exact emails carries them word for word, spaced by their days', async () => {
+  const message = [
+    'Crea una campaña pausada con esta versión editada de «Secuencia AXIS», sin cambiar el texto.',
+    '', 'Correo 1 · día 1', 'Asunto: Antecedentes sin trámites', '', 'Hola,', 'Escribí esto yo.', 'Nicolás',
+    '', '---', '', 'Correo 2 · día 5', 'Asunto: ¿Lo vemos?', '', 'Hola,', '¿Te sirve el jueves?', 'Nicolás',
+  ].join('\n');
+  let proposed: { messages: Array<{ subject: string; body: string; delayDays: number }> } | undefined;
+  const reply = await runCoworkReadLoop({
+    message, runId: '00000000-0000-4000-8000-0000000000aa', signal: new AbortController().signal, authorize: async () => {},
+    record: async () => {}, execute: async () => ({ scope: 'own', campaigns: [] }),
+    proposeEffect: async proposal => { proposed = proposal.campaign; },
+    // The model «improves» the text and guesses the spacing; the person's version wins.
+    decide: async () => coworkDecisionSchema.parse({ action: 'campaign.create', query: null, leadId: null, answer: { reply: 'Te dejo la campaña pausada.', document: null },
+      campaign: { name: 'AXIS · RR. HH.', objective: 'Primera conversación',
+        criteria: { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [], minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: false },
+        emails: ['fmunoz@securitas.cl'], provider: 'google',
+        messages: [{ subject: 'Antecedentes laborales, sin trámites', body: 'Hola,\nTe escribo por AXIS.\nNicolás', delayDays: 0 },
+          { subject: '¿Lo vemos esta semana?', body: 'Hola,\n¿Te sirve?\nNicolás', delayDays: 2 }] } }),
+  });
+  assert.equal(reply.reply, 'Te dejo la campaña pausada.');
+  assert.deepEqual(proposed?.messages, [
+    { subject: 'Antecedentes sin trámites', body: 'Hola,\nEscribí esto yo.\nNicolás', delayDays: 0 },
+    { subject: '¿Lo vemos?', body: 'Hola,\n¿Te sirve el jueves?\nNicolás', delayDays: 4 },
+  ]);
+});

@@ -6,6 +6,7 @@ import { coworkCodeProposalSchema } from './code-proposal';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
 import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
 import { collectCoworkLeadRows } from './lead-export';
+import { coworkEditedEmails, type CoworkEditedEmail } from './blocks';
 import { coworkReadPlanSchema, executeCoworkReadPlan } from './read-plan';
 import { specialistTasksSchema, type SpecialistTask } from './specialists';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS, type CoworkDomainRead } from './domain-reads';
@@ -376,6 +377,19 @@ function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof cowor
   return null;
 }
 
+/** A campaign asked for with the person's exact emails («Crea una campaña pausada
+ * con esta versión…») carries that text word for word: the loop copies it over
+ * whatever the model wrote, and spaces the emails by the days they came with. */
+export function coworkCampaignWithExactEmails(campaign: z.infer<typeof coworkCampaignDraftSchema>, emails: CoworkEditedEmail[]) {
+  const messages = emails.slice(0, 7).map((email, index) => {
+    const previous = index > 0 ? emails[index - 1] : null;
+    const fromDays = previous && email.day !== null && previous.day !== null ? email.day - previous.day : null;
+    const delayDays = index === 0 ? 0 : Math.max(1, Math.min(90, fromDays ?? campaign.messages[index]?.delayDays ?? 3));
+    return { subject: email.subject, body: email.body, delayDays };
+  });
+  return { ...campaign, messages };
+}
+
 /** What a proposed campaign does, when the model left no explanation of its own. */
 function campaignNote(campaign: z.infer<typeof coworkCampaignDraftSchema>): string {
   const people = campaign.emails.length;
@@ -651,7 +665,9 @@ export async function runCoworkReadLoop(input: {
           : decision.action === 'campaign.schedule_batch' ? decision.campaignId
           : decision.action === 'linkedin.invite' || decision.action === 'linkedin.message' ? 'new-linkedin-job'
           : decision.leadId;
-        const campaign = decision.action === 'campaign.create' ? decision.campaign ?? undefined : undefined;
+        const exactEmails = decision.action === 'campaign.create' ? coworkEditedEmails(input.message) : null;
+        const campaign = decision.action === 'campaign.create' && decision.campaign
+          ? (exactEmails ? coworkCampaignWithExactEmails(decision.campaign, exactEmails) : decision.campaign) : undefined;
         const code = decision.action === 'code.execute' ? decision.code ?? undefined : undefined;
         const profile = decision.action === 'profile.update' ? decision.profile ?? undefined : undefined;
         const savedSearch = decision.action === 'saved_search.create' || decision.action === 'saved_search.update' || decision.action === 'saved_search.delete'

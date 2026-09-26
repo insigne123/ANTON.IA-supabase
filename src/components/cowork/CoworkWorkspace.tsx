@@ -533,6 +533,10 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     if (!latest || !canFollowUp) return;
     void post(text, latest.run.id);
   }
+  // A version sent from the panel reads in the conversation; on phones the panel covers it.
+  const sendFromPanel = canFollowUp ? (text: string) => { followUp(text); if (!isDesktop) closeArtifact(); } : null;
+  const panelSendHint = pendingDecision ? 'Primero aprueba o descarta la propuesta pendiente.'
+    : !ready ? 'Cowork no está disponible ahora.' : 'Disponible cuando Cowork termine el paso actual.';
 
   async function cancel() {
     if (!latest || cancelling) return;
@@ -679,7 +683,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
         <CoworkArtifactPanel artifact={openArtifact} events={turns.find(turn => turn.run.id === openArtifact.runId)?.events || []}
           canResearch={Boolean(state?.canResearch) && latest?.run.status === 'completed'} canCreateDraft={Boolean(state?.canCreateDraft) && latest?.run.status === 'completed'}
           maximized={maximized} onToggleMaximize={() => setMaximized(value => !value)} onClose={closeArtifact} headingRef={artifactHeading}
-          onError={setError} onAccessDenied={clearPrivateResults} onUseReport={askAboutContact}
+          onError={setError} onAccessDenied={clearPrivateResults} onUseReport={askAboutContact} onSend={sendFromPanel} sendHint={panelSendHint}
           onSelectVersion={id => { if (turns.some(turn => turn.run.id === id)) { const doc = artifacts.find(item => item.runId === id && item.kind === 'document'); if (doc) setArtifactId(doc.id); } else choose(id, { pin: true }); }} />
       </div>
       : inConversation && latest && panelOpen && <div className="hidden w-[272px] shrink-0 border-l border-cw-border bg-cw-rail xl:block">

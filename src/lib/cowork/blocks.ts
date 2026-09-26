@@ -13,6 +13,53 @@ export function coworkSequenceText(block: Extract<CoworkBlock, { type: 'sequence
   return block.steps.map((step, index) => `Correo ${index + 1} · día ${step.day}\n${coworkEmailText(step)}`).join('\n\n---\n\n');
 }
 
+type Draftable = Extract<CoworkBlock, { type: 'email_draft' | 'sequence' }>;
+export type CoworkEditedEmail = { subject: string; body: string; day: number | null };
+
+/** The emails of a card as editable steps: a single email is a one-step sequence. */
+export function coworkDraftSteps(block: Draftable): CoworkEditedEmail[] {
+  return block.type === 'email_draft'
+    ? [{ subject: block.subject, body: block.body, day: null }]
+    : block.steps.map(step => ({ subject: step.subject, body: step.body, day: step.day }));
+}
+
+const USE_LEAD = 'Usa exactamente esta versión';
+const CAMPAIGN_LEAD = 'Crea una campaña pausada con esta versión';
+
+/** The message sent from a card: what to do and the exact text, in a shape the
+ * loop reads back (coworkEditedEmails) so a campaign carries it word for word. */
+export function coworkVersionMessage(block: Draftable, steps: CoworkEditedEmail[], intent: 'use' | 'campaign', edited: boolean) {
+  const what = `${edited ? ' editada' : ''} de «${block.title}», sin cambiar el texto`;
+  const to = block.type === 'email_draft' && block.to?.length ? `, para ${block.to.join(', ')}` : '';
+  const lead = intent === 'campaign' ? `${CAMPAIGN_LEAD}${what}${to}.` : `${USE_LEAD}${what}.`;
+  const body = steps.length === 1 && steps[0].day === null
+    ? coworkEmailText(steps[0])
+    : steps.map((step, index) => `Correo ${index + 1}${step.day === null ? '' : ` · día ${step.day}`}\n${coworkEmailText(step)}`).join('\n\n---\n\n');
+  return `${lead}\n\n${body}`;
+}
+
+/** The exact emails of a message sent with coworkVersionMessage, or null when the
+ * message is anything else or the text does not read back cleanly. */
+export function coworkEditedEmails(message: string): CoworkEditedEmail[] | null {
+  const text = String(message || '').replace(/\r\n/g, '\n');
+  const breakAt = text.indexOf('\n\n');
+  if (breakAt < 0) return null;
+  const lead = text.slice(0, breakAt);
+  if (!(lead.startsWith(USE_LEAD) || lead.startsWith(CAMPAIGN_LEAD)) || !lead.includes('sin cambiar el texto')) return null;
+  const emails: CoworkEditedEmail[] = [];
+  for (const part of text.slice(breakAt + 2).split(/\n\n---\n\n/)) {
+    const match = /^(?:Correo \d+(?: · día (\d+))?\n)?Asunto: ([^\n]+)\n\n([\s\S]+)$/.exec(part.trim());
+    if (!match || !match[2].trim() || !match[3].trim()) return null;
+    emails.push({ subject: match[2].trim(), body: match[3].trim(), day: match[1] ? Number(match[1]) : null });
+  }
+  return emails.length ? emails : null;
+}
+
+/** Whether the person asked for a campaign with the exact text (not only to keep it). */
+export function coworkWantsCampaignFromVersion(message: string) {
+  return String(message || '').startsWith(CAMPAIGN_LEAD) && coworkEditedEmails(message) !== null;
+}
+
 /** CSV with a BOM for spreadsheets; formulas are neutralized like the contact export. */
 export function coworkTableCsv(block: Extract<CoworkBlock, { type: 'table' }>) {
   return '﻿' + [block.columns, ...block.rows].map(row => row.map(csvCell).join(',')).join('\r\n');

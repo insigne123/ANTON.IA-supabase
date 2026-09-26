@@ -4,7 +4,7 @@
 // and one email sent. Names are fictional and complete: masked names made the
 // model guess surnames. No database, mailbox or provider is touched.
 import { coworkStarter } from '../../src/lib/cowork/starters';
-import { coworkBlocksText } from '../../src/lib/cowork/blocks';
+import { coworkBlocksText, coworkVersionMessage, type CoworkEditedEmail } from '../../src/lib/cowork/blocks';
 import { CORPUS_COMMON_CHECKS, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -261,4 +261,54 @@ export const STARTER_CORPUS: CorpusCase[] = [
     checks: [...CORPUS_COMMON_CHECKS,
       { label: 'consulta resultados', test: r => r.actions.some(action => action.startsWith('metrics.') || ['campaigns.list', 'contacted.search'].includes(action)) },
       { label: 'da los números (1 correo enviado)', test: r => /\b1\b|\bun (?:solo )?(?:correo|envío)|\buna? sola?\b/i.test(r.reply) }] },
+];
+
+/** A sequence the person edited in the panel, and what Cowork does with their
+ * exact text: a campaign carries it word for word, «usar» keeps it unrewritten. */
+const EDITED_SEQUENCE = { type: 'sequence' as const, title: 'Secuencia AXIS para RR. HH.', steps: [
+  { day: 1, subject: 'Antecedentes laborales en minutos', body: 'Hola,\nEn Yago automatizamos la consulta de antecedentes laborales en el Poder Judicial con AXIS.\n¿Lo vemos 15 minutos esta semana?\nNicolás Y.' },
+  { day: 4, subject: '¿Cuánto tarda hoy una revisión?', body: 'Hola,\nQuería saber cuánto les toma hoy revisar los antecedentes de un postulante.\nNicolás Y.' },
+] };
+export const EDITED_STEPS: CoworkEditedEmail[] = [
+  { day: 1, subject: 'Antecedentes en minutos, no en días', body: 'Hola,\nCon AXIS revisas antecedentes laborales de postulantes en el Poder Judicial en minutos.\n¿Te muestro cómo en 15 minutos?\nNicolás Y.' },
+  { day: 4, subject: '¿Cuánto tarda hoy una revisión?', body: 'Hola,\nQuería saber cuánto les toma hoy revisar los antecedentes de un postulante. Si es más de un día, AXIS te puede ayudar.\nNicolás Y.' },
+];
+const SEQUENCE_TURN = { request: 'armame una secuencia de 2 correos para mis contactos de rrhh que aun no contacto', at: '2026-09-26T13:00:00Z',
+  reply: 'Te dejé la secuencia de 2 correos para Felipe (Securitas) y Camila (Adecco), que tienen correo y aún no reciben nada. Marcela ya recibió uno y Andrea no tiene correo.\n\n¿La convierto en una campaña pausada para Felipe y Camila?',
+  observations: [{ action: 'leads.search', input: 'RR. HH.', result: read('leads.search', 'RR. HH.') }] };
+const USE_REQUEST = coworkVersionMessage(EDITED_SEQUENCE, EDITED_STEPS, 'use', true);
+const plain = (value: string) => value.replace(/\s+/g, ' ').trim();
+/** The campaign carries the person's subjects and bodies, in order, untouched. */
+const exactCampaign = (result: CorpusTurnResult) => {
+  const messages = campaign(result)?.messages || [];
+  return messages.length === EDITED_STEPS.length
+    && messages.every((message, index) => plain(message.subject) === plain(EDITED_STEPS[index].subject) && plain(message.body) === plain(EDITED_STEPS[index].body));
+};
+/** A card with the emails, if any, shows the person's version and not a rewrite. */
+const keptVersion = (result: CorpusTurnResult) => (result.blocks || []).every(block => block.type !== 'sequence' && block.type !== 'email_draft'
+  || (block.type === 'sequence' ? block.steps : [block]).every((step, index) => plain(step.body) === plain(EDITED_STEPS[index]?.body || '')));
+const onlyNewPeopleContacts = (result: CorpusTurnResult) => !campaign(result)
+  || Boolean(campaign(result)?.emails?.length && campaign(result)!.emails!.every(email => ['fmunoz@securitas.cl', 'cfuentes@adecco.cl'].includes(email)));
+
+export const EDIT_CORPUS: CorpusCase[] = [
+  { id: 'editar-campana', title: 'Campaña con la secuencia que el usuario editó', world, history: [SEQUENCE_TURN],
+    request: coworkVersionMessage(EDITED_SEQUENCE, EDITED_STEPS, 'campaign', true),
+    origin: 'El usuario editó la secuencia en el panel y tocó «Crear campaña con esta versión»: la campaña lleva su texto exacto.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'propone la campaña', test: r => r.proposal?.kind === 'campaign_create' },
+      { label: 'la campaña lleva el texto exacto del usuario', test: exactCampaign },
+      { label: 'solo Felipe y Camila (RR. HH., con correo y sin envíos)', test: onlyNewPeopleContacts }] },
+  { id: 'editar-usar', title: 'Usar la versión editada', world, history: [SEQUENCE_TURN], request: USE_REQUEST,
+    origin: 'El usuario tocó «Usar esta versión»: Cowork la toma tal cual, sin mejorarla, y pregunta el siguiente paso.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'no propone nada todavía', test: r => !r.proposal && !r.search },
+      { label: 'no reescribe la versión del usuario', test: r => keptVersion(r) && !r.document }] },
+  { id: 'editar-luego-crear', title: 'Crear la campaña después de fijar la versión', world, request: 'sí, créala',
+    history: [SEQUENCE_TURN, { request: USE_REQUEST, at: '2026-09-26T13:05:00Z',
+      reply: 'Listo: desde ahora uso tu versión tal cual.\n\n¿Creo la campaña pausada con ella para Felipe y Camila?' }],
+    origin: 'La versión se fijó un turno antes; «créala» debe llevar ese texto, no uno nuevo.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'propone la campaña', test: r => r.proposal?.kind === 'campaign_create' },
+      { label: 'la campaña lleva el texto exacto del usuario', test: exactCampaign },
+      { label: 'solo Felipe y Camila (RR. HH., con correo y sin envíos)', test: onlyNewPeopleContacts }] },
 ];

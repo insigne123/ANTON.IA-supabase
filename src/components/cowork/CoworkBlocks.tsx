@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, type MouseEvent, type ReactNode } from 'react';
-import { ChartColumn, Check, ChevronRight, Copy, Download, ListOrdered, Mail, Table2 } from 'lucide-react';
+import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { ChartColumn, Check, ChevronRight, Copy, Download, ListOrdered, Mail, Megaphone, Pencil, RotateCcw, Send, Table2 } from 'lucide-react';
 import type { CoworkBlock } from '@/lib/cowork/contracts';
 import type { CoworkArtifact, CoworkPanelBlock } from '@/lib/cowork/presentation';
-import { coworkBlockFilename, coworkBlockMeta, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv } from '@/lib/cowork/blocks';
+import {
+  coworkBlockFilename, coworkBlockMeta, coworkDraftSteps, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv, coworkVersionMessage,
+  type CoworkEditedEmail,
+} from '@/lib/cowork/blocks';
 import { cn } from '@/lib/utils';
 import { CwButton } from './ui';
 
@@ -152,24 +155,116 @@ function EmailBody({ subject, body, to }: { subject: string; body: string; to?: 
   </div>;
 }
 
-/** The whole card in the side panel: everything visible, each part copyable. */
-export function CoworkBlockView({ block }: { block: CoworkPanelBlock }) {
-  if (block.type === 'email_draft') return <div className="space-y-5">
-    <div className="flex flex-wrap gap-2"><CopyButton text={coworkEmailText(block)} label="Copiar correo completo" size="sm" variant="secondary" /></div>
-    <EmailBody subject={block.subject} body={block.body} to={block.to} />
+type Draftable = Extract<CoworkPanelBlock, { type: 'email_draft' | 'sequence' }>;
+const LIMITS = { subject: 300, body: 12000 };
+
+/** Edits survive closing and reopening the panel in this tab; nothing leaves the browser. */
+function useSessionSteps(key: string, original: CoworkEditedEmail[]) {
+  const [steps, setSteps] = useState<CoworkEditedEmail[]>(original);
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(key) || 'null');
+      const fits = Array.isArray(saved) && saved.length === original.length
+        && saved.every(step => step && typeof step.subject === 'string' && typeof step.body === 'string');
+      setSteps(fits ? saved.map((step: CoworkEditedEmail, index: number) => ({ ...original[index], subject: step.subject, body: step.body })) : original);
+    } catch { setSteps(original); }
+  }, [key, original]);
+  const save = (next: CoworkEditedEmail[]) => {
+    setSteps(next);
+    try {
+      if (JSON.stringify(next) === JSON.stringify(original)) sessionStorage.removeItem(key);
+      else sessionStorage.setItem(key, JSON.stringify(next));
+    } catch { /* The edit still works for as long as the panel is open. */ }
+  };
+  return [steps, save] as const;
+}
+
+const FIELD = 'w-full rounded-[10px] border border-cw-border bg-cw-elevated px-3 text-cw-text placeholder:text-cw-faint focus-visible:border-cw-border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]';
+
+/** Subject and body of one email, editable; shared by the panel and the campaign review. */
+export function CoworkEmailFields<T extends { subject: string; body: string }>({ step, index, total, idPrefix, onChange }: {
+  step: T; index: number; total: number; idPrefix: string; onChange: (step: T) => void;
+}) {
+  const name = total > 1 ? ` del correo ${index + 1}` : '';
+  const rows = Math.min(18, Math.max(6, step.body.split('\n').length + 1));
+  return <div className="space-y-3">
+    <div>
+      <label htmlFor={`${idPrefix}-subject-${index}`} className="mb-1 block text-[12px] font-medium text-cw-muted">Asunto{name}</label>
+      <input id={`${idPrefix}-subject-${index}`} value={step.subject} maxLength={LIMITS.subject} aria-invalid={!step.subject.trim()}
+        onChange={event => onChange({ ...step, subject: event.target.value })} className={cn(FIELD, 'h-10 text-[15px] font-semibold')} />
+    </div>
+    <div>
+      <label htmlFor={`${idPrefix}-body-${index}`} className="mb-1 block text-[12px] font-medium text-cw-muted">Cuerpo{name}</label>
+      <textarea id={`${idPrefix}-body-${index}`} value={step.body} maxLength={LIMITS.body} rows={rows} aria-invalid={!step.body.trim()}
+        onChange={event => onChange({ ...step, body: event.target.value })} className={cn(FIELD, 'resize-y py-3 text-[14.5px] leading-[1.65]')} />
+    </div>
   </div>;
-  if (block.type === 'sequence') return <div className="space-y-5">
-    <div className="flex flex-wrap gap-2"><CopyButton text={coworkSequenceText(block)} label="Copiar secuencia completa" size="sm" variant="secondary" /></div>
-    <ol className="space-y-4">
-      {block.steps.map((step, index) => <li key={`${step.day}-${index}`} className="rounded-2xl border border-cw-border bg-cw-elevated p-4">
-        <p className="mb-3 flex items-center gap-2 text-[12.5px] font-medium text-cw-muted">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cw-accent-soft text-[12px] font-semibold text-cw-accent">{index + 1}</span>
-          Día {step.day}{index > 0 ? ` · ${step.day - block.steps[index - 1].day} ${step.day - block.steps[index - 1].day === 1 ? 'día' : 'días'} después` : ' · primer envío'}
-        </p>
-        <EmailBody subject={step.subject} body={step.body} />
-      </li>)}
-    </ol>
+}
+
+/** An email or a sequence you can edit before using it: the exact text you leave
+ * is what gets sent to Cowork, and what a campaign created from it will carry. */
+function DraftView({ block, draftKey, onSend, sendHint }: {
+  block: Draftable; draftKey: string; onSend: ((message: string) => void) | null; sendHint: string;
+}) {
+  // Polling hands over a new object with the same content: keep the edit.
+  const originalText = JSON.stringify(coworkDraftSteps(block));
+  const original = useMemo(() => JSON.parse(originalText) as CoworkEditedEmail[], [originalText]);
+  const [steps, setSteps] = useSessionSteps(draftKey, original);
+  const [editing, setEditing] = useState(false);
+  const edited = JSON.stringify(steps) !== JSON.stringify(original);
+  const complete = steps.every(step => step.subject.trim() && step.body.trim());
+  const text = block.type === 'email_draft' ? coworkEmailText(steps[0]) : coworkSequenceText({ ...block, steps: steps.map((step, index) => ({ ...step, day: step.day ?? index + 1 })) });
+  const send = (intent: 'use' | 'campaign') => onSend?.(coworkVersionMessage(block, steps.map(step => ({ ...step, subject: step.subject.trim(), body: step.body.trim() })), intent, edited));
+  const update = (index: number, step: CoworkEditedEmail) => setSteps(steps.map((item, at) => at === index ? step : item));
+  const sequence = block.type === 'sequence';
+
+  return <div className="space-y-5">
+    <div className="flex flex-wrap items-center gap-2">
+      {editing
+        ? <CwButton key="done" size="sm" variant="primary" onClick={() => setEditing(false)} disabled={!complete}><Check aria-hidden="true" />Listo</CwButton>
+        : <CwButton key="edit" size="sm" variant="secondary" onClick={() => setEditing(true)}><Pencil aria-hidden="true" />Editar</CwButton>}
+      {!editing && <CopyButton text={text} label={sequence ? 'Copiar secuencia completa' : 'Copiar correo completo'} size="sm" variant="secondary" />}
+      {edited && <CwButton size="sm" variant="ghost" onClick={() => setSteps(original)}><RotateCcw aria-hidden="true" />Volver al original</CwButton>}
+      {edited && <span className="rounded-full bg-cw-accent-soft px-2.5 py-0.5 text-[12px] font-medium text-cw-accent">Editado por ti</span>}
+    </div>
+    {block.type === 'email_draft' && block.to && block.to.length > 0 && <div>
+      <p className="mb-1.5 text-[12px] font-medium text-cw-muted">Para</p>
+      <p className="flex flex-wrap gap-1.5">{block.to.map(item => <span key={item} className="rounded-full border border-cw-border bg-cw-panel px-2.5 py-0.5 text-[12.5px] text-cw-text">{item}</span>)}</p>
+    </div>}
+    {sequence
+      ? <ol className="space-y-4">
+        {steps.map((step, index) => {
+          const day = step.day ?? index + 1;
+          const previous = index > 0 ? steps[index - 1].day ?? index : null;
+          return <li key={index} className="rounded-2xl border border-cw-border bg-cw-elevated p-4">
+            <p className="mb-3 flex items-center gap-2 text-[12.5px] font-medium text-cw-muted">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cw-accent-soft text-[12px] font-semibold text-cw-accent">{index + 1}</span>
+              Día {day}{previous === null ? ' · primer envío' : ` · ${day - previous} ${day - previous === 1 ? 'día' : 'días'} después`}
+            </p>
+            {editing ? <CoworkEmailFields step={step} index={index} total={steps.length} idPrefix="cw-draft" onChange={next => update(index, next)} /> : <EmailBody subject={step.subject} body={step.body} />}
+          </li>;
+        })}
+      </ol>
+      : editing ? <CoworkEmailFields step={steps[0]} index={0} total={1} idPrefix="cw-draft" onChange={next => update(0, next)} /> : <EmailBody subject={steps[0].subject} body={steps[0].body} />}
+    {!complete && <p role="alert" className="text-[12.5px] text-cw-danger">Cada correo necesita asunto y cuerpo.</p>}
+    <section aria-label="Qué hago con esta versión" className="rounded-2xl border border-cw-border bg-cw-panel p-4">
+      <p className="text-[13.5px] font-semibold text-cw-text">¿Qué hago con {edited ? 'tu versión' : sequence ? 'esta secuencia' : 'este correo'}?</p>
+      <p className="mt-0.5 text-[12.5px] leading-5 text-cw-muted">Cowork usa el texto tal cual, sin reescribirlo. Crear la campaña te pide aprobación y no envía nada.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <CwButton size="sm" variant="primary" disabled={!onSend || !complete || editing} onClick={() => send('campaign')}><Megaphone aria-hidden="true" />Crear campaña con esta versión</CwButton>
+        <CwButton size="sm" variant="secondary" disabled={!onSend || !complete || editing} onClick={() => send('use')}><Send aria-hidden="true" />Usar esta versión</CwButton>
+      </div>
+      {(!onSend || editing) && <p className="mt-2 text-[12px] text-cw-muted">{editing ? 'Toca «Listo» para usar lo que editaste.' : sendHint}</p>}
+    </section>
   </div>;
+}
+
+/** The whole card in the side panel: everything visible, each part copyable;
+ * emails and sequences can be edited and used as they are. */
+export function CoworkBlockView({ block, draftKey, onSend = null, sendHint = 'Disponible cuando Cowork termine el paso actual.' }: {
+  block: CoworkPanelBlock; draftKey: string; onSend?: ((message: string) => void) | null; sendHint?: string;
+}) {
+  if (block.type === 'email_draft' || block.type === 'sequence') return <DraftView block={block} draftKey={draftKey} onSend={onSend} sendHint={sendHint} />;
   return <div className="space-y-4">
     <div className="flex flex-wrap gap-2">
       <CwButton size="sm" onClick={() => downloadCsv(block)}><Download aria-hidden="true" />Descargar CSV</CwButton>

@@ -26,7 +26,7 @@ function when(value: string) {
 
 /** The open result, beside the conversation (or full screen on phones). */
 export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDraft, maximized, onToggleMaximize, onClose, headingRef,
-  onError, onAccessDenied, onUseReport, onSelectVersion }: {
+  onError, onAccessDenied, onUseReport, onSelectVersion, onSend = null, sendHint }: {
   artifact: CoworkArtifact;
   events: CoworkEvent[];
   canResearch: boolean;
@@ -39,6 +39,9 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
   onAccessDenied: () => void;
   onUseReport: (leadId: string) => void;
   onSelectVersion: (runId: string) => void;
+  /** Sends a version of an email or sequence as the next message; null while it cannot be sent. */
+  onSend?: ((message: string) => void) | null;
+  sendHint?: string;
 }) {
   const [copied, setCopied] = useState(false);
   const label = artifact.kind === 'block' ? BLOCK_LABEL[artifact.block.type] : KIND_LABEL[artifact.kind];
@@ -81,7 +84,7 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
     </header>
     <div className="cw-scroll min-h-0 flex-1 overflow-y-auto">
       {artifact.kind === 'block' && <div className="mx-auto w-full max-w-[46rem] px-4 py-6 sm:px-8">
-        <CoworkBlockView block={artifact.block} />
+        <CoworkBlockView key={artifact.id} block={artifact.block} draftKey={`cowork:draft:${artifact.id}`} onSend={onSend} sendHint={sendHint} />
       </div>}
       {artifact.kind === 'document' && <article className="mx-auto w-full max-w-[46rem] px-5 py-8 sm:px-10 sm:py-10">
         <CoworkMarkdown text={artifact.content} variant="document" />
