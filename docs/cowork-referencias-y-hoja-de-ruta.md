@@ -44,6 +44,14 @@ Para eso se revisaron seis proyectos de código abierto. Se leyó el código, no
 
    También la regla «si pide redactar, entrégalo sin preguntar». Resultado: marketing pasa de 15/22 a 33/33 y producción queda en 40/42, con 3 repeticiones.
 3. **La pregunta final no queda dentro de la lista** (insigne123/ANTON.IA-supabase#4): arreglo del parser de Markdown. Afecta cerca del 5 % de las respuestas, justo las que cierran con una pregunta bajo una lista.
+4. **Nombre, empresa y oferta en cada turno** (insigne123/ANTON.IA-supabase#7, punto 2 de la hoja de ruta): el servidor los lee una vez por trabajo.
+   - 22 % menos consultas por caso.
+   - `profile.get` pasa de 20 consultas a 0.
+   - 73/75 casos, contra 71/75 de la versión anterior el mismo día.
+5. **Inicio orientado a correo y LinkedIn** (insigne123/ANTON.IA-supabase#8): seis puntos de partida, entre ellos «Escribir a mis contactos», «Invitar por LinkedIn» y una plantilla para mejorar un correo.
+   - Cada botón es un caso del corpus.
+   - 18/18 con el modelo real.
+   - Es la parte del punto 1 que toca el inicio; dentro de la conversación siguen las respuestas sugeridas.
 
 ## Hoja de ruta propuesta
 
@@ -52,7 +60,7 @@ En orden de impacto por esfuerzo. Cada punto es un PR chico.
 | # | Qué | Por qué | Esfuerzo |
 |---|---|---|---|
 | 1 | **Acciones rápidas persistentes** bajo el composer: «Escribir a mis contactos», «Buscar prospectos», «¿Cómo voy?», «Seguimientos» | En LeadAce son la entrada principal. Hoy las sugerencias de inicio de Cowork desaparecen después del primer mensaje | Bajo, solo UI |
-| 2 | **Contexto base del usuario** (nombre, empresa y oferta) en cada turno | En el corpus de marketing, la firma y la oferta cuestan dos de las tres consultas por turno. Sin ellas, algunos correos salen firmados «Yago SpA» | Medio: worker y contexto, sin migración |
+| 2 | **Contexto base del usuario** (nombre, empresa y oferta) en cada turno | En el corpus de marketing, la firma y la oferta cuestan dos de las tres consultas por turno. Sin ellas, algunos correos salen firmados «Yago SpA» | Hecho en insigne123/ANTON.IA-supabase#7 |
 | 3 | **Mencionar contactos con `@`** en el composer | Elegir un contacto guardado evita búsquedas ambiguas y ahorra una consulta. `contactRef` ya viaja oculto con el mensaje | Medio: UI y una lectura existente |
 | 4 | **Plantillas con `/` y variables** («/campaña {segmento} {oferta}») | Tareas frecuentes sin escribir el pedido completo | Medio |
 | 5 | **Preguntas con opciones** cuando falta un dato (fecha, proveedor o segmento) | Una tarjeta con opciones se contesta con un toque. Hoy es texto libre | Medio |
