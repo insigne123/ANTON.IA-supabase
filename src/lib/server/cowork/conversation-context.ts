@@ -1,12 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { COWORK_NOTE_ACTION, coworkDocumentSchema } from '@/lib/cowork/contracts';
+import { COWORK_NOTE_ACTION, coworkDocumentSchema, coworkStoredBlocks, type CoworkBlock } from '@/lib/cowork/contracts';
 
 export async function loadCoworkHistory(
   client: SupabaseClient,
   scope: { userId: string; organizationId: string },
   parentId: string | null,
 ) {
-  const history: Array<{ runId: string; at: string | null; request: string; reply: string; document: { title: string; content: string } | null; observations: unknown[]; actions?: Array<{ kind: string; label: string; outcome: string; result?: unknown }> }> = [];
+  const history: Array<{ runId: string; at: string | null; request: string; reply: string; document: { title: string; content: string } | null; blocks?: CoworkBlock[]; observations: unknown[]; actions?: Array<{ kind: string; label: string; outcome: string; result?: unknown }> }> = [];
   const visited = new Set<string>();
   let remaining = 60000;
   let cursor = parentId;
@@ -22,6 +22,8 @@ export async function loadCoworkHistory(
       .eq('kind', 'run.completed').order('sequence', { ascending: false }).limit(1).maybeSingle();
     if (event.error || !event.data) throw new Error('Conversation result unavailable');
     const result = coworkDocumentSchema.parse({ reply: event.data.payload.reply, document: event.data.payload.document });
+    // The cards of that answer (emails, sequences, tables): «usa el segundo correo» refers to them.
+    const blocks = coworkStoredBlocks(event.data.payload.blocks);
     // Most recent observations first for the query cap, then back to
     // chronological order: a resumed run must see the latest tool result
     // (for example a completed external search), not only the oldest reads.
@@ -44,8 +46,8 @@ export async function loadCoworkHistory(
       outcome: row.kind === 'effect.completed' ? 'ejecutada' : 'falló',
       ...(row.payload?.result === undefined ? {} : { result: row.payload.result }),
     })).reverse();
-    const turn = { runId: cursor, at: typeof run.created_at === 'string' ? run.created_at : null, request: run.message, ...result,
-      observations: observedPayloads, ...(actions.length ? { actions } : {}) };
+    const turn = { runId: cursor, at: typeof run.created_at === 'string' ? run.created_at : null, request: run.message, reply: result.reply, document: result.document,
+      ...(blocks.length ? { blocks } : {}), observations: observedPayloads, ...(actions.length ? { actions } : {}) };
     const size = JSON.stringify(turn).length;
     if (size > remaining) {
       // Preserve the immediate parent rather than silently editing a truncated document.

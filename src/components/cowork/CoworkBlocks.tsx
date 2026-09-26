@@ -1,0 +1,180 @@
+'use client';
+
+import { useState, type MouseEvent, type ReactNode } from 'react';
+import { ChartColumn, Check, ChevronRight, Copy, Download, ListOrdered, Mail, Table2 } from 'lucide-react';
+import type { CoworkBlock } from '@/lib/cowork/contracts';
+import type { CoworkArtifact, CoworkPanelBlock } from '@/lib/cowork/presentation';
+import { coworkBlockFilename, coworkBlockMeta, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv } from '@/lib/cowork/blocks';
+import { cn } from '@/lib/utils';
+import { CwButton } from './ui';
+
+type Metrics = Extract<CoworkBlock, { type: 'metrics' }>;
+type Table = Extract<CoworkBlock, { type: 'table' }>;
+type BlockArtifact = Extract<CoworkArtifact, { kind: 'block' }>;
+
+export function CoworkBlockIcon({ block, className }: { block: Pick<CoworkBlock, 'type'>; className?: string }) {
+  const Icon = block.type === 'email_draft' ? Mail : block.type === 'sequence' ? ListOrdered : block.type === 'table' ? Table2 : ChartColumn;
+  return <Icon className={className} aria-hidden="true" />;
+}
+
+/** Copies text and confirms it in place for a moment. */
+export function CopyButton({ text, label, copiedLabel = 'Copiado', size = 'xs', variant = 'ghost' }: {
+  text: string; label: string; copiedLabel?: string; size?: 'xs' | 'sm'; variant?: 'ghost' | 'secondary';
+}) {
+  const [copied, setCopied] = useState(false);
+  return <CwButton size={size} variant={variant} aria-live="polite"
+    onClick={async () => {
+      try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { setCopied(false); }
+    }}>
+    {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}{copied ? copiedLabel : label}
+  </CwButton>;
+}
+
+function downloadCsv(table: Table) {
+  const url = URL.createObjectURL(new Blob([coworkTableCsv(table)], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = coworkBlockFilename(table.title, 'csv');
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Figures read at a glance: value first, then what it is and over what base. */
+export function MetricsBlock({ block, live = false }: { block: Metrics; live?: boolean }) {
+  return <section aria-label={block.title} className={cn('rounded-2xl border border-cw-border bg-cw-elevated p-4 shadow-[var(--cw-shadow-sm)]', live && 'cw-rise')}>
+    <header className="mb-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+      <h3 className="text-[14px] font-semibold tracking-tight text-cw-text">{block.title}</h3>
+      {block.period && <p className="text-[12.5px] text-cw-muted">{block.period}</p>}
+    </header>
+    <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {block.items.map(item => <div key={`${item.label}-${item.value}`} className="flex flex-col rounded-xl bg-cw-panel px-3 py-2.5">
+        <dt className="order-2 text-[12.5px] font-medium text-cw-muted">{item.label}</dt>
+        <dd className="order-1 text-[22px] font-semibold leading-7 tracking-tight text-cw-text tabular-nums">{item.value}</dd>
+        {item.detail && <dd className="order-3 mt-0.5 text-[12px] leading-4 text-cw-faint">{item.detail}</dd>}
+      </div>)}
+    </dl>
+  </section>;
+}
+
+function CardShell({ artifact, active, onOpen, children, actions }: {
+  artifact: BlockArtifact; active: boolean; onOpen: (artifact: CoworkArtifact, opener: HTMLElement) => void;
+  children: ReactNode; actions: ReactNode;
+}) {
+  return <section aria-label={artifact.title} className={cn('overflow-hidden rounded-2xl border bg-cw-elevated shadow-[var(--cw-shadow-sm)] transition-colors',
+    active ? 'border-cw-accent' : 'border-cw-border')}>
+    <button type="button" onClick={event => onOpen(artifact, event.currentTarget)} aria-label={`Abrir ${artifact.title}`} aria-pressed={active}
+      className="group flex w-full items-center gap-3 border-b border-cw-border px-3.5 py-3 text-left transition-colors hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--cw-accent-ring)]">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cw-accent-soft text-cw-accent">
+        <CoworkBlockIcon block={artifact.block} className="h-[18px] w-[18px]" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[14px] font-semibold text-cw-text">{artifact.title}</span>
+        <span className="block truncate text-[12.5px] text-cw-muted">{coworkBlockMeta(artifact.block)}</span>
+      </span>
+      <span className="hidden shrink-0 items-center gap-1 text-[12.5px] font-medium text-cw-accent sm:flex">Abrir<ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" /></span>
+      <ChevronRight className="h-4 w-4 shrink-0 text-cw-faint sm:hidden" aria-hidden="true" />
+    </button>
+    <div className="px-3.5 py-3">{children}</div>
+    <div className="flex flex-wrap items-center gap-1 border-t border-cw-border bg-cw-panel px-2.5 py-1.5">{actions}</div>
+  </section>;
+}
+
+/** A result the person will copy, review or export, shown as a card in the chat. */
+export function BlockCard({ artifact, active, onOpen, live = false }: {
+  artifact: BlockArtifact; active: boolean; onOpen: (artifact: CoworkArtifact, opener: HTMLElement) => void; live?: boolean;
+}) {
+  const { block } = artifact;
+  const open = (event: MouseEvent<HTMLButtonElement>) => onOpen(artifact, event.currentTarget);
+  const openButton = <CwButton size="xs" variant="ghost" onClick={open}><ChevronRight aria-hidden="true" />Abrir</CwButton>;
+  return <div className={cn(live && 'cw-rise')}>
+    {block.type === 'email_draft' && <CardShell artifact={artifact} active={active} onOpen={onOpen}
+      actions={<><CopyButton text={coworkEmailText(block)} label="Copiar correo" />{openButton}</>}>
+      <p className="text-[13.5px] font-semibold text-cw-text">{block.subject}</p>
+      <p className="mt-1.5 line-clamp-4 whitespace-pre-line text-[13.5px] leading-[1.55] text-cw-muted">{block.body}</p>
+    </CardShell>}
+    {block.type === 'sequence' && <CardShell artifact={artifact} active={active} onOpen={onOpen}
+      actions={<><CopyButton text={coworkSequenceText(block)} label="Copiar secuencia" />{openButton}</>}>
+      <ol className="space-y-1.5">
+        {block.steps.map((step, index) => <li key={`${step.day}-${index}`} className="flex items-center gap-2.5 text-[13.5px]">
+          <span className="w-14 shrink-0 rounded-md bg-cw-panel px-1.5 py-0.5 text-center text-[12px] font-medium tabular-nums text-cw-muted">Día {step.day}</span>
+          <span className="min-w-0 truncate text-cw-text">{step.subject}</span>
+        </li>)}
+      </ol>
+    </CardShell>}
+    {block.type === 'table' && <CardShell artifact={artifact} active={active} onOpen={onOpen}
+      actions={<>
+        <CwButton size="xs" variant="ghost" onClick={() => downloadCsv(block)}><Download aria-hidden="true" />Descargar CSV</CwButton>
+        <CopyButton text={coworkTableTsv(block)} label="Copiar tabla" />{openButton}
+      </>}>
+      <TableGrid block={block} limit={5} />
+    </CardShell>}
+  </div>;
+}
+
+function TableGrid({ block, limit }: { block: Table; limit?: number }) {
+  const rows = limit ? block.rows.slice(0, limit) : block.rows;
+  return <div className="cw-scroll -mx-1 overflow-x-auto px-1">
+    <table className="w-full min-w-[28rem] border-collapse text-left text-[13px]">
+      <caption className="sr-only">{block.title}</caption>
+      <thead>
+        <tr>{block.columns.map(column => <th key={column} scope="col" className="whitespace-nowrap border-b border-cw-border px-2 py-1.5 text-[12px] font-semibold text-cw-muted">{column}</th>)}</tr>
+      </thead>
+      <tbody>
+        {rows.map((row, index) => <tr key={index} className="border-b border-cw-border last:border-0">
+          {row.map((cell, column) => <td key={column} className={cn('px-2 py-1.5 align-top text-cw-text', column === 0 && 'font-medium')}>{cell || <span className="text-cw-faint">—</span>}</td>)}
+        </tr>)}
+      </tbody>
+    </table>
+    {limit && block.rows.length > limit && <p className="mt-1.5 text-[12.5px] text-cw-muted">{block.rows.length - limit} {block.rows.length - limit === 1 ? 'fila más' : 'filas más'} en la tabla completa</p>}
+  </div>;
+}
+
+function EmailBody({ subject, body, to }: { subject: string; body: string; to?: string[] | null }) {
+  return <div className="space-y-4">
+    {to && to.length > 0 && <div>
+      <p className="mb-1.5 text-[12px] font-medium text-cw-muted">Para</p>
+      <p className="flex flex-wrap gap-1.5">{to.map(item => <span key={item} className="rounded-full border border-cw-border bg-cw-panel px-2.5 py-0.5 text-[12.5px] text-cw-text">{item}</span>)}</p>
+    </div>}
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <p className="text-[12px] font-medium text-cw-muted">Asunto</p>
+        <CopyButton text={subject} label="Copiar asunto" />
+      </div>
+      <p className="text-[15px] font-semibold text-cw-text">{subject}</p>
+    </div>
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <p className="text-[12px] font-medium text-cw-muted">Cuerpo</p>
+        <CopyButton text={body} label="Copiar cuerpo" />
+      </div>
+      <p className="whitespace-pre-line rounded-xl border border-cw-border bg-cw-panel px-4 py-3.5 text-[14.5px] leading-[1.65] text-cw-text">{body}</p>
+    </div>
+  </div>;
+}
+
+/** The whole card in the side panel: everything visible, each part copyable. */
+export function CoworkBlockView({ block }: { block: CoworkPanelBlock }) {
+  if (block.type === 'email_draft') return <div className="space-y-5">
+    <div className="flex flex-wrap gap-2"><CopyButton text={coworkEmailText(block)} label="Copiar correo completo" size="sm" variant="secondary" /></div>
+    <EmailBody subject={block.subject} body={block.body} to={block.to} />
+  </div>;
+  if (block.type === 'sequence') return <div className="space-y-5">
+    <div className="flex flex-wrap gap-2"><CopyButton text={coworkSequenceText(block)} label="Copiar secuencia completa" size="sm" variant="secondary" /></div>
+    <ol className="space-y-4">
+      {block.steps.map((step, index) => <li key={`${step.day}-${index}`} className="rounded-2xl border border-cw-border bg-cw-elevated p-4">
+        <p className="mb-3 flex items-center gap-2 text-[12.5px] font-medium text-cw-muted">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cw-accent-soft text-[12px] font-semibold text-cw-accent">{index + 1}</span>
+          Día {step.day}{index > 0 ? ` · ${step.day - block.steps[index - 1].day} ${step.day - block.steps[index - 1].day === 1 ? 'día' : 'días'} después` : ' · primer envío'}
+        </p>
+        <EmailBody subject={step.subject} body={step.body} />
+      </li>)}
+    </ol>
+  </div>;
+  return <div className="space-y-4">
+    <div className="flex flex-wrap gap-2">
+      <CwButton size="sm" onClick={() => downloadCsv(block)}><Download aria-hidden="true" />Descargar CSV</CwButton>
+      <CopyButton text={coworkTableTsv(block)} label="Copiar tabla" size="sm" variant="secondary" />
+    </div>
+    <TableGrid block={block} />
+  </div>;
+}

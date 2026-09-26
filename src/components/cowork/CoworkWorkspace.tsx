@@ -339,6 +339,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     autoOpened.current.add(latest.run.id);
     const produced = coworkTurnArtifacts(latest.run, latest.events);
     const best = produced.find(item => item.kind === 'document')
+      || produced.find(item => item.kind === 'block' && item.block.type === 'sequence')
+      || produced.find(item => item.kind === 'block' && item.block.type === 'table' && item.block.rows.length >= 6)
       || produced.find(item => item.kind === 'contacts' && item.count >= 3)
       || produced.find(item => item.kind === 'file');
     if (best) openArtifactPanel(best, null, false);

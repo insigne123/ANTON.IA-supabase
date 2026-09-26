@@ -10,8 +10,9 @@ const read = (action: string, query: string | null = null, extra: Record<string,
 const parallel = (reads: Array<{ action: string; input: string }>) =>
   coworkDecisionSchema.parse({ action: 'reads.parallel', query: null, leadId: null, answer: null, reads });
 const answer = (reply: string, document: { title: string; content: string } | null = null,
-  suggestions: Array<{ label: string; message: string }> = [{ label: 'Sí, adelante', message: 'Sí, adelante con lo que propones' }]) =>
-  coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null, answer: { reply, document, suggestions } });
+  suggestions: Array<{ label: string; message: string }> = [{ label: 'Sí, adelante', message: 'Sí, adelante con lo que propones' }],
+  extra: { blocks?: unknown[]; question?: string } = {}) =>
+  coworkDecisionSchema.parse({ action: 'answer', query: null, leadId: null, answer: { reply, document, suggestions, ...extra } });
 
 /** What a good turn looks like for each case, played through the real loop. */
 const IDEAL: Record<string, CorpusDecider> = {
@@ -23,7 +24,10 @@ const IDEAL: Record<string, CorpusDecider> = {
     : answer('Con 0 envíos este mes, lo que más mueve la aguja hoy es activar contactos.\n- Tienes 256 contactos guardados y 19 campañas, ninguna con envíos.\n- Hay 2 incidencias abiertas (una es la sincronización de Outlook).\n¿Busco el correo de tus 3 contactos más recientes para armar la primera campaña?'),
   'metricas-semana': async context => context.observations.length === 0
     ? parallel([{ action: 'metrics.rates', input: '' }])
-    : answer('Esta semana no enviaste correos desde ANTON.IA: 0 envíos, 0 respuestas y 0 rebotes, igual que en los últimos 30 días.\n¿Armamos una campaña corta con tus contactos de Adecco para empezar a medir?'),
+    : answer('Esta semana no enviaste correos desde ANTON.IA, igual que en los últimos 30 días: sin envíos no hay tasas que comparar.', null, undefined, {
+      question: '¿Armamos una campaña corta con tus contactos de Adecco para empezar a medir?',
+      blocks: [{ type: 'metrics', title: 'Correos de la semana', period: 'Últimos 7 días', items: [
+        { label: 'Envíos', value: '0', detail: null }, { label: 'Respuestas', value: '0', detail: null }, { label: 'Rebotes', value: '0', detail: null }] }] }),
   'ultimos-guardados': async context => context.observations.length === 0
     ? read('leads.search', '')
     : answer('Tus últimos 4 contactos guardados:\n- Carlos Ah***a · Operations Manager · Minera Centinela\n- Nehal Pa***a · Recruitment Manager · Adecco\n- Jose Ca***o · Reclutador Junior · GrupoExpro (con correo)\n- Katherine Sa***o · Consultor de Selección · Adecco\nSolo Jose tiene correo. ¿Busco el correo de los otros tres?'),
@@ -87,9 +91,13 @@ Object.assign(IDEAL, {
   },
   'mkt-secuencia': async context => context.observations.length === 0
     ? read('message.context')
-    : answer('Te dejé la secuencia de 3 correos en tono cercano, firmada con tu nombre y sin ofertas que no estén aprobadas.\n¿La convierto en una campaña pausada para tus contactos de RR. HH. con correo?',
-      { title: 'Secuencia AXIS para gerentes de personas', content: 'Tres correos breves para abrir conversación sobre AXIS.\n\n## Correo 1\nAsunto: Antecedentes laborales en minutos\n\nHola,\nEn Yago automatizamos la consulta de antecedentes en el Poder Judicial.\n¿Lo vemos 15 minutos?\nNicolás Y.\n\n## Correo 2\nAsunto: ¿Cuánto tarda hoy una revisión?\n\nHola,\nQuería saber cómo revisan hoy los antecedentes de los postulantes.\nNicolás Y.\n\n## Correo 3\nAsunto: ¿Te lo muestro?\n\nHola,\nSi te sirve, te muestro AXIS con un caso real de tu área.\nNicolás Y.\n\n## Próximos pasos\n- Crear la campaña pausada y revisar los destinatarios.' },
-      chip('Sí, crea la campaña', 'Sí, crea una campaña pausada con esta secuencia para mis contactos de RR. HH. con correo')),
+    : answer('Te dejé la secuencia de 3 correos en tono cercano, firmada con tu nombre y sin ofertas que no estén aprobadas.', null,
+      chip('Sí, crea la campaña', 'Sí, crea una campaña pausada con esta secuencia para mis contactos de RR. HH. con correo'), {
+        question: '¿La convierto en una campaña pausada para tus contactos de RR. HH. con correo?',
+        blocks: [{ type: 'sequence', title: 'Secuencia AXIS para gerentes de personas', steps: [
+          { day: 1, subject: 'Antecedentes laborales en minutos', body: 'Hola,\nEn Yago automatizamos la consulta de antecedentes en el Poder Judicial.\n¿Lo vemos 15 minutos?\nNicolás Y.' },
+          { day: 4, subject: '¿Cuánto tarda hoy una revisión?', body: 'Hola,\nQuería saber cómo revisan hoy los antecedentes de los postulantes.\nNicolás Y.' },
+          { day: 8, subject: '¿Te lo muestro?', body: 'Hola,\nSi te sirve, te muestro AXIS con un caso real de tu área.\nNicolás Y.' }] }] }),
   'mkt-linkedin-mensaje': async context => context.observations.length === 0
     ? read('leads.search', 'Marcela')
     : coworkDecisionSchema.parse({ action: 'linkedin.message', query: null, leadId: MARKETING_LEAD.marcela,
@@ -103,8 +111,11 @@ Object.assign(IDEAL, {
     ? parallel([{ action: 'leads.search', input: '' }, { action: 'contacted.search', input: '' }])
     : answer('Hoy le escribiría a Felipe (Securitas) y Camila (Adecco): tienen correo, trabajan en selección y aún no les has escrito. Marcela ya recibió tu correo hace 6 días.\n¿Te preparo el correo para los dos?',
       null, chip('Sí, prepáralo', 'Sí, prepara un correo sobre AXIS para Felipe y Camila')),
-  'mkt-mejorar-correo': async () => answer('Así queda más creíble y fácil de responder:\n\nHola,\nEn Yago ayudamos a equipos de RR. HH. a revisar antecedentes laborales de postulantes sin trámites manuales.\n¿Te sirve que lo veamos 15 minutos esta semana?\nSaludos,\nNicolás\n\nQuité «el mejor del mercado» y «80 %» porque no tenemos cómo respaldarlos.\n¿Lo uso como primer correo de una campaña para tus contactos de RR. HH.?',
-    null, chip('Sí, úsalo', 'Sí, usa este correo como primer mensaje de una campaña para mis contactos de RR. HH.')),
+  'mkt-mejorar-correo': async () => answer('Así queda más creíble y fácil de responder. Quité «el mejor del mercado» y «80 %» porque no tenemos cómo respaldarlos.',
+    null, chip('Sí, úsalo', 'Sí, usa este correo como primer mensaje de una campaña para mis contactos de RR. HH.'), {
+      question: '¿Lo uso como primer correo de una campaña para tus contactos de RR. HH.?',
+      blocks: [{ type: 'email_draft', title: 'Correo mejorado', to: null, subject: 'Antecedentes laborales sin trámites manuales',
+        body: 'Hola,\nEn Yago ayudamos a equipos de RR. HH. a revisar antecedentes laborales de postulantes sin trámites manuales.\n¿Te sirve que lo veamos 15 minutos esta semana?\nSaludos,\nNicolás' }] }),
   'mkt-busqueda-y-campana': async () => coworkDecisionSchema.parse({ action: 'prospecting.propose_search', query: null, leadId: null,
     searchCriteria: { titles: ['Gerente de Recursos Humanos', 'Gerente de Personas', 'HR Manager', 'Head of People'], industries: ['retail'], locations: ['Santiago, Chile'], limit: 10 },
     answer: { reply: 'Primero busco 10 gerentes de RR. HH. en retail en Santiago. Cuando apruebes y veas los resultados, guardo a los que elijas, busco sus correos y armo la campaña para ellos.', document: null } }),
@@ -118,8 +129,11 @@ Object.assign(IDEAL, {
       null, chip('Sí, ármala', 'Sí, arma mi primera campaña con Felipe y Camila')),
   'mkt-seguimiento': async context => context.observations.length === 0
     ? parallel([{ action: 'leads.search', input: 'Marcela' }, { action: 'contacted.search', input: 'Marcela' }])
-    : answer('Le escribiste a Marcela el 19 sep sobre antecedentes laborales. Un seguimiento corto con otro ángulo:\n\nAsunto: ¿Cómo lo resuelven hoy?\nHola Marcela,\nMe quedé pensando en cómo revisan hoy los antecedentes en Sodexo. Si te sirve, te muestro en 15 minutos cómo lo hace AXIS.\nNicolás\n\n¿Lo dejo listo para enviar desde tu correo?',
-      null, chip('Sí, déjalo listo', 'Sí, deja listo el seguimiento para Marcela')),
+    : answer('Le escribiste a Marcela el 19 sep sobre antecedentes laborales. Te dejo un seguimiento corto con otro ángulo.',
+      null, chip('Sí, déjalo listo', 'Sí, deja listo el seguimiento para Marcela'), {
+        question: '¿Lo dejo listo para enviar desde tu correo?',
+        blocks: [{ type: 'email_draft', title: 'Seguimiento a Marcela', to: ['Marcela Rojas'], subject: '¿Cómo lo resuelven hoy?',
+          body: 'Hola Marcela,\nMe quedé pensando en cómo revisan hoy los antecedentes en Sodexo. Si te sirve, te muestro en 15 minutos cómo lo hace AXIS.\nNicolás' }] }),
 } satisfies Record<string, CorpusDecider>);
 
 /** Home starters: what a good first turn looks like for each button. */

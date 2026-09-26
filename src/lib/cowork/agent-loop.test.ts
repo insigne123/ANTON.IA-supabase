@@ -415,7 +415,25 @@ test('an answer missing its closing question or quick replies gets one correctio
     return { ...answer, answer: { reply: 'Asunto: Uno\nHola\n\nAsunto: Dos\nHola\n¿Creo la campaña?', document: null, suggestions: chips } };
   } });
   assert.equal(drafts.length, 1);
-  assert.match(drafts[0], /pon los correos en document/);
+  assert.match(drafts[0], /pon los correos en un bloque sequence/);
+  // The same emails as a sequence card are delivered: no correction.
+  calls = 0;
+  await runCoworkReadLoop({ ...base, decide: async () => {
+    calls++;
+    return { ...answer, answer: { reply: 'Te dejé dos correos.\n¿Creo la campaña?', document: null, suggestions: chips,
+      blocks: [{ type: 'sequence', title: 'Dos correos', steps: [{ day: 1, subject: 'Uno', body: 'Hola,\nNicolás' }, { day: 4, subject: 'Dos', body: 'Hola,\nNicolás' }] }] } };
+  } });
+  assert.equal(calls, 1);
+  // A [placeholder] in a card would reach the recipient: one correction, keeping the rest.
+  const filler: string[] = [];
+  await runCoworkReadLoop({ ...base, decide: async (_observations, _mustAnswer, rejections = []) => {
+    filler.push(...rejections.map(item => item.reason));
+    return { ...answer, answer: { reply: 'Te dejé el correo.\n¿Lo uso en una campaña?', document: null, suggestions: chips,
+      blocks: [{ type: 'email_draft', title: 'Correo', to: null, subject: 'Hola', body: 'Hola,\n[tu nombre]' }] } };
+  } });
+  assert.equal(filler.length, 1);
+  assert.match(filler[0], /corchetes/);
+  assert.doesNotMatch(filler[0], /conservando[^.]*los bloques/);
   // A complete answer needs no second call.
   calls = 0;
   await runCoworkReadLoop({ ...base, decide: async () => { calls++; return asked; } });

@@ -87,11 +87,59 @@ export function coworkStoredQuestion(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 3 && value.length <= 300 && /\?\s*$/.test(value) ? value.trim() : null;
 }
 
+/** Structured results the chat renders as cards (Generative UI): the person
+ * sees, copies, opens or exports them instead of reading them out of prose.
+ * The shapes are generous so an oversized table never costs the whole answer;
+ * the worker trims them to what a card shows (answer-quality.ts). */
+export const coworkEmailDraftBlockSchema = z.object({
+  type: z.literal('email_draft'),
+  title: z.string().max(200),
+  /** Recipients as observed (names or emails); null when the email is generic. */
+  to: z.array(z.string().max(300)).max(100).nullable(),
+  subject: z.string().max(400),
+  body: z.string().max(12000),
+}).strict();
+export const coworkSequenceBlockSchema = z.object({
+  type: z.literal('sequence'),
+  title: z.string().max(200),
+  /** day: the day each email goes out, counting the first as day 1. */
+  steps: z.array(z.object({ day: z.number().int().min(0).max(365), subject: z.string().max(400), body: z.string().max(8000) }).strict()).max(12),
+}).strict();
+export const coworkTableBlockSchema = z.object({
+  type: z.literal('table'),
+  title: z.string().max(200),
+  columns: z.array(z.string().max(120)).max(20),
+  rows: z.array(z.array(z.string().max(1000)).max(20)).max(200),
+}).strict();
+export const coworkMetricsBlockSchema = z.object({
+  type: z.literal('metrics'),
+  title: z.string().max(200),
+  /** «Últimos 7 días», «septiembre 2026»: every figure is read with its period. */
+  period: z.string().max(120).nullable(),
+  items: z.array(z.object({ label: z.string().max(120), value: z.string().max(80), detail: z.string().max(300).nullable() }).strict()).max(12),
+}).strict();
+export const coworkBlockSchema = z.discriminatedUnion('type', [
+  coworkEmailDraftBlockSchema, coworkSequenceBlockSchema, coworkTableBlockSchema, coworkMetricsBlockSchema,
+]);
+export type CoworkBlock = z.infer<typeof coworkBlockSchema>;
+export const COWORK_BLOCK_LIMIT = 4;
+
+/** Blocks as saved by the worker; a malformed one is skipped, never the whole answer. */
+export function coworkStoredBlocks(value: unknown): CoworkBlock[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap(item => {
+    const parsed = coworkBlockSchema.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  }).slice(0, COWORK_BLOCK_LIMIT);
+}
+
 export const coworkDocumentSchema = z.object({
   reply: z.string().min(1).max(20000),
   document: z.object({ title: z.string().min(1).max(160), content: z.string().min(1).max(40000) }).nullable(),
   /** The closing question on the next step, apart from the reply so it is never lost or buried. */
   question: z.string().max(400).nullable().optional(),
+  /** Emails, sequences, tables and figures to show as cards (rule 11). */
+  blocks: z.array(coworkBlockSchema).max(10).nullable().optional(),
   suggestions: z.array(coworkSuggestionSchema).max(6).nullable().optional(),
 }).strict();
 

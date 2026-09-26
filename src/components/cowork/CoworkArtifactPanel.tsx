@@ -5,6 +5,7 @@ import { ArrowLeft, Check, Copy, Maximize2, Minimize2, X } from 'lucide-react';
 import type { CoworkEvent } from '@/lib/cowork/contracts';
 import type { CoworkArtifact } from '@/lib/cowork/presentation';
 import { ArtifactPreview } from './ArtifactPreview';
+import { CoworkBlockView } from './CoworkBlocks';
 import { ContactResults } from './ContactResults';
 import { CoworkMarkdown } from './CoworkMarkdown';
 import { CoworkArtifactIcon, coworkArtifactMeta } from './CoworkTurn';
@@ -14,8 +15,9 @@ import { ResearchSources } from './ResearchSources';
 import { CwButton } from './ui';
 
 const KIND_LABEL: Record<CoworkArtifact['kind'], string> = {
-  document: 'Documento', contacts: 'Tabla', file: 'Archivo', sources: 'Fuentes',
+  block: 'Resultado', document: 'Documento', contacts: 'Tabla', file: 'Archivo', sources: 'Fuentes',
 };
+const BLOCK_LABEL = { email_draft: 'Correo', sequence: 'Secuencia', table: 'Tabla' } as const;
 
 function when(value: string) {
   const date = new Date(value);
@@ -39,7 +41,7 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
   onSelectVersion: (runId: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const label = KIND_LABEL[artifact.kind];
+  const label = artifact.kind === 'block' ? BLOCK_LABEL[artifact.block.type] : KIND_LABEL[artifact.kind];
   const closeLabel = artifact.kind === 'document' ? 'Cerrar documento' : `Cerrar ${label.toLowerCase()}`;
 
   async function copyDocument() {
@@ -78,6 +80,9 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
       </div>
     </header>
     <div className="cw-scroll min-h-0 flex-1 overflow-y-auto">
+      {artifact.kind === 'block' && <div className="mx-auto w-full max-w-[46rem] px-4 py-6 sm:px-8">
+        <CoworkBlockView block={artifact.block} />
+      </div>}
       {artifact.kind === 'document' && <article className="mx-auto w-full max-w-[46rem] px-5 py-8 sm:px-10 sm:py-10">
         <CoworkMarkdown text={artifact.content} variant="document" />
       </article>}

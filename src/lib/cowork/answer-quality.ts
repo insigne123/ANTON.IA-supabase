@@ -1,4 +1,4 @@
-import { COWORK_SUGGESTION_LIMITS, coworkSameLine, type CoworkSuggestion } from './contracts';
+import { COWORK_BLOCK_LIMIT, COWORK_SUGGESTION_LIMITS, coworkBlockSchema, coworkSameLine, type CoworkBlock, type CoworkSuggestion } from './contracts';
 import { COWORK_GLOSSARY } from './decision-context';
 
 /** Deterministic last pass over what the person reads. The prompt asks for
@@ -56,6 +56,53 @@ export function coworkSuggestions(value: unknown): CoworkSuggestion[] {
   return kept;
 }
 
+/** What a card shows at most; longer results belong in a document or an export. */
+export const COWORK_BLOCK_DISPLAY = { steps: 7, columns: 8, rows: 50, metrics: 6, recipients: 25 } as const;
+
+/** Blocks safe to render as cards: plain text without IDs or internal codes,
+ * trimmed to what a card shows. A malformed block is dropped on its own; a
+ * one-email sequence reads as an email. */
+export function coworkBlocks(value: unknown): CoworkBlock[] {
+  if (!Array.isArray(value)) return [];
+  const text = (raw: unknown, max: number) => polishCoworkText(String(raw ?? '')).trim().slice(0, max).trim();
+  const line = (raw: unknown, max: number) => text(String(raw ?? '').replace(/\s+/g, ' '), max);
+  const visible = (raw: unknown, max: number) => { const value = line(raw, max); return UUID.test(value) ? '' : value; };
+  const blocks: CoworkBlock[] = [];
+  for (const item of value) {
+    const parsed = coworkBlockSchema.safeParse(item);
+    if (!parsed.success) continue;
+    const block = parsed.data;
+    if (block.type === 'email_draft' || block.type === 'sequence') {
+      const steps = (block.type === 'sequence' ? block.steps : [{ day: 1, subject: block.subject, body: block.body }])
+        .map(step => ({ day: Math.max(1, step.day), subject: visible(step.subject, 200), body: text(step.body, block.type === 'sequence' ? 4000 : 6000) }))
+        .filter(step => step.subject && step.body && !UUID.test(step.body))
+        .sort((a, b) => a.day - b.day)
+        .slice(0, COWORK_BLOCK_DISPLAY.steps);
+      if (!steps.length) continue;
+      const title = visible(block.title, 120);
+      if (block.type === 'email_draft' || steps.length === 1) {
+        const to = (block.type === 'email_draft' ? block.to || [] : []).map(value => visible(value, 160)).filter(Boolean).slice(0, COWORK_BLOCK_DISPLAY.recipients);
+        blocks.push({ type: 'email_draft', title: title || steps[0].subject, to: to.length ? to : null, subject: steps[0].subject, body: steps[0].body });
+      } else {
+        blocks.push({ type: 'sequence', title: title || `Secuencia de ${steps.length} correos`, steps });
+      }
+    } else if (block.type === 'table') {
+      const columns = block.columns.slice(0, COWORK_BLOCK_DISPLAY.columns).map((column, index) => visible(column, 60) || `Columna ${index + 1}`);
+      const rows = block.rows.map(row => columns.map((_, index) => visible(row[index], 300)))
+        .filter(row => row.some(Boolean)).slice(0, COWORK_BLOCK_DISPLAY.rows);
+      if (!columns.length || !rows.length) continue;
+      blocks.push({ type: 'table', title: visible(block.title, 120) || 'Tabla', columns, rows });
+    } else {
+      const items = block.items.map(item => ({ label: visible(item.label, 60), value: visible(item.value, 40), detail: item.detail ? visible(item.detail, 140) || null : null }))
+        .filter(item => item.label && item.value).slice(0, COWORK_BLOCK_DISPLAY.metrics);
+      if (!items.length) continue;
+      blocks.push({ type: 'metrics', title: visible(block.title, 120) || 'Cifras', period: block.period ? visible(block.period, 80) || null : null, items });
+    }
+    if (blocks.length === COWORK_BLOCK_LIMIT) break;
+  }
+  return blocks;
+}
+
 /** The closing question on the next step as one plain sentence, or null.
  * Wrapping formatting goes; a missing opening «¿» is added. */
 export function coworkQuestion(value: unknown): string | null {
@@ -80,10 +127,11 @@ export const COWORK_YES_CHIP: CoworkSuggestion = { label: 'Sí, adelante', messa
 /** The reply as it is kept and read back (history, copies, exports): it ends
  * with the closing question, which also travels apart so the chat can show it
  * next to the quick replies. */
-export function polishCoworkAnswer<T extends { reply: string; document: { title: string; content: string } | null; question?: unknown; suggestions?: unknown }>(
+export function polishCoworkAnswer<T extends { reply: string; document: { title: string; content: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown }>(
   answer: T,
-): T & { question: string | null; suggestions: CoworkSuggestion[] | null } {
+): T & { question: string | null; blocks: CoworkBlock[] | null; suggestions: CoworkSuggestion[] | null } {
   const suggestions = coworkSuggestions(answer.suggestions);
+  const blocks = coworkBlocks(answer.blocks);
   const question = coworkQuestion(answer.question);
   let reply = polishCoworkText(answer.reply).trimEnd();
   if (question) {
@@ -105,6 +153,7 @@ export function polishCoworkAnswer<T extends { reply: string; document: { title:
     reply,
     document: answer.document ? { ...answer.document, content: polishCoworkText(answer.document.content) } : null,
     question,
+    blocks: blocks.length ? blocks : null,
     suggestions: suggestions.length ? suggestions : question ? [COWORK_YES_CHIP] : null,
   };
 }

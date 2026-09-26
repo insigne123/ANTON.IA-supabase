@@ -5,6 +5,8 @@
 // production outcome it replaces. No database, mailbox or provider is touched.
 import { COWORK_DEFERRAL, coworkAnswerIssues } from '../../src/lib/cowork/answer-quality';
 import type { CoworkUserContext } from '../../src/lib/cowork/decision-context';
+import type { CoworkBlock } from '../../src/lib/cowork/contracts';
+import { coworkBlocksText } from '../../src/lib/cowork/blocks';
 
 export const CORPUS_NOW = new Date('2026-09-25T13:10:00Z');
 
@@ -133,7 +135,14 @@ export type CorpusTurnResult = {
   failed: string | null;
   /** Quick replies shown under the answer (empty for proposals and failures). */
   suggestions?: Array<{ label: string; message: string }>;
+  /** Cards shown with the answer (emails, sequences, tables, figures). */
+  blocks?: CoworkBlock[];
+  /** The closing question, when it traveled apart (it also ends the reply). */
+  question?: string | null;
 };
+
+/** What the person reads in the chat: the reply plus every card. */
+export const corpusShown = (result: CorpusTurnResult) => [result.reply, coworkBlocksText(result.blocks || [])].filter(Boolean).join('\n\n');
 
 export type CorpusWorld = { read: (action: string, input: string) => unknown; savedEmails: string[]; userContext?: CoworkUserContext | null };
 
@@ -192,11 +201,12 @@ export const CORPUS: CorpusCase[] = [
       { label: 'no repite las lecturas del turno anterior', test: r => !r.actions.includes('contacted.search') && !r.actions.includes('replies.attention') },
       // Counts from app.context, exceptions.list or audience.analyze (118 of RR. HH., 21 with email), or the
       // saved contacts by name; a count may be written out («dos incidencias abiertas»), a bare «dos» does not count.
-      { label: 'usa datos de la cuenta (incidencias, campañas o contactos)', test: r => /\b(?:2|19|256|255|118|41|37|21)\b|\bdos incidencias\b|\bdiecinueve campañas\b|\b(?:Carlos|Nehal|Katherine|Jose)\b/i.test(r.reply) }] },
+      { label: 'usa datos de la cuenta (incidencias, campañas o contactos)', test: r => /\b(?:2|19|256|255|118|41|37|21)\b|\bdos incidencias\b|\bdiecinueve campañas\b|\b(?:Carlos|Nehal|Katherine)\b|\bJos[eé](?![a-z])/i.test(r.reply) }] },
   { id: 'metricas-semana', title: 'Números de la semana', request: 'como me ha ido esta semana con los correos? dame numeros',
     production: { run: '1c86e476', latencySeconds: 32, scores: { comprension: 5, veracidad: 5, utilidad: 3, claridad: 4, friccion: 3 }, problem: 'Correcta pero sin siguiente paso y con jerga de cobertura.' },
     checks: [...CORPUS_COMMON_CHECKS, { label: 'consulta métricas', test: r => r.actions.some(a => a.startsWith('metrics.')) },
-      { label: 'da los números (0 envíos)', test: r => /\b0\b|ningún|ningun|no enviaste/i.test(r.reply) }] },
+      { label: 'da los números (0 envíos)', test: r => /\b0\b|ningún|ningun|no enviaste/i.test(corpusShown(r)) },
+      { label: 'las cifras van como tarjeta', test: r => (r.blocks || []).some(block => block.type === 'metrics') }] },
   { id: 'ultimos-guardados', title: 'Últimos contactos guardados', request: 'muestrame los ultimos contactos que guarde',
     production: { run: 'ba91494c', latencySeconds: 74, scores: { comprension: 5, veracidad: 5, utilidad: 3, claridad: 4, friccion: 3 }, problem: 'Buen formato pero cierra con metacomentario técnico y sin ofrecer buscar correos.' },
     checks: [...CORPUS_COMMON_CHECKS, { label: 'consulta tus guardados', test: r => r.actions.includes('leads.search') },
@@ -244,7 +254,7 @@ export const CORPUS: CorpusCase[] = [
   { id: 'vender-mas', title: 'Pedido vago', request: 'ayudame a vender mas, no se por donde partir',
     production: { run: '5aee709f', latencySeconds: 162, scores: { comprension: 4, veracidad: 4, utilidad: 2, claridad: 3, friccion: 2 }, problem: 'Consejo genérico y pregunta «qué vendes».' },
     checks: [...CORPUS_COMMON_CHECKS, { label: 'no pregunta qué vende el usuario', test: r => !/qué (?:producto|servicio|vendes|ofreces)/i.test(r.reply) },
-      { label: 'aterriza en datos de la cuenta', test: r => /\d/.test(r.reply) }] },
+      { label: 'aterriza en datos de la cuenta', test: r => /\d/.test(corpusShown(r)) }] },
   { id: 'ley-chile', title: 'Pregunta legal', request: 'oye y puedo mandarle correos a gente que no me ha dado permiso? que dice la ley en chile de eso',
     production: { run: '2b56981d', latencySeconds: 97, scores: { comprension: 5, veracidad: 4, utilidad: 4, claridad: 4, friccion: 4 }, problem: 'Buena, pero filtra «do_not_contact» y no ofrece revisar bajas antes de una campaña.' },
     checks: [...CORPUS_COMMON_CHECKS, { label: 'consulta el marco legal', test: r => r.actions.includes('compliance.law') },

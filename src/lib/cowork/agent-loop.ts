@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { COWORK_NOTE_ACTION, coworkDocumentSchema } from './contracts';
-import { coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
+import { COWORK_NOTE_ACTION, coworkDocumentSchema, type CoworkBlock } from './contracts';
+import { coworkBlocks, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema } from './code-proposal';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
@@ -309,6 +309,18 @@ const DOCUMENT_WITH_PROPOSAL = 'Entregaste un documento junto con una propuesta 
  * its last decision: after that the answer stands as it is. */
 const CLOSING_FEEDBACK = 'Cierre incompleto:';
 
+/** A [placeholder] in any text of a card («[tu nombre]»), which would reach the recipient as is. */
+function hasFiller(block: CoworkBlock): boolean {
+  const texts: string[] = [];
+  const collect = (value: unknown) => {
+    if (typeof value === 'string') texts.push(value);
+    else if (Array.isArray(value)) value.forEach(collect);
+    else if (value && typeof value === 'object') Object.values(value).forEach(collect);
+  };
+  collect(block);
+  return texts.some(text => /\[[^\]]{2,}\]/.test(text));
+}
+
 /** The next-step question: answer.question, or a reply that already ends asking. */
 function closingQuestion(answer: { reply: string; question?: unknown }): string | null {
   const fromField = coworkQuestion(answer.question);
@@ -317,19 +329,25 @@ function closingQuestion(answer: { reply: string; question?: unknown }): string 
   return /\?\s*$/.test(last) ? last.trim() : null;
 }
 
-function closingFeedback(answer: { reply: string; document: { title: string } | null; question?: unknown; suggestions?: unknown }): string | null {
+function closingFeedback(answer: { reply: string; document: { title: string } | null; question?: unknown; blocks?: unknown; suggestions?: unknown }): string | null {
   const chips = coworkSuggestions(answer.suggestions).length;
+  const blocks = coworkBlocks(answer.blocks);
+  const drafts = blocks.some(block => block.type === 'email_draft' || block.type === 'sequence');
+  const filler = blocks.some(hasFiller);
   const missing = [
     closingQuestion(answer) ? null : 'completa answer.question con la pregunta del siguiente paso (regla 4)',
     // A question apart already gets a one-tap yes (COWORK_YES_CHIP): not worth another call.
     chips || coworkQuestion(answer.question) ? null : 'agrega 1 a 3 respuestas sugeridas que se envíen tal cual al tocarlas (regla 9)',
-    // Two or more emails are meant to be copied and kept: they go in the document, not in the chat.
-    !answer.document && (answer.reply.match(/asunto\s*\d*\s*[:：]/gi) || []).length >= 2
-      ? 'pon los correos en document (un ## por correo con «Asunto:») y deja en reply un resumen breve' : null,
+    // Two or more emails are meant to be copied and kept: they go in a card, not in the chat.
+    !answer.document && !drafts && (answer.reply.match(/asunto\s*\d*\s*[:：]/gi) || []).length >= 2
+      ? 'pon los correos en un bloque sequence (regla 11) y deja en reply un resumen breve' : null,
+    // A card is copied as is: a [placeholder] would reach the recipient.
+    filler ? 'reemplaza los [corchetes] de relleno de los bloques con datos reales (userContext o lo observado) o quítalos' : null,
   ].filter(Boolean);
   if (!missing.length) return null;
   // The model does not see its previous answer: name what already worked so the retry keeps it.
   const keep = [answer.document ? `el document «${answer.document.title.slice(0, 80)}»` : null,
+    blocks.length && !filler ? 'los bloques' : null,
     closingQuestion(answer) ? 'la pregunta final' : null, chips ? 'las respuestas sugeridas' : null].filter(Boolean);
   return `${CLOSING_FEEDBACK} ${missing.join(' y ')}. Entrega de nuevo la respuesta completa${keep.length ? `, conservando ${keep.join(' y ')}` : ''}.`;
 }
@@ -371,6 +389,9 @@ function completeFrom(first: CoworkAnswer, retry: CoworkAnswer): CoworkAnswer {
   return {
     ...retry,
     document: retry.document ?? (emailsInChat ? null : first.document),
+    // Blocks come back too, unless they were the problem (a [placeholder] in a card).
+    blocks: coworkBlocks(retry.blocks).length ? retry.blocks
+      : emailsInChat || coworkBlocks(first.blocks).some(hasFiller) ? null : first.blocks ?? null,
     question: closingQuestion(retry) ? retry.question ?? null : closingQuestion(first),
     suggestions: coworkSuggestions(retry.suggestions).length ? retry.suggestions : first.suggestions ?? null,
   };

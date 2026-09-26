@@ -4,14 +4,16 @@ import { useState } from 'react';
 import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, Library, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
-  coworkDisplayMessage, coworkFileSize, coworkLiveActivity, coworkProposalView, coworkTurnArtifacts, coworkTurnNote, coworkTurnOutput,
+  coworkDisplayMessage, coworkFileSize, coworkLiveActivity, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
   coworkTurnSuggestions, isCoworkActive, type CoworkArtifact,
 } from '@/lib/cowork/presentation';
 import { coworkReplyBody, type CoworkSuggestion } from '@/lib/cowork/contracts';
 import { markdownExcerpt } from '@/lib/cowork/markdown';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
+import { coworkBlockMeta } from '@/lib/cowork/blocks';
 import { cn } from '@/lib/utils';
 import { CoworkActivity } from './CoworkActivity';
+import { BlockCard, CoworkBlockIcon, MetricsBlock } from './CoworkBlocks';
 import { CoworkApproval } from './CoworkApproval';
 import { CoworkMarkdown } from './CoworkMarkdown';
 import { coworkArtifactUrls } from './ArtifactPreview';
@@ -19,12 +21,14 @@ import { CoworkMark, CwButton } from './ui';
 
 export type CoworkTurnData = { run: CoworkRun; events: CoworkEvent[] };
 
-export function CoworkArtifactIcon({ artifact, className }: { artifact: Pick<CoworkArtifact, 'kind'>; className?: string }) {
+export function CoworkArtifactIcon({ artifact, className }: { artifact: CoworkArtifact; className?: string }) {
+  if (artifact.kind === 'block') return <CoworkBlockIcon block={artifact.block} className={className} />;
   const Icon = artifact.kind === 'document' ? FileText : artifact.kind === 'contacts' ? Table2 : artifact.kind === 'sources' ? Library : FileText;
   return <Icon className={className} aria-hidden="true" />;
 }
 
 export function coworkArtifactMeta(artifact: CoworkArtifact) {
+  if (artifact.kind === 'block') return coworkBlockMeta(artifact.block);
   if (artifact.kind === 'document') return 'Documento';
   if (artifact.kind === 'contacts') return `Tabla · ${artifact.count} ${artifact.companies ? (artifact.count === 1 ? 'empresa' : 'empresas') : (artifact.count === 1 ? 'contacto' : 'contactos')}`;
   if (artifact.kind === 'sources') return `${artifact.count} fuente${artifact.count === 1 ? '' : 's'}`;
@@ -123,6 +127,10 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   const output = coworkTurnOutput(events);
   const proposal = coworkProposalView(run, events);
   const artifacts = coworkTurnArtifacts(run, events);
+  // Emails, sequences and tables read as rich cards; figures stay inline.
+  const blockCards = artifacts.flatMap(artifact => artifact.kind === 'block' ? [artifact] : []);
+  const otherArtifacts = artifacts.filter(artifact => artifact.kind !== 'block');
+  const metrics = coworkTurnBlocks(events).flatMap(block => block.type === 'metrics' ? [block] : []);
   const failure = events.slice().reverse().find(event => event.kind === 'run.failed')?.payload;
   const startedAt = events.find(event => event.kind === 'run.started')?.created_at || run.created_at;
   const waitingDecision = proposal?.state === 'pending';
@@ -155,8 +163,10 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
         <CoworkActivity events={events} active={working} liveLabel={coworkLiveActivity(run, events)} startedAt={startedAt} />
         {note && <div className={cn(live && 'cw-rise')}><CoworkMarkdown text={note} /></div>}
         {!proposal && replyBlock}
-        {artifacts.length > 0 && <div className="grid gap-2">
-          {artifacts.map(artifact => artifact.kind === 'contacts' && !artifact.external && artifact.count <= 2
+        {!proposal && metrics.map((block, index) => <MetricsBlock key={`metrics-${index}`} block={block} live={live} />)}
+        {blockCards.map(artifact => <BlockCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} live={live} />)}
+        {otherArtifacts.length > 0 && <div className="grid gap-2">
+          {otherArtifacts.map(artifact => artifact.kind === 'contacts' && !artifact.external && artifact.count <= 2
             ? <ContactChips key={artifact.id} artifact={artifact} events={events} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />
             : <ArtifactCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />)}
         </div>}

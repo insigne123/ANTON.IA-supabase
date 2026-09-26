@@ -4,7 +4,8 @@
 // and one email sent. Names are fictional and complete: masked names made the
 // model guess surnames. No database, mailbox or provider is touched.
 import { coworkStarter } from '../../src/lib/cowork/starters';
-import { CORPUS_COMMON_CHECKS, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
+import { coworkBlocksText } from '../../src/lib/cowork/blocks';
+import { CORPUS_COMMON_CHECKS, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 export const MARKETING_LEAD = { marcela: id(101), felipe: id(102), andrea: id(103), rodrigo: id(104), camila: id(105) };
@@ -96,7 +97,7 @@ function read(action: string, input: string): unknown {
 const world = { read, savedEmails: contacts.map(lead => lead.email).filter((email): email is string => Boolean(email)) };
 export const marketingRead = read;
 
-const text = (result: CorpusTurnResult) => [result.reply, result.note || '', result.document?.content || ''].join('\n');
+const text = (result: CorpusTurnResult) => [corpusShown(result), result.note || '', result.document?.content || ''].join('\n');
 const campaign = (result: CorpusTurnResult) => result.proposal?.campaign as { emails?: string[]; messages?: Array<{ subject: string; body: string }> } | undefined;
 const PLACEHOLDER = /\[(?:tu |su )?(?:nombre|empresa|cargo|firma|name)[^\]]*\]/i;
 const PEOPLE_EMAILS = ['mrojas@sodexo.cl', 'fmunoz@securitas.cl', 'cfuentes@adecco.cl'];
@@ -104,13 +105,19 @@ const lastLine = (reply: string) => reply.split('\n').filter(line => line.trim()
 /** Drops sentences that deny something («No agregué prueba gratuita»): a denial is not an offer. */
 const withoutDenials = (content: string) => content.split(/(?<=[.!?\n])/).filter(sentence => !/\bno\b|\bni\b|\bsin\b(?! costo)/i.test(sentence)).join('');
 
+/** The emails themselves: the cards, or the document when they came as one. */
+const emails = (result: CorpusTurnResult) => [coworkBlocksText((result.blocks || []).filter(block => block.type === 'email_draft' || block.type === 'sequence')),
+  result.document?.content || ''].join('\n');
+
 /** From the first greeting to the signature: the email itself, without the comments around it. */
 const rewrittenEmail = (result: CorpusTurnResult) => {
-  const all = result.document?.content || result.reply;
+  const card = (result.blocks || []).find(block => block.type === 'email_draft');
+  const all = card?.type === 'email_draft' ? card.body : result.document?.content || result.reply;
   const start = all.search(/\bHola\b/i);
   if (start < 0) return all;
   const body = all.slice(start);
-  const signature = body.search(/Nicol[aá]s/);
+  // The signature is the last «Nicolás»: an opening «Soy Nicolás, de Yago» is part of the email.
+  const signature = [...body.matchAll(/Nicol[aá]s/g)].pop()?.index ?? -1;
   return signature < 0 ? body : body.slice(0, signature);
 };
 
@@ -133,11 +140,13 @@ export const MARKETING_CORPUS: CorpusCase[] = [
   { id: 'mkt-secuencia', title: 'Secuencia de 3 correos', request: 'armame una secuencia de 3 correos para ofrecer axis a gerentes de personas, tono cercano', world,
     origin: 'Redactar una secuencia lista para usar: tres correos distintos, con asunto, firma real y sin prometer lo que no está aprobado.',
     checks: [...CORPUS_COMMON_CHECKS,
-      { label: 'entrega los 3 correos en un documento', test: r => Boolean(r.document) && ((r.document?.content || '').match(/asunto/gi) || []).length >= 3 },
+      { label: 'entrega los 3 correos en una secuencia o un documento', test: r => (r.blocks || []).some(block => block.type === 'sequence' && block.steps.length >= 3)
+        || (Boolean(r.document) && ((r.document?.content || '').match(/asunto/gi) || []).length >= 3) },
       { label: 'sin datos de relleno entre corchetes', test: r => !PLACEHOLDER.test(text(r)) },
       // Only the emails count: the reply or a scope note may say that no free trial was offered.
-      { label: 'no ofrece prueba gratuita sin oferta aprobada', test: r => !/prueba gratuita|gratis|sin costo/i.test(withoutDenials(r.document?.content || '')) },
-      { label: 'firma con el nombre del perfil', test: r => /Nicol[aá]s/.test(r.document?.content || '') }] },
+      { label: 'no ofrece prueba gratuita sin oferta aprobada', test: r => !/prueba gratuita|gratis|sin costo/i.test(withoutDenials(emails(r))) },
+      { label: 'firma con el nombre del perfil', test: r => /Nicol[aá]s/.test(emails(r)) },
+      { label: 'la secuencia va como tarjeta', test: r => (r.blocks || []).some(block => block.type === 'sequence') }] },
   { id: 'mkt-linkedin-mensaje', title: 'Mensaje de LinkedIn a un contacto', request: 'escribele a marcela por linkedin, algo corto presentandome', world,
     origin: 'LinkedIn desde el chat: identificar a la persona y dejar el mensaje en cola para aprobar, firmado con el nombre real.',
     checks: [...CORPUS_COMMON_CHECKS,
@@ -163,7 +172,8 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       // Only the rewritten email counts: the explanation may name what was removed.
       { label: 'quita promesas sin respaldo', test: r => !/el mejor del mercado|80 ?%/i.test(rewrittenEmail(r)) },
       { label: 'lo concreta con la oferta real (AXIS)', test: r => /AXIS|antecedentes/i.test(text(r)) },
-      { label: 'firma con el nombre del perfil', test: r => /Nicol[aá]s/.test(text(r)) }] },
+      { label: 'firma con el nombre del perfil', test: r => /Nicol[aá]s/.test(text(r)) },
+      { label: 'el correo va como tarjeta', test: r => (r.blocks || []).some(block => block.type === 'email_draft') }] },
   { id: 'mkt-busqueda-y-campana', title: 'Pedido de varios pasos', world,
     request: 'busca 10 gerentes de rrhh en empresas de retail en santiago y despues armame una campaña para ellos',
     origin: 'Dos pasos encadenados: el primero es la búsqueda y la nota debe explicar qué sigue después de aprobarla.',
@@ -192,7 +202,8 @@ export const MARKETING_CORPUS: CorpusCase[] = [
       { label: 'revisa lo que se le envió', test: r => r.actions.some(action => ['contacted.search', 'contacted.timeline', 'leads.search'].includes(action)) },
       { label: 'redacta el seguimiento', test: r => /asunto/i.test(text(r)) || r.proposal?.kind === 'linkedin_message' || r.proposal?.kind === 'campaign_create' },
       { label: 'no reprocha el silencio ni anuncia cierre', test: r => !/no (?:me )?respondiste|última vez|ultimo mensaje|último mensaje|cierro (?:el|este) hilo/i.test(text(r)) },
-      { label: 'firma con el nombre del perfil', test: r => r.proposal?.kind === 'linkedin_message' || /Nicol[aá]s/.test(text(r)) }] },
+      { label: 'firma con el nombre del perfil', test: r => r.proposal?.kind === 'linkedin_message' || /Nicol[aá]s/.test(text(r)) },
+      { label: 'el seguimiento va como tarjeta', test: r => Boolean(r.proposal) || (r.blocks || []).some(block => block.type === 'email_draft') }] },
 ];
 
 /** Contacts with an email who never received anything: Marcela already got one. */

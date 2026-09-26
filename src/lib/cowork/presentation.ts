@@ -1,5 +1,5 @@
 import { collectCoworkLeadRows } from './lead-export';
-import { coworkDocumentSchema, coworkStoredQuestion, coworkStoredSuggestions, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText } from './contracts';
+import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText } from './contracts';
 
 /**
  * Pure presentation helpers for the Cowork workspace. Everything here derives
@@ -240,13 +240,23 @@ export function coworkTurnOutput(events: CoworkEvent[]): CoworkTurnOutput | null
   return parsed.success ? { reply: parsed.data.reply, document: parsed.data.document, question: coworkStoredQuestion(completed?.question) } : null;
 }
 
+/** Cards of a finished answer (emails, sequences, tables and figures); older turns have none. */
+export function coworkTurnBlocks(events: CoworkEvent[]): CoworkBlock[] {
+  const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
+  return coworkStoredBlocks(completed?.blocks);
+}
+
 /** Quick replies of a finished answer; turns saved before they existed have none. */
 export function coworkTurnSuggestions(events: CoworkEvent[]): CoworkSuggestion[] {
   const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
   return coworkStoredSuggestions(completed?.suggestions);
 }
 
+/** Cards that also open in the side panel; figures stay inline in the chat. */
+export type CoworkPanelBlock = Exclude<CoworkBlock, { type: 'metrics' }>;
+
 export type CoworkArtifact =
+  | { kind: 'block'; id: string; runId: string; title: string; block: CoworkPanelBlock; createdAt: string }
   | { kind: 'document'; id: string; runId: string; title: string; content: string; createdAt: string }
   | { kind: 'contacts'; id: string; runId: string; title: string; count: number; companies: boolean; external: boolean; createdAt: string }
   | { kind: 'file'; id: string; runId: string; title: string; name: string; extension: string; size: number | null; createdAt: string }
@@ -269,6 +279,10 @@ export function coworkTurnArtifacts(run: Pick<CoworkRun, 'id' | 'created_at'>, e
   const artifacts: CoworkArtifact[] = [];
   const completedAt = events.slice().reverse().find(event => event.kind === 'run.completed')?.created_at || run.created_at;
   const output = coworkTurnOutput(events);
+  coworkTurnBlocks(events).forEach((block, index) => {
+    if (block.type === 'metrics') return;
+    artifacts.push({ kind: 'block', id: `${run.id}:block:${index}`, runId: run.id, title: block.title, block, createdAt: completedAt });
+  });
   if (output?.document) {
     artifacts.push({ kind: 'document', id: `${run.id}:document`, runId: run.id, title: output.document.title,
       content: output.document.content, createdAt: completedAt });

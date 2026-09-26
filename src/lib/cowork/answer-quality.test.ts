@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { coworkAnswerIssues, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText } from './answer-quality';
+import { coworkAnswerIssues, coworkBlocks, coworkQuestion, coworkSuggestions, polishCoworkAnswer, polishCoworkText } from './answer-quality';
 import { coworkReplyBody, coworkStoredQuestion } from './contracts';
 
 test('internal codes copied from tool results become plain Spanish', () => {
@@ -114,4 +114,30 @@ test('the closing question is one plain sentence that ends the reply exactly onc
   assert.equal(coworkStoredQuestion('¿Creo la campaña?'), '¿Creo la campaña?');
   assert.equal(coworkStoredQuestion('Listo.'), null);
   assert.equal(coworkStoredQuestion({ text: '¿Sí?' }), null);
+});
+
+test('blocks become cards one by one: plain text, no IDs, trimmed to what a card shows', () => {
+  const id = '00000000-0000-4000-8000-000000000022';
+  const blocks = coworkBlocks([
+    { type: 'email_draft', title: '', to: ['Marcela Rojas', id], subject: 'Antecedentes en minutos', body: 'Hola,\nNicolás' },
+    { type: 'sequence', title: 'Una sola', steps: [{ day: 0, subject: 'Único', body: 'Hola' }] },
+    { type: 'table', title: 'Prioridad', columns: ['Contacto', 'ID', ''], rows: [['Felipe', id, 'x'], ['', '', ''], ['Camila', 'last_30_days', 'y', 'extra']] },
+    { type: 'metrics', title: 'Semana', period: 'last_7_days', items: [{ label: 'Envíos', value: '1', detail: null }, { label: '', value: '3', detail: null }] },
+    { type: 'metrics', title: 'Sobra', period: null, items: [{ label: 'Quinta', value: '5', detail: null }] },
+    { type: 'nope' },
+  ]);
+  assert.deepEqual(blocks, [
+    { type: 'email_draft', title: 'Antecedentes en minutos', to: ['Marcela Rojas'], subject: 'Antecedentes en minutos', body: 'Hola,\nNicolás' },
+    // A one-email sequence reads as an email.
+    { type: 'email_draft', title: 'Una sola', to: null, subject: 'Único', body: 'Hola' },
+    { type: 'table', title: 'Prioridad', columns: ['Contacto', 'ID', 'Columna 3'], rows: [['Felipe', '', 'x'], ['Camila', 'últimos 30 días', 'y']] },
+    { type: 'metrics', title: 'Semana', period: 'últimos 7 días', items: [{ label: 'Envíos', value: '1', detail: null }] },
+  ]);
+  assert.deepEqual(coworkBlocks(null), []);
+  // Sequences keep their order by day and at most seven emails.
+  const steps = Array.from({ length: 9 }, (_, index) => ({ day: 9 - index, subject: `Correo ${9 - index}`, body: 'Hola' }));
+  const sequence = coworkBlocks([{ type: 'sequence', title: 'Larga', steps }])[0];
+  assert.equal(sequence.type, 'sequence');
+  if (sequence.type === 'sequence') assert.deepEqual(sequence.steps.map(step => step.day), [1, 2, 3, 4, 5, 6, 7]);
+  assert.equal(polishCoworkAnswer({ reply: 'Listo.', document: null }).blocks, null);
 });
