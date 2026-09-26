@@ -28,9 +28,9 @@ export const metadata: Metadata = {
   title: 'ANTON.IA - Lead Automation',
   description: 'AI-powered lead search, research, and outreach.',
   icons: {
-    icon: [{ url: '/icon.png', type: 'image/png' }],
-    apple: [{ url: '/icon.png', type: 'image/png' }],
-    shortcut: ['/icon.png'],
+    icon: [{ url: '/icon-192.png', type: 'image/png', sizes: '192x192' }],
+    apple: [{ url: '/icon-192.png', type: 'image/png', sizes: '192x192' }],
+    shortcut: ['/icon-192.png'],
   },
   manifest: '/manifest.webmanifest',
 };
