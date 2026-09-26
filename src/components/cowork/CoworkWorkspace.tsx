@@ -486,6 +486,13 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     void post(latest.run.message, latest.run.parent_run_id ?? null);
   }
 
+  // A quick reply is a message you did not have to type: same thread, same rules.
+  const canFollowUp = Boolean(ready && !sending && latest && latestIsCurrent && latest.run.status === 'completed' && !optimistic && !queued);
+  function followUp(text: string) {
+    if (!latest || !canFollowUp) return;
+    void post(text, latest.run.id);
+  }
+
   async function cancel() {
     if (!latest || cancelling) return;
     setCancelling(true);
@@ -543,7 +550,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const quotaNote = searchQuota ? `Búsquedas externas hoy: ${searchQuota.remaining} de ${searchQuota.limit}` : '';
 
   const homeComposer = <CoworkComposer ref={composer} id="cowork-message" size="large" value={message} onChange={setMessage} onSubmit={() => void submit()}
-    placeholder="Describe lo que necesitas. Por ejemplo: «prioriza mis respuestas pendientes de hoy»"
+    placeholder="Describe lo que necesitas. Por ejemplo: «escríbele a mis contactos que aún no contacto»"
     ready={ready} sending={sending} submitLabel="Crear trabajo" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
     footnote={quotaNote || undefined} />;
 
@@ -587,7 +594,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
               {state?.olderTurnsOmitted && <p className="text-center text-[12px] text-cw-faint">Se muestran los últimos ocho turnos anteriores.</p>}
               {turns.map((turn, index) => <CoworkTurn key={turn.run.id} turn={turn} latest={index === turns.length - 1}
                 resolving={resolving} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
-                onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null}
+                onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null} onSuggestion={canFollowUp ? followUp : null}
                 budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)} />)}
               {continuationMissing && latestIsCurrent && latest?.run.status === 'completed' && !optimistic && !queued && ready && <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-[38px]">
                 <CwButton size="sm" variant="secondary" disabled={sending}
