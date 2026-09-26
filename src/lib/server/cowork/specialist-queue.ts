@@ -4,6 +4,7 @@ import { generateStructuredWithTelemetry } from '@/ai/openai-json';
 import { prepareCoworkSpecialists, coworkSpecialistInstructions, coworkSpecialistsEnabled,
   specialistTaskSchema, specialistResultSchema, type SpecialistTask } from '@/lib/cowork/specialists';
 import type { CoworkObservation } from '@/lib/cowork/agent-loop';
+import { coworkIsAssistantEvent } from '@/lib/cowork/contracts';
 import { coworkReadTaskSchema } from '@/lib/cowork/parallel-reads';
 import { requireCoworkWorkerAccess } from './access';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -44,7 +45,9 @@ export async function loadCoworkSpecialistResume(client: SupabaseClient,
     .eq('run_id', runId).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
     .eq('kind', 'tool.completed').order('sequence', { ascending: true }).limit(10);
   if (error) throw new Error('No se pudo recuperar la revisión guardada.');
-  const observations = (data || []).map(row => observationSchema.parse(row.payload)) as CoworkObservation[];
+  // The plan the person saw is not an observation to resume from.
+  const observations = (data || []).filter(row => !coworkIsAssistantEvent(row.payload))
+    .map(row => observationSchema.parse(row.payload)) as CoworkObservation[];
   if (!observations.some(row => row.action === 'specialists.review')) return undefined;
   if (observations.length > 4) throw new Error('La revisión excede el presupuesto de contexto.');
   return observations;

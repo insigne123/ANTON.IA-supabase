@@ -42,6 +42,34 @@ export function coworkNoteText(payload: unknown): string | null {
   return typeof reply === 'string' && reply.trim() ? reply.trim() : null;
 }
 
+/** A tool event with the short plan the person sees while the turn works: what
+ * Cowork will consult and do, in order. Like the note it is never a data read,
+ * never reaches the model as an observation, and never carries an ID. */
+export const COWORK_PLAN_ACTION = 'assistant.plan';
+
+/** `read`: the consultation that completes the step; null for the step that
+ * writes the answer. */
+export type CoworkPlanStep = { label: string; read: string | null };
+export const COWORK_PLAN_LIMITS = { steps: 5, label: 80 } as const;
+
+export function coworkPlanSteps(payload: unknown): CoworkPlanStep[] | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const record = payload as { action?: unknown; result?: { steps?: unknown } | null };
+  if (record.action !== COWORK_PLAN_ACTION || !Array.isArray(record.result?.steps)) return null;
+  const steps = record.result.steps.flatMap((step: unknown) => {
+    const { label, read } = (step || {}) as { label?: unknown; read?: unknown };
+    if (typeof label !== 'string' || !label.trim() || label.length > COWORK_PLAN_LIMITS.label) return [];
+    return [{ label: label.trim(), read: typeof read === 'string' && /^[a-z_]+(?:\.[a-z_]+)+$/.test(read) ? read : null }];
+  }).slice(0, COWORK_PLAN_LIMITS.steps);
+  return steps.length > 1 ? steps : null;
+}
+
+/** Tool events the assistant wrote about itself (its note, its plan), not data it read. */
+export function coworkIsAssistantEvent(payload: unknown): boolean {
+  const action = payload && typeof payload === 'object' ? (payload as { action?: unknown }).action : null;
+  return action === COWORK_NOTE_ACTION || action === COWORK_PLAN_ACTION;
+}
+
 /** A quick reply the person can click to continue: `label` is what the button
  * shows, `message` is what gets sent. The decision accepts generous lengths so
  * one long chip never rejects the whole answer; `coworkSuggestions` keeps only

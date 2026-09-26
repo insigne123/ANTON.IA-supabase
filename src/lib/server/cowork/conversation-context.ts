@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { COWORK_NOTE_ACTION, coworkDocumentSchema, coworkStoredBlocks, type CoworkBlock } from '@/lib/cowork/contracts';
+import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, coworkDocumentSchema, coworkStoredBlocks, type CoworkBlock } from '@/lib/cowork/contracts';
 
 export async function loadCoworkHistory(
   client: SupabaseClient,
@@ -29,10 +29,12 @@ export async function loadCoworkHistory(
     // (for example a completed external search), not only the oldest reads.
     const observed = await client.from('cowork_run_events').select('payload')
       .eq('run_id', cursor).eq('user_id', scope.userId).eq('organization_id', scope.organizationId)
-      .eq('kind', 'tool.completed').order('sequence', { ascending: false }).limit(4);
+      .eq('kind', 'tool.completed').order('sequence', { ascending: false }).limit(5);
     if (observed.error) throw new Error('Conversation observations unavailable');
     // Up to three data reads plus the assistant's note that accompanied a proposal.
-    const newestFirst = ((observed.data || []) as Array<{ payload: unknown }>).map((row: { payload: unknown }) => row.payload);
+    // The plan shown while it worked is not context: the reply already says what was done.
+    const newestFirst = ((observed.data || []) as Array<{ payload: unknown }>).map((row: { payload: unknown }) => row.payload)
+      .filter(payload => (payload as { action?: unknown } | null)?.action !== COWORK_PLAN_ACTION);
     const isNote = (payload: unknown) => (payload as { action?: unknown } | null)?.action === COWORK_NOTE_ACTION;
     const reads = newestFirst.filter(payload => !isNote(payload)).slice(0, 3);
     const observedPayloads = newestFirst.filter(payload => isNote(payload) || reads.includes(payload)).reverse();

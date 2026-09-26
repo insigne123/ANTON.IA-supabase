@@ -4,7 +4,7 @@
 import { coworkAgentInstructions } from '../../src/lib/cowork/agent-instructions';
 import { coworkDecisionContext } from '../../src/lib/cowork/decision-context';
 import { runCoworkReadLoop, type CoworkObservation, type CoworkRejection, type coworkDecisionSchema } from '../../src/lib/cowork/agent-loop';
-import { COWORK_NOTE_ACTION, coworkNoteText } from '../../src/lib/cowork/contracts';
+import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, coworkNoteText, coworkPlanSteps } from '../../src/lib/cowork/contracts';
 import { coworkFailureMessage } from '../../src/lib/cowork/failure-messages';
 import { polishCoworkAnswer } from '../../src/lib/cowork/answer-quality';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
@@ -69,5 +69,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider): P
   }
   const note = recorded.find(observation => observation.action === COWORK_NOTE_ACTION);
   result.note = note ? coworkNoteText(note) : null;
+  const plan = recorded.find(observation => observation.action === COWORK_PLAN_ACTION);
+  result.plan = plan ? coworkPlanSteps(plan) : null;
   return scoreCorpusCase(entry, result);
 }

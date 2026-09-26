@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, Library, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
-  coworkDisplayMessage, coworkFileSize, coworkLiveActivity, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
+  coworkDisplayMessage, coworkFileSize, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
   coworkTurnSuggestions, isCoworkActive, type CoworkArtifact,
 } from '@/lib/cowork/presentation';
 import { coworkReplyBody, type CoworkSuggestion } from '@/lib/cowork/contracts';
@@ -160,7 +160,7 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
     <div className="flex gap-3">
       <CoworkMark working={working} size={26} className="mt-0.5 hidden sm:inline-flex" />
       <div className="min-w-0 flex-1 space-y-3.5">
-        <CoworkActivity events={events} active={working} liveLabel={coworkLiveActivity(run, events)} startedAt={startedAt} />
+        <CoworkActivity events={events} active={working} liveLabel={coworkLiveActivity(run, events)} startedAt={startedAt} plan={coworkPlanProgress(run, events)} />
         {note && <div className={cn(live && 'cw-rise')}><CoworkMarkdown text={note} /></div>}
         {!proposal && replyBlock}
         {!proposal && metrics.map((block, index) => <MetricsBlock key={`metrics-${index}`} block={block} live={live} />)}

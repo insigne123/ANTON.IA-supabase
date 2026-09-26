@@ -4,8 +4,9 @@ import type { CoworkEvent, CoworkRun } from './contracts';
 import {
   coworkExpectsContinuation, coworkProposalView, coworkTurnArtifacts, coworkTurnProgress, describeCoworkObservation,
   groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions,
-  coworkTurnBlocks,
+  coworkTurnBlocks, coworkPlanProgress, coworkReadEvents,
 } from './presentation';
+import { coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
 
 const at = (minute: number) => `2026-09-24T12:${String(minute).padStart(2, '0')}:00Z`;
 const run = (id: string, minute: number, extra: Partial<CoworkRun> = {}): CoworkRun =>
@@ -122,4 +123,51 @@ test('cards of a finished turn open in the panel, except figures, which stay in 
   assert.deepEqual(artifacts.map(item => [item.kind, item.id, item.title]), [['block', 'r:block:1', 'Correo']]);
   // Turns saved before cards existed have none.
   assert.deepEqual(coworkTurnBlocks([{ sequence: 1, kind: 'run.completed', created_at: '2026-09-26T12:00:00Z', payload: { reply: 'Listo.', document: null } }]), []);
+});
+
+test('the plan of a turn checks off each step as its read completes, and the last one with the answer', () => {
+  const plan = event('tool.completed', { action: 'assistant.plan', input: '', result: { steps: [
+    { label: 'Reviso tus contactos', read: 'leads.search' },
+    { label: 'Veo qué correos ya enviaste', read: 'contacted.search' },
+    { label: 'Redacto el correo', read: null },
+  ] } });
+  const leads = event('tool.completed', { action: 'leads.search', input: 'RRHH', result: {} });
+  const sent = event('tool.completed', { action: 'contacted.search', input: '', result: {} });
+  const states = (status: CoworkRun['status'], events: CoworkEvent[]) => coworkPlanProgress({ status }, events)?.map(step => step.state);
+  // It is never a read of its own.
+  assert.deepEqual(coworkReadEvents([plan, leads]), [leads]);
+  assert.deepEqual(states('running', [plan]), ['current', 'pending', 'pending']);
+  assert.deepEqual(states('running', [plan, leads]), ['done', 'current', 'pending']);
+  assert.deepEqual(states('running', [plan, leads, sent]), ['done', 'done', 'current']);
+  assert.deepEqual(states('completed', [plan, leads, sent]), ['done', 'done', 'done']);
+  // A read the model dropped reads as skipped, never done.
+  assert.deepEqual(states('running', [plan, sent]), ['skipped', 'done', 'current']);
+  assert.deepEqual(states('completed', [plan, leads]), ['done', 'skipped', 'done']);
+  // A proposal ends the plan too; a failure leaves the rest pending, with nothing in progress.
+  assert.deepEqual(states('waiting_approval', [plan, leads, sent]), ['done', 'done', 'done']);
+  assert.deepEqual(states('failed', [plan, leads]), ['done', 'pending', 'pending']);
+  assert.equal(coworkPlanProgress({ status: 'running' }, [leads]), null);
+  // The line above the plan never says it is still understanding the request.
+  assert.equal(coworkLiveActivity({ status: 'running' }, [plan]), 'Plan listo. Empezando…');
+  assert.equal(coworkLiveActivity({ status: 'running' }, []), 'Entendiendo tu solicitud…');
+  // The side panel names the step in progress.
+  assert.equal(coworkTurnProgress({ status: 'running' }, [plan, leads]).find(step => step.key === 'work')?.detail, 'Paso 2 de 3: Veo qué correos ya enviaste');
+  assert.equal(coworkTurnProgress({ status: 'completed' }, [plan, leads, sent]).find(step => step.key === 'work')?.detail, '2 consultas');
+});
+
+test('a stored plan is read only in the shape the worker writes', () => {
+  const stored = (steps: unknown) => coworkPlanSteps({ action: 'assistant.plan', result: { steps } });
+  assert.deepEqual(stored([{ label: 'Reviso tus contactos', read: 'leads.search' }, { label: 'Redacto', read: null }]),
+    [{ label: 'Reviso tus contactos', read: 'leads.search' }, { label: 'Redacto', read: null }]);
+  // One step is not a plan; odd reads read as none; oversized labels are dropped.
+  assert.equal(stored([{ label: 'Reviso', read: null }]), null);
+  assert.deepEqual(stored([{ label: 'Uno', read: 'DROP TABLE' }, { label: 'x'.repeat(81), read: null }, { label: 'Dos', read: 7 }]),
+    [{ label: 'Uno', read: null }, { label: 'Dos', read: null }]);
+  assert.equal(coworkPlanSteps({ action: 'assistant.note', result: { steps: [{ label: 'a', read: null }, { label: 'b', read: null }] } }), null);
+  assert.equal(coworkPlanSteps(null), null);
+  // History and resumed reviews skip what the assistant wrote about itself.
+  assert.equal(coworkIsAssistantEvent({ action: 'assistant.plan' }), true);
+  assert.equal(coworkIsAssistantEvent({ action: 'assistant.note' }), true);
+  assert.equal(coworkIsAssistantEvent({ action: 'leads.search' }), false);
+  assert.equal(coworkIsAssistantEvent(null), false);
 });

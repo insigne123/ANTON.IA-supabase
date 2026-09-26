@@ -185,7 +185,9 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     writeDraft(userId, message);
   }, [message, userId]);
 
-  // Selected conversation: poll while work is in flight and follow continuations.
+  // Selected conversation: refresh while work is in flight and follow continuations.
+  // While the worker is busy a live stream rings on every change, so the page
+  // refreshes right away; polling stays underneath as the fallback.
   useEffect(() => {
     if (!selected) { setAwaitingContinuation(false); setContinuationMissing(false); return; }
     let disposed = false;
@@ -194,10 +196,30 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     const openedAt = Date.now();
     let completionSeenAt: number | null = null;
     let failures = 0;
-    async function poll() {
+    let inflight = false;
+    let again = false;
+    let stream: EventSource | null = null;
+    let streamLive = false;
+    let streamFailed = false;
+    const closeStream = () => { stream?.close(); stream = null; streamLive = false; };
+    const openStream = () => {
+      if (stream || streamFailed || typeof EventSource === 'undefined') return;
+      const source = new EventSource(`/api/cowork/runs/${selected}/stream`);
+      stream = source;
+      source.onopen = () => { streamLive = true; };
+      source.addEventListener('change', () => { void poll(); });
+      source.addEventListener('end', () => { closeStream(); void poll(); });
+      source.onerror = () => {
+        streamLive = false;
+        // A refused connection is final: keep polling as before.
+        if (source.readyState === EventSource.CLOSED) { closeStream(); streamFailed = true; }
+      };
+    };
+    /** Reads the run once and returns when to read it again (null: no need). */
+    async function refresh(): Promise<number | null> {
       try {
         const data: ThreadState = await request(`/api/cowork/runs/${selected}`, { signal: controller.signal });
-        if (disposed) return;
+        if (disposed) return null;
         failures = 0;
         setState(data);
         setError('');
@@ -211,7 +233,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
           liveRuns.current.add(data.continuation.id);
           setWorkUrl(data.continuation.id, 'replace');
           setSelected(data.continuation.id);
-          return;
+          return null;
         }
         let delay: number | null = null;
         if (isCoworkActive(status)) {
@@ -220,11 +242,13 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
             && !data.events.some(event => event.kind === 'effect.started' || event.kind === 'search.started');
           const decisionPending = status === 'waiting_approval' && coworkProposalView(data.run, data.events)?.state === 'pending';
           // Nothing moves while a decision waits on you; otherwise stay close to live.
-          delay = decisionPending ? 10000 : Date.now() - openedAt < 60000 ? 2000 : 4000;
+          if (decisionPending) closeStream(); else openStream();
+          delay = decisionPending ? 10000 : status === 'running' && streamLive ? 15000 : Date.now() - openedAt < 60000 ? 2000 : 4000;
           if (status === 'queued' || status === 'waiting_workers' || approvedNotStarted) wake();
           setAwaitingContinuation(false);
           setContinuationMissing(false);
         } else if (coworkExpectsContinuation(data.events) && !data.continuation) {
+          closeStream();
           completionSeenAt ??= Date.now();
           // An old completion is not worth waiting for: measure from when it happened.
           const completedAt = Date.parse(data.events.slice().reverse().find(event => event.kind === 'run.completed')?.created_at || '');
@@ -234,22 +258,37 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
           setContinuationMissing(!waiting);
           if (waiting) delay = 2000;
         } else {
+          closeStream();
           setAwaitingContinuation(false);
           setContinuationMissing(false);
         }
-        if (delay !== null) timer = setTimeout(poll, delay);
+        return delay;
       } catch (problem) {
-        if (disposed || controller.signal.aborted) return;
+        if (disposed || controller.signal.aborted) return null;
         const status = (problem as { status?: number }).status;
         setError(problem instanceof Error ? problem.message : 'No se pudo actualizar el trabajo.');
         if (status !== 401 && status !== 403 && status !== 404 && failures < 3) {
           failures += 1;
-          timer = setTimeout(poll, 4000 * failures);
+          return 4000 * failures;
         }
+        closeStream();
+        return null;
       }
     }
+    // One read at a time: a ring during a read asks for one more right after it.
+    async function poll() {
+      if (disposed) return;
+      if (inflight) { again = true; return; }
+      inflight = true;
+      clearTimeout(timer);
+      let delay: number | null = null;
+      try { delay = await refresh(); } finally { inflight = false; }
+      if (disposed) return;
+      if (again) { again = false; void poll(); return; }
+      if (delay !== null) timer = setTimeout(poll, delay);
+    }
     void poll();
-    return () => { disposed = true; controller.abort(); clearTimeout(timer); };
+    return () => { disposed = true; controller.abort(); clearTimeout(timer); closeStream(); };
   }, [selected, threadVersion, request, wake]);
 
   // Restore from the URL and follow browser navigation.

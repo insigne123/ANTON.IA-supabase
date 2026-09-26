@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { COWORK_NOTE_ACTION, coworkDocumentSchema, type CoworkBlock } from './contracts';
+import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, coworkDocumentSchema, type CoworkBlock, type CoworkPlanStep } from './contracts';
 import { coworkBlocks, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
 import { coworkCodeProposalSchema } from './code-proposal';
@@ -41,6 +41,8 @@ export const coworkDecisionSchema = z.object({
     'answer', ...COWORK_DOMAIN_FIXED_READS, ...COWORK_DOMAIN_ENTITY_READS]),
   reads: z.array(coworkReadTaskSchema).min(1).max(3).nullable().optional(),
   plan: coworkReadPlanSchema.nullable().optional(),
+  /** The steps the person sees while the turn works (rule 12); only the first consulting decision uses it. */
+  outline: z.array(z.object({ label: z.string().max(300), read: z.string().max(80).nullable() }).strict()).max(10).nullable().optional(),
   specialists: specialistTasksSchema.nullable().optional(),
   query: z.string().max(120).nullable(),
   leadId: z.string().uuid().nullable(),
@@ -76,7 +78,7 @@ export type CoworkEffectAction = 'leads.save_contact' | 'research.start' | 'draf
   | 'crm.update_record' | 'campaign.prepare_draft_v2'
   | 'crm.assign_lead' | 'exception.resolve' | 'mission.control' | 'message_context.update' | 'lead.enrich_batch'
   | 'campaign.schedule_batch' | 'linkedin.invite' | 'linkedin.message';
-export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
+export type CoworkObservation = { action: CoworkReadAction | 'specialists.review' | typeof COWORK_NOTE_ACTION | typeof COWORK_PLAN_ACTION; input: string; result: unknown; task?: { id: string; dependsOn: string[] } };
 type Decision = z.infer<typeof coworkDecisionSchema>;
 
 export type CoworkEffectProposal = { kind: CoworkEffectKind; targetId: string; label: string; originRunId: string;
@@ -205,9 +207,14 @@ function describeLeadTarget(
   observations: CoworkObservation[], history: CoworkHistoryTurn[],
 ): string | null {
   if (action !== 'leads.save_contact' && action !== 'research.start' && action !== 'lead.enrich') return null;
+  return observedLeadName(targetId, observations, history);
+}
+
+/** «Nombre (Empresa)» of a contact seen in this thread, or null. */
+function observedLeadName(leadId: string, observations: CoworkObservation[], history: CoworkHistoryTurn[]): string | null {
   const payloads = [...observations, ...history.flatMap(turn => turn.observations || [])];
   for (const row of collectCoworkLeadRows(payloads)) {
-    if (row.id !== targetId) continue;
+    if (row.id !== leadId) continue;
     const name = String(row.name || '').trim();
     const company = String((row as Record<string, unknown>).company || '').trim();
     if (name && company) return `${name} (${company})`;
@@ -356,6 +363,19 @@ type CoworkAnswer = z.infer<typeof coworkDocumentSchema>;
 
 /** When the model proposes a search without explaining it, the card still gets a
  * sentence built from the criteria, never a blank next to the approval. */
+/** What a proposal does when the model left no explanation of its own: the card
+ * never arrives with a generic line when the loop knows what it is about. */
+function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof coworkCampaignDraftSchema> | undefined, person: string | null): string | null {
+  if (campaign) return campaignNote(campaign);
+  const who = person || 'este contacto';
+  if (action === 'linkedin.message') return `Preparé un mensaje de LinkedIn para ${who}. Revisa el texto en la tarjeta antes de aprobarlo.`;
+  if (action === 'linkedin.invite') return `Propongo invitar a ${who} en LinkedIn. Revisa la invitación en la tarjeta antes de aprobarla.`;
+  if (action === 'lead.enrich') return `Propongo buscar el correo de ${who} con el proveedor; usa un crédito. Revísalo antes de aprobar.`;
+  if (action === 'research.start') return `Propongo investigar a ${who} para escribirle con más contexto. Revísalo antes de aprobar.`;
+  if (action === 'leads.save_contact') return `${person ? `Propongo guardar a ${person} en tus contactos.` : 'Propongo guardar este contacto en ANTON.IA.'} Revísalo antes de aprobar.`;
+  return null;
+}
+
 /** What a proposed campaign does, when the model left no explanation of its own. */
 function campaignNote(campaign: z.infer<typeof coworkCampaignDraftSchema>): string {
   const people = campaign.emails.length;
@@ -363,7 +383,11 @@ function campaignNote(campaign: z.infer<typeof coworkCampaignDraftSchema>): stri
   return `Preparé la campaña «${campaign.name}» para ${people} ${people === 1 ? 'contacto' : 'contactos'}, con ${emails} ${emails === 1 ? 'correo' : 'correos'}. Queda pausada: revísala y, cuando la apruebes, se crea sin enviar nada todavía.`;
 }
 
-function searchNote(criteria: CoworkSearchCriteria): string {
+/** A search asked as the first step of a longer request («busca… y después armame
+ * una campaña») says what comes after it, even when the model left no note. */
+const LATER_STEP = /(?<!\p{L})(?:campa[ñn]as?|secuencias?|escribirles|mandarles|enviarles)(?!\p{L})/iu;
+
+function searchNote(criteria: CoworkSearchCriteria, request = ''): string {
   // The model sometimes repeats a term («retail», «retail»): each one is named once.
   const unique = (items: string[]) => items.map(item => item.trim())
     .filter((item, index, all) => item && all.findIndex(other => other.toLowerCase() === item.toLowerCase()) === index);
@@ -377,6 +401,7 @@ function searchNote(criteria: CoworkSearchCriteria): string {
     industries.length ? `, del rubro ${list(industries, 'y')}` : '',
     places.length ? `, en ${list(places, 'y')}` : '',
     '. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.',
+    LATER_STEP.test(request) ? ' Cuando veas los resultados y guardes a quienes te sirvan, sigo con la campaña.' : '',
   ].join('');
 }
 
@@ -426,6 +451,28 @@ function proposalRejection(error: unknown, signal: AbortSignal): unknown {
   return new CoworkDecisionRejected(error.message, `La propuesta no se pudo preparar: ${reason}`, true);
 }
 
+const ID_TEXT = /[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}/i;
+const NOT_A_STEP_READ = new Set(['answer', 'reads.parallel', 'reads.plan']);
+
+/** The plan as the person reads it: two to five short steps without IDs or
+ * [filler]. A step keeps its read only when it names one the loop runs, so the
+ * chat can check it off when that read completes. */
+export function coworkOutline(value: Decision['outline']): CoworkPlanStep[] | null {
+  if (!value) return null;
+  const actions = new Set<string>(coworkDecisionSchema.shape.action.options);
+  const steps = value.flatMap(step => {
+    let label = polishCoworkText(step.label).replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim().replace(/[.:;,]+$/, '');
+    if (label.length < 3 || ID_TEXT.test(label) || /\[[^\]]{2,}\]/.test(label)) return [];
+    if (label.length > COWORK_PLAN_LIMITS.label) {
+      const cut = label.slice(0, COWORK_PLAN_LIMITS.label - 1);
+      label = `${cut.lastIndexOf(' ') > 40 ? cut.slice(0, cut.lastIndexOf(' ')) : cut}…`;
+    }
+    const read = step.read && actions.has(step.read) && !NOT_A_STEP_READ.has(step.read) ? step.read : null;
+    return [{ label: label[0].toUpperCase() + label.slice(1), read }];
+  }).slice(0, COWORK_PLAN_LIMITS.steps);
+  return steps.length > 1 ? steps : null;
+}
+
 /** Bounded read-only loop. Tool outputs are observations, never instructions. */
 export async function runCoworkReadLoop(input: {
   message: string;
@@ -467,6 +514,18 @@ export async function runCoworkReadLoop(input: {
     return reply;
   };
   const explain = (decision: Decision) => recordNote(decision.answer?.reply || '');
+  // The plan shows up before the first read, so the person sees what is coming
+  // while it works. Only the first consulting decision draws it.
+  let outlined = false;
+  const recordPlan = async (decision: Decision) => {
+    if (outlined) return;
+    outlined = true;
+    const steps = coworkOutline(decision.outline);
+    if (!steps) return;
+    await input.authorize();
+    input.signal.throwIfAborted();
+    await input.record({ action: COWORK_PLAN_ACTION, input: '', result: { steps } });
+  };
   // The answer that got the closing correction. From then on the loop never ends
   // worse than that answer: no more reads, and a failed retry returns it.
   let closingFallback: CoworkAnswer | null = null;
@@ -520,7 +579,7 @@ export async function runCoworkReadLoop(input: {
         const parsed = coworkSearchCriteriaSchema.safeParse(decision.searchCriteria);
         if (!parsed.success) throw rejected('Invalid external search proposal', `Criterios de búsqueda inválidos: ${issueSummary(parsed.error)}. Corrígelos.`);
         if (decision.answer?.document && turn < 3) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
-        const note = await explain(decision) ?? await recordNote(searchNote(parsed.data));
+        const note = await explain(decision) ?? await recordNote(searchNote(parsed.data, input.message));
         await input.authorize(); input.signal.throwIfAborted();
         try { await input.proposeSearch(parsed.data); } catch (error) { throw proposalRejection(error, input.signal); }
         return { reply: note || (decision.searchCriteria.target === 'companies'
@@ -654,7 +713,9 @@ export async function runCoworkReadLoop(input: {
         if (kind === 'enrich_contact' && turn < 3 && repeatedEnrichment(label, input.history || [])) {
           throw rejected('Enrichment already ran in this thread', 'Ya se buscó el correo de este contacto en este hilo (mira history.actions): repetirlo gasta otro crédito y el proveedor responde lo mismo. No lo vuelvas a proponer; sigue con lo que pidió el usuario (por ejemplo, investigarlo con research.start) o explica la alternativa.');
         }
-        const note = await explain(decision) ?? (campaign ? await recordNote(campaignNote(campaign)) : null);
+        const fallback = proposalNote(decision.action, campaign, targetName
+          ?? (decision.leadId ? observedLeadName(decision.leadId, observations, input.history || []) : null));
+        const note = await explain(decision) ?? (fallback ? await recordNote(fallback) : null);
         await input.authorize();
         input.signal.throwIfAborted();
         try {
@@ -676,6 +737,7 @@ export async function runCoworkReadLoop(input: {
       // Only reads remain below: after a closing correction the first answer stands instead.
       if (closingFallback) return closingFallback;
       if (turn === 3) throw new Error('Cowork tool budget exhausted');
+      await recordPlan(decision);
       if (decision.action === 'reads.plan') {
         if (!decision.plan || readsUsed + decision.plan.length > 3) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed));
         readsUsed += decision.plan.length;

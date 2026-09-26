@@ -180,7 +180,7 @@ test('effect proposals require an observed target and resolve its origin run', a
   const fromHistory = await runCoworkReadLoop({ ...base,
     history: [{ runId: parentId, observations: [{ action: 'prospecting.search', input: 'x', result: { items: [{ id: 'apollo:abc' }], scope: 'external_search' } }] }],
     decide: async () => save });
-  assert.match(fromHistory.reply, /Revisa/);
+  assert.equal(fromHistory.reply, 'Propongo guardar este contacto en ANTON.IA. Revísalo antes de aprobar.');
   assert.deepEqual(proposals, [{ kind: 'save_contact', targetId: 'apollo:abc',
     label: 'Guardar contacto apollo:abc', originRunId: parentId }]);
 });
@@ -308,7 +308,7 @@ test('an email lookup that already ran in the thread is not proposed again', asy
   assert.deepEqual(proposals.map(proposal => [proposal.kind, proposal.label]), [['start_research', 'Investigar contacto Carlos A. (Minera Centinela)']]);
 });
 
-test('a proposal without explanation keeps the short default and records no note', async () => {
+test('a proposal without explanation gets a note that says what it does and for whom', async () => {
   const leadId = '00000000-0000-4000-8000-000000000021';
   const recorded: string[] = [];
   const result = await runCoworkReadLoop({
@@ -320,8 +320,8 @@ test('a proposal without explanation keeps the short default and records no note
       ? { action: 'leads.search' as const, query: 'José', leadId: null, answer: null }
       : { action: 'lead.enrich' as const, query: null, leadId, answer: null },
   });
-  assert.match(result.reply, /Revisa la propuesta/);
-  assert.deepEqual(recorded, ['leads.search']);
+  assert.equal(result.reply, 'Propongo buscar el correo de José C. (GrupoExpro) con el proveedor; usa un crédito. Revísalo antes de aprobar.');
+  assert.deepEqual(recorded, ['leads.search', 'assistant.note']);
 });
 
 test('a proposal the server cannot stage returns to the model with the reason instead of failing the run', async () => {
@@ -525,6 +525,15 @@ test('a search proposed without an explanation still gets a sentence built from 
   });
   assert.equal((repeated[0] as { result: { reply: string } }).result.reply,
     'Propongo buscar hasta 10 personas con cargos como HR Manager, del rubro retail, en Santiago, Chile. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.');
+  // Seen with the real model: the first step of «busca… y después armame una campaña» came without a note.
+  const chained: unknown[] = [];
+  await runCoworkReadLoop({
+    message: 'busca 10 gerentes de rrhh en retail y despues armame una campaña para ellos', signal: new AbortController().signal,
+    authorize: async () => {}, execute: async () => ({}), record: async observation => { chained.push(observation); }, proposeSearch: async () => {},
+    decide: async () => ({ action: 'prospecting.propose_search' as const, query: null, leadId: null, answer: null,
+      searchCriteria: { titles: ['HR Manager'], industries: ['retail'], locations: ['Santiago, Chile'], limit: 10 } }),
+  });
+  assert.match((chained[0] as { result: { reply: string } }).result.reply, /Cuando veas los resultados y guardes a quienes te sirvan, sigo con la campaña\.$/);
 });
 
 test('a campaign proposed before listing campaigns gets the list read by the loop, not a failed turn', async () => {
@@ -574,5 +583,64 @@ test('a campaign proposed before listing campaigns gets the list read by the loo
     decide: async () => coworkDecisionSchema.parse({ action: 'campaign.create', query: null, leadId: null, campaign, answer: null }),
   });
   assert.equal(silent.reply, 'Preparé la campaña «AXIS · RR. HH.» para 1 contacto, con 1 correo. Queda pausada: revísala y, cuando la apruebes, se crea sin enviar nada todavía.');
+  assert.equal((notes.at(-1) as { action: string }).action, 'assistant.note');
+});
+
+test('the plan is recorded once, before the first read, and never reaches the model as data', async () => {
+  const recorded: Array<{ action: string; result: unknown }> = [];
+  const seen: number[] = [];
+  const decisions = [
+    { ...search, outline: [
+      { label: '**Reviso tus contactos** de logística.', read: 'leads.search' },
+      { label: 'Abro la ficha 00000000-0000-4000-8000-000000000022', read: 'crm.get_lead' },
+      { label: 'Cruzo con lo que ya enviaste y con el historial completo de respuestas de cada contacto de la lista', read: 'contacted.search' },
+      { label: 'Redacto el correo', read: 'invented.read' },
+    ] },
+    { ...search, query: 'Transporte', outline: [{ label: 'Otro plan', read: null }, { label: 'Que no se guarda', read: null }] },
+    { ...answer, answer: { reply: 'Un contacto encontrado.', document: null, question: '¿Le escribo?' } },
+  ];
+  await runCoworkReadLoop({
+    message: 'Busca logística', signal: new AbortController().signal, authorize: async () => {},
+    decide: async observations => { seen.push(observations.length); return coworkDecisionSchema.parse(decisions.shift()); },
+    execute: async () => ({ items: [] }), record: async observation => { recorded.push(observation); },
+  });
+  assert.deepEqual(recorded.map(item => item.action), ['assistant.plan', 'leads.search', 'leads.search']);
+  // Sanitized: no IDs, no Markdown, short labels, only reads the loop knows.
+  assert.deepEqual(recorded[0].result, { steps: [
+    { label: 'Reviso tus contactos de logística', read: 'leads.search' },
+    { label: 'Cruzo con lo que ya enviaste y con el historial completo de respuestas de cada…', read: 'contacted.search' },
+    { label: 'Redacto el correo', read: null },
+  ] });
+  // The model sees its reads, not its plan.
+  assert.deepEqual(seen, [0, 1, 2]);
+
+  // Answering straight away needs no plan.
+  const direct: string[] = [];
+  await runCoworkReadLoop({
+    message: 'Hola', signal: new AbortController().signal, authorize: async () => {}, execute: async () => ({}),
+    record: async observation => { direct.push(observation.action); },
+    decide: async () => coworkDecisionSchema.parse({ ...answer, outline: [{ label: 'Saludo', read: null }, { label: 'Respondo', read: null }] }),
+  });
+  assert.deepEqual(direct, []);
+});
+
+test('a LinkedIn proposal without an explanation still says for whom and what to check', async () => {
+  const lead = '00000000-0000-4000-8000-000000000101';
+  const notes: unknown[] = [];
+  const proposals: string[] = [];
+  const decisions = [
+    { action: 'leads.search', query: 'Felipe', leadId: null, answer: null },
+    { action: 'linkedin.message', query: null, leadId: lead, linkedinMessage: 'Hola Felipe, ¿conversamos sobre AXIS?', answer: null },
+  ];
+  const reply = await runCoworkReadLoop({
+    message: 'Escríbele a Felipe por LinkedIn', runId: '00000000-0000-4000-8000-0000000000aa',
+    signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({ scope: 'own_saved_contacts', items: [{ id: lead, name: 'Felipe Muñoz', company: 'Securitas Chile' }] }),
+    record: async observation => { notes.push(observation); },
+    proposeEffect: async proposal => { proposals.push(proposal.kind); },
+    decide: async () => coworkDecisionSchema.parse(decisions.shift()),
+  });
+  assert.deepEqual(proposals, ['linkedin_message']);
+  assert.equal(reply.reply, 'Preparé un mensaje de LinkedIn para Felipe Muñoz (Securitas Chile). Revisa el texto en la tarjeta antes de aprobarlo.');
   assert.equal((notes.at(-1) as { action: string }).action, 'assistant.note');
 });

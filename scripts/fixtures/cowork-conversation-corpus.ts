@@ -139,6 +139,8 @@ export type CorpusTurnResult = {
   blocks?: CoworkBlock[];
   /** The closing question, when it traveled apart (it also ends the reply). */
   question?: string | null;
+  /** The plan shown while it worked, when the turn consulted something. */
+  plan?: Array<{ label: string; read: string | null }> | null;
 };
 
 /** What the person reads in the chat: the reply plus every card. */

@@ -1,5 +1,6 @@
 import { collectCoworkLeadRows } from './lead-export';
-import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText } from './contracts';
+import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
+  coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep } from './contracts';
 
 /**
  * Pure presentation helpers for the Cowork workspace. Everything here derives
@@ -220,7 +221,7 @@ export type CoworkTurnOutput = { reply: string; document: { title: string; conte
 
 /** Data reads of a turn: tool events other than the assistant's own note. */
 export function coworkReadEvents(events: CoworkEvent[]): CoworkEvent[] {
-  return events.filter(event => event.kind === 'tool.completed' && coworkNoteText(event.payload) === null);
+  return events.filter(event => event.kind === 'tool.completed' && !coworkIsAssistantEvent(event.payload));
 }
 
 /** What the assistant wrote next to its proposal, if anything. */
@@ -231,6 +232,34 @@ export function coworkTurnNote(events: CoworkEvent[]): string | null {
     if (note) return note;
   }
   return null;
+}
+
+export type CoworkPlanState = 'done' | 'current' | 'pending' | 'skipped';
+export type CoworkPlanProgress = Array<CoworkPlanStep & { state: CoworkPlanState }>;
+
+/** The plan shown while a turn works, with each step's state. A step with a
+ * read is done once that read completes; the final step, once the answer or
+ * the proposal is in. A read the model dropped reads as skipped, never as done. */
+export function coworkPlanProgress(run: Pick<CoworkRun, 'status'>, events: CoworkEvent[]): CoworkPlanProgress | null {
+  const planEvent = events.find(event => event.kind === 'tool.completed' && coworkPlanSteps(event.payload));
+  const steps = planEvent ? coworkPlanSteps(planEvent.payload) : null;
+  if (!planEvent || !steps) return null;
+  const reads = coworkReadEvents(events).filter(event => event.sequence > planEvent.sequence).map(event => String(event.payload?.action || ''));
+  const states: CoworkPlanState[] = steps.map(step => {
+    const index = step.read ? reads.indexOf(step.read) : -1;
+    if (index === -1) return 'pending';
+    reads.splice(index, 1);
+    return 'done';
+  });
+  const lastDone = states.lastIndexOf('done');
+  states.forEach((state, index) => { if (state === 'pending' && steps[index].read && index < lastDone) states[index] = 'skipped'; });
+  const ended = run.status === 'completed' || run.status === 'waiting_approval';
+  if (ended) states.forEach((state, index) => { if (state === 'pending') states[index] = steps[index].read ? 'skipped' : 'done'; });
+  else if (isCoworkActive(run.status)) {
+    const current = states.indexOf('pending');
+    if (current !== -1) states[current] = 'current';
+  }
+  return steps.map((step, index) => ({ ...step, state: states[index] }));
 }
 
 export function coworkTurnOutput(events: CoworkEvent[]): CoworkTurnOutput | null {
@@ -325,10 +354,14 @@ export function coworkTurnProgress(run: Pick<CoworkRun, 'status' | 'automatic'>,
   const started = events.some(event => event.kind === 'run.started') || run.status !== 'queued';
   const steps: CoworkProgressStep[] = [{ key: 'received', label: run.automatic ? 'Retomó el trabajo con el resultado' : 'Solicitud recibida', state: 'done' }];
   const workDone = proposal !== null || ['completed', 'failed', 'cancelled'].includes(run.status) || run.status === 'waiting_workers';
+  // With a plan, the step in progress says which one it is, like the chat does.
+  const plan = coworkPlanProgress(run, events);
+  const current = plan ? plan.findIndex(step => step.state === 'current') : -1;
   steps.push({
     key: 'work', label: run.status === 'queued' && !started ? 'En cola para empezar' : 'Analizar y consultar datos',
     state: run.status === 'queued' && !started ? 'active' : workDone ? (run.status === 'failed' && !proposal && reads === 0 ? 'error' : 'done') : 'active',
-    detail: reads ? `${reads} consulta${reads === 1 ? '' : 's'}` : undefined,
+    detail: plan && current !== -1 ? `Paso ${current + 1} de ${plan.length}: ${plan[current].label}`
+      : reads ? `${reads} consulta${reads === 1 ? '' : 's'}` : undefined,
   });
   if (run.status === 'waiting_workers') steps.push({ key: 'specialists', label: 'Revisión de especialistas', state: 'active' });
   if (proposal) {
@@ -461,6 +494,7 @@ export function coworkLiveActivity(run: Pick<CoworkRun, 'status'>, events: Cowor
     return 'Esperando tu decisión';
   }
   const lastRead = coworkReadEvents(events).pop();
-  if (!lastRead) return 'Entendiendo tu solicitud…';
+  // Once the plan is on screen, the request is understood.
+  if (!lastRead) return events.some(event => event.kind === 'tool.completed' && coworkPlanSteps(event.payload)) ? 'Plan listo. Empezando…' : 'Entendiendo tu solicitud…';
   return `${coworkActionInfo(lastRead.payload?.action).label}. Analizando…`;
 }
