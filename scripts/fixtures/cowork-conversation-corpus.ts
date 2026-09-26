@@ -141,6 +141,8 @@ export type CorpusTurnResult = {
   question?: string | null;
   /** The plan shown while it worked, when the turn consulted something. */
   plan?: Array<{ label: string; read: string | null }> | null;
+  /** Each read with its input, so the judge can see the same data the model saw. */
+  reads?: Array<{ action: string; input: string }>;
 };
 
 /** What the person reads in the chat: the reply plus every card. */

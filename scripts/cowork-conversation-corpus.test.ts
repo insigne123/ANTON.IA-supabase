@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { CORPUS, LEAD } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, EDITED_STEPS, MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
-import { runCorpusCase, scoreCorpusCase, type CorpusDecider } from './fixtures/cowork-conversation-runner';
+import { corpusShownAnswer, runCorpusCase, scoreCorpusCase, type CorpusDecider } from './fixtures/cowork-conversation-runner';
 
 const read = (action: string, query: string | null = null, extra: Record<string, unknown> = {}) =>
   coworkDecisionSchema.parse({ action, query, leadId: null, answer: null, ...extra });
@@ -205,4 +205,19 @@ test('the production baseline answers fail the checks the corpus was written for
   assert.ok(failing(baseline('informe-jefe', { actions: ['metrics.overview', 'metrics.rates', 'metrics.diagnose'], reply: 'Preparé un informe.',
     document: { title: 'Informe de prospección — últimos 30 días', content: '**Alcance:** período *last_30_days*.\n## Interpretación\nNo calculables.' } }))
     .includes('usa actividad además de métricas'));
+});
+
+test('a corpus turn keeps each read with its input and what the person saw, for the judge', async () => {
+  const entry = MARKETING_CORPUS.find(item => item.id === 'mkt-campana-rrhh')!;
+  const outcome = await runCorpusCase(entry, IDEAL['mkt-campana-rrhh']);
+  assert.deepEqual(outcome.result.reads, [
+    { action: 'leads.search', input: 'RR. HH.' }, { action: 'message.context', input: '' }, { action: 'campaigns.list', input: '' }]);
+  const shown = corpusShownAnswer(outcome.result);
+  assert.equal(shown.proposal?.kind, 'campaign_create');
+  assert.match(String(shown.proposal?.note), /Tus contactos de RR\. HH\. con correo son 3/);
+  const detail = shown.proposal?.detail as { nombre: string; destinatarios: string[] };
+  assert.deepEqual(detail.destinatarios, ['mrojas@sodexo.cl', 'fmunoz@securitas.cl', 'cfuentes@adecco.cl']);
+  // The review card's title travels too.
+  assert.equal(detail.nombre, (outcome.result.proposal?.campaign as { name: string }).name);
+  assert.ok(detail.nombre);
 });

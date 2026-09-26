@@ -7,6 +7,8 @@ import { runCoworkReadLoop, type CoworkObservation, type CoworkRejection, type c
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, coworkNoteText, coworkPlanSteps } from '../../src/lib/cowork/contracts';
 import { coworkFailureMessage } from '../../src/lib/cowork/failure-messages';
 import { polishCoworkAnswer } from '../../src/lib/cowork/answer-quality';
+import { coworkBlocksText } from '../../src/lib/cowork/blocks';
+import type { CoworkShownAnswer } from '../../src/lib/cowork/judge';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 import type { z } from 'zod';
 
@@ -36,8 +38,9 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider): P
     reply: turn.reply, document: null, observations: turn.observations || [], ...(turn.actions ? { actions: turn.actions } : {}),
   }));
   const actions: string[] = [];
+  const reads: Array<{ action: string; input: string }> = [];
   const recorded: CoworkObservation[] = [];
-  const result: CorpusTurnResult = { actions, reply: '', document: null, proposal: null, search: null, note: null, failed: null };
+  const result: CorpusTurnResult = { actions, reads, reply: '', document: null, proposal: null, search: null, note: null, failed: null };
   let decision = 0;
   try {
     const answer = await runCoworkReadLoop({
@@ -48,7 +51,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider): P
         executionPolicy: { mode: 'approval' }, userContext: entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext,
         ...(rejections.length ? { rejectedDecisions: rejections } : {}),
       }, CORPUS_NOW, 'America/Santiago'), { caseId: entry.id, turn: decision++ }),
-      execute: async (action, value) => { actions.push(action); return (entry.world?.read ?? corpusRead)(action, value); },
+      execute: async (action, value) => { actions.push(action); reads.push({ action, input: value }); return (entry.world?.read ?? corpusRead)(action, value); },
       record: async observation => { recorded.push(observation); },
       proposeSearch: async criteria => { result.search = criteria as unknown as Record<string, unknown>; },
       proposeNote: async () => { result.proposal = { kind: 'crm_note', label: 'Nota CRM' }; },
@@ -72,4 +75,22 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider): P
   const plan = recorded.find(observation => observation.action === COWORK_PLAN_ACTION);
   result.plan = plan ? coworkPlanSteps(plan) : null;
   return scoreCorpusCase(entry, result);
+}
+
+/** What the person saw in a corpus turn. */
+export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
+  const campaign = result.proposal?.campaign as { name?: unknown; objective?: unknown; messages?: unknown; emails?: unknown } | undefined;
+  return {
+    reply: result.reply,
+    cards: result.blocks?.length ? coworkBlocksText(result.blocks) : null,
+    question: result.question ?? null,
+    quickReplies: (result.suggestions || []).map(chip => chip.message),
+    proposal: result.proposal ? { kind: result.proposal.kind, label: result.proposal.label, note: result.note,
+      // The review card shows the campaign's name and objective above its recipients and emails.
+      ...(campaign ? { detail: { nombre: campaign.name, objetivo: campaign.objective, destinatarios: campaign.emails, correos: campaign.messages } }
+        : result.proposal.linkedinMessage ? { detail: result.proposal.linkedinMessage } : {}) } : null,
+    search: result.search,
+    document: result.document,
+    failed: result.failed,
+  };
 }
