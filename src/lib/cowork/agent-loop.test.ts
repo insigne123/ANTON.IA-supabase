@@ -370,9 +370,107 @@ test('an invalid model output is corrected on the next decision', async () => {
         throw error;
       }
       assert.match(rejections[0].reason, /delayDays: El primer correo es inmediato/);
-      return { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Listo.', document: null } };
+      return { action: 'answer' as const, query: null, leadId: null,
+        answer: { reply: 'Listo.\n¿Creo la campaña?', document: null, suggestions: [{ label: 'Sí, créala', message: 'Sí, crea la campaña' }] } };
     },
   });
-  assert.equal(result.reply, 'Listo.');
+  assert.equal(result.reply, 'Listo.\n¿Creo la campaña?');
   assert.equal(calls, 2);
+});
+
+test('an answer missing its closing question or quick replies gets one correction, never a second one', async () => {
+  const chips = [{ label: 'Sí, búscalos', message: 'Sí, busca el correo de los tres contactos' }];
+  const open = { ...answer, answer: { reply: 'Tienes 3 contactos sin correo. Después los reviso.', document: null, suggestions: chips } };
+  const asked = { ...answer, answer: { reply: 'Tienes 3 contactos sin correo.\n¿Busco sus correos?', document: null, suggestions: chips } };
+  const seen: string[][] = [];
+  const base = { message: 'Pendientes', signal: new AbortController().signal, authorize: async () => {},
+    execute: async () => ({}), record: async () => {} };
+  const corrected = await runCoworkReadLoop({ ...base, decide: async (_observations, _mustAnswer, rejections = []) => {
+    seen.push(rejections.map(item => item.reason));
+    return rejections.length ? asked : open;
+  } });
+  assert.equal(corrected.reply, 'Tienes 3 contactos sin correo.\n¿Busco sus correos?');
+  assert.equal(seen.length, 2);
+  assert.match(seen[1][0], /pregunta del siguiente paso/);
+  assert.doesNotMatch(seen[1][0], /agrega 1 a 3 respuestas sugeridas/);
+  // The retry is told to keep what already worked.
+  assert.match(seen[1][0], /conservando las respuestas sugeridas/);
+  // Still open after the correction: the answer stands rather than looping.
+  let calls = 0;
+  const kept = await runCoworkReadLoop({ ...base, decide: async () => { calls++; return open; } });
+  assert.equal(kept.reply, 'Tienes 3 contactos sin correo. Después los reviso.');
+  assert.equal(calls, 2);
+  // Quick replies that do not survive cleanup count as missing.
+  const reasons: string[] = [];
+  await runCoworkReadLoop({ ...base, decide: async (_observations, _mustAnswer, rejections = []) => {
+    reasons.push(...rejections.map(item => item.reason));
+    return { ...answer, answer: { reply: '¿Busco sus correos?', document: null, suggestions: [{ label: 'Sí', message: 'Aquí van los textos:' }] } };
+  } });
+  assert.equal(reasons.length, 1);
+  assert.match(reasons[0], /respuestas sugeridas/);
+  // Several emails in the chat belong in a document.
+  const drafts: string[] = [];
+  await runCoworkReadLoop({ ...base, decide: async (_observations, _mustAnswer, rejections = []) => {
+    drafts.push(...rejections.map(item => item.reason));
+    return { ...answer, answer: { reply: 'Asunto: Uno\nHola\n\nAsunto: Dos\nHola\n¿Creo la campaña?', document: null, suggestions: chips } };
+  } });
+  assert.equal(drafts.length, 1);
+  assert.match(drafts[0], /pon los correos en document/);
+  // A complete answer needs no second call.
+  calls = 0;
+  await runCoworkReadLoop({ ...base, decide: async () => { calls++; return asked; } });
+  assert.equal(calls, 1);
+});
+
+test('a closing correction never leaves the turn worse than the first answer', async () => {
+  const chips = [{ label: 'Sí, créala', message: 'Sí, crea la campaña pausada' }];
+  const first = { ...answer, answer: { reply: 'Te dejé la secuencia.', document: { title: 'Secuencia', content: '## Correo 1\nAsunto: Hola' }, suggestions: chips } };
+  const base = { message: 'Secuencia', signal: new AbortController().signal, authorize: async () => {}, record: async () => {} };
+  // The retry fixes the question but drops the document and the quick replies: both come back.
+  const fixed = await runCoworkReadLoop({ ...base, execute: async () => ({}), decide: async (_observations, mustAnswer, rejections = []) => {
+    if (!rejections.length) return first;
+    assert.equal(mustAnswer, true);
+    return { ...answer, answer: { reply: 'Te dejé la secuencia.\n¿Creo la campaña?', document: null, suggestions: null } };
+  } });
+  assert.equal(fixed.reply, 'Te dejé la secuencia.\n¿Creo la campaña?');
+  assert.equal(fixed.document?.title, 'Secuencia');
+  assert.deepEqual(fixed.suggestions, chips);
+  // The retry goes back to reading: nothing more is read and the first answer stands.
+  let reads = 0;
+  const kept = await runCoworkReadLoop({ ...base, execute: async () => { reads++; return {}; },
+    decide: async (_observations, _mustAnswer, rejections = []) => rejections.length ? search : first });
+  assert.equal(reads, 0);
+  assert.equal(kept.reply, 'Te dejé la secuencia.');
+  // The retry is not valid output: the first answer stands instead of failing the turn.
+  const survived = await runCoworkReadLoop({ ...base, execute: async () => ({}),
+    decide: async (_observations, _mustAnswer, rejections = []) => {
+      if (!rejections.length) return first;
+      const error = new Error('invalid') as Error & { issues: unknown[] };
+      error.name = 'ZodError';
+      error.issues = [{ path: ['answer'], message: 'Required' }];
+      throw error;
+    } });
+  assert.equal(survived.reply, 'Te dejé la secuencia.');
+});
+
+test('a search proposed without an explanation still gets a sentence built from its criteria', async () => {
+  const notes: unknown[] = [];
+  await runCoworkReadLoop({
+    message: 'Busca gerentes', signal: new AbortController().signal, authorize: async () => {}, execute: async () => ({}),
+    record: async observation => { notes.push(observation); }, proposeSearch: async () => {},
+    decide: async () => ({ action: 'prospecting.propose_search' as const, query: null, leadId: null, answer: null,
+      searchCriteria: { titles: ['Gerente de Operaciones', 'Superintendente'], industries: ['minería'], locations: ['Antofagasta, Chile'], limit: 25 } }),
+  });
+  assert.deepEqual(notes, [{ action: 'assistant.note', input: '', result: { reply:
+    'Propongo buscar hasta 25 personas con cargos como Gerente de Operaciones o Superintendente, del rubro minería, en Antofagasta, Chile. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.' } }]);
+  // Seen with the real model: a repeated industry was named twice («del rubro retail y retail»).
+  const repeated: unknown[] = [];
+  await runCoworkReadLoop({
+    message: 'Busca gerentes de RR. HH. en retail', signal: new AbortController().signal, authorize: async () => {}, execute: async () => ({}),
+    record: async observation => { repeated.push(observation); }, proposeSearch: async () => {},
+    decide: async () => ({ action: 'prospecting.propose_search' as const, query: null, leadId: null, answer: null,
+      searchCriteria: { titles: ['HR Manager', 'hr manager '], industries: ['retail', 'Retail'], locations: ['Santiago, Chile'], limit: 10 } }),
+  });
+  assert.equal((repeated[0] as { result: { reply: string } }).result.reply,
+    'Propongo buscar hasta 10 personas con cargos como HR Manager, del rubro retail, en Santiago, Chile. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.');
 });
