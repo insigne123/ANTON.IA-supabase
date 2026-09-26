@@ -11,7 +11,7 @@ Esta carpeta define como mejorar interfaces en este proyecto sin caer en UI gene
 
 ## Documentos
 
-- `docs/ui-ux/apple-inspired-methodology.md`: metodologia general basada en simpleza y claridad tipo Apple
+- `docs/ui-ux/apple-inspired-methodology.md`: metodologia anterior (tipo Apple). Queda como referencia historica; ya no es la direccion por defecto
 - `docs/ui-ux/visual-system.md`: reglas visuales base de la app
 - `docs/ui-ux/reference-workflow.md`: flujo obligatorio antes de tocar UI
 - `docs/ui-ux/release-audit-checklist.md`: checklist de revision visual antes de deploy
@@ -41,4 +41,4 @@ Esta carpeta define como mejorar interfaces en este proyecto sin caer en UI gene
 
 ## Regla principal
 
-La metodologia por defecto de esta app es: simpleza, claridad y facilidad de uso por encima de decoracion o exceso de elementos.
+La interfaz se disena para lo mas intuitivo y util para el objetivo del usuario, con la paleta de colores actual. Se agregan tablas, tarjetas, graficos o acciones cuando acercan al usuario a su objetivo, y se quita lo decorativo. El estilo Apple-like dejo de ser una restriccion (decision del dueno, 26 sep 2026).
