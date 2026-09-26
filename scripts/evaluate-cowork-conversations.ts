@@ -12,8 +12,13 @@ import { generateStructuredWithTelemetry } from '../src/ai/openai-json';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { coworkModelUsage } from '../src/lib/server/cowork/model-usage';
 import { coworkAnswerIssues } from '../src/lib/cowork/answer-quality';
-import { CORPUS } from './fixtures/cowork-conversation-corpus';
+import { CORPUS as PRODUCTION_CORPUS } from './fixtures/cowork-conversation-corpus';
+import { EDIT_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { corpusInstructions, runCorpusCase, type CorpusOutcome } from './fixtures/cowork-conversation-runner';
+
+// Production conversations first, then the marketing use cases (email and LinkedIn)
+// and every button on the Cowork home.
+const CORPUS = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS];
 
 async function main() {
   if (!process.argv.includes('--live') || !process.env.OPENAI_API_KEY || !process.env.COWORK_MODEL) {
@@ -59,7 +64,8 @@ async function main() {
         }
         usage.push(coworkModelUsage(response.telemetry));
         decisions.push({ action: response.data.action, reads: response.data.reads ?? null, query: response.data.query,
-          leadId: response.data.leadId, answer: response.data.answer, searchCriteria: response.data.searchCriteria ?? null });
+          leadId: response.data.leadId, answer: response.data.answer, searchCriteria: response.data.searchCriteria ?? null,
+          outline: response.data.outline ?? null });
         return response.data;
       });
       const shown = outcome.result.note && (outcome.result.proposal || outcome.result.search) ? outcome.result.note : outcome.result.reply;
@@ -75,7 +81,21 @@ async function main() {
     casesPassed: outcomes.filter(outcome => outcome.passed).length,
     checksPassed: `${checks.filter(check => check.passed).length}/${checks.length}`,
     failedRuns: outcomes.filter(outcome => outcome.result.failed).length,
+    // Fewer reads and model calls per case mean faster turns with the same answer.
+    readsPerCase: Math.round(outcomes.reduce((sum, outcome) => sum + outcome.result.actions.length, 0) / Math.max(1, outcomes.length) * 100) / 100,
+    callsPerCase: Math.round(calls / Math.max(1, outcomes.length) * 100) / 100,
     answersWithIssues: outcomes.filter(outcome => outcome.issues.length).length,
+    answersWithSuggestions: `${outcomes.filter(outcome => outcome.result.suggestions?.length).length}/${outcomes.filter(outcome => !outcome.result.proposal && !outcome.result.search && !outcome.result.failed).length}`,
+    // The plan the person sees while it works: shown when the turn consults, and each
+    // planned read actually run (a plan that promises what never happens misleads).
+    plansShown: `${outcomes.filter(outcome => outcome.result.plan).length}/${outcomes.filter(outcome => outcome.result.actions.length).length}`,
+    // The plan belongs to the first consulting decision: any later one is wasted output.
+    laterOutlines: outcomes.reduce((sum, outcome) => sum + outcome.decisions.slice(1)
+      .filter(decision => Array.isArray((decision as { outline?: unknown }).outline)).length, 0),
+    plannedReadsRun: (() => {
+      const planned = outcomes.flatMap(outcome => (outcome.result.plan || []).filter(step => step.read).map(step => outcome.result.actions.includes(String(step.read))));
+      return `${planned.filter(Boolean).length}/${planned.length}`;
+    })(),
   };
   const report = { mode: 'real_model_real_loop_corpus_tools', summary, usage, outcomes,
     limitation: 'Fixture tools copied from one production workspace; lexical checks screen behavior and need a human read of the replies.' };
@@ -85,6 +105,8 @@ async function main() {
   for (const outcome of outcomes) {
     const failing = outcome.checks.filter(check => !check.passed).map(check => check.label);
     console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${outcome.id}${repeat > 1 ? ` #${outcome.attempt}` : ''} (${outcome.seconds}s)${failing.length ? ` · ${failing.join('; ')}` : ''}`);
+    if (outcome.result.plan) console.log(`     ☐ ${outcome.result.plan.map(step => `${step.label}${step.read ? ` (${step.read})` : ''}`).join(' → ')}`);
+    if (outcome.result.suggestions?.length) console.log(`     ↳ ${outcome.result.suggestions.map(chip => `[${chip.label}]`).join(' ')}`);
   }
   if (summary.casesPassed !== summary.cases) process.exitCode = 1;
 }

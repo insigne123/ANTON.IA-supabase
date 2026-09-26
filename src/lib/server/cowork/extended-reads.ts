@@ -151,7 +151,7 @@ async function readCoworkMetrics(client: SupabaseClient, scope: Scope) {
 }
 
 /** What the organization sells, as configured for research (products). */
-async function readOrganizationOffer(client: SupabaseClient | undefined, organizationId: string) {
+export async function readOrganizationOffer(client: SupabaseClient | undefined, organizationId: string) {
   if (!client) return null;
   try {
     const { data, error } = await client.from('antonia_workflow_settings')

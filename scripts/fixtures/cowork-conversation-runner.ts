@@ -4,10 +4,10 @@
 import { coworkAgentInstructions } from '../../src/lib/cowork/agent-instructions';
 import { coworkDecisionContext } from '../../src/lib/cowork/decision-context';
 import { runCoworkReadLoop, type CoworkObservation, type CoworkRejection, type coworkDecisionSchema } from '../../src/lib/cowork/agent-loop';
-import { COWORK_NOTE_ACTION, coworkNoteText } from '../../src/lib/cowork/contracts';
+import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, coworkNoteText, coworkPlanSteps } from '../../src/lib/cowork/contracts';
 import { coworkFailureMessage } from '../../src/lib/cowork/failure-messages';
 import { polishCoworkAnswer } from '../../src/lib/cowork/answer-quality';
-import { CORPUS_NOW, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
+import { CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 import type { z } from 'zod';
 
 type Decision = z.infer<typeof coworkDecisionSchema>;
@@ -45,24 +45,31 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider): P
       signal: new AbortController().signal, authorize: async () => {},
       decide: (observations, mustAnswer, rejections: CoworkRejection[] = []) => decide(coworkDecisionContext(corpusInstructions, {
         history: { turns, olderTurnsOmitted: false }, request: entry.request, observations, mustAnswer,
-        executionPolicy: { mode: 'approval' }, ...(rejections.length ? { rejectedDecisions: rejections } : {}),
+        executionPolicy: { mode: 'approval' }, userContext: entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext,
+        ...(rejections.length ? { rejectedDecisions: rejections } : {}),
       }, CORPUS_NOW, 'America/Santiago'), { caseId: entry.id, turn: decision++ }),
-      execute: async (action, value) => { actions.push(action); return corpusRead(action, value); },
+      execute: async (action, value) => { actions.push(action); return (entry.world?.read ?? corpusRead)(action, value); },
       record: async observation => { recorded.push(observation); },
       proposeSearch: async criteria => { result.search = criteria as unknown as Record<string, unknown>; },
       proposeNote: async () => { result.proposal = { kind: 'crm_note', label: 'Nota CRM' }; },
       proposeEffect: async proposal => {
-        corpusStageEffect(proposal);
-        result.proposal = { kind: proposal.kind, label: proposal.label, ...(proposal.campaign ? { campaign: proposal.campaign } : {}) };
+        corpusStageEffect(proposal, entry.world?.savedEmails);
+        result.proposal = { kind: proposal.kind, label: proposal.label, targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
+          ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}) };
       },
     });
     const polished = polishCoworkAnswer(answer);
     result.reply = polished.reply;
     result.document = polished.document;
+    result.suggestions = polished.suggestions || [];
+    result.blocks = polished.blocks || [];
+    result.question = polished.question;
   } catch (error) {
     result.failed = coworkFailureMessage(error);
   }
   const note = recorded.find(observation => observation.action === COWORK_NOTE_ACTION);
   result.note = note ? coworkNoteText(note) : null;
+  const plan = recorded.find(observation => observation.action === COWORK_PLAN_ACTION);
+  result.plan = plan ? coworkPlanSteps(plan) : null;
   return scoreCorpusCase(entry, result);
 }

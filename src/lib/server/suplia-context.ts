@@ -73,7 +73,7 @@ export function offerText(value: unknown): string {
   return [name, products.length ? `Productos: ${products.join('; ')}` : ''].filter(Boolean).join('. ').slice(0, 600);
 }
 
-function profileOffer(profile: Record<string, unknown> | null) {
+export function profileOffer(profile: Record<string, unknown> | null) {
   if (!profile) return null;
   for (const candidate of [profile.company_profile, profile.value_proposition, profile.offer,
     profile.companyName, profile.company, profile.businessDescription]) {
