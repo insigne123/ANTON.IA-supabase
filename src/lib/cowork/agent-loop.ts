@@ -331,9 +331,12 @@ type CoworkAnswer = z.infer<typeof coworkDocumentSchema>;
 /** When the model proposes a search without explaining it, the card still gets a
  * sentence built from the criteria, never a blank next to the approval. */
 function searchNote(criteria: CoworkSearchCriteria): string {
-  const titles = (criteria.titles || []).slice(0, 3);
-  const places = [...(criteria.locations || []), ...(criteria.companyLocations || [])].slice(0, 2);
-  const industries = (criteria.industries || []).slice(0, 2);
+  // The model sometimes repeats a term («retail», «retail»): each one is named once.
+  const unique = (items: string[]) => items.map(item => item.trim())
+    .filter((item, index, all) => item && all.findIndex(other => other.toLowerCase() === item.toLowerCase()) === index);
+  const titles = unique(criteria.titles || []).slice(0, 3);
+  const places = unique([...(criteria.locations || []), ...(criteria.companyLocations || [])]).slice(0, 2);
+  const industries = unique(criteria.industries || []).slice(0, 2);
   const list = (items: string[], last: string) => items.length > 1 ? `${items.slice(0, -1).join(', ')} ${last} ${items[items.length - 1]}` : items[0];
   return [
     `Propongo buscar hasta ${criteria.limit || 25} ${criteria.target === 'companies' ? 'empresas' : 'personas'}`,

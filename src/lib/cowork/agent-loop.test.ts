@@ -463,4 +463,14 @@ test('a search proposed without an explanation still gets a sentence built from 
   });
   assert.deepEqual(notes, [{ action: 'assistant.note', input: '', result: { reply:
     'Propongo buscar hasta 25 personas con cargos como Gerente de Operaciones o Superintendente, del rubro minería, en Antofagasta, Chile. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.' } }]);
+  // Seen with the real model: a repeated industry was named twice («del rubro retail y retail»).
+  const repeated: unknown[] = [];
+  await runCoworkReadLoop({
+    message: 'Busca gerentes de RR. HH. en retail', signal: new AbortController().signal, authorize: async () => {}, execute: async () => ({}),
+    record: async observation => { repeated.push(observation); }, proposeSearch: async () => {},
+    decide: async () => ({ action: 'prospecting.propose_search' as const, query: null, leadId: null, answer: null,
+      searchCriteria: { titles: ['HR Manager', 'hr manager '], industries: ['retail', 'Retail'], locations: ['Santiago, Chile'], limit: 10 } }),
+  });
+  assert.equal((repeated[0] as { result: { reply: string } }).result.reply,
+    'Propongo buscar hasta 10 personas con cargos como HR Manager, del rubro retail, en Santiago, Chile. Revisa los criterios antes de aprobar: la búsqueda no guarda contactos ni revela correos.');
 });
