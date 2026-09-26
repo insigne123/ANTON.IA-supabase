@@ -28,10 +28,21 @@ La direccion visual por defecto de esta app es Apple-like: claridad, foco, super
 ## Git y releases
 
 - `main` es la unica rama canonica para integrar, verificar y desplegar cambios.
+- `main` esta protegida: todo cambio entra por PR desde ramas `claude/*` o `feat/*`, con 1 revision y CI en verde. Sin push directo, sin force-push, sin borrar ramas.
 - Inicia todo cambio desde `main`; no abras ramas `release/*` ni despliegues desde worktrees detached.
 - Usa un worktree temporal solo para aislar trabajo concurrente. Antes de verificar o desplegar, integra el resultado probado de vuelta en `main`.
 - No borres ramas o worktrees historicos sin una solicitud explicita; nunca deben ser fuente de cambios nuevos ni de un despliegue.
 - Antes de actualizar `main`, revisa `git status`, `git diff`, la historia entrante y las pruebas pertinentes.
+- Cada deploy bueno se etiqueta `prod-YYYY-MM-DD`. Rollback: `git revert` del cambio + redeploy + smoke (`/api/onboarding/tour` 401, `/cowork` 200, `POST /api/cowork/wake` 401).
+
+## Colaboracion externa (Claude)
+
+- Trabaja en ramas `claude/<tema>`, un tema por PR, PRs chicos, siempre desde `main` al dia.
+- Cada PR describe: archivos tocados, dependencias fuera del PR, evidencia de `typecheck` + `test:unit` + `build` en verde y como verificarlo en la app.
+- Si tu base no es este `main`, dilo en el PR y lista que asumiste como base.
+- Prohibido: secretos o tokens en codigo, logs o issues; archivos `.env*`; migraciones sin solicitud explicita; escrituras en produccion; envios reales de correo; force-push; borrar ramas; deployar (el deploy lo hace el mantenedor tras el merge).
+- Las pruebas usan `.env.test.local`; jamas `.env.local` en una suite ni credenciales en el repo.
+- El deploy a produccion y el rollback los ejecuta el mantenedor. Punto de retorno: ultimo tag `prod-*`.
 
 ## Limites del estilo Apple-like
 
