@@ -26,7 +26,7 @@ Idea tomada de las «follow-up chips» de LobeHub y los «Follow up» de Open We
 - etiqueta de más de 40 caracteres o mensaje de más de 200;
 - con un UUID;
 - con un mensaje que termina en «:», porque espera texto del usuario;
-- que empieza con «Sí, cuando…» o «Voy a…», porque anuncia algo que el usuario hará después.
+- que deja algo para después, porque no se puede hacer al tocarla: empieza con «Sí, cuando…» o dice «voy a…», «te indicaré…», «te aviso…», «más tarde» o «déjame pensar».
 
 También se traducen los códigos internos igual que en la respuesta y se quedan como máximo tres.
 

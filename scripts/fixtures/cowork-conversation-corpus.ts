@@ -3,7 +3,7 @@
 // real user typed; tool results are compact, masked copies of what production
 // returned. Each case says what a good turn must do and records the baseline
 // production outcome it replaces. No database, mailbox or provider is touched.
-import { coworkAnswerIssues } from '../../src/lib/cowork/answer-quality';
+import { COWORK_DEFERRAL, coworkAnswerIssues } from '../../src/lib/cowork/answer-quality';
 import type { CoworkUserContext } from '../../src/lib/cowork/decision-context';
 
 export const CORPUS_NOW = new Date('2026-09-25T13:10:00Z');
@@ -163,8 +163,8 @@ const explained = (result: CorpusTurnResult) => !(result.proposal || result.sear
 // A plain answer offers at least one quick reply; a proposal already has its card.
 const suggested = (result: CorpusTurnResult) => Boolean(result.proposal || result.search) || (result.suggestions?.length ?? 0) > 0;
 // Each quick reply asks for something Cowork does on click, never a promise the person makes.
-const DEFERRAL = /(?<!\p{L})(?:voy a|te indicar[ée]|te aviso|lo pienso|d[ée]jame pensar|m[áa]s tarde|despu[ée]s lo|luego lo)(?!\p{L})|^s[íi],? cuando(?!\p{L})/iu;
-const actionable = (result: CorpusTurnResult) => (result.suggestions || []).every(chip => !DEFERRAL.test(chip.message));
+// The sanitizer drops these; the check guards it on the chips the person would see.
+const actionable = (result: CorpusTurnResult) => (result.suggestions || []).every(chip => !COWORK_DEFERRAL.test(chip.message));
 
 export const CORPUS_COMMON_CHECKS = [
   { label: 'termina sin fallar', test: answerOk },
