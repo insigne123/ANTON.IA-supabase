@@ -4,7 +4,7 @@ import { z } from 'zod';
 /** Fase 3: bounded code proposal the model may submit for human review.
  * Tighter than the executor protocol (12 KB code): the executor caps are the
  * outer safety net, this schema keeps reviews readable. Input files must have
- * been observed via files.list in this execution or its history. */
+ * been observed via files.list or files.read in this execution or its history. */
 const fileNameSchema = z.string().trim().min(1).max(120)
   .refine(name => name === name.trim() && !name.includes('/') && !name.includes('\\') && !name.includes('\0') && !name.startsWith('.'), {
     message: 'Nombre de archivo inválido.',

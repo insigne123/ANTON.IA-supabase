@@ -5,6 +5,10 @@ import { readMailboxCoverage } from './reply-reads';
 import { buildSupliaContext, offerText } from '@/lib/server/suplia-context';
 import { getCurrentNativeDraft } from '@/lib/server/native-drafts';
 import { hashMessagingDraftContent } from '@/lib/messaging-contracts';
+import {
+  COWORK_FILE_NOTICE, COWORK_FILE_UNREADABLE, coworkDecodeFile, coworkFileKind, coworkFileMissing, coworkFilePreview, coworkFilesByWords,
+} from '@/lib/cowork/file-read';
+import { COWORK_UPLOAD_BUCKET, listCoworkUploads } from './uploads';
 
 type Scope = { userId: string; organizationId: string };
 
@@ -151,7 +155,7 @@ async function readCoworkMetrics(client: SupabaseClient, scope: Scope) {
 }
 
 /** What the organization sells, as configured for research (products). */
-async function readOrganizationOffer(client: SupabaseClient | undefined, organizationId: string) {
+export async function readOrganizationOffer(client: SupabaseClient | undefined, organizationId: string) {
   if (!client) return null;
   try {
     const { data, error } = await client.from('antonia_workflow_settings')
@@ -229,4 +233,32 @@ export async function readCoworkFiles(client: SupabaseClient, scope: Scope) {
     if (files.length >= 40) break;
   }
   return { scope: 'own_uploads', files: files.slice(0, 40) };
+}
+
+const MAX_READ_BYTES = 20 * 1024 * 1024;
+
+/** One uploaded file from this user's own uploads, by its name or by words of
+ * it («feria» when only one upload has that word); the most recent when the name
+ * repeats. Only CSV, JSON, Markdown and text are read, trimmed to what the model
+ * can use in one decision; nothing is executed. */
+export async function readCoworkFileContent(client: SupabaseClient, scope: Scope, value: string) {
+  const asked = z.string().trim().min(1).max(120).parse(value).toLowerCase();
+  if (/[\\/\0]/.test(asked) || asked.startsWith('.')) throw new Error('Nombre de archivo inválido.');
+  const root = `${scope.organizationId}/${scope.userId}`;
+  const uploads = await listCoworkUploads(client, scope);
+  const byWords = uploads.has(asked) ? [] : coworkFilesByWords(asked, [...uploads.keys()]);
+  const name = uploads.has(asked) ? asked : byWords.length === 1 ? byWords[0] : null;
+  if (!name) return coworkFileMissing(asked, [...uploads.keys()], byWords);
+  const match = (uploads.get(name) || [])[0];
+  const base = { scope: 'own_uploads', found: true, name, runId: match.runId, size: match.size };
+  const kind = coworkFileKind(name);
+  if (kind === 'excel' || kind === 'other') return { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE[kind] };
+  if (match.size > MAX_READ_BYTES) throw new Error('El archivo supera 20 MB.');
+  const { data, error: downloadError } = await client.storage.from(COWORK_UPLOAD_BUCKET).download(`${root}/${match.runId}/${name}`);
+  if (downloadError || !data) throw new Error('No se pudo leer el archivo.');
+  const bytes = new Uint8Array(await data.arrayBuffer());
+  if (bytes.length > MAX_READ_BYTES) throw new Error('El archivo supera 20 MB.');
+  const preview = coworkFilePreview(name, coworkDecodeFile(bytes));
+  if (!preview) return { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE.other };
+  return { ...base, ...preview, notice: COWORK_FILE_NOTICE };
 }

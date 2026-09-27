@@ -185,7 +185,9 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     writeDraft(userId, message);
   }, [message, userId]);
 
-  // Selected conversation: poll while work is in flight and follow continuations.
+  // Selected conversation: refresh while work is in flight and follow continuations.
+  // While the worker is busy a live stream rings on every change, so the page
+  // refreshes right away; polling stays underneath as the fallback.
   useEffect(() => {
     if (!selected) { setAwaitingContinuation(false); setContinuationMissing(false); return; }
     let disposed = false;
@@ -194,10 +196,30 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     const openedAt = Date.now();
     let completionSeenAt: number | null = null;
     let failures = 0;
-    async function poll() {
+    let inflight = false;
+    let again = false;
+    let stream: EventSource | null = null;
+    let streamLive = false;
+    let streamFailed = false;
+    const closeStream = () => { stream?.close(); stream = null; streamLive = false; };
+    const openStream = () => {
+      if (stream || streamFailed || typeof EventSource === 'undefined') return;
+      const source = new EventSource(`/api/cowork/runs/${selected}/stream`);
+      stream = source;
+      source.onopen = () => { streamLive = true; };
+      source.addEventListener('change', () => { void poll(); });
+      source.addEventListener('end', () => { closeStream(); void poll(); });
+      source.onerror = () => {
+        streamLive = false;
+        // A refused connection is final: keep polling as before.
+        if (source.readyState === EventSource.CLOSED) { closeStream(); streamFailed = true; }
+      };
+    };
+    /** Reads the run once and returns when to read it again (null: no need). */
+    async function refresh(): Promise<number | null> {
       try {
         const data: ThreadState = await request(`/api/cowork/runs/${selected}`, { signal: controller.signal });
-        if (disposed) return;
+        if (disposed) return null;
         failures = 0;
         setState(data);
         setError('');
@@ -211,7 +233,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
           liveRuns.current.add(data.continuation.id);
           setWorkUrl(data.continuation.id, 'replace');
           setSelected(data.continuation.id);
-          return;
+          return null;
         }
         let delay: number | null = null;
         if (isCoworkActive(status)) {
@@ -220,11 +242,13 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
             && !data.events.some(event => event.kind === 'effect.started' || event.kind === 'search.started');
           const decisionPending = status === 'waiting_approval' && coworkProposalView(data.run, data.events)?.state === 'pending';
           // Nothing moves while a decision waits on you; otherwise stay close to live.
-          delay = decisionPending ? 10000 : Date.now() - openedAt < 60000 ? 2000 : 4000;
+          if (decisionPending) closeStream(); else openStream();
+          delay = decisionPending ? 10000 : status === 'running' && streamLive ? 15000 : Date.now() - openedAt < 60000 ? 2000 : 4000;
           if (status === 'queued' || status === 'waiting_workers' || approvedNotStarted) wake();
           setAwaitingContinuation(false);
           setContinuationMissing(false);
         } else if (coworkExpectsContinuation(data.events) && !data.continuation) {
+          closeStream();
           completionSeenAt ??= Date.now();
           // An old completion is not worth waiting for: measure from when it happened.
           const completedAt = Date.parse(data.events.slice().reverse().find(event => event.kind === 'run.completed')?.created_at || '');
@@ -234,22 +258,37 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
           setContinuationMissing(!waiting);
           if (waiting) delay = 2000;
         } else {
+          closeStream();
           setAwaitingContinuation(false);
           setContinuationMissing(false);
         }
-        if (delay !== null) timer = setTimeout(poll, delay);
+        return delay;
       } catch (problem) {
-        if (disposed || controller.signal.aborted) return;
+        if (disposed || controller.signal.aborted) return null;
         const status = (problem as { status?: number }).status;
         setError(problem instanceof Error ? problem.message : 'No se pudo actualizar el trabajo.');
         if (status !== 401 && status !== 403 && status !== 404 && failures < 3) {
           failures += 1;
-          timer = setTimeout(poll, 4000 * failures);
+          return 4000 * failures;
         }
+        closeStream();
+        return null;
       }
     }
+    // One read at a time: a ring during a read asks for one more right after it.
+    async function poll() {
+      if (disposed) return;
+      if (inflight) { again = true; return; }
+      inflight = true;
+      clearTimeout(timer);
+      let delay: number | null = null;
+      try { delay = await refresh(); } finally { inflight = false; }
+      if (disposed) return;
+      if (again) { again = false; void poll(); return; }
+      if (delay !== null) timer = setTimeout(poll, delay);
+    }
     void poll();
-    return () => { disposed = true; controller.abort(); clearTimeout(timer); };
+    return () => { disposed = true; controller.abort(); clearTimeout(timer); closeStream(); };
   }, [selected, threadVersion, request, wake]);
 
   // Restore from the URL and follow browser navigation.
@@ -339,6 +378,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     autoOpened.current.add(latest.run.id);
     const produced = coworkTurnArtifacts(latest.run, latest.events);
     const best = produced.find(item => item.kind === 'document')
+      || produced.find(item => item.kind === 'block' && item.block.type === 'sequence')
+      || produced.find(item => item.kind === 'block' && item.block.type === 'table' && item.block.rows.length >= 6)
       || produced.find(item => item.kind === 'contacts' && item.count >= 3)
       || produced.find(item => item.kind === 'file');
     if (best) openArtifactPanel(best, null, false);
@@ -486,6 +527,17 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     void post(latest.run.message, latest.run.parent_run_id ?? null);
   }
 
+  // A quick reply is a message you did not have to type: same thread, same rules.
+  const canFollowUp = Boolean(ready && !sending && latest && latestIsCurrent && latest.run.status === 'completed' && !optimistic && !queued);
+  function followUp(text: string) {
+    if (!latest || !canFollowUp) return;
+    void post(text, latest.run.id);
+  }
+  // A version sent from the panel reads in the conversation; on phones the panel covers it.
+  const sendFromPanel = canFollowUp ? (text: string) => { followUp(text); if (!isDesktop) closeArtifact(); } : null;
+  const panelSendHint = pendingDecision ? 'Primero aprueba o descarta la propuesta pendiente.'
+    : !ready ? 'Cowork no está disponible ahora.' : 'Disponible cuando Cowork termine el paso actual.';
+
   async function cancel() {
     if (!latest || cancelling) return;
     setCancelling(true);
@@ -543,7 +595,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const quotaNote = searchQuota ? `Búsquedas externas hoy: ${searchQuota.remaining} de ${searchQuota.limit}` : '';
 
   const homeComposer = <CoworkComposer ref={composer} id="cowork-message" size="large" value={message} onChange={setMessage} onSubmit={() => void submit()}
-    placeholder="Describe lo que necesitas. Por ejemplo: «prioriza mis respuestas pendientes de hoy»"
+    placeholder="Describe lo que necesitas. Por ejemplo: «escríbele a mis contactos que aún no contacto»"
     ready={ready} sending={sending} submitLabel="Crear trabajo" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
     footnote={quotaNote || undefined} />;
 
@@ -587,7 +639,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
               {state?.olderTurnsOmitted && <p className="text-center text-[12px] text-cw-faint">Se muestran los últimos ocho turnos anteriores.</p>}
               {turns.map((turn, index) => <CoworkTurn key={turn.run.id} turn={turn} latest={index === turns.length - 1}
                 resolving={resolving} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
-                onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null}
+                onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null} onSuggestion={canFollowUp ? followUp : null}
                 budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)} />)}
               {continuationMissing && latestIsCurrent && latest?.run.status === 'completed' && !optimistic && !queued && ready && <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-[38px]">
                 <CwButton size="sm" variant="secondary" disabled={sending}
@@ -631,7 +683,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
         <CoworkArtifactPanel artifact={openArtifact} events={turns.find(turn => turn.run.id === openArtifact.runId)?.events || []}
           canResearch={Boolean(state?.canResearch) && latest?.run.status === 'completed'} canCreateDraft={Boolean(state?.canCreateDraft) && latest?.run.status === 'completed'}
           maximized={maximized} onToggleMaximize={() => setMaximized(value => !value)} onClose={closeArtifact} headingRef={artifactHeading}
-          onError={setError} onAccessDenied={clearPrivateResults} onUseReport={askAboutContact}
+          onError={setError} onAccessDenied={clearPrivateResults} onUseReport={askAboutContact} onSend={sendFromPanel} sendHint={panelSendHint}
           onSelectVersion={id => { if (turns.some(turn => turn.run.id === id)) { const doc = artifacts.find(item => item.runId === id && item.kind === 'document'); if (doc) setArtifactId(doc.id); } else choose(id, { pin: true }); }} />
       </div>
       : inConversation && latest && panelOpen && <div className="hidden w-[272px] shrink-0 border-l border-cw-border bg-cw-rail xl:block">

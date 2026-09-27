@@ -52,6 +52,21 @@ export async function getCoworkRun(auth: AuthContext, id: string) {
   return { run, events };
 }
 
+/** Where a run stands, in two indexed lookups: its status and its latest event.
+ * The live stream compares these to tell the page when to refresh. */
+export async function getCoworkRunCursor(auth: AuthContext, id: string) {
+  z.string().uuid().parse(id);
+  const { data: run, error } = await auth.supabase.from('cowork_runs')
+    .select('status').eq('id', id).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId).maybeSingle();
+  if (error) throw error;
+  if (!run) return null;
+  const { data: last, error: eventError } = await auth.supabase.from('cowork_run_events')
+    .select('sequence').eq('run_id', id).eq('user_id', auth.user.id).eq('organization_id', auth.organizationId)
+    .order('sequence', { ascending: false }).limit(1).maybeSingle();
+  if (eventError) throw eventError;
+  return { status: String(run.status), sequence: typeof last?.sequence === 'number' ? last.sequence : 0 };
+}
+
 export async function admitCoworkRun(auth: AuthContext, body: unknown) {
   const input = coworkRequestSchema.parse(body);
   assertCoworkModeAvailable(input.mode, process.env.COWORK_AUTONOMY_ENABLED === 'true');

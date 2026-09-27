@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { coworkReadPlanSchema, executeCoworkReadPlan, type CoworkReadPlan } from './read-plan';
 import { runCoworkReadLoop } from './agent-loop';
+import { COWORK_TURN_DEFAULTS } from './turn-budget';
 
 const plan: CoworkReadPlan = [
   { id: 'context', dependsOn: [], read: { action: 'app.context', input: '' } },
@@ -81,6 +82,8 @@ test('agent dispatches plan through the same gateway and shared read budget', as
   let decisions = 0;
   const result = await runCoworkReadLoop({
     message: 'Consulta contexto, métricas y campañas', signal: new AbortController().signal,
+    // A three-read turn: the plan spends all of it.
+    ceiling: { ...COWORK_TURN_DEFAULTS, reads: 3 },
     authorize: async () => {}, execute: async action => ({ action }),
     record: async observation => { records.push(observation); },
     decide: async (observations, mustAnswer) => {
@@ -112,6 +115,7 @@ test('plan cannot bypass budget already consumed by sequential reads', async () 
   let executions = 0;
   await assert.rejects(runCoworkReadLoop({
     message: 'Consulta', signal: new AbortController().signal, authorize: async () => {},
+    ceiling: { ...COWORK_TURN_DEFAULTS, reads: 3 },
     execute: async () => { executions++; return {}; }, record: async () => {},
     decide: async () => {
       decisions++;

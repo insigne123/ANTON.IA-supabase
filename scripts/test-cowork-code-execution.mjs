@@ -4,7 +4,12 @@ import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 process.env.COWORK_ENABLED = 'true';
 const state = {
-  listed: [{ name: 'in.csv' }], downloads: {}, uploads: [], events: [],
+  listed: [{ name: 'in.csv' }], downloads: {}, uploads: [], events: [], copies: [],
+  // Uploads of earlier turns: «Adjuntar archivos» stores them in the turn on screen.
+  earlier: {
+    'run-old': [{ name: 'prospectos.xlsx', updated_at: '2026-09-20T10:00:00Z', metadata: { size: 900 } }],
+    'run-new': [{ name: 'prospectos.xlsx', updated_at: '2026-09-26T10:00:00Z', metadata: { size: 950 } }],
+  },
   staged: null, executor: null, executorStatus: 200,
 };
 const client = {
@@ -12,7 +17,14 @@ const client = {
     from: bucket => ({
       list: async prefix => {
         if (bucket !== 'cowork-uploads') return { data: [], error: null };
-        return { data: state.listed, error: null };
+        if (prefix === 'org/owner') return { data: ['run-code', ...Object.keys(state.earlier)].map(name => ({ name })), error: null };
+        const run = prefix.split('/').pop();
+        return { data: run === 'run-code' ? state.listed : state.earlier[run] || [], error: null };
+      },
+      copy: async (from, to) => {
+        state.copies.push([from, to]);
+        state.listed.push({ name: to.split('/').pop() });
+        return { data: { path: to }, error: null };
       },
       download: async path => {
         const body = state.downloads[path];
@@ -73,10 +85,16 @@ const auth = { user: { id: 'owner' }, organizationId: 'org', supabase: client };
 const scope = { userId: 'owner', organizationId: 'org' };
 const proposal = { language: 'python', code: 'print("hi")', inputFiles: ['in.csv'] };
 try {
-  // Staging rejects files that are not uploaded for this run.
-  await assert.rejects(module.exports.stageCoworkCode(scope, 'run-code', { ...proposal, inputFiles: ['ghost.csv'] }), /no está subido/);
+  // Staging rejects files that are not among the person's uploads.
+  await assert.rejects(module.exports.stageCoworkCode(scope, 'run-code', { ...proposal, inputFiles: ['ghost.csv'] }), /no está entre tus archivos subidos/);
   assert.equal(state.staged, null);
+  assert.equal(state.copies.length, 0);
+  // A file uploaded in an earlier turn is copied into this run from its newest upload.
+  await module.exports.stageCoworkCode(scope, 'run-code', { ...proposal, inputFiles: ['prospectos.xlsx'] });
+  assert.deepEqual(state.copies, [['org/owner/run-new/prospectos.xlsx', 'org/owner/run-code/prospectos.xlsx']]);
+  // Files already in this run are not copied again.
   const staged = await module.exports.stageCoworkCode(scope, 'run-code', proposal);
+  assert.equal(state.copies.length, 1);
   assert.equal(staged.files, 1);
   assert.ok(state.staged);
   const target = `code:${state.staged.code_hash}`;
@@ -134,7 +152,7 @@ try {
   await assert.rejects(module.exports.executeCoworkCode(auth, 'run-code', target), /no está configurada/);
   process.env.COWORK_EXECUTOR_SECRET = 'test-secret';
 
-  console.log('PASS: staging gate, hash-bound execution, artifact promotion, drift refusal, busy/timeout handling, config gate.');
+  console.log('PASS: staging gate, copy from earlier uploads, hash-bound execution, artifact promotion, drift refusal, busy/timeout handling, config gate.');
 } finally {
   delete globalThis.__coworkCode;
   delete globalThis.fetch;

@@ -93,6 +93,10 @@ test('history keeps three reads plus the assistant note and dates each turn', as
   const fourReads = [4, 3, 2, 1].map(n => ({ action: 'leads.search', n }));
   const capped = await loadCoworkHistory(orderedClient(fourReads), { userId: 'owner', organizationId: 'org' }, 'a');
   assert.deepEqual(capped.turns[0].observations.map(item => (item as { n: number }).n), [2, 3, 4]);
+  // The plan shown while it worked is not context and takes no read's place.
+  const plan = { action: 'assistant.plan', input: '', result: { steps: [{ label: 'Reviso', read: 'leads.search' }, { label: 'Respondo', read: null }] } };
+  const planned = await loadCoworkHistory(orderedClient([reads[1], reads[0], plan]), { userId: 'owner', organizationId: 'org' }, 'a');
+  assert.deepEqual(planned.turns[0].observations, [reads[0], reads[1]]);
 });
 
 test('history tells the model which approved actions already ran and how they ended', async () => {

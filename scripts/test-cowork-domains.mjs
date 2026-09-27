@@ -39,7 +39,7 @@ const fixtures = {
   '@/lib/server/campaigns-v2/plan': `export const getFirstContactPlan=async input=>{globalThis.__coworkDomains.state.planCalls.push(input);return globalThis.__coworkDomains.state.plan;};`,
   '@/lib/server/campaigns-v2/send-context': `export const getCampaignV2RecipientStepSendContext=async input=>{globalThis.__coworkDomains.state.stepCalls.push(input);return globalThis.__coworkDomains.state.step;};`,
   '@/lib/server/privacy-subject-data': `export const isEmailSuppressedForScope=async(email,scope)=>{const s=globalThis.__coworkDomains.state;s.suppressionCalls.push({email,scope});if(s.suppressionFailure)throw new Error('suppression unavailable');return s.suppressed;};`,
-  './extended-reads': 'export const queryCoworkExtendedReads=async()=>{throw new Error("unexpected extended read")};',
+  './extended-reads': 'export const queryCoworkExtendedReads=async()=>{throw new Error("unexpected extended read")};export const readCoworkFileContent=async()=>{throw new Error("unexpected file read")};',
   './lead-tools': 'export const queryCoworkLeads=async()=>{throw new Error("unexpected lead read")};',
   './research-read': 'export const readCoworkResearch=async()=>{throw new Error("unexpected research")};',
 };
