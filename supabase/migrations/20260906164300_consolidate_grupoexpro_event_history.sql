@@ -83,6 +83,10 @@ do $$
 declare
   v_context uuid := (select organization_id from grupoexpro_event_context);
 begin
+  if not exists (select 1 from grupoexpro_event_users) then
+    return;
+  end if;
+
   if (
     select count(*) from public.antonia_event_ledger
     where actor_user_id in (select user_id from grupoexpro_event_users)
