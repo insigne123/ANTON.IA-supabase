@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { coworkDecisionSchema, runCoworkReadLoop } from './agent-loop';
 import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
+import { COWORK_NOTE_ACTION } from './contracts';
 
 const answer = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Un contacto encontrado.', document: null } };
 const search = { action: 'leads.search' as const, query: 'Logística', leadId: null, answer: null };
@@ -248,6 +249,35 @@ test('code execution anchors input files to files.list observations', async () =
     code: { language: 'node' as const, code: 'x', inputFiles: [] }, answer: null };
   await runCoworkReadLoop({ ...base, history: [], decide: async () => bare });
   assert.equal(proposals[1].originRunId, runId);
+});
+
+test('code execution also takes a file that files.read found, here or in an earlier turn, but not one it missed', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const parentId = '00000000-0000-4000-8000-000000000011';
+  const proposals: Array<{ originRunId: string }> = [];
+  const notes: string[] = [];
+  const found = { scope: 'own_uploads', found: true, name: 'prospectos.xlsx', runId: parentId, size: 900, kind: 'unreadable', message: 'Excel' };
+  const missed = { scope: 'own_uploads', found: false, name: 'prospectos.xlsx', available: [] };
+  const base = { message: 'Revisa el excel', runId, signal: new AbortController().signal, authorize: async () => {},
+    record: async (observation: { action: string; result: unknown }) => {
+      if (observation.action === COWORK_NOTE_ACTION) notes.push((observation.result as { reply: string }).reply);
+    },
+    proposeEffect: async (proposal: { originRunId: string }) => { proposals.push(proposal); } };
+  const readFile = { action: 'files.read' as const, query: 'prospectos.xlsx', leadId: null, answer: null };
+  const analyze = { action: 'code.execute' as const, query: null, leadId: null,
+    code: { language: 'python' as const, code: 'print(1)', inputFiles: ['prospectos.xlsx'] }, answer: null };
+  await runCoworkReadLoop({ ...base, execute: async () => found, decide: async observations => observations.length ? analyze : readFile });
+  assert.equal(proposals[0].originRunId, runId);
+  // Without an explanation from the model, the card still says what it runs on.
+  assert.match(notes[0], /Propongo analizar prospectos\.xlsx con código/);
+  // Read in the previous turn: that turn is the origin.
+  const history = [{ runId: parentId, observations: [{ action: 'files.read', input: 'prospectos.xlsx', result: found }] }];
+  await runCoworkReadLoop({ ...base, history, execute: async () => found, decide: async () => analyze });
+  assert.equal(proposals[1].originRunId, parentId);
+  // A read that did not find it is no evidence.
+  await assert.rejects(runCoworkReadLoop({ ...base, execute: async () => missed,
+    decide: async observations => observations.length ? analyze : readFile }), /observed first/);
+  assert.equal(proposals.length, 2);
 });
 
 test('a proposal carries the model explanation as a persisted note, recorded before the approval card', async () => {

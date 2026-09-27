@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, COWORK_PLAN_LIMITS, coworkDocumentSchema, type CoworkBlock, type CoworkPlanStep } from './contracts';
 import { coworkBlocks, coworkQuestion, coworkSuggestions, polishCoworkText } from './answer-quality';
 import { coworkCampaignDraftSchema } from './campaign-proposal';
-import { coworkCodeProposalSchema } from './code-proposal';
+import { coworkCodeProposalSchema, type CoworkCodeProposal } from './code-proposal';
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
 import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
 import { collectCoworkLeadRows } from './lead-export';
@@ -225,29 +225,28 @@ function observedLeadName(leadId: string, observations: CoworkObservation[], his
   return null;
 }
 
-/** Origin for code.execute: input files must have been observed via files.list.
- * Runs without inputs anchor to the proposing run itself (allowed as origin). */
+/** Upload names an observation shows: every file of files.list, or the one files.read found. */
+function observedUploads(observation: { action?: unknown; result?: unknown }): string[] {
+  if (observation.action === 'files.list') {
+    const files = (observation.result as { files?: Array<{ name?: string }> } | null)?.files;
+    return Array.isArray(files) ? files.map(file => String(file.name || '').toLowerCase()) : [];
+  }
+  if (observation.action !== 'files.read') return [];
+  const result = observation.result as { found?: boolean; name?: string } | null;
+  return result?.found === true && typeof result.name === 'string' ? [result.name.toLowerCase()] : [];
+}
+
+/** Origin for code.execute: input files must have been observed via files.list
+ * or files.read. Runs without inputs anchor to the proposing run itself (allowed as origin). */
 function codeOriginRunId(
   wanted: string[], observations: CoworkObservation[], history: CoworkHistoryTurn[], currentRunId: string,
 ): string | null {
   if (wanted.length === 0) return currentRunId || null;
   const names = wanted.map(name => name.toLowerCase());
-  const seenHere = new Set<string>();
-  for (const observation of observations) {
-    if (observation.action !== 'files.list') continue;
-    const files = (observation.result as { files?: Array<{ name?: string }> } | null)?.files;
-    if (Array.isArray(files)) for (const file of files) seenHere.add(String(file.name || '').toLowerCase());
-  }
+  const seenHere = new Set(observations.flatMap(observedUploads));
   if (names.every(name => seenHere.has(name))) return currentRunId || null;
   for (const turn of history) {
-    const seen = new Set<string>();
-    for (const item of turn.observations) {
-      if (!item || typeof item !== 'object') continue;
-      const payload = item as Record<string, unknown>;
-      if (payload.action !== 'files.list') continue;
-      const files = (payload.result as { files?: Array<{ name?: string }> } | null)?.files;
-      if (Array.isArray(files)) for (const file of files) seen.add(String(file.name || '').toLowerCase());
-    }
+    const seen = new Set(turn.observations.flatMap(item => item && typeof item === 'object' ? observedUploads(item as Record<string, unknown>) : []));
     if (names.every(name => seen.has(name))) return turn.runId;
   }
   return null;
@@ -370,8 +369,14 @@ type CoworkAnswer = z.infer<typeof coworkDocumentSchema>;
  * sentence built from the criteria, never a blank next to the approval. */
 /** What a proposal does when the model left no explanation of its own: the card
  * never arrives with a generic line when the loop knows what it is about. */
-function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof coworkCampaignDraftSchema> | undefined, person: string | null): string | null {
+function proposalNote(action: CoworkEffectAction, campaign: z.infer<typeof coworkCampaignDraftSchema> | undefined, person: string | null,
+  code?: CoworkCodeProposal): string | null {
   if (campaign) return campaignNote(campaign);
+  if (action === 'code.execute') {
+    return code?.inputFiles.length
+      ? `Propongo analizar ${code.inputFiles.join(', ')} con código en un entorno aislado. Revisa el código y los archivos en la tarjeta antes de aprobar.`
+      : 'Propongo ejecutar código en un entorno aislado. Revisa el código en la tarjeta antes de aprobarlo.';
+  }
   const who = person || 'este contacto';
   if (action === 'linkedin.message') return `Preparé un mensaje de LinkedIn para ${who}. Revisa el texto en la tarjeta antes de aprobarlo.`;
   if (action === 'linkedin.invite') return `Propongo invitar a ${who} en LinkedIn. Revisa la invitación en la tarjeta antes de aprobarla.`;
@@ -752,7 +757,7 @@ export async function runCoworkReadLoop(input: {
           throw rejected('Enrichment already ran in this thread', 'Ya se buscó el correo de este contacto en este hilo (mira history.actions): repetirlo gasta otro crédito y el proveedor responde lo mismo. No lo vuelvas a proponer; sigue con lo que pidió el usuario (por ejemplo, investigarlo con research.start) o explica la alternativa.');
         }
         const fallback = proposalNote(decision.action, campaign, targetName
-          ?? (decision.leadId ? observedLeadName(decision.leadId, observations, input.history || []) : null));
+          ?? (decision.leadId ? observedLeadName(decision.leadId, observations, input.history || []) : null), code);
         const note = await explain(decision) ?? (fallback ? await recordNote(fallback) : null);
         await input.authorize();
         input.signal.throwIfAborted();

@@ -62,7 +62,7 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider): P
       proposeEffect: async proposal => {
         corpusStageEffect(proposal, entry.world?.savedEmails);
         result.proposal = { kind: proposal.kind, label: proposal.label, targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),
-          ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}) };
+          ...(proposal.linkedinJob?.message ? { linkedinMessage: proposal.linkedinJob.message } : {}), ...(proposal.code ? { code: proposal.code } : {}) };
       },
     });
     const polished = polishCoworkAnswer(answer);
@@ -92,7 +92,9 @@ export function corpusShownAnswer(result: CorpusTurnResult): CoworkShownAnswer {
     proposal: result.proposal ? { kind: result.proposal.kind, label: result.proposal.label, note: result.note,
       // The review card shows the campaign's name and objective above its recipients and emails.
       ...(campaign ? { detail: { nombre: campaign.name, objetivo: campaign.objective, destinatarios: campaign.emails, correos: campaign.messages } }
-        : result.proposal.linkedinMessage ? { detail: result.proposal.linkedinMessage } : {}) } : null,
+        : result.proposal.linkedinMessage ? { detail: result.proposal.linkedinMessage }
+        // The code card shows the files it runs on and the code itself.
+        : result.proposal.code ? { detail: { archivos: result.proposal.code.inputFiles, codigo: result.proposal.code.code } } : {}) } : null,
     search: result.search,
     document: result.document,
     failed: result.failed,

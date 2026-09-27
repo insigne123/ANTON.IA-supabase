@@ -6,8 +6,8 @@ import { coworkFileSize } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
 
 /** Run-scoped file upload. Cowork reads CSV, JSON, Markdown and text when asked
- * (files.read). Lists what is already uploaded; contents are never previewed or
- * executed here. */
+ * (files.read), and approved code can use any of them in a later turn. Lists
+ * what is already uploaded; contents are never previewed or executed here. */
 export function FileUpload({ runId, onError, onAccessDenied }: {
   runId: string; onError: (message: string) => void; onAccessDenied: () => void;
 }) {
@@ -59,7 +59,7 @@ export function FileUpload({ runId, onError, onAccessDenied }: {
         <input id={`cowork-files-${runId}`} type="file" multiple accept=".csv,.json,.md,.txt,.xlsx" disabled={uploading}
           onChange={event => { void upload(event.target.files); event.target.value = ''; }} className="sr-only" />
       </label>
-      <span className="text-[12px] text-cw-muted">o arrástralos aquí · Cowork lee CSV, JSON, MD y TXT de hasta 20 MB; un Excel, guárdalo como CSV.</span>
+      <span className="text-[12px] text-cw-muted">o arrástralos aquí · Cowork lee CSV, JSON, MD y TXT de hasta 20 MB; un Excel lo analiza con código, con tu aprobación.</span>
     </div>
     {uploading && <p role="status" className="sr-only">Subiendo…</p>}
   </section>;

@@ -129,7 +129,8 @@ export type CorpusTurnResult = {
   actions: string[];
   reply: string;
   document: { title: string; content: string } | null;
-  proposal: { kind: string; label: string; targetId?: string; campaign?: unknown; linkedinMessage?: string } | null;
+  proposal: { kind: string; label: string; targetId?: string; campaign?: unknown; linkedinMessage?: string;
+    code?: { language: string; code: string; inputFiles: string[] } } | null;
   search: Record<string, unknown> | null;
   note: string | null;
   failed: string | null;

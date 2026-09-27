@@ -214,7 +214,7 @@ test('files.read says what exists when the name is not there, and does not open 
   assert.match(missing.nextStep, /Adjuntar archivos/);
   const excel = await readCoworkFileContent(client as never, scope, 'prospectos.xlsx') as { kind: string; message: string };
   assert.equal(excel.kind, 'unreadable');
-  assert.match(excel.message, /exporta la hoja a CSV/);
+  assert.match(excel.message, /analizar con código, con aprobación, o exportar la hoja a CSV/);
   assert.ok(!paths.some(path => path.startsWith('cowork-uploads:')), 'nothing was downloaded');
   await assert.rejects(readCoworkFileContent(client as never, scope, '../otro/leads.csv'), /inválido/);
   await assert.rejects(readCoworkFileContent(client as never, scope, '.env'), /inválido/);

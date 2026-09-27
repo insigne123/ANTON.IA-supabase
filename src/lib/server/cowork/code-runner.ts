@@ -3,6 +3,7 @@ import type { AuthContext } from '@/lib/server/auth-utils';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
 import { getCoworkRun } from './runs';
 import { requireCoworkWorkerAccess } from './access';
+import { listCoworkUploads, type CoworkUpload } from './uploads';
 import { coworkCodeProposalSchema, hashCoworkCodeProposal, type CoworkCodeProposal } from '@/lib/cowork/code-proposal';
 
 /** Fase 3: run owner-reviewed code on the isolated remote executor.
@@ -66,13 +67,23 @@ export async function stageCoworkCode(
   const parsed = coworkCodeProposalSchema.parse(proposal);
   const client = getSupabaseAdminClient();
   await requireCoworkWorkerAccess(client, scope);
-  // Input files must exist under this run's upload prefix: no cross-run reads.
+  // Input files are the person's own uploads. «Adjuntar archivos» stores them in
+  // the turn on screen, an earlier run than the one proposing code, so a file
+  // missing here is copied now from its newest upload: execution still reads
+  // only this run's prefix, and it runs on the copy the person reviewed.
   if (parsed.inputFiles.length > 0) {
-    const { data, error } = await client.storage.from(UPLOAD_BUCKET).list(uploadPrefix(scope, runId), { limit: 50 });
+    const bucket = client.storage.from(UPLOAD_BUCKET);
+    const { data, error } = await bucket.list(uploadPrefix(scope, runId), { limit: 50 });
     if (error) throw new Error('No se pudieron verificar los archivos de entrada.');
     const available = new Set((data || []).map(file => file.name.toLowerCase()));
-    for (const name of parsed.inputFiles) {
-      if (!available.has(name.toLowerCase())) throw new Error(`El archivo ${name} no está subido en este trabajo.`);
+    const missing = parsed.inputFiles.filter(name => !available.has(name.toLowerCase()));
+    const uploads = missing.length ? await listCoworkUploads(client, scope) : new Map<string, CoworkUpload[]>();
+    for (const name of missing) {
+      const stored = [...uploads.keys()].find(key => key.toLowerCase() === name.toLowerCase());
+      const newest = stored ? uploads.get(stored)?.[0] : undefined;
+      if (!stored || !newest) throw new Error(`El archivo ${name} no está entre tus archivos subidos.`);
+      const copied = await bucket.copy(`${uploadPrefix(scope, newest.runId)}/${stored}`, `${uploadPrefix(scope, runId)}/${name}`);
+      if (copied.error) throw new Error(`No se pudo preparar el archivo ${name}.`);
     }
   }
   const staged = await client.from('cowork_code_proposals').upsert(

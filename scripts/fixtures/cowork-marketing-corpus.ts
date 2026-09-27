@@ -367,12 +367,13 @@ export const FILE_CORPUS: CorpusCase[] = [
         || /import|no (?:están|aparecen|figuran) (?:guardad|entre tus contactos|en tus contactos)|aún no (?:están|aparecen|figuran)/i.test(r.reply) }] },
   { id: 'archivo-excel', title: 'Un Excel que Cowork aún no lee', world: filesWorld,
     request: 'revisa el excel prospectos.xlsx que subi y dime a quien contactar',
-    origin: 'Un formato que Cowork todavía no lee: lo dice y ofrece el camino (exportar a CSV), sin inventar su contenido.',
+    origin: 'Un formato que Cowork todavía no lee directo: propone analizarlo con código (con aprobación) u ofrece exportarlo a CSV, sin inventar su contenido.',
     checks: [...CORPUS_COMMON_CHECKS,
-      { label: 'pide exportarlo a CSV', test: r => /csv/i.test(r.reply) },
-      // The code runner only takes files uploaded in the same turn, and uploads land in the previous one.
-      { label: 'no propone ejecutar código con el archivo', test: r => r.proposal?.kind !== 'code_execute' },
-      { label: 'no afirma haberlo leído', test: r => !/(?:revisé|leí|en tu excel hay|el excel tiene)/i.test(r.reply) }] },
+      { label: 'ofrece un camino: analizarlo con código o exportarlo a CSV', test: r => r.proposal?.kind === 'code_execute' || /csv/i.test(r.reply) },
+      { label: 'si propone código, lo corre sobre el Excel', test: r => r.proposal?.kind !== 'code_execute'
+        || Boolean(r.proposal.code?.inputFiles.some(name => name.toLowerCase() === 'prospectos.xlsx')) },
+      // «no se ha leído» says the opposite: «leí» and «revisé» count only as whole words.
+      { label: 'no afirma haberlo leído', test: r => !/(?:revisé|leí)(?![a-záéíóúñ])|en tu excel hay|el excel tiene/i.test(r.reply) }] },
   { id: 'archivo-no-esta', title: 'Un archivo que no existe', world: filesWorld,
     request: 'lee el archivo clientes-2025.csv que te mande',
     origin: 'El nombre no coincide con ninguna subida: lo dice y muestra lo que sí hay, sin inventar datos.',

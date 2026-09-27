@@ -197,8 +197,9 @@ Object.assign(IDEAL, {
           ['3', 'Andrés Pizarro', 'Sodimac', 'Jefe de Personas; por importar'], ['4', 'Daniela Soto', 'Cencosud', 'HR Business Partner; por importar'],
           ['5', 'Valentina Lagos', 'Manpower', 'Consultora de Selección; por importar'], ['6', 'Marcela Rojas', 'Sodexo Chile', 'Ya contactada: seguimiento']] }] }),
   'archivo-excel': async context => !seen(context, 'files.read') ? read('files.read', 'prospectos.xlsx')
-    : answer('Todavía no puedo abrir archivos Excel desde aquí. Si guardas la hoja como CSV y la subes con el clip «Adjuntar archivos», te digo a quién contactar.',
-      null, undefined, { question: '¿La reviso apenas subas el CSV?' }),
+    : read('code.execute', null, { code: { language: 'python', inputFiles: ['prospectos.xlsx'],
+      code: "import pandas as pd\nprint(pd.read_excel('prospectos.xlsx').head(50).to_csv(index=False))" },
+    answer: { reply: 'Un Excel todavía no lo leo sin código: propongo abrir prospectos.xlsx en un entorno aislado y, con sus filas, decirte a quién contactar. También puedes exportarlo a CSV y subirlo.', document: null } }),
   'archivo-no-esta': async context => !seen(context, 'files.read') ? read('files.read', 'clientes-2025.csv')
     : answer('No encuentro un archivo llamado clientes-2025.csv entre lo que subiste. Lo que veo es asistentes-feria-rrhh.csv y prospectos.xlsx, por si era uno de esos.',
       null, [{ label: 'Era el de la feria', message: 'Era asistentes-feria-rrhh.csv, léelo' }], { question: '¿Lo subes con el clip «Adjuntar archivos»?' }),

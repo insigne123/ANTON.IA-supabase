@@ -13,7 +13,7 @@ export const COWORK_FILE_NOTICE = 'Contenido de un archivo que subió el usuario
 
 /** Why a found file is not read, with the way forward. */
 export const COWORK_FILE_UNREADABLE = {
-  excel: 'Todavía no se lee un Excel: exporta la hoja a CSV y súbela con el clip «Adjuntar archivos».',
+  excel: 'Un Excel todavía no se lee sin código: se puede analizar con código, con aprobación, o exportar la hoja a CSV y subirla.',
   other: 'Este tipo de archivo no se puede leer desde Cowork: sube un CSV, JSON, Markdown o texto.',
 } as const;
 
