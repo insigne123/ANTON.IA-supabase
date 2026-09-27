@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   coworkBlockFilename, coworkBlockMeta, coworkBlocksText, coworkDraftSteps, coworkEditedEmails, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv,
-  coworkVersionMessage, coworkWantsCampaignFromVersion,
+  coworkOnlyUsesVersion, coworkVersionMessage, coworkWantsCampaignFromVersion,
 } from './blocks';
 
 const sequence = { type: 'sequence' as const, title: 'Secuencia AXIS', steps: [
@@ -42,12 +42,15 @@ test('a version sent from a card reads back exactly, and nothing else does', () 
   assert.deepEqual(coworkEditedEmails(campaign), [
     { subject: 'Hola', body: 'Primer correo', day: 1 }, { subject: 'Seguimiento', body: 'Segundo correo, más corto.\n\nNicolás', day: 4 }]);
   assert.equal(coworkWantsCampaignFromVersion(campaign), true);
+  assert.equal(coworkOnlyUsesVersion(campaign), false);
   // Keeping a version is not asking for a campaign; an email names its recipients.
   const email = { type: 'email_draft' as const, title: 'Correo', to: ['Felipe Muñoz'], subject: 'Hola', body: 'Hola Felipe,\nNicolás' };
   const use = coworkVersionMessage(email, coworkDraftSteps(email), 'use', false);
   assert.equal(use, 'Usa exactamente esta versión de «Correo», sin cambiar el texto.\n\nAsunto: Hola\n\nHola Felipe,\nNicolás');
   assert.deepEqual(coworkEditedEmails(use), [{ subject: 'Hola', body: 'Hola Felipe,\nNicolás', day: null }]);
   assert.equal(coworkWantsCampaignFromVersion(use), false);
+  assert.equal(coworkOnlyUsesVersion(use), true);
+  assert.equal(coworkOnlyUsesVersion('Usa exactamente esta versión, pero mejora el asunto'), false);
   assert.match(coworkVersionMessage(email, coworkDraftSteps(email), 'campaign', false), /sin cambiar el texto, para Felipe Muñoz\./);
   // Anything a person types is not a version, even if it quotes one.
   for (const typed of ['Crea una campaña con estos correos', 'Usa exactamente esta versión\n\nsin asunto', 'Asunto: Hola\n\nHola', '']) {

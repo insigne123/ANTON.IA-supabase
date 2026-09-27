@@ -60,6 +60,11 @@ export function coworkWantsCampaignFromVersion(message: string) {
   return String(message || '').startsWith(CAMPAIGN_LEAD) && coworkEditedEmails(message) !== null;
 }
 
+/** Whether the message came from «Usar esta versión»: it keeps the text, and nothing is created yet. */
+export function coworkOnlyUsesVersion(message: string) {
+  return String(message || '').startsWith(USE_LEAD) && coworkEditedEmails(message) !== null;
+}
+
 /** CSV with a BOM for spreadsheets; formulas are neutralized like the contact export. */
 export function coworkTableCsv(block: Extract<CoworkBlock, { type: 'table' }>) {
   return '﻿' + [block.columns, ...block.rows].map(row => row.map(csvCell).join(',')).join('\r\n');

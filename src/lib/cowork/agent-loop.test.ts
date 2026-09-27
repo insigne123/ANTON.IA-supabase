@@ -718,6 +718,33 @@ test('a campaign asked with the exact emails carries them word for word, spaced 
   ]);
 });
 
+test('«Usar esta versión» proposes nothing: a proposal comes back as a correction, and the last decision confirms instead of failing', async () => {
+  const message = [
+    'Usa exactamente esta versión editada de «Secuencia AXIS», sin cambiar el texto.',
+    '', 'Correo 1 · día 1', 'Asunto: Antecedentes sin trámites', '', 'Hola,', 'Escribí esto yo.', 'Nicolás',
+  ].join('\n');
+  const create = coworkDecisionSchema.parse({ action: 'campaign.create', query: null, leadId: null, answer: { reply: 'Te dejo la campaña pausada.', document: null },
+    campaign: { name: 'AXIS', objective: 'Primera conversación',
+      criteria: { relationship: 'never_contacted', titles: [], industries: [], countries: [], sizes: [], seniorities: [], minimumDaysSinceSent: 0, excludeReplied: true, enrichedOnly: false },
+      emails: ['fmunoz@securitas.cl'], provider: 'google', messages: [{ subject: 'Antecedentes sin trámites', body: 'Hola,\nEscribí esto yo.\nNicolás', delayDays: 0 }] } });
+  const confirm = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Listo, uso tu versión tal cual.', document: null, question: '¿Creo la campaña pausada con ella?' } };
+  let proposals = 0;
+  const reasons: string[] = [];
+  const base = { message, runId: '00000000-0000-4000-8000-0000000000aa', signal: new AbortController().signal, authorize: async () => {},
+    record: async () => {}, execute: async () => ({ scope: 'own', campaigns: [] }), proposeEffect: async () => { proposals++; } };
+  const corrected = await runCoworkReadLoop({ ...base, decide: async (_observations, _mustAnswer, rejections = []) => {
+    reasons.push(...rejections.map(rejection => rejection.reason));
+    return rejections.length ? confirm : create;
+  } });
+  assert.equal(corrected.reply, 'Listo, uso tu versión tal cual.');
+  assert.match(reasons.join('|'), /Usar esta versión/);
+  // A model that insists until its last decision still leaves the person a clear answer.
+  const insisted = await runCoworkReadLoop({ ...base, ceiling: { decisions: 2, reads: 3, softDeadlineMs: 50_000 }, decide: async () => create });
+  assert.equal(insisted.reply, 'Listo: desde ahora uso tu versión tal cual, sin cambiarla.');
+  assert.equal(proposals, 0);
+});
+
 test('the coordinator sees what is left of the turn and may read past three when the ceiling is raised', async () => {
   const seen: Array<{ mustAnswer: boolean; budget?: CoworkTurnBudget }> = [];
   const batch = (inputs: string[]) => ({ action: 'reads.parallel' as const, query: null, leadId: null, answer: null,
