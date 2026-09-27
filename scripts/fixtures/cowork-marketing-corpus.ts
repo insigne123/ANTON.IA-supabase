@@ -6,6 +6,7 @@
 import { coworkStarter } from '../../src/lib/cowork/starters';
 import { coworkBlocksText, coworkVersionMessage, type CoworkEditedEmail } from '../../src/lib/cowork/blocks';
 import { COWORK_FILE_NOTICE, COWORK_FILE_UNREADABLE, coworkFileMissing, coworkFilePreview, coworkFilesByWords } from '../../src/lib/cowork/file-read';
+import { coworkWithAttachments } from '../../src/lib/cowork/attachments';
 import { CORPUS_COMMON_CHECKS, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -364,7 +365,7 @@ export const FILE_CORPUS: CorpusCase[] = [
       { label: 'ordena a las personas del archivo con correo, no solo a la primera', test: r => FAIR_PEOPLE.filter(name => text(r).includes(name)).length >= 4 },
       { label: 'una campaña solo va a contactos guardados', test: r => !campaign(r) || (campaign(r)?.emails || []).every(email => SAVED_EMAILS.includes(email)) },
       { label: 'dice qué pasa con los que no están guardados', test: r => Boolean(r.proposal)
-        || /import|no (?:están|aparecen|figuran) (?:guardad|entre tus contactos|en tus contactos)|aún no (?:están|aparecen|figuran)/i.test(r.reply) }] },
+        || /import|no (?:están|aparecen|figuran) (?:guardad|entre tus contactos|en tus contactos)|aún no (?:están|aparecen|figuran)/i.test(text(r)) }] },
   { id: 'archivo-excel', title: 'Un Excel que Cowork aún no lee', world: filesWorld,
     request: 'revisa el excel prospectos.xlsx que subi y dime a quien contactar',
     origin: 'Un formato que Cowork todavía no lee directo: propone analizarlo con código (con aprobación) u ofrece exportarlo a CSV, sin inventar su contenido.',
@@ -381,5 +382,20 @@ export const FILE_CORPUS: CorpusCase[] = [
       { label: 'dice que no lo encuentra', test: r => /no (?:lo |la )?(?:encuentro|encontré|aparece|está|veo)|no hay (?:un|ningún) archivo/i.test(r.reply) },
       { label: 'muestra el archivo que sí subió', test: r => /asistentes-feria-rrhh/i.test(text(r)) },
       { label: 'pide subirlo', test: r => /\bs[uú]b(?:e|es|as|ir|irlo|irla|elo|ela)\b|adjunta/i.test(`${r.reply}\n${r.question || ''}`) }] },
+  { id: 'adjunto-solo', title: 'Solo adjunta un archivo, sin escribir nada', world: filesWorld,
+    request: coworkWithAttachments('', ['asistentes-feria-rrhh.csv']),
+    origin: 'El usuario arrastró un CSV al cuadro y envió sin texto: Cowork lo lee por su nombre, dice qué trae y propone el siguiente paso.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'lee el archivo adjunto por su nombre', test: r => (r.reads || []).some(read => read.action === 'files.read' && read.input === 'asistentes-feria-rrhh.csv') },
+      { label: 'dice cuántas personas trae (8)', test: r => /\b8\b|\bocho\b/i.test(r.reply) },
+      { label: 'no pregunta qué archivo es', test: r => !/(?:qué|cuál) archivo/i.test(`${r.reply}\n${r.question || ''}`) }] },
+  { id: 'adjunto-con-pedido', title: 'Adjunta un archivo y pide algo sin nombrarlo', world: filesWorld,
+    request: coworkWithAttachments('¿a quiénes les escribo primero?', ['asistentes-feria-rrhh.csv']),
+    origin: 'El pedido no dice «el archivo»: el adjunto es el contexto, y Cowork prioriza a sus personas.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'lee el archivo adjunto por su nombre', test: r => (r.reads || []).some(read => read.action === 'files.read' && read.input === 'asistentes-feria-rrhh.csv') },
+      { label: 'ordena a las personas del archivo con correo, no solo a la primera', test: r => FAIR_PEOPLE.filter(name => text(r).includes(name)).length >= 4 },
+      { label: 'dice qué pasa con los que no están guardados', test: r => Boolean(r.proposal)
+        || /import|no (?:están|aparecen|figuran) (?:guardad|entre tus contactos|en tus contactos)|aún no (?:están|aparecen|figuran)/i.test(text(r)) }] },
 ];
 

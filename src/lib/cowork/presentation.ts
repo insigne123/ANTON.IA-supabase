@@ -1,4 +1,5 @@
 import { collectCoworkLeadRows } from './lead-export';
+import { coworkMessageAttachments } from './attachments';
 import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
   coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep } from './contracts';
 
@@ -399,8 +400,10 @@ export function coworkDisplayMessage(message: string) {
   return String(message || '').replace(ID_REFERENCE, '').trim();
 }
 
+/** A thread's title: the text of its first message, or its files when it only carried files. */
 export function coworkCleanTitle(message: string, max = 90) {
-  const text = coworkDisplayMessage(message).replace(/\s+/g, ' ').trim();
+  const { text: written, files } = coworkMessageAttachments(message);
+  const text = coworkDisplayMessage(written || (files.length ? `Archivos: ${files.join(', ')}` : '')).replace(/\s+/g, ' ').trim();
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 }
 

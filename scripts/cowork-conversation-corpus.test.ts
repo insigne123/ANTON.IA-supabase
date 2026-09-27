@@ -203,6 +203,13 @@ Object.assign(IDEAL, {
   'archivo-no-esta': async context => !seen(context, 'files.read') ? read('files.read', 'clientes-2025.csv')
     : answer('No encuentro un archivo llamado clientes-2025.csv entre lo que subiste. Lo que veo es asistentes-feria-rrhh.csv y prospectos.xlsx, por si era uno de esos.',
       null, [{ label: 'Era el de la feria', message: 'Era asistentes-feria-rrhh.csv, léelo' }], { question: '¿Lo subes con el clip «Adjuntar archivos»?' }),
+  'adjunto-solo': async context => context.observations.length === 0 ? parallel([{ action: 'files.read', input: FAIR }, { action: 'leads.search', input: '' }])
+    : answer('Es la lista de la feria: 8 personas con nombre, empresa, cargo y correo; 6 tienen correo. Marcela Rojas y Camila Fuentes ya están en tus contactos.',
+      null, [{ label: 'A quién escribo primero', message: '¿A quiénes de la lista les escribo primero?' }], { question: '¿Te digo a quiénes escribirles primero?' }),
+  'adjunto-con-pedido': async context => context.observations.length === 0 ? parallel([{ action: 'files.read', input: FAIR }, { action: 'leads.search', input: '' }])
+    : !seen(context, 'contacted.search') ? read('contacted.search', '')
+    : answer('Partiría por Camila Fuentes: ya está en tus contactos, tiene correo y aún no le escribes. Después, Tomás, Andrés, Daniela y Valentina, que primero hay que importar con Importar Leads.',
+      null, undefined, { question: '¿Te redacto el correo para Camila?' }),
 } satisfies Record<string, CorpusDecider>);
 
 const ALL_CASES = [...CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS];

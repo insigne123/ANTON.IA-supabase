@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, Library, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
-  coworkDisplayMessage, coworkFileSize, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
+  coworkFileSize, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
   coworkTurnSuggestions, isCoworkActive, type CoworkArtifact,
 } from '@/lib/cowork/presentation';
 import { coworkReplyBody, type CoworkSuggestion } from '@/lib/cowork/contracts';
@@ -13,6 +13,7 @@ import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkBlockMeta, coworkEditedEmails, type CoworkEditedEmail } from '@/lib/cowork/blocks';
 import { cn } from '@/lib/utils';
 import { CoworkActivity } from './CoworkActivity';
+import { CoworkUserMessage } from './CoworkAttachments';
 import { BlockCard, CoworkBlockIcon, MetricsBlock } from './CoworkBlocks';
 import { CoworkApproval } from './CoworkApproval';
 import { CoworkMarkdown } from './CoworkMarkdown';
@@ -174,8 +175,7 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
     {run.automatic
       ? <p className="flex items-center gap-2 text-[12.5px] text-cw-muted"><CornerDownRight className="h-3.5 w-3.5" aria-hidden="true" />Continuó automáticamente con el resultado</p>
       : <div className="flex justify-end">
-        {version ? <VersionMessage message={run.message} emails={version} />
-          : <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-[18px] rounded-br-md bg-cw-user px-4 py-2.5 text-[15px] leading-[1.55] text-cw-text">{coworkDisplayMessage(run.message)}</p>}
+        {version ? <VersionMessage message={run.message} emails={version} /> : <CoworkUserMessage message={run.message} />}
       </div>}
 
     <div className="flex gap-3">
