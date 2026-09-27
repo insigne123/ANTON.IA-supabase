@@ -564,6 +564,7 @@ export async function runCoworkReadLoop(input: {
   // worse than that answer: no more reads, and a failed retry returns it.
   let closingFallback: CoworkAnswer | null = null;
   let campaignsListed = false;
+  let filesListed = false;
   for (let turn = 0; turn < ceiling.decisions; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
@@ -749,7 +750,23 @@ export async function runCoworkReadLoop(input: {
           observations.push(listed);
           originRunId = effectTargetRun(decision.action, targetId, observations, input.history || [], input.runId || '');
         }
-        if (!originRunId) throw rejected('Effect target must be observed first', 'El objetivo de la propuesta no aparece en los resultados de este hilo: consúltalo primero (leads.search, campaigns.list, draft.get o research.get_existing) y usa su ID exacto. Para crear una campaña, los destinatarios deben ser contactos guardados con correo.');
+        // The same for code on uploaded files proposed before reading them (seen with an
+        // Excel): the loop lists the uploads once instead of rejecting the whole turn away.
+        if (!originRunId && decision.action === 'code.execute' && !filesListed) {
+          filesListed = true;
+          await input.authorize();
+          input.signal.throwIfAborted();
+          const listed: CoworkObservation = { action: 'files.list', input: '', result: await input.execute('files.list', '') };
+          readsUsed++;
+          await input.record(listed);
+          observations.push(listed);
+          originRunId = codeOriginRunId(code?.inputFiles || [], observations, input.history || [], input.runId || '');
+        }
+        if (!originRunId) {
+          throw rejected('Effect target must be observed first', decision.action === 'code.execute'
+            ? 'Los archivos de code.execute no están entre las subidas del usuario: usa el nombre exacto que muestra files.list o files.read; si falta, pide subirlo con el clip «Adjuntar archivos».'
+            : 'El objetivo de la propuesta no aparece en los resultados de este hilo: consúltalo primero (leads.search, campaigns.list, draft.get o research.get_existing) y usa su ID exacto. Para crear una campaña, los destinatarios deben ser contactos guardados con correo.');
+        }
         if (decision.answer?.document && turn < last) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
         const targetName = describeLeadTarget(decision.action, targetId, observations, input.history || []);
         const label = effectLabel(decision.action, targetId, targetName);

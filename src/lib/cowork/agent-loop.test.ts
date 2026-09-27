@@ -251,6 +251,20 @@ test('code execution anchors input files to files.list observations', async () =
   assert.equal(proposals[1].originRunId, runId);
 });
 
+test('code proposed before reading its upload: the loop lists the uploads once instead of failing the turn', async () => {
+  const runId = '00000000-0000-4000-8000-000000000010';
+  const reads: string[] = [];
+  const proposals: Array<{ originRunId: string }> = [];
+  const analyze = { action: 'code.execute' as const, query: null, leadId: null,
+    code: { language: 'python' as const, code: 'print(1)', inputFiles: ['prospectos.xlsx'] }, answer: null };
+  await runCoworkReadLoop({ message: 'Revisa el excel', runId, signal: new AbortController().signal, authorize: async () => {}, record: async () => {},
+    execute: async action => { reads.push(action); return { scope: 'own_uploads', files: [{ name: 'prospectos.xlsx', runId: 'otro', size: 9 }] }; },
+    proposeEffect: async (proposal: { originRunId: string }) => { proposals.push(proposal); },
+    decide: async () => analyze });
+  assert.deepEqual(reads, ['files.list']);
+  assert.equal(proposals[0].originRunId, runId);
+});
+
 test('code execution also takes a file that files.read found, here or in an earlier turn, but not one it missed', async () => {
   const runId = '00000000-0000-4000-8000-000000000010';
   const parentId = '00000000-0000-4000-8000-000000000011';
