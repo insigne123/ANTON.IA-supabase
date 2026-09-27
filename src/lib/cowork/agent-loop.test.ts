@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { coworkDecisionSchema, runCoworkReadLoop } from './agent-loop';
+import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
 
 const answer = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Un contacto encontrado.', document: null } };
 const search = { action: 'leads.search' as const, query: 'Logística', leadId: null, answer: null };
@@ -45,7 +46,8 @@ test('tool loop is bounded even when the model never finishes', async () => {
     message: 'Busca', signal: new AbortController().signal, authorize: async () => {},
     decide: async () => search, execute: async () => { calls++; return {}; }, record: async () => {},
   }), /budget exhausted/);
-  assert.equal(calls, 3);
+  // Every decision but the last may read; the last one must answer.
+  assert.equal(calls, COWORK_TURN_DEFAULTS.decisions - 1);
 });
 
 test('access revoked after a model decision prevents tool execution', async () => {
@@ -133,6 +135,7 @@ test('parallel and sequential queries share one total read budget', async () => 
   let decisions = 0;
   await assert.rejects(runCoworkReadLoop({
     message: 'Compara', signal: new AbortController().signal, authorize: async () => {},
+    ceiling: { ...COWORK_TURN_DEFAULTS, reads: 3 },
     decide: async (_observations, mustAnswer) => {
       if (decisions++ === 0) return { action: 'reads.parallel', query: null, leadId: null, answer: null,
         reads: ['uno','dos','tres'].map(input => ({ action: 'leads.search', input })) };
@@ -669,4 +672,95 @@ test('a campaign asked with the exact emails carries them word for word, spaced 
     { subject: 'Antecedentes sin trámites', body: 'Hola,\nEscribí esto yo.\nNicolás', delayDays: 0 },
     { subject: '¿Lo vemos?', body: 'Hola,\n¿Te sirve el jueves?\nNicolás', delayDays: 4 },
   ]);
+});
+
+test('the coordinator sees what is left of the turn and may read past three when the ceiling is raised', async () => {
+  const seen: Array<{ mustAnswer: boolean; budget?: CoworkTurnBudget }> = [];
+  const batch = (inputs: string[]) => ({ action: 'reads.parallel' as const, query: null, leadId: null, answer: null,
+    reads: inputs.map(input => ({ action: 'leads.search' as const, input })) });
+  // A complete answer: no closing correction spends another decision.
+  const closed = { action: 'answer' as const, query: null, leadId: null,
+    answer: { reply: 'Comparé los seis segmentos.', document: null, question: '¿Te preparo la campaña para el primero?' } };
+  let reads = 0;
+  const result = await runCoworkReadLoop({
+    message: 'Compara seis segmentos', signal: new AbortController().signal, authorize: async () => {},
+    ceiling: { decisions: 5, reads: 6, softDeadlineMs: 50_000 },
+    execute: async () => { reads++; return {}; }, record: async () => {},
+    decide: async (_observations, mustAnswer, _rejections, budget) => {
+      seen.push({ mustAnswer, budget });
+      return seen.length === 1 ? batch(['uno', 'dos', 'tres']) : seen.length === 2 ? batch(['cuatro', 'cinco', 'seis']) : closed;
+    },
+  });
+  assert.equal(result.reply, 'Comparé los seis segmentos.');
+  assert.equal(reads, 6);
+  assert.deepEqual(seen, [
+    { mustAnswer: false, budget: { reads: 6, readsLeft: 6, decisionsLeft: 4 } },
+    { mustAnswer: false, budget: { reads: 6, readsLeft: 3, decisionsLeft: 3 } },
+    // All the reads are spent: the third decision answers.
+    { mustAnswer: true, budget: { reads: 6, readsLeft: 0, decisionsLeft: 2 } },
+  ]);
+});
+
+test('past the soft deadline the turn answers with what it has, without a closing correction', async () => {
+  let clock = 0;
+  let decisions = 0;
+  const bare = { action: 'answer' as const, query: null, leadId: null, answer: { reply: 'Tienes 4 contactos con correo.', document: null } };
+  const result = await runCoworkReadLoop({
+    message: 'Revisa mis contactos', signal: new AbortController().signal, authorize: async () => {},
+    now: () => clock,
+    execute: async () => { clock += 51_000; return {}; }, record: async () => {},
+    decide: async (_observations, mustAnswer) => {
+      decisions++;
+      if (decisions === 1) return search;
+      assert.equal(mustAnswer, true);
+      return bare;
+    },
+  });
+  // The answer has no closing question, but there is no time left to ask for one.
+  assert.equal(result.reply, 'Tienes 4 contactos con correo.');
+  assert.equal(decisions, 2);
+});
+
+test('a read asked for after the soft deadline is refused and the turn still answers', async () => {
+  let clock = 0;
+  let decisions = 0;
+  let reads = 0;
+  const reasons: string[] = [];
+  const result = await runCoworkReadLoop({
+    message: 'Revisa mis contactos', signal: new AbortController().signal, authorize: async () => {},
+    now: () => clock,
+    execute: async () => { reads++; clock += 51_000; return {}; }, record: async () => {},
+    decide: async (_observations, _mustAnswer, rejections = []) => {
+      decisions++;
+      reasons.push(...rejections.map(item => item.reason));
+      return decisions < 3 ? search : answer;
+    },
+  });
+  assert.equal(result.reply, 'Un contacto encontrado.');
+  assert.equal(reads, 1);
+  assert.match(reasons.join('|'), /Se acabó el tiempo de este turno/);
+});
+
+test('a specialist review sees at most three observations of the turn', async () => {
+  const reasons: string[] = [];
+  let decisions = 0;
+  const specialists = { action: 'specialists.review' as const, query: null, leadId: null, answer: null,
+    specialists: [{ role: 'analyst' as const, objective: 'Compara', evidence: [0, 1, 2] }] };
+  const result = await runCoworkReadLoop({
+    message: 'Analiza cuatro segmentos', signal: new AbortController().signal, authorize: async () => {},
+    // Only a raised ceiling reaches four observations.
+    ceiling: { decisions: 5, reads: 6, softDeadlineMs: 50_000 },
+    execute: async () => ({}), record: async () => {},
+    review: async () => { assert.fail('must not review four observations'); },
+    decide: async (_observations, _mustAnswer, rejections = []) => {
+      decisions++;
+      reasons.push(...rejections.map(item => item.reason));
+      if (decisions === 1) return { action: 'reads.parallel' as const, query: null, leadId: null, answer: null,
+        reads: ['uno', 'dos', 'tres'].map(input => ({ action: 'leads.search' as const, input })) };
+      if (decisions === 2) return search;
+      return decisions === 3 ? specialists : answer;
+    },
+  });
+  assert.equal(result.reply, 'Un contacto encontrado.');
+  assert.match(reasons.join('|'), /solo está disponible con hasta 3 consultas/);
 });

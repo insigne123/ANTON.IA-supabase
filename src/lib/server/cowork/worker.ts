@@ -1,5 +1,6 @@
 import { generateStructuredWithTelemetry } from '@/ai/openai-json';
 import { coworkDecisionSchema, runCoworkReadLoop } from '@/lib/cowork/agent-loop';
+import { coworkTurnCeiling } from '@/lib/cowork/turn-budget';
 import { coworkFailureCategory, coworkFailureMessage } from '@/lib/cowork/failure-messages';
 import { polishCoworkAnswer } from '@/lib/cowork/answer-quality';
 import { getSupabaseAdminClient } from '@/lib/server/supabase-admin';
@@ -135,29 +136,32 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     const runLease = process.env.COWORK_OPERATION_LEASES_ENABLED === 'true' ? run.lease_token : undefined;
     const readGateway = createCoworkOperationGateway(client, coworkReadCapabilities(client, scope), { authorize, runLease });
     const operationScope = { userId: scope.userId, organizationId: scope.organizationId, runId: run.id };
+    // How much this turn may spend; the coordinator decides within it.
+    const turnCeiling = coworkTurnCeiling();
     const instructions = coworkAgentInstructions({
+      turnCeiling,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
       threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. Búsquedas disponibles hoy: ${remainingSearches}. Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,
     });
     const result = await runCoworkReadLoop({
-      message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize,
+      message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize, ceiling: turnCeiling,
       resumedObservations: coworkSpecialistQueueEnabled() ? await loadCoworkSpecialistResume(client, scope, run.id) : undefined,
       review: coworkSpecialistQueueEnabled() ? async (tasks, observations) => {
         await authorize();
         return enqueueCoworkSpecialists(client, run.id, run.lease_token, tasks, observations);
       } : undefined,
-      decide: async (observations, mustAnswer, rejections = []) => {
+      decide: async (observations, mustAnswer, rejections = [], turnBudget) => {
         const reservationId = await reserveCoworkModelCall(client, run.id, run.lease_token, 'coordinator');
         const turn = await generateStructuredWithTelemetry({
           schema: coworkDecisionSchema,
           systemPrompt: `${instructions.systemPrompt}\n${coworkSpecialistQueueEnabled()
             ? 'specialists.review: una vez por turno, specialists [{role: analyst|researcher|verifier, objective, evidence: índices de observaciones actuales}]. Máximo dos roles distintos. Si necesitas esta revisión, reserva una decisión antes del último turno; mustAnswer exige responder.' + (process.env.COWORK_SPECIALIST_TOOLS_ENABLED === 'true'
-              ? ' Cada tarea puede incluir read {action,input}: analyst permite metrics.overview/crm.record; researcher research.get_existing/leads.get; verifier privacy.contactability/crm.collaboration. Solo IDs observados en su evidencia. Cada read consume una de las tres lecturas totales del turno, junto con las ya ejecutadas. No permite escrituras ni proveedores externos.'
+              ? ' Cada tarea puede incluir read {action,input}: analyst permite metrics.overview/crm.record; researcher research.get_existing/leads.get; verifier privacy.contactability/crm.collaboration. Solo IDs observados en su evidencia. La revisión ve como máximo tres consultas del turno, contando cada read junto con las ya ejecutadas. No permite escrituras ni proveedores externos.'
               : ' Solo analizan datos observados; no asignes read porque las herramientas están deshabilitadas.')
             : 'specialists.review está deshabilitado.'}`,
           prompt: JSON.stringify(coworkDecisionContext(instructions, {
-            history, request: run.message, observations, mustAnswer, executionPolicy, userContext,
+            history, request: run.message, observations, mustAnswer, executionPolicy, userContext, turnBudget,
             ...(rejections.length ? { rejectedDecisions: rejections } : {}),
           })),
           openAiModel: process.env.COWORK_MODEL, allowDefaultModelFallback: false,

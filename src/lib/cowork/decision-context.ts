@@ -1,5 +1,6 @@
 import { coworkAgentInstructions } from './agent-instructions';
 import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION } from './contracts';
+import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget } from './turn-budget';
 
 /** The organization's working time zone. ANTON.IA schedules and reports in
  * Chile; override with COWORK_TIME_ZONE for another market. */
@@ -92,11 +93,22 @@ const USER_CONTEXT_INSTRUCTION = 'Datos del usuario leídos al iniciar este trab
 /** Shared by the worker and AXIS replay. Time comes from the server, not the model. */
 export function coworkDecisionContext(
   instructions: ReturnType<typeof coworkAgentInstructions>,
-  input: { history: unknown; request: string; observations: unknown[]; mustAnswer: boolean; executionPolicy: unknown; rejectedDecisions?: unknown[];
-    userContext?: CoworkUserContext | null },
+  {
+    turnBudget, ...input
+  }: { history: unknown; request: string; observations: unknown[]; mustAnswer: boolean; executionPolicy: unknown; rejectedDecisions?: unknown[];
+    userContext?: CoworkUserContext | null;
+    /** What the loop has left for this turn; without it, reads are counted from the observations.
+     * Decisions stay the loop's business: it asks for the answer with mustAnswer. */
+    turnBudget?: CoworkTurnBudget },
   now = new Date(),
   timeZone = coworkTimeZone(),
 ) {
+  const maximumReads = turnBudget?.reads ?? COWORK_TURN_DEFAULTS.reads;
+  const readsUsed = input.observations.reduce<number>((used, item) => {
+    const action = (item as { action?: string } | null)?.action;
+    return used + (action === 'specialists.review' || action === COWORK_NOTE_ACTION || action === COWORK_PLAN_ACTION ? 0
+      : action === 'privacy.contactability_batch' || action === 'lists.review_batch' ? maximumReads : 1);
+  }, 0);
   const observedLeadIds = new Set<string>();
   for (const observation of input.observations) {
     const result = (observation as { result?: { items?: Array<{ lead_id?: string }> } } | null)?.result;
@@ -118,12 +130,8 @@ export function coworkDecisionContext(
     // The plan belongs to the first consulting decision (rule 12); repeating it only costs output.
     ...(input.observations.length ? { planStatus: 'El plan ya se mostró: en esta decisión outline es null.' } : {}),
     readBudget: {
-      maximum: 3,
-      remaining: Math.max(0, 3 - input.observations.reduce<number>((used, item) => {
-        const action = (item as { action?: string } | null)?.action;
-        return used + (action === 'specialists.review' || action === COWORK_NOTE_ACTION || action === COWORK_PLAN_ACTION ? 0
-          : action === 'privacy.contactability_batch' || action === 'lists.review_batch' ? 3 : 1);
-      }, 0)),
+      maximum: maximumReads,
+      remaining: turnBudget?.readsLeft ?? Math.max(0, maximumReads - readsUsed),
       instruction: 'No repitas una consulta ya observada en esta ejecución ni en el hilo reciente. Si no está confirmado que el correo esté sincronizado, volver a leer la misma fuente no lo confirma: responde con lo que sabes y el próximo paso disponible.',
     },
     clock: { serverNow: now.toISOString(), timezone: 'UTC', source: 'server', timeZone, localNow: localNow(now, timeZone) },

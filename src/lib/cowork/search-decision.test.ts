@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runCoworkReadLoop, coworkDecisionSchema } from './agent-loop';
+import { COWORK_TURN_DEFAULTS } from './turn-budget';
 
 test('unambiguous single matching read preserves search input when model omits query', async () => {
   const calls: string[] = [];
@@ -25,7 +26,7 @@ test('mismatched read cannot supply a direct search argument', async () => {
         reads: [{ action: 'leads.search', input: 'Rafael' }] });
     },
   }), /Missing tool argument|budget exhausted/);
-  assert.equal(feedback.length, 4);
+  assert.equal(feedback.length, COWORK_TURN_DEFAULTS.decisions);
   assert.equal(feedback[0], '');
   assert.match(feedback[1], /Falta el argumento de la consulta/);
 });

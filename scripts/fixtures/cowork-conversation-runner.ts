@@ -8,6 +8,7 @@ import { COWORK_NOTE_ACTION, COWORK_PLAN_ACTION, coworkNoteText, coworkPlanSteps
 import { coworkFailureMessage } from '../../src/lib/cowork/failure-messages';
 import { polishCoworkAnswer } from '../../src/lib/cowork/answer-quality';
 import { coworkBlocksText } from '../../src/lib/cowork/blocks';
+import { coworkTurnCeiling } from '../../src/lib/cowork/turn-budget';
 import type { CoworkShownAnswer } from '../../src/lib/cowork/judge';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 import type { z } from 'zod';
@@ -16,8 +17,11 @@ type Decision = z.infer<typeof coworkDecisionSchema>;
 export type CorpusContext = ReturnType<typeof coworkDecisionContext>;
 export type CorpusDecider = (context: CorpusContext, meta: { caseId: string; turn: number }) => Promise<Decision>;
 
+/** The same ceiling the worker reads from the environment (defaults when unset). */
+export const corpusCeiling = coworkTurnCeiling();
+
 export const corpusInstructions = coworkAgentInstructions({
-  externalSearch: true, automaticExternalSearch: false,
+  turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false,
   threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
 });
 
@@ -45,9 +49,9 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider): P
   try {
     const answer = await runCoworkReadLoop({
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
-      signal: new AbortController().signal, authorize: async () => {},
-      decide: (observations, mustAnswer, rejections: CoworkRejection[] = []) => decide(coworkDecisionContext(corpusInstructions, {
-        history: { turns, olderTurnsOmitted: false }, request: entry.request, observations, mustAnswer,
+      signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling,
+      decide: (observations, mustAnswer, rejections: CoworkRejection[] = [], turnBudget) => decide(coworkDecisionContext(corpusInstructions, {
+        history: { turns, olderTurnsOmitted: false }, request: entry.request, observations, mustAnswer, turnBudget,
         executionPolicy: { mode: 'approval' }, userContext: entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext,
         ...(rejections.length ? { rejectedDecisions: rejections } : {}),
       }, CORPUS_NOW, 'America/Santiago'), { caseId: entry.id, turn: decision++ }),

@@ -17,6 +17,7 @@ import { coworkCrmRecordPatchSchema, type CoworkCrmRecordPatch } from './crm-rec
 import { coworkCrmAssignSchema, coworkExceptionResolveSchema, coworkMissionControlSchema,
   type CoworkCrmAssign, type CoworkExceptionResolve, type CoworkMissionControl } from './team-proposals';
 import { coworkMessageContextPatchSchema, type CoworkMessageContextPatch } from './message-context-proposal';
+import { COWORK_TURN_DEFAULTS, type CoworkTurnBudget, type CoworkTurnCeiling } from './turn-budget';
 
 export const coworkEffectKindSchema = z.enum(['save_contact', 'start_research',
   'request_draft', 'enrich_contact', 'send_email', 'campaign_create', 'campaign_activate', 'campaign_pause', 'code_execute',
@@ -296,12 +297,15 @@ export type CoworkRejection = { action: string; reason: string };
 
 const MISSING_PROPOSAL_FIELDS = 'Faltan datos de la propuesta: usa un ID observado como objetivo y completa el objeto que exige la acción (campaign, code, profile, savedSearch, crmRecord, stepId, crmAssign, exceptionResolve, missionControl, messageContext, leadIds, linkedinMessage o campaignId).';
 
-function budgetFeedback(readsUsed: number) {
-  const left = Math.max(0, 3 - readsUsed);
+function budgetFeedback(readsUsed: number, maximum: number) {
+  const left = Math.max(0, maximum - readsUsed);
   return left > 0
     ? `Solo quedan ${left} lecturas en este trabajo: pide como máximo ${left} o responde con lo observado.`
     : 'No quedan lecturas en este trabajo: responde con lo observado o propone un paso sobre un objetivo ya observado.';
 }
+
+/** Specialists cite observations by index 0 to 2 (specialists.ts): a review sees at most three. */
+const SPECIALIST_OBSERVATIONS = 3;
 
 function rejected(message: string, feedback: string) {
   return new CoworkDecisionRejected(message, feedback);
@@ -495,8 +499,13 @@ export async function runCoworkReadLoop(input: {
   resumedObservations?: CoworkObservation[];
   signal: AbortSignal;
   authorize: () => Promise<void>;
-  /** rejections: earlier decisions of this run the loop refused, with the reason. */
-  decide: (observations: CoworkObservation[], mustAnswer: boolean, rejections?: CoworkRejection[]) => Promise<Decision>;
+  /** How much this turn may spend; the coordinator decides within it (turn-budget.ts). */
+  ceiling?: CoworkTurnCeiling;
+  /** Clock for the soft deadline, injectable in tests. */
+  now?: () => number;
+  /** rejections: earlier decisions of this run the loop refused, with the reason.
+   * budget: what is left of the ceiling at this decision. */
+  decide: (observations: CoworkObservation[], mustAnswer: boolean, rejections?: CoworkRejection[], budget?: CoworkTurnBudget) => Promise<Decision>;
   execute: (action: CoworkReadAction, value: string) => Promise<unknown>;
   record: (observation: CoworkObservation) => Promise<void>;
   review?: (tasks: SpecialistTask[], observations: CoworkObservation[]) => Promise<unknown>;
@@ -514,6 +523,12 @@ export async function runCoworkReadLoop(input: {
     if (decision.action !== 'answer' || !decision.answer) throw new Error('Resumed review must produce a final answer');
     return decision.answer;
   }
+  const ceiling = input.ceiling ?? COWORK_TURN_DEFAULTS;
+  const now = input.now ?? Date.now;
+  const startedAt = now();
+  const last = ceiling.decisions - 1;
+  // Past the soft deadline the turn wraps up: the next decision answers with what it has.
+  const late = () => now() - startedAt >= ceiling.softDeadlineMs;
   let readsUsed = 0;
   let reviewed = false;
   const rejections: CoworkRejection[] = [];
@@ -544,16 +559,19 @@ export async function runCoworkReadLoop(input: {
   // worse than that answer: no more reads, and a failed retry returns it.
   let closingFallback: CoworkAnswer | null = null;
   let campaignsListed = false;
-  for (let turn = 0; turn < 4; turn++) {
+  for (let turn = 0; turn < ceiling.decisions; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
+    const overdue = late();
+    const budget: CoworkTurnBudget = { reads: ceiling.reads, readsLeft: Math.max(0, ceiling.reads - readsUsed), decisionsLeft: last - turn };
     let decision: Decision;
     try {
-      decision = coworkDecisionSchema.parse(await input.decide(observations, turn === 3 || readsUsed >= 3 || closingFallback !== null, rejections.slice()));
+      decision = coworkDecisionSchema.parse(await input.decide(observations,
+        turn === last || readsUsed >= ceiling.reads || closingFallback !== null || overdue, rejections.slice(), budget));
     } catch (error) {
       const reason = invalidDecisionReason(error);
       if (closingFallback && !input.signal.aborted) return closingFallback;
-      if (reason === null || turn === 3 || input.signal.aborted) throw error;
+      if (reason === null || turn === last || input.signal.aborted) throw error;
       rejections.push({ action: 'decision', reason });
       continue;
     }
@@ -562,7 +580,8 @@ export async function runCoworkReadLoop(input: {
       if (decision.action === 'answer') {
         if (!decision.answer) throw rejected('Missing final answer', 'Elegiste answer sin contenido: entrega answer.reply con la respuesta completa.');
         if (closingFallback) return completeFrom(closingFallback, decision.answer);
-        const closing = turn < 3 ? closingFeedback(decision.answer) : null;
+        // A correction needs one more decision, and time for it.
+        const closing = turn < last && !late() ? closingFeedback(decision.answer) : null;
         if (closing) {
           // Asked directly, not thrown: the catch below returns closingFallback once it is set.
           closingFallback = decision.answer;
@@ -573,8 +592,11 @@ export async function runCoworkReadLoop(input: {
       }
       if (decision.action === 'specialists.review' && closingFallback) return closingFallback;
       if (decision.action === 'specialists.review') {
-        if (reviewed || turn === 3 || !input.review || !decision.specialists || !observations.length) {
+        if (reviewed || turn === last || !input.review || !decision.specialists || !observations.length) {
           throw rejected('Specialist review unavailable or budget exhausted', 'La revisión de especialistas no está disponible ahora: continúa con lecturas o responde.');
+        }
+        if (observations.length + decision.specialists.filter(task => task.read).length > SPECIALIST_OBSERVATIONS) {
+          throw rejected('Specialist review sees at most three observations', 'La revisión de especialistas solo está disponible con hasta 3 consultas en el turno: responde con lo observado.');
         }
         reviewed = true;
         await input.authorize(); input.signal.throwIfAborted();
@@ -592,7 +614,7 @@ export async function runCoworkReadLoop(input: {
         }
         const parsed = coworkSearchCriteriaSchema.safeParse(decision.searchCriteria);
         if (!parsed.success) throw rejected('Invalid external search proposal', `Criterios de búsqueda inválidos: ${issueSummary(parsed.error)}. Corrígelos.`);
-        if (decision.answer?.document && turn < 3) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
+        if (decision.answer?.document && turn < last) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
         const note = await explain(decision) ?? await recordNote(searchNote(parsed.data, input.message));
         await input.authorize(); input.signal.throwIfAborted();
         try { await input.proposeSearch(parsed.data); } catch (error) { throw proposalRejection(error, input.signal); }
@@ -606,7 +628,7 @@ export async function runCoworkReadLoop(input: {
           return Array.isArray(result?.items) && result.items.some(item => item.id === decision.leadId);
         });
         if (!observed) throw rejected('Note target must be observed first', 'El contacto de la nota no aparece en los resultados de este trabajo: búscalo primero con leads.search y usa su id.');
-        if (decision.answer?.document && turn < 3) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
+        if (decision.answer?.document && turn < last) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
         const note = await explain(decision);
         await input.authorize();
         input.signal.throwIfAborted();
@@ -723,10 +745,10 @@ export async function runCoworkReadLoop(input: {
           originRunId = effectTargetRun(decision.action, targetId, observations, input.history || [], input.runId || '');
         }
         if (!originRunId) throw rejected('Effect target must be observed first', 'El objetivo de la propuesta no aparece en los resultados de este hilo: consúltalo primero (leads.search, campaigns.list, draft.get o research.get_existing) y usa su ID exacto. Para crear una campaña, los destinatarios deben ser contactos guardados con correo.');
-        if (decision.answer?.document && turn < 3) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
+        if (decision.answer?.document && turn < last) throw rejected('Document with proposal', DOCUMENT_WITH_PROPOSAL);
         const targetName = describeLeadTarget(decision.action, targetId, observations, input.history || []);
         const label = effectLabel(decision.action, targetId, targetName);
-        if (kind === 'enrich_contact' && turn < 3 && repeatedEnrichment(label, input.history || [])) {
+        if (kind === 'enrich_contact' && turn < last && repeatedEnrichment(label, input.history || [])) {
           throw rejected('Enrichment already ran in this thread', 'Ya se buscó el correo de este contacto en este hilo (mira history.actions): repetirlo gasta otro crédito y el proveedor responde lo mismo. No lo vuelvas a proponer; sigue con lo que pidió el usuario (por ejemplo, investigarlo con research.start) o explica la alternativa.');
         }
         const fallback = proposalNote(decision.action, campaign, targetName
@@ -752,10 +774,12 @@ export async function runCoworkReadLoop(input: {
       }
       // Only reads remain below: after a closing correction the first answer stands instead.
       if (closingFallback) return closingFallback;
-      if (turn === 3) throw new Error('Cowork tool budget exhausted');
+      if (turn === last) throw new Error('Cowork tool budget exhausted');
+      // Checked again here: the decision itself may have run past the soft deadline.
+      if (late()) throw rejected('Cowork turn time exhausted', 'Se acabó el tiempo de este turno: responde con lo observado y di en una línea qué queda para el siguiente paso.');
       await recordPlan(decision);
       if (decision.action === 'reads.plan') {
-        if (!decision.plan || readsUsed + decision.plan.length > 3) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed));
+        if (!decision.plan || readsUsed + decision.plan.length > ceiling.reads) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, ceiling.reads));
         readsUsed += decision.plan.length;
         const results = await executeCoworkReadPlan(decision.plan, {
           signal: input.signal, authorize: input.authorize,
@@ -772,7 +796,7 @@ export async function runCoworkReadLoop(input: {
         // A fixed read asked twice (for example, with two periods) is one read.
         const reads = decision.reads?.filter((task, index, all) =>
           all.findIndex(other => other.action === task.action && other.input === task.input) === index);
-        if (!reads || readsUsed + reads.length > 3) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed));
+        if (!reads || readsUsed + reads.length > ceiling.reads) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, ceiling.reads));
         readsUsed += reads.length;
         const results = await executeCoworkParallelReads(reads, {
           signal: input.signal, authorize: input.authorize,
@@ -786,7 +810,7 @@ export async function runCoworkReadLoop(input: {
         // One batch consumes the turn's read budget: at most 5 minimized checks.
         if (!decision.leadIds || readsUsed > 0) throw rejected('Cowork tool budget exhausted', decision.leadIds
           ? 'Las revisiones en lote solo pueden ser la primera consulta del trabajo: responde o usa lecturas individuales.' : 'Falta leadIds con 1 a 5 contactos observados.');
-        readsUsed = 3;
+        readsUsed = ceiling.reads;
         await input.authorize();
         input.signal.throwIfAborted();
         const result = await input.execute(decision.action, JSON.stringify(decision.leadIds));
@@ -797,7 +821,7 @@ export async function runCoworkReadLoop(input: {
         observations.push(observation);
         continue;
       }
-      if (readsUsed >= 3) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed));
+      if (readsUsed >= ceiling.reads) throw rejected('Cowork tool budget exhausted', budgetFeedback(readsUsed, ceiling.reads));
       const value = COWORK_DOMAIN_FIXED_READS.some(action => action === decision.action) ? ''
         : decision.action === 'leads.search' || decision.action === 'crm.search' || decision.action === 'contacted.search' || decision.action === 'deliverability.check' || decision.action === 'compliance.obligation'
         ? (decision.query ?? (decision.reads?.length === 1 && decision.reads[0].action === decision.action
@@ -832,7 +856,7 @@ export async function runCoworkReadLoop(input: {
     } catch (error) {
       // Correctable refusals go back to the model; the last decision must stand on its own.
       if (closingFallback && error instanceof CoworkDecisionRejected && !input.signal.aborted) return closingFallback;
-      if (!(error instanceof CoworkDecisionRejected) || turn === 3 || input.signal.aborted) throw error;
+      if (!(error instanceof CoworkDecisionRejected) || turn === last || input.signal.aborted) throw error;
       rejections.push({ action: decision.action, reason: error.feedback });
     }
   }
