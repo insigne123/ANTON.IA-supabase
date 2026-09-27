@@ -2,11 +2,11 @@
 
 ## Direccion
 
-La app debe sentirse como una herramienta SaaS premium y sobria, con una disciplina de simpleza inspirada en Apple: clara, precisa, silenciosa y facil de usar.
+La app debe sentirse como una herramienta de trabajo clara y poderosa: que el usuario entienda que hacer y lo haga rapido. Se mantiene la paleta de colores actual; el estilo Apple-like ya no es una restriccion.
 
 ## Principios
 
-- una sola accion principal por superficie
+- una accion principal destacada por superficie, con las acciones utiles visibles cerca de donde se necesitan
 - profundidad por capas, no por ruido
 - fondos con atmosfera sutil, no planos sin intencion
 - cards y paneles con radios amplios y sombras suaves
