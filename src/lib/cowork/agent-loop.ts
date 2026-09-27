@@ -6,7 +6,7 @@ import { coworkCodeProposalSchema, type CoworkCodeProposal } from './code-propos
 import { coworkSearchCriteriaSchema, type CoworkSearchCriteria } from './search-proposal';
 import { coworkReadTaskSchema, executeCoworkParallelReads } from './parallel-reads';
 import { collectCoworkLeadRows } from './lead-export';
-import { coworkEditedEmails, type CoworkEditedEmail } from './blocks';
+import { coworkEditedEmails, coworkOnlyUsesVersion, type CoworkEditedEmail } from './blocks';
 import { coworkReadPlanSchema, executeCoworkReadPlan } from './read-plan';
 import { specialistTasksSchema, type SpecialistTask } from './specialists';
 import { COWORK_DOMAIN_FIXED_READS, COWORK_DOMAIN_ENTITY_READS, type CoworkDomainRead } from './domain-reads';
@@ -315,6 +315,20 @@ function rejected(message: string, feedback: string) {
  * deliver the document first; on the last decision the proposal stands. */
 const DOCUMENT_WITH_PROPOSAL = 'Entregaste un documento junto con una propuesta y el documento se perdería. Si el usuario pidió un documento, entrégalo con answer (reply y document) y ofrece la acción en answer.question; si no, propón la acción con document null.';
 
+/** Every decision that proposes something for approval: an effect, a note or a search. */
+const PROPOSAL_ACTIONS = new Set<string>(['crm.propose_note', 'prospecting.propose_search',
+  'leads.save_contact', 'research.start', 'draft.request', 'lead.enrich', 'email.send',
+  'campaign.create', 'campaign.activate', 'campaign.pause', 'code.execute',
+  'profile.update', 'saved_search.create', 'saved_search.update', 'saved_search.delete', 'campaign.stop_v2',
+  'crm.update_record', 'campaign.prepare_draft_v2',
+  'crm.assign_lead', 'exception.resolve', 'mission.control', 'message_context.update',
+  'lead.enrich_batch', 'campaign.schedule_batch', 'linkedin.invite', 'linkedin.message']);
+const USE_VERSION_ONLY = 'El usuario tocó «Usar esta versión»: solo fija su texto y todavía no quiere crear nada. No propongas acciones: responde en una frase que usarás su versión tal cual (sin reescribirla) y pregunta el siguiente paso, por ejemplo crear la campaña pausada con ella.';
+const VERSION_KEPT_ANSWER = {
+  reply: 'Listo: desde ahora uso tu versión tal cual, sin cambiarla.', document: null, question: '¿Creo la campaña pausada con ella?',
+  suggestions: [{ label: 'Crear la campaña', message: 'Sí, crea la campaña pausada con esta versión' }],
+};
+
 /** An answer closes with the next-step question and the quick replies that
  * answer it (rules 4 and 9). The model gets one correction per run, never on
  * its last decision: after that the answer stands as it is. */
@@ -565,6 +579,7 @@ export async function runCoworkReadLoop(input: {
   let closingFallback: CoworkAnswer | null = null;
   let campaignsListed = false;
   let filesListed = false;
+  const keepsVersionOnly = coworkOnlyUsesVersion(input.message);
   for (let turn = 0; turn < ceiling.decisions; turn++) {
     input.signal.throwIfAborted();
     await input.authorize();
@@ -612,6 +627,13 @@ export async function runCoworkReadLoop(input: {
         await input.record(observation);
         observations.push(observation);
         continue;
+      }
+      // «Usar esta versión» only keeps the person's text: the model proposed a campaign
+      // anyway in 1 to 3 of every 3 runs, so the loop turns any proposal back into the answer.
+      if (keepsVersionOnly && PROPOSAL_ACTIONS.has(decision.action)) {
+        // On the last decision the confirmation itself is the answer, never a failed turn.
+        if (turn === last) return VERSION_KEPT_ANSWER;
+        throw rejected('Version kept, nothing proposed yet', USE_VERSION_ONLY);
       }
       if (decision.action === 'prospecting.propose_search') {
         if (!input.proposeSearch || !decision.searchCriteria) {
