@@ -86,7 +86,7 @@ export function CoworkMark({ working = false, size = 26, className }: { working?
   return <span className={cn('relative inline-flex shrink-0 items-center justify-center', className)} style={{ width: size, height: size }} aria-hidden="true">
     {working && <span className="cw-orbit absolute inset-[-3px] rounded-full border-2 border-transparent border-t-cw-accent" />}
     {/* eslint-disable-next-line @next/next/no-img-element */}
-    <img src="/icon.png" alt="" width={size} height={size} className="h-full w-full rounded-full object-cover ring-1 ring-cw-border" />
+    <img src="/icon-192.png" alt="" width={size} height={size} className="h-full w-full rounded-full object-cover ring-1 ring-cw-border" />
   </span>;
 }
 

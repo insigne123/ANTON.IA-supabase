@@ -33,6 +33,13 @@ do $$
 declare
   v_organization_id uuid;
 begin
+  if not exists (
+    select 1 from auth.users
+    where lower(btrim(email)) ~ '^[^@[:space:]]+@grupoexpro[.]com$'
+  ) then
+    return;
+  end if;
+
   select id into strict v_organization_id
   from public.organizations
   where lower(btrim(name)) = 'grupoexpro';

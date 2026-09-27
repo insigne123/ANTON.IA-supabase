@@ -1,5 +1,9 @@
 -- Create the shared workspace from the empty organization provisioned for its
 -- invited owner. Historical data and legacy memberships move separately.
+-- The CLI runs migration statements individually; locks and the temporary
+-- table must share an explicit transaction. Empty development databases have
+-- no GrupoExpro users and do not need this production-only data migration.
+begin;
 set local lock_timeout = '10s';
 set local statement_timeout = '2min';
 
@@ -25,6 +29,10 @@ declare
   v_relation record;
   v_row_count bigint;
 begin
+  if not exists (select 1 from grupoexpro_workspace_users) then
+    return;
+  end if;
+
   if (select count(*) from grupoexpro_workspace_users) <> 6 then
     raise exception 'Expected exactly 6 GrupoExpro users, found %',
       (select count(*) from grupoexpro_workspace_users);
@@ -129,3 +137,4 @@ end;
 $$;
 
 notify pgrst, 'reload schema';
+commit;

@@ -5,6 +5,7 @@ import { ArrowDown, CornerDownRight, PanelLeft, PanelRight, RotateCcw, SquarePen
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import type { CoworkRun } from '@/lib/cowork/contracts';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
+import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
 import {
   coworkCleanTitle, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
   coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
@@ -16,7 +17,7 @@ import { CoworkHome } from './CoworkHome';
 import { CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
 import { CoworkTurn, type CoworkTurnData } from './CoworkTurn';
-import { FileUpload } from './FileUpload';
+import { CoworkAttachments, CoworkUserMessage, useCoworkAttachments, type CoworkAttachment } from './CoworkAttachments';
 import { CoworkMark, CwButton, CwStatusPill } from './ui';
 
 type ThreadState = CoworkTurnData & {
@@ -72,7 +73,7 @@ function setWorkUrl(id: string | null, mode: 'push' | 'replace') {
 function PendingTurn({ text }: { text: string }) {
   return <article className="cw-rise space-y-4" aria-label="Mensaje enviándose">
     <div className="flex justify-end">
-      <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-[18px] rounded-br-md bg-cw-user px-4 py-2.5 text-[15px] leading-[1.55] text-cw-text">{text}</p>
+      <CoworkUserMessage message={text} />
     </div>
     <div className="flex items-center gap-3">
       <CoworkMark working size={26} className="hidden sm:inline-flex" />
@@ -130,6 +131,10 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const clearPrivateResults = useCallback(() => {
     setRuns([]); setState(null); setReady(false); setArtifactId(null); setOptimistic(null); setQueued(null);
   }, []);
+  const attach = useCoworkAttachments({ onError: setError, onAccessDenied: clearPrivateResults });
+  const clearAttachments = attach.clear;
+  /** The files of a queued message, back in the box if the person edits it. */
+  const queuedFiles = useRef<CoworkAttachment[]>([]);
 
   const request = useCallback(async (url: string, options?: RequestInit) => {
     const response = await fetch(url, { ...options, cache: 'no-store' });
@@ -185,7 +190,9 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     writeDraft(userId, message);
   }, [message, userId]);
 
-  // Selected conversation: poll while work is in flight and follow continuations.
+  // Selected conversation: refresh while work is in flight and follow continuations.
+  // While the worker is busy a live stream rings on every change, so the page
+  // refreshes right away; polling stays underneath as the fallback.
   useEffect(() => {
     if (!selected) { setAwaitingContinuation(false); setContinuationMissing(false); return; }
     let disposed = false;
@@ -194,10 +201,30 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     const openedAt = Date.now();
     let completionSeenAt: number | null = null;
     let failures = 0;
-    async function poll() {
+    let inflight = false;
+    let again = false;
+    let stream: EventSource | null = null;
+    let streamLive = false;
+    let streamFailed = false;
+    const closeStream = () => { stream?.close(); stream = null; streamLive = false; };
+    const openStream = () => {
+      if (stream || streamFailed || typeof EventSource === 'undefined') return;
+      const source = new EventSource(`/api/cowork/runs/${selected}/stream`);
+      stream = source;
+      source.onopen = () => { streamLive = true; };
+      source.addEventListener('change', () => { void poll(); });
+      source.addEventListener('end', () => { closeStream(); void poll(); });
+      source.onerror = () => {
+        streamLive = false;
+        // A refused connection is final: keep polling as before.
+        if (source.readyState === EventSource.CLOSED) { closeStream(); streamFailed = true; }
+      };
+    };
+    /** Reads the run once and returns when to read it again (null: no need). */
+    async function refresh(): Promise<number | null> {
       try {
         const data: ThreadState = await request(`/api/cowork/runs/${selected}`, { signal: controller.signal });
-        if (disposed) return;
+        if (disposed) return null;
         failures = 0;
         setState(data);
         setError('');
@@ -211,7 +238,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
           liveRuns.current.add(data.continuation.id);
           setWorkUrl(data.continuation.id, 'replace');
           setSelected(data.continuation.id);
-          return;
+          return null;
         }
         let delay: number | null = null;
         if (isCoworkActive(status)) {
@@ -220,11 +247,13 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
             && !data.events.some(event => event.kind === 'effect.started' || event.kind === 'search.started');
           const decisionPending = status === 'waiting_approval' && coworkProposalView(data.run, data.events)?.state === 'pending';
           // Nothing moves while a decision waits on you; otherwise stay close to live.
-          delay = decisionPending ? 10000 : Date.now() - openedAt < 60000 ? 2000 : 4000;
+          if (decisionPending) closeStream(); else openStream();
+          delay = decisionPending ? 10000 : status === 'running' && streamLive ? 15000 : Date.now() - openedAt < 60000 ? 2000 : 4000;
           if (status === 'queued' || status === 'waiting_workers' || approvedNotStarted) wake();
           setAwaitingContinuation(false);
           setContinuationMissing(false);
         } else if (coworkExpectsContinuation(data.events) && !data.continuation) {
+          closeStream();
           completionSeenAt ??= Date.now();
           // An old completion is not worth waiting for: measure from when it happened.
           const completedAt = Date.parse(data.events.slice().reverse().find(event => event.kind === 'run.completed')?.created_at || '');
@@ -234,22 +263,37 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
           setContinuationMissing(!waiting);
           if (waiting) delay = 2000;
         } else {
+          closeStream();
           setAwaitingContinuation(false);
           setContinuationMissing(false);
         }
-        if (delay !== null) timer = setTimeout(poll, delay);
+        return delay;
       } catch (problem) {
-        if (disposed || controller.signal.aborted) return;
+        if (disposed || controller.signal.aborted) return null;
         const status = (problem as { status?: number }).status;
         setError(problem instanceof Error ? problem.message : 'No se pudo actualizar el trabajo.');
         if (status !== 401 && status !== 403 && status !== 404 && failures < 3) {
           failures += 1;
-          timer = setTimeout(poll, 4000 * failures);
+          return 4000 * failures;
         }
+        closeStream();
+        return null;
       }
     }
+    // One read at a time: a ring during a read asks for one more right after it.
+    async function poll() {
+      if (disposed) return;
+      if (inflight) { again = true; return; }
+      inflight = true;
+      clearTimeout(timer);
+      let delay: number | null = null;
+      try { delay = await refresh(); } finally { inflight = false; }
+      if (disposed) return;
+      if (again) { again = false; void poll(); return; }
+      if (delay !== null) timer = setTimeout(poll, delay);
+    }
     void poll();
-    return () => { disposed = true; controller.abort(); clearTimeout(timer); };
+    return () => { disposed = true; controller.abort(); clearTimeout(timer); closeStream(); };
   }, [selected, threadVersion, request, wake]);
 
   // Restore from the URL and follow browser navigation.
@@ -269,10 +313,11 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     pinnedRun.current = options.pin ? id : null;
     setWorkUrl(id, 'push');
     setState(null); setSelected(id); setArtifactId(null); setMaximized(false); setDrawerOpen(false); setError('');
-    setOptimistic(null); setQueued(null); setShowFiles(false);
+    // Attached files belong to the message being written in this conversation.
+    setOptimistic(null); setQueued(null); setShowFiles(false); clearAttachments();
     stickToBottom.current = true;
     if (!id) requestAnimationFrame(() => composer.current?.focus());
-  }, []);
+  }, [clearAttachments]);
 
   // While following a continuation the previous state stays on screen until the new turn loads.
   const turns: CoworkTurnData[] = useMemo(() => state && selected
@@ -339,6 +384,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     autoOpened.current.add(latest.run.id);
     const produced = coworkTurnArtifacts(latest.run, latest.events);
     const best = produced.find(item => item.kind === 'document')
+      || produced.find(item => item.kind === 'block' && item.block.type === 'sequence')
+      || produced.find(item => item.kind === 'block' && item.block.type === 'table' && item.block.rows.length >= 6)
       || produced.find(item => item.kind === 'contacts' && item.count >= 3)
       || produced.find(item => item.kind === 'file');
     if (best) openArtifactPanel(best, null, false);
@@ -436,25 +483,29 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   }, [latest, resolving, request, wake]);
 
   async function submit() {
-    const text = message.trim();
-    if (!text || sending || !ready) return;
-    if (!selected) {
-      setMessage('');
-      if (!await post(text, null)) setMessage(text);
-      return;
-    }
-    if (!latest || !latestIsCurrent) { setQueued(text); setMessage(''); return; }
+    const typed = message.trim();
+    const files = attach.files;
+    // The attached files travel as the last lines of the message (attachments.ts).
+    const text = coworkWithAttachments(typed, files.map(file => file.name));
+    if (!text || sending || !ready || attach.uploading) return;
+    // The files leave the box with the message, and come back with the text if it could not be saved.
+    const send = async (parentRunId: string | null) => {
+      setMessage(''); attach.clear(); setShowFiles(false);
+      if (await post(text, parentRunId)) return;
+      setMessage(typed); attach.restore(files);
+    };
+    const queue = () => { queuedFiles.current = files; setQueued(text); setMessage(''); attach.clear(); setShowFiles(false); };
+    if (!selected) { await send(null); return; }
+    if (!latest || !latestIsCurrent) { queue(); return; }
     const status = latest.run.status;
     if (pendingDecision) {
       // Writing instead of deciding means "no, do this instead".
       if (!await resolve(false)) return;
-      setMessage('');
-      if (!await post(text, latest.run.id)) setMessage(text);
+      await send(latest.run.id);
       return;
     }
-    if (busy) { setQueued(text); setMessage(''); return; }
-    setMessage('');
-    if (!await post(text, status === 'completed' ? latest.run.id : (latest.run.parent_run_id ?? null))) setMessage(text);
+    if (busy) { queue(); return; }
+    await send(status === 'completed' ? latest.run.id : (latest.run.parent_run_id ?? null));
   }
 
   // Send a message written while the previous step was still running.
@@ -485,6 +536,17 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     if (!latest) return;
     void post(latest.run.message, latest.run.parent_run_id ?? null);
   }
+
+  // A quick reply is a message you did not have to type: same thread, same rules.
+  const canFollowUp = Boolean(ready && !sending && latest && latestIsCurrent && latest.run.status === 'completed' && !optimistic && !queued);
+  function followUp(text: string) {
+    if (!latest || !canFollowUp) return;
+    void post(text, latest.run.id);
+  }
+  // A version sent from the panel reads in the conversation; on phones the panel covers it.
+  const sendFromPanel = canFollowUp ? (text: string) => { followUp(text); if (!isDesktop) closeArtifact(); } : null;
+  const panelSendHint = pendingDecision ? 'Primero aprueba o descarta la propuesta pendiente.'
+    : !ready ? 'Cowork no está disponible ahora.' : 'Disponible cuando Cowork termine el paso actual.';
 
   async function cancel() {
     if (!latest || cancelling) return;
@@ -541,11 +603,22 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       : busy ? 'Escribe; lo envío al terminar este paso'
         : latest.run.status === 'completed' ? 'Responde o pide el siguiente paso…' : 'Reformula o indica cómo seguir…';
   const quotaNote = searchQuota ? `Búsquedas externas hoy: ${searchQuota.remaining} de ${searchQuota.limit}` : '';
+  const queuedView = queued ? coworkMessageAttachments(queued) : null;
 
+  // The clip, the dropped files and their chips work the same on the home box and in a conversation.
+  const fileProps = (composerId: string) => ({
+    onToggleFiles: () => setShowFiles(value => !value), filesOpen: showFiles,
+    hasAttachments: attach.files.length > 0, attaching: attach.uploading,
+    onDropFiles: (files: FileList) => { setShowFiles(true); void attach.upload(files); },
+    attachments: showFiles || attach.files.length > 0
+      ? <CoworkAttachments id={`${composerId}-files`} files={attach.files} uploading={attach.uploading} open={showFiles}
+        onUpload={files => void attach.upload(files)} onRemove={attach.remove} />
+      : null,
+  });
   const homeComposer = <CoworkComposer ref={composer} id="cowork-message" size="large" value={message} onChange={setMessage} onSubmit={() => void submit()}
-    placeholder="Describe lo que necesitas. Por ejemplo: «prioriza mis respuestas pendientes de hoy»"
+    placeholder="Describe lo que necesitas. Por ejemplo: «escríbele a mis contactos que aún no contacto»"
     ready={ready} sending={sending} submitLabel="Crear trabajo" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
-    footnote={quotaNote || undefined} />;
+    {...fileProps('cowork-message')} footnote={quotaNote || undefined} />;
 
   return <section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] md:h-[calc(100dvh-5.5rem)]">
     <div className={cn('hidden w-[256px] shrink-0 border-r border-cw-border bg-cw-rail', railVisible && 'lg:block')}>
@@ -587,7 +660,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
               {state?.olderTurnsOmitted && <p className="text-center text-[12px] text-cw-faint">Se muestran los últimos ocho turnos anteriores.</p>}
               {turns.map((turn, index) => <CoworkTurn key={turn.run.id} turn={turn} latest={index === turns.length - 1}
                 resolving={resolving} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
-                onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null}
+                onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null} onSuggestion={canFollowUp ? followUp : null}
                 budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)} />)}
               {continuationMissing && latestIsCurrent && latest?.run.status === 'completed' && !optimistic && !queued && ready && <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-[38px]">
                 <CwButton size="sm" variant="secondary" disabled={sending}
@@ -612,12 +685,14 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
                 placeholder={composerPlaceholder} ready={ready} sending={sending} submitLabel="Enviar mensaje"
                 onStop={active && !pendingDecision && latestIsCurrent ? () => void cancel() : null} stopping={cancelling}
                 canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
-                onToggleFiles={latest && latest.run.status === 'completed' ? () => setShowFiles(value => !value) : null} filesOpen={showFiles}
-                attachments={showFiles && latest && latest.run.status === 'completed' ? <FileUpload key={`files-${latest.run.id}`} runId={latest.run.id} onError={setError} onAccessDenied={clearPrivateResults} /> : null}
+                {...fileProps('cowork-followup')}
                 queued={queued ? {
-                  text: queued,
+                  text: queuedView ? queuedView.text || `Archivos: ${queuedView.files.join(', ')}` : queued,
                   note: pendingDecision ? 'Se enviará cuando resuelvas la propuesta' : 'Se enviará cuando termine este paso',
-                  onCancel: () => { setMessage(queued); setQueued(null); requestAnimationFrame(() => composer.current?.focus()); },
+                  onCancel: () => {
+                    setMessage(queuedView?.text ?? queued); attach.restore(queuedFiles.current); queuedFiles.current = []; setQueued(null);
+                    requestAnimationFrame(() => composer.current?.focus());
+                  },
                   onSendNow: pendingDecision ? () => void sendQueuedNow() : null,
                 } : null}
                 footnote="ANTON.IA puede equivocarse. Revisa cada propuesta antes de aprobarla." />
@@ -631,7 +706,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
         <CoworkArtifactPanel artifact={openArtifact} events={turns.find(turn => turn.run.id === openArtifact.runId)?.events || []}
           canResearch={Boolean(state?.canResearch) && latest?.run.status === 'completed'} canCreateDraft={Boolean(state?.canCreateDraft) && latest?.run.status === 'completed'}
           maximized={maximized} onToggleMaximize={() => setMaximized(value => !value)} onClose={closeArtifact} headingRef={artifactHeading}
-          onError={setError} onAccessDenied={clearPrivateResults} onUseReport={askAboutContact}
+          onError={setError} onAccessDenied={clearPrivateResults} onUseReport={askAboutContact} onSend={sendFromPanel} sendHint={panelSendHint}
           onSelectVersion={id => { if (turns.some(turn => turn.run.id === id)) { const doc = artifacts.find(item => item.runId === id && item.kind === 'document'); if (doc) setArtifactId(doc.id); } else choose(id, { pin: true }); }} />
       </div>
       : inConversation && latest && panelOpen && <div className="hidden w-[272px] shrink-0 border-l border-cw-border bg-cw-rail xl:block">

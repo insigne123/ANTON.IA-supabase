@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, type ReactNode } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { ArrowUp, LoaderCircle, Paperclip, Square, X } from 'lucide-react';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import { cn } from '@/lib/utils';
@@ -27,6 +27,12 @@ type Props = {
   onToggleFiles?: (() => void) | null;
   filesOpen?: boolean;
   attachments?: ReactNode;
+  /** Files are attached: the message can go without text. */
+  hasAttachments?: boolean;
+  /** A file is uploading: sending waits so the message names it. */
+  attaching?: boolean;
+  /** Files dropped anywhere on the box. */
+  onDropFiles?: ((files: FileList) => void) | null;
   queued?: { text: string; note: string; onCancel: () => void; onSendNow?: (() => void) | null } | null;
   footnote?: ReactNode;
   size?: 'large' | 'regular';
@@ -35,9 +41,11 @@ type Props = {
 /** Persistent composer: Enter sends, Shift+Enter adds a line, grows with the text. */
 export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function CoworkComposer({
   id, value, onChange, onSubmit, placeholder, ready, sending, submitLabel, onStop, stopping = false,
-  canAutonomous = false, mode, onModeChange, onToggleFiles, filesOpen = false, attachments, queued, footnote, size = 'regular',
+  canAutonomous = false, mode, onModeChange, onToggleFiles, filesOpen = false, attachments, hasAttachments = false, attaching = false, onDropFiles,
+  queued, footnote, size = 'regular',
 }, ref) {
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const [dragging, setDragging] = useState(false);
   useImperativeHandle(ref, () => ({ focus: () => textarea.current?.focus() }), []);
 
   useEffect(() => {
@@ -49,8 +57,9 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
     node.style.overflowY = node.scrollHeight > max ? 'auto' : 'hidden';
   }, [value, size]);
 
-  const canSend = ready && !sending && Boolean(value.trim());
-  const showStop = Boolean(onStop) && !value.trim() && !sending;
+  const canSend = ready && !sending && !attaching && (Boolean(value.trim()) || hasAttachments);
+  const showStop = Boolean(onStop) && !value.trim() && !hasAttachments && !sending;
+  const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types || []).includes('Files');
 
   return <div className="w-full">
     {queued && <div className="cw-rise mb-2 flex items-start gap-2 rounded-xl border border-cw-border bg-cw-panel px-3 py-2 text-[13px]">
@@ -63,9 +72,13 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
       <CwButton size="xs" variant="ghost" onClick={queued.onCancel} aria-label="Editar mensaje en espera"><X aria-hidden="true" />Editar</CwButton>
     </div>}
     <form onSubmit={event => { event.preventDefault(); if (canSend) onSubmit(); }}
+      onDragOver={onDropFiles ? event => { if (!carriesFiles(event)) return; event.preventDefault(); setDragging(true); } : undefined}
+      onDragLeave={onDropFiles ? event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); } : undefined}
+      onDrop={onDropFiles ? event => { if (!carriesFiles(event)) return; event.preventDefault(); setDragging(false); onDropFiles(event.dataTransfer.files); } : undefined}
       className={cn(
         'group/composer rounded-[22px] border border-cw-border-strong bg-cw-elevated shadow-[var(--cw-shadow)] transition-[box-shadow,border-color]',
         'focus-within:border-cw-border-strong focus-within:shadow-[0_0_0_4px_var(--cw-accent-soft),var(--cw-shadow)]',
+        dragging && 'border-cw-accent shadow-[0_0_0_4px_var(--cw-accent-soft),var(--cw-shadow)]',
       )}>
       <label htmlFor={id} className="sr-only">{size === 'large' ? 'Describe tu trabajo' : 'Escribe tu mensaje'}</label>
       <textarea

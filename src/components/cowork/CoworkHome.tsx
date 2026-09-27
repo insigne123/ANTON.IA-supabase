@@ -2,17 +2,9 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowRight } from 'lucide-react';
-import { coworkShortTime, coworkStatusCopy, type CoworkIconKey, type CoworkThreadSummary } from '@/lib/cowork/presentation';
+import { coworkShortTime, coworkStatusCopy, type CoworkThreadSummary } from '@/lib/cowork/presentation';
+import { COWORK_STARTERS } from '@/lib/cowork/starters';
 import { CoworkIcon, CoworkMark, CwStatusPill } from './ui';
-
-export const COWORK_SUGGESTIONS: Array<{ icon: CoworkIconKey; title: string; prompt: string }> = [
-  { icon: 'reply', title: 'Revisar mis pendientes', prompt: 'Revisa mis pendientes de hoy: respuestas por atender, seguimientos vencidos y reuniones por confirmar. Prioriza lo más urgente y dime qué hago primero.' },
-  { icon: 'globe', title: 'Buscar nuevos prospectos', prompt: 'Busca gerentes de recursos humanos en empresas de más de 200 empleados en Santiago de Chile.' },
-  { icon: 'chart', title: 'Informe de la semana', prompt: 'Prepara un informe de mis métricas de los últimos 7 días: envíos, respuestas y tasas, con lo que conviene mejorar.' },
-  { icon: 'campaign', title: 'Armar una campaña', prompt: 'Arma una campaña de seguimiento para mis contactos guardados del sector logística. Muéstrame los mensajes antes de crearla.' },
-  { icon: 'shield', title: 'Revisar entregabilidad', prompt: 'Revisa la entregabilidad de mi dominio y dime qué corregir para no caer en spam.' },
-  { icon: 'contacts', title: 'Revisar un contacto', prompt: 'Revisa a [nombre del contacto] y dime si está listo para contactar.' },
-];
 
 function greeting(hour: number) {
   if (hour < 5 || hour >= 20) return 'Buenas noches';
@@ -39,12 +31,12 @@ export function CoworkHome({ composer, threads, ready, loading, onSuggestion, on
       <div className="cw-rise mb-7 flex flex-col items-center text-center">
         <CoworkMark size={44} className="mb-4" />
         <h1 className="font-cw-heading text-2xl font-semibold leading-tight tracking-[-0.025em] text-cw-text sm:text-[2rem]">{hello}. ¿En qué avanzamos hoy?</h1>
-        <p className="mt-2 max-w-[34rem] text-[14.5px] leading-6 text-cw-muted">Consulto tus contactos, CRM, campañas y métricas, y preparo informes o borradores. Antes de cambiar algo te pido aprobación.</p>
+        <p className="mt-2 max-w-[34rem] text-[14.5px] leading-6 text-cw-muted">Escribo correos y mensajes de LinkedIn para tus contactos, busco prospectos nuevos y te cuento cómo vas. Antes de enviar o cambiar algo te pido aprobación.</p>
       </div>
       <div className="cw-rise [animation-delay:60ms]">{composer}</div>
       {!ready && !loading && <p className="mt-3 text-center text-[13px] text-cw-muted">El procesamiento todavía no está disponible. Puedes consultar los trabajos guardados.</p>}
       <div className="cw-rise mt-5 flex flex-wrap justify-center gap-2 [animation-delay:120ms]">
-        {COWORK_SUGGESTIONS.map(item => <button key={item.title} type="button" onClick={() => onSuggestion(item.prompt)}
+        {COWORK_STARTERS.map(item => <button key={item.id} type="button" onClick={() => onSuggestion(item.prompt)}
           className="inline-flex items-center gap-2 rounded-full border border-cw-border bg-cw-elevated px-3.5 py-2 text-[13.5px] text-cw-text shadow-[var(--cw-shadow-sm)] transition-colors hover:border-cw-border-strong hover:bg-cw-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
           <CoworkIcon name={item.icon} className="h-4 w-4 text-cw-accent" />{item.title}
         </button>)}

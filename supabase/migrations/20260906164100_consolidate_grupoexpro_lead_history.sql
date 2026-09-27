@@ -1,5 +1,6 @@
 -- Move user-attributable lead and enrichment history into GrupoExpro while
 -- preserving each row's original user_id.
+begin;
 set local lock_timeout = '10s';
 set local statement_timeout = '2min';
 
@@ -29,6 +30,10 @@ declare
   v_check record;
   v_actual bigint;
 begin
+  if not exists (select 1 from grupoexpro_lead_users) then
+    return;
+  end if;
+
   if (select count(*) from grupoexpro_lead_users) <> 6
     or (select count(*) from grupoexpro_lead_context) <> 1 then
     raise exception 'GrupoExpro identity preflight failed';
@@ -170,3 +175,4 @@ end;
 $$;
 
 notify pgrst, 'reload schema';
+commit;

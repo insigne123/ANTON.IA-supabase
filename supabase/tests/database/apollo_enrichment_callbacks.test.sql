@@ -398,6 +398,15 @@ insert into public.antonia_user_daily_usage (
   2
 );
 
+-- Legacy user-scoped refunds now debit the private daily credit bucket.
+insert into public.antonia_user_daily_credits (
+  user_id, date, usage_count, investigate_count
+) values (
+  'd0000000-0000-4000-8000-000000000001',
+  timezone('utc', now())::date,
+  2, 2
+);
+
 insert into public.apollo_enrichment_callbacks (
   user_id, organization_id, target_table, target_lead_id, apollo_person_id,
   token_hash, idempotency_key, operation_id, quota_resource, requested_fields,
@@ -847,11 +856,10 @@ select results_eq(
   'partial settlement retains only submitted user-scoped quota'
 );
 select is(
-  (select usage_count from public.antonia_user_daily_usage
-    where organization_id = 'd1000000-0000-4000-8000-000000000001'
-      and user_id = 'd0000000-0000-4000-8000-000000000001'
+  (select usage_count from public.antonia_user_daily_credits
+    where user_id = 'd0000000-0000-4000-8000-000000000001'
       and date = timezone('utc', now())::date
-      and resource = 'investigate'),
+      and investigate_count = 1),
   1,
   'partial settlement returns unsubmitted quota to the user bucket'
 );

@@ -1,5 +1,6 @@
 -- Retire GrupoExpro access from legacy personal organizations only after all
 -- attributable tenant data has moved. A banned technical owner preserves them.
+begin;
 set local lock_timeout = '10s';
 set local statement_timeout = '2min';
 
@@ -46,6 +47,10 @@ declare
   v_remaining bigint;
   v_archive_id uuid := (select archive_user_id from grupoexpro_archive_context);
 begin
+  if not exists (select 1 from grupoexpro_archive_users) then
+    return;
+  end if;
+
   if (select count(*) from grupoexpro_archive_users) <> 6
     or (select count(*) from grupoexpro_archive_context) <> 1
     or (select count(*) from grupoexpro_legacy_organizations) <> 3
@@ -166,3 +171,4 @@ end;
 $$;
 
 notify pgrst, 'reload schema';
+commit;

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CoworkCapability } from '@/lib/cowork/capabilities';
 import { queryCoworkLeads } from './lead-tools';
-import { queryCoworkExtendedReads, type CoworkExtendedReadAction } from './extended-reads';
+import { queryCoworkExtendedReads, readCoworkFileContent, type CoworkExtendedReadAction } from './extended-reads';
 import { readCoworkResearch } from './research-read';
 import { readCoworkSavedSearches } from './saved-searches';
 import { readCoworkProfile } from './profile-read';
@@ -192,6 +192,12 @@ export function coworkReadCapabilities(
     extended('app.context', 'Conexiones de correo, volúmenes y oferta, sin entrada'),
     extended('draft.get', 'Versión vigente de un borrador propio con su hash de contenido, por UUID'),
     extended('campaigns.list', 'Campañas propias con estado y destinatarios, sin entrada'),
-    extended('files.list', 'Archivos subidos para código (nombre, trabajo, tamaño), sin contenido'),
+    extended('files.list', 'Archivos subidos (nombre, trabajo, tamaño), sin contenido'),
+    {
+      name: 'files.read', version: 1, effect: 'read',
+      description: 'Contenido acotado de un archivo subido (CSV, JSON, Markdown o texto), por nombre; no ejecuta nada',
+      input: z.string().trim().min(1).max(120), output: z.unknown(),
+      execute: input => readCoworkFileContent(client, scope, input as string),
+    },
   ];
 }
