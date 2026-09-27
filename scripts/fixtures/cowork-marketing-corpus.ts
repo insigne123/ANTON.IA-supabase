@@ -398,4 +398,3 @@ export const FILE_CORPUS: CorpusCase[] = [
       { label: 'dice qué pasa con los que no están guardados', test: r => Boolean(r.proposal)
         || /import|no (?:están|aparecen|figuran) (?:guardad|entre tus contactos|en tus contactos)|aún no (?:están|aparecen|figuran)/i.test(text(r)) }] },
 ];
-
