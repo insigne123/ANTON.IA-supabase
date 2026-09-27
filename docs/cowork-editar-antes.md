@@ -90,6 +90,35 @@ La otra falla (`linkedin-seguimiento`, 1 de 3) es la conocida: no explicó cómo
   - no se aprobó nada.
 - Sin scroll horizontal en ningún caso.
 
+## Guarda de «Usar esta versión» (27 sep 2026)
+
+«Usar esta versión» solo fija el texto; crear la campaña es otro botón. Aun así, en `editar-usar` el modelo proponía la campaña a veces:
+
+| Corrida | Veces que propuso la campaña |
+|---|---|
+| #15 (dos corridas) | 2 de 6 |
+| #16 y #17 (cinco corridas) | 10 de 15 |
+| #19 | 3 de 3 |
+
+La regla ya lo pedía y el modelo no la cumplía siempre; con más reglas en el prompt empeoró. Por eso ahora lo hace el bucle, no el modelo:
+
+- **Rechazo corregible:** si el mensaje viene de «Usar esta versión» (`coworkOnlyUsesVersion`), cualquier propuesta se rechaza (efecto, nota o búsqueda). El rechazo pide confirmar en una frase y preguntar el siguiente paso.
+- **Si insiste hasta la última decisión,** el turno no falla: responde «Listo: desde ahora uso tu versión tal cual, sin cambiarla.» y pregunta si crea la campaña pausada, con el botón «Crear la campaña».
+- **«Crear campaña con esta versión» no cambia:** sigue proponiendo la campaña con el texto exacto.
+
+**Medición** (gpt-6-luna, 5 repeticiones, sobre #19):
+
+| Caso | Pasan |
+|---|---|
+| `editar-usar` | 5 de 5 |
+| `editar-campana` | 5 de 5 |
+| `editar-luego-crear` | 5 de 5 |
+
+- En 3 de las 5 respuestas de `editar-usar` el modelo intentó crear la campaña y la guarda lo evitó:
+  - una vez el propio modelo corrigió;
+  - dos veces respondió la confirmación fija en la última decisión.
+- Pruebas: `blocks.test.ts` (qué mensaje es solo «usar») y `agent-loop.test.ts` (rechazo, corrección y respuesta fija sin propuestas).
+
 ## Pendientes
 
 - **La tarjeta del chat no muestra la edición:** sigue con el texto de Cowork; la versión editada vive en el panel. Se puede marcar «Editado» también en la tarjeta.
