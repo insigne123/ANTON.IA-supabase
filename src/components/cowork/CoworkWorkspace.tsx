@@ -5,6 +5,7 @@ import { ArrowDown, CornerDownRight, PanelLeft, PanelRight, RotateCcw, SquarePen
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import type { CoworkRun } from '@/lib/cowork/contracts';
 import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
+import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
 import {
   coworkCleanTitle, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
   coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
@@ -16,7 +17,7 @@ import { CoworkHome } from './CoworkHome';
 import { CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
 import { CoworkTurn, type CoworkTurnData } from './CoworkTurn';
-import { FileUpload } from './FileUpload';
+import { CoworkAttachments, CoworkUserMessage, useCoworkAttachments, type CoworkAttachment } from './CoworkAttachments';
 import { CoworkMark, CwButton, CwStatusPill } from './ui';
 
 type ThreadState = CoworkTurnData & {
@@ -72,7 +73,7 @@ function setWorkUrl(id: string | null, mode: 'push' | 'replace') {
 function PendingTurn({ text }: { text: string }) {
   return <article className="cw-rise space-y-4" aria-label="Mensaje enviándose">
     <div className="flex justify-end">
-      <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-[18px] rounded-br-md bg-cw-user px-4 py-2.5 text-[15px] leading-[1.55] text-cw-text">{text}</p>
+      <CoworkUserMessage message={text} />
     </div>
     <div className="flex items-center gap-3">
       <CoworkMark working size={26} className="hidden sm:inline-flex" />
@@ -130,6 +131,10 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const clearPrivateResults = useCallback(() => {
     setRuns([]); setState(null); setReady(false); setArtifactId(null); setOptimistic(null); setQueued(null);
   }, []);
+  const attach = useCoworkAttachments({ onError: setError, onAccessDenied: clearPrivateResults });
+  const clearAttachments = attach.clear;
+  /** The files of a queued message, back in the box if the person edits it. */
+  const queuedFiles = useRef<CoworkAttachment[]>([]);
 
   const request = useCallback(async (url: string, options?: RequestInit) => {
     const response = await fetch(url, { ...options, cache: 'no-store' });
@@ -308,10 +313,11 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     pinnedRun.current = options.pin ? id : null;
     setWorkUrl(id, 'push');
     setState(null); setSelected(id); setArtifactId(null); setMaximized(false); setDrawerOpen(false); setError('');
-    setOptimistic(null); setQueued(null); setShowFiles(false);
+    // Attached files belong to the message being written in this conversation.
+    setOptimistic(null); setQueued(null); setShowFiles(false); clearAttachments();
     stickToBottom.current = true;
     if (!id) requestAnimationFrame(() => composer.current?.focus());
-  }, []);
+  }, [clearAttachments]);
 
   // While following a continuation the previous state stays on screen until the new turn loads.
   const turns: CoworkTurnData[] = useMemo(() => state && selected
@@ -477,25 +483,29 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   }, [latest, resolving, request, wake]);
 
   async function submit() {
-    const text = message.trim();
-    if (!text || sending || !ready) return;
-    if (!selected) {
-      setMessage('');
-      if (!await post(text, null)) setMessage(text);
-      return;
-    }
-    if (!latest || !latestIsCurrent) { setQueued(text); setMessage(''); return; }
+    const typed = message.trim();
+    const files = attach.files;
+    // The attached files travel as the last lines of the message (attachments.ts).
+    const text = coworkWithAttachments(typed, files.map(file => file.name));
+    if (!text || sending || !ready || attach.uploading) return;
+    // The files leave the box with the message, and come back with the text if it could not be saved.
+    const send = async (parentRunId: string | null) => {
+      setMessage(''); attach.clear(); setShowFiles(false);
+      if (await post(text, parentRunId)) return;
+      setMessage(typed); attach.restore(files);
+    };
+    const queue = () => { queuedFiles.current = files; setQueued(text); setMessage(''); attach.clear(); setShowFiles(false); };
+    if (!selected) { await send(null); return; }
+    if (!latest || !latestIsCurrent) { queue(); return; }
     const status = latest.run.status;
     if (pendingDecision) {
       // Writing instead of deciding means "no, do this instead".
       if (!await resolve(false)) return;
-      setMessage('');
-      if (!await post(text, latest.run.id)) setMessage(text);
+      await send(latest.run.id);
       return;
     }
-    if (busy) { setQueued(text); setMessage(''); return; }
-    setMessage('');
-    if (!await post(text, status === 'completed' ? latest.run.id : (latest.run.parent_run_id ?? null))) setMessage(text);
+    if (busy) { queue(); return; }
+    await send(status === 'completed' ? latest.run.id : (latest.run.parent_run_id ?? null));
   }
 
   // Send a message written while the previous step was still running.
@@ -593,11 +603,22 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       : busy ? 'Escribe; lo envío al terminar este paso'
         : latest.run.status === 'completed' ? 'Responde o pide el siguiente paso…' : 'Reformula o indica cómo seguir…';
   const quotaNote = searchQuota ? `Búsquedas externas hoy: ${searchQuota.remaining} de ${searchQuota.limit}` : '';
+  const queuedView = queued ? coworkMessageAttachments(queued) : null;
 
+  // The clip, the dropped files and their chips work the same on the home box and in a conversation.
+  const fileProps = (composerId: string) => ({
+    onToggleFiles: () => setShowFiles(value => !value), filesOpen: showFiles,
+    hasAttachments: attach.files.length > 0, attaching: attach.uploading,
+    onDropFiles: (files: FileList) => { setShowFiles(true); void attach.upload(files); },
+    attachments: showFiles || attach.files.length > 0
+      ? <CoworkAttachments id={`${composerId}-files`} files={attach.files} uploading={attach.uploading} open={showFiles}
+        onUpload={files => void attach.upload(files)} onRemove={attach.remove} />
+      : null,
+  });
   const homeComposer = <CoworkComposer ref={composer} id="cowork-message" size="large" value={message} onChange={setMessage} onSubmit={() => void submit()}
     placeholder="Describe lo que necesitas. Por ejemplo: «escríbele a mis contactos que aún no contacto»"
     ready={ready} sending={sending} submitLabel="Crear trabajo" canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
-    footnote={quotaNote || undefined} />;
+    {...fileProps('cowork-message')} footnote={quotaNote || undefined} />;
 
   return <section aria-label="Cowork" className="cw-shell relative flex h-[calc(100dvh-5rem)] min-h-[540px] min-w-0 overflow-hidden rounded-[20px] border border-cw-border shadow-[var(--cw-shadow-lg)] md:h-[calc(100dvh-5.5rem)]">
     <div className={cn('hidden w-[256px] shrink-0 border-r border-cw-border bg-cw-rail', railVisible && 'lg:block')}>
@@ -664,12 +685,14 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
                 placeholder={composerPlaceholder} ready={ready} sending={sending} submitLabel="Enviar mensaje"
                 onStop={active && !pendingDecision && latestIsCurrent ? () => void cancel() : null} stopping={cancelling}
                 canAutonomous={canAutonomous} mode={mode} onModeChange={setMode}
-                onToggleFiles={latest && latest.run.status === 'completed' ? () => setShowFiles(value => !value) : null} filesOpen={showFiles}
-                attachments={showFiles && latest && latest.run.status === 'completed' ? <FileUpload key={`files-${latest.run.id}`} runId={latest.run.id} onError={setError} onAccessDenied={clearPrivateResults} /> : null}
+                {...fileProps('cowork-followup')}
                 queued={queued ? {
-                  text: queued,
+                  text: queuedView ? queuedView.text || `Archivos: ${queuedView.files.join(', ')}` : queued,
                   note: pendingDecision ? 'Se enviará cuando resuelvas la propuesta' : 'Se enviará cuando termine este paso',
-                  onCancel: () => { setMessage(queued); setQueued(null); requestAnimationFrame(() => composer.current?.focus()); },
+                  onCancel: () => {
+                    setMessage(queuedView?.text ?? queued); attach.restore(queuedFiles.current); queuedFiles.current = []; setQueued(null);
+                    requestAnimationFrame(() => composer.current?.focus());
+                  },
                   onSendNow: pendingDecision ? () => void sendQueuedNow() : null,
                 } : null}
                 footnote="ANTON.IA puede equivocarse. Revisa cada propuesta antes de aprobarla." />
