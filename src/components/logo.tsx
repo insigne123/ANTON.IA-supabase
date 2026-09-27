@@ -21,7 +21,7 @@ const IMG_CLASS: Record<NonNullable<LogoProps["size"]>, string> = {
 };
 
 export default function Logo({ size = "md", showWordmark = true, className }: LogoProps) {
-  const [src, setSrc] = useState<string>("/icon.png");
+  const [src, setSrc] = useState<string>("/icon-192.png");
 
   const onError = () => {
     setSrc("/logo-placeholder.svg");
