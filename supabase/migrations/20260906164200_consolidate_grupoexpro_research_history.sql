@@ -1,5 +1,6 @@
 -- Move the closed research and draft graph for GrupoExpro users. Composite
 -- foreign keys are validated explicitly before the transaction can commit.
+begin;
 set local lock_timeout = '10s';
 set local statement_timeout = '2min';
 
@@ -22,6 +23,10 @@ declare
   v_check record;
   v_actual bigint;
 begin
+  if not exists (select 1 from grupoexpro_research_users) then
+    return;
+  end if;
+
   if (select count(*) from grupoexpro_research_users) <> 6
     or (select count(*) from grupoexpro_research_context) <> 1 then
     raise exception 'GrupoExpro research identity preflight failed';
@@ -229,3 +234,4 @@ end;
 $$;
 
 notify pgrst, 'reload schema';
+commit;
