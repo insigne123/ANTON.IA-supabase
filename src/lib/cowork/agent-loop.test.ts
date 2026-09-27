@@ -764,3 +764,21 @@ test('a specialist review sees at most three observations of the turn', async ()
   assert.equal(result.reply, 'Un contacto encontrado.');
   assert.match(reasons.join('|'), /solo está disponible con hasta 3 consultas/);
 });
+
+test('an uploaded file is read by its name, alone or next to other reads', async () => {
+  const calls: string[] = [];
+  let decisions = 0;
+  const result = await runCoworkReadLoop({
+    message: '¿Qué trae la lista que subí?', signal: new AbortController().signal, authorize: async () => {},
+    execute: async (action, value) => { calls.push(`${action}:${value}`); return {}; }, record: async () => {},
+    decide: async () => {
+      decisions++;
+      if (decisions === 1) return { action: 'files.read' as const, query: 'leads-feria.csv', leadId: null, answer: null };
+      if (decisions === 2) return { action: 'reads.parallel' as const, query: null, leadId: null, answer: null,
+        reads: [{ action: 'files.read' as const, input: 'notas.md' }, { action: 'leads.search' as const, input: '' }] };
+      return answer;
+    },
+  });
+  assert.equal(result.reply, 'Un contacto encontrado.');
+  assert.deepEqual(calls, ['files.read:leads-feria.csv', 'files.read:notas.md', 'leads.search:']);
+});

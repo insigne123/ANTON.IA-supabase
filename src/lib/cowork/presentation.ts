@@ -57,6 +57,7 @@ const ACTIONS: Record<string, CoworkActionInfo> = {
   'campaigns.retry_review': { label: 'Revisó envíos reintentables', source: 'Campañas', icon: 'campaign' },
   'campaigns.company_plan': { label: 'Revisó el plan por empresa', source: 'Campañas', icon: 'campaign' },
   'files.list': { label: 'Revisó los archivos adjuntos', source: 'Archivos', icon: 'file' },
+  'files.read': { label: 'Leyó un archivo que subiste', source: 'Archivos', icon: 'file' },
   'saved_searches.list': { label: 'Revisó tus búsquedas guardadas', source: 'Búsquedas guardadas', icon: 'bookmark' },
   'profile.get': { label: 'Consultó tu perfil comercial', source: 'Perfil', icon: 'profile' },
   'lists.review_contact': { label: 'Revisó un contacto para la lista', source: 'Listas', icon: 'list' },

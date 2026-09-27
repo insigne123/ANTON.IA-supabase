@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { CORPUS, LEAD } from './fixtures/cowork-conversation-corpus';
-import { EDIT_CORPUS, EDITED_STEPS, MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
+import { EDIT_CORPUS, EDITED_STEPS, FILE_CORPUS, MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { corpusShownAnswer, runCorpusCase, scoreCorpusCase, type CorpusDecider } from './fixtures/cowork-conversation-runner';
 
 const read = (action: string, query: string | null = null, extra: Record<string, unknown> = {}) =>
@@ -179,7 +179,32 @@ Object.assign(IDEAL, {
     : editedCampaign(EXACT, 'Te dejo la campaña pausada con tu versión para Felipe (Securitas) y Camila (Adecco).'),
 } satisfies Record<string, CorpusDecider>);
 
-const ALL_CASES = [...CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS];
+const FAIR = 'asistentes-feria-rrhh.csv';
+Object.assign(IDEAL, {
+  'archivo-que-trae': async context => context.observations.length === 0 ? parallel([{ action: 'files.read', input: 'feria' }, { action: 'leads.search', input: '' }])
+    : answer('La lista de la feria trae 8 personas con nombre, empresa, cargo y correo; 6 tienen correo. Marcela Rojas y Camila Fuentes ya están en tus contactos; las otras 6 son nuevas.',
+      null, undefined, { question: '¿Te digo a quiénes escribirles primero?', blocks: [{ type: 'table', title: 'Asistentes de la feria',
+        columns: ['Persona', 'Empresa', 'Correo', 'Guardada'], rows: [
+          ['Marcela Rojas', 'Sodexo Chile', 'Sí', 'Sí'], ['Camila Fuentes', 'Adecco', 'Sí', 'Sí'], ['Tomás Riquelme', 'Walmart Chile', 'Sí', 'No'],
+          ['Daniela Soto', 'Cencosud', 'Sí', 'No'], ['Ignacio Paredes', 'ISS Chile', 'No', 'No'], ['Valentina Lagos', 'Manpower', 'Sí', 'No'],
+          ['Andrés Pizarro', 'Sodimac', 'Sí', 'No'], ['Francisca Mella', 'Randstad', 'No', 'No']] }] }),
+  'archivo-a-quien': async context => context.observations.length === 0 ? parallel([{ action: 'files.read', input: FAIR }, { action: 'leads.search', input: '' }])
+    : !seen(context, 'contacted.search') ? read('contacted.search', '')
+    : answer('Partiría por Camila Fuentes: ya está en tus contactos, tiene correo y aún no le escribes. Después, Tomás y Andrés por su cargo; para incluirlos en una campaña, primero hay que importarlos a tus contactos con Importar Leads. A Marcela ya le escribiste, e Ignacio y Francisca no traen correo.',
+      null, undefined, { question: '¿Te redacto el correo para Camila?', blocks: [{ type: 'table', title: 'A quién escribir primero',
+        columns: ['Orden', 'Persona', 'Empresa', 'Motivo'], rows: [
+          ['1', 'Camila Fuentes', 'Adecco', 'Guardada, con correo y sin envíos'], ['2', 'Tomás Riquelme', 'Walmart Chile', 'Jefe de Reclutamiento; por importar'],
+          ['3', 'Andrés Pizarro', 'Sodimac', 'Jefe de Personas; por importar'], ['4', 'Daniela Soto', 'Cencosud', 'HR Business Partner; por importar'],
+          ['5', 'Valentina Lagos', 'Manpower', 'Consultora de Selección; por importar'], ['6', 'Marcela Rojas', 'Sodexo Chile', 'Ya contactada: seguimiento']] }] }),
+  'archivo-excel': async context => !seen(context, 'files.read') ? read('files.read', 'prospectos.xlsx')
+    : answer('Todavía no puedo abrir archivos Excel desde aquí. Si guardas la hoja como CSV y la subes con el clip «Adjuntar archivos», te digo a quién contactar.',
+      null, undefined, { question: '¿La reviso apenas subas el CSV?' }),
+  'archivo-no-esta': async context => !seen(context, 'files.read') ? read('files.read', 'clientes-2025.csv')
+    : answer('No encuentro un archivo llamado clientes-2025.csv entre lo que subiste. Lo que veo es asistentes-feria-rrhh.csv y prospectos.xlsx, por si era uno de esos.',
+      null, [{ label: 'Era el de la feria', message: 'Era asistentes-feria-rrhh.csv, léelo' }], { question: '¿Lo subes con el clip «Adjuntar archivos»?' }),
+} satisfies Record<string, CorpusDecider>);
+
+const ALL_CASES = [...CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS];
 
 test('every corpus case has an ideal turn that passes all its checks through the real loop', async () => {
   assert.deepEqual(Object.keys(IDEAL).sort(), ALL_CASES.map(entry => entry.id).sort());

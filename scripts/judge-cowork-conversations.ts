@@ -15,11 +15,11 @@ import {
   type CoworkJudgement,
 } from '../src/lib/cowork/judge';
 import { CORPUS as PRODUCTION_CORPUS, CORPUS_USER_CONTEXT, corpusRead, type CorpusCase, type CorpusTurnResult } from './fixtures/cowork-conversation-corpus';
-import { EDIT_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
+import { EDIT_CORPUS, FILE_CORPUS, MARKETING_CORPUS, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
 import { JUDGE_CALIBRATION } from './fixtures/cowork-judge-calibration';
 import { corpusShownAnswer } from './fixtures/cowork-conversation-runner';
 
-const CORPUS: CorpusCase[] = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS];
+const CORPUS: CorpusCase[] = [...PRODUCTION_CORPUS, ...MARKETING_CORPUS, ...STARTER_CORPUS, ...EDIT_CORPUS, ...FILE_CORPUS];
 
 /** The data the model saw, replayed from the fixture with the same inputs. */
 function observationsFor(entry: CorpusCase, result: CorpusTurnResult) {

@@ -5,8 +5,9 @@ import { FileText, LoaderCircle, Upload } from 'lucide-react';
 import { coworkFileSize } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
 
-/** Run-scoped file upload for code execution inputs. Lists what is already
- * uploaded; contents are never previewed or executed here. */
+/** Run-scoped file upload. Cowork reads CSV, JSON, Markdown and text when asked
+ * (files.read). Lists what is already uploaded; contents are never previewed or
+ * executed here. */
 export function FileUpload({ runId, onError, onAccessDenied }: {
   runId: string; onError: (message: string) => void; onAccessDenied: () => void;
 }) {
@@ -58,7 +59,7 @@ export function FileUpload({ runId, onError, onAccessDenied }: {
         <input id={`cowork-files-${runId}`} type="file" multiple accept=".csv,.json,.md,.txt,.xlsx" disabled={uploading}
           onChange={event => { void upload(event.target.files); event.target.value = ''; }} className="sr-only" />
       </label>
-      <span className="text-[12px] text-cw-muted">o arrástralos aquí · CSV, JSON, MD, TXT o XLSX (máx. 20 MB). Se usan cuando el trabajo ejecuta código.</span>
+      <span className="text-[12px] text-cw-muted">o arrástralos aquí · Cowork lee CSV, JSON, MD y TXT de hasta 20 MB; un Excel, guárdalo como CSV.</span>
     </div>
     {uploading && <p role="status" className="sr-only">Subiendo…</p>}
   </section>;

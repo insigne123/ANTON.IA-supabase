@@ -5,6 +5,7 @@
 // model guess surnames. No database, mailbox or provider is touched.
 import { coworkStarter } from '../../src/lib/cowork/starters';
 import { coworkBlocksText, coworkVersionMessage, type CoworkEditedEmail } from '../../src/lib/cowork/blocks';
+import { COWORK_FILE_NOTICE, COWORK_FILE_UNREADABLE, coworkFileMissing, coworkFilePreview, coworkFilesByWords } from '../../src/lib/cowork/file-read';
 import { CORPUS_COMMON_CHECKS, corpusShown, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -312,3 +313,72 @@ export const EDIT_CORPUS: CorpusCase[] = [
       { label: 'la campaña lleva el texto exacto del usuario', test: exactCampaign },
       { label: 'solo Felipe y Camila (RR. HH., con correo y sin envíos)', test: onlyNewPeopleContacts }] },
 ];
+
+/** Files the person uploaded: the attendee list of an HR fair (8 people, 6 with an
+ * email, Marcela and Camila already saved) and an Excel Cowork cannot read yet. */
+const UPLOAD_RUN = id(201);
+export const FAIR_CSV = [
+  'Nombre;Empresa;Cargo;Correo',
+  'Marcela Rojas;Sodexo Chile;Gerente de Personas;mrojas@sodexo.cl',
+  'Camila Fuentes;Adecco;Analista de Selección;cfuentes@adecco.cl',
+  'Tomás Riquelme;Walmart Chile;Jefe de Reclutamiento;triquelme@walmart.cl',
+  'Daniela Soto;Cencosud;HR Business Partner;dsoto@cencosud.cl',
+  'Ignacio Paredes;ISS Chile;Gerente de RR. HH.;',
+  'Valentina Lagos;Manpower;Consultora de Selección;vlagos@manpower.cl',
+  'Andrés Pizarro;Sodimac;Jefe de Personas;apizarro@sodimac.cl',
+  'Francisca Mella;Randstad;Analista de Talento;',
+].join('\n');
+const UPLOADS = [
+  { name: 'asistentes-feria-rrhh.csv', runId: UPLOAD_RUN, size: FAIR_CSV.length, updatedAt: '2026-09-26T15:00:00Z' },
+  { name: 'prospectos.xlsx', runId: UPLOAD_RUN, size: 20480, updatedAt: '2026-09-25T10:00:00Z' },
+];
+function filesRead(action: string, input: string): unknown {
+  if (action === 'files.list') return { scope: 'own_uploads', files: UPLOADS };
+  if (action !== 'files.read') return read(action, input);
+  const asked = input.trim().toLowerCase();
+  const byWords = coworkFilesByWords(asked, UPLOADS.map(upload => upload.name));
+  const file = UPLOADS.find(upload => upload.name === asked) || (byWords.length === 1 ? UPLOADS.find(upload => upload.name === byWords[0]) : undefined);
+  if (!file) return coworkFileMissing(asked, UPLOADS.map(upload => upload.name), byWords);
+  const name = file.name;
+  const base = { scope: 'own_uploads', found: true, name, runId: file.runId, size: file.size };
+  if (name.endsWith('.xlsx')) return { ...base, kind: 'unreadable', message: COWORK_FILE_UNREADABLE.excel };
+  return { ...base, ...coworkFilePreview(name, FAIR_CSV), notice: COWORK_FILE_NOTICE };
+}
+const filesWorld = { ...world, read: filesRead };
+const FAIR_PEOPLE = ['Marcela', 'Camila', 'Tomás', 'Daniela', 'Ignacio', 'Valentina', 'Andrés', 'Francisca'];
+const SAVED_EMAILS = contacts.map(lead => lead.email).filter(Boolean);
+
+export const FILE_CORPUS: CorpusCase[] = [
+  { id: 'archivo-que-trae', title: 'Qué trae un archivo subido', world: filesWorld,
+    request: 'te subi la lista de asistentes de la feria de rrhh, que trae?',
+    origin: 'El usuario subió un CSV y pregunta por él: Cowork lo lee sin ejecutar código y dice qué trae.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'lee el archivo', test: r => r.actions.includes('files.read') },
+      { label: 'dice cuántas personas trae (8)', test: r => /\b8\b|\bocho\b/i.test(r.reply) },
+      { label: 'no inventa personas fuera del archivo', test: r => !/Rodrigo|Andrea|Felipe/.test(r.reply) || r.actions.includes('leads.search') }] },
+  { id: 'archivo-a-quien', title: 'A quién escribirle de un archivo subido', world: filesWorld,
+    request: 'de la lista de la feria que subi, a quienes les escribo primero?',
+    origin: 'Priorizar sobre un archivo: leerlo, cruzarlo con los contactos guardados y recordar que los nuevos se importan antes de una campaña.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'lee el archivo', test: r => r.actions.includes('files.read') },
+      { label: 'ordena a las personas del archivo con correo, no solo a la primera', test: r => FAIR_PEOPLE.filter(name => text(r).includes(name)).length >= 4 },
+      { label: 'una campaña solo va a contactos guardados', test: r => !campaign(r) || (campaign(r)?.emails || []).every(email => SAVED_EMAILS.includes(email)) },
+      { label: 'dice qué pasa con los que no están guardados', test: r => Boolean(r.proposal)
+        || /import|no (?:están|aparecen|figuran) (?:guardad|entre tus contactos|en tus contactos)|aún no (?:están|aparecen|figuran)/i.test(r.reply) }] },
+  { id: 'archivo-excel', title: 'Un Excel que Cowork aún no lee', world: filesWorld,
+    request: 'revisa el excel prospectos.xlsx que subi y dime a quien contactar',
+    origin: 'Un formato que Cowork todavía no lee: lo dice y ofrece el camino (exportar a CSV), sin inventar su contenido.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'pide exportarlo a CSV', test: r => /csv/i.test(r.reply) },
+      // The code runner only takes files uploaded in the same turn, and uploads land in the previous one.
+      { label: 'no propone ejecutar código con el archivo', test: r => r.proposal?.kind !== 'code_execute' },
+      { label: 'no afirma haberlo leído', test: r => !/(?:revisé|leí|en tu excel hay|el excel tiene)/i.test(r.reply) }] },
+  { id: 'archivo-no-esta', title: 'Un archivo que no existe', world: filesWorld,
+    request: 'lee el archivo clientes-2025.csv que te mande',
+    origin: 'El nombre no coincide con ninguna subida: lo dice y muestra lo que sí hay, sin inventar datos.',
+    checks: [...CORPUS_COMMON_CHECKS,
+      { label: 'dice que no lo encuentra', test: r => /no (?:lo |la )?(?:encuentro|encontré|aparece|está|veo)|no hay (?:un|ningún) archivo/i.test(r.reply) },
+      { label: 'muestra el archivo que sí subió', test: r => /asistentes-feria-rrhh/i.test(text(r)) },
+      { label: 'pide subirlo', test: r => /\bs[uú]b(?:e|es|as|ir|irlo|irla|elo|ela)\b|adjunta/i.test(`${r.reply}\n${r.question || ''}`) }] },
+];
+
