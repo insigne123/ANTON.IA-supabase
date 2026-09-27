@@ -276,6 +276,8 @@ function parseAlign(cell: string): MdAlign {
   return null;
 }
 
+const ENDS_SENTENCE = /[.!?…:][»"”')\]]*\s*$/;
+
 function parseList(lines: string[], start: number, depth: number): { block: MdBlock; next: number } {
   const first = LIST_ITEM.exec(lines[start]) as RegExpExecArray;
   const baseIndent = indentOf(first[1]);
@@ -310,8 +312,10 @@ function parseList(lines: string[], start: number, depth: number): { block: MdBl
       index += 1;
       continue;
     }
-    // Lazy continuation: wrapped text of the item paragraph.
-    if (!previousBlank && !startsBlock(lines, index)) {
+    // Lazy continuation: wrapped text of the item paragraph. Chat answers put the
+    // closing question right under the last item; once that item has ended its
+    // sentence, the next line starts a paragraph instead of joining the item.
+    if (!previousBlank && !startsBlock(lines, index) && !ENDS_SENTENCE.test(current.lines[current.lines.length - 1] || '')) {
       current.lines.push(line.trim());
       index += 1;
       continue;
