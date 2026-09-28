@@ -5,6 +5,7 @@ import { ArrowUp, LoaderCircle, Paperclip, Square, X } from 'lucide-react';
 import type { CoworkExecutionMode } from '@/lib/cowork/execution-policy';
 import { cn } from '@/lib/utils';
 import { ExecutionMode } from './ExecutionMode';
+import { CwCollapse } from './motion';
 import { CwButton } from './ui';
 
 export type CoworkComposerHandle = { focus: () => void };
@@ -62,15 +63,20 @@ export const CoworkComposer = forwardRef<CoworkComposerHandle, Props>(function C
   const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types || []).includes('Files');
 
   return <div className="w-full">
-    {queued && <div className="cw-rise mb-2 flex items-start gap-2 rounded-xl border border-cw-border bg-cw-panel px-3 py-2 text-[13px]">
-      <LoaderCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cw-muted motion-safe:animate-spin" aria-hidden="true" />
-      <div className="min-w-0 flex-1">
-        <p className="text-cw-muted">{queued.note}</p>
-        <p className="truncate text-cw-text">«{queued.text}»</p>
-      </div>
-      {queued.onSendNow && <CwButton size="xs" variant="secondary" onClick={queued.onSendNow}>Enviar ahora</CwButton>}
-      <CwButton size="xs" variant="ghost" onClick={queued.onCancel} aria-label="Editar mensaje en espera"><X aria-hidden="true" />Editar</CwButton>
-    </div>}
+    {/* The message waiting for the current step opens its space above the box and closes it when it leaves. */}
+    <CwCollapse show={Boolean(queued)}>
+      {queued && <div className="pb-2">
+        <div className="flex items-start gap-2 rounded-xl border border-cw-border bg-cw-panel px-3 py-2 text-[13px]">
+          <LoaderCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cw-muted motion-safe:animate-spin" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <p className="text-cw-muted">{queued.note}</p>
+            <p className="truncate text-cw-text">«{queued.text}»</p>
+          </div>
+          {queued.onSendNow && <CwButton size="xs" variant="secondary" onClick={queued.onSendNow}>Enviar ahora</CwButton>}
+          <CwButton size="xs" variant="ghost" onClick={queued.onCancel} aria-label="Editar mensaje en espera"><X aria-hidden="true" />Editar</CwButton>
+        </div>
+      </div>}
+    </CwCollapse>
     <form onSubmit={event => { event.preventDefault(); if (canSend) onSubmit(); }}
       onDragOver={onDropFiles ? event => { if (!carriesFiles(event)) return; event.preventDefault(); setDragging(true); } : undefined}
       onDragLeave={onDropFiles ? event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); } : undefined}

@@ -1,4 +1,5 @@
 import { collectCoworkLeadRows } from './lead-export';
+import { coworkVersionSource } from './blocks';
 import { coworkMessageAttachments } from './attachments';
 import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
   coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep } from './contracts';
@@ -111,6 +112,59 @@ export function describeCoworkObservation(payload: Record<string, unknown>): { l
     if (count !== null) parts.push(`${count} resultado${count === 1 ? '' : 's'}`);
   }
   return { label: info.label, detail: parts.length ? parts.join(' · ') : null, icon: info.icon, source: info.source };
+}
+
+/** What a read found, in the person's words, for the chip beside its plan step:
+ * a number and what it counts («4 contactos»), or a short phrase («sin envíos»). */
+export type CoworkReadFinding = { count: number | null; label: string };
+
+const FINDING_NOUNS: Record<string, [string, string]> = {
+  'leads.search': ['contacto', 'contactos'],
+  'crm.search': ['ficha', 'fichas'],
+  'contacted.search': ['envío', 'envíos'],
+  'contacted.account': ['hilo', 'hilos'],
+  'campaigns.list': ['campaña', 'campañas'],
+  'campaigns.inbox': ['pendiente', 'pendientes'],
+  'replies.attention': ['respuesta', 'respuestas'],
+  'replies.stalled': ['interesado', 'interesados'],
+  'saved_searches.list': ['búsqueda guardada', 'búsquedas guardadas'],
+  'files.list': ['archivo', 'archivos'],
+  'linkedin.network': ['contacto', 'contactos'],
+  'linkedin.followups': ['contacto', 'contactos'],
+  'linkedin.inbox': ['conversación', 'conversaciones'],
+  'missions.list': ['misión', 'misiones'],
+  'exceptions.list': ['incidencia', 'incidencias'],
+  'prospecting.search': ['contacto nuevo', 'contactos nuevos'],
+};
+
+export function coworkReadFinding(payload: Record<string, unknown> | null | undefined): CoworkReadFinding | null {
+  const action = String(payload?.action || '');
+  const result = payload?.result;
+  if (action === 'files.read') {
+    const file = (result && typeof result === 'object' ? result : null) as { found?: unknown; kind?: unknown; totalRows?: unknown } | null;
+    if (!file) return null;
+    if (file.found === false) return { count: null, label: 'no lo encontró' };
+    if (file.kind === 'table' && typeof file.totalRows === 'number') return { count: file.totalRows, label: file.totalRows === 1 ? 'fila' : 'filas' };
+    if (file.kind === 'text') return { count: null, label: 'texto leído' };
+    if (file.kind === 'unreadable') return { count: null, label: 'no se pudo leer' };
+    return null;
+  }
+  if (action === 'research.get_existing') {
+    const research = (result && typeof result === 'object' ? result : null) as { availability?: string; research?: { sources?: unknown[] } } | null;
+    if (research?.availability === 'available') {
+      const sources = research.research?.sources?.length ?? 0;
+      return { count: sources, label: sources === 1 ? 'fuente' : 'fuentes' };
+    }
+    return research?.availability ? { count: null, label: 'sin informe' } : null;
+  }
+  const count = countOf(result);
+  if (count === null) return null;
+  const [one, many] = FINDING_NOUNS[action] || ['resultado', 'resultados'];
+  return count === 0 ? { count: null, label: `sin ${many}` } : { count, label: count === 1 ? one : many };
+}
+
+export function coworkFindingText(finding: CoworkReadFinding) {
+  return finding.count === null ? finding.label : `${finding.count} ${finding.label}`;
 }
 
 export type CoworkStatusTone = 'neutral' | 'progress' | 'attention' | 'success' | 'danger';
@@ -237,7 +291,8 @@ export function coworkTurnNote(events: CoworkEvent[]): string | null {
 }
 
 export type CoworkPlanState = 'done' | 'current' | 'pending' | 'skipped';
-export type CoworkPlanProgress = Array<CoworkPlanStep & { state: CoworkPlanState }>;
+/** Each step with its state and, once its read is in, what that read found. */
+export type CoworkPlanProgress = Array<CoworkPlanStep & { state: CoworkPlanState; found: CoworkReadFinding | null }>;
 
 /** The plan shown while a turn works, with each step's state. A step with a
  * read is done once that read completes; the final step, once the answer or
@@ -246,10 +301,12 @@ export function coworkPlanProgress(run: Pick<CoworkRun, 'status'>, events: Cowor
   const planEvent = events.find(event => event.kind === 'tool.completed' && coworkPlanSteps(event.payload));
   const steps = planEvent ? coworkPlanSteps(planEvent.payload) : null;
   if (!planEvent || !steps) return null;
-  const reads = coworkReadEvents(events).filter(event => event.sequence > planEvent.sequence).map(event => String(event.payload?.action || ''));
-  const states: CoworkPlanState[] = steps.map(step => {
-    const index = step.read ? reads.indexOf(step.read) : -1;
+  const reads = coworkReadEvents(events).filter(event => event.sequence > planEvent.sequence);
+  const found: Array<CoworkReadFinding | null> = steps.map(() => null);
+  const states: CoworkPlanState[] = steps.map((step, at) => {
+    const index = step.read ? reads.findIndex(event => event.payload?.action === step.read) : -1;
     if (index === -1) return 'pending';
+    found[at] = coworkReadFinding(reads[index].payload);
     reads.splice(index, 1);
     return 'done';
   });
@@ -261,7 +318,68 @@ export function coworkPlanProgress(run: Pick<CoworkRun, 'status'>, events: Cowor
     const current = states.indexOf('pending');
     if (current !== -1) states[current] = 'current';
   }
-  return steps.map((step, index) => ({ ...step, state: states[index] }));
+  return steps.map((step, index) => ({ ...step, state: states[index], found: found[index] }));
+}
+
+/** What a turn's reads found, in order and without repeats: the evidence behind its answer. */
+export function coworkTurnFindings(events: CoworkEvent[]): CoworkReadFinding[] {
+  const seen = new Set<string>();
+  return coworkReadEvents(events).flatMap(event => {
+    const finding = coworkReadFinding(event.payload);
+    if (!finding || seen.has(coworkFindingText(finding))) return [];
+    seen.add(coworkFindingText(finding));
+    return [finding];
+  });
+}
+
+export type CoworkCardTone = 'neutral' | 'accent' | 'attention' | 'success' | 'danger';
+export type CoworkCardStatus = { label: string; tone: CoworkCardTone };
+
+const CAMPAIGN_STATUS: Record<CoworkProposalState, CoworkCardStatus> = {
+  pending: { label: 'Campaña propuesta · espera tu aprobación', tone: 'attention' },
+  approved: { label: 'Creando la campaña…', tone: 'accent' },
+  running: { label: 'Creando la campaña…', tone: 'accent' },
+  done: { label: 'Campaña creada · pausada', tone: 'success' },
+  discarded: { label: 'Campaña descartada · no se creó', tone: 'neutral' },
+  failed: { label: 'No se pudo crear la campaña', tone: 'danger' },
+};
+
+/**
+ * What happened to each email or sequence card after it was shown, keyed by
+ * artifact id. A later turn sent from the card («Usar esta versión», «Crear
+ * campaña con esta versión») names it by title; the latest card with that title
+ * before the turn is the one used, and the latest use wins. Cards nobody used
+ * are not in the map: they are drafts nobody sent.
+ */
+export function coworkCardStatuses(turns: Array<{ run: CoworkRun; events: CoworkEvent[] }>): Map<string, CoworkCardStatus> {
+  const statuses = new Map<string, CoworkCardStatus>();
+  const cardByTitle = new Map<string, string>();
+  for (const { run, events } of turns) {
+    const source = coworkVersionSource(run.message);
+    const card = source ? cardByTitle.get(source.title) : undefined;
+    if (source && card) {
+      if (source.intent === 'use') {
+        statuses.set(card, { label: `${source.edited ? 'Tu versión, elegida' : 'Versión elegida'} · no se ha enviado`, tone: 'accent' });
+      } else {
+        const proposal = coworkProposalView(run, events);
+        if (proposal?.type === 'effect' && proposal.payload.kind === 'campaign_create') statuses.set(card, CAMPAIGN_STATUS[proposal.state]);
+        else if (isCoworkActive(run.status)) statuses.set(card, { label: 'Preparando la campaña…', tone: 'accent' });
+      }
+    }
+    for (const artifact of coworkTurnArtifacts(run, events)) {
+      if (artifact.kind === 'block' && (artifact.block.type === 'email_draft' || artifact.block.type === 'sequence')) cardByTitle.set(artifact.title, artifact.id);
+    }
+  }
+  return statuses;
+}
+
+/** Whether the final answer reads differently from the one shown while it was being
+ * written: a word changed or went away. Spacing, punctuation, case and text added at
+ * the end (the closing question) do not count. */
+export function coworkAnswerChanged(shown: string, final: string): boolean {
+  const words = (text: string) => text.toLocaleLowerCase('es').match(/[\p{L}\p{N}]+/gu) || [];
+  const after = words(final);
+  return words(shown).some((word, index) => after[index] !== word);
 }
 
 export function coworkTurnOutput(events: CoworkEvent[]): CoworkTurnOutput | null {

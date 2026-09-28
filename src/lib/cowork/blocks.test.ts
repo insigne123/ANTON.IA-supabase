@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   coworkBlockFilename, coworkBlockMeta, coworkBlocksText, coworkDraftSteps, coworkEditedEmails, coworkEmailText, coworkSequenceText, coworkTableCsv, coworkTableTsv,
-  coworkOnlyUsesVersion, coworkVersionMessage, coworkWantsCampaignFromVersion,
+  coworkOnlyUsesVersion, coworkVersionMessage, coworkVersionSource, coworkWantsCampaignFromVersion, coworkWordDiff, coworkFigureNumber,
 } from './blocks';
 
 const sequence = { type: 'sequence' as const, title: 'Secuencia AXIS', steps: [
@@ -56,4 +56,39 @@ test('a version sent from a card reads back exactly, and nothing else does', () 
   for (const typed of ['Crea una campaña con estos correos', 'Usa exactamente esta versión\n\nsin asunto', 'Asunto: Hola\n\nHola', '']) {
     assert.equal(coworkEditedEmails(typed), null);
   }
+});
+
+test('a version names the card it came from, whether it was edited and what it asked for', () => {
+  const edited = coworkDraftSteps(sequence).map((step, index) => index === 1 ? { ...step, body: 'Otro cuerpo' } : step);
+  assert.deepEqual(coworkVersionSource(coworkVersionMessage(sequence, edited, 'campaign', true)), { title: 'Secuencia AXIS', edited: true, intent: 'campaign' });
+  const email = { type: 'email_draft' as const, title: 'Correo «corto» a Felipe', to: ['Felipe'], subject: 'Hola', body: 'Hola Felipe' };
+  assert.deepEqual(coworkVersionSource(coworkVersionMessage(email, coworkDraftSteps(email), 'use', false)), { title: 'Correo «corto» a Felipe', edited: false, intent: 'use' });
+  assert.equal(coworkVersionSource('Usa exactamente esta versión de «X», sin cambiar el texto.'), null);
+  assert.equal(coworkVersionSource('Crea una campaña con la secuencia'), null);
+});
+
+test('after an edit, only the new or rewritten words are marked, one mark per change', () => {
+  const marked = (before: string, after: string) => coworkWordDiff(before, after).filter(part => part.changed).map(part => part.text);
+  assert.deepEqual(coworkWordDiff('Hola Felipe,', 'Hola Felipe,'), [{ text: 'Hola Felipe,', changed: false }]);
+  assert.deepEqual(marked('Hola Felipe, te escribo por AXIS.', 'Hola Felipe, te escribo hoy por AXIS de Yago.'), ['hoy', 'de Yago']);
+  assert.deepEqual(marked('Nos vemos el martes', 'Nos vemos el jueves'), ['jueves']);
+  // Removed words leave nothing to mark; the text always reads back whole.
+  assert.deepEqual(marked('Hola Felipe, ¿cómo estás?', 'Hola Felipe'), []);
+  const after = 'Hola Camila,\n\nTe escribo por AXIS.';
+  assert.equal(coworkWordDiff('Hola Felipe,\n\nTe escribo.', after).map(part => part.text).join(''), after);
+  // Very long texts are not compared.
+  const long = Array.from({ length: 600 }, (_, index) => `palabra${index}`).join(' ');
+  assert.deepEqual(marked(long, `${long} nueva`), []);
+});
+
+test('a figure counts only its whole number and writes it back exactly as given', () => {
+  const back = (value: string) => {
+    const figure = coworkFigureNumber(value);
+    return figure ? `${figure.before}${figure.format(figure.number)}${figure.after}` : null;
+  };
+  for (const value of ['45%', '1.200', 'US$ 300', '3 de 5', '12.345.678 envíos', '0']) assert.equal(back(value), value);
+  assert.equal(coworkFigureNumber('1.200')?.number, 1200);
+  assert.equal(coworkFigureNumber('US$ 300')?.before, 'US$ ');
+  // Decimals, grouped decimals and words stay as text.
+  for (const value of ['12,5 %', '1.234,5', '3.5', 'Sin datos', '—', '']) assert.equal(coworkFigureNumber(value), null, value);
 });

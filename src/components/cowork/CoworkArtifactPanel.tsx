@@ -12,6 +12,7 @@ import { CoworkArtifactIcon, coworkArtifactMeta } from './CoworkTurn';
 import { DocumentVersions } from './DocumentVersions';
 import { ExportMenu } from './ExportMenu';
 import { ResearchSources } from './ResearchSources';
+import { cwSwap, m } from './motion';
 import { CwButton } from './ui';
 
 const KIND_LABEL: Record<CoworkArtifact['kind'], string> = {
@@ -56,7 +57,7 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
     } catch { setCopied(false); }
   }
 
-  return <aside aria-label={artifact.kind === 'document' ? 'Documento' : label} className="cw-slide-in flex h-full min-h-0 flex-col bg-cw-elevated">
+  return <aside aria-label={artifact.kind === 'document' ? 'Documento' : label} className="flex h-full min-h-0 flex-col bg-cw-elevated">
     <header className="flex shrink-0 items-center gap-2 border-b border-cw-border px-3 py-2.5 sm:px-4">
       <CwButton variant="ghost" size="icon-sm" className="lg:hidden" onClick={onClose} aria-label="Volver a la conversación"><ArrowLeft aria-hidden="true" /></CwButton>
       <span className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cw-border bg-cw-panel text-cw-accent sm:flex">
@@ -82,7 +83,9 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
         <CwButton variant="ghost" size="icon-sm" onClick={onClose} aria-label={closeLabel} title="Cerrar"><X aria-hidden="true" /></CwButton>
       </div>
     </header>
-    <div className="cw-scroll min-h-0 flex-1 overflow-y-auto">
+    {/* Opening another result fades the new content in, so the change reads as a change of
+        page. The old content leaves at once: the title and the content always match. */}
+    <m.div key={artifact.id} initial="hidden" animate="shown" variants={cwSwap} className="cw-scroll min-h-0 flex-1 overflow-y-auto">
       {artifact.kind === 'block' && <div className="mx-auto w-full max-w-[46rem] px-4 py-6 sm:px-8">
         <CoworkBlockView key={artifact.id} block={artifact.block} draftKey={`cowork:draft:${artifact.id}`} onSend={onSend} sendHint={sendHint} />
       </div>}
@@ -99,6 +102,6 @@ export function CoworkArtifactPanel({ artifact, events, canResearch, canCreateDr
       {artifact.kind === 'sources' && <div className="px-4 py-5 sm:px-6">
         <ResearchSources events={events} runId={artifact.runId} sequence={artifact.sequence} canCreateDraft={canCreateDraft} onAccessDenied={onAccessDenied} />
       </div>}
-    </div>
+    </m.div>
   </aside>;
 }

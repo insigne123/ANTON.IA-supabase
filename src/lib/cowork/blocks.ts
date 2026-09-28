@@ -55,6 +55,15 @@ export function coworkEditedEmails(message: string): CoworkEditedEmail[] | null 
   return emails.length ? emails : null;
 }
 
+/** Which card a version message came from (by its title), whether it was edited and what it asked for. */
+export function coworkVersionSource(message: string): { title: string; edited: boolean; intent: 'use' | 'campaign' } | null {
+  if (!coworkEditedEmails(message)) return null;
+  const lead = String(message).replace(/\r\n/g, '\n').split('\n\n')[0];
+  const match = /( editada)? de «(.+?)», sin cambiar el texto/.exec(lead);
+  if (!match) return null;
+  return { title: match[2], edited: Boolean(match[1]), intent: lead.startsWith(CAMPAIGN_LEAD) ? 'campaign' : 'use' };
+}
+
 /** Whether the person asked for a campaign with the exact text (not only to keep it). */
 export function coworkWantsCampaignFromVersion(message: string) {
   return String(message || '').startsWith(CAMPAIGN_LEAD) && coworkEditedEmails(message) !== null;
@@ -63,6 +72,59 @@ export function coworkWantsCampaignFromVersion(message: string) {
 /** Whether the message came from «Usar esta versión»: it keeps the text, and nothing is created yet. */
 export function coworkOnlyUsesVersion(message: string) {
   return String(message || '').startsWith(USE_LEAD) && coworkEditedEmails(message) !== null;
+}
+
+/** The integer inside a figure («45 %», «1.200 envíos», «US$ 300»): what comes before and after
+ * it, and how to write it back the same way (with thousands dots or not). Decimals, ranges
+ * and anything else return null and stay as text. */
+export function coworkFigureNumber(value: string): { before: string; number: number; after: string; format: (value: number) => string } | null {
+  const match = /^([^\d]*?)(\d{1,3}(?:\.\d{3})+|\d+)(?!\d|[.,]\d)([\s\S]*)$/.exec(value);
+  if (!match) return null;
+  const number = Number(match[2].replace(/\./g, ''));
+  if (!Number.isSafeInteger(number)) return null;
+  const format = match[2].includes('.') ? (next: number) => String(next).replace(/\B(?=(\d{3})+(?!\d))/g, '.') : String;
+  return { before: match[1], number, after: match[3], format };
+}
+
+export type CoworkDiffSegment = { text: string; changed: boolean };
+
+/** The new text split into what stayed and what is new or rewritten, word by word, for a
+ * brief highlight after an edit. Removed words are not shown. Very long texts (more than
+ * ~250 000 word pairs) come back unmarked rather than slow the page down. */
+export function coworkWordDiff(before: string, after: string): CoworkDiffSegment[] {
+  const split = (text: string) => text.match(/\s+|[\p{L}\p{N}]+|[^\s\p{L}\p{N}]/gu) || [];
+  const space = (token: string) => /^\s+$/.test(token);
+  const old = split(before).filter(token => !space(token));
+  const tokens = split(after);
+  const words = tokens.flatMap((token, index) => space(token) ? [] : [{ token, index }]);
+  const kept = new Set<number>();
+  if (old.length * words.length <= 250_000) {
+    // Longest common subsequence of words: whatever is not in it is new.
+    const table = Array.from({ length: old.length + 1 }, () => new Uint16Array(words.length + 1));
+    for (let i = old.length - 1; i >= 0; i--) {
+      for (let j = words.length - 1; j >= 0; j--) {
+        table[i][j] = old[i] === words[j].token ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+      }
+    }
+    for (let i = 0, j = 0; i < old.length && j < words.length;) {
+      if (old[i] === words[j].token) { kept.add(words[j].index); i++; j++; }
+      else if (table[i + 1][j] >= table[i][j + 1]) i++;
+      else j++;
+    }
+  } else words.forEach(word => kept.add(word.index));
+  const changed = tokens.map((token, index) => !space(token) && !kept.has(index));
+  // A space between two changed words belongs to the change, so one edit reads as one mark.
+  tokens.forEach((token, index) => {
+    if (!space(token)) return;
+    changed[index] = index > 0 && index < tokens.length - 1 && changed[index - 1] && changed[index + 1];
+  });
+  const segments: CoworkDiffSegment[] = [];
+  tokens.forEach((token, index) => {
+    const last = segments[segments.length - 1];
+    if (last && last.changed === changed[index]) last.text += token;
+    else segments.push({ text: token, changed: changed[index] });
+  });
+  return segments;
 }
 
 /** CSV with a BOM for spreadsheets; formulas are neutralized like the contact export. */

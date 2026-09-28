@@ -5,6 +5,7 @@ import { requireCoworkAccess } from '@/lib/server/cowork/access';
 import { AuthError, handleAuthError } from '@/lib/server/auth-utils';
 import { getCoworkRunCursor } from '@/lib/server/cowork/runs';
 import { coworkStreamFrames } from '@/lib/server/cowork/run-stream';
+import { coworkStreamingEnabled, readCoworkRunDraft } from '@/lib/server/cowork/live-draft';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -14,8 +15,9 @@ const headers = { 'Cache-Control': 'private, no-store' };
 /**
  * Live doorbell for one run: a server-sent event each time its status or its
  * latest event changes, so the page refreshes right away instead of on its
- * next poll. It carries no content; the page reads the run through GET
- * /api/cowork/runs/[id] as always, and falls back to polling if this fails.
+ * next poll. The page reads the run through GET /api/cowork/runs/[id] as always,
+ * and falls back to polling if this fails. With COWORK_STREAMING_ENABLED it also
+ * carries the answer while it is being written (`draft` frames, only what changed).
  */
 export async function GET(req: NextRequest, context: Context) {
   try {
@@ -34,7 +36,10 @@ export async function GET(req: NextRequest, context: Context) {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     });
     const scoped = { ...auth, supabase: reader };
-    const frames = coworkStreamFrames({ first, read: () => getCoworkRunCursor(scoped, id), signal: req.signal });
+    const frames = coworkStreamFrames({
+      first, read: () => getCoworkRunCursor(scoped, id), signal: req.signal,
+      readDraft: coworkStreamingEnabled() ? () => readCoworkRunDraft(scoped, id) : undefined,
+    });
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       async pull(controller) {
