@@ -208,7 +208,8 @@ export async function searchLinkedInProfileLead(
   // `queued` flag alone is not enough, because the API also sets it on
   // terminal phone failures when phone reveal was requested.
   const pendingProfile = result.phone_enrichment?.status === 'queued'
-    || String(enriched.enrichmentStatus || '').trim().toLowerCase().startsWith('pending');
+    || String(enriched.enrichmentStatus || '').trim().toLowerCase().startsWith('pending')
+    || result.providerState === 'unknown' || result.providerState === 'processing';
   if (enriched.errorCode === 'APOLLO_CREDITS_EXHAUSTED') {
     throw new Error('La cuenta de Apollo no tiene créditos disponibles. Recarga créditos o espera al próximo ciclo de facturación.');
   }
@@ -225,12 +226,13 @@ export async function searchLinkedInProfileLead(
     throw new Error('No pudimos consultar este perfil en Apollo. Inténtalo nuevamente.');
   }
   return {
-    count: 1,
-    leads_count: 1,
-    leads: [lead],
+    count: hasUsableLinkedInProfileData(lead) ? 1 : 0,
+    leads_count: hasUsableLinkedInProfileData(lead) ? 1 : 0,
+    leads: hasUsableLinkedInProfileData(lead) ? [lead] : [],
     search_mode: 'linkedin_profile',
     enrichment_requested: revealEmail || revealPhone,
     profile_tracking_ids: [lead.id],
+    profile_pending: pendingProfile,
     phone_enrichment: result.phone_enrichment,
   } as LeadSearchResponse;
 }
@@ -245,6 +247,7 @@ export async function enrichLinkedInProfileLead(input: {
   queued: boolean;
   operationId: string;
   operationStatus?: string;
+  providerState?: string;
   enriched?: Array<{ id: string }>;
   phone_enrichment?: LeadSearchResponse['phone_enrichment'];
 }> {

@@ -220,6 +220,23 @@ test('standard enrichment uses query params, disables waterfall, and keeps phone
   }
 });
 
+test('Apollo URL and ID echoes without profile data are not successful matches', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ request_id: '123', person: {
+    id: 'person-1', linkedin_url: 'https://www.linkedin.com/in/example', match_confidence: 'none',
+  } });
+  try {
+    const parsed = validateEnrichmentInput({ lead: { linkedin_url: 'https://www.linkedin.com/in/example' },
+      reveal_email: true, reveal_phone: false, enrichment_level: 'basic' });
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    const result = await executeApolloEnrichment(parsed.value, 'test-key', getGatewayConfig());
+    assert.equal(result.success, false);
+    assert.equal(result.enrichment_status, 'not_found');
+    assert.equal(result.extracted_data, null);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('standard enrichment preserves Apollo request IDs larger than JavaScript safe integers', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(

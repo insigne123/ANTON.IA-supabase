@@ -49,6 +49,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Switch } from '@/components/ui/switch';
 import { splitDomainInput } from '@/lib/domain';
 import { normalizeLinkedinProfileUrl } from '@/lib/linkedin-url';
+import { hasUsableLinkedInProfileData } from '@/lib/linkedin-profile-result';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
@@ -1045,7 +1046,7 @@ export default function SearchPage() {
             ? 'ready'
             : 'missing';
 
-      if (result.leads.length === 0 && phoneStatus !== 'queued') {
+      if (result.leads.length === 0 && phoneStatus !== 'queued' && !result.profile_pending) {
         setProfilePhonePollingStartedAt(null);
         setProfileSearchNotice({
           tone: 'warning',
@@ -1057,7 +1058,7 @@ export default function SearchPage() {
         return;
       }
 
-      if (phoneStatus === 'queued') {
+      if (phoneStatus === 'queued' || result.profile_pending) {
         const pollingIds = Array.from(new Set([
           ...(result.profile_tracking_ids || []),
           ...result.leads.map((raw) => raw.id),
@@ -1452,7 +1453,16 @@ export default function SearchPage() {
               };
               return nextLead;
             });
-            return updated;
+            // Tracking rows are not leads. Add a result only after polling
+            // returns usable profile data; previously an empty initial result
+            // could never become visible because this only mapped prev.
+            const knownIds = new Set(updated.map((lead) => String(lead.id)));
+            const discovered = items.filter((item) => !knownIds.has(String(item.id)) && hasUsableLinkedInProfileData(item as Partial<Lead>))
+              .map((item) => normalizeLeadForUI(item as Lead, {
+                revealEmail: filters.revealEmail,
+                revealPhone: filters.revealPhone,
+              }));
+            return [...updated, ...discovered];
           });
 
           if (resolvedWithRequestedData.length > 0) {
@@ -1483,7 +1493,17 @@ export default function SearchPage() {
           }
 
           if (!stillPending) {
-            finishWithoutContact('Encontramos el perfil, pero el proveedor no devolvió todos los datos de contacto solicitados.', items);
+            const hasProfile = items.some((item) => hasUsableLinkedInProfileData(item as Partial<Lead>));
+            finishWithoutContact(hasProfile
+              ? 'El perfil está disponible, pero Apollo no devolvió todos los datos de contacto solicitados.'
+              : 'No pudimos confirmar este perfil en Apollo. Revisa la URL antes de volver a buscar.', items);
+            if (!hasProfile) {
+              setLeads([]);
+              setProfileSearchNotice({ tone: 'warning', title: 'Perfil no confirmado',
+                description: 'Apollo no devolvió información suficiente para confirmar este perfil. Revisa la URL antes de volver a buscar.',
+                emailState: filters.revealEmail ? 'missing' : 'not_requested',
+                phoneState: filters.revealPhone ? 'missing' : 'not_requested' });
+            }
             return;
           }
         }
