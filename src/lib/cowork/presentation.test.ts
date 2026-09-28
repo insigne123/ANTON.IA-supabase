@@ -4,7 +4,7 @@ import type { CoworkEvent, CoworkRun } from './contracts';
 import {
   coworkExpectsContinuation, coworkProposalView, coworkTurnArtifacts, coworkTurnProgress, describeCoworkObservation,
   groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions,
-  coworkTurnBlocks, coworkPlanProgress, coworkReadEvents, coworkReadFinding, coworkFindingText,
+  coworkTurnBlocks, coworkPlanProgress, coworkReadEvents, coworkReadFinding, coworkFindingText, coworkAnswerChanged,
 } from './presentation';
 import { coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
 
@@ -190,4 +190,17 @@ test('a stored plan is read only in the shape the worker writes', () => {
   assert.equal(coworkIsAssistantEvent({ action: 'assistant.note' }), true);
   assert.equal(coworkIsAssistantEvent({ action: 'leads.search' }), false);
   assert.equal(coworkIsAssistantEvent(null), false);
+});
+
+test('the final answer counts as adjusted only when a word shown changed or went away', () => {
+  const shown = 'Tus 3 contactos de RR. HH. tienen correo.';
+  assert.equal(coworkAnswerChanged(shown, shown), false);
+  // Spacing, case, punctuation and the closing question added at the end do not count.
+  assert.equal(coworkAnswerChanged(shown, 'Tus 3 contactos de RR.HH. tienen  correo:\n\n¿Creo la campaña?'), false);
+  assert.equal(coworkAnswerChanged('TUS 3 contactos', 'tus 3 contactos'), false);
+  assert.equal(coworkAnswerChanged(shown, 'Tus 3 contactos de RR. HH. tienen correo verificado.'), false);
+  // A changed or dropped word does.
+  assert.equal(coworkAnswerChanged(shown, 'Tus 4 contactos de RR. HH. tienen correo.'), true);
+  assert.equal(coworkAnswerChanged(shown, 'Tus 3 contactos tienen correo.'), true);
+  assert.equal(coworkAnswerChanged(shown, 'Tus 3 contactos'), true);
 });

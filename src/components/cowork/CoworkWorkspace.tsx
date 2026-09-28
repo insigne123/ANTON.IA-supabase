@@ -16,7 +16,7 @@ import { CoworkComposer, type CoworkComposerHandle } from './CoworkComposer';
 import { CoworkHome } from './CoworkHome';
 import { CoworkSidePanel } from './CoworkSidePanel';
 import { CoworkThreadList } from './CoworkThreadList';
-import { CoworkTurn, type CoworkTurnData } from './CoworkTurn';
+import { CoworkTurn, type CoworkLiveAnswer, type CoworkTurnData } from './CoworkTurn';
 import { CoworkAttachments, CoworkUserMessage, useCoworkAttachments, type CoworkAttachment } from './CoworkAttachments';
 import { AnimatePresence, CoworkMotion, CwCollapse, cwPanel, cwPop, cwSwap, cwVariants, m } from './motion';
 import { CoworkMark, CwButton, CwStatusPill } from './ui';
@@ -112,6 +112,10 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   // The worker should resume after an approved action; if it never does, offer the next step instead of a dead end.
   const [continuationMissing, setContinuationMissing] = useState(false);
   const [showJump, setShowJump] = useState(false);
+  /** The answer while it is being written, from the stream's `draft` frames (COWORK_STREAMING_ENABLED). */
+  const [liveAnswer, setLiveAnswer] = useState<(CoworkLiveAnswer & { runId: string }) | null>(null);
+  /** Turns whose answer was seen being written: the final one does not rise in again. */
+  const streamedRuns = useRef(new Set<string>());
   /** The summary slides back in once a result it made way for closes; on load it is simply there. */
   const [summaryReturns, setSummaryReturns] = useState(false);
 
@@ -216,6 +220,22 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
       stream = source;
       source.onopen = () => { streamLive = true; };
       source.addEventListener('change', () => { void poll(); });
+      // Only what changed travels: keep `from` characters of the text so far and add `text`.
+      source.addEventListener('draft', event => {
+        try {
+          const data = JSON.parse((event as MessageEvent<string>).data) as { from?: unknown; text?: unknown; cards?: unknown; reviewing?: unknown };
+          if (typeof data.from !== 'number' || typeof data.text !== 'string') return;
+          const from = data.from;
+          const text = data.text;
+          streamedRuns.current.add(selected);
+          setLiveAnswer(current => ({
+            runId: selected,
+            text: `${current?.runId === selected ? current.text.slice(0, from) : ''}${text}`,
+            cards: Array.isArray(data.cards) ? data.cards as CoworkLiveAnswer['cards'] : [],
+            reviewing: data.reviewing === true,
+          }));
+        } catch { /* A malformed frame only skips the preview. */ }
+      });
       source.addEventListener('end', () => { closeStream(); void poll(); });
       source.onerror = () => {
         streamLive = false;
@@ -304,7 +324,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
     const restore = () => {
       const id = new URL(window.location.href).searchParams.get('work');
       setSelected(id && UUID.test(id) ? id : null);
-      setState(null); setArtifactId(null); setError(''); setOptimistic(null); setQueued(null);
+      setState(null); setArtifactId(null); setError(''); setOptimistic(null); setQueued(null); setLiveAnswer(null);
       stickToBottom.current = true;
     };
     restore();
@@ -315,7 +335,7 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const choose = useCallback((id: string | null, options: { pin?: boolean } = {}) => {
     pinnedRun.current = options.pin ? id : null;
     setWorkUrl(id, 'push');
-    setState(null); setSelected(id); setArtifactId(null); setMaximized(false); setDrawerOpen(false); setError('');
+    setState(null); setSelected(id); setArtifactId(null); setMaximized(false); setDrawerOpen(false); setError(''); setLiveAnswer(null);
     // Attached files belong to the message being written in this conversation.
     setOptimistic(null); setQueued(null); setShowFiles(false); clearAttachments();
     stickToBottom.current = true;
@@ -669,7 +689,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
               {turns.map((turn, index) => <CoworkTurn key={turn.run.id} turn={turn} latest={index === turns.length - 1}
                 resolving={resolving} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
                 onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null} onSuggestion={canFollowUp ? followUp : null}
-                budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)} />)}
+                budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)}
+                liveAnswer={liveAnswer?.runId === turn.run.id ? liveAnswer : null} streamed={streamedRuns.current.has(turn.run.id)} />)}
               {continuationMissing && latestIsCurrent && latest?.run.status === 'completed' && !optimistic && !queued && ready && <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-[38px]">
                 <CwButton size="sm" variant="secondary" disabled={sending}
                   onClick={() => { setContinuationMissing(false); void post(CONTINUE_PROMPT, latest.run.id); }}>

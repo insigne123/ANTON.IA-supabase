@@ -190,3 +190,23 @@
   .cw-shimmer { animation: none; color: var(--cw-muted); background: none; }
   .cw-breathe, .cw-orbit, .cw-rise, .cw-fade, .cw-slide-in { animation: none; }
 }
+
+/* The answer while it is being written: each new paragraph or list fades in, and a still
+   cursor marks where the text grows (the working indicator already loops; this does not).
+   While the answer is reviewed the cursor goes away. */
+.cw-live-answer .cw-prose > * { animation: cw-fade 0.18s ease-out both; }
+.cw-live-answer:not(.cw-live-reviewing) .cw-prose > :last-child:is(p, h3, h4, h5, h6)::after,
+.cw-live-answer:not(.cw-live-reviewing) .cw-prose > :last-child:is(ul, ol) > li:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 0.45em;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 2px;
+  background: var(--cw-accent);
+  opacity: 0.8;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cw-live-answer .cw-prose > * { animation: none; }
+}

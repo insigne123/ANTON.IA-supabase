@@ -1,10 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, Library, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
+import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, Library, PencilLine, RotateCcw, Table2, TriangleAlert } from 'lucide-react';
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
-  coworkFileSize, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
+  coworkAnswerChanged, coworkFileSize, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
   coworkTurnSuggestions, isCoworkActive, type CoworkArtifact,
 } from '@/lib/cowork/presentation';
 import { coworkReplyBody, type CoworkSuggestion } from '@/lib/cowork/contracts';
@@ -19,9 +19,50 @@ import { CoworkApproval } from './CoworkApproval';
 import { CoworkMarkdown } from './CoworkMarkdown';
 import { coworkArtifactUrls } from './ArtifactPreview';
 import { AnimatePresence, cwFadeRise, cwVariants, m } from './motion';
+import type { CoworkLiveDraft } from '@/lib/cowork/partial-json';
 import { CoworkMark, CwButton } from './ui';
 
 export type CoworkTurnData = { run: CoworkRun; events: CoworkEvent[] };
+/** The answer while it is being written: its text so far, how far each card got, and
+ * whether it is being reviewed (the closing correction may still change it). */
+export type CoworkLiveAnswer = { text: string; cards: CoworkLiveDraft['cards']; reviewing: boolean };
+
+const LIVE_CARD_COPY: Record<string, (parts: number) => string> = {
+  email_draft: () => 'Escribiendo el correo',
+  sequence: parts => parts ? `Armando la secuencia · correo ${parts}` : 'Armando la secuencia',
+  table: parts => parts ? `Armando la tabla · ${parts} ${parts === 1 ? 'fila' : 'filas'}` : 'Armando la tabla',
+  metrics: parts => parts ? `Calculando cifras · ${parts}` : 'Calculando cifras',
+};
+
+/** A card still being written: what it is and how far it got, until the real card takes its place. */
+function LiveCard({ card }: { card: CoworkLiveAnswer['cards'][number] }) {
+  return <m.div {...cwVariants(cwFadeRise)} className="rounded-2xl border border-cw-border bg-cw-elevated px-3.5 py-3 shadow-[var(--cw-shadow-sm)]">
+    <div className="flex items-center gap-3">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cw-accent-soft text-cw-accent">
+        <CoworkBlockIcon block={{ type: card.type as 'email_draft' }} className="h-[18px] w-[18px]" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[14px] font-semibold text-cw-text">{card.title || 'Preparando…'}</span>
+        <span className="cw-shimmer block truncate text-[12.5px]">{(LIVE_CARD_COPY[card.type] || (() => 'Preparando…'))(card.parts)}</span>
+      </span>
+    </div>
+    <div className="mt-3 space-y-2" aria-hidden="true">
+      <span className="block h-2.5 w-3/4 rounded-full bg-cw-hover motion-safe:animate-pulse" />
+      <span className="block h-2.5 w-1/2 rounded-full bg-cw-hover motion-safe:animate-pulse" />
+    </div>
+  </m.div>;
+}
+
+/** The answer as it is being written: the text so far with a cursor, then the cards on their way.
+ * While it is reviewed the cursor goes away and a line says so. It is not a live region: screen
+ * readers hear the status once it is done. */
+function LiveAnswerView({ answer }: { answer: CoworkLiveAnswer }) {
+  return <div aria-busy="true" className="space-y-3.5">
+    <div className={cn('cw-live-answer', answer.reviewing && 'cw-live-reviewing')}><CoworkMarkdown text={answer.text} /></div>
+    {answer.cards.map((card, index) => <LiveCard key={`${card.type}-${index}`} card={card} />)}
+    {answer.reviewing && <p className="cw-shimmer text-[12.5px]">Revisando la respuesta…</p>}
+  </div>;
+}
 
 export function CoworkArtifactIcon({ artifact, className }: { artifact: CoworkArtifact; className?: string }) {
   if (artifact.kind === 'block') return <CoworkBlockIcon block={artifact.block} className={className} />;
@@ -130,11 +171,16 @@ function CopyReply({ text }: { text: string }) {
 }
 
 /** One conversational turn: the request, what was consulted, the reply, results and any decision. */
-export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false }: {
+export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false,
+  liveAnswer = null, streamed = false }: {
   turn: CoworkTurnData;
   latest: boolean;
   /** The turn finished while you were watching: reveal the answer gently. */
   live?: boolean;
+  /** The answer while it is being written (null when the page gets no live draft). */
+  liveAnswer?: CoworkLiveAnswer | null;
+  /** Its answer was seen being written: the final text replaces it in place, without rising in again. */
+  streamed?: boolean;
   resolving: boolean;
   openArtifactId: string | null;
   onOpenArtifact: (artifact: CoworkArtifact, opener: HTMLElement) => void;
@@ -168,8 +214,13 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   const note = proposal ? coworkTurnNote(events) : null;
   // Only the conversation's current answer offers quick replies.
   const suggestions = latest && onSuggestion && run.status === 'completed' && !proposal ? coworkTurnSuggestions(events) : [];
-  const replyBlock = reply ? <div className={cn('group/reply', live && 'cw-rise')}>
+  // The answer was reviewed after it was shown and came back different: it fades in and says so.
+  const adjusted = streamed && !active && Boolean(reply) && Boolean(liveAnswer?.reviewing) && coworkAnswerChanged(liveAnswer?.text || '', reply);
+  const replyBlock = reply ? <div className={cn('group/reply', live && !streamed && 'cw-rise', adjusted && 'cw-fade')}>
     {body && <CoworkMarkdown text={body} />}
+    {adjusted && <p className="cw-fade mt-2 flex items-center gap-1.5 text-[12.5px] text-cw-muted">
+      <PencilLine className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Ajusté la respuesta al revisarla.
+    </p>}
     {!active && <div className="-ml-1.5 mt-1 flex opacity-100 transition-opacity sm:opacity-0 sm:group-hover/reply:opacity-100 sm:focus-within:opacity-100"><CopyReply text={reply} /></div>}
   </div> : null;
 
@@ -186,6 +237,7 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
         <CoworkActivity events={events} active={working} liveLabel={coworkLiveActivity(run, events)} startedAt={startedAt} plan={coworkPlanProgress(run, events)} />
         {note && <div className={cn(live && 'cw-rise')}><CoworkMarkdown text={note} /></div>}
         {!proposal && replyBlock}
+        {working && !reply && !proposal && liveAnswer && <LiveAnswerView answer={liveAnswer} />}
         {!proposal && metrics.map((block, index) => <MetricsBlock key={`metrics-${index}`} block={block} live={live} />)}
         {blockCards.map(artifact => <BlockCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} live={live} />)}
         {otherArtifacts.length > 0 && <div className="grid gap-2">

@@ -320,6 +320,15 @@ export function coworkPlanProgress(run: Pick<CoworkRun, 'status'>, events: Cowor
   return steps.map((step, index) => ({ ...step, state: states[index], found: found[index] }));
 }
 
+/** Whether the final answer reads differently from the one shown while it was being
+ * written: a word changed or went away. Spacing, punctuation, case and text added at
+ * the end (the closing question) do not count. */
+export function coworkAnswerChanged(shown: string, final: string): boolean {
+  const words = (text: string) => text.toLocaleLowerCase('es').match(/[\p{L}\p{N}]+/gu) || [];
+  const after = words(final);
+  return words(shown).some((word, index) => after[index] !== word);
+}
+
 export function coworkTurnOutput(events: CoworkEvent[]): CoworkTurnOutput | null {
   const completed = events.slice().reverse().find(event => event.kind === 'run.completed')?.payload;
   const parsed = coworkDocumentSchema.safeParse(completed ? { reply: completed.reply, document: completed.document } : null);
