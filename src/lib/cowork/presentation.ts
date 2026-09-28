@@ -1,4 +1,5 @@
 import { collectCoworkLeadRows } from './lead-export';
+import { coworkVersionSource } from './blocks';
 import { coworkMessageAttachments } from './attachments';
 import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
   coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep } from './contracts';
@@ -318,6 +319,58 @@ export function coworkPlanProgress(run: Pick<CoworkRun, 'status'>, events: Cowor
     if (current !== -1) states[current] = 'current';
   }
   return steps.map((step, index) => ({ ...step, state: states[index], found: found[index] }));
+}
+
+/** What a turn's reads found, in order and without repeats: the evidence behind its answer. */
+export function coworkTurnFindings(events: CoworkEvent[]): CoworkReadFinding[] {
+  const seen = new Set<string>();
+  return coworkReadEvents(events).flatMap(event => {
+    const finding = coworkReadFinding(event.payload);
+    if (!finding || seen.has(coworkFindingText(finding))) return [];
+    seen.add(coworkFindingText(finding));
+    return [finding];
+  });
+}
+
+export type CoworkCardTone = 'neutral' | 'accent' | 'attention' | 'success' | 'danger';
+export type CoworkCardStatus = { label: string; tone: CoworkCardTone };
+
+const CAMPAIGN_STATUS: Record<CoworkProposalState, CoworkCardStatus> = {
+  pending: { label: 'Campaña propuesta · espera tu aprobación', tone: 'attention' },
+  approved: { label: 'Creando la campaña…', tone: 'accent' },
+  running: { label: 'Creando la campaña…', tone: 'accent' },
+  done: { label: 'Campaña creada · pausada', tone: 'success' },
+  discarded: { label: 'Campaña descartada · no se creó', tone: 'neutral' },
+  failed: { label: 'No se pudo crear la campaña', tone: 'danger' },
+};
+
+/**
+ * What happened to each email or sequence card after it was shown, keyed by
+ * artifact id. A later turn sent from the card («Usar esta versión», «Crear
+ * campaña con esta versión») names it by title; the latest card with that title
+ * before the turn is the one used, and the latest use wins. Cards nobody used
+ * are not in the map: they are drafts nobody sent.
+ */
+export function coworkCardStatuses(turns: Array<{ run: CoworkRun; events: CoworkEvent[] }>): Map<string, CoworkCardStatus> {
+  const statuses = new Map<string, CoworkCardStatus>();
+  const cardByTitle = new Map<string, string>();
+  for (const { run, events } of turns) {
+    const source = coworkVersionSource(run.message);
+    const card = source ? cardByTitle.get(source.title) : undefined;
+    if (source && card) {
+      if (source.intent === 'use') {
+        statuses.set(card, { label: `${source.edited ? 'Tu versión, elegida' : 'Versión elegida'} · no se ha enviado`, tone: 'accent' });
+      } else {
+        const proposal = coworkProposalView(run, events);
+        if (proposal?.type === 'effect' && proposal.payload.kind === 'campaign_create') statuses.set(card, CAMPAIGN_STATUS[proposal.state]);
+        else if (isCoworkActive(run.status)) statuses.set(card, { label: 'Preparando la campaña…', tone: 'accent' });
+      }
+    }
+    for (const artifact of coworkTurnArtifacts(run, events)) {
+      if (artifact.kind === 'block' && (artifact.block.type === 'email_draft' || artifact.block.type === 'sequence')) cardByTitle.set(artifact.title, artifact.id);
+    }
+  }
+  return statuses;
 }
 
 /** Whether the final answer reads differently from the one shown while it was being

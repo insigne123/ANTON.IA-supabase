@@ -5,7 +5,7 @@ import { Check, ChevronRight, Copy, CornerDownRight, Download, FileText, Library
 import type { CoworkEvent, CoworkRun } from '@/lib/cowork/contracts';
 import {
   coworkAnswerChanged, coworkFileSize, coworkLiveActivity, coworkPlanProgress, coworkProposalView, coworkTurnArtifacts, coworkTurnBlocks, coworkTurnNote, coworkTurnOutput,
-  coworkTurnSuggestions, isCoworkActive, type CoworkArtifact,
+  coworkTurnSuggestions, isCoworkActive, type CoworkArtifact, type CoworkCardStatus,
 } from '@/lib/cowork/presentation';
 import { coworkReplyBody, type CoworkSuggestion } from '@/lib/cowork/contracts';
 import { markdownExcerpt } from '@/lib/cowork/markdown';
@@ -172,7 +172,7 @@ function CopyReply({ text }: { text: string }) {
 
 /** One conversational turn: the request, what was consulted, the reply, results and any decision. */
 export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArtifact, onResolve, onRetry, onSuggestion = null, budgetExhausted, live = false,
-  liveAnswer = null, streamed = false }: {
+  liveAnswer = null, streamed = false, cardStatuses = null }: {
   turn: CoworkTurnData;
   latest: boolean;
   /** The turn finished while you were watching: reveal the answer gently. */
@@ -189,6 +189,8 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
   /** Sends a quick reply as your next message; null when you cannot send now. */
   onSuggestion?: ((message: string) => void) | null;
   budgetExhausted: boolean;
+  /** What later turns did with this turn's email and sequence cards, by artifact id. */
+  cardStatuses?: ReadonlyMap<string, CoworkCardStatus> | null;
 }) {
   const { run, events } = turn;
   const version = coworkEditedEmails(run.message);
@@ -239,7 +241,8 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
         {!proposal && replyBlock}
         {working && !reply && !proposal && liveAnswer && <LiveAnswerView answer={liveAnswer} />}
         {!proposal && metrics.map((block, index) => <MetricsBlock key={`metrics-${index}`} block={block} live={live} />)}
-        {blockCards.map(artifact => <BlockCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} live={live} />)}
+        {blockCards.map(artifact => <BlockCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} live={live}
+          status={cardStatuses?.get(artifact.id) ?? null} />)}
         {otherArtifacts.length > 0 && <div className="grid gap-2">
           {otherArtifacts.map(artifact => artifact.kind === 'contacts' && !artifact.external && artifact.count <= 2
             ? <ContactChips key={artifact.id} artifact={artifact} events={events} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />

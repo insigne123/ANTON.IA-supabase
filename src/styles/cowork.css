@@ -210,3 +210,18 @@
 @media (prefers-reduced-motion: reduce) {
   .cw-live-answer .cw-prose > * { animation: none; }
 }
+
+/* Words an edit changed: marked right after «Listo», then plain text again. With less motion the
+   mark does not fade; it simply goes away with the rest (DraftView clears it after 3 s). */
+@keyframes cw-changed { from { background-color: var(--cw-accent-soft); } to { background-color: transparent; } }
+.cw-changed {
+  color: inherit;
+  background-color: var(--cw-accent-soft);
+  border-radius: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  animation: cw-changed 2.4s ease-out 0.5s both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cw-changed { animation: none; }
+}

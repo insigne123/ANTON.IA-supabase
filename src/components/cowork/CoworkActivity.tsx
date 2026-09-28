@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ChevronRight, LoaderCircle, Minus } from 'lucide-react';
 import type { CoworkEvent } from '@/lib/cowork/contracts';
 import {
-  coworkElapsed, coworkFindingText, coworkReadEvents, describeCoworkObservation, type CoworkIconKey, type CoworkPlanProgress,
+  coworkElapsed, coworkFindingText, coworkReadEvents, coworkTurnFindings, describeCoworkObservation, type CoworkIconKey, type CoworkPlanProgress,
   type CoworkPlanState, type CoworkReadFinding,
 } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
@@ -149,6 +149,8 @@ export function CoworkActivity({ events, active, liveLabel, startedAt, plan = nu
   ].filter(Boolean);
   const joined = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}` : parts[0] || '';
   const summary = active ? liveLabel : joined.charAt(0).toUpperCase() + joined.slice(1);
+  // Where the answer comes from, at a glance: what the reads found («3 contactos», «sin envíos»).
+  const findings = active ? [] : coworkTurnFindings(events).slice(0, 3).map(coworkFindingText);
 
   // When the plan ends it closes its space and the one-line summary takes its place.
   return <AnimatePresence initial={false} mode="wait">
@@ -166,6 +168,12 @@ export function CoworkActivity({ events, active, liveLabel, startedAt, plan = nu
             </span>)}
           </span>}
           <span className={cn('min-w-0 truncate', active && 'cw-shimmer')} role={active ? 'status' : undefined}>{summary}</span>
+          {findings.length > 0 && <>
+            <span className="sr-only">. Encontró: {findings.join(', ')}</span>
+            {!open && <span className="hidden shrink-0 items-center gap-1 sm:flex" aria-hidden="true">
+              {findings.map(text => <span key={text} className="rounded-full bg-cw-accent-soft px-2 py-px text-[12px] font-medium leading-5 text-cw-accent">{text}</span>)}
+            </span>}
+          </>}
           {elapsed && <span className="shrink-0 text-[12px] tabular-nums text-cw-faint">{elapsed}</span>}
           {expandable && <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 transition-transform duration-200', open && 'rotate-90')} aria-hidden="true" />}
         </button>

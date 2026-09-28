@@ -87,7 +87,9 @@ export function CwCollapse({ show, children, className, animateIn = true }: {
  * Screen readers get only the final value; `announce` false leaves even that to
  * the surrounding text (a chip already hidden from them).
  */
-export function CwCount({ value, animateIn = true, duration = 0.5, announce = true }: { value: number; animateIn?: boolean; duration?: number; announce?: boolean }) {
+export function CwCount({ value, animateIn = true, duration = 0.5, announce = true, format = String }: {
+  value: number; animateIn?: boolean; duration?: number; announce?: boolean; format?: (value: number) => string;
+}) {
   const reduce = useReducedMotion();
   // Small numbers read at a glance (and «1 contactos» would flash by): only larger ones count, from half.
   const still = !animateIn || Boolean(reduce) || value <= 9;
@@ -99,7 +101,8 @@ export function CwCount({ value, animateIn = true, duration = 0.5, announce = tr
     const start = performance.now();
     let frame = 0;
     const tick = (now: number) => {
-      const progress = Math.min(1, (now - start) / (duration * 1000));
+      // A frame's timestamp can come slightly before `start`: never count below where it began.
+      const progress = Math.max(0, Math.min(1, (now - start) / (duration * 1000)));
       const next = Math.round(origin + (value - origin) * (1 - (1 - progress) ** 3));
       setShown(next);
       if (progress < 1) frame = requestAnimationFrame(tick); else from.current = value;
@@ -107,7 +110,7 @@ export function CwCount({ value, animateIn = true, duration = 0.5, announce = tr
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [value, still, duration]);
-  return <><span aria-hidden="true" className="tabular-nums">{shown}</span>{announce && <span className="sr-only">{value}</span>}</>;
+  return <><span aria-hidden="true" className="tabular-nums">{format(shown)}</span>{announce && <span className="sr-only">{format(value)}</span>}</>;
 }
 
 /**

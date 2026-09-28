@@ -8,7 +8,7 @@ import { collectCoworkLeadRows } from '@/lib/cowork/lead-export';
 import { coworkMessageAttachments, coworkWithAttachments } from '@/lib/cowork/attachments';
 import {
   coworkCleanTitle, coworkConsultedSources, coworkExpectsContinuation, coworkProposalView, coworkStatusCopy,
-  coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
+  coworkCardStatuses, coworkTurnArtifacts, coworkTurnProgress, groupCoworkThreads, isCoworkActive, type CoworkArtifact,
 } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
 import { CoworkArtifactPanel } from './CoworkArtifactPanel';
@@ -348,6 +348,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
   const latest = turns[turns.length - 1] || null;
   const latestIsCurrent = Boolean(latest && latest.run.id === selected);
   const artifacts = useMemo(() => turns.flatMap(turn => coworkTurnArtifacts(turn.run, turn.events)), [turns]);
+  // What later turns did with each email or sequence card («Campaña creada · pausada»…).
+  const cardStatuses = useMemo(() => coworkCardStatuses(turns), [turns]);
   const openArtifact = artifactId ? artifacts.find(item => item.id === artifactId) || null : null;
   const proposal = latest ? coworkProposalView(latest.run, latest.events) : null;
   const pendingDecision = Boolean(latest && latest.run.status === 'waiting_approval' && proposal?.state === 'pending');
@@ -690,7 +692,8 @@ export function CoworkWorkspace({ userId = null }: { userId?: string | null } = 
                 resolving={resolving} openArtifactId={artifactId} onOpenArtifact={openArtifactPanel}
                 onResolve={approve => void resolve(approve)} onRetry={ready ? retry : null} onSuggestion={canFollowUp ? followUp : null}
                 budgetExhausted={Boolean(state?.budget?.exhausted)} live={liveRuns.current.has(turn.run.id)}
-                liveAnswer={liveAnswer?.runId === turn.run.id ? liveAnswer : null} streamed={streamedRuns.current.has(turn.run.id)} />)}
+                liveAnswer={liveAnswer?.runId === turn.run.id ? liveAnswer : null} streamed={streamedRuns.current.has(turn.run.id)}
+                cardStatuses={cardStatuses} />)}
               {continuationMissing && latestIsCurrent && latest?.run.status === 'completed' && !optimistic && !queued && ready && <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-[38px]">
                 <CwButton size="sm" variant="secondary" disabled={sending}
                   onClick={() => { setContinuationMissing(false); void post(CONTINUE_PROMPT, latest.run.id); }}>
