@@ -125,7 +125,7 @@ function getFriendlySearchErrorMessage(message?: string) {
   }
 
   if (raw.includes('APOLLO_PROFILE_NO_USABLE_DATA')) {
-    return 'Apollo no devolvió datos utilizables para esta URL (nombre, cargo o empresa). Puedes reintentar solo los datos profesionales, verificar la URL o buscar por cargo y empresa.';
+    return 'No se encontraron datos en las bases de datos para esta URL (nombre, cargo o empresa). Puedes reintentar solo los datos profesionales, verificar la URL o buscar por cargo y empresa.';
   }
 
   if (lower.includes('perfil distinto') || lower.includes('otra persona') || lower.includes('corresponda a la url')) {
@@ -1122,7 +1122,7 @@ export default function SearchPage() {
         setProfileSearchNotice({
           tone: 'warning',
           title: 'Perfil sin datos de contacto',
-          description: 'Apollo devolvió los datos profesionales, pero no tiene correo ni teléfono para esta URL. Puedes guardar el perfil o completar los datos manualmente.',
+          description: 'Se encontraron los datos profesionales, pero no hay correo ni teléfono disponibles para esta URL en las bases de datos. Puedes guardar el perfil o completar los datos manualmente.',
           emailState: 'missing',
           phoneState: 'missing',
         });
@@ -1529,12 +1529,12 @@ export default function SearchPage() {
           if (!stillPending) {
             const hasProfile = items.some((item) => hasUsableLinkedInProfileData(item as Partial<Lead>));
             finishWithoutContact(hasProfile
-              ? 'El perfil está disponible, pero Apollo no devolvió todos los datos de contacto solicitados.'
-              : 'No pudimos confirmar este perfil en Apollo. Revisa la URL antes de volver a buscar.', items);
+              ? 'El perfil está disponible, pero no se encontraron todos los datos de contacto solicitados en las bases de datos.'
+              : 'No pudimos confirmar este perfil en las bases de datos. Revisa la URL antes de volver a buscar.', items);
             if (!hasProfile) {
               setLeads([]);
               setProfileSearchNotice({ tone: 'warning', title: 'Perfil no confirmado',
-                description: 'Apollo no devolvió información suficiente para confirmar este perfil. Revisa la URL antes de volver a buscar.',
+                description: 'No se encontró información suficiente en las bases de datos para confirmar este perfil. Revisa la URL antes de volver a buscar.',
                 emailState: filters.revealEmail ? 'missing' : 'not_requested',
                 phoneState: filters.revealPhone ? 'missing' : 'not_requested' });
             }
