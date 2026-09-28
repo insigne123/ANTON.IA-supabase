@@ -18,6 +18,7 @@ import { BlockCard, CoworkBlockIcon, MetricsBlock } from './CoworkBlocks';
 import { CoworkApproval } from './CoworkApproval';
 import { CoworkMarkdown } from './CoworkMarkdown';
 import { coworkArtifactUrls } from './ArtifactPreview';
+import { AnimatePresence, cwFadeRise, cwVariants, m } from './motion';
 import { CoworkMark, CwButton } from './ui';
 
 export type CoworkTurnData = { run: CoworkRun; events: CoworkEvent[] };
@@ -76,9 +77,10 @@ function ContactChips({ artifact, events, active, onOpen }: { artifact: CoworkAr
 }
 
 /** Quick replies under the latest answer: one click sends the message. The
- * first answers the closing question, so it carries the accent. */
+ * first answers the closing question, so it carries the accent. They fade
+ * away once used, so the choice reads as made. */
 function SuggestedReplies({ suggestions, live, onSelect }: { suggestions: CoworkSuggestion[]; live: boolean; onSelect: (message: string) => void }) {
-  return <div role="group" aria-label="Respuestas sugeridas" className={cn('flex flex-wrap gap-2', live && 'cw-rise')}>
+  return <m.div role="group" aria-label="Respuestas sugeridas" {...cwVariants(cwFadeRise, live)} className="flex flex-wrap gap-2">
     {suggestions.map((chip, index) => <button key={chip.label} type="button" onClick={() => onSelect(chip.message)} title={chip.message}
       aria-label={chip.message === chip.label ? chip.label : `${chip.label}: ${chip.message}`}
       className={cn('inline-flex max-w-full items-center rounded-full border px-3.5 py-2 text-[13.5px] leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]',
@@ -87,7 +89,7 @@ function SuggestedReplies({ suggestions, live, onSelect }: { suggestions: Cowork
           : 'border-cw-border bg-cw-elevated text-cw-text shadow-[var(--cw-shadow-sm)] hover:border-cw-border-strong hover:bg-cw-panel')}>
       <span className="truncate">{chip.label}</span>
     </button>)}
-  </div>;
+  </m.div>;
 }
 
 /** A version sent from a card: the instruction reads first, the exact emails fold away. */
@@ -192,7 +194,9 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
             : <ArtifactCard key={artifact.id} artifact={artifact} active={openArtifactId === artifact.id} onOpen={onOpenArtifact} />)}
         </div>}
         {question && <NextStep question={question} live={live} />}
-        {suggestions.length > 0 && onSuggestion && <SuggestedReplies suggestions={suggestions} live={live} onSelect={onSuggestion} />}
+        <AnimatePresence initial={false}>
+          {suggestions.length > 0 && onSuggestion && <SuggestedReplies key="suggestions" suggestions={suggestions} live={live} onSelect={onSuggestion} />}
+        </AnimatePresence>
         {proposal && <CoworkApproval run={run} proposal={proposal} resolving={resolving} interactive={latest} onResolve={onResolve} />}
         {proposal && replyBlock}
         {run.status === 'failed' && <div role="alert" className="flex flex-wrap items-start gap-3 rounded-2xl bg-cw-danger-soft px-4 py-3 text-[13.5px] text-cw-danger">

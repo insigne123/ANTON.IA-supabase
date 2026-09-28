@@ -5,6 +5,7 @@ import { FileText, LoaderCircle, Upload, X } from 'lucide-react';
 import { coworkMessageAttachments } from '@/lib/cowork/attachments';
 import { coworkDisplayMessage, coworkFileSize } from '@/lib/cowork/presentation';
 import { cn } from '@/lib/utils';
+import { AnimatePresence, cwPop, cwVariants, m } from './motion';
 
 export type CoworkAttachment = { name: string; size: number };
 
@@ -49,16 +50,20 @@ export function CoworkAttachments({ id, files, uploading, open, onUpload, onRemo
   onUpload: (files: FileList | null) => void; onRemove: (name: string) => void;
 }) {
   return <section aria-label="Archivos adjuntos" className="space-y-2">
-    {files.length > 0 && <ul className="flex flex-wrap gap-1.5">
-      {files.map(file => <li key={file.name} className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-cw-border bg-cw-elevated py-1 pl-2 pr-1 text-[12.5px]">
+    {/* A chip pops in when its file is attached and out when it is removed. */}
+    <ul className="flex flex-wrap gap-1.5 empty:hidden">
+      <AnimatePresence initial={false}>
+      {files.map(file => <m.li key={file.name} {...cwVariants(cwPop)}
+        className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-cw-border bg-cw-elevated py-1 pl-2 pr-1 text-[12.5px]">
         <FileText className="h-3.5 w-3.5 shrink-0 text-cw-muted" aria-hidden="true" />
         <span className="truncate">{file.name}</span><span className="shrink-0 text-cw-muted">{coworkFileSize(file.size)}</span>
         <button type="button" onClick={() => onRemove(file.name)} aria-label={`Quitar ${file.name} del mensaje`} title="Quitar del mensaje"
           className="shrink-0 rounded-md p-0.5 text-cw-muted hover:bg-cw-hover hover:text-cw-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cw-accent-ring)]">
           <X className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
-      </li>)}
-    </ul>}
+      </m.li>)}
+      </AnimatePresence>
+    </ul>
     {open && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-dashed border-cw-border-strong bg-cw-panel px-3 py-2.5">
       <label htmlFor={id} className={cn('inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] font-medium text-cw-text hover:bg-cw-hover focus-within:ring-2 focus-within:ring-[color:var(--cw-accent-ring)]', uploading && 'pointer-events-none opacity-50')}>
         {uploading ? <LoaderCircle className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" /> : <Upload className="h-4 w-4" aria-hidden="true" />}
