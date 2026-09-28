@@ -176,10 +176,8 @@ test('LinkedIn profile search recovers an occupied target and keeps it pollable'
       reveal_email: true,
       reveal_phone: true,
     });
-    assert.equal(result.count, 1);
-    assert.equal(result.leads[0]?.id, 'profile-target-1');
-    assert.equal(result.leads[0]?.linkedin_url, 'https://www.linkedin.com/in/example');
-    assert.equal(result.leads[0]?.enrichment_status, 'pending_phone');
+    assert.equal(result.count, 0);
+    assert.deepEqual(result.leads, []);
     assert.equal(result.phone_enrichment?.status, 'queued');
     assert.deepEqual(result.profile_tracking_ids, ['profile-target-1']);
   } finally {
@@ -236,5 +234,27 @@ test('profile identity refusal is shown explicitly instead of an unrelated or em
   try {
     await assert.rejects(() => searchLinkedInProfileLead({search_mode: 'linkedin_profile',
       linkedin_url: 'https://www.linkedin.com/in/it-recruiter-janet-montero/'}), /No pudimos confirmar/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('an ambiguous provider outcome without phone reveal remains trackable without inventing a lead', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({
+      error: 'ENRICHMENT_PROVIDER_OUTCOME_UNKNOWN',
+      operationStatus: 'submitted', providerState: 'unknown', queued: true,
+      enriched: [{ id: 'profile-pending' }],
+    }, { status: 409 });
+  };
+  try {
+    const result = await searchLinkedInProfileLead({ search_mode: 'linkedin_profile',
+      linkedin_url: 'https://www.linkedin.com/in/example', reveal_email: true, reveal_phone: false });
+    assert.equal(calls, 1, 'an ambiguous charge must not be submitted again');
+    assert.equal(result.profile_pending, true);
+    assert.equal(result.count, 0);
+    assert.deepEqual(result.leads, []);
+    assert.deepEqual(result.profile_tracking_ids, ['profile-pending']);
   } finally { globalThis.fetch = originalFetch; }
 });
