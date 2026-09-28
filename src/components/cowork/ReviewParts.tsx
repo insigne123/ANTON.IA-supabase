@@ -62,6 +62,8 @@ export function ReviewActions({ onReject, onApprove, approveLabel, rejectLabel =
 }) {
   return <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
     <CwButton variant="ghost" disabled={resolving} onClick={onReject}>{rejectLabel}</CwButton>
-    <CwButton variant="primary" disabled={resolving || disabled} onClick={onApprove}>{resolving ? resolvingLabel : approveLabel}</CwButton>
+    <CwButton variant="primary" disabled={resolving || disabled} onClick={onApprove}>
+      {resolving && <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" />}{resolving ? resolvingLabel : approveLabel}
+    </CwButton>
   </div>;
 }

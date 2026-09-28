@@ -252,7 +252,7 @@ export function CoworkTurn({ turn, latest, resolving, openArtifactId, onOpenArti
         <AnimatePresence initial={false}>
           {suggestions.length > 0 && onSuggestion && <SuggestedReplies key="suggestions" suggestions={suggestions} live={live} onSelect={onSuggestion} />}
         </AnimatePresence>
-        {proposal && <CoworkApproval run={run} proposal={proposal} resolving={resolving} interactive={latest} onResolve={onResolve} />}
+        {proposal && <CoworkApproval run={run} proposal={proposal} resolving={resolving} interactive={latest} onResolve={onResolve} live={live} />}
         {proposal && replyBlock}
         {run.status === 'failed' && <div role="alert" className="flex flex-wrap items-start gap-3 rounded-2xl bg-cw-danger-soft px-4 py-3 text-[13.5px] text-cw-danger">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />

@@ -36,7 +36,8 @@ const waitFor = async predicate => {
 const button = text => [...window.document.querySelectorAll('button')].find(node => node.textContent.trim() === text);
 try {
   await waitFor(() => button('Buscar contactos'));
-  assert.match(window.document.body.textContent, /Hasta 5 contactos/);
+  // The limit reads before deciding, in what approving does.
+  assert.match(window.document.body.textContent, /Se buscan hasta 5 contactos nuevos/);
   button('Buscar contactos').click();
   await waitFor(() => window.document.body.textContent.includes('espera su turno'));
   assert.equal(button('Buscar contactos'), undefined);
