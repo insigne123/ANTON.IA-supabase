@@ -4,7 +4,7 @@ import type { CoworkEvent, CoworkRun } from './contracts';
 import {
   coworkExpectsContinuation, coworkProposalView, coworkTurnArtifacts, coworkTurnProgress, describeCoworkObservation,
   groupCoworkThreads, coworkDateBucket, coworkConsultedSources, coworkLiveActivity, coworkTurnOutput, coworkTurnSuggestions,
-  coworkTurnBlocks, coworkPlanProgress, coworkReadEvents,
+  coworkTurnBlocks, coworkPlanProgress, coworkReadEvents, coworkReadFinding, coworkFindingText,
 } from './presentation';
 import { coworkIsAssistantEvent, coworkPlanSteps } from './contracts';
 
@@ -150,9 +150,29 @@ test('the plan of a turn checks off each step as its read completes, and the las
   // The line above the plan never says it is still understanding the request.
   assert.equal(coworkLiveActivity({ status: 'running' }, [plan]), 'Plan listo. Empezando…');
   assert.equal(coworkLiveActivity({ status: 'running' }, []), 'Entendiendo tu solicitud…');
+  // Each done step says what its read found; the others found nothing yet.
+  const counted = event('tool.completed', { action: 'leads.search', input: 'RRHH', result: { items: [{}, {}, {}, {}] } });
+  assert.deepEqual(coworkPlanProgress({ status: 'running' }, [plan, counted])?.map(step => step.found), [{ count: 4, label: 'contactos' }, null, null]);
   // The side panel names the step in progress.
   assert.equal(coworkTurnProgress({ status: 'running' }, [plan, leads]).find(step => step.key === 'work')?.detail, 'Paso 2 de 3: Veo qué correos ya enviaste');
   assert.equal(coworkTurnProgress({ status: 'completed' }, [plan, leads, sent]).find(step => step.key === 'work')?.detail, '2 consultas');
+});
+
+test('what a read found reads as a count and what it counts, or a short phrase', () => {
+  const found = (action: string, result: unknown) => coworkReadFinding({ action, result });
+  assert.deepEqual(found('leads.search', { items: [{}] }), { count: 1, label: 'contacto' });
+  assert.deepEqual(found('contacted.search', { items: [] }), { count: null, label: 'sin envíos' });
+  assert.deepEqual(found('campaigns.list', { campaigns: [{}, {}] }), { count: 2, label: 'campañas' });
+  assert.deepEqual(found('crm.get_lead', { records: [{}, {}, {}] }), { count: 3, label: 'resultados' });
+  assert.deepEqual(found('files.read', { found: true, kind: 'table', totalRows: 8 }), { count: 8, label: 'filas' });
+  assert.deepEqual(found('files.read', { found: false }), { count: null, label: 'no lo encontró' });
+  assert.deepEqual(found('files.read', { found: true, kind: 'unreadable' }), { count: null, label: 'no se pudo leer' });
+  assert.deepEqual(found('research.get_existing', { availability: 'available', research: { sources: [{}, {}] } }), { count: 2, label: 'fuentes' });
+  assert.deepEqual(found('research.get_existing', { availability: 'missing' }), { count: null, label: 'sin informe' });
+  // Figures without a list (metrics, quotas) have nothing to count.
+  assert.equal(found('metrics.overview', { sent: 12, replies: 1 }), null);
+  assert.equal(coworkFindingText({ count: 4, label: 'contactos' }), '4 contactos');
+  assert.equal(coworkFindingText({ count: null, label: 'sin envíos' }), 'sin envíos');
 });
 
 test('a stored plan is read only in the shape the worker writes', () => {

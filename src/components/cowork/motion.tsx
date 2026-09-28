@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, LazyMotion, MotionConfig, m, useReducedMotion, type Transition, type Variants } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
@@ -81,6 +81,36 @@ export function CwCollapse({ show, children, className, animateIn = true }: {
 }
 
 /**
+ * A number that counts up to its value when it appears live, so a result reads
+ * as just found. At rest (history, reduced motion) and for numbers up to 9 it
+ * shows the value at once.
+ * Screen readers get only the final value; `announce` false leaves even that to
+ * the surrounding text (a chip already hidden from them).
+ */
+export function CwCount({ value, animateIn = true, duration = 0.5, announce = true }: { value: number; animateIn?: boolean; duration?: number; announce?: boolean }) {
+  const reduce = useReducedMotion();
+  // Small numbers read at a glance (and «1 contactos» would flash by): only larger ones count, from half.
+  const still = !animateIn || Boolean(reduce) || value <= 9;
+  const [shown, setShown] = useState(still ? value : Math.floor(value / 2));
+  const from = useRef(shown);
+  useEffect(() => {
+    if (still) { setShown(value); from.current = value; return; }
+    const origin = from.current;
+    const start = performance.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - start) / (duration * 1000));
+      const next = Math.round(origin + (value - origin) * (1 - (1 - progress) ** 3));
+      setShown(next);
+      if (progress < 1) frame = requestAnimationFrame(tick); else from.current = value;
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [value, still, duration]);
+  return <><span aria-hidden="true" className="tabular-nums">{shown}</span>{announce && <span className="sr-only">{value}</span>}</>;
+}
+
+/**
  * The motion context of the workspace. `reducedMotion="user"` turns movement
  * into plain fades when the system asks for less motion; cowork.css does the
  * same for the CSS effects.
@@ -93,4 +123,4 @@ export function CoworkMotion({ children }: { children: ReactNode }) {
   </LazyMotion>;
 }
 
-export { AnimatePresence, m };
+export { AnimatePresence, m, useReducedMotion };
