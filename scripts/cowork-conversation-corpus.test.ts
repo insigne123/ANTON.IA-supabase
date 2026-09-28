@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { coworkDecisionSchema } from '../src/lib/cowork/agent-loop';
 import { CORPUS, LEAD } from './fixtures/cowork-conversation-corpus';
 import { EDIT_CORPUS, EDITED_STEPS, FILE_CORPUS, MARKETING_CORPUS, MARKETING_LEAD, STARTER_CORPUS } from './fixtures/cowork-marketing-corpus';
-import { corpusShownAnswer, runCorpusCase, scoreCorpusCase, type CorpusDecider } from './fixtures/cowork-conversation-runner';
+import { corpusShownAnswer, runCorpusCase, scoreCorpusCase, type CorpusDecider, type CorpusWriter } from './fixtures/cowork-conversation-runner';
+import { runCoworkWriter } from '../src/lib/cowork/writer';
 
 const read = (action: string, query: string | null = null, extra: Record<string, unknown> = {}) =>
   coworkDecisionSchema.parse({ action, query, leadId: null, answer: null, ...extra });
@@ -253,4 +254,32 @@ test('a corpus turn keeps each read with its input and what the person saw, for 
   // The review card's title travels too.
   assert.equal(detail.nombre, (outcome.result.proposal?.campaign as { name: string }).name);
   assert.ok(detail.nombre);
+});
+
+test('with the Writer on, a drafting turn hands the emails over and still passes its checks, and the judge sees who wrote them', async () => {
+  const entry = MARKETING_CORPUS.find(item => item.id === 'mkt-secuencia')!;
+  const brief = { kind: 'sequence', recipients: null, objective: 'Presentar AXIS a gerentes de personas y conseguir una conversación', angle: null,
+    tone: 'cercano', steps: 3, notes: null, findings: null };
+  const decide: CorpusDecider = async context => context.observations.length === 0
+    ? read('message.context')
+    : coworkDecisionSchema.parse({ action: 'draft.write', query: null, leadId: null, answer: null, write: brief });
+  const signed = (body: string) => `Hola,\n${body}\n¿Te sirve verlo 15 minutos esta semana?\nNicolás Y.\nGerente Comercial, Yago SpA`;
+  // The real pipeline with scripted models: the first draft offers something «gratis», the checks catch it and the Writer fixes it.
+  const drafts = [['AXIS es gratis el primer mes.', 'Quería saber cómo revisan hoy los antecedentes.', 'Te muestro AXIS con un caso real.'],
+    ['AXIS revisa antecedentes en el Poder Judicial.', 'Quería saber cómo revisan hoy los antecedentes.', 'Te muestro AXIS con un caso real.']];
+  const write: CorpusWriter = (writeBrief, observations, meta) => runCoworkWriter({
+    request: meta.request, brief: writeBrief, userContext: meta.userContext as { fullName?: string | null }, observations, step: meta.step,
+    generate: async ({ schema }) => schema.parse({
+      reply: 'Te dejé tres correos en tono cercano, cada uno con un ángulo distinto.', question: '¿La convierto en una campaña pausada para tus contactos de RR. HH. con correo?',
+      suggestions: [{ label: 'Sí, crea la campaña', message: 'Sí, crea una campaña pausada con esta secuencia' }],
+      blocks: [{ type: 'sequence', title: 'Secuencia AXIS para gerentes de personas',
+        steps: drafts.shift()!.map((body, index) => ({ day: [1, 3, 7][index], subject: `Asunto ${index + 1}`, body: signed(body) })) }],
+    }),
+  });
+  const outcome = await runCorpusCase(entry, decide, write);
+  const failing = outcome.checks.filter(check => !check.passed).map(check => check.label);
+  assert.deepEqual(failing, [], `${failing.join(', ')} · ${outcome.result.failed || outcome.result.reply}`);
+  assert.equal((outcome.result.writer?.brief as { kind: string }).kind, 'sequence');
+  assert.deepEqual(outcome.result.writer?.steps.map(step => `${step.agent}:${step.state}:${step.label}`),
+    ['writer:working:Escribiendo 3 correos', 'writer:done:Escribió 3 correos', 'reviewer:working:Aplicando 1 ajuste', 'reviewer:done:1 ajuste']);
 });

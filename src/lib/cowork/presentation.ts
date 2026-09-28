@@ -2,7 +2,7 @@ import { collectCoworkLeadRows } from './lead-export';
 import { coworkVersionSource } from './blocks';
 import { coworkMessageAttachments } from './attachments';
 import { coworkDocumentSchema, coworkStoredBlocks, coworkStoredQuestion, coworkStoredSuggestions, type CoworkBlock, type CoworkEvent, type CoworkRun, type CoworkRunStatus, type CoworkSuggestion, coworkNoteText,
-  coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep } from './contracts';
+  coworkIsAssistantEvent, coworkPlanSteps, type CoworkPlanStep, coworkAgentEvent, type CoworkAgentEvent } from './contracts';
 
 /**
  * Pure presentation helpers for the Cowork workspace. Everything here derives
@@ -675,6 +675,36 @@ export function coworkConsultedSources(events: CoworkEvent[]): string[] {
   return sources;
 }
 
+/** The Writer or the Reviewer in a turn (writer.ts): its latest step, with the name the page shows. */
+export type CoworkAgentRow = CoworkAgentEvent & { name: string };
+const AGENT_NAMES: Record<CoworkAgentEvent['agent'], string> = { writer: 'Redactora', reviewer: 'Revisora' };
+
+/** Each agent of the turn at its latest step, in the order they started: who wrote, who reviewed. */
+export function coworkAgentRows(events: CoworkEvent[]): CoworkAgentRow[] {
+  const rows = new Map<CoworkAgentEvent['agent'], CoworkAgentRow>();
+  for (const event of events) {
+    const step = event.kind === 'tool.completed' ? coworkAgentEvent(event.payload) : null;
+    // A later step replaces the agent's row in place: the order stays the order they started.
+    if (step) rows.set(step.agent, { ...step, name: AGENT_NAMES[step.agent] });
+  }
+  return [...rows.values()];
+}
+
+/** One line for an agent's step: «Redactora · escribiendo 3 correos…». */
+export function coworkAgentLine(row: CoworkAgentRow): string {
+  const label = row.label.charAt(0).toLocaleLowerCase('es') + row.label.slice(1);
+  return `${row.name} · ${label}${row.state === 'working' ? '…' : ''}`;
+}
+
+export type CoworkDraftReview = { outcome: 'clean' | 'fixed' | 'pending'; changes: string[] };
+/** How the Reviewer left the turn's emails, for their cards: nothing to fix, what it fixed, or what
+ * is still to look at. Null when nobody reviewed them (no time, or the review failed). */
+export function coworkDraftReview(events: CoworkEvent[]): CoworkDraftReview | null {
+  const reviewer = coworkAgentRows(events).find(row => row.agent === 'reviewer');
+  if (!reviewer || reviewer.state !== 'done' || !reviewer.outcome || reviewer.outcome === 'skipped') return null;
+  return { outcome: reviewer.outcome, changes: reviewer.changes };
+}
+
 /** Latest live activity line while a run is working. */
 export function coworkLiveActivity(run: Pick<CoworkRun, 'status'>, events: CoworkEvent[]): string {
   if (run.status === 'queued') return events.some(event => event.kind === 'effect.completed' || event.kind === 'search.approved') ? 'Retomando el trabajo…' : 'Preparando el trabajo…';
@@ -686,6 +716,12 @@ export function coworkLiveActivity(run: Pick<CoworkRun, 'status'>, events: Cowor
     return 'Esperando tu decisión';
   }
   const lastRead = coworkReadEvents(events).pop();
+  // After the reads, the Writer and the Reviewer say what they are doing.
+  const lastAgent = events.slice().reverse().find(event => event.kind === 'tool.completed' && coworkAgentEvent(event.payload));
+  if (lastAgent && (!lastRead || lastAgent.sequence > lastRead.sequence)) {
+    const row = coworkAgentRows(events).find(item => item.agent === coworkAgentEvent(lastAgent.payload)?.agent);
+    if (row) return coworkAgentLine(row);
+  }
   // Once the plan is on screen, the request is understood.
   if (!lastRead) return events.some(event => event.kind === 'tool.completed' && coworkPlanSteps(event.payload)) ? 'Plan listo. Empezando…' : 'Entendiendo tu solicitud…';
   return `${coworkActionInfo(lastRead.payload?.action).label}. Analizando…`;

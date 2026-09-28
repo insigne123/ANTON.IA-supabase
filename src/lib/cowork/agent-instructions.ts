@@ -8,6 +8,8 @@ export function coworkAgentInstructions(configuration: {
   threadBudget?: string | null;
   /** How much one turn may spend (turn-budget.ts); the rules name the same numbers the loop enforces. */
   turnCeiling?: CoworkTurnCeiling;
+  /** The Writer and the Reviewer write the emails of the turn (writer.ts, COWORK_WRITER_ENABLED). */
+  writer?: boolean;
 }) {
   const ceiling = configuration.turnCeiling ?? COWORK_TURN_DEFAULTS;
   const allReads = ceiling.reads === 3 ? 'las tres lecturas' : `las ${ceiling.reads} lecturas`;
@@ -83,6 +85,9 @@ export function coworkAgentInstructions(configuration: {
           : 'El usuario debe revisar y aprobar los criterios antes de ejecutar. Consume una operación de cuota al ejecutarse.',
       ].join(' '),
     additionalCapability: 'crm.propose_note: solo ante una solicitud explícita, propone el texto COMPLETO de reemplazo en note para leadId. Primero identifica el contacto mediante leads.search/get en esta ejecución. Requiere siempre revisión humana y ficha CRM existente, incluso en modo autónomo. No afirmes que se guardó. Usa null en note para otras acciones.',
+    writerCapability: configuration.writer
+      ? 'Redactora: para entregar un correo (kind email) o una secuencia (kind sequence) usa action draft.write con write {kind, recipients (nombres o correos observados, o null si es genérico), objective (qué debe lograr el texto), angle (el ángulo o dato del destinatario que conviene usar, o null), tone (o null), steps (2 a 7 correos en una secuencia, o null), notes (lo que el usuario pidió cuidar o evitar, y si es un seguimiento, qué decía el correo anterior; o null), findings (lo que el usuario debe leer junto a los correos, en 1 a 2 frases: lo que no puedes hacer de lo pedido y la alternativa (por ejemplo, que no agendas en su calendario), las cifras observadas, a quiénes va y quiénes quedan fuera y por qué; son hechos para el usuario: las reglas de redacción y lo que no se debe ofrecer van en notes; null si no hay nada que agregar)}. La Redactora escribe los correos, la Revisora los revisa y el resultado es la respuesta final del turno: no escribas tú los correos ni los pongas en answer.blocks. Si writerAvailable es false, escribe tú los correos con answer: la Redactora necesita una decisión de reserva por si falla. Antes lee solo lo necesario: los contactos del grupo (quiénes tienen correo y quiénes ya recibieron algo) y, para una secuencia, message.context. Si el usuario trae una versión exacta («Usa exactamente esta versión…»), no uses draft.write: esa versión manda (regla 11). Los mensajes de LinkedIn siguen con linkedin.message.'
+      : null,
     threadBudgetCapability: configuration.threadBudget
       || 'Hilo nuevo: dispones del presupuesto completo de pasos automáticos; aun así, cierra cada trabajo con lo esencial y no encadenes trabajo innecesario.',
     effectCapability: [

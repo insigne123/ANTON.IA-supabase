@@ -28,6 +28,7 @@ import { coworkDecisionContext } from '@/lib/cowork/decision-context';
 import { loadCoworkUserContext } from './user-context';
 import { reserveCoworkModelCall } from './model-budget';
 import { coworkDraftWriter, coworkStreamingEnabled } from './live-draft';
+import { coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
 import { recordCoworkModelUsage } from './model-usage';
 import { stageCoworkProfileUpdate } from './profile-update';
 import { stageCoworkSavedSearchCreate, stageCoworkSavedSearchUpdate, stageCoworkSavedSearchDelete } from './saved-search-ops';
@@ -94,6 +95,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
   const controller = new AbortController();
   // Leave time for the terminal write before the route's 120-second deadline.
   const deadline = setTimeout(() => controller.abort(), 105000);
+  const claimedAt = Date.now();
   const authorize = async () => {
     controller.signal.throwIfAborted();
     await requireCoworkWorkerAccess(client, scope);
@@ -146,12 +148,21 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       if (written.error) throw written.error;
       return written.data === true;
     }, { onDisabled: reason => console.warn('[cowork] live draft off for this run:', reason instanceof Error ? reason.message : reason) }) : null;
+    const writerEnabled = coworkWriterEnabled();
     const instructions = coworkAgentInstructions({
       turnCeiling,
+      writer: writerEnabled,
       externalSearch: process.env.COWORK_EXTERNAL_SEARCH_ENABLED === 'true',
       automaticExternalSearch: executionPolicy.automaticExternalSearch,
       threadBudget: `Hilo automático: paso ${stats.depth + 1} de ${budgets.maxDepth}. Efectos usados ${stats.effects}/${budgets.maxEffects}; búsquedas externas ${stats.searches}/${budgets.maxSearches}; borradores ${stats.drafts}/${budgets.maxDrafts}. Búsquedas disponibles hoy: ${remainingSearches}. Si este es el último paso, cierra con el resumen final sin proponer más efectos ni búsquedas.`,
     });
+    // Reads, notes, the plan and each agent's step, as events of the run.
+    const recordEvent = async (payload: unknown) => {
+      const recorded = await client.rpc('cowork_record_tool_result', {
+        p_run_id: run.id, p_token: run.lease_token, p_payload: payload,
+      });
+      if (recorded.error || recorded.data !== true) throw new Error('Cowork run is no longer writable');
+    };
     const result = await runCoworkReadLoop({
       message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize, ceiling: turnCeiling,
       resumedObservations: coworkSpecialistQueueEnabled() ? await loadCoworkSpecialistResume(client, scope, run.id) : undefined,
@@ -191,12 +202,19 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         capability: action, input: value,
         operationId: `cowork:${run.id}:${action}:${coworkOperationHash(value)}`,
       }, controller.signal),
-      record: async observation => {
-        const recorded = await client.rpc('cowork_record_tool_result', {
-          p_run_id: run.id, p_token: run.lease_token, p_payload: observation,
-        });
-        if (recorded.error || recorded.data !== true) throw new Error('Cowork run is no longer writable');
-      },
+      record: recordEvent,
+      // The Writer and the Reviewer write the emails when the coordinator hands them a brief.
+      write: writerEnabled ? coworkWriterTurn({
+        request: run.message, userContext, signal: controller.signal, authorize,
+        reserve: role => reserveCoworkModelCall(client, run.id, run.lease_token, role),
+        generate: generateStructuredWithTelemetry,
+        recordUsage: (reservationId, callTelemetry) => recordCoworkModelUsage(client, reservationId, run.lease_token, callTelemetry),
+        record: recordEvent, liveDraft,
+        // Five seconds before the worker's deadline, for the terminal write.
+        timeLeft: () => 100000 - (Date.now() - claimedAt),
+        models: coworkWriterModels(),
+        onCall: call => telemetry.push(call),
+      }) : undefined,
       proposeNote: async (leadId, note) => {
         const proposed = await client.rpc('cowork_propose_note', {
           p_run_id: run.id, p_token: run.lease_token, p_lead_id: leadId, p_note: note,

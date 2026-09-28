@@ -10,18 +10,27 @@ import { polishCoworkAnswer } from '../../src/lib/cowork/answer-quality';
 import { coworkBlocksText } from '../../src/lib/cowork/blocks';
 import { coworkTurnCeiling } from '../../src/lib/cowork/turn-budget';
 import type { CoworkShownAnswer } from '../../src/lib/cowork/judge';
+import { coworkWriterBlocks, type CoworkAgentStep, type CoworkWriteBrief, type CoworkWriterOutput } from '../../src/lib/cowork/writer';
 import { CORPUS_NOW, CORPUS_USER_CONTEXT, corpusRead, corpusStageEffect, type CorpusCase, type CorpusTurnResult } from './cowork-conversation-corpus';
 import type { z } from 'zod';
 
 type Decision = z.infer<typeof coworkDecisionSchema>;
 export type CorpusContext = ReturnType<typeof coworkDecisionContext>;
 export type CorpusDecider = (context: CorpusContext, meta: { caseId: string; turn: number }) => Promise<Decision>;
+/** The Writer for a corpus case: the real pipeline (writer.ts) with the configured models, or a scripted one. */
+export type CorpusWriter = (brief: CoworkWriteBrief, observations: CoworkObservation[], meta: { caseId: string; request: string; userContext: unknown;
+  step: (step: CoworkAgentStep) => Promise<void> }) => Promise<CoworkWriterOutput>;
 
 /** The same ceiling the worker reads from the environment (defaults when unset). */
 export const corpusCeiling = coworkTurnCeiling();
 
 export const corpusInstructions = coworkAgentInstructions({
   turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false,
+  threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
+});
+/** The same instructions with the Writer on (COWORK_WRITER_ENABLED). */
+export const corpusWriterInstructions = coworkAgentInstructions({
+  turnCeiling: corpusCeiling, externalSearch: true, automaticExternalSearch: false, writer: true,
   threadBudget: 'Hilo automático: paso 1 de 5. Efectos usados 0/6; búsquedas externas 0/2; borradores 0/3. Búsquedas disponibles hoy: 49.',
 });
 
@@ -36,7 +45,7 @@ export function scoreCorpusCase(entry: CorpusCase, result: CorpusTurnResult): Co
   return { id: entry.id, result, checks, passed: checks.every(check => check.passed) };
 }
 
-export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider): Promise<CorpusOutcome> {
+export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider, write?: CorpusWriter): Promise<CorpusOutcome> {
   const turns = (entry.history || []).map((turn, index) => ({
     runId: `00000000-0000-4000-9000-${String(index + 1).padStart(12, '0')}`, at: turn.at, request: turn.request,
     reply: turn.reply, document: null, observations: turn.observations || [], ...(turn.actions ? { actions: turn.actions } : {}),
@@ -46,19 +55,27 @@ export async function runCorpusCase(entry: CorpusCase, decide: CorpusDecider): P
   const recorded: CoworkObservation[] = [];
   const result: CorpusTurnResult = { actions, reads, reply: '', document: null, proposal: null, search: null, note: null, failed: null };
   let decision = 0;
+  const instructions = write ? corpusWriterInstructions : corpusInstructions;
+  const userContext = entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext;
   try {
     const answer = await runCoworkReadLoop({
       message: entry.request, runId: '00000000-0000-4000-9000-000000000099', history: turns,
       signal: new AbortController().signal, authorize: async () => {}, ceiling: corpusCeiling,
-      decide: (observations, mustAnswer, rejections: CoworkRejection[] = [], turnBudget) => decide(coworkDecisionContext(corpusInstructions, {
+      decide: (observations, mustAnswer, rejections: CoworkRejection[] = [], turnBudget) => decide(coworkDecisionContext(instructions, {
         history: { turns, olderTurnsOmitted: false }, request: entry.request, observations, mustAnswer, turnBudget,
-        executionPolicy: { mode: 'approval' }, userContext: entry.world?.userContext === undefined ? CORPUS_USER_CONTEXT : entry.world.userContext,
+        executionPolicy: { mode: 'approval' }, userContext,
         ...(rejections.length ? { rejectedDecisions: rejections } : {}),
       }, CORPUS_NOW, 'America/Santiago'), { caseId: entry.id, turn: decision++ }),
       execute: async (action, value) => { actions.push(action); reads.push({ action, input: value }); return (entry.world?.read ?? corpusRead)(action, value); },
       record: async observation => { recorded.push(observation); },
       proposeSearch: async criteria => { result.search = criteria as unknown as Record<string, unknown>; },
       proposeNote: async () => { result.proposal = { kind: 'crm_note', label: 'Nota CRM' }; },
+      ...(write ? { write: async (brief: CoworkWriteBrief, observations: CoworkObservation[]) => {
+        const steps: CoworkAgentStep[] = [];
+        result.writer = { brief, steps };
+        const output = await write(brief, observations, { caseId: entry.id, request: entry.request, userContext, step: async step => { steps.push(step); } });
+        return { ...output, document: null, blocks: coworkWriterBlocks(output) };
+      } } : {}),
       proposeEffect: async proposal => {
         corpusStageEffect(proposal, entry.world?.savedEmails);
         result.proposal = { kind: proposal.kind, label: proposal.label, targetId: proposal.targetId, ...(proposal.campaign ? { campaign: proposal.campaign } : {}),

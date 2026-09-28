@@ -144,6 +144,8 @@ export type CorpusTurnResult = {
   plan?: Array<{ label: string; read: string | null }> | null;
   /** Each read with its input, so the judge can see the same data the model saw. */
   reads?: Array<{ action: string; input: string }>;
+  /** When the Writer wrote the answer (writer.ts): the coordinator's brief and what each agent did. */
+  writer?: { brief: unknown; steps: Array<{ agent: string; state: string; label: string; changes?: string[] }> };
 };
 
 /** What the person reads in the chat: the reply plus every card. */
