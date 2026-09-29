@@ -113,6 +113,7 @@ export const LeadSearchResponseSchema = LeadsResponseSchema.extend({
   phone_enrichment: LeadPhoneEnrichmentSchema.optional(),
   provider_warnings: z.array(z.string()).optional(),
   profile_tracking_ids: z.array(z.string()).optional(),
+  profile_pending: z.boolean().optional(),
   warning: z.string().optional(),
   requires_organization_selection: z.boolean().optional(),
   organization_candidates: z.array(CompanySearchOrganizationSchema).optional(),

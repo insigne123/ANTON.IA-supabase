@@ -138,44 +138,8 @@ export async function searchCompanyPeople(
   };
 }
 
-export async function searchLinkedInProfileLead(
-  body: LinkedInProfileSearchRequest,
-  signal?: AbortSignal,
-): Promise<LeadSearchResponse> {
-  const linkedinUrl = normalizeLinkedinProfileUrl(
-    body.linkedin_url || body.linkedin_profile_url || body.linkedinUrl,
-  );
-  if (!linkedinUrl) throw new Error('La URL de LinkedIn no es válida.');
-  const revealEmail = body.reveal_email ?? body.revealEmail ?? false;
-  const revealPhone = body.reveal_phone ?? body.revealPhone ?? false;
-  const operationId = `profile-match:${crypto.randomUUID()}`;
-  const result = await enrichLinkedInProfileLead({
-    lead: {
-      id: `profile-search:${linkedinUrl}`,
-      linkedin_url: linkedinUrl,
-    },
-    revealEmail,
-    revealPhone,
-    operationId,
-    linkedinUrl,
-  }, signal);
-  const enriched = result.enriched?.[0] as any;
-  if (enriched?.errorCode === 'APOLLO_PERSON_IDENTITY_MISMATCH') {
-    throw new Error('No pudimos confirmar que el perfil devuelto corresponda a la URL solicitada. No mostraremos datos de otra persona.');
-  }
-  if (enriched?.linkedinUrl && normalizeLinkedinProfileUrl(enriched.linkedinUrl).toLowerCase() !== linkedinUrl.toLowerCase()) {
-    throw new Error('El proveedor devolvió un perfil distinto al solicitado. No mostraremos datos de otra persona.');
-  }
-  if (!enriched) {
-    return {
-      count: 0,
-      leads_count: 0,
-      leads: [],
-      search_mode: 'linkedin_profile',
-      phone_enrichment: result.phone_enrichment,
-    } as LeadSearchResponse;
-  }
-  const lead: Lead = {
+function toProfileLead(enriched: any, linkedinUrl: string): Lead {
+  return {
     id: String(enriched.id || `profile-search:${linkedinUrl}`),
     name: enriched.fullName,
     first_name: enriched.firstName,
@@ -203,12 +167,53 @@ export async function searchLinkedInProfileLead(
     source_provider_id: enriched.sourceProviderId,
     apollo_id: enriched.sourceProviderId,
   };
+}
+
+export async function searchLinkedInProfileLead(
+  body: LinkedInProfileSearchRequest,
+  signal?: AbortSignal,
+): Promise<LeadSearchResponse> {
+  const linkedinUrl = normalizeLinkedinProfileUrl(
+    body.linkedin_url || body.linkedin_profile_url || body.linkedinUrl,
+  );
+  if (!linkedinUrl) throw new Error('La URL de LinkedIn no es válida.');
+  const revealEmail = body.reveal_email ?? body.revealEmail ?? false;
+  const revealPhone = body.reveal_phone ?? body.revealPhone ?? false;
+  const requestProfile = (reveal: { revealEmail: boolean; revealPhone: boolean }) => enrichLinkedInProfileLead({
+    lead: {
+      id: `profile-search:${linkedinUrl}`,
+      linkedin_url: linkedinUrl,
+    },
+    revealEmail: reveal.revealEmail,
+    revealPhone: reveal.revealPhone,
+    operationId: `profile-match:${crypto.randomUUID()}`,
+    linkedinUrl,
+  }, signal);
+  const result = await requestProfile({ revealEmail, revealPhone });
+  let enriched = result.enriched?.[0] as any;
+  if (enriched?.errorCode === 'APOLLO_PERSON_IDENTITY_MISMATCH') {
+    throw new Error('No pudimos confirmar que el perfil devuelto corresponda a la URL solicitada. No mostraremos datos de otra persona.');
+  }
+  if (enriched?.linkedinUrl && normalizeLinkedinProfileUrl(enriched.linkedinUrl).toLowerCase() !== linkedinUrl.toLowerCase()) {
+    throw new Error('El proveedor devolvió un perfil distinto al solicitado. No mostraremos datos de otra persona.');
+  }
+  if (!enriched) {
+    return {
+      count: 0,
+      leads_count: 0,
+      leads: [],
+      search_mode: 'linkedin_profile',
+      phone_enrichment: result.phone_enrichment,
+    } as LeadSearchResponse;
+  }
+  let lead: Lead = toProfileLead(enriched, linkedinUrl);
   // A profile is only pending while the provider still owns the outcome:
   // queued phone enrichment or a pending enrichment status. The top-level
   // `queued` flag alone is not enough, because the API also sets it on
   // terminal phone failures when phone reveal was requested.
-  const pendingProfile = result.phone_enrichment?.status === 'queued'
-    || String(enriched.enrichmentStatus || '').trim().toLowerCase().startsWith('pending');
+  let pendingProfile = result.phone_enrichment?.status === 'queued'
+    || String(enriched.enrichmentStatus || '').trim().toLowerCase().startsWith('pending')
+    || result.providerState === 'unknown' || result.providerState === 'processing';
   if (enriched.errorCode === 'APOLLO_CREDITS_EXHAUSTED') {
     throw new Error('La cuenta de Apollo no tiene créditos disponibles. Recarga créditos o espera al próximo ciclo de facturación.');
   }
@@ -222,15 +227,44 @@ export async function searchLinkedInProfileLead(
         phone_enrichment: result.phone_enrichment,
       } as LeadSearchResponse;
     }
-    throw new Error('No pudimos consultar este perfil en Apollo. Inténtalo nuevamente.');
+    if (revealEmail || revealPhone) {
+      // Reintento automático solo con datos profesionales (matchOnly en el
+      // servidor): si Apollo tiene la identidad pero no el contacto, al menos
+      // se muestra el perfil en vez de un error genérico.
+      try {
+        const retry = await requestProfile({ revealEmail: false, revealPhone: false });
+        const fallback = retry.enriched?.[0] as any;
+        if (fallback && !fallback.errorCode
+          && (!fallback.linkedinUrl || normalizeLinkedinProfileUrl(fallback.linkedinUrl).toLowerCase() === linkedinUrl.toLowerCase())) {
+          const fallbackLead = toProfileLead(fallback, linkedinUrl);
+          if (hasUsableLinkedInProfileData(fallbackLead)) {
+            return {
+              count: 1,
+              leads_count: 1,
+              leads: [fallbackLead],
+              search_mode: 'linkedin_profile',
+              enrichment_requested: false,
+              profile_tracking_ids: [fallbackLead.id],
+              profile_pending: false,
+              phone_enrichment: retry.phone_enrichment,
+              provider_warnings: ['APOLLO_PROFESSIONAL_ONLY'],
+            } as LeadSearchResponse;
+          }
+        }
+      } catch {
+        // El reintento no debe ocultar el diagnóstico original.
+      }
+    }
+    throw new Error('APOLLO_PROFILE_NO_USABLE_DATA');
   }
   return {
-    count: 1,
-    leads_count: 1,
-    leads: [lead],
+    count: hasUsableLinkedInProfileData(lead) ? 1 : 0,
+    leads_count: hasUsableLinkedInProfileData(lead) ? 1 : 0,
+    leads: hasUsableLinkedInProfileData(lead) ? [lead] : [],
     search_mode: 'linkedin_profile',
     enrichment_requested: revealEmail || revealPhone,
     profile_tracking_ids: [lead.id],
+    profile_pending: pendingProfile,
     phone_enrichment: result.phone_enrichment,
   } as LeadSearchResponse;
 }
@@ -245,6 +279,7 @@ export async function enrichLinkedInProfileLead(input: {
   queued: boolean;
   operationId: string;
   operationStatus?: string;
+  providerState?: string;
   enriched?: Array<{ id: string }>;
   phone_enrichment?: LeadSearchResponse['phone_enrichment'];
 }> {
