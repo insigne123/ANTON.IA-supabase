@@ -64,12 +64,14 @@ export function coworkPlanSteps(payload: unknown): CoworkPlanStep[] | null {
   return steps.length > 1 ? steps : null;
 }
 
-/** What the Writer or the Reviewer is doing in the turn (writer.ts), for the page. */
+/** What the Writer, the Reviewer or the judge is doing in the turn (writer.ts, judge-run.ts), for the page. */
 export const COWORK_AGENT_ACTION = 'assistant.agent';
 
 const REVIEW_OUTCOMES = ['clean', 'fixed', 'pending', 'skipped'] as const;
+const AGENTS = ['writer', 'reviewer', 'judge'] as const;
 export type CoworkAgentEvent = {
-  agent: 'writer' | 'reviewer';
+  /** The judge reads the coordinator's final answer (G2); the Reviewer, the Writer's emails (G1). */
+  agent: typeof AGENTS[number];
   state: 'working' | 'done';
   label: string;
   /** The Reviewer's last step: how the review ended (writer.ts, CoworkReviewOutcome). */
@@ -82,8 +84,9 @@ export function coworkAgentEvent(payload: unknown): CoworkAgentEvent | null {
   if (!payload || typeof payload !== 'object') return null;
   const record = payload as { action?: unknown; result?: Record<string, unknown> | null };
   if (record.action !== COWORK_AGENT_ACTION || !record.result || typeof record.result !== 'object') return null;
-  const { agent, state, label, outcome, changes } = record.result;
-  if ((agent !== 'writer' && agent !== 'reviewer') || (state !== 'working' && state !== 'done') || typeof label !== 'string' || !label.trim()) return null;
+  const { state, label, outcome, changes } = record.result;
+  const agent = AGENTS.find(item => item === record.result?.agent);
+  if (!agent || (state !== 'working' && state !== 'done') || typeof label !== 'string' || !label.trim()) return null;
   return {
     agent, state, label: label.trim().slice(0, 120),
     outcome: REVIEW_OUTCOMES.find(item => item === outcome) ?? null,

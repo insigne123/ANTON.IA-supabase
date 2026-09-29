@@ -29,6 +29,7 @@ import { loadCoworkUserContext } from './user-context';
 import { reserveCoworkModelCall } from './model-budget';
 import { coworkDraftWriter, coworkStreamingEnabled } from './live-draft';
 import { coworkWriterEnabled, coworkWriterModels, coworkWriterTurn } from './writer-run';
+import { coworkJudgeEnabled, coworkJudgeModel, coworkJudgeTurn } from './judge-run';
 import { recordCoworkModelUsage } from './model-usage';
 import { stageCoworkProfileUpdate } from './profile-update';
 import { stageCoworkSavedSearchCreate, stageCoworkSavedSearchUpdate, stageCoworkSavedSearchDelete } from './saved-search-ops';
@@ -116,6 +117,8 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
     } catch { controller.abort(); }
     finally { checking = false; }
   }, 3000);
+  // The judge's row is closed even when the turn fails after it asked for a correction.
+  let judgeTurn: ReturnType<typeof coworkJudgeTurn> | null = null;
   try {
     const telemetry: Array<{ model: string; durationMs: number }> = [];
     await authorize();
@@ -163,6 +166,17 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
       });
       if (recorded.error || recorded.data !== true) throw new Error('Cowork run is no longer writable');
     };
+    // The judge reads the coordinator's final answer and asks for one correction when it is worth it.
+    judgeTurn = coworkJudgeEnabled() ? coworkJudgeTurn({
+      request: run.message, history: history.turns, userContext, signal: controller.signal, authorize,
+      reserve: () => reserveCoworkModelCall(client, run.id, run.lease_token, 'judge'),
+      generate: generateStructuredWithTelemetry,
+      recordUsage: (reservationId, callTelemetry) => recordCoworkModelUsage(client, reservationId, run.lease_token, callTelemetry),
+      record: recordEvent, liveDraft,
+      timeLeft: () => 100000 - (Date.now() - claimedAt),
+      model: coworkJudgeModel(),
+      onCall: call => telemetry.push(call),
+    }) : null;
     const result = await runCoworkReadLoop({
       message: run.message, runId: run.id, history: history.turns, signal: controller.signal, authorize, ceiling: turnCeiling,
       resumedObservations: coworkSpecialistQueueEnabled() ? await loadCoworkSpecialistResume(client, scope, run.id) : undefined,
@@ -215,6 +229,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         models: coworkWriterModels(),
         onCall: call => telemetry.push(call),
       }) : undefined,
+      judge: judgeTurn?.review,
       proposeNote: async (leadId, note) => {
         const proposed = await client.rpc('cowork_propose_note', {
           p_run_id: run.id, p_token: run.lease_token, p_lead_id: leadId, p_note: note,
@@ -387,6 +402,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
         }
       },
     });
+    await judgeTurn?.finish(result);
     if (waitingApproval) return { claimed: true, processed: 1 };
     controller.signal.throwIfAborted();
     await requireCoworkWorkerAccess(client, scope);
@@ -399,6 +415,7 @@ async function processCoworkConversationRun(): Promise<{ claimed: boolean; proce
   } catch (error) {
     if (error instanceof CoworkSpecialistsDeferred) return { claimed: true, processed: 1 };
     console.warn('[cowork] run failed', { runId: run.id, reason: coworkFailureCategory(error) });
+    await judgeTurn?.finish(null).catch(() => undefined);
     // Cancellation invalidates the lease; terminal writes cannot revive it.
     const failed = await client.rpc('cowork_finish_run', {
       p_run_id: run.id, p_token: run.lease_token, p_status: 'failed',

@@ -675,9 +675,10 @@ export function coworkConsultedSources(events: CoworkEvent[]): string[] {
   return sources;
 }
 
-/** The Writer or the Reviewer in a turn (writer.ts): its latest step, with the name the page shows. */
+/** The Writer, the Reviewer or the judge in a turn (writer.ts, judge-run.ts): its latest step, with the name the page shows. */
 export type CoworkAgentRow = CoworkAgentEvent & { name: string };
-const AGENT_NAMES: Record<CoworkAgentEvent['agent'], string> = { writer: 'Redactora', reviewer: 'Revisora' };
+/** The judge reads answers as the Reviewer reads emails: to the person, both are the Reviewer. */
+const AGENT_NAMES: Record<CoworkAgentEvent['agent'], string> = { writer: 'Redactora', reviewer: 'Revisora', judge: 'Revisora' };
 
 /** Each agent of the turn at its latest step, in the order they started: who wrote, who reviewed. */
 export function coworkAgentRows(events: CoworkEvent[]): CoworkAgentRow[] {
@@ -705,6 +706,13 @@ export function coworkDraftReview(events: CoworkEvent[]): CoworkDraftReview | nu
   return { outcome: reviewer.outcome, changes: reviewer.changes };
 }
 
+/** How the judge left the turn's answer (G2): read with nothing to fix, or fixed after its review.
+ * Null when it did not review it (off, no time, or its call failed). */
+export function coworkAnswerReview(rows: CoworkAgentRow[]): 'clean' | 'fixed' | null {
+  const judge = rows.find(row => row.agent === 'judge');
+  return judge?.state === 'done' && (judge.outcome === 'clean' || judge.outcome === 'fixed') ? judge.outcome : null;
+}
+
 /** Latest live activity line while a run is working. */
 export function coworkLiveActivity(run: Pick<CoworkRun, 'status'>, events: CoworkEvent[]): string {
   if (run.status === 'queued') return events.some(event => event.kind === 'effect.completed' || event.kind === 'search.approved') ? 'Retomando el trabajo…' : 'Preparando el trabajo…';
@@ -716,7 +724,7 @@ export function coworkLiveActivity(run: Pick<CoworkRun, 'status'>, events: Cowor
     return 'Esperando tu decisión';
   }
   const lastRead = coworkReadEvents(events).pop();
-  // After the reads, the Writer and the Reviewer say what they are doing.
+  // After the reads, the Writer, the Reviewer and the judge say what they are doing.
   const lastAgent = events.slice().reverse().find(event => event.kind === 'tool.completed' && coworkAgentEvent(event.payload));
   if (lastAgent && (!lastRead || lastAgent.sequence > lastRead.sequence)) {
     const row = coworkAgentRows(events).find(item => item.agent === coworkAgentEvent(lastAgent.payload)?.agent);
