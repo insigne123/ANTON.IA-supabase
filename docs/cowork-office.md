@@ -16,6 +16,7 @@ Primer PR de la Ola F del plan 2 de Cowork (puntos F1 y F2). Hasta hoy, Cowork l
   - en un Word, los títulos y los párrafos quedan como párrafos, cada elemento de una lista (también los anidados) en su línea, y cada fila de una tabla en una línea, con las celdas separadas por « | » (`Piloto | 30 días | $450.000`).
 - **Lo que no se abre, lo dice y da el camino:**
   - un `.xls` antiguo: al adjuntarlo, la subida ya lo rechaza (solo acepta `.xlsx`); si estuviera subido de antes, Cowork dice «guárdalo como .xlsx (o exporta la hoja a CSV) y súbelo de nuevo»;
+  - una hoja que no está en el Excel: dice que no la encontró y que se abra el archivo sin «#Hoja» para ver cuáles hay; no abre otra en su lugar;
   - un PDF que es solo imagen (un escaneo): «pide el contenido pegado en el chat, o un PDF con texto»;
   - un archivo dañado o protegido con clave: «pide subirlo de nuevo, o el contenido en CSV o texto»;
   - un archivo que al abrirse ocupa demasiado (un Excel de más de un millón de celdas, un Word de mil páginas o un ZIP que se expande sin medida): «pide subir solo la hoja o las páginas que importan, o su contenido en CSV o texto».
