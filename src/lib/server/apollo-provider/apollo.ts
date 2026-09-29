@@ -654,7 +654,8 @@ export async function executeApolloEnrichment(input: EnrichmentInput, apiKey: st
   const payload = await requestApollo('/people/match', apiKey, config, { query });
   const lead = mapPerson(payload.person, { includeContact: true });
   const providerRequestId = firstText(payload.request_id, payload.requestId);
-  if (!lead) {
+  if (!lead || (!lead.name && !lead.title && !lead.organization_name && !lead.email
+    && !lead.primary_phone && lead.phone_numbers.length === 0)) {
     return {
       success: false,
       enrichment_status: 'not_found',

@@ -41,6 +41,10 @@ test('flags a personal slug that shares nothing with the returned name', () => {
   );
   assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/it-recruiter-janet-montero/', 'Janet Montero'), false);
   assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/it-recruiter-janet-montero/', 'Janet M.'), false);
+  assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/luisruben-rrhh/', 'Luis Rubén Mines Ayuqui'), false);
+  assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/luisruben-rrhh/', 'Luis Mines Ayuqui'), false);
+  assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/luisruben-consultor/', 'Luis Rubén Mines Ayuqui'), false);
+  assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/luisruben-mines/', 'Marco Psenda'), true);
   assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/jdoe2024/', 'Marco Psenda'), false);
   assert.equal(linkedinSlugConflictsWithName('https://www.linkedin.com/in/ana-perez/', 'Ana'), false);
   assert.equal(linkedinSlugConflictsWithName('not a url', 'Marco Psenda'), false);
